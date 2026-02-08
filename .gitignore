@@ -6,3 +6,26 @@ duckdb_unittest_tempdir
 /test/bin
 venv
 .sync
+.tmp
+third_party/
+!third_party/.gitkeep
+third_party/distfiles/
+third_party/conformance/
+third_party/licenses/
+third_party/htslib/
+third_party/bcftools/
+third_party/samtools/
+
+# R package artifacts
+r/duckhts/.Rproj.user/
+r/duckhts/.Rhistory
+r/duckhts/.RData
+r/duckhts/.Rbuildignore
+r/duckhts/inst/doc/
+r/duckhts/src/*.o
+r/duckhts/src/*.so
+r/duckhts/src/*.dll
+r/duckhts/src/*.dylib
+r/duckhts/tests/testthat/
+r/duckhts/*.tar.gz
+r/duckhts/*.Rcheck/

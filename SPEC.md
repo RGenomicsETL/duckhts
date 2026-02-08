@@ -102,14 +102,16 @@ Notes:
   - BAM/CRAM: small alignment with index
   - Region queries + record counts
 - Provide a test driver script that can run in CI with no network access.
+- Prefer staging datasets from vendored htslib/bcftools/samtools test trees.
 
 ## Build Strategy
-- htslib built as part of extension build; bcftools/samtools used for testing only.
+- htslib is the only required build dependency for the extension.
+- bcftools and samtools are vendored for testing and output comparison only.
 - CMake/Makefile integration to locate vendored headers/libs.
 - Avoid network access at build time; vendored code only.
 
 ## R Package (Testing Harness)
-- Provide a subdirectory R package for testing and developer workflows.
+- Provide a subdirectory R package under `r/duckhts` for testing and developer workflows.
 - Include a `bootstrap.R` script (modeled after Arrow's approach) to vendor the extension build infrastructure for use from R.
 - The R package should be able to build and load the extension locally for tests.
 
