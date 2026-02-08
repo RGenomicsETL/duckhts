@@ -72,58 +72,74 @@ set(HTSLIB_SRC_DIR "${CMAKE_SOURCE_DIR}/third_party/htslib")
 set(HTSLIB_BUILD_DIR "${HTSLIB_SRC_DIR}")  # build in-tree like upstream expects
 
 # ------------------------------------------------------------------
-# Probe optional dependencies and build configure flags dynamically.
-# htslib's ./configure will fail when --enable-X is given but the lib
-# is missing, so we only pass flags for libraries we actually find.
+# Dependency detection.
+#
+# We use find_package() which works everywhere:
+#   • In CI the vcpkg toolchain intercepts these and finds vcpkg ports
+#     (declared in vcpkg.json).
+#   • On Linux with system packages, CMake's standard modules find them.
+#   • On macOS, Homebrew installs into /opt/homebrew (ARM) or /usr/local
+#     (Intel) — both are in CMake's default search paths.
 # ------------------------------------------------------------------
 
-# Probe all dependencies with find_library (not find_package) so that
-# vcpkg toolchain files don't intercept the search and fail when the
-# libs are installed as system packages but not via vcpkg.
-
-# zlib — required by htslib; we always link it.
-find_library(LIBZ NAMES z)
+# zlib — always required
+find_package(ZLIB REQUIRED)
 
 # Optional compression libraries
-find_library(LIBBZ2   NAMES bz2)
-find_library(LIBLZMA  NAMES lzma)
-find_library(LIBDEFLATE NAMES deflate)
+find_package(BZip2 QUIET)
+find_package(LibLZMA QUIET)
 
-# Optional network / crypto libraries
-find_library(LIBCURL  NAMES curl)
-find_library(LIBCRYPTO NAMES crypto)
+# libdeflate has no standard FindModule; use find_library + find_path
+find_library(LIBDEFLATE_LIBRARY NAMES deflate)
+find_path(LIBDEFLATE_INCLUDE_DIR NAMES libdeflate.h)
+if(LIBDEFLATE_LIBRARY AND LIBDEFLATE_INCLUDE_DIR)
+    set(LIBDEFLATE_FOUND TRUE)
+else()
+    set(LIBDEFLATE_FOUND FALSE)
+endif()
 
-# Build the htslib configure argument list
+# Optional network / crypto
+find_package(CURL QUIET)
+find_package(OpenSSL QUIET)
+
+# Threads (portable: resolves to -lpthread on Linux, nothing on macOS)
+find_package(Threads REQUIRED)
+
+# ------------------------------------------------------------------
+# Build the htslib configure argument list.
+# Only pass --enable/--disable for things we probed so htslib's
+# configure never tries to use something that isn't installed.
+# ------------------------------------------------------------------
 set(HTSLIB_CONFIGURE_ARGS
     "CFLAGS=-fPIC -O2"
     "--disable-plugins"
 )
 
-if(LIBBZ2)
+if(BZIP2_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-bz2")
 else()
     list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-bz2")
 endif()
 
-if(LIBLZMA)
+if(LIBLZMA_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-lzma")
 else()
     list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-lzma")
 endif()
 
-if(LIBCURL)
+if(CURL_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-libcurl")
 else()
     list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-libcurl")
 endif()
 
-if(LIBCURL AND LIBCRYPTO)
+if(CURL_FOUND AND OPENSSL_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-gcs" "--enable-s3")
 else()
     list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-gcs" "--disable-s3")
 endif()
 
-if(LIBDEFLATE)
+if(LIBDEFLATE_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--with-libdeflate")
 else()
     list(APPEND HTSLIB_CONFIGURE_ARGS "--without-libdeflate")
@@ -155,31 +171,35 @@ set_target_properties(hts PROPERTIES
 )
 add_dependencies(hts htslib_build)
 
-# Link hts and only the transitive dependencies that are actually present.
-# zlib is always needed; use the found path or fall back to -lz.
-if(LIBZ)
-    set(HTSLIB_LINK_LIBS hts ${LIBZ})
-else()
-    set(HTSLIB_LINK_LIBS hts z)
+# ------------------------------------------------------------------
+# Link hts + transitive dependencies (only what was found).
+# Uses CMake imported targets for correctness & portability.
+# ------------------------------------------------------------------
+set(HTSLIB_LINK_LIBS hts ZLIB::ZLIB)
+
+if(BZIP2_FOUND)
+    list(APPEND HTSLIB_LINK_LIBS BZip2::BZip2)
+endif()
+if(LIBLZMA_FOUND)
+    list(APPEND HTSLIB_LINK_LIBS LibLZMA::LibLZMA)
+endif()
+if(LIBDEFLATE_FOUND)
+    list(APPEND HTSLIB_LINK_LIBS ${LIBDEFLATE_LIBRARY})
+endif()
+if(CURL_FOUND)
+    list(APPEND HTSLIB_LINK_LIBS CURL::libcurl)
+endif()
+if(OPENSSL_FOUND)
+    list(APPEND HTSLIB_LINK_LIBS OpenSSL::Crypto)
 endif()
 
-if(LIBBZ2)
-    list(APPEND HTSLIB_LINK_LIBS ${LIBBZ2})
-endif()
-if(LIBLZMA)
-    list(APPEND HTSLIB_LINK_LIBS ${LIBLZMA})
-endif()
-if(LIBDEFLATE)
-    list(APPEND HTSLIB_LINK_LIBS ${LIBDEFLATE})
-endif()
-if(LIBCURL)
-    list(APPEND HTSLIB_LINK_LIBS ${LIBCURL})
-endif()
-if(LIBCRYPTO)
-    list(APPEND HTSLIB_LINK_LIBS ${LIBCRYPTO})
-endif()
+# Threads::Threads is portable (pthread on Linux, nothing on macOS)
+list(APPEND HTSLIB_LINK_LIBS Threads::Threads)
 
-list(APPEND HTSLIB_LINK_LIBS pthread m)
+# libm: needed on Linux/musl, harmless no-op on macOS
+if(NOT APPLE)
+    list(APPEND HTSLIB_LINK_LIBS m)
+endif()
 
 message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 

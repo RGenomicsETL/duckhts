@@ -24,25 +24,8 @@ include extension-ci-tools/makefiles/c_api_extensions/c_cpp.Makefile
 
 configure: venv platform extension_version
 
-# ---------------------------------------------------------------------------
-# Install htslib build dependencies (system dev headers/libs).
-# This runs once before cmake; it is a no-op when deps are already present.
-# We detect the package manager to stay portable across CI images.
-# ---------------------------------------------------------------------------
-.PHONY: install_htslib_deps
-install_htslib_deps:
-	@if [ ! -f /usr/include/zlib.h ] && [ ! -f /usr/local/include/zlib.h ]; then \
-		echo "==> Installing htslib build dependencies..."; \
-		if command -v apk  >/dev/null 2>&1; then apk add --no-cache zlib-dev bzip2-dev xz-dev curl-dev openssl-dev; \
-		elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev libdeflate-dev 2>/dev/null || true; \
-		elif command -v yum >/dev/null 2>&1; then yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel 2>/dev/null || true; \
-		fi; \
-	else \
-		echo "==> htslib build dependencies already present"; \
-	fi
-
-debug: install_htslib_deps build_extension_library_debug build_extension_with_metadata_debug
-release: install_htslib_deps build_extension_library_release build_extension_with_metadata_release
+debug: build_extension_library_debug build_extension_with_metadata_debug
+release: build_extension_library_release build_extension_with_metadata_release
 
 test: test_debug
 test_debug: test_extension_debug

@@ -1,0 +1,23 @@
+{
+  "name": "duckhts",
+  "version-string": "0.1.0",
+  "description": "DuckDB extension for reading HTS file formats via htslib",
+  "dependencies": [
+    "zlib"
+  ],
+  "default-features": ["compression", "net"],
+  "features": {
+    "compression": {
+      "description": "bzip2 and liblzma support for CRAM/BAM",
+      "dependencies": ["bzip2", "liblzma"]
+    },
+    "net": {
+      "description": "libcurl + OpenSSL for HTTP/S3/GCS access",
+      "dependencies": ["curl", "openssl"]
+    },
+    "deflate": {
+      "description": "libdeflate for faster (de)compression",
+      "dependencies": ["libdeflate"]
+    }
+  }
+}
