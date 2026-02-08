@@ -112,7 +112,18 @@ LOAD '/path/to/duckhts.duckdb_extension';
 
 ## Testing
 
-SQL tests live in `test/sql/` using DuckDB's SQLLogicTest format:
+SQL tests live in `test/sql/` using DuckDB's SQLLogicTest format.
+
+Before running tests for the first time, prepare the indexed test data:
+
+```bash
+./test/scripts/prepare_test_data.sh   # requires samtools, bcftools, bgzip, tabix
+```
+
+This copies files from the vendored htslib test suite into `test/data/` and
+builds the required indexes (BAI, CSI, TBI, FAI) so region queries work.
+
+Then run:
 
 ```bash
 make test_release
