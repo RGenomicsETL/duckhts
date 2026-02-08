@@ -7,7 +7,6 @@ duckdb_unittest_tempdir
 venv
 .sync
 .tmp
-third_party/
 !third_party/.gitkeep
 third_party/distfiles/
 third_party/conformance/

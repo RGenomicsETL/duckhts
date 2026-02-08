@@ -38,6 +38,7 @@ set(EXTENSION_SOURCES
         src/bcf_reader.c
         src/bam_reader.c
         src/seq_reader.c
+        src/tabix_reader.c
         src/vep_parser.c
 )
 
@@ -60,58 +61,9 @@ target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 # Include DuckDB C API headers
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 
-# ---- htslib integration ----
-# Prefer vendored third_party/htslib if present, else fall back to system
-set(HTSLIB_DIR "${CMAKE_SOURCE_DIR}/third_party/htslib")
-if(EXISTS "${HTSLIB_DIR}/htslib/hts.h")
-    message(STATUS "Using vendored htslib from ${HTSLIB_DIR}")
-    target_include_directories(${EXTENSION_NAME} PRIVATE "${HTSLIB_DIR}")
-
-    if(EXISTS "${HTSLIB_DIR}/libhts.a")
-        target_link_libraries(${EXTENSION_NAME} PRIVATE "${HTSLIB_DIR}/libhts.a")
-
-        # Parse htslib's config.mk to discover which libraries it was built with.
-        # config.mk has a main LIBS line plus noplugin_LIBS (for statically-linked
-        # plugin deps like curl, crypto).  We collect -l flags from both.
-        if(EXISTS "${HTSLIB_DIR}/config.mk")
-            file(READ "${HTSLIB_DIR}/config.mk" _htslib_config)
-
-            # Collect all -l flags from LIBS, noplugin_LIBS, LIBCURL_LIBS, CRYPTO_LIBS lines
-            string(REGEX MATCHALL "-l([^ \t\n]+)" _all_lib_flags "${_htslib_config}")
-            set(_seen_libs "")
-            foreach(_flag ${_all_lib_flags})
-                string(REGEX REPLACE "^-l" "" _lib "${_flag}")
-                if(NOT _lib IN_LIST _seen_libs)
-                    list(APPEND _seen_libs "${_lib}")
-                    target_link_libraries(${EXTENSION_NAME} PRIVATE ${_lib})
-                endif()
-            endforeach()
-            message(STATUS "htslib link libs (from config.mk): ${_seen_libs}")
-
-            # Always need pthread and m
-            target_link_libraries(${EXTENSION_NAME} PRIVATE pthread m)
-        else()
-            # Fallback: common htslib dependencies
-            target_link_libraries(${EXTENSION_NAME} PRIVATE z bz2 lzma deflate curl crypto pthread m)
-        endif()
-    elseif(EXISTS "${HTSLIB_DIR}/libhts.so")
-        target_link_libraries(${EXTENSION_NAME} PRIVATE "${HTSLIB_DIR}/libhts.so")
-    else()
-        message(WARNING "Vendored htslib headers found but no library. Run 'make' in third_party/htslib/ first.")
-    endif()
-else()
-    # Try pkg-config for system htslib
-    find_package(PkgConfig)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(HTSLIB htslib)
-        if(HTSLIB_FOUND)
-            message(STATUS "Using system htslib via pkg-config")
-            target_include_directories(${EXTENSION_NAME} PRIVATE ${HTSLIB_INCLUDE_DIRS})
-            target_link_libraries(${EXTENSION_NAME} PRIVATE ${HTSLIB_LINK_LIBRARIES})
-        endif()
-    endif()
-    if(NOT HTSLIB_FOUND)
-        message(STATUS "No vendored or system htslib found; trying -lhts")
-        target_link_libraries(${EXTENSION_NAME} PRIVATE hts z)
-    endif()
-endif()
+# ---- htslib ----
+# Build htslib from vendored sources via its own CMakeLists.txt.
+# This detects available system libraries (zlib, bz2, lzma, libdeflate,
+# curl, openssl) and compiles htslib as a static library with -fPIC.
+add_subdirectory(third_party/htslib)
+target_link_libraries(${EXTENSION_NAME} PRIVATE hts)
