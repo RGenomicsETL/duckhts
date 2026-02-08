@@ -307,11 +307,15 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
     idx_t row_count = 0;
     int n_cols = bd->n_cols;
+    idx_t chunk_col_count = duckdb_data_chunk_get_column_count(output);
 
     /* Pre-fetch column vectors */
-    duckdb_vector *vectors = (duckdb_vector *)alloca(sizeof(duckdb_vector) * n_cols);
-    for (int c = 0; c < n_cols; c++) {
-        vectors[c] = duckdb_data_chunk_get_vector(output, c);
+    duckdb_vector *vectors = NULL;
+    if (chunk_col_count > 0) {
+        vectors = (duckdb_vector *)alloca(sizeof(duckdb_vector) * chunk_col_count);
+        for (idx_t c = 0; c < chunk_col_count; c++) {
+            vectors[c] = duckdb_data_chunk_get_vector(output, c);
+        }
     }
 
     while (row_count < TABIX_BATCH_SIZE) {
@@ -330,9 +334,11 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
         /* Skip comment/header lines */
         if (id->line.l == 0 || id->line.s[0] == '#') continue;
 
+        if (chunk_col_count > 0) {
         if (bd->mode == TABIX_MODE_GTF || bd->mode == TABIX_MODE_GFF) {
             /* Parse GTF/GFF 9 columns with proper types */
-            for (int c = 0; c < GXF_COL_COUNT; c++) {
+            int max_cols = (int)chunk_col_count < GXF_COL_COUNT ? (int)chunk_col_count : GXF_COL_COUNT;
+            for (int c = 0; c < max_cols; c++) {
                 int flen = 0;
                 const char *fld = get_field(id->line.s, c, &flen);
 
@@ -340,15 +346,16 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                     /* Missing value */
                     switch (c) {
                         case GXF_COL_START:
-                        case GXF_COL_END:
-                            duckdb_vector_assign_string_element_len(vectors[c], row_count, "0", 1);
+                        case GXF_COL_END: {
+                            int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
+                            data[row_count] = 0;
                             break;
+                        }
                         case GXF_COL_SCORE: {
                             /* Set NULL for missing score */
+                            duckdb_vector_ensure_validity_writable(vectors[c]);
                             uint64_t *validity = duckdb_vector_get_validity(vectors[c]);
-                            if (validity) {
-                                duckdb_validity_set_row_invalid(validity, row_count);
-                            }
+                            duckdb_validity_set_row_invalid(validity, row_count);
                             break;
                         }
                         default:
@@ -390,7 +397,8 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             }
         } else {
             /* Generic mode: all VARCHAR */
-            for (int c = 0; c < n_cols; c++) {
+            int max_cols = (int)chunk_col_count < n_cols ? (int)chunk_col_count : n_cols;
+            for (int c = 0; c < max_cols; c++) {
                 int flen = 0;
                 const char *fld = get_field(id->line.s, c, &flen);
                 if (fld) {
@@ -400,6 +408,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 }
             }
         }
+        } /* chunk_col_count > 0 */
 
         row_count++;
     }
