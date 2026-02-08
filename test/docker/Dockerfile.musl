@@ -1,0 +1,32 @@
+# Minimal musl build environment for local CI testing.
+#
+# This approximates the DuckDB CI linux_amd64_musl image but WITHOUT vcpkg,
+# so we can verify the extension builds with system-provided libraries.
+#
+# Usage:
+#   docker build -t duckhts-musl -f test/docker/Dockerfile.musl .
+#   docker run -v $(pwd):/duckdb_build_dir duckhts-musl make release
+#
+# To test without optional deps (e.g. no libcurl, no libdeflate):
+#   docker build --build-arg EXTRA_PKGS="" -t duckhts-musl-minimal -f test/docker/Dockerfile.musl .
+#   docker run -v $(pwd):/duckdb_build_dir duckhts-musl-minimal make release
+
+FROM alpine:3.22
+
+# Core build tools
+RUN apk update -q && apk add -qq \
+    bash build-base cmake ninja git python3 autoconf libtool
+
+# htslib required: zlib
+RUN apk add -qq zlib-dev
+
+# htslib optional (can be toggled off via --build-arg EXTRA_PKGS="")
+ARG EXTRA_PKGS="bzip2-dev xz-dev curl-dev openssl-dev"
+RUN if [ -n "$EXTRA_PKGS" ]; then apk add -qq $EXTRA_PKGS; fi
+
+ENV GEN=ninja
+ENV DUCKDB_PLATFORM=linux_amd64_musl
+
+VOLUME /duckdb_build_dir
+WORKDIR /duckdb_build_dir
+RUN git config --global --add safe.directory "*"
