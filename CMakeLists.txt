@@ -67,7 +67,6 @@ target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 # static libhts.a with -fPIC.  htslib's configure auto-detects every
 # available library (zlib, bz2, lzma, libdeflate, libcurl, openssl …).
 include(ExternalProject)
-include(CheckIncludeFile)
 
 set(HTSLIB_SRC_DIR "${CMAKE_SOURCE_DIR}/third_party/htslib")
 set(HTSLIB_BUILD_DIR "${HTSLIB_SRC_DIR}")  # build in-tree like upstream expects
@@ -78,8 +77,12 @@ set(HTSLIB_BUILD_DIR "${HTSLIB_SRC_DIR}")  # build in-tree like upstream expects
 # is missing, so we only pass flags for libraries we actually find.
 # ------------------------------------------------------------------
 
-# Always-required: zlib
-find_package(ZLIB REQUIRED)
+# Probe all dependencies with find_library (not find_package) so that
+# vcpkg toolchain files don't intercept the search and fail when the
+# libs are installed as system packages but not via vcpkg.
+
+# zlib — required by htslib; we always link it.
+find_library(LIBZ NAMES z)
 
 # Optional compression libraries
 find_library(LIBBZ2   NAMES bz2)
@@ -137,7 +140,12 @@ set_target_properties(hts PROPERTIES
 add_dependencies(hts htslib_build)
 
 # Link hts and only the transitive dependencies that are actually present.
-set(HTSLIB_LINK_LIBS hts ZLIB::ZLIB)
+# zlib is always needed; use the found path or fall back to -lz.
+if(LIBZ)
+    set(HTSLIB_LINK_LIBS hts ${LIBZ})
+else()
+    set(HTSLIB_LINK_LIBS hts z)
+endif()
 
 if(LIBBZ2)
     list(APPEND HTSLIB_LINK_LIBS ${LIBBZ2})
