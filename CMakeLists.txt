@@ -99,6 +99,18 @@ set(HTSLIB_CONFIGURE_ARGS
     "--disable-plugins"
 )
 
+if(LIBBZ2)
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-bz2")
+else()
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-bz2")
+endif()
+
+if(LIBLZMA)
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-lzma")
+else()
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-lzma")
+endif()
+
 if(LIBCURL)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-libcurl")
 else()
