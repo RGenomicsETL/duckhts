@@ -5,7 +5,6 @@ configure
 .idea
 duckdb_unittest_tempdir
 /test/bin
-/test/data/
 venv
 .sync
 .tmp
