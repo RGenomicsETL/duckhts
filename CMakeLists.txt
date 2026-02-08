@@ -119,12 +119,16 @@ endif()
 
 message(STATUS "htslib configure args: ${HTSLIB_CONFIGURE_ARGS}")
 
+# htslib uses GNU Makefiles (not Ninja), so we must always use `make`
+# even when the outer CMake build uses Ninja.
+find_program(MAKE_COMMAND NAMES gmake make REQUIRED)
+
 ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"
     BUILD_IN_SOURCE   TRUE
     CONFIGURE_COMMAND "${HTSLIB_SRC_DIR}/configure"
                       ${HTSLIB_CONFIGURE_ARGS}
-    BUILD_COMMAND     ${CMAKE_MAKE_PROGRAM} -j lib-static
+    BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static
     INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
     BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
     LOG_CONFIGURE     TRUE
