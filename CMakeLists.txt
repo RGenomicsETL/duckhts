@@ -62,8 +62,45 @@ target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 
 # ---- htslib ----
-# Build htslib from vendored sources via its own CMakeLists.txt.
-# This detects available system libraries (zlib, bz2, lzma, libdeflate,
-# curl, openssl) and compiles htslib as a static library with -fPIC.
-add_subdirectory(third_party/htslib)
-target_link_libraries(${EXTENSION_NAME} PRIVATE hts)
+# Build vendored htslib using its own configure + make.  CMake drives the
+# process via ExternalProject_Add so it runs once, in-tree, producing a
+# static libhts.a with -fPIC.  htslib's configure auto-detects every
+# available library (zlib, bz2, lzma, libdeflate, libcurl, openssl …).
+include(ExternalProject)
+
+set(HTSLIB_SRC_DIR "${CMAKE_SOURCE_DIR}/third_party/htslib")
+set(HTSLIB_BUILD_DIR "${HTSLIB_SRC_DIR}")  # build in-tree like upstream expects
+
+ExternalProject_Add(htslib_build
+    SOURCE_DIR        "${HTSLIB_SRC_DIR}"
+    BUILD_IN_SOURCE   TRUE
+    CONFIGURE_COMMAND "${HTSLIB_SRC_DIR}/configure"
+                      "CFLAGS=-fPIC -O2"
+                      --disable-plugins
+                      --enable-libcurl
+                      --enable-gcs
+                      --enable-s3
+                      --with-libdeflate
+    BUILD_COMMAND     ${CMAKE_MAKE_PROGRAM} -j lib-static
+    INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
+    BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
+    LOG_CONFIGURE     TRUE
+    LOG_BUILD         TRUE
+)
+
+# Import the static library so CMake knows about it
+add_library(hts STATIC IMPORTED GLOBAL)
+set_target_properties(hts PROPERTIES
+    IMPORTED_LOCATION "${HTSLIB_BUILD_DIR}/libhts.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_SRC_DIR}"
+)
+add_dependencies(hts htslib_build)
+
+# Link hts and its transitive dependencies.
+# After configure runs, config.mk lists the exact libs.  But since we
+# enable everything and build static, we know the full set:
+target_link_libraries(${EXTENSION_NAME} PRIVATE
+    hts
+    z bz2 lzma deflate curl crypto
+    pthread m
+)
