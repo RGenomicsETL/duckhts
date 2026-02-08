@@ -97,6 +97,8 @@ typedef struct {
     hts_itr_t *itr;        /* NULL when doing sequential scan */
     kstring_t  line;
     bool       finished;
+    idx_t     *column_ids;      /* logical column indices (for projection pushdown) */
+    idx_t      n_projected_cols;
 } tabix_init_data_t;
 
 static void tabix_init_data_destroy(void *data) {
@@ -106,6 +108,7 @@ static void tabix_init_data_destroy(void *data) {
         if (id->tbx) tbx_destroy(id->tbx);
         if (id->fp)  hts_close(id->fp);
         free(id->line.s);
+        free(id->column_ids);
         free(id);
     }
 }
@@ -289,6 +292,17 @@ static void tabix_init(duckdb_init_info info) {
     id->line.m = 0;
     id->line.s = NULL;
 
+    /* Store projection pushdown column mapping */
+    id->n_projected_cols = duckdb_init_get_column_count(info);
+    if (id->n_projected_cols > 0) {
+        id->column_ids = (idx_t *)malloc(sizeof(idx_t) * id->n_projected_cols);
+        for (idx_t i = 0; i < id->n_projected_cols; i++) {
+            id->column_ids[i] = duckdb_init_get_column_index(info, i);
+        }
+    } else {
+        id->column_ids = NULL;
+    }
+
     duckdb_init_set_init_data(info, id, tabix_init_data_destroy);
 }
 
@@ -336,15 +350,19 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
         if (chunk_col_count > 0) {
         if (bd->mode == TABIX_MODE_GTF || bd->mode == TABIX_MODE_GFF) {
-            /* Parse GTF/GFF 9 columns with proper types */
-            int max_cols = (int)chunk_col_count < GXF_COL_COUNT ? (int)chunk_col_count : GXF_COL_COUNT;
-            for (int c = 0; c < max_cols; c++) {
+            /* Parse GTF/GFF columns with projection pushdown:
+             * Vector index c maps to logical column id->column_ids[c],
+             * which is the field index in the TSV line. */
+            for (idx_t c = 0; c < chunk_col_count; c++) {
+                int logical_col = (int)id->column_ids[c];
+                if (logical_col >= GXF_COL_COUNT) continue;
+
                 int flen = 0;
-                const char *fld = get_field(id->line.s, c, &flen);
+                const char *fld = get_field(id->line.s, logical_col, &flen);
 
                 if (!fld || flen == 0 || (flen == 1 && fld[0] == '.')) {
                     /* Missing value */
-                    switch (c) {
+                    switch (logical_col) {
                         case GXF_COL_START:
                         case GXF_COL_END: {
                             int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
@@ -365,7 +383,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                     continue;
                 }
 
-                switch (c) {
+                switch (logical_col) {
                     case GXF_COL_START:
                     case GXF_COL_END: {
                         /* Parse as int64 */
@@ -396,11 +414,12 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 }
             }
         } else {
-            /* Generic mode: all VARCHAR */
-            int max_cols = (int)chunk_col_count < n_cols ? (int)chunk_col_count : n_cols;
-            for (int c = 0; c < max_cols; c++) {
+            /* Generic mode: all VARCHAR, with projection pushdown */
+            for (idx_t c = 0; c < chunk_col_count; c++) {
+                int logical_col = (int)id->column_ids[c];
+                if (logical_col >= n_cols) continue;
                 int flen = 0;
-                const char *fld = get_field(id->line.s, c, &flen);
+                const char *fld = get_field(id->line.s, logical_col, &flen);
                 if (fld) {
                     duckdb_vector_assign_string_element_len(vectors[c], row_count, fld, flen);
                 } else {
