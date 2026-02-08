@@ -67,20 +67,60 @@ target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 # static libhts.a with -fPIC.  htslib's configure auto-detects every
 # available library (zlib, bz2, lzma, libdeflate, libcurl, openssl …).
 include(ExternalProject)
+include(CheckIncludeFile)
 
 set(HTSLIB_SRC_DIR "${CMAKE_SOURCE_DIR}/third_party/htslib")
 set(HTSLIB_BUILD_DIR "${HTSLIB_SRC_DIR}")  # build in-tree like upstream expects
+
+# ------------------------------------------------------------------
+# Probe optional dependencies and build configure flags dynamically.
+# htslib's ./configure will fail when --enable-X is given but the lib
+# is missing, so we only pass flags for libraries we actually find.
+# ------------------------------------------------------------------
+
+# Always-required: zlib
+find_package(ZLIB REQUIRED)
+
+# Optional compression libraries
+find_library(LIBBZ2   NAMES bz2)
+find_library(LIBLZMA  NAMES lzma)
+find_library(LIBDEFLATE NAMES deflate)
+
+# Optional network / crypto libraries
+find_library(LIBCURL  NAMES curl)
+find_library(LIBCRYPTO NAMES crypto)
+
+# Build the htslib configure argument list
+set(HTSLIB_CONFIGURE_ARGS
+    "CFLAGS=-fPIC -O2"
+    "--disable-plugins"
+)
+
+if(LIBCURL)
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-libcurl")
+else()
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-libcurl")
+endif()
+
+if(LIBCURL AND LIBCRYPTO)
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-gcs" "--enable-s3")
+else()
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-gcs" "--disable-s3")
+endif()
+
+if(LIBDEFLATE)
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--with-libdeflate")
+else()
+    list(APPEND HTSLIB_CONFIGURE_ARGS "--without-libdeflate")
+endif()
+
+message(STATUS "htslib configure args: ${HTSLIB_CONFIGURE_ARGS}")
 
 ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"
     BUILD_IN_SOURCE   TRUE
     CONFIGURE_COMMAND "${HTSLIB_SRC_DIR}/configure"
-                      "CFLAGS=-fPIC -O2"
-                      --disable-plugins
-                      --enable-libcurl
-                      --enable-gcs
-                      --enable-s3
-                      --with-libdeflate
+                      ${HTSLIB_CONFIGURE_ARGS}
     BUILD_COMMAND     ${CMAKE_MAKE_PROGRAM} -j lib-static
     INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
     BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
@@ -96,11 +136,29 @@ set_target_properties(hts PROPERTIES
 )
 add_dependencies(hts htslib_build)
 
-# Link hts and its transitive dependencies.
-# After configure runs, config.mk lists the exact libs.  But since we
-# enable everything and build static, we know the full set:
+# Link hts and only the transitive dependencies that are actually present.
+set(HTSLIB_LINK_LIBS hts ZLIB::ZLIB)
+
+if(LIBBZ2)
+    list(APPEND HTSLIB_LINK_LIBS ${LIBBZ2})
+endif()
+if(LIBLZMA)
+    list(APPEND HTSLIB_LINK_LIBS ${LIBLZMA})
+endif()
+if(LIBDEFLATE)
+    list(APPEND HTSLIB_LINK_LIBS ${LIBDEFLATE})
+endif()
+if(LIBCURL)
+    list(APPEND HTSLIB_LINK_LIBS ${LIBCURL})
+endif()
+if(LIBCRYPTO)
+    list(APPEND HTSLIB_LINK_LIBS ${LIBCRYPTO})
+endif()
+
+list(APPEND HTSLIB_LINK_LIBS pthread m)
+
+message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
+
 target_link_libraries(${EXTENSION_NAME} PRIVATE
-    hts
-    z bz2 lzma deflate curl crypto
-    pthread m
+    ${HTSLIB_LINK_LIBS}
 )
