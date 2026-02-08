@@ -1,101 +1,145 @@
-# DuckDB C/C++ extension template
-This is an **experimental** template for C/C++ based extensions that link with the **C Extension API** of DuckDB. Note that this
-is different from https://github.com/duckdb/extension-template, which links against the C++ API of DuckDB.
+# DuckHTS
 
-Features:
-- No DuckDB build required
-- CI/CD chain preconfigured
-- (Coming soon) Works with community extensions
+A [DuckDB](https://duckdb.org/) extension for reading high-throughput sequencing (HTS) file formats using [htslib](https://github.com/samtools/htslib).
 
-## Cloning
-Clone the repo with submodules
+Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed files directly from SQL.
 
-```shell
-git clone --recurse-submodules <repo>
+## Functions
+
+| Function | Description | Schema |
+|---|---|---|
+| `read_bcf(path, [region, tidy_format])` | Read VCF/BCF files | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_\*, FORMAT\_\* |
+| `read_bam(path, [region])` | Read SAM/BAM/CRAM files | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL |
+| `read_fasta(path)` | Read FASTA files | NAME, DESCRIPTION, SEQUENCE |
+| `read_fastq(path)` | Read FASTQ files | NAME, DESCRIPTION, SEQUENCE, QUALITY |
+| `read_gff(path, [region])` | Read GFF3 files | seqname, source, feature, start, end, score, strand, frame, attributes |
+| `read_gtf(path, [region])` | Read GTF files | seqname, source, feature, start, end, score, strand, frame, attributes |
+| `read_tabix(path, [region])` | Read any tabix-indexed file | column0, column1, … (auto-detected) |
+
+## Examples
+
+```sql
+LOAD 'duckhts';
+
+-- Read a VCF file
+SELECT CHROM, POS, REF, ALT, QUAL
+FROM read_bcf('variants.vcf.gz')
+WHERE CHROM = '1' AND POS > 1000000;
+
+-- Region query on an indexed VCF (requires .tbi or .csi index)
+SELECT * FROM read_bcf('variants.bcf', region := 'chr1:1000000-2000000');
+
+-- Read a BAM file
+SELECT QNAME, FLAG, RNAME, POS, MAPQ, CIGAR
+FROM read_bam('alignments.bam')
+WHERE FLAG & 4 = 0;  -- mapped reads only
+
+-- Region query on an indexed BAM
+SELECT count(*) FROM read_bam('alignments.bam', region := 'chr1:1-1000000');
+
+-- Read FASTA sequences
+SELECT NAME, length(SEQUENCE) as seq_length
+FROM read_fasta('reference.fa');
+
+-- Read FASTQ and compute average quality
+SELECT NAME, length(SEQUENCE) as read_length
+FROM read_fastq('reads.fq.gz');
+
+-- Read GFF3 annotations
+SELECT seqname, feature, start, "end", attributes
+FROM read_gff('annotations.gff3')
+WHERE feature = 'gene';
+
+-- Read a tabix-indexed BED file
+SELECT * FROM read_tabix('regions.bed.gz', region := 'chr1:1-1000000');
 ```
-
-## Dependencies
-In principle, compiling this template only requires a C/C++ toolchain. However, this template relies on some additional
-tooling to make life a little easier and to be able to share CI/CD infrastructure with extension templates for other languages:
-
-- Python3
-- Python3-venv
-- [Make](https://www.gnu.org/software/make)
-- CMake
-- Git
-- (Optional) Ninja + ccache
-
-Installing these dependencies will vary per platform:
-- For Linux, these come generally pre-installed or are available through the distro-specific package manager.
-- For MacOS, [homebrew](https://formulae.brew.sh/).
-- For Windows, [chocolatey](https://community.chocolatey.org/).
 
 ## Building
-After installing the dependencies, building is a two-step process. Firstly run:
-```shell
-make configure
-```
-This will ensure a Python venv is set up with DuckDB and DuckDB's test runner installed. Additionally, depending on configuration,
-DuckDB will be used to determine the correct platform for which you are compiling.
 
-Then, to build the extension run:
-```shell
+### Prerequisites
+
+- C compiler (GCC or Clang)
+- CMake ≥ 3.5
+- Make
+- Python 3 + venv
+- Git
+- htslib build dependencies: zlib, libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
+
+On Debian/Ubuntu:
+```bash
+sudo apt install build-essential cmake python3 python3-venv git \
+    zlib1g-dev libbz2-dev liblzma-dev libdeflate-dev libcurl4-openssl-dev libssl-dev
+```
+
+On macOS:
+```bash
+brew install cmake htslib xz libdeflate
+```
+
+### Vendor htslib
+
+```bash
+./scripts/vendor_htslib.sh
+```
+
+This downloads and verifies htslib 1.23 into `third_party/htslib/`.
+
+### Build
+
+```bash
+make configure    # one-time setup (Python venv, platform detection)
+make release      # build optimised extension
+```
+
+The build uses CMake's `ExternalProject` to run htslib's own `./configure && make` automatically — htslib's configure detects all available libraries (zlib, bz2, lzma, libdeflate, libcurl, OpenSSL) and enables them.
+
+The extension binary is written to `build/release/duckhts.duckdb_extension`.
+
+### Debug build
+
+```bash
 make debug
 ```
-This delegates the build process to cargo, which will produce a shared library in `target/debug/<shared_lib_name>`. After this step, 
-a script is run to transform the shared library into a loadable extension by appending a binary footer. The resulting extension is written
-to the `build/debug` directory.
 
-To create optimized release binaries, simply run `make release` instead.
+## Loading
 
-### Faster builds
-We recommend to install Ninja and Ccache for building as this can have a significant speed boost during development. After installing, ninja can be used 
-by running:
-```shell
-make clean
-GEN=ninja make debug
+```sql
+-- Unsigned extensions must be loaded with -unsigned flag:
+-- duckdb -unsigned
+
+LOAD '/path/to/duckhts.duckdb_extension';
 ```
 
 ## Testing
-This extension uses the DuckDB Python client for testing. This should be automatically installed in the `make configure` step.
-The tests themselves are written in the SQLLogicTest format, just like most of DuckDB's tests. A sample test can be found in
-`test/sql/<extension_name>.test`. To run the tests using the *debug* build:
 
-```shell
-make test_debug
-```
+SQL tests live in `test/sql/` using DuckDB's SQLLogicTest format:
 
-or for the *release* build:
-```shell
+```bash
 make test_release
 ```
 
-### Version switching
-Testing with different DuckDB versions is really simple:
+## Project Structure
 
-First, run 
 ```
-make clean_all
+src/
+  duckhts.c          # Extension entry point
+  bcf_reader.c       # VCF/BCF reader (read_bcf)
+  bam_reader.c       # SAM/BAM/CRAM reader (read_bam)
+  seq_reader.c       # FASTA/FASTQ reader (read_fasta, read_fastq)
+  tabix_reader.c     # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
+  vep_parser.c       # VEP/CSQ annotation parser
+  include/
+    vcf_types.h
+    vep_parser.h
+third_party/
+  htslib/            # Vendored htslib 1.23 (built automatically)
+test/
+  sql/               # SQL logic tests
+duckdb_capi/
+  duckdb.h           # DuckDB C API headers
+  duckdb_extension.h
 ```
-to ensure the previous `make configure` step is deleted.
 
-Then, run 
-```
-DUCKDB_TEST_VERSION=v1.1.2 make configure
-```
-to select a different duckdb version to test with
+## License
 
-Finally, build and test with 
-```
-make debug
-make test_debug
-```
-
-### Using unstable Extension C API functionality
-The DuckDB Extension C API has a stable part and an unstable part. By default, this template only allows usage of the stable
-part of the API. To switch it to allow using the unstable part, take the following steps:
-
-Firstly, set your `TARGET_DUCKDB_VERSION` to your desired in `./Makefile`. Then, run `make update_duckdb_headers` to ensure 
-the headers in `./duckdb_capi` are set to the correct version. (FIXME: this is not yet working properly). 
-
-Finally, set `USE_UNSTABLE_C_API` to 1 in `./Makefile`. That's all!
+MIT
