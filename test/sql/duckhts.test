@@ -1,6 +1,9 @@
 # name: test/sql/duckhts.test
 # description: Test duckhts extension – read_bcf, read_bam, read_fasta, read_fastq, read_gff, read_gtf, read_tabix
 # group: [duckhts]
+#
+# Test data lives in test/data/ and is prepared by test/scripts/prepare_test_data.sh
+# which copies files from vendored htslib and builds the required indexes.
 
 require duckhts
 
@@ -8,31 +11,37 @@ require duckhts
 # read_bcf – VCF/BCF reader
 # ==============================================================
 
-# --- record count ---
+# --- record count (bgzipped VCF) ---
 query I
-SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/third_party/htslib/test/formatcols.vcf');
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
 ----
 1
 
 # --- first row fixed columns ---
 query IIIT
-SELECT CHROM, POS, ID, REF FROM read_bcf('__WORKING_DIRECTORY__/third_party/htslib/test/formatcols.vcf') LIMIT 1;
+SELECT CHROM, POS, ID, REF FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz') LIMIT 1;
 ----
 1	100	a	A
 
-# --- larger VCF (BCF) file ---
+# --- larger BCF file ---
 query I
-SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/vcf_file.bcf');
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf');
 ----
 15
 
 # --- first three rows of the BCF ---
 query III
-SELECT CHROM, POS, REF FROM read_bcf('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/vcf_file.bcf') LIMIT 3;
+SELECT CHROM, POS, REF FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf') LIMIT 3;
 ----
 1	3000150	C
 1	3000151	C
 1	3062915	GTTT
+
+# --- BCF region query ---
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151');
+----
+2
 
 # ==============================================================
 # read_bam – SAM/BAM/CRAM reader
@@ -40,25 +49,25 @@ SELECT CHROM, POS, REF FROM read_bcf('__WORKING_DIRECTORY__/third_party/htslib/t
 
 # --- record count ---
 query I
-SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/third_party/htslib/test/range.bam');
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam');
 ----
 112
 
 # --- first row ---
 query IIIII
-SELECT QNAME, FLAG, RNAME, POS, MAPQ FROM read_bam('__WORKING_DIRECTORY__/third_party/htslib/test/range.bam') LIMIT 1;
+SELECT QNAME, FLAG, RNAME, POS, MAPQ FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam') LIMIT 1;
 ----
 HS18_09653:4:1315:19857:61712	145	CHROMOSOME_I	914	23
 
 # --- region query (full contig) ---
 query I
-SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/third_party/htslib/test/range.bam', region := 'CHROMOSOME_I');
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I');
 ----
 18
 
 # --- region query (sub-range) ---
 query I
-SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/third_party/htslib/test/range.bam', region := 'CHROMOSOME_I:1-1000');
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
 ----
 2
 
@@ -68,19 +77,19 @@ SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/third_party/htslib/test/ran
 
 # --- record count ---
 query I
-SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/third_party/htslib/test/ce.fa');
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa');
 ----
 7
 
 # --- first sequence name ---
 query I
-SELECT NAME FROM read_fasta('__WORKING_DIRECTORY__/third_party/htslib/test/ce.fa') LIMIT 1;
+SELECT NAME FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa') LIMIT 1;
 ----
 CHROMOSOME_I
 
 # --- sequence lengths of first 3 ---
 query II
-SELECT NAME, length(SEQUENCE) FROM read_fasta('__WORKING_DIRECTORY__/third_party/htslib/test/ce.fa') LIMIT 3;
+SELECT NAME, length(SEQUENCE) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa') LIMIT 3;
 ----
 CHROMOSOME_I	1009800
 CHROMOSOME_II	5000
@@ -92,41 +101,41 @@ CHROMOSOME_III	5000
 
 # --- record count ---
 query I
-SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/third_party/htslib/test/fastq/r1.fq');
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq');
 ----
 5
 
 # --- first row: name and lengths ---
 query III
-SELECT NAME, length(SEQUENCE), length(QUALITY) FROM read_fastq('__WORKING_DIRECTORY__/third_party/htslib/test/fastq/r1.fq') LIMIT 1;
+SELECT NAME, length(SEQUENCE), length(QUALITY) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq') LIMIT 1;
 ----
 HS25_09827:2:1201:1505:59795#49	100	100
 
 # ==============================================================
-# read_gff – GFF3 reader
+# read_gff – GFF3 reader (bgzipped + tabix indexed)
 # ==============================================================
 
 # --- record count ---
 query I
-SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/gff_file.gff');
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz');
 ----
 62
 
 # --- first row ---
 query IIIII
-SELECT seqname, source, feature, start, "end" FROM read_gff('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/gff_file.gff') LIMIT 1;
+SELECT seqname, source, feature, start, "end" FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') LIMIT 1;
 ----
 X	Vega	exon	2934816	2935190
 
 # --- projection pushdown: single column ---
 query I
-SELECT feature FROM read_gff('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/gff_file.gff') LIMIT 1;
+SELECT feature FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') LIMIT 1;
 ----
 exon
 
 # --- feature counts ---
 query II
-SELECT feature, count(*) as cnt FROM read_gff('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/gff_file.gff') GROUP BY feature ORDER BY cnt DESC;
+SELECT feature, count(*) as cnt FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') GROUP BY feature ORDER BY cnt DESC;
 ----
 exon	23
 intron	19
@@ -134,19 +143,31 @@ CDS	15
 transcript	4
 gene	1
 
+# --- GFF region query ---
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
+----
+4
+
 # ==============================================================
-# read_tabix – generic tabix reader
+# read_tabix – generic tabix reader (bgzipped + tabix indexed)
 # ==============================================================
 
-# --- record count on the same GFF file (treated as generic TSV) ---
+# --- record count ---
 query I
-SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/gff_file.gff');
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz');
 ----
 62
 
 # --- projection pushdown on generic tabix ---
 query II
-SELECT column0, column2 FROM read_tabix('__WORKING_DIRECTORY__/third_party/htslib/test/tabix/gff_file.gff') LIMIT 2;
+SELECT column0, column2 FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') LIMIT 2;
 ----
 X	exon
 X	gene
+
+# --- tabix region query ---
+query I
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
+----
+4
