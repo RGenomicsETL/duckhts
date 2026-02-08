@@ -110,10 +110,38 @@ find_package(Threads REQUIRED)
 # Only pass --enable/--disable for things we probed so htslib's
 # configure never tries to use something that isn't installed.
 # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Build paths for htslib's configure.
+#
+# When vcpkg is active, libraries are installed under
+#   ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/
+# and htslib's autotools configure needs CPPFLAGS/LDFLAGS/PKG_CONFIG_PATH
+# pointing there.  On plain system builds these are empty and harmless.
+# ------------------------------------------------------------------
+set(HTSLIB_EXTRA_CFLAGS "")
+set(HTSLIB_EXTRA_LDFLAGS "")
+set(HTSLIB_PKG_CONFIG_PATH "")
+
+if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    set(_vcpkg_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+    if(EXISTS "${_vcpkg_prefix}")
+        set(HTSLIB_EXTRA_CFLAGS "-I${_vcpkg_prefix}/include")
+        set(HTSLIB_EXTRA_LDFLAGS "-L${_vcpkg_prefix}/lib")
+        set(HTSLIB_PKG_CONFIG_PATH "${_vcpkg_prefix}/lib/pkgconfig")
+        message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
+    endif()
+endif()
+
 set(HTSLIB_CONFIGURE_ARGS
-    "CFLAGS=-fPIC -O2"
+    "CFLAGS=-fPIC -O2 ${HTSLIB_EXTRA_CFLAGS}"
+    "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
     "--disable-plugins"
 )
+
+# Pass PKG_CONFIG_PATH so configure's pkg-config checks find vcpkg libs
+if(NOT "${HTSLIB_PKG_CONFIG_PATH}" STREQUAL "")
+    list(APPEND HTSLIB_CONFIGURE_ARGS "PKG_CONFIG_PATH=${HTSLIB_PKG_CONFIG_PATH}")
+endif()
 
 if(BZIP2_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-bz2")
