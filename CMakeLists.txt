@@ -10,6 +10,16 @@ endif()
 
 add_definitions(-DDUCKDB_EXTENSION_NAME=${EXTENSION_NAME})
 
+# Avoid "manually-specified variables were not used" warnings when the
+# CI passes TARGET_DUCKDB_VERSION_* for header fetching but the stable API
+# path doesn't consume them.
+if(DEFINED TARGET_DUCKDB_VERSION_MAJOR OR DEFINED TARGET_DUCKDB_VERSION_MINOR OR DEFINED TARGET_DUCKDB_VERSION_PATCH)
+    set(_duckdb_target_release_version
+        "${TARGET_DUCKDB_VERSION_MAJOR}.${TARGET_DUCKDB_VERSION_MINOR}.${TARGET_DUCKDB_VERSION_PATCH}"
+        CACHE INTERNAL "DuckDB release version passed by CI"
+    )
+endif()
+
 # Only override the C API version when building with the unstable API.
 # For stable API builds, the header's own defaults (currently v1.2.0) are correct.
 # TARGET_DUCKDB_VERSION_* is the DuckDB *release* version (for header fetching),
@@ -131,14 +141,16 @@ set(HTSLIB_PKG_CONFIG_PATH "")
 set(HTSLIB_HOST_FLAG "")
 if(APPLE)
     if(NOT DEFINED OSX_BUILD_ARCH OR "${OSX_BUILD_ARCH}" STREQUAL "")
-        if(DEFINED CMAKE_OSX_ARCHITECTURES AND NOT "${CMAKE_OSX_ARCHITECTURES}" STREQUAL "")
-            list(GET CMAKE_OSX_ARCHITECTURES 0 OSX_BUILD_ARCH)
-        elseif(DEFINED VCPKG_TARGET_TRIPLET)
+        if(DEFINED VCPKG_TARGET_TRIPLET)
             if(VCPKG_TARGET_TRIPLET MATCHES "^x64-osx")
                 set(OSX_BUILD_ARCH "x86_64")
             elseif(VCPKG_TARGET_TRIPLET MATCHES "^arm64-osx")
                 set(OSX_BUILD_ARCH "arm64")
             endif()
+        endif()
+        if((NOT DEFINED OSX_BUILD_ARCH OR "${OSX_BUILD_ARCH}" STREQUAL "") AND
+           DEFINED CMAKE_OSX_ARCHITECTURES AND NOT "${CMAKE_OSX_ARCHITECTURES}" STREQUAL "")
+            list(GET CMAKE_OSX_ARCHITECTURES 0 OSX_BUILD_ARCH)
         endif()
     endif()
     if(DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
