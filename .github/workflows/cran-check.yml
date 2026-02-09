@@ -9,7 +9,7 @@ on:
 
 jobs:
   R-CMD-check-ubuntu:
-    runs: ubuntu-latest
+    runs-on: ubuntu-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -30,7 +30,7 @@ jobs:
           retention-days: 30
 
   R-CMD-check-macos:
-    runs: macos-latest
+    runs-on: macos-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -51,7 +51,7 @@ jobs:
           retention-days: 30
 
   R-CMD-check-windows:
-    runs: windows-latest
+    runs-on: windows-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:
