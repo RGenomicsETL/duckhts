@@ -1,10 +1,10 @@
 name: CRAN Check
 
 on:
-  #push:
-  #  branches: [ main, develop ]
-  #pull_request:
-  #  branches: [ main ]
+  push:
+    branches: [ r_package ]
+  pull_request:
+    branches: [ r_package]
   workflow_dispatch:
 
 jobs:
