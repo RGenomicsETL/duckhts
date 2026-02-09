@@ -10,7 +10,7 @@ Authors@R: c(
     )
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading 'HTS' file
     formats (VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, tabix) from
-    'R' via 'DuckDB'. The extension and its htslib dependency are compiled from
+    'R' via 'DuckDB'. The extension and its 'htslib' dependency are compiled from
     vendored sources during package installation.
 License: GPL-3
 Copyright: See inst/COPYRIGHT
