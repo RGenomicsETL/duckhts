@@ -1,6 +1,6 @@
-# Rduckhts 0.1.1-0.0.2
+# Rduckhts 0.1.1-0.0.3
 
-- misspeling
+- misspeling correction
 
 # Rduckhts 0.1.1-0.0.2
 
