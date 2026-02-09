@@ -30,6 +30,8 @@ library(DBI)
 library(duckdb)
 library(Rduckhts)
 
+setup_hts_env()
+
 ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
 if (!file.exists(ext_path)) {
     ext_path <- file.path("inst", "extdata", "duckhts.duckdb_extension")
@@ -113,6 +115,26 @@ variants
     ## 3 -20, -5, -20
     ## 4 -20, -5, -20
     ## 5         NULL
+
+### Remote VCF on S3 (requires libcurl)
+
+``` r
+# Enable htslib plugins for remote access (S3/GCS/HTTP)
+setup_hts_env()
+
+# Example S3 URL (1000 Genomes cohort VCF)
+s3_base <- "s3://1000genomes-dragen-v3.7.6/data/cohorts/"
+s3_path <- "gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/"
+s3_vcf_file <- "3202_samples_cohort_gg_chr22.vcf.gz"
+s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
+
+# Query remote VCF directly with DuckDB + DuckHTS (region-scoped)
+rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:10000000-10050000", overwrite = TRUE)
+dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
+```
+
+    ## [1] CHROM n    
+    ## <0 rows> (or 0-length row.names)
 
 ``` r
 r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
