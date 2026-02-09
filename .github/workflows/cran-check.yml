@@ -23,7 +23,7 @@ jobs:
         run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
       - name: Upload check results
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Rduckhts-check-results-ubuntu
           path: r/Rduckhts.Rduckhts.Rcheck/
@@ -44,7 +44,7 @@ jobs:
         run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
       - name: Upload check results
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Rduckhts-check-results-macos
           path: r/Rduckhts.Rduckhts.Rcheck/
@@ -65,7 +65,7 @@ jobs:
         run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
       - name: Upload check results
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Rduckhts-check-results-windows
           path: r/Rduckhts.Rduckhts.Rcheck/
