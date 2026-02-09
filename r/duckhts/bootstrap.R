@@ -1,10 +1,12 @@
 #!/usr/bin/env Rscript
+# Bootstrap script: copies extension sources into inst/duckhts_extension/
+# Run from r/duckhts/:  Rscript bootstrap.R
+# Or with explicit root: Rscript bootstrap.R /path/to/duckhts
 
 args <- commandArgs(trailingOnly = TRUE)
-run_conformance <- "--conformance" %in% args
+repo_root <- if (length(args) >= 1) args[1] else NULL
 
-suppressPackageStartupMessages({
-    library(duckhts)
-})
+# Source the function directly (package may not be installed yet)
+source(file.path("R", "bootstrap.R"))
 
-duckhts_bootstrap(vendor_conformance = run_conformance)
+duckhts_bootstrap(repo_root = repo_root)

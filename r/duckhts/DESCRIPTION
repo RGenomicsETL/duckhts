@@ -1,15 +1,21 @@
 Package: duckhts
-Title: DuckHTS Testing Harness
+Title: DuckDB HTS File Reader Extension for R
 Version: 0.0.0.9000
-Authors@R: person(given = "Sounkou Mahamane", family = "Toure", email = "sounkoutoure@gmail.com",
+Authors@R: person("DuckHTS", "Contributors",
+    email = "dev@duckhts.invalid",
     role = c("aut", "cre"))
-Description: R package harness for building and testing the DuckHTS
-    DuckDB extension.
-License: MIT
+Description: Bundles the duckhts DuckDB extension for reading HTS file
+    formats (VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, tabix) from
+    R via DuckDB. The extension and its htslib dependency are compiled from
+    vendored sources during package installation.
+License: MIT + file LICENSE
 Encoding: UTF-8
-LazyData: true
+OS_type: unix
+SystemRequirements: GNU make, zlib, libbz2, liblzma, libcurl, openssl
 Imports:
+    DBI,
     utils
 Suggests:
     duckdb,
     testthat
+RoxygenNote: 7.3.3
