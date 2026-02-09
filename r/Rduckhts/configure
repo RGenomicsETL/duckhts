@@ -63,7 +63,8 @@ add_prefix_if_header() {
 
 if [ "`uname`" = "Darwin" ]; then
   BREW_PREFIXES="/opt/homebrew /usr/local /opt/local"
-  add_prefix_if_header "openssl/ssl.h" $BREW_PREFIXES || true
+  OPENSSL_PREFIXES="/opt/homebrew/opt/openssl@3 /opt/homebrew/opt/openssl@1.1 /opt/homebrew/opt/openssl /usr/local/opt/openssl@3 /usr/local/opt/openssl@1.1 /usr/local/opt/openssl"
+  add_prefix_if_header "openssl/ssl.h" $OPENSSL_PREFIXES || true
   add_prefix_if_header "curl/curl.h" $BREW_PREFIXES || true
   add_prefix_if_header "zlib.h" $BREW_PREFIXES || true
   add_prefix_if_header "bzlib.h" $BREW_PREFIXES || true
@@ -142,6 +143,16 @@ HAS_BZ2=no
 HAS_LZMA=no
 HAS_CURL=no
 HAS_OPENSSL=no
+OPENSSL_LIBS=""
+OPENSSL_CFLAGS=""
+
+if command -v pkg-config >/dev/null 2>&1; then
+  if pkg-config --exists openssl 2>/dev/null; then
+    OPENSSL_CFLAGS=`pkg-config --cflags openssl`
+    OPENSSL_LIBS=`pkg-config --libs openssl`
+    CPPFLAGS="${CPPFLAGS} ${OPENSSL_CFLAGS}"
+  fi
+fi
 
 LIBS=""
 
@@ -165,9 +176,15 @@ if try_compile_header_lib "curl" "curl/curl.h" "-lcurl" "no"; then
   LIBS="$LIBS -lcurl"
 fi
 
-if try_compile_header_lib "openssl" "openssl/ssl.h" "-lssl -lcrypto" "no"; then
+if [ -n "${OPENSSL_LIBS}" ]; then
+  OPENSSL_TEST_LIBS="${OPENSSL_LIBS}"
+else
+  OPENSSL_TEST_LIBS="-lssl -lcrypto"
+fi
+
+if try_compile_header_lib "openssl" "openssl/ssl.h" "${OPENSSL_TEST_LIBS}" "no"; then
   HAS_OPENSSL=yes
-  LIBS="$LIBS -lssl -lcrypto"
+  LIBS="$LIBS ${OPENSSL_TEST_LIBS}"
 fi
 
 LIBS="$LIBS -lpthread"

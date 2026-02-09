@@ -36,12 +36,35 @@ test_table_creation <- function() {
   expect_silent(rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE))
   expect_silent(rduckhts_tabix(con, "tabix_data", tabix_path, overwrite = TRUE))
 
-  expect_true(nrow(DBI::dbGetQuery(con, "SELECT * FROM variants LIMIT 1")) >= 0)
-  expect_true(nrow(DBI::dbGetQuery(con, "SELECT * FROM reads LIMIT 1")) >= 0)
-  expect_true(nrow(DBI::dbGetQuery(con, "SELECT * FROM sequences LIMIT 1")) >= 0)
-  expect_true(nrow(DBI::dbGetQuery(con, "SELECT * FROM fastq_reads LIMIT 1")) >= 0)
-  expect_true(nrow(DBI::dbGetQuery(con, "SELECT * FROM annotations LIMIT 1")) >= 0)
-  expect_true(nrow(DBI::dbGetQuery(con, "SELECT * FROM tabix_data LIMIT 1")) >= 0)
+  expect_true(DBI::dbExistsTable(con, "variants"))
+  if (DBI::dbExistsTable(con, "variants")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT * FROM variants LIMIT 1"))
+  }
+
+  expect_true(DBI::dbExistsTable(con, "reads"))
+  if (DBI::dbExistsTable(con, "reads")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT * FROM reads LIMIT 1"))
+  }
+
+  expect_true(DBI::dbExistsTable(con, "sequences"))
+  if (DBI::dbExistsTable(con, "sequences")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT * FROM sequences LIMIT 1"))
+  }
+
+  expect_true(DBI::dbExistsTable(con, "fastq_reads"))
+  if (DBI::dbExistsTable(con, "fastq_reads")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT * FROM fastq_reads LIMIT 1"))
+  }
+
+  expect_true(DBI::dbExistsTable(con, "annotations"))
+  if (DBI::dbExistsTable(con, "annotations")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT * FROM annotations LIMIT 1"))
+  }
+
+  expect_true(DBI::dbExistsTable(con, "tabix_data"))
+  if (DBI::dbExistsTable(con, "tabix_data")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT * FROM tabix_data LIMIT 1"))
+  }
 
   # Test overwrite parameter validation
   if (DBI::dbExistsTable(con, "test_table")) {

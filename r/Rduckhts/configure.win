@@ -206,6 +206,14 @@ if [ "$HAS_CURL" = "no" ]; then
 fi
 
 # Configure htslib for Windows/MinGW
+CONFIGURE_BUILD_HOST=""
+if [ -n "${BUILD:-}" ]; then
+    CONFIGURE_BUILD_HOST="${CONFIGURE_BUILD_HOST} --build=${BUILD}"
+fi
+if [ -n "${HOST:-}" ]; then
+    CONFIGURE_BUILD_HOST="${CONFIGURE_BUILD_HOST} --host=${HOST}"
+fi
+
 ./configure \
     CC="${CC}" \
     AR="${AR}" \
@@ -214,8 +222,7 @@ fi
     CPPFLAGS="${CPPFLAGS}" \
     LDFLAGS="${LDFLAGS}" \
     LIBS="${LIBS}" \
-    --build=${BUILD} \
-    --host=${HOST} \
+    ${CONFIGURE_BUILD_HOST} \
     ${HTSLIB_CONFIGURE_FLAGS}
 
 echo "---------- Building htslib (static) ----------"
