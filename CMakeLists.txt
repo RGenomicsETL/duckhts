@@ -138,6 +138,12 @@ set(HTSLIB_CONFIGURE_ARGS
     "--disable-plugins"
 )
 
+# Autotools convention: CPPFLAGS for -I, CFLAGS for -O/-f etc.
+# Some configure scripts only honour CPPFLAGS for include-path probes.
+if(NOT "${HTSLIB_EXTRA_CFLAGS}" STREQUAL "")
+    list(APPEND HTSLIB_CONFIGURE_ARGS "CPPFLAGS=${HTSLIB_EXTRA_CFLAGS}")
+endif()
+
 # Pass PKG_CONFIG_PATH so configure's pkg-config checks find vcpkg libs
 if(NOT "${HTSLIB_PKG_CONFIG_PATH}" STREQUAL "")
     list(APPEND HTSLIB_CONFIGURE_ARGS "PKG_CONFIG_PATH=${HTSLIB_PKG_CONFIG_PATH}")
