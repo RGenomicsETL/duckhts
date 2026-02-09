@@ -1,8 +1,11 @@
 
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
 # DuckHTS
 
-A [DuckDB](https://duckdb.org/) extension for reading high-throughput
-sequencing (HTS) file formats using
+A [DuckDB](https://duckdb.org/) extension (see the [DuckDB Extension
+API](https://duckdb.org/docs/extensions/overview)) for reading
+high-throughput sequencing (HTS) file formats using
 [htslib](https://github.com/samtools/htslib).
 
 Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed
@@ -93,8 +96,8 @@ MinGW/RTools for Windows.
 - Make
 - Python 3 + venv
 - Git
-- htslib build dependencies: zlib, libbz2, liblzma, libdeflate, libcurl,
-  libcrypto (OpenSSL)
+- [htslib](https://github.com/samtools/htslib) build dependencies: zlib,
+  libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
 
 On Debian/Ubuntu:
 
@@ -109,13 +112,14 @@ On macOS:
 brew install cmake htslib xz libdeflate
 ```
 
-### Vendor htslib
+### Vendor [htslib](https://github.com/samtools/htslib)
 
 ``` bash
 ./scripts/vendor_htslib.sh
 ```
 
-This downloads and verifies htslib 1.23 into `third_party/htslib/`.
+This downloads and verifies [htslib](https://github.com/samtools/htslib)
+1.23 into `third_party/htslib/`.
 
 ### Build
 
@@ -124,7 +128,8 @@ make configure    # one-time setup (Python venv, platform detection)
 make release      # build optimised extension
 ```
 
-The build runs htslib’s Makefile (`make lib-static`) in-tree.
+The build runs [htslib](https://github.com/samtools/htslib)’s Makefile
+(`make lib-static`) in-tree.
 
 The extension binary is written to
 `build/release/duckhts.duckdb_extension`.
@@ -146,7 +151,8 @@ LOAD '/path/to/duckhts.duckdb_extension';
 
 ## Testing
 
-SQL tests live in `test/sql/` using DuckDB’s SQLLogicTest format.
+SQL tests live in `test/sql/` using [DuckDB](https://duckdb.org/)’s
+SQLLogicTest format.
 
 Before running tests for the first time, prepare the indexed test data:
 
@@ -154,9 +160,10 @@ Before running tests for the first time, prepare the indexed test data:
 ./test/scripts/prepare_test_data.sh   # requires samtools, bcftools, bgzip, tabix
 ```
 
-This copies files from the vendored htslib test suite into `test/data/`
-and builds the required indexes (BAI, CSI, TBI, FAI) so region queries
-work.
+This copies files from the vendored
+[htslib](https://github.com/samtools/htslib) test suite into
+`test/data/` and builds the required indexes (BAI, CSI, TBI, FAI) so
+region queries work.
 
 Then run:
 
@@ -167,8 +174,9 @@ make test_release
 ## R demo
 
 The R package lives under r/Rduckhts and provides helpers to load the
-extension and create DuckDB tables from HTS files. See its README for
-R-specific usage.
+extension and create [DuckDB](https://duckdb.org/) tables from HTS
+files. See its README for R-specific usage:
+[r/Rduckhts/README.Rmd](r/Rduckhts/README.Rmd).
 
 ``` r
 library(DBI)
@@ -178,86 +186,71 @@ drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
 dbExecute(con, sprintf("LOAD '%s'", ext_path))
-```
+#> [1] 0
 
-    ## [1] 0
-
-``` r
 dbGetQuery(con, "
   SELECT *
   FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
   LIMIT 5
 ")
-```
+#>   CHROM POS ID REF ALT QUAL FILTER SAMPLE_ID  FORMAT_S
+#> 1     1 100  a   A   T   NA   PASS        S1         a
+#> 2     1 100  a   A   T   NA   PASS        S²   bbbbbbb
+#> 3     1 100  a   A   T   NA   PASS        S3 ccccccccc
 
-    ##   CHROM POS ID REF ALT QUAL FILTER SAMPLE_ID  FORMAT_S
-    ## 1     1 100  a   A   T   NA   PASS        S1         a
-    ## 2     1 100  a   A   T   NA   PASS        S²   bbbbbbb
-    ## 3     1 100  a   A   T   NA   PASS        S3 ccccccccc
-
-``` r
 dbGetQuery(con, "
   SELECT NAME, SEQUENCE, QUALITY, MATE, PAIR_ID
   FROM read_fastq('test/data/r1.fq', mate_path := 'test/data/r2.fq')
   LIMIT 5
 ")
-```
+#>                              NAME
+#> 1 HS25_09827:2:1201:1505:59795#49
+#> 2 HS25_09827:2:1201:1505:59795#49
+#> 3 HS25_09827:2:1201:1559:70726#49
+#> 4 HS25_09827:2:1201:1559:70726#49
+#> 5 HS25_09827:2:1201:1564:39627#49
+#>                                                                                               SEQUENCE
+#> 1 CCGTTAGAGCATTTGTTGAAAATGCTTTCCTTGCTCCATGTGATGACTCTGGTGCCCTTGTCAAAAGCCAGCTGGGCCTATTCGTGTGGGTCTGTTTCTG
+#> 2 AAGGAAAGAAGGGAGGGAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAAGTAGGAAGAATTCATCTACCCAATT
+#> 3 TTGTTAAAATGACCATACCCAAAGTGATCTACAGACTCAATACAATTTCTATTGAAATACCAATCACACTCTTCACAGAACTAGAAAAACAGTTCTAAAA
+#> 4 TTTTCTTTTATTAATTTTATACTTACATTTAAGTCTTTATTCCATTTTGAGTCAATGTTTGTATATGATGAGAGATAGGGGTCTAGTTTCATACTTCTAC
+#> 5 ACGCGGCAATCCAATGTGTGAGTTGAGAAGCGGTGAGGAGGGAATCCTAATTTTATGAGCAGGTCAGGACCGTGGGAGATACCTGACACCTGAGATGGTA
+#>                                                                                                QUALITY
+#> 1 CABCFGDEEFFEFHGHGGFFGDIGIJFIFHHGHEIFGHBCGHDIFBE9GIAICGGICFIBFGGHGDGGGHE?GIGDFGGHEGIEJG>;FG<GGHACEFGH
+#> 2 <CBB>DCHFEFBHAGCGACF7CJI8HBIIEFGFEBG?DCGA?ACFGGI=BEDG?EFEHFFFEHFD?HG+DFH>FFHGFBFE4F@I3HF@>A5F?GFH<EG
+#> 3 CABEFGFFGFHGGGGJGGFFGKIHHJFIEHHHGIEGGEHJGHDHFGHIGICIJEFIFGIF8GGHKFHGGFEI6GGGFIGHGGIE>EFCFHGGGHEJEAJE
+#> 4 ;CBCEFDHDGFGHDGDIGEF@EJIIGEEIECGFHGFHGGGHHHHGGKIFFEHGEGHFIEFFHHGDHHGJEGF?FBHFFGCHHFFII>GCFCFFGGCEBF?
+#> 5 BACCFGBFGFHGGJGHGGFEGHIGIJHFEH:HHEHGHHBGGH9IAGHGFHIFJFFAFGIFDIGHKEIG<C>F,CGD66?7EFI5EEG>EGGGGD5=HH6E
+#>   MATE                         PAIR_ID
+#> 1    1 HS25_09827:2:1201:1505:59795#49
+#> 2    2 HS25_09827:2:1201:1505:59795#49
+#> 3    1 HS25_09827:2:1201:1559:70726#49
+#> 4    2 HS25_09827:2:1201:1559:70726#49
+#> 5    1 HS25_09827:2:1201:1564:39627#49
 
-    ##                              NAME
-    ## 1 HS25_09827:2:1201:1505:59795#49
-    ## 2 HS25_09827:2:1201:1505:59795#49
-    ## 3 HS25_09827:2:1201:1559:70726#49
-    ## 4 HS25_09827:2:1201:1559:70726#49
-    ## 5 HS25_09827:2:1201:1564:39627#49
-    ##                                                                                               SEQUENCE
-    ## 1 CCGTTAGAGCATTTGTTGAAAATGCTTTCCTTGCTCCATGTGATGACTCTGGTGCCCTTGTCAAAAGCCAGCTGGGCCTATTCGTGTGGGTCTGTTTCTG
-    ## 2 AAGGAAAGAAGGGAGGGAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAGGAAAGTAGGAAGAATTCATCTACCCAATT
-    ## 3 TTGTTAAAATGACCATACCCAAAGTGATCTACAGACTCAATACAATTTCTATTGAAATACCAATCACACTCTTCACAGAACTAGAAAAACAGTTCTAAAA
-    ## 4 TTTTCTTTTATTAATTTTATACTTACATTTAAGTCTTTATTCCATTTTGAGTCAATGTTTGTATATGATGAGAGATAGGGGTCTAGTTTCATACTTCTAC
-    ## 5 ACGCGGCAATCCAATGTGTGAGTTGAGAAGCGGTGAGGAGGGAATCCTAATTTTATGAGCAGGTCAGGACCGTGGGAGATACCTGACACCTGAGATGGTA
-    ##                                                                                                QUALITY
-    ## 1 CABCFGDEEFFEFHGHGGFFGDIGIJFIFHHGHEIFGHBCGHDIFBE9GIAICGGICFIBFGGHGDGGGHE?GIGDFGGHEGIEJG>;FG<GGHACEFGH
-    ## 2 <CBB>DCHFEFBHAGCGACF7CJI8HBIIEFGFEBG?DCGA?ACFGGI=BEDG?EFEHFFFEHFD?HG+DFH>FFHGFBFE4F@I3HF@>A5F?GFH<EG
-    ## 3 CABEFGFFGFHGGGGJGGFFGKIHHJFIEHHHGIEGGEHJGHDHFGHIGICIJEFIFGIF8GGHKFHGGFEI6GGGFIGHGGIE>EFCFHGGGHEJEAJE
-    ## 4 ;CBCEFDHDGFGHDGDIGEF@EJIIGEEIECGFHGFHGGGHHHHGGKIFFEHGEGHFIEFFHHGDHHGJEGF?FBHFFGCHHFFII>GCFCFFGGCEBF?
-    ## 5 BACCFGBFGFHGGJGHGGFEGHIGIJHFEH:HHEHGHHBGGH9IAGHGFHIFJFFAFGIFDIGHKEIG<C>F,CGD66?7EFI5EEG>EGGGGD5=HH6E
-    ##   MATE                         PAIR_ID
-    ## 1    1 HS25_09827:2:1201:1505:59795#49
-    ## 2    2 HS25_09827:2:1201:1505:59795#49
-    ## 3    1 HS25_09827:2:1201:1559:70726#49
-    ## 4    2 HS25_09827:2:1201:1559:70726#49
-    ## 5    1 HS25_09827:2:1201:1564:39627#49
-
-``` r
 dbGetQuery(con, "
   SELECT QNAME, RNAME, POS, READ_GROUP_ID, SAMPLE_ID
   FROM read_bam('test/data/rg.sam.gz')
   LIMIT 5
 ")
-```
+#>   QNAME RNAME POS READ_GROUP_ID SAMPLE_ID
+#> 1    a1    xx   1            x1        x1
+#> 2    b1    xx   1            x2        x2
+#> 3    c1    xx   1          <NA>      <NA>
+#> 4    a2    xx  11            x1        x1
+#> 5    b2    xx  11            x2        x2
 
-    ##   QNAME RNAME POS READ_GROUP_ID SAMPLE_ID
-    ## 1    a1    xx   1            x1        x1
-    ## 2    b1    xx   1            x2        x2
-    ## 3    c1    xx   1          <NA>      <NA>
-    ## 4    a2    xx  11            x1        x1
-    ## 5    b2    xx  11            x2        x2
-
-``` r
 dbGetQuery(con, "
   SELECT seqname, feature, start, \"end\", attributes_map
   FROM read_gff('test/data/gff_file.gff.gz', attributes_map := true)
   WHERE feature = 'gene'
   LIMIT 5
 ")
-```
+#>   seqname feature   start     end
+#> 1       X    gene 2934816 2964270
+#>                                                              attributes_map
+#> 1 ID, Name, biotype, OTTHUMG00000137358, OTTHUMG00000137358, protein_coding
 
-    ##   seqname feature   start     end
-    ## 1       X    gene 2934816 2964270
-    ##                                                              attributes_map
-    ## 1 ID, Name, biotype, OTTHUMG00000137358, OTTHUMG00000137358, protein_coding
-
-``` r
 dbDisconnect(con, shutdown = TRUE)
 ```
 
@@ -283,6 +276,15 @@ Rendering this document requires a built extension at
     duckdb_capi/
       duckdb.h           # DuckDB C API headers
       duckdb_extension.h
+
+## References
+
+- DuckDB: <https://duckdb.org/>
+- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+- DuckDB extension template (C):
+  <https://github.com/duckdb/extension-template-c>
+- htslib: <https://github.com/samtools/htslib>
+- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 
