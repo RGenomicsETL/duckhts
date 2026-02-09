@@ -27,6 +27,11 @@ expect_equal(length(formals(rduckhts_tabix)), 5)
 # Test that DBI is available
 expect_true(requireNamespace("DBI", quietly = TRUE))
 
+# Test example files are bundled
+expect_true(file.exists(system.file("extdata", "ce.fa", package = "Rduckhts")))
+expect_true(file.exists(system.file("extdata", "r1.fq", package = "Rduckhts")))
+expect_true(file.exists(system.file("extdata", "vcf_file.bcf", package = "Rduckhts")))
+
 # Test parameter validation - these should fail gracefully without a connection
 expect_error(rduckhts_bcf(NULL, "test", "nonexistent.vcf"))
 expect_error(rduckhts_bam(NULL, "test", "nonexistent.bam"))

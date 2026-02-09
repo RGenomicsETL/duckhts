@@ -37,18 +37,19 @@ if (!file.exists(ext_path)) {
 	stop("DuckHTS extension not found at: ", ext_path)
 }
 
-tmp_dir <- tempdir()
-fasta_path <- file.path(tmp_dir, "example.fa")
-fastq_path <- file.path(tmp_dir, "example.fq")
+fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
+fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
+fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
 
-writeLines(c(">seq1", "ACGTACGT", ">seq2", "TTGGCCAA"), fasta_path)
-writeLines(c("@r1", "ACGT", "+", "IIII"), fastq_path)
+if (!file.exists(fasta_path) || !file.exists(fastq_r1) || !file.exists(fastq_r2)) {
+	stop("Example data files not found in extdata")
+}
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con, extension_path = ext_path)
 
 rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE)
-rduckhts_fastq(con, "reads", fastq_path, overwrite = TRUE)
+rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)
 
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
@@ -65,29 +66,36 @@ We load the extension with `rduckhts_load(con, extension_path = NULL)`. We creat
 ### Region Queries
 
 ```r
-rduckhts_bcf(con, "chr1_variants", "file.vcf.gz", region = "chr1:1000000-2000000")
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+rduckhts_bcf(con, "chr1_variants", bcf_path, region = "1:1-1000")
 chr1_variants <- dbGetQuery(con, "SELECT * FROM chr1_variants WHERE POS BETWEEN 1500000 AND 1600000")
 ```
 
 ### Paired FASTQ
 
 ```r
-rduckhts_fastq(con, "paired_reads", "r1.fq", mate_path = "r2.fq")
-rduckhts_fastq(con, "interleaved_reads", "interleaved.fq", interleaved = TRUE)
+r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
+r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
+interleaved <- system.file("extdata", "interleaved.fq", package = "Rduckhts")
+rduckhts_fastq(con, "paired_reads", r1, mate_path = r2)
+rduckhts_fastq(con, "interleaved_reads", interleaved, interleaved = TRUE)
 pairs <- dbGetQuery(con, "SELECT * FROM paired_reads WHERE MATE = 1")
 ```
 
 ### Attributes Map for GFF/GTF
 
 ```r
-rduckhts_gff(con, "genes", "annotations.gff3.gz", attributes_map = TRUE)
+gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
+rduckhts_gff(con, "genes", gff_path, attributes_map = TRUE)
 gene_annotations <- dbGetQuery(con, "SELECT seqname, start, end, attributes['gene_id'], attributes['gene_name'] FROM genes WHERE feature = 'gene'")
 ```
 
 ### CRAM with Reference
 
 ```r
-rduckhts_bam(con, "cram_reads", "reads.cram", reference = "reference.fa")
+cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
+ref_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
+rduckhts_bam(con, "cram_reads", cram_path, reference = ref_path)
 cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads")
 ```
 
