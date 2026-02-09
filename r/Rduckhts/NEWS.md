@@ -1,4 +1,6 @@
-# Rduckhts 0.1.1-0.9000
+# Rduckhts 0.1.1-0.0.1
+
+- CRAN Submission
 
 - Bump bundled duckhts extension version to 0.1.1.
 
