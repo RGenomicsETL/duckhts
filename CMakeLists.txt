@@ -232,42 +232,28 @@ list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
 
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
 
-if(WIN32 AND NOT MINGW)
-    # MSVC builds can't run autotools configure. Use vcpkg/system htslib.
-    find_path(HTSLIB_INCLUDE_DIR NAMES htslib/hts.h)
-    find_library(HTSLIB_LIBRARY NAMES htslib hts)
-    if(NOT HTSLIB_INCLUDE_DIR OR NOT HTSLIB_LIBRARY)
-        message(FATAL_ERROR "htslib not found. On Windows MSVC, install htslib via vcpkg or provide HTSLIB_INCLUDE_DIR/HTSLIB_LIBRARY.")
-    endif()
-    add_library(hts UNKNOWN IMPORTED GLOBAL)
-    set_target_properties(hts PROPERTIES
-        IMPORTED_LOCATION "${HTSLIB_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_INCLUDE_DIR}"
-    )
-else()
-    # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
-    # even when the outer CMake build uses Ninja.
-    find_program(MAKE_COMMAND NAMES gmake make REQUIRED)
+# htslib uses GNU Makefiles (not Ninja), so we must always use `make`
+# even when the outer CMake build uses Ninja.
+find_program(MAKE_COMMAND NAMES gmake make REQUIRED)
 
-    ExternalProject_Add(htslib_build
-        SOURCE_DIR        "${HTSLIB_SRC_DIR}"
-        BUILD_IN_SOURCE   TRUE
-        CONFIGURE_COMMAND ""
-        BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
-        INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
-        BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
-        LOG_CONFIGURE     TRUE
-        LOG_BUILD         TRUE
-    )
+ExternalProject_Add(htslib_build
+    SOURCE_DIR        "${HTSLIB_SRC_DIR}"
+    BUILD_IN_SOURCE   TRUE
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
+    INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
+    BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
+    LOG_CONFIGURE     TRUE
+    LOG_BUILD         TRUE
+)
 
-    # Import the static library so CMake knows about it
-    add_library(hts STATIC IMPORTED GLOBAL)
-    set_target_properties(hts PROPERTIES
-        IMPORTED_LOCATION "${HTSLIB_BUILD_DIR}/libhts.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_SRC_DIR}"
-    )
-    add_dependencies(hts htslib_build)
-endif()
+# Import the static library so CMake knows about it
+add_library(hts STATIC IMPORTED GLOBAL)
+set_target_properties(hts PROPERTIES
+    IMPORTED_LOCATION "${HTSLIB_BUILD_DIR}/libhts.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_SRC_DIR}"
+)
+add_dependencies(hts htslib_build)
 
 # ------------------------------------------------------------------
 # Link hts + transitive dependencies (only what was found).

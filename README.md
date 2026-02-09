@@ -2,7 +2,7 @@
 
 A [DuckDB](https://duckdb.org/) extension for reading high-throughput sequencing (HTS) file formats using [htslib](https://github.com/samtools/htslib).
 
-Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed files directly from SQL.
+Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed files directly Using SQL.
 
 ## Functions
 
