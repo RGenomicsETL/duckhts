@@ -8,20 +8,20 @@ sequencing (HTS) file formats using
 Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed
 files directly using SQL.
 
-Note: MSVC builds (windows\_amd64/windows\_arm64) are not supported. Use
+Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use
 MinGW/RTools for Windows.
 
 ## Functions
 
-| Function                                     | Description                 | Schema                                                                                                      |
-| -------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `read_bcf(path, [region, tidy_format])`      | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                  |
-| `read_bam(path, [region, reference])`        | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID            |
-| `read_fasta(path)`                           | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                 |
-| `read_fastq(path, [mate_path, interleaved])` | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                             |
-| `read_gff(path, [region, attributes_map])`   | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled) |
-| `read_gtf(path, [region, attributes_map])`   | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled) |
-| `read_tabix(path, [region])`                 | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                         |
+| Function                                     | Description                 | Schema                                                                                                     |
+|----------------------------------------------|-----------------------------|------------------------------------------------------------------------------------------------------------|
+| `read_bcf(path, [region, tidy_format])`      | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                 |
+| `read_bam(path, [region, reference])`        | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ_GROUP_ID, SAMPLE_ID              |
+| `read_fasta(path)`                           | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                |
+| `read_fastq(path, [mate_path, interleaved])` | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR_ID when paired/interleaved)                             |
+| `read_gff(path, [region, attributes_map])`   | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
+| `read_gtf(path, [region, attributes_map])`   | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
+| `read_tabix(path, [region])`                 | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                        |
 
 ## Examples
 
@@ -83,18 +83,18 @@ platform settings:
 make configure
 ```
 
-Note: MSVC builds (windows\_amd64/windows\_arm64) are not supported. Use
+Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use
 MinGW/RTools for Windows.
 
 ### Prerequisites
 
-  - C compiler (GCC or Clang)
-  - CMake ≥ 3.5
-  - Make
-  - Python 3 + venv
-  - Git
-  - htslib build dependencies: zlib, libbz2, liblzma, libdeflate,
-    libcurl, libcrypto (OpenSSL)
+- C compiler (GCC or Clang)
+- CMake ≥ 3.5
+- Make
+- Python 3 + venv
+- Git
+- htslib build dependencies: zlib, libbz2, liblzma, libdeflate, libcurl,
+  libcrypto (OpenSSL)
 
 On Debian/Ubuntu:
 
@@ -165,6 +165,10 @@ make test_release
 ```
 
 ## R demo
+
+The R package lives under r/Rduckhts and provides helpers to load the
+extension and create DuckDB tables from HTS files. See its README for
+R-specific usage.
 
 ``` r
 library(DBI)

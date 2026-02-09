@@ -161,6 +161,9 @@ make test_release
 
 ## R demo
 
+The R package lives under r/Rduckhts and provides helpers to load the extension
+and create DuckDB tables from HTS files. See its README for R-specific usage.
+
 ```{r eval=TRUE}
 library(DBI)
 library(duckdb)

@@ -71,6 +71,14 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - Add more edge case tests for CRAN preparation
 - Test R package loading and function calls
 
+## Best Practices Learned
+- Keep Windows builds on MinGW/Rtools; match DuckDB platform strings (e.g., windows_amd64_mingw) in extension metadata.
+- Use $ORIGIN rpaths on Linux so libhts.so can be found at runtime.
+- Prefer pkg-config (plus Homebrew fallbacks) for OpenSSL/libcurl detection on macOS.
+- Avoid plugins on Windows; keep plugin support behind configure checks on Unix.
+- Bundle all runtime data under inst/extdata for R and keep README examples runnable with local files.
+- Keep README examples deterministic and short; use eval=FALSE only when external network access is required.
+
 ## Current Focus Areas
 1. **CRAN Preparation**: Adapt R package build system, remove vcpkg dependency
 2. **Enhanced Testing**: Add more comprehensive tests and edge cases
