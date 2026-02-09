@@ -4,7 +4,7 @@ output: github_document
 
 # DuckHTS
 
-A [DuckDB](https://duckdb.org/) extension for reading high-throughput sequencing (HTS)
+A [DuckDB](https://duckdb.org/) extension (see the [DuckDB Extension API](https://duckdb.org/docs/extensions/overview)) for reading high-throughput sequencing (HTS)
 file formats using [htslib](https://github.com/samtools/htslib).
 
 Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed files directly using SQL.
@@ -91,7 +91,7 @@ Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTo
 - Make
 - Python 3 + venv
 - Git
-- htslib build dependencies: zlib, libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
+- [htslib](https://github.com/samtools/htslib) build dependencies: zlib, libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
 
 On Debian/Ubuntu:
 
@@ -106,13 +106,13 @@ On macOS:
 brew install cmake htslib xz libdeflate
 ```
 
-### Vendor htslib
+### Vendor [htslib](https://github.com/samtools/htslib)
 
 ```bash
 ./scripts/vendor_htslib.sh
 ```
 
-This downloads and verifies htslib 1.23 into `third_party/htslib/`.
+This downloads and verifies [htslib](https://github.com/samtools/htslib) 1.23 into `third_party/htslib/`.
 
 ### Build
 
@@ -121,7 +121,7 @@ make configure    # one-time setup (Python venv, platform detection)
 make release      # build optimised extension
 ```
 
-The build runs htslib's Makefile (`make lib-static`) in-tree.
+The build runs [htslib](https://github.com/samtools/htslib)'s Makefile (`make lib-static`) in-tree.
 
 The extension binary is written to `build/release/duckhts.duckdb_extension`.
 
@@ -142,7 +142,7 @@ LOAD '/path/to/duckhts.duckdb_extension';
 
 ## Testing
 
-SQL tests live in `test/sql/` using DuckDB's SQLLogicTest format.
+SQL tests live in `test/sql/` using [DuckDB](https://duckdb.org/)'s SQLLogicTest format.
 
 Before running tests for the first time, prepare the indexed test data:
 
@@ -150,7 +150,7 @@ Before running tests for the first time, prepare the indexed test data:
 ./test/scripts/prepare_test_data.sh   # requires samtools, bcftools, bgzip, tabix
 ```
 
-This copies files from the vendored htslib test suite into `test/data/` and
+This copies files from the vendored [htslib](https://github.com/samtools/htslib) test suite into `test/data/` and
 builds the required indexes (BAI, CSI, TBI, FAI) so region queries work.
 
 Then run:
@@ -162,7 +162,8 @@ make test_release
 ## R demo
 
 The R package lives under r/Rduckhts and provides helpers to load the extension
-and create DuckDB tables from HTS files. See its README for R-specific usage.
+and create [DuckDB](https://duckdb.org/) tables from HTS files. See its README for R-specific usage:
+[r/Rduckhts/README.Rmd](r/Rduckhts/README.Rmd).
 
 ```{r eval=TRUE}
 library(DBI)
@@ -224,6 +225,14 @@ duckdb_capi/
   duckdb.h           # DuckDB C API headers
   duckdb_extension.h
 ```
+
+## References
+
+- DuckDB: https://duckdb.org/
+- DuckDB Extension API: https://duckdb.org/docs/extensions/overview
+- DuckDB extension template (C): https://github.com/duckdb/extension-template-c
+- htslib: https://github.com/samtools/htslib
+- RBCFTools: https://github.com/RGenomicsETL/RBCFTools
 
 ## License
 

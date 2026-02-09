@@ -2,3 +2,4 @@ inst/extdata/*.duckdb_extension*
 inst/extdata/*.tmp
 inst/extdata/*.raw
 *.tar.gz
+docs

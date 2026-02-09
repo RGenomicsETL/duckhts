@@ -39,3 +39,6 @@
 ^inst/extdata/.*\.raw$
 ^inst/duckhts_extension/htslib/libexec/.*$
 ^inst/duckhts_extension/htslib/bin/.*$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$

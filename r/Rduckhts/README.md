@@ -3,7 +3,7 @@
 
 [![CRAN
 Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)
-[![R-CMD-check](https://github.com/RGenomicsETL/duckhts/workflows/CRAN-check/badge.svg)](https://github.com/RGenomicsETL/duckhts/actions)
+[![R-CMD-check](https://github.com/RGenomicsETL/duckhts/workflows/R-CMD-check/badge.svg)](https://github.com/RGenomicsETL/duckhts/actions)
 
 We provide an R interface to the DuckDB HTS (High Throughput Sequencing)
 file reader extension. We enable reading common bioinformatics file
@@ -33,21 +33,9 @@ library(Rduckhts)
 setup_hts_env()
 
 ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
-if (!file.exists(ext_path)) {
-    ext_path <- file.path("inst", "extdata", "duckhts.duckdb_extension")
-}
-if (!file.exists(ext_path)) {
-    stop("DuckHTS extension not found at: ", ext_path)
-}
-
 fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
 fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
 fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
-
-if (!file.exists(fasta_path) || !file.exists(fastq_r1) || !file.exists(fastq_r2)) {
-    stop("Example data files not found in extdata")
-}
-
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con, extension_path = ext_path)
 ```
@@ -129,7 +117,7 @@ s3_vcf_file <- "3202_samples_cohort_gg_chr22.vcf.gz"
 s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
 
 # Query remote VCF directly with DuckDB + DuckHTS (region-scoped)
-rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:10000000-10050000", overwrite = TRUE)
+rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:10000000-10550000", overwrite = TRUE)
 dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
 ```
 
