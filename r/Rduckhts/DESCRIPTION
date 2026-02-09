@@ -1,6 +1,6 @@
 Package: Rduckhts
 Title: 'DuckDB' 'HTS' File Reader Extension for 'R'
-Version: 0.1.1-0.0.2.9000
+Version: 0.1.1-0.0.2
 Authors@R: c(
         person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
@@ -17,7 +17,7 @@ Copyright: See inst/COPYRIGHT
 Encoding: UTF-8
 SystemRequirements: GNU make, cmake, zlib, libbz2, liblzma, libcurl, openssl (development headers)
 Depends:
-    R (>= 4.0.0)
+    R (>= 4.4.0)
 Imports:
     DBI,
     duckdb,
