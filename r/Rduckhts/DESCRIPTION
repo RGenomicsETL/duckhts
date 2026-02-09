@@ -25,5 +25,5 @@ Imports:
 Suggests:
     tinytest
 RoxygenNote: 7.3.3
-URL: https://github.com/RGenomicsETL/duckhts
+URL: https://github.com/RGenomicsETL/duckhts, https://rgenomicsetl.github.io/duckhts/
 BugReports: https://github.com/RGenomicsETL/duckhts/issues
