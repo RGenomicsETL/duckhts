@@ -18,9 +18,7 @@ We follow the RBCFTools table pattern and create DuckDB tables instead of return
 
 ## Installation
 
-```r
-remotes::install_github("RGenomicsETL/duckhts", subdir = "r/Rduckhts")
-```
+We install from GitHub with `remotes::install_github("RGenomicsETL/duckhts", subdir = "r/Rduckhts")`.
 
 ## Quick Start (runnable example)
 
@@ -54,10 +52,8 @@ rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
-dbDisconnect(con, shutdown = TRUE)
+message("Loaded example data and created tables.")
 ```
-
-## Available Functions
 
 We load the extension with `rduckhts_load(con, extension_path = NULL)`. We create tables with `rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the parameters documented in their help pages.
 
@@ -65,38 +61,36 @@ We load the extension with `rduckhts_load(con, extension_path = NULL)`. We creat
 
 ### Region Queries
 
-```r
+```{r}
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
-rduckhts_bcf(con, "chr1_variants", bcf_path, region = "1:1-1000")
-chr1_variants <- dbGetQuery(con, "SELECT * FROM chr1_variants WHERE POS BETWEEN 1500000 AND 1600000")
+rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+variants <- dbGetQuery(con, "SELECT * FROM variants LIMIT 5")
+variants
 ```
 
-### Paired FASTQ
-
-```r
+```{r}
 r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
 r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
 interleaved <- system.file("extdata", "interleaved.fq", package = "Rduckhts")
-rduckhts_fastq(con, "paired_reads", r1, mate_path = r2)
-rduckhts_fastq(con, "interleaved_reads", interleaved, interleaved = TRUE)
-pairs <- dbGetQuery(con, "SELECT * FROM paired_reads WHERE MATE = 1")
+rduckhts_fastq(con, "paired_reads", r1, mate_path = r2, overwrite = TRUE)
+rduckhts_fastq(con, "interleaved_reads", interleaved, interleaved = TRUE, overwrite = TRUE)
+pairs <- dbGetQuery(con, "SELECT * FROM paired_reads WHERE MATE = 1 LIMIT 5")
+pairs
 ```
 
-### Attributes Map for GFF/GTF
-
-```r
+```{r}
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
-rduckhts_gff(con, "genes", gff_path, attributes_map = TRUE)
-gene_annotations <- dbGetQuery(con, "SELECT seqname, start, end, attributes['gene_id'], attributes['gene_name'] FROM genes WHERE feature = 'gene'")
+rduckhts_gff(con, "genes", gff_path, attributes_map = TRUE, overwrite = TRUE)
+gene_annotations <- dbGetQuery(con, "SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5")
+gene_annotations
 ```
 
-### CRAM with Reference
-
-```r
+```{r}
 cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
 ref_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
-rduckhts_bam(con, "cram_reads", cram_path, reference = ref_path)
-cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads")
+rduckhts_bam(con, "cram_reads", cram_path, reference = ref_path, overwrite = TRUE)
+cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads LIMIT 5")
+cram_reads
 ```
 
 ## System Requirements
@@ -114,3 +108,7 @@ We reference DuckDB, htslib, and RBCFTools as the primary upstream projects that
 ## License
 
 GPL-3.
+
+```{r}
+dbDisconnect(con, shutdown = TRUE)
+```
