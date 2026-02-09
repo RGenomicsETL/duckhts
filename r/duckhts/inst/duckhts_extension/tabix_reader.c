@@ -57,6 +57,7 @@ enum {
     GXF_COL_STRAND,
     GXF_COL_FRAME,
     GXF_COL_ATTRIBUTES,
+    GXF_COL_ATTRIBUTES_MAP,
     GXF_COL_COUNT
 };
 
@@ -76,6 +77,7 @@ typedef struct {
     char *region;          /* NULL = full scan */
     tabix_mode_t mode;
     int  n_cols;           /* detected or fixed (9 for GTF/GFF) */
+    int  include_attr_map;
 } tabix_bind_data_t;
 
 static void tabix_bind_data_destroy(void *data) {
@@ -151,6 +153,154 @@ static const char *get_field(const char *s, int idx, int *len) {
     return NULL;
 }
 
+static void trim_span(const char **start, int *len) {
+    const char *s = *start;
+    int l = *len;
+    while (l > 0 && (*s == ' ' || *s == '\t')) {
+        s++;
+        l--;
+    }
+    while (l > 0 && (s[l - 1] == ' ' || s[l - 1] == '\t')) {
+        l--;
+    }
+    *start = s;
+    *len = l;
+}
+
+static int count_gff_pairs(const char *s) {
+    int count = 0;
+    const char *p = s;
+    while (*p) {
+        while (*p == ';' || *p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        const char *key = p;
+        while (*p && *p != '=' && *p != ';') p++;
+        if (*p != '=') {
+            while (*p && *p != ';') p++;
+            continue;
+        }
+        int key_len = (int)(p - key);
+        p++; /* skip '=' */
+        const char *val = p;
+        while (*p && *p != ';') p++;
+        int val_len = (int)(p - val);
+        trim_span(&key, &key_len);
+        trim_span(&val, &val_len);
+        if (key_len > 0) count++;
+        if (*p == ';') p++;
+    }
+    return count;
+}
+
+static int count_gtf_pairs(const char *s) {
+    int count = 0;
+    const char *p = s;
+    while (*p) {
+        while (*p == ';' || *p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        const char *key = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != ';') p++;
+        int key_len = (int)(p - key);
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"') p++;
+            if (*p == '"') p++;
+        } else {
+            while (*p && *p != ';') p++;
+        }
+        trim_span(&key, &key_len);
+        if (key_len > 0) count++;
+        while (*p && *p != ';') p++;
+        if (*p == ';') p++;
+    }
+    return count;
+}
+
+static void fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gff) {
+    if (!s || s[0] == '\0' || (s[0] == '.' && s[1] == '\0')) {
+        duckdb_vector_ensure_validity_writable(vec);
+        uint64_t *validity = duckdb_vector_get_validity(vec);
+        duckdb_validity_set_row_invalid(validity, row);
+        duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
+        duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+        list_data[row] = entry;
+        return;
+    }
+
+    int pair_count = is_gff ? count_gff_pairs(s) : count_gtf_pairs(s);
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = pair_count;
+
+    if (pair_count == 0) {
+        duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+        list_data[row] = entry;
+        return;
+    }
+
+    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+
+    duckdb_vector child = duckdb_list_vector_get_child(vec);
+    duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
+    duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+
+    const char *p = s;
+    int write_idx = 0;
+    while (*p && write_idx < pair_count) {
+        while (*p == ';' || *p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+
+        const char *key = p;
+        int key_len = 0;
+        const char *val = NULL;
+        int val_len = 0;
+
+        if (is_gff) {
+            while (*p && *p != '=' && *p != ';') p++;
+            if (*p != '=') {
+                while (*p && *p != ';') p++;
+                continue;
+            }
+            key_len = (int)(p - key);
+            p++; /* '=' */
+            val = p;
+            while (*p && *p != ';') p++;
+            val_len = (int)(p - val);
+        } else {
+            while (*p && *p != ' ' && *p != '\t' && *p != ';') p++;
+            key_len = (int)(p - key);
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == '"') {
+                p++;
+                val = p;
+                while (*p && *p != '"') p++;
+                val_len = (int)(p - val);
+                if (*p == '"') p++;
+            } else {
+                val = p;
+                while (*p && *p != ';') p++;
+                val_len = (int)(p - val);
+            }
+        }
+
+        trim_span(&key, &key_len);
+        trim_span(&val, &val_len);
+        if (key_len > 0) {
+            duckdb_vector_assign_string_element_len(key_vec, entry.offset + write_idx, key, key_len);
+            duckdb_vector_assign_string_element_len(val_vec, entry.offset + write_idx, val, val_len);
+            write_idx++;
+        }
+        while (*p && *p != ';') p++;
+        if (*p == ';') p++;
+    }
+
+    entry.length = write_idx;
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+}
+
 /* ================================================================
  * Bind  (shared logic for all three modes)
  * ================================================================ */
@@ -194,7 +344,14 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
 
     /* Schema: GTF/GFF have fixed 9 columns; generic auto-detects */
     if (mode == TABIX_MODE_GTF || mode == TABIX_MODE_GFF) {
-        bd->n_cols = GXF_COL_COUNT;
+        /* File has 9 fixed columns; attributes_map is a derived column. */
+        bd->n_cols = GXF_COL_COUNT - 1;
+        duckdb_value attr_map_val = duckdb_bind_get_named_parameter(info, "attributes_map");
+        if (attr_map_val && !duckdb_is_null_value(attr_map_val)) {
+            bd->include_attr_map = duckdb_get_bool(attr_map_val) ? 1 : 0;
+        }
+        if (attr_map_val) duckdb_destroy_value(&attr_map_val);
+
         duckdb_bind_add_result_column(info, "seqname",    duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
         duckdb_bind_add_result_column(info, "source",     duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
         duckdb_bind_add_result_column(info, "feature",    duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
@@ -204,6 +361,15 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_bind_add_result_column(info, "strand",     duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
         duckdb_bind_add_result_column(info, "frame",      duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
         duckdb_bind_add_result_column(info, "attributes", duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
+        if (bd->include_attr_map) {
+            duckdb_logical_type key_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+            duckdb_logical_type val_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+            duckdb_logical_type map_type = duckdb_create_map_type(key_type, val_type);
+            duckdb_bind_add_result_column(info, "attributes_map", map_type);
+            duckdb_destroy_logical_type(&key_type);
+            duckdb_destroy_logical_type(&val_type);
+            duckdb_destroy_logical_type(&map_type);
+        }
     } else {
         /* Generic tabix: peek at first line to determine column count */
         htsFile *fp = hts_open(bd->file_path, "r");
@@ -355,7 +521,20 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
              * which is the field index in the TSV line. */
             for (idx_t c = 0; c < chunk_col_count; c++) {
                 int logical_col = (int)id->column_ids[c];
-                if (logical_col >= GXF_COL_COUNT) continue;
+                if (logical_col == GXF_COL_ATTRIBUTES_MAP && bd->include_attr_map) {
+                    const char *fld = NULL;
+                    int flen = 0;
+                    fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
+                    char *tmp = NULL;
+                    if (fld && flen > 0) {
+                        tmp = (char *)alloca((size_t)flen + 1);
+                        memcpy(tmp, fld, (size_t)flen);
+                        tmp[flen] = '\0';
+                    }
+                    fill_attr_map(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF);
+                    continue;
+                }
+                if (logical_col >= GXF_COL_COUNT - 1) continue;
 
                 int flen = 0;
                 const char *fld = get_field(id->line.s, logical_col, &flen);
@@ -448,6 +627,10 @@ static duckdb_table_function create_tabix_tf(const char *name,
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
+
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_table_function_add_named_parameter(tf, "attributes_map", bool_type);
+    duckdb_destroy_logical_type(&bool_type);
 
     duckdb_table_function_set_bind(tf, bind_fn);
     duckdb_table_function_set_init(tf, tabix_init);
