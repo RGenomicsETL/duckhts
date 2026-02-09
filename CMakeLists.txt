@@ -117,15 +117,40 @@ set(HTSLIB_EXTRA_CFLAGS "")
 set(HTSLIB_EXTRA_LDFLAGS "")
 set(HTSLIB_PKG_CONFIG_PATH "")
 
+# ------------------------------------------------------------------
+# macOS cross-compilation support.
+#
+# The CI passes -DOSX_BUILD_ARCH=x86_64 (or arm64) for universal builds.
+# When building for x86_64 on an arm64 Mac (or vice-versa) we need to
+# tell both the C compiler and htslib's autotools configure about the
+# target architecture.
+# ------------------------------------------------------------------
+set(HTSLIB_HOST_FLAG "")
+if(APPLE AND DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
+    set(CMAKE_OSX_ARCHITECTURES "${OSX_BUILD_ARCH}" CACHE STRING "" FORCE)
+    set(HTSLIB_EXTRA_CFLAGS "-arch ${OSX_BUILD_ARCH}")
+    set(HTSLIB_EXTRA_LDFLAGS "-arch ${OSX_BUILD_ARCH}")
+    if("${OSX_BUILD_ARCH}" STREQUAL "x86_64")
+        set(HTSLIB_HOST_FLAG "--host=x86_64-apple-darwin")
+    elseif("${OSX_BUILD_ARCH}" STREQUAL "arm64")
+        set(HTSLIB_HOST_FLAG "--host=aarch64-apple-darwin")
+    endif()
+    message(STATUS "macOS cross-compile: arch=${OSX_BUILD_ARCH} host=${HTSLIB_HOST_FLAG}")
+endif()
+
 if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     set(_vcpkg_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
     if(EXISTS "${_vcpkg_prefix}")
-        set(HTSLIB_EXTRA_CFLAGS "-I${_vcpkg_prefix}/include")
-        set(HTSLIB_EXTRA_LDFLAGS "-L${_vcpkg_prefix}/lib")
+        set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -I${_vcpkg_prefix}/include")
+        set(HTSLIB_EXTRA_LDFLAGS "${HTSLIB_EXTRA_LDFLAGS} -L${_vcpkg_prefix}/lib")
         set(HTSLIB_PKG_CONFIG_PATH "${_vcpkg_prefix}/lib/pkgconfig")
         message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
     endif()
 endif()
+
+# Strip leading whitespace that may appear when no arch flags were prepended
+string(STRIP "${HTSLIB_EXTRA_CFLAGS}" HTSLIB_EXTRA_CFLAGS)
+string(STRIP "${HTSLIB_EXTRA_LDFLAGS}" HTSLIB_EXTRA_LDFLAGS)
 
 set(HTSLIB_CONFIGURE_ARGS
     "CFLAGS=-fPIC -O2 ${HTSLIB_EXTRA_CFLAGS}"
@@ -133,10 +158,16 @@ set(HTSLIB_CONFIGURE_ARGS
     "--disable-plugins"
 )
 
+# --host for cross-compilation (must come before variable assignments)
+if(NOT "${HTSLIB_HOST_FLAG}" STREQUAL "")
+    list(APPEND HTSLIB_CONFIGURE_ARGS "${HTSLIB_HOST_FLAG}")
+endif()
+
 # Autotools convention: CPPFLAGS for -I, CFLAGS for -O/-f etc.
 # Some configure scripts only honour CPPFLAGS for include-path probes.
-if(NOT "${HTSLIB_EXTRA_CFLAGS}" STREQUAL "")
-    list(APPEND HTSLIB_CONFIGURE_ARGS "CPPFLAGS=${HTSLIB_EXTRA_CFLAGS}")
+# Only pass -I flags in CPPFLAGS (not -arch or other compiler flags).
+if(DEFINED _vcpkg_prefix AND EXISTS "${_vcpkg_prefix}")
+    list(APPEND HTSLIB_CONFIGURE_ARGS "CPPFLAGS=-I${_vcpkg_prefix}/include")
 endif()
 
 # Pass PKG_CONFIG_PATH so configure's pkg-config checks find vcpkg libs
@@ -160,8 +191,19 @@ endif()
 if(BZIP2_FOUND)
     list(APPEND HTSLIB_EXTRA_LIBS "-lbz2")
 endif()
-list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
-if(NOT APPLE)
+if(APPLE)
+    # macOS: pthreads are in libSystem (no -lpthread), and curl with
+    # SecureTransport needs macOS frameworks for TLS.
+    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
+    if(CURL_FOUND)
+        list(APPEND HTSLIB_EXTRA_LIBS
+            "-framework CoreFoundation"
+            "-framework SystemConfiguration"
+            "-framework Security"
+        )
+    endif()
+else()
+    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
     list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
 endif()
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
