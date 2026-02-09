@@ -9,17 +9,18 @@ version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://R
 
 `Rduckhts` provides an R interface to a [DuckDB](https://duckdb.org/)
 `HTS` (High Throughput Sequencing) file reader extension. This enables
-reading common bioinformatics file formats such as VCF/BCF,
-SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, and tabix-indexed files directly
-from `R` using `SQL` queries via [`duckhts`](./inst/duckhts_extension).
+reading common bioinformatics file formats such as `VCF`/`BCF`,
+`SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and tabix-indexed
+files directly from `R` using `SQL` queries via
+[`duckhts`](./inst/duckhts_extension).
 
 ## How it works
 
-Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools) table
-pattern and tables are created and returned instead of data frames.
-`VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and
-`tabix` formats can be queried. We support region queries for indexed
-files, and we target Linux, macOS, and RTools.
+Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables
+are created and returned instead of data frames. `VCF`/`BCF`,
+`SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats
+can be queried. We support region queries for indexed files, and we
+target Linux, macOS, and RTools.
 [`htslib`](https://github.com/samtools/htslib) 1.23 is bundled so build
 dependencies stay minimal. The extensnion is built by adapting the
 generic extension infracstructure by using only makefiles unlike unlike
@@ -72,8 +73,6 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #>    n
 #> 1 10
-
-message("Loaded example data and created tables.")
 ```
 
 ## Examples
