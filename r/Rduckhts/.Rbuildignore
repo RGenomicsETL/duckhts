@@ -4,7 +4,9 @@
 ^.*\.Rcheck$
 ^.*\.Rcheck$
 ^README\.md$
+^README\.Rmd$
 ^LICENSE\.md$
+^LICENSE$
 ^\.gitignore$
 ^\.git/
 ^\.github/
@@ -16,6 +18,7 @@
 ^extension-ci-tools/
 ^duckdb_capi/
 ^DESCRIPTION\.yml$
+^test_installation\.R$
 
 # Build artifacts to ignore
 ^inst/duckhts_extension/.*\.o$
@@ -24,9 +27,14 @@
 ^inst/duckhts_extension/config\.log$
 ^inst/duckhts_extension/config\.status$
 ^inst/duckhts_extension/htslib/.*\.o$
+^inst/duckhts_extension/htslib/bin/.*$
+^inst/duckhts_extension/htslib/htscodecs/tests/.*$
+^inst/duckhts_extension/htslib/test/.*$
 ^inst/duckhts_extension/htslib/libhts\.a$
 ^inst/duckhts_extension/htslib/libhts\.so.*$
 ^inst/duckhts_extension/htslib/htslib\.pc$
 ^inst/extdata/.*\.duckdb_extension.*$
 ^inst/extdata/.*\.tmp$
 ^inst/extdata/.*\.raw$
+^inst/duckhts_extension/htslib/libexec/.*$
+^inst/duckhts_extension/htslib/bin/.*$

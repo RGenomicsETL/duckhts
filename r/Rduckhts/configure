@@ -1,0 +1,309 @@
+#!/bin/sh
+# Minimal configure for DuckHTS
+set -eu
+
+THIS_DIR=`dirname "$0"`
+THIS_DIR=`cd "$THIS_DIR" && pwd`
+
+# Capture configure arguments (--host, --build, etc.)
+CONFIGURE_ARGS="$@"
+
+MAKE=`"${R_HOME}/bin/R" CMD config MAKE`
+CC=`"${R_HOME}/bin/R" CMD config CC | cut -f1 -d' '`
+AR=`"${R_HOME}/bin/R" CMD config AR`
+RANLIB=`"${R_HOME}/bin/R" CMD config RANLIB`
+R_CPPFLAGS=`"${R_HOME}/bin/R" CMD config CPPFLAGS`
+R_CFLAGS=`"${R_HOME}/bin/R" CMD config CFLAGS`
+R_CPICFLAGS=`"${R_HOME}/bin/R" CMD config CPICFLAGS`
+R_LDFLAGS=`"${R_HOME}/bin/R" CMD config LDFLAGS`
+
+if [ "`uname`" = "Darwin" ]; then
+  SHLIB_EXT="dylib"
+else
+  SHLIB_EXT="so"
+fi
+
+EXT_DIR="${THIS_DIR}/inst/duckhts_extension"
+HTSLIB_DIR="${EXT_DIR}/htslib"
+DUCKDB_CAPI_HEADER="${EXT_DIR}/duckdb_capi/duckdb_extension.h"
+
+if [ ! -d "${HTSLIB_DIR}" ]; then
+  echo "ERROR: htslib sources not found in inst/duckhts_extension/htslib"
+  echo "Package may not be built properly. Sources should be bundled during package creation."
+  exit 1
+fi
+
+if [ ! -f "${DUCKDB_CAPI_HEADER}" ]; then
+  echo "ERROR: DuckDB C API header not found at ${DUCKDB_CAPI_HEADER}"
+  echo "Package may not be built properly. Sources should be bundled during package creation."
+  exit 1
+fi
+
+CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
+CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
+LDFLAGS="${R_LDFLAGS}"
+
+add_prefix_if_header() {
+  header=$1
+  shift
+  for p in "$@"; do
+    if [ -f "${p}/include/${header}" ]; then
+      CPPFLAGS="${CPPFLAGS} -I${p}/include"
+      if [ -d "${p}/lib" ]; then
+        LDFLAGS="${LDFLAGS} -L${p}/lib"
+      fi
+      if [ -d "${p}/lib64" ]; then
+        LDFLAGS="${LDFLAGS} -L${p}/lib64"
+      fi
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [ "`uname`" = "Darwin" ]; then
+  BREW_PREFIXES="/opt/homebrew /usr/local /opt/local"
+  add_prefix_if_header "openssl/ssl.h" $BREW_PREFIXES || true
+  add_prefix_if_header "curl/curl.h" $BREW_PREFIXES || true
+  add_prefix_if_header "zlib.h" $BREW_PREFIXES || true
+  add_prefix_if_header "bzlib.h" $BREW_PREFIXES || true
+  add_prefix_if_header "lzma.h" $BREW_PREFIXES || true
+fi
+
+EXT_VERSION=`awk -F': *' '/^Version:/ {print $2; exit}' "${THIS_DIR}/DESCRIPTION" || true`
+if [ -z "${EXT_VERSION}" ]; then
+  EXT_VERSION="0.0.0"
+fi
+
+DUCKDB_API_MAJOR=`awk '/DUCKDB_EXTENSION_API_VERSION_MAJOR/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
+DUCKDB_API_MINOR=`awk '/DUCKDB_EXTENSION_API_VERSION_MINOR/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
+DUCKDB_API_PATCH=`awk '/DUCKDB_EXTENSION_API_VERSION_PATCH/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
+if [ -n "${DUCKDB_API_MAJOR}" ] && [ -n "${DUCKDB_API_MINOR}" ] && [ -n "${DUCKDB_API_PATCH}" ]; then
+  DUCKDB_VERSION="v${DUCKDB_API_MAJOR}.${DUCKDB_API_MINOR}.${DUCKDB_API_PATCH}"
+else
+  DUCKDB_VERSION="v1.2.0"
+fi
+
+OS_NAME=`uname -s`
+ARCH_NAME=`uname -m`
+DUCKDB_PLATFORM=""
+case "${OS_NAME}" in
+  Linux)
+    case "${ARCH_NAME}" in
+      x86_64) DUCKDB_PLATFORM="linux_amd64";;
+      aarch64|arm64) DUCKDB_PLATFORM="linux_arm64";;
+    esac
+    ;;
+  Darwin)
+    case "${ARCH_NAME}" in
+      x86_64) DUCKDB_PLATFORM="osx_amd64";;
+      arm64) DUCKDB_PLATFORM="osx_arm64";;
+    esac
+    ;;
+esac
+
+if [ -z "${DUCKDB_PLATFORM}" ]; then
+  echo "ERROR: Unsupported platform: ${OS_NAME}/${ARCH_NAME}"
+  exit 1
+fi
+
+echo "---------- Checking for required headers and libraries ----------"
+
+try_compile_header_lib() {
+  lib_name=$1
+  header=$2
+  lib_flag=$3
+  required=$4
+
+  echo "Checking for ${lib_name} (${header}, ${lib_flag})..."
+
+  cat > conftest.c << EOF
+#include <${header}>
+int main() { return 0; }
+EOF
+
+  if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} conftest.c ${lib_flag} -o conftest 2>/dev/null; then
+    echo "  ${lib_name}: found"
+    rm -f conftest conftest.c
+    return 0
+  else
+    echo "  ${lib_name}: not found"
+    rm -f conftest conftest.c
+    if [ "${required}" = "yes" ]; then
+      echo "ERROR: ${lib_name} is required but not found"
+      exit 1
+    fi
+    return 1
+  fi
+}
+
+HAS_ZLIB=no
+HAS_BZ2=no
+HAS_LZMA=no
+HAS_CURL=no
+HAS_OPENSSL=no
+
+LIBS=""
+
+if try_compile_header_lib "zlib" "zlib.h" "-lz" "yes"; then
+  HAS_ZLIB=yes
+  LIBS="$LIBS -lz"
+fi
+
+if try_compile_header_lib "bz2" "bzlib.h" "-lbz2" "no"; then
+  HAS_BZ2=yes
+  LIBS="$LIBS -lbz2"
+fi
+
+if try_compile_header_lib "lzma" "lzma.h" "-llzma" "no"; then
+  HAS_LZMA=yes
+  LIBS="$LIBS -llzma"
+fi
+
+if try_compile_header_lib "curl" "curl/curl.h" "-lcurl" "no"; then
+  HAS_CURL=yes
+  LIBS="$LIBS -lcurl"
+fi
+
+if try_compile_header_lib "openssl" "openssl/ssl.h" "-lssl -lcrypto" "no"; then
+  HAS_OPENSSL=yes
+  LIBS="$LIBS -lssl -lcrypto"
+fi
+
+LIBS="$LIBS -lpthread"
+
+echo "---------- Configuring htslib ----------"
+cd "${HTSLIB_DIR}"
+
+HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
+
+if [ "$HAS_BZ2" = "no" ]; then
+  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-bz2"
+fi
+
+if [ "$HAS_LZMA" = "no" ]; then
+  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-lzma"
+fi
+
+if [ "$HAS_CURL" = "no" ]; then
+  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
+  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
+elif [ "$HAS_OPENSSL" = "no" ]; then
+  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
+fi
+
+./configure \
+  ${CONFIGURE_ARGS} \
+  --prefix="${HTSLIB_DIR}" \
+  CC="${CC}" \
+  AR="${AR}" \
+  RANLIB="${RANLIB}" \
+  CFLAGS="${CFLAGS}" \
+  CPPFLAGS="${CPPFLAGS}" \
+  LDFLAGS="${LDFLAGS}" \
+  LIBS="${LIBS}" \
+  ${HTSLIB_CONFIGURE_FLAGS}
+
+echo "---------- Building htslib (static + shared) ----------"
+${MAKE} -j libhts.a libhts.${SHLIB_EXT} plugins
+${MAKE} install
+
+rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true
+
+if [ ! -f "libhts.a" ]; then
+  echo "ERROR: htslib build failed - libhts.a not found"
+  exit 1
+fi
+
+HTSLIB_SHARED_LIB=""
+if [ -f "${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}" ]; then
+  HTSLIB_SHARED_LIB="${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}"
+fi
+
+if [ -z "${HTSLIB_SHARED_LIB}" ]; then
+  echo "ERROR: htslib shared library not found (libhts.so/libhts.dylib)"
+  exit 1
+fi
+
+if [ "`uname`" = "Darwin" ]; then
+  echo "Fixing htslib install names for macOS..."
+  if [ -f "${HTSLIB_DIR}/lib/libhts.3.dylib" ]; then
+    install_name_tool -id @rpath/libhts.3.dylib "${HTSLIB_DIR}/lib/libhts.3.dylib" || true
+  fi
+  if [ -f "${HTSLIB_DIR}/lib/libhts.dylib" ] && [ ! -L "${HTSLIB_DIR}/lib/libhts.dylib" ]; then
+    install_name_tool -id @rpath/libhts.dylib "${HTSLIB_DIR}/lib/libhts.dylib" || true
+  fi
+fi
+
+echo "---------- Building DuckHTS extension ----------"
+
+cd "${EXT_DIR}"
+
+C_SOURCES="duckhts.c bcf_reader.c bam_reader.c seq_reader.c tabix_reader.c vep_parser.c"
+INCLUDES="-I./include -I./duckdb_capi -I./htslib"
+
+echo "Compiling extension sources..."
+OBJECT_FILES=""
+for src_file in $C_SOURCES; do
+    obj_file="${src_file%.c}.o"
+    echo "  Compiling $src_file -> $obj_file"
+  ${CC} ${CFLAGS} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to compile $src_file"
+        exit 1
+    fi
+    OBJECT_FILES="$OBJECT_FILES $obj_file"
+done
+
+# Create extension directory
+mkdir -p "${THIS_DIR}/inst/extdata"
+
+EXT_RPATH=""
+case "${OS_NAME}" in
+  Linux)
+    EXT_RPATH="-Wl,--disable-new-dtags -Wl,-rpath,\\\$ORIGIN/../duckhts_extension/htslib/lib"
+    ;;
+  Darwin)
+    EXT_RPATH="-Wl,-rpath,@loader_path/../duckhts_extension/htslib/lib"
+    ;;
+esac
+
+# Link the extension (raw, metadata appended later)
+echo "Linking DuckHTS extension..."
+RAW_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension.raw"
+FINAL_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension"
+${CC} -shared -fPIC ${EXT_RPATH} -o "${RAW_EXT_FILE}" \
+    $OBJECT_FILES \
+  -L"${HTSLIB_DIR}/lib" -lhts \
+  $LIBS
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to link DuckHTS extension"
+    exit 1
+fi
+
+echo "---------- Cleaning up build artifacts ----------"
+rm -f $OBJECT_FILES
+
+echo "Appending DuckDB extension metadata..."
+"${R_HOME}/bin/Rscript" "${THIS_DIR}/tools/append_extension_metadata.R" \
+  --library-file "${RAW_EXT_FILE}" \
+  --out-file "${FINAL_EXT_FILE}" \
+  --extension-name "duckhts" \
+  --duckdb-platform "${DUCKDB_PLATFORM}" \
+  --duckdb-version "${DUCKDB_VERSION}" \
+  --extension-version "${EXT_VERSION}" \
+  --abi-type "C_STRUCT"
+
+echo "---------- DuckHTS extension built successfully ----------"
+ls -la "${FINAL_EXT_FILE}"
+
+if [ "`uname`" = "Darwin" ]; then
+  install_name_tool -change "${HTSLIB_DIR}/lib/libhts.3.dylib" @rpath/libhts.3.dylib "${FINAL_EXT_FILE}" 2>/dev/null || true
+  install_name_tool -change "${HTSLIB_DIR}/lib/libhts.dylib" @rpath/libhts.dylib "${FINAL_EXT_FILE}" 2>/dev/null || true
+fi
+
+rm -f "${RAW_EXT_FILE}"
+
+cd "${THIS_DIR}"
+echo "Configure complete"

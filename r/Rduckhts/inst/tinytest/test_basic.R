@@ -16,13 +16,13 @@ expect_true(exists("rduckhts_tabix"))
 
 # Test function signatures
 expect_equal(length(formals(rduckhts_load)), 2)
-expect_equal(length(formals(rduckhts_bcf)), 5)
-expect_equal(length(formals(rduckhts_bam)), 5)
-expect_equal(length(formals(rduckhts_fasta)), 3)
-expect_equal(length(formals(rduckhts_fastq)), 5)
-expect_equal(length(formals(rduckhts_gff)), 5)
-expect_equal(length(formals(rduckhts_gtf)), 5)
-expect_equal(length(formals(rduckhts_tabix)), 4)
+expect_equal(length(formals(rduckhts_bcf)), 6)
+expect_equal(length(formals(rduckhts_bam)), 6)
+expect_equal(length(formals(rduckhts_fasta)), 4)
+expect_equal(length(formals(rduckhts_fastq)), 6)
+expect_equal(length(formals(rduckhts_gff)), 6)
+expect_equal(length(formals(rduckhts_gtf)), 6)
+expect_equal(length(formals(rduckhts_tabix)), 5)
 
 # Test that DBI is available
 expect_true(requireNamespace("DBI", quietly = TRUE))

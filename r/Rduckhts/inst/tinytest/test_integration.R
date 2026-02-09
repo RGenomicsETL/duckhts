@@ -14,8 +14,10 @@ test_table_creation <- function() {
   drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
   con <- dbConnect(drv)
 
-  # Test load function (will likely fail without extension, but should not crash)
-  expect_error(rduckhts_load(con))
+  # Ensure bundled extension exists and can be loaded
+  ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
+  expect_true(file.exists(ext_path))
+  expect_silent(rduckhts_load(con, ext_path))
 
   # Test table creation functions without extension (should fail gracefully)
   expect_error(rduckhts_bcf(con, "variants", "nonexistent.vcf"))

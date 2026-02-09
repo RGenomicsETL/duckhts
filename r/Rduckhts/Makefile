@@ -3,6 +3,7 @@
 
 # Package name
 PKG_NAME := Rduckhts
+PKG_VERSION := $(shell grep '^Version:' DESCRIPTION | awk '{print $$2}')
 
 # Default target
 .PHONY: all
@@ -18,28 +19,22 @@ deps:
 build: deps
 	R CMD build .
 
-# Install the package locally
-.PHONY: install
-install: build
-	R CMD INSTALL $(PKG_NAME)_*.tar.gz
+.PHONY: install check build rd test test-integration clean cran-ready help
 
-# Check the package (basic check)
+install: build
+	R CMD INSTALL $(PKG_NAME)_$(PKG_VERSION).tar.gz
+
 .PHONY: check
-check:
-	R CMD check --no-manual .
+
+check: build
+	R CMD check --as-cran --no-manual $(PKG_NAME)_$(PKG_VERSION).tar.gz
 rd: 
 	R -e 'roxygen2::roxygenize(".",load_code=NULL)'
-# Full CRAN check
-.PHONY: check-cran
-check-cran:
-	R CMD check --as-cran .
 
-# Run tests
-.PHONY: test test-integration
-test: deps
+test: install
 	R -e "tinytest::test_package('$(PKG_NAME)')"
 
-test-integration: deps
+test-integration: install
 	R -e "source('inst/tinytest/test_integration.R')"
 
 # Clean build artifacts

@@ -10,6 +10,7 @@
 #' @author DuckHTS Contributors
 #' @references \url{https://github.com/RGenomicsETL/duckhts}
 #' @keywords internal
+#' @importFrom DBI dbExecute dbExistsTable dbRemoveTable
 "_PACKAGE"
 
 #' Load DuckHTS Extension
@@ -54,10 +55,10 @@ rduckhts_load <- function(con, extension_path = NULL) {
   }
 
   # Enable unsigned extensions if needed
-  dbExecute(con, "SET enable_progress_bar = false")
+  DBI::dbExecute(con, "SET enable_progress_bar = false")
 
   # Load the extension
-  result <- dbExecute(con, sprintf("LOAD '%s'", extension_path))
+  result <- DBI::dbExecute(con, sprintf("LOAD '%s'", extension_path))
   return(result == 0)
 }
 
@@ -93,15 +94,15 @@ rduckhts_bcf <- function(
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -134,7 +135,7 @@ rduckhts_bcf <- function(
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -169,15 +170,15 @@ rduckhts_bam <- function(
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -209,7 +210,7 @@ rduckhts_bam <- function(
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -235,15 +236,15 @@ rduckhts_bam <- function(
 #' @export
 rduckhts_fasta <- function(con, table_name, path, overwrite = FALSE) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -260,7 +261,7 @@ rduckhts_fasta <- function(con, table_name, path, overwrite = FALSE) {
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -295,15 +296,15 @@ rduckhts_fastq <- function(
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -335,7 +336,7 @@ rduckhts_fastq <- function(
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -370,15 +371,15 @@ rduckhts_gff <- function(
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -410,7 +411,7 @@ rduckhts_gff <- function(
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -445,15 +446,15 @@ rduckhts_gtf <- function(
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -485,7 +486,7 @@ rduckhts_gtf <- function(
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -518,15 +519,15 @@ rduckhts_tabix <- function(
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
-    if (dbExistsTable(con, table_name) && !overwrite) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
         "Table '",
         table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (dbExistsTable(con, table_name)) {
-      dbRemoveTable(con, table_name)
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
     }
   }
 
@@ -551,6 +552,6 @@ rduckhts_tabix <- function(
     )
   }
 
-  dbExecute(con, create_query)
+  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
