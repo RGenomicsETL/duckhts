@@ -21,48 +21,56 @@ so runtime dependencies stay minimal.
 ## Installation
 
 ``` r
-install.packages("Rduckhts")
 remotes::install_github("RGenomicsETL/duckhts", subdir = "r/Rduckhts")
 ```
 
 ## Quick Start (runnable example)
 
 ``` r
-if (requireNamespace("duckdb", quietly = TRUE) &&
-        requireNamespace("Rduckhts", quietly = TRUE)) {
-    library(DBI)
-    library(duckdb)
-    library(Rduckhts)
+library(DBI)
+library(duckdb)
+library(Rduckhts)
 
-    ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
-    if (!file.exists(ext_path)) {
-        ext_path <- file.path("inst", "extdata", "duckhts.duckdb_extension")
-    }
-
-    if (file.exists(ext_path)) {
-        tmp_dir <- tempdir()
-        fasta_path <- file.path(tmp_dir, "example.fa")
-        fastq_path <- file.path(tmp_dir, "example.fq")
-
-        writeLines(c(">seq1", "ACGTACGT", ">seq2", "TTGGCCAA"), fasta_path)
-        writeLines(c("@r1", "ACGT", "+", "IIII"), fastq_path)
-
-        con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-        rduckhts_load(con, extension_path = ext_path)
-
-        rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE)
-        rduckhts_fastq(con, "reads", fastq_path, overwrite = TRUE)
-
-        dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
-        dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
-
-        dbDisconnect(con, shutdown = TRUE)
-    } else {
-        cat("Extension not found; skipping example.\n")
-    }
-} else {
-    cat("duckdb or Rduckhts not available; skipping example.\n")
+ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
+if (!file.exists(ext_path)) {
+    ext_path <- file.path("inst", "extdata", "duckhts.duckdb_extension")
 }
+if (!file.exists(ext_path)) {
+    stop("DuckHTS extension not found at: ", ext_path)
+}
+
+tmp_dir <- tempdir()
+fasta_path <- file.path(tmp_dir, "example.fa")
+fastq_path <- file.path(tmp_dir, "example.fq")
+
+writeLines(c(">seq1", "ACGTACGT", ">seq2", "TTGGCCAA"), fasta_path)
+writeLines(c("@r1", "ACGT", "+", "IIII"), fastq_path)
+
+con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+rduckhts_load(con, extension_path = ext_path)
+```
+
+    ## [1] TRUE
+
+``` r
+rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE)
+rduckhts_fastq(con, "reads", fastq_path, overwrite = TRUE)
+
+dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
+```
+
+    ##   n
+    ## 1 2
+
+``` r
+dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
+```
+
+    ##   n
+    ## 1 1
+
+``` r
+dbDisconnect(con, shutdown = TRUE)
 ```
 
 ## Available Functions
