@@ -176,8 +176,9 @@ duckhts_build <- function(build_dir = NULL, force = FALSE, verbose = TRUE) {
     if (verbose) message("  Linking...")
     if (system(link_cmd) != 0) stop("Link failed", call. = FALSE)
 
-    # The .so IS the extension (unsigned, no metadata append)
+    # Copy the shared library, then append DuckDB extension metadata
     file.copy(shared_lib, ext_file, overwrite = TRUE)
+    duckhts_append_metadata(ext_file, verbose = verbose)
     if (verbose) message("Extension built: ", ext_file)
 
     ext_file
@@ -199,7 +200,8 @@ duckhts_load <- function(con = NULL, extension_path = NULL) {
         stop("duckdb R package is required", call. = FALSE)
     }
     if (is.null(con)) {
-        con <- DBI::dbConnect(duckdb::duckdb())
+        drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+        con <- DBI::dbConnect(drv)
     }
 
     if (is.null(extension_path)) {
@@ -215,7 +217,6 @@ duckhts_load <- function(con = NULL, extension_path = NULL) {
         )
     }
 
-    DBI::dbExecute(con, "SET allow_unsigned_extensions = true")
     DBI::dbExecute(con, sprintf("LOAD '%s'", extension_path))
 
     invisible(con)
@@ -224,6 +225,75 @@ duckhts_load <- function(con = NULL, extension_path = NULL) {
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+#' Append DuckDB extension metadata trailer to a shared library
+#' @keywords internal
+duckhts_append_metadata <- function(ext_file, verbose = FALSE) {
+    platform <- duckhts_detect_platform()
+    api_version <- "v1.2.0"
+    ext_version <- as.character(utils::packageVersion("duckhts"))
+
+    if (verbose) {
+        message(
+            "  Appending metadata: platform=", platform,
+            " api=", api_version, " ext=", ext_version
+        )
+    }
+
+    # Helper: pad a string to exactly 32 bytes with null bytes
+    pad32 <- function(s) {
+        raw_s <- charToRaw(s)
+        n <- length(raw_s)
+        if (n > 32) stop("Metadata field too long: ", s, call. = FALSE)
+        c(raw_s, raw(32L - n))
+    }
+
+    con <- file(ext_file, open = "ab")
+    on.exit(close(con))
+
+    # 1. Start signature (23 bytes): Wasm custom section header
+    writeBin(as.raw(c(
+        0x00, # Wasm custom section marker
+        0x93, 0x04, # LEB128(531)
+        0x10 # name length = 16
+    )), con)
+    writeBin(charToRaw("duckdb_signature"), con)
+    writeBin(as.raw(c(0x80, 0x04)), con) # LEB128(512)
+
+    # 2. Eight 32-byte fields in reverse order (FIELD8..FIELD1)
+    writeBin(pad32(""), con) # FIELD8 unused
+    writeBin(pad32(""), con) # FIELD7 unused
+    writeBin(pad32(""), con) # FIELD6 unused
+    writeBin(pad32("C_STRUCT"), con) # FIELD5 abi_type
+    writeBin(pad32(ext_version), con) # FIELD4 extension version
+    writeBin(pad32(api_version), con) # FIELD3 DuckDB API version
+    writeBin(pad32(platform), con) # FIELD2 platform
+    writeBin(pad32("4"), con) # FIELD1 magic
+
+    # 3. Signature space (256 null bytes)
+    writeBin(raw(256L), con)
+}
+
+#' Detect DuckDB platform string
+#' @keywords internal
+duckhts_detect_platform <- function() {
+    sysname <- tolower(Sys.info()[["sysname"]])
+    machine <- Sys.info()[["machine"]]
+
+    os <- switch(sysname,
+        linux = "linux",
+        darwin = "osx",
+        windows = "windows",
+        sysname
+    )
+    arch <- switch(machine,
+        x86_64  = "amd64",
+        aarch64 = "aarch64",
+        arm64   = "aarch64",
+        machine
+    )
+    paste0(os, "_", arch)
+}
 
 #' @keywords internal
 duckhts_extension_dir <- function() {
