@@ -281,7 +281,7 @@ mkdir -p "${THIS_DIR}/inst/extdata"
 EXT_RPATH=""
 case "${OS_NAME}" in
   Linux)
-    EXT_RPATH="-Wl,--disable-new-dtags -Wl,-rpath,\\\$ORIGIN/../duckhts_extension/htslib/lib"
+    EXT_RPATH="-Wl,--disable-new-dtags -Wl,-rpath,\$ORIGIN/../duckhts_extension/htslib/lib"
     ;;
   Darwin)
     EXT_RPATH="-Wl,-rpath,@loader_path/../duckhts_extension/htslib/lib"

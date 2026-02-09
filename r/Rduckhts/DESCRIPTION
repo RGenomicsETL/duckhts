@@ -1,14 +1,19 @@
 Package: Rduckhts
 Title: 'DuckDB' 'HTS' File Reader Extension for 'R'
 Version: 0.0.0.9000
-Authors@R: person(given = "Sounkou Mahamane", family = "Toure",
+Authors@R: c(
+        person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
-    role = c("aut", "cre"))
-Description: Bundles the duckhts DuckDB extension for reading HTS file
+    role = c("aut", "cre")),
+    person(given = "htslib authors", role = "ctb"),
+    person(given = "DuckDB C Extension API authors", role = "ctb")
+    )
+Description: Bundles the 'duckhts' 'DuckDB' extension for reading 'HTS' file
     formats (VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, tabix) from
     'R' via 'DuckDB'. The extension and its htslib dependency are compiled from
     vendored sources during package installation.
 License: GPL-3
+Copyright: See inst/COPYRIGHT
 Encoding: UTF-8
 SystemRequirements: GNU make, cmake, zlib, libbz2, liblzma, libcurl, openssl (development headers)
 Depends:

@@ -1,0 +1,12 @@
+This package bundles third-party sources.
+
+HTSlib
+	Source: inst/duckhts_extension/htslib
+	Authors: Genome Research Ltd and contributors (see LICENSE in that directory)
+	License: MIT/Expat for files outside cram/ and Modified BSD 3-Clause for cram/
+	Reference: inst/duckhts_extension/htslib/LICENSE
+
+DuckDB C API headers
+	Source: inst/duckhts_extension/duckdb_capi/duckdb.h and duckdb_extension.h
+	Authors: DuckDB contributors
+	License: See the DuckDB project license for the version of these headers
