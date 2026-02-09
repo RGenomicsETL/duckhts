@@ -48,6 +48,12 @@ clean:
 	rm -f $(PKG_NAME)_*.tar.gz
 	rm -rf $(PKG_NAME).Rcheck/
 	rm -f src/*.o src/*.so
+	cd inst/duckhts_extension/htslib && make clean 2>/dev/null || true
+	rm -f inst/duckhts_extension/config.log inst/duckhts_extension/config.status
+	rm -f inst/duckhts_extension/htslib/libhts.a inst/duckhts_extension/htslib/libhts.so* inst/duckhts_extension/htslib/htslib.pc
+	rm -f inst/extdata/*.duckdb_extension*
+	rm -f inst/extdata/*.tmp
+	rm -f inst/extdata/*.raw
 
 # Prepare for CRAN submission
 .PHONY: cran-ready
