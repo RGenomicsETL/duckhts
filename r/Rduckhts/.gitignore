@@ -1,4 +1,3 @@
-inst/duckhts_extension/
 inst/extdata/*.duckdb_extension*
 inst/extdata/*.tmp
 inst/extdata/*.raw
