@@ -71,6 +71,28 @@ SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', regio
 ----
 2
 
+# --- read group / sample ---
+query I
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/rg.sam.gz') WHERE READ_GROUP_ID IS NOT NULL;
+----
+4
+
+query I
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/rg.sam.gz') WHERE SAMPLE_ID = 'x1';
+----
+2
+
+query I
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/rg.sam.gz') WHERE SAMPLE_ID = 'x2';
+----
+2
+
+# --- CRAM with explicit reference ---
+query I
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram', reference := '__WORKING_DIRECTORY__/test/data/ce.fa');
+----
+1
+
 # ==============================================================
 # read_fasta – FASTA reader
 # ==============================================================
@@ -111,6 +133,48 @@ SELECT NAME, length(SEQUENCE), length(QUALITY) FROM read_fastq('__WORKING_DIRECT
 ----
 HS25_09827:2:1201:1505:59795#49	100	100
 
+# --- paired FASTQ (mate_path) ---
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/r2.fq');
+----
+10
+
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/r2.fq') WHERE MATE = 1;
+----
+5
+
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/r2.fq') WHERE MATE = 2;
+----
+5
+
+query I
+SELECT count(DISTINCT PAIR_ID) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/r2.fq');
+----
+5
+
+# --- interleaved FASTQ ---
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/interleaved.fq', interleaved := true);
+----
+10
+
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/interleaved.fq', interleaved := true) WHERE MATE = 1;
+----
+5
+
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/interleaved.fq', interleaved := true) WHERE MATE = 2;
+----
+5
+
+query I
+SELECT count(DISTINCT PAIR_ID) FROM read_fastq('__WORKING_DIRECTORY__/test/data/interleaved.fq', interleaved := true);
+----
+5
+
 # ==============================================================
 # read_gff – GFF3 reader (bgzipped + tabix indexed)
 # ==============================================================
@@ -148,6 +212,12 @@ query I
 SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
 ----
 4
+
+# --- attributes_map ---
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', attributes_map := true) WHERE attributes_map IS NOT NULL;
+----
+62
 
 # ==============================================================
 # read_tabix – generic tabix reader (bgzipped + tabix indexed)

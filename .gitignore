@@ -17,6 +17,10 @@ third_party/htslib/*.so
 third_party/htslib/*.dll
 third_party/htslib/*.dylib
 third_party/htslib/*.a
+third_party/htslib/**/*.o
+third_party/htslib/config.*
+third_party/htslib/htscodecs.mk
+third_party/htslib/version.h
 third_party/bcftools/*.o
 third_party/bcftools/*.so
 third_party/bcftools/*.dll
@@ -27,6 +31,11 @@ third_party/samtools/*.so
 third_party/samtools/*.dll
 third_party/samtools/*.dylib
 third_party/samtools/*.a
+
+# Local clones copied in for reference
+bcftools/
+samtools/
+hts-specs/
 
 # R package artifacts
 r/duckhts/.Rproj.user/

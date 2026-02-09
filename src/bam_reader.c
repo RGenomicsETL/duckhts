@@ -29,6 +29,17 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
+#include <htslib/kstring.h>
+
+/* ================================================================
+ * Helpers
+ * ================================================================ */
+
+static inline void set_null(duckdb_vector vec, idx_t row) {
+    duckdb_vector_ensure_validity_writable(vec);
+    uint64_t *v = duckdb_vector_get_validity(vec);
+    v[row / 64] &= ~((uint64_t)1 << (row % 64));
+}
 
 /* ================================================================
  * Column indices — matches SAM spec field order
@@ -46,6 +57,8 @@ enum {
     BAM_COL_TLEN,
     BAM_COL_SEQ,
     BAM_COL_QUAL,
+    BAM_COL_READ_GROUP_ID,
+    BAM_COL_SAMPLE_ID,
     BAM_COL_CORE_COUNT
 };
 
@@ -55,6 +68,7 @@ enum {
 
 typedef struct {
     char *file_path;
+    char *reference;
 
     /* Parsed from the "region" named parameter.
      * May contain comma-separated multi-region specs. */
@@ -101,6 +115,11 @@ typedef struct {
     char *qual_buf;
     size_t qual_buf_cap;
     char cigar_buf[8192];
+
+    /* Read group caching */
+    char *last_rg_id;
+    char *last_sample_id;
+    kstring_t rg_tmp;
 } bam_local_init_data_t;
 
 /* ================================================================
@@ -111,6 +130,7 @@ static void destroy_bam_bind(void *data) {
     bam_bind_data_t *b = (bam_bind_data_t *)data;
     if (!b) return;
     if (b->file_path) duckdb_free(b->file_path);
+    if (b->reference) duckdb_free(b->reference);
     if (b->region) duckdb_free(b->region);
     if (b->regions) {
         for (unsigned int i = 0; i < b->n_regions; i++)
@@ -135,6 +155,9 @@ static void destroy_bam_local(void *data) {
     if (l->column_ids) duckdb_free(l->column_ids);
     if (l->seq_buf) free(l->seq_buf);
     if (l->qual_buf) free(l->qual_buf);
+    if (l->last_rg_id) free(l->last_rg_id);
+    if (l->last_sample_id) free(l->last_sample_id);
+    free(l->rg_tmp.s);
     duckdb_free(l);
 }
 
@@ -243,6 +266,13 @@ static void bam_read_bind(duckdb_bind_info info) {
         region = duckdb_get_varchar(region_val);
     if (region_val) duckdb_destroy_value(&region_val);
 
+    /* Parse optional reference for CRAM */
+    char *reference = NULL;
+    duckdb_value ref_val = duckdb_bind_get_named_parameter(info, "reference");
+    if (ref_val && !duckdb_is_null_value(ref_val))
+        reference = duckdb_get_varchar(ref_val);
+    if (ref_val) duckdb_destroy_value(&ref_val);
+
     /* Probe the file: open, read header, check index */
     samFile *fp = sam_open(file_path, "r");
     if (!fp) {
@@ -251,21 +281,27 @@ static void bam_read_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, err);
         duckdb_free(file_path);
         if (region) duckdb_free(region);
+        if (reference) duckdb_free(reference);
         return;
     }
 
+    if (reference) {
+        hts_set_opt(fp, CRAM_OPT_REFERENCE, reference);
+    }
     sam_hdr_t *hdr = sam_hdr_read(fp);
     if (!hdr) {
         sam_close(fp);
         duckdb_bind_set_error(info, "Failed to read SAM/BAM/CRAM header");
         duckdb_free(file_path);
         if (region) duckdb_free(region);
+        if (reference) duckdb_free(reference);
         return;
     }
 
     bam_bind_data_t *bind = (bam_bind_data_t *)duckdb_malloc(sizeof(bam_bind_data_t));
     memset(bind, 0, sizeof(bam_bind_data_t));
     bind->file_path = file_path;
+    bind->reference = reference;
     bind->region = region;
     bind->n_contigs = sam_hdr_nref(hdr);
 
@@ -299,6 +335,8 @@ static void bam_read_bind(duckdb_bind_info info) {
     duckdb_bind_add_result_column(info, "TLEN",  bigint_type);
     duckdb_bind_add_result_column(info, "SEQ",   varchar_type);
     duckdb_bind_add_result_column(info, "QUAL",  varchar_type);
+    duckdb_bind_add_result_column(info, "READ_GROUP_ID", varchar_type);
+    duckdb_bind_add_result_column(info, "SAMPLE_ID", varchar_type);
 
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&int32_type);
@@ -363,6 +401,15 @@ static void bam_read_local_init(duckdb_init_info info) {
         return;
     }
 
+    if (bind->reference) {
+        if (hts_set_opt(local->fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
+            duckdb_init_set_error(info, "Failed to set CRAM reference");
+            sam_close(local->fp);
+            duckdb_free(local);
+            return;
+        }
+    }
+
     /* Enable htslib I/O threads for BAM/CRAM decompression.
      * hts_set_threads creates non-shared threads for this file handle. */
     hts_set_threads(local->fp, 2);
@@ -378,6 +425,9 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     /* Allocate a reusable bam1_t record */
     local->rec = bam_init1();
+    local->rg_tmp.l = 0;
+    local->rg_tmp.m = 0;
+    local->rg_tmp.s = NULL;
 
     /* Load index if needed for parallel scanning or region queries */
     if (is_parallel || bind->n_regions > 0) {
@@ -604,6 +654,47 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 break;
             }
 
+            case BAM_COL_READ_GROUP_ID: {
+                uint8_t *aux = bam_aux_get(b, "RG");
+                if (aux) {
+                    const char *rg = bam_aux2Z(aux);
+                    if (rg) {
+                        duckdb_vector_assign_string_element(vec, row_count, rg);
+                    } else {
+                        set_null(vec, row_count);
+                    }
+                } else {
+                    set_null(vec, row_count);
+                }
+                break;
+            }
+
+            case BAM_COL_SAMPLE_ID: {
+                uint8_t *aux = bam_aux_get(b, "RG");
+                const char *rg = aux ? bam_aux2Z(aux) : NULL;
+                if (!rg) {
+                    set_null(vec, row_count);
+                    break;
+                }
+                if (!local->last_rg_id || strcmp(local->last_rg_id, rg) != 0) {
+                    free(local->last_rg_id);
+                    free(local->last_sample_id);
+                    local->last_rg_id = strdup(rg);
+                    local->last_sample_id = NULL;
+                    local->rg_tmp.l = 0;
+                    if (sam_hdr_find_tag_id(local->hdr, "RG", "ID", rg, "SM", &local->rg_tmp) == 0 &&
+                        local->rg_tmp.s && local->rg_tmp.l > 0) {
+                        local->last_sample_id = strdup(local->rg_tmp.s);
+                    }
+                }
+                if (local->last_sample_id) {
+                    duckdb_vector_assign_string_element(vec, row_count, local->last_sample_id);
+                } else {
+                    set_null(vec, row_count);
+                }
+                break;
+            }
+
             default:
                 break;
             } /* switch */
@@ -626,6 +717,7 @@ void register_read_bam_function(duckdb_connection connection) {
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "reference", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     duckdb_table_function_set_bind(tf, bam_read_bind);

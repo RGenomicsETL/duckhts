@@ -144,6 +144,11 @@ find_package(OpenSSL QUIET)
 # Threads (portable: resolves to -lpthread on Linux, nothing on macOS)
 find_package(Threads REQUIRED)
 
+# MinGW regex (regcomp/regexec are in libgnurx)
+if(WIN32 AND MINGW)
+    find_library(GNUREGEX_LIBRARY NAMES gnurx regex)
+endif()
+
 # ------------------------------------------------------------------
 # Build paths for htslib's Makefile.
 #
@@ -219,6 +224,9 @@ else()
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
     list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
 endif()
+if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
+    list(APPEND HTSLIB_EXTRA_LIBS "-lgnurx")
+endif()
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
 list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
 
@@ -281,6 +289,9 @@ if(CURL_FOUND)
 endif()
 if(OPENSSL_FOUND)
     list(APPEND HTSLIB_LINK_LIBS OpenSSL::Crypto)
+endif()
+if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
+    list(APPEND HTSLIB_LINK_LIBS ${GNUREGEX_LIBRARY})
 endif()
 
 # Threads::Threads is portable (pthread on Linux, nothing on macOS)

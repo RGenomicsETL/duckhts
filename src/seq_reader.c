@@ -39,6 +39,8 @@ enum {
     SEQ_COL_DESCRIPTION,
     SEQ_COL_SEQUENCE,
     SEQ_COL_QUALITY,  /* FASTQ only */
+    SEQ_COL_MATE,     /* FASTQ paired/interleaved only */
+    SEQ_COL_PAIR_ID,
     SEQ_COL_MAX
 };
 
@@ -48,7 +50,10 @@ enum {
 
 typedef struct {
     char *file_path;
+    char *mate_path;
     int is_fastq;
+    int interleaved;
+    int paired;
 } seq_bind_data_t;
 
 /* ================================================================
@@ -59,8 +64,15 @@ typedef struct {
     samFile *fp;
     sam_hdr_t *hdr;
     bam1_t *rec;
+    samFile *fp_mate;
+    sam_hdr_t *hdr_mate;
+    bam1_t *rec_mate;
     int done;
     int is_fastq;
+    int interleaved;
+    int paired;
+    int pending_mate;
+    int interleaved_mate;
 
     idx_t column_count;
     idx_t *column_ids;
@@ -71,6 +83,8 @@ typedef struct {
     /* Reusable buffer for decoded quality */
     char *qual_buf;
     size_t qual_buf_cap;
+    char *pair_buf;
+    size_t pair_buf_cap;
 } seq_init_data_t;
 
 /* ================================================================
@@ -81,6 +95,7 @@ static void destroy_seq_bind(void *data) {
     seq_bind_data_t *b = (seq_bind_data_t *)data;
     if (!b) return;
     if (b->file_path) duckdb_free(b->file_path);
+    if (b->mate_path) duckdb_free(b->mate_path);
     duckdb_free(b);
 }
 
@@ -90,9 +105,13 @@ static void destroy_seq_init(void *data) {
     if (init->rec) bam_destroy1(init->rec);
     if (init->hdr) sam_hdr_destroy(init->hdr);
     if (init->fp) sam_close(init->fp);
+    if (init->rec_mate) bam_destroy1(init->rec_mate);
+    if (init->hdr_mate) sam_hdr_destroy(init->hdr_mate);
+    if (init->fp_mate) sam_close(init->fp_mate);
     if (init->column_ids) duckdb_free(init->column_ids);
     if (init->seq_buf) free(init->seq_buf);
     if (init->qual_buf) free(init->qual_buf);
+    if (init->pair_buf) free(init->pair_buf);
     duckdb_free(init);
 }
 
@@ -126,6 +145,19 @@ static void decode_qual(const uint8_t *qual, int len, char *buf) {
     for (int i = 0; i < len; i++)
         buf[i] = (char)(qual[i] + 33);
     buf[len] = '\0';
+}
+
+static const char *strip_pair_suffix(const char *name, char *buf, size_t buf_cap) {
+    if (!name) return "";
+    size_t len = strlen(name);
+    if (len >= 2 && name[len - 2] == '/' &&
+        (name[len - 1] == '1' || name[len - 1] == '2')) {
+        len -= 2;
+    }
+    if (len + 1 > buf_cap) len = buf_cap - 1;
+    memcpy(buf, name, len);
+    buf[len] = '\0';
+    return buf;
 }
 
 /* ================================================================
@@ -170,17 +202,44 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     bind->file_path = file_path;
     bind->is_fastq = is_fastq;
 
+    if (is_fastq) {
+        duckdb_value mate_val = duckdb_bind_get_named_parameter(info, "mate_path");
+        if (mate_val && !duckdb_is_null_value(mate_val)) {
+            bind->mate_path = duckdb_get_varchar(mate_val);
+            bind->paired = 1;
+        }
+        if (mate_val) duckdb_destroy_value(&mate_val);
+
+        duckdb_value inter_val = duckdb_bind_get_named_parameter(info, "interleaved");
+        if (inter_val && !duckdb_is_null_value(inter_val)) {
+            bind->interleaved = duckdb_get_bool(inter_val) ? 1 : 0;
+        }
+        if (inter_val) duckdb_destroy_value(&inter_val);
+
+        if (bind->paired && bind->interleaved) {
+            duckdb_bind_set_error(info, "read_fastq: use mate_path or interleaved, not both");
+            destroy_seq_bind(bind);
+            return;
+        }
+    }
+
     /* Define schema */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type usmallint_type = duckdb_create_logical_type(DUCKDB_TYPE_USMALLINT);
 
     duckdb_bind_add_result_column(info, "NAME", varchar_type);
     duckdb_bind_add_result_column(info, "DESCRIPTION", varchar_type);
     duckdb_bind_add_result_column(info, "SEQUENCE", varchar_type);
     if (is_fastq) {
         duckdb_bind_add_result_column(info, "QUALITY", varchar_type);
+        if (bind->paired || bind->interleaved) {
+            duckdb_bind_add_result_column(info, "MATE", usmallint_type);
+            duckdb_bind_add_result_column(info, "PAIR_ID", varchar_type);
+        }
     }
 
     duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&usmallint_type);
     duckdb_bind_set_bind_data(info, bind, destroy_seq_bind);
 }
 
@@ -216,6 +275,27 @@ static void seq_read_init(duckdb_init_info info) {
 
     init->rec = bam_init1();
     init->is_fastq = bind->is_fastq;
+    init->paired = bind->paired;
+    init->interleaved = bind->interleaved;
+    init->pending_mate = 0;
+    init->interleaved_mate = 1;
+
+    if (bind->paired) {
+        init->fp_mate = sam_open(bind->mate_path, "r");
+        if (!init->fp_mate) {
+            duckdb_init_set_error(info, "Failed to open mate FASTQ file");
+            destroy_seq_init(init);
+            return;
+        }
+        init->hdr_mate = sam_hdr_read(init->fp_mate);
+        if (!init->hdr_mate) {
+            duckdb_init_set_error(info, "Failed to read mate FASTQ header");
+            destroy_seq_init(init);
+            return;
+        }
+        init->rec_mate = bam_init1();
+    }
+
     init->done = 0;
 
     /* Projection pushdown */
@@ -249,14 +329,37 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     idx_t row_count = 0;
 
     while (row_count < vector_size) {
-        int ret = sam_read1(init->fp, init->hdr, init->rec);
+        bam1_t *b = NULL;
+        int mate = 0;
+        if (init->paired) {
+            if (init->pending_mate) {
+                b = init->rec_mate;
+                mate = 2;
+                init->pending_mate = 0;
+            } else {
+                int r1 = sam_read1(init->fp, init->hdr, init->rec);
+                int r2 = sam_read1(init->fp_mate, init->hdr_mate, init->rec_mate);
+                if (r1 < 0 || r2 < 0) {
+                    init->done = 1;
+                    break;
+                }
+                b = init->rec;
+                mate = 1;
+                init->pending_mate = 1;
+            }
+        } else {
+            int ret = sam_read1(init->fp, init->hdr, init->rec);
         if (ret < 0) {
             /* -1 = EOF, < -1 = error */
             init->done = 1;
             break;
         }
-
-        bam1_t *b = init->rec;
+            b = init->rec;
+            if (init->interleaved) {
+                mate = init->interleaved_mate;
+                init->interleaved_mate = (init->interleaved_mate == 1) ? 2 : 1;
+            }
+        }
         int seq_len = b->core.l_qseq;
 
         for (idx_t i = 0; i < init->column_count; i++) {
@@ -315,6 +418,28 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 break;
             }
 
+            case SEQ_COL_MATE: {
+                if (init->is_fastq && (init->paired || init->interleaved)) {
+                    uint16_t *data = (uint16_t *)duckdb_vector_get_data(vec);
+                    data[row_count] = (uint16_t)mate;
+                } else {
+                    set_null(vec, row_count);
+                }
+                break;
+            }
+
+            case SEQ_COL_PAIR_ID: {
+                if (init->is_fastq && (init->paired || init->interleaved)) {
+                    const char *name = bam_get_qname(b);
+                    ensure_buf(&init->pair_buf, &init->pair_buf_cap, (int)strlen(name));
+                    const char *pair_id = strip_pair_suffix(name, init->pair_buf, init->pair_buf_cap);
+                    duckdb_vector_assign_string_element(vec, row_count, pair_id);
+                } else {
+                    set_null(vec, row_count);
+                }
+                break;
+            }
+
             default:
                 break;
             } /* switch */
@@ -353,7 +478,12 @@ void register_read_fastq_function(duckdb_connection connection) {
 
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_table_function_add_parameter(tf, varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "mate_path", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
+
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_table_function_add_named_parameter(tf, "interleaved", bool_type);
+    duckdb_destroy_logical_type(&bool_type);
 
     duckdb_table_function_set_bind(tf, fastq_read_bind);
     duckdb_table_function_set_init(tf, seq_read_init);
