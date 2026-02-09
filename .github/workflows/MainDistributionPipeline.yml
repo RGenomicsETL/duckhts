@@ -22,3 +22,4 @@ jobs:
       extension_name: duckhts
       extra_toolchains: python3
       exclude_archs: windows_amd64;windows_arm64
+      reduced_ci_mode: disabled

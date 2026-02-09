@@ -168,9 +168,6 @@ library(duckdb)
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
-if (!file.exists(ext_path)) {
-  stop("Extension binary not found at: ", ext_path, call. = FALSE)
-}
 dbExecute(con, sprintf("LOAD '%s'", ext_path))
 
 dbGetQuery(con, "
