@@ -52,10 +52,10 @@ test_table_creation <- function() {
   expect_error(rduckhts_bcf(con, "test_table", bcf_path, overwrite = FALSE))
 
   dbDisconnect(con, shutdown = TRUE)
-  cat("Table creation pattern tests passed!\n")
+  message("Table creation pattern tests passed!")
 }
 
 # Run the test
 test_table_creation()
 
-cat("Integration tests completed!\n")
+message("Integration tests completed!")

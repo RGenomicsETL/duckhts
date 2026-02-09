@@ -11,6 +11,7 @@
 #' @references \url{https://github.com/RGenomicsETL/duckhts}
 #' @keywords internal
 #' @importFrom DBI dbExecute dbExistsTable dbRemoveTable
+#' @importFrom duckdb duckdb
 "_PACKAGE"
 
 build_param_str <- function(params) {

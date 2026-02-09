@@ -41,4 +41,4 @@ expect_error(rduckhts_gff(NULL, "test", "nonexistent.gff"))
 expect_error(rduckhts_gtf(NULL, "test", "nonexistent.gtf"))
 expect_error(rduckhts_tabix(NULL, "test", "nonexistent.bed.gz"))
 
-cat("All basic tests passed!\n")
+message("All basic tests passed!")
