@@ -1,72 +1,58 @@
-name: CRAN Check
-
+# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
+# Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
 on:
   push:
-    branches: [ r_package ]
-  pull_request:
-    branches: [ r_package]
+    branches: [r_package]
+  #pull_request:
   workflow_dispatch:
 
+name: R-CMD-check.yaml
+
+permissions: read-all
+
 jobs:
-  R-CMD-check-ubuntu:
-    runs-on: ubuntu-latest
-    env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev cmake make
-      - name: Check package
-        run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
-      - name: Upload check results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Rduckhts-check-results-ubuntu
-          path: r/Rduckhts.Rduckhts.Rcheck/
-          retention-days: 30
+  R-CMD-check:
+    runs-on: ${{ matrix.config.os }}
 
-  R-CMD-check-macos:
-    runs-on: macos-latest
-    env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
-      - name: Install system dependencies
-        run: brew install htslib cmake
-      - name: Check package
-        run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
-      - name: Upload check results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Rduckhts-check-results-macos
-          path: r/Rduckhts.Rduckhts.Rcheck/
-          retention-days: 30
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
-  R-CMD-check-windows:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: macos-latest,   r: 'release'}
+         # - {os: windows-latest, r: 'release'}
+          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
+         # - {os: ubuntu-latest,   r: 'release'}
+         # - {os: ubuntu-latest,   r: 'oldrel-1'}
+
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
         with:
+          r-version: ${{ matrix.config.r }}
+          http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
-      - name: Check package
-        run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
-      - name: Upload check results
-        if: failure()
-        uses: actions/upload-artifact@v4
+
+      #- name: Install system dependencies (macOS)
+      #  if: runner.os == 'macOS'
+      #  run: |
+      #    brew install pkg-config curl gsl libdeflate bzip2 xz openssl
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          name: Rduckhts-check-results-windows
-          path: r/Rduckhts.Rduckhts.Rcheck/
-          retention-days: 30
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+          error-on: '"error"'
