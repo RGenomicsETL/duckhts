@@ -1,26 +1,27 @@
 #!/bin/sh
 # cleanup.win script for Rduckhts package (Windows systems)
-# This script is used during package cleanup and CRAN checks on Windows
+# This script is used during package cleanup and CRAN checks on Windows (Rtools POSIX shell)
 
 set -eu
 
 # Remove build artifacts
-del /Q src\*.o src\*.so src\*.dll 2>NUL || true
-del /Q inst\duckhts_extension\*.o inst\duckhts_extension\*.so 2>NUL || true
-del /Q inst\duckhts_extension\*.dll 2>NUL || true
+rm -f src/*.o src/*.so src/*.dll
+rm -f inst/duckhts_extension/*.o inst/duckhts_extension/*.so
+rm -f inst/duckhts_extension/*.dll
 
 # Clean up htslib build artifacts if they exist
-if exist "inst\duckhts_extension\htslib" (
-    cd inst\duckhts_extension\htslib
-    make clean 2>NUL || true
-    del /Q config.log config.status 2>NUL || true
-    del /Q libhts.a libhts.so* 2>NUL || true
-    del /Q htslib.pc 2>NUL || true
-    del /Q *.o 2>NUL || true
-    cd ..\..\..
-)
+if [ -d "inst/duckhts_extension/htslib" ]; then
+        cd inst/duckhts_extension/htslib
+        make clean 2>/dev/null || true
+        rm -f config.log config.status
+        rm -f libhts.a libhts.so* libhts.dylib
+        rm -f htslib.pc
+        rm -f lib/htslib.pc lib/libhts.a lib/libhts.so* lib/libhts.dylib
+        rm -f *.o  # Remove any remaining object files
+        cd ../../..
+fi
 
 # Remove any generated extension binaries
-del /Q inst\extdata\*.duckdb_extension 2>NUL || true
+rm -f inst/extdata/*.duckdb_extension
 
 echo "Cleanup complete."

@@ -4,8 +4,8 @@
 
 set -eu
 
-THIS_DIR=$(dirname "$0")
-THIS_DIR=$(cd "$THIS_DIR" && pwd)
+THIS_DIR=`dirname "$0"`
+THIS_DIR=`cd "$THIS_DIR" && pwd`
 
 EXT_DIR="${THIS_DIR}/inst/duckhts_extension"
 
@@ -16,18 +16,60 @@ if [ ! -d "${EXT_DIR}/htslib" ]; then
 fi
 
 # Get R's compiler settings for Windows
-CC=$(${R_HOME}/bin/R CMD config CC)
-MAKE=$(${R_HOME}/bin/R CMD config MAKE)
-AR=$(${R_HOME}/bin/R CMD config AR)
-# Use ranlib from system if R doesn't provide it
-if command -v ${R_HOME}/bin/R CMD config RANLIB >/dev/null 2>&1; then
-    RANLIB=$(${R_HOME}/bin/R CMD config RANLIB)
-else
+MAKE=`"${R_HOME}/bin/R" CMD config MAKE`
+CC=`"${R_HOME}/bin/R" CMD config CC`
+AR=`"${R_HOME}/bin/R" CMD config AR`
+RANLIB=`"${R_HOME}/bin/R" CMD config RANLIB`
+R_CPPFLAGS=`"${R_HOME}/bin/R" CMD config CPPFLAGS`
+R_CFLAGS=`"${R_HOME}/bin/R" CMD config CFLAGS`
+R_CPICFLAGS=`"${R_HOME}/bin/R" CMD config CPICFLAGS`
+R_LDFLAGS=`"${R_HOME}/bin/R" CMD config LDFLAGS`
+if [ -z "${RANLIB}" ]; then
     RANLIB=ranlib
 fi
 
 HTSLIB_DIR="${EXT_DIR}/htslib"
-CFLAGS="-O2"
+DUCKDB_CAPI_HEADER="${EXT_DIR}/duckdb_capi/duckdb_extension.h"
+CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
+CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
+LDFLAGS="${R_LDFLAGS}"
+
+if [ ! -f "${DUCKDB_CAPI_HEADER}" ]; then
+    echo "ERROR: DuckDB C API header not found at ${DUCKDB_CAPI_HEADER}"
+    echo "Package may not be built properly. Sources should be bundled during package creation."
+    exit 1
+fi
+
+EXT_VERSION=`awk -F': *' '/^Version:/ {print $2; exit}' "${THIS_DIR}/DESCRIPTION" || true`
+if [ -z "${EXT_VERSION}" ]; then
+    EXT_VERSION="0.0.0"
+fi
+
+DUCKDB_API_MAJOR=`awk '/DUCKDB_EXTENSION_API_VERSION_MAJOR/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
+DUCKDB_API_MINOR=`awk '/DUCKDB_EXTENSION_API_VERSION_MINOR/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
+DUCKDB_API_PATCH=`awk '/DUCKDB_EXTENSION_API_VERSION_PATCH/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
+if [ -n "${DUCKDB_API_MAJOR}" ] && [ -n "${DUCKDB_API_MINOR}" ] && [ -n "${DUCKDB_API_PATCH}" ]; then
+    DUCKDB_VERSION="v${DUCKDB_API_MAJOR}.${DUCKDB_API_MINOR}.${DUCKDB_API_PATCH}"
+else
+    DUCKDB_VERSION="v1.2.0"
+fi
+
+OS_NAME=`uname -s`
+ARCH_NAME=`uname -m`
+DUCKDB_PLATFORM=""
+case "${OS_NAME}" in
+    *MINGW*|*MSYS*|*CYGWIN*)
+        case "${ARCH_NAME}" in
+            x86_64) DUCKDB_PLATFORM="windows_amd64";;
+            aarch64|arm64) DUCKDB_PLATFORM="windows_arm64";;
+        esac
+        ;;
+esac
+
+if [ -z "${DUCKDB_PLATFORM}" ]; then
+    echo "ERROR: Unsupported platform: ${OS_NAME}/${ARCH_NAME}"
+    exit 1
+fi
 
 echo "---------- Checking for required libraries (Windows) ----------"
 
@@ -44,7 +86,7 @@ try_compile() {
 int main() { return 0; }
 EOF
 
-    if ${CC} ${lib_flag} -o conftest conftest.c 2>/dev/null; then
+    if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} ${lib_flag} -o conftest conftest.c 2>/dev/null; then
         echo "  ${lib_name}: found"
         rm -f conftest conftest.c
         return 0
@@ -99,8 +141,8 @@ LIBS="$LIBS -lpthread -lws2_32"
 echo "---------- Configuring htslib (Windows) ----------"
 cd "${HTSLIB_DIR}"
 
-# Build htslib configure flags - minimal approach
-HTSLIB_CONFIGURE_FLAGS="--disable-plugins"
+# Build htslib configure flags
+HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
 
 if [ "$HAS_BZ2" = "no" ]; then
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-bz2"
@@ -120,6 +162,7 @@ fi
     AR="${AR}" \
     RANLIB="${RANLIB}" \
     CFLAGS="${CFLAGS}" \
+    CPPFLAGS="${CPPFLAGS}" \
     LDFLAGS="${LDFLAGS}" \
     LIBS="${LIBS}" \
     --build=${BUILD} \
@@ -128,6 +171,8 @@ fi
 
 echo "---------- Building htslib (static) ----------"
 ${MAKE} -j lib-static
+
+rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true
 
 if [ ! -f "libhts.a" ]; then
     echo "ERROR: htslib build failed - libhts.a not found"
@@ -156,11 +201,13 @@ for src_file in $C_SOURCES; do
 done
 
 # Create extension directory
-mkdir -p ../inst/extdata
+mkdir -p "${THIS_DIR}/inst/extdata"
 
 # Link the extension for Windows
 echo "Linking DuckHTS extension for Windows..."
-${CC} -shared -o ../inst/extdata/duckhts.duckdb_extension \
+RAW_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension.raw"
+FINAL_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension"
+${CC} -shared -o "${RAW_EXT_FILE}" \
     $OBJECT_FILES \
     ./htslib/libhts.a \
     $LIBS
@@ -173,8 +220,20 @@ fi
 echo "---------- Cleaning up build artifacts ----------"
 rm -f $OBJECT_FILES
 
+echo "Appending DuckDB extension metadata..."
+"${R_HOME}/bin/Rscript" "${THIS_DIR}/tools/append_extension_metadata.R" \
+    --library-file "${RAW_EXT_FILE}" \
+    --out-file "${FINAL_EXT_FILE}" \
+    --extension-name "duckhts" \
+    --duckdb-platform "${DUCKDB_PLATFORM}" \
+    --duckdb-version "${DUCKDB_VERSION}" \
+    --extension-version "${EXT_VERSION}" \
+    --abi-type "C_STRUCT"
+
 echo "---------- DuckHTS extension built successfully for Windows ----------"
-ls -la ../inst/extdata/duckhts.duckdb_extension
+ls -la "${FINAL_EXT_FILE}"
+
+rm -f "${RAW_EXT_FILE}"
 
 cd "${THIS_DIR}"
 echo "Windows configure complete."
