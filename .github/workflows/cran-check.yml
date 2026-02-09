@@ -23,11 +23,11 @@ jobs:
         run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
       - name: Upload check results
         if: failure()
-          uses: actions/upload-artifact@v3
-          with:
-            name: Rduckhts-check-results-ubuntu
-            path: r/Rduckhts.Rduckhts.Rcheck/
-            retention-days: 30
+        uses: actions/upload-artifact@v3
+        with:
+          name: Rduckhts-check-results-ubuntu
+          path: r/Rduckhts.Rduckhts.Rcheck/
+          retention-days: 30
 
   R-CMD-check-macos:
     runs: macos-latest
@@ -44,11 +44,11 @@ jobs:
         run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
       - name: Upload check results
         if: failure()
-          uses: actions/upload-artifact@v3
-          with:
-            name: Rduckhts-check-results-macos
-            path: r/Rduckhts.Rduckhts.Rcheck/
-            retention-days: 30
+        uses: actions/upload-artifact@v3
+        with:
+          name: Rduckhts-check-results-macos
+          path: r/Rduckhts.Rduckhts.Rcheck/
+          retention-days: 30
 
   R-CMD-check-windows:
     runs: windows-latest
@@ -65,8 +65,8 @@ jobs:
         run: cd r/Rduckhts && R CMD build . && R CMD check --as-cran .
       - name: Upload check results
         if: failure()
-          uses: actions/upload-artifact@v3
-          with:
-            name: Rduckhts-check-results-windows
-            path: r/Rduckhts.Rduckhts.Rcheck/
-            retention-days: 30
+        uses: actions/upload-artifact@v3
+        with:
+          name: Rduckhts-check-results-windows
+          path: r/Rduckhts.Rduckhts.Rcheck/
+          retention-days: 30
