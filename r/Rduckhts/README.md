@@ -5,18 +5,21 @@
 Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)
 [![R-CMD-check](https://github.com/RGenomicsETL/duckhts/workflows/R-CMD-check/badge.svg)](https://github.com/RGenomicsETL/duckhts/actions)
 
-We provide an R interface to the DuckDB HTS (High Throughput Sequencing)
-file reader extension. We enable reading common bioinformatics file
-formats such as VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, and
-tabix-indexed files directly from R using SQL queries via DuckDB.
+We provide an R interface to the [DuckDB](https://duckdb.org/) HTS (High
+Throughput Sequencing) file reader extension. We enable reading common
+bioinformatics file formats such as VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ,
+GFF, GTF, and tabix-indexed files directly from R using SQL queries via
+[DuckDB](https://duckdb.org/).
 
 ## Key Features
 
-We follow the RBCFTools table pattern and create DuckDB tables instead
-of returning data frames. We support VCF/BCF, SAM/BAM/CRAM, FASTA,
-FASTQ, GFF, GTF, and tabix. We support region queries for indexed files,
-and we target Linux, macOS, and Windows (MinGW). We bundle htslib 1.23
-so runtime dependencies stay minimal.
+We follow the [RBCFTools](https://github.com/RGenomicsETL/RBCFTools)
+table pattern and create [DuckDB](https://duckdb.org/) tables instead of
+returning data frames. We support VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ,
+GFF, GTF, and tabix. We support region queries for indexed files, and we
+target Linux, macOS, and Windows (MinGW). We bundle
+[htslib](https://github.com/samtools/htslib) 1.23 so runtime
+dependencies stay minimal.
 
 ## Installation
 
@@ -189,20 +192,27 @@ cram_reads
 We require zlib and libbz2, and we optionally use liblzma, libcurl, and
 openssl during build. We build with cmake, GNU make, and a C compiler.
 On Ubuntu/Debian we install build-essential, cmake, and the listed dev
-packages. On macOS we install cmake and htslib. On Windows we use Rtools
+packages. On macOS we install cmake and
+[htslib](https://github.com/samtools/htslib). On Windows we use Rtools
 and MinGW.
 
 ## Notes
 
-We follow the RBCFTools pattern and create DuckDB tables rather than
+We follow the [RBCFTools](https://github.com/RGenomicsETL/RBCFTools)
+pattern and create [DuckDB](https://duckdb.org/) tables rather than
 returning data frames. We check for existing tables and require
 `overwrite = TRUE` to replace them. We use region queries for indexed
-files, we bundle htslib 1.23, and we enable plugins where supported.
+files, we bundle [htslib](https://github.com/samtools/htslib) 1.23, and
+we enable plugins where supported.
 
 ## References
 
-We reference DuckDB, htslib, and RBCFTools as the primary upstream
-projects that inform this work.
+- DuckDB: <https://duckdb.org/>
+- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+- DuckDB extension template (C):
+  <https://github.com/duckdb/extension-template-c>
+- htslib: <https://github.com/samtools/htslib>
+- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 
