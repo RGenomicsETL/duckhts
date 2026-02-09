@@ -61,6 +61,18 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   )
   message("  Copied DuckDB C API headers")
 
+  # Apply local patch(es) to C API headers for R package only
+  patch_file <- file.path(pkg_src_dir, "inst", "patches", "duckdb_capi_strict_prototypes.patch")
+  if (file.exists(patch_file)) {
+    message("  Applying DuckDB C API patch: ", patch_file)
+    patch_status <- system2("patch", c("-p1", "-d", dest, "-i", patch_file))
+    if (!identical(patch_status, 0L)) {
+      stop("Failed to apply DuckDB C API patch: ", patch_file, call. = FALSE)
+    }
+  } else {
+    message("  DuckDB C API patch not found (skipping): ", patch_file)
+  }
+
   # htslib source tree (full copy, then clean)
   htslib_src <- file.path(repo_root, "third_party", "htslib")
   if (!dir.exists(htslib_src)) {
@@ -333,15 +345,13 @@ duckhts_detect_platform <- function() {
   sysname <- tolower(Sys.info()[["sysname"]])
   machine <- Sys.info()[["machine"]]
 
-  os <- switch(
-    sysname,
+  os <- switch(sysname,
     linux = "linux",
     darwin = "osx",
     windows = "windows",
     sysname
   )
-  arch <- switch(
-    machine,
+  arch <- switch(machine,
     x86_64 = "amd64",
     aarch64 = "aarch64",
     arm64 = "aarch64",
