@@ -2,4 +2,4 @@ name: duckhts
 version: 0.1.0
 description: DuckDB extension for reading HTS file formats via htslib
 license: MIT
-excluded_platforms: windows_amd64
+excluded_platforms: windows_amd64;windows_arm64
