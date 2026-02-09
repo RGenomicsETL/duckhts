@@ -27,6 +27,8 @@ library(DBI)
 library(duckdb)
 library(Rduckhts)
 
+setup_hts_env()
+
 ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
 if (!file.exists(ext_path)) {
 	ext_path <- file.path("inst", "extdata", "duckhts.duckdb_extension")

@@ -60,8 +60,8 @@ DUCKDB_PLATFORM=""
 case "${OS_NAME}" in
     *MINGW*|*MSYS*|*CYGWIN*)
         case "${ARCH_NAME}" in
-            x86_64) DUCKDB_PLATFORM="windows_amd64";;
-            aarch64|arm64) DUCKDB_PLATFORM="windows_arm64";;
+            x86_64) DUCKDB_PLATFORM="windows_amd64_mingw";;
+            aarch64|arm64) DUCKDB_PLATFORM="windows_arm64_mingw";;
         esac
         ;;
 esac

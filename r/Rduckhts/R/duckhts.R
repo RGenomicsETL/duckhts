@@ -25,6 +25,46 @@ build_param_str <- function(params) {
   ""
 }
 
+#' Setup HTSlib Environment
+#'
+#' Sets the `HTS_PATH` environment variable to point to the bundled htslib
+#' plugins directory. This enables remote file access via libcurl plugins
+#' (e.g., s3://, gs://, http://) when plugins are available.
+#'
+#' @return Invisibly returns the previous value of `HTS_PATH` (or `NA` if unset).
+#'
+#' @details
+#' Call this before querying remote URLs to allow htslib to locate its plugins.
+#'
+#' @examples
+#' setup_hts_env()
+#'
+#' @export
+setup_hts_env <- function() {
+  old_value <- Sys.getenv("HTS_PATH", unset = NA)
+  plugins_dir <- duckhts_htslib_plugins_dir()
+  if (nzchar(plugins_dir) && dir.exists(plugins_dir)) {
+    Sys.setenv(HTS_PATH = plugins_dir)
+  }
+  invisible(old_value)
+}
+
+#' @keywords internal
+duckhts_htslib_plugins_dir <- function() {
+  ext_dir <- duckhts_extension_dir()
+  candidates <- c(
+    file.path(ext_dir, "htslib", "libexec", "htslib"),
+    file.path(ext_dir, "htslib", "plugins"),
+    file.path(ext_dir, "htslib")
+  )
+  for (p in candidates) {
+    if (dir.exists(p)) {
+      return(normalizePath(p))
+    }
+  }
+  ""
+}
+
 #' Load DuckHTS Extension
 #'
 #' Loads the DuckHTS extension into a DuckDB connection. This must be called
