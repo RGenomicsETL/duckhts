@@ -106,11 +106,6 @@ find_package(OpenSSL QUIET)
 find_package(Threads REQUIRED)
 
 # ------------------------------------------------------------------
-# Build the htslib configure argument list.
-# Only pass --enable/--disable for things we probed so htslib's
-# configure never tries to use something that isn't installed.
-# ------------------------------------------------------------------
-# ------------------------------------------------------------------
 # Build paths for htslib's configure.
 #
 # When vcpkg is active, libraries are installed under
