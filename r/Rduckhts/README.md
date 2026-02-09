@@ -111,10 +111,10 @@ s3_vcf_file <- "3202_samples_cohort_gg_chr22.vcf.gz"
 s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
 
 # Query remote VCF directly with DuckDB + DuckHTS (region-scoped)
-rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:10000000-10550000", overwrite = TRUE)
+rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:16050000-16050500", overwrite = TRUE)
 dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
-#> [1] CHROM n    
-#> <0 rows> (or 0-length row.names)
+#>   CHROM  n
+#> 1 chr22 11
 ```
 
 ``` r
