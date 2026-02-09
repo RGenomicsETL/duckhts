@@ -1,7 +1,6 @@
 #!/bin/sh
-# configure.win script for Rduckhts package (Windows systems)
-# Builds htslib from vendored sources during R CMD INSTALL on Windows
-# Checks for available libraries before configuring htslib
+# configure.win script for Rduckhts package (Windows)
+# Clean, direct approach - no slop
 
 set -eu
 
@@ -16,28 +15,30 @@ if [ ! -d "${EXT_DIR}/htslib" ]; then
     exit 1
 fi
 
-echo "---------- Configuring htslib for Windows ----------"
-
 # Get R's compiler settings for Windows
 CC=$(${R_HOME}/bin/R CMD config CC)
-MAKE=$(${R_HOME}/bin/R CMD MAKE)
-AR=$(${R_HOME}/bin/R CMD AR)
-RANLIB=$(${R_HOME}/bin/R CMD RANLIB)
+MAKE=$(${R_HOME}/bin/R CMD config MAKE)
+AR=$(${R_HOME}/bin/R CMD config AR)
+# Use ranlib from system if R doesn't provide it
+if command -v ${R_HOME}/bin/R CMD config RANLIB >/dev/null 2>&1; then
+    RANLIB=$(${R_HOME}/bin/R CMD config RANLIB)
+else
+    RANLIB=ranlib
+fi
 
 HTSLIB_DIR="${EXT_DIR}/htslib"
 CFLAGS="-O2"
 
-echo "---------- Checking for required libraries on Windows ----------"
+echo "---------- Checking for required libraries (Windows) ----------"
 
-# Function to check if library is available on Windows
-check_lib() {
+# Simple compile test - Windows version
+try_compile() {
     lib_name=$1
     lib_flag=$2
     required=$3
     
     echo "Checking for ${lib_name}..."
     
-    # Try to compile a simple test program
     cat > conftest.c << EOF
 #include <stdio.h>
 int main() { return 0; }
@@ -58,46 +59,49 @@ EOF
     fi
 }
 
-# Check required libraries and headers for Windows
+# Check libraries
 HAS_ZLIB=no
 HAS_BZ2=no
 HAS_LZMA=no
 HAS_CURL=no
 HAS_OPENSSL=no
 
-# Windows typically has these available in Rtools
-if check_lib "zlib" "-lz" "yes"; then
+LIBS=""
+
+if try_compile "zlib" "-lz" "yes"; then
     HAS_ZLIB=yes
     LIBS="$LIBS -lz"
 fi
 
-if check_lib "bz2" "-lbz2" "yes"; then
+if try_compile "bz2" "-lbz2" "yes"; then
     HAS_BZ2=yes
     LIBS="$LIBS -lbz2"
 fi
 
-if check_lib "lzma" "-llzma" "no"; then
+if try_compile "lzma" "-llzma" "no"; then
     HAS_LZMA=yes
     LIBS="$LIBS -llzma"
 fi
 
-if check_lib "curl" "-lcurl" "no"; then
+if try_compile "curl" "-lcurl" "no"; then
     HAS_CURL=yes
     LIBS="$LIBS -lcurl"
 fi
 
-if check_lib "ssl" "-lssl" "no"; then
+if try_compile "ssl" "-lssl" "no"; then
     HAS_OPENSSL=yes
     LIBS="$LIBS -lssl -lcrypto"
 fi
 
-# Build configure options for htslib
-HTSLIB_CONFIGURE_FLAGS=""
+# Windows-specific libraries
+LIBS="$LIBS -lpthread -lws2_32"
 
-echo "---------- Configuring htslib for Windows ----------"
+echo "---------- Configuring htslib (Windows) ----------"
 cd "${HTSLIB_DIR}"
 
-# Disable features for missing libraries
+# Build htslib configure flags - minimal approach
+HTSLIB_CONFIGURE_FLAGS="--disable-plugins"
+
 if [ "$HAS_BZ2" = "no" ]; then
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-bz2"
 fi
@@ -110,27 +114,67 @@ if [ "$HAS_CURL" = "no" ]; then
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
 fi
 
-# Always disable plugins for CRAN compliance
-HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-plugins"
-
-echo "Using configure flags: $HTSLIB_CONFIGURE_FLAGS"
-
-# Configure for Windows/MinGW
+# Configure htslib for Windows/MinGW
 ./configure \
     CC="${CC}" \
     AR="${AR}" \
     RANLIB="${RANLIB}" \
     CFLAGS="${CFLAGS}" \
+    LDFLAGS="${LDFLAGS}" \
     LIBS="${LIBS}" \
     --build=${BUILD} \
     --host=${HOST} \
     ${HTSLIB_CONFIGURE_FLAGS}
 
-echo "---------- Building htslib (static) for Windows ----------"
+echo "---------- Building htslib (static) ----------"
 ${MAKE} -j lib-static
 
-echo "---------- htslib built successfully for Windows ----------"
-ls -la libhts.a
+if [ ! -f "libhts.a" ]; then
+    echo "ERROR: htslib build failed - libhts.a not found"
+    exit 1
+fi
+
+echo "---------- Building DuckHTS extension (Windows) ----------"
+
+# Build the extension
+cd "${EXT_DIR}"
+
+C_SOURCES="duckhts.c bcf_reader.c bam_reader.c seq_reader.c tabix_reader.c vep_parser.c"
+INCLUDES="-I./include -I./duckdb_capi -I./htslib"
+
+echo "Compiling extension sources for Windows..."
+OBJECT_FILES=""
+for src_file in $C_SOURCES; do
+    obj_file="${src_file%.c}.o"
+    echo "  Compiling $src_file -> $obj_file"
+    ${CC} ${CFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to compile $src_file"
+        exit 1
+    fi
+    OBJECT_FILES="$OBJECT_FILES $obj_file"
+done
+
+# Create extension directory
+mkdir -p ../inst/extdata
+
+# Link the extension for Windows
+echo "Linking DuckHTS extension for Windows..."
+${CC} -shared -o ../inst/extdata/duckhts.duckdb_extension \
+    $OBJECT_FILES \
+    ./htslib/libhts.a \
+    $LIBS
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to link DuckHTS extension"
+    exit 1
+fi
+
+echo "---------- Cleaning up build artifacts ----------"
+rm -f $OBJECT_FILES
+
+echo "---------- DuckHTS extension built successfully for Windows ----------"
+ls -la ../inst/extdata/duckhts.duckdb_extension
 
 cd "${THIS_DIR}"
 echo "Windows configure complete."

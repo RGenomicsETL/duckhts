@@ -14,8 +14,10 @@ if [ -d "inst/duckhts_extension/htslib" ]; then
     cd inst/duckhts_extension/htslib
     make clean 2>/dev/null || true
     rm -f config.log config.status
-    rm -f libhts.a libhts.so*
+    rm -f libhts.a libhts.so* libhts.dylib
     rm -f htslib.pc
+    rm -f lib/htslib.pc lib/libhts.a lib/libhts.so* lib/libhts.dylib
+    rm -f *.o  # Remove any remaining object files
     cd ../../..
 fi
 

@@ -16,6 +16,7 @@ if exist "inst\duckhts_extension\htslib" (
     del /Q config.log config.status 2>NUL || true
     del /Q libhts.a libhts.so* 2>NUL || true
     del /Q htslib.pc 2>NUL || true
+    del /Q *.o 2>NUL || true
     cd ..\..\..
 )
 

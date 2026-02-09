@@ -45,7 +45,12 @@ rduckhts_load <- function(con, extension_path = NULL) {
   }
 
   if (!file.exists(extension_path)) {
-    stop("DuckHTS extension not found. Please install the package properly.")
+    stop(
+      "DuckHTS extension not found at: ",
+      extension_path,
+      "\nThis suggests the package was not built correctly during installation.",
+      "\nTry recompiling the package with R CMD INSTALL --preclean Rduckhts"
+    )
   }
 
   # Enable unsigned extensions if needed

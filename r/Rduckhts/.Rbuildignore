@@ -1,10 +1,8 @@
 ^bootstrap\.R$
-^configure$
 ^.*\.tar\.gz$
 ^\.Rproj\.user$
-^\.Rcheck$
 ^.*\.Rcheck$
-^.*\.log$
+^.*\.Rcheck$
 ^README\.md$
 ^LICENSE\.md$
 ^\.gitignore$
@@ -18,3 +16,17 @@
 ^extension-ci-tools/
 ^duckdb_capi/
 ^DESCRIPTION\.yml$
+
+# Build artifacts to ignore
+^inst/duckhts_extension/.*\.o$
+^inst/duckhts_extension/.*\.so$
+^inst/duckhts_extension/.*\.dll$
+^inst/duckhts_extension/config\.log$
+^inst/duckhts_extension/config\.status$
+^inst/duckhts_extension/htslib/.*\.o$
+^inst/duckhts_extension/htslib/libhts\.a$
+^inst/duckhts_extension/htslib/libhts\.so.*$
+^inst/duckhts_extension/htslib/htslib\.pc$
+^inst/extdata/.*\.duckdb_extension.*$
+^inst/extdata/.*\.tmp$
+^inst/extdata/.*\.raw$

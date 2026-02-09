@@ -27,7 +27,8 @@ install: build
 .PHONY: check
 check:
 	R CMD check --no-manual .
-
+rd: 
+	R -e 'roxygen2::roxygenize(".",load_code=NULL)'
 # Full CRAN check
 .PHONY: check-cran
 check-cran:
