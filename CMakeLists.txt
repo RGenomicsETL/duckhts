@@ -10,6 +10,32 @@ endif()
 
 add_definitions(-DDUCKDB_EXTENSION_NAME=${EXTENSION_NAME})
 
+# ------------------------------------------------------------------
+# macOS target architecture (must be set before project()).
+#
+# Prefer the vcpkg target triplet when provided to avoid host-arch leakage
+# during cross-compilation on Apple Silicon runners.
+# ------------------------------------------------------------------
+if(APPLE)
+    if(NOT DEFINED OSX_BUILD_ARCH OR "${OSX_BUILD_ARCH}" STREQUAL "")
+        if(DEFINED VCPKG_TARGET_TRIPLET)
+            if(VCPKG_TARGET_TRIPLET MATCHES "^x64-osx")
+                set(OSX_BUILD_ARCH "x86_64")
+            elseif(VCPKG_TARGET_TRIPLET MATCHES "^arm64-osx")
+                set(OSX_BUILD_ARCH "arm64")
+            endif()
+        endif()
+        if((NOT DEFINED OSX_BUILD_ARCH OR "${OSX_BUILD_ARCH}" STREQUAL "") AND
+           DEFINED CMAKE_OSX_ARCHITECTURES AND NOT "${CMAKE_OSX_ARCHITECTURES}" STREQUAL "")
+            list(GET CMAKE_OSX_ARCHITECTURES 0 OSX_BUILD_ARCH)
+        endif()
+    endif()
+    if(DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
+        set(CMAKE_OSX_ARCHITECTURES "${OSX_BUILD_ARCH}" CACHE STRING "" FORCE)
+        message(STATUS "macOS target arch: ${OSX_BUILD_ARCH}")
+    endif()
+endif()
+
 # Avoid "manually-specified variables were not used" warnings when the
 # CI passes TARGET_DUCKDB_VERSION_* for header fetching but the stable API
 # path doesn't consume them.
@@ -130,39 +156,12 @@ set(HTSLIB_EXTRA_CFLAGS "")
 set(HTSLIB_EXTRA_LDFLAGS "")
 
 # ------------------------------------------------------------------
-# macOS cross-compilation support.
-#
-# The CI passes -DOSX_BUILD_ARCH=x86_64 (or arm64) for universal builds.
-# When building for x86_64 on an arm64 Mac (or vice-versa) we need to
-# tell both the C compiler and htslib's autotools configure about the
-# target architecture.
+# macOS cross-compilation support (htslib build flags).
 # ------------------------------------------------------------------
-set(HTSLIB_HOST_FLAG "")
-if(APPLE)
-    if(NOT DEFINED OSX_BUILD_ARCH OR "${OSX_BUILD_ARCH}" STREQUAL "")
-        if(DEFINED VCPKG_TARGET_TRIPLET)
-            if(VCPKG_TARGET_TRIPLET MATCHES "^x64-osx")
-                set(OSX_BUILD_ARCH "x86_64")
-            elseif(VCPKG_TARGET_TRIPLET MATCHES "^arm64-osx")
-                set(OSX_BUILD_ARCH "arm64")
-            endif()
-        endif()
-        if((NOT DEFINED OSX_BUILD_ARCH OR "${OSX_BUILD_ARCH}" STREQUAL "") AND
-           DEFINED CMAKE_OSX_ARCHITECTURES AND NOT "${CMAKE_OSX_ARCHITECTURES}" STREQUAL "")
-            list(GET CMAKE_OSX_ARCHITECTURES 0 OSX_BUILD_ARCH)
-        endif()
-    endif()
-    if(DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
-        set(CMAKE_OSX_ARCHITECTURES "${OSX_BUILD_ARCH}" CACHE STRING "" FORCE)
-        set(HTSLIB_EXTRA_CFLAGS "-arch ${OSX_BUILD_ARCH}")
-        set(HTSLIB_EXTRA_LDFLAGS "-arch ${OSX_BUILD_ARCH}")
-        if("${OSX_BUILD_ARCH}" STREQUAL "x86_64")
-            set(HTSLIB_HOST_FLAG "--host=x86_64-apple-darwin")
-        elseif("${OSX_BUILD_ARCH}" STREQUAL "arm64")
-            set(HTSLIB_HOST_FLAG "--host=aarch64-apple-darwin")
-        endif()
-        message(STATUS "macOS cross-compile: arch=${OSX_BUILD_ARCH} host=${HTSLIB_HOST_FLAG}")
-    endif()
+if(APPLE AND DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
+    set(HTSLIB_EXTRA_CFLAGS "-arch ${OSX_BUILD_ARCH}")
+    set(HTSLIB_EXTRA_LDFLAGS "-arch ${OSX_BUILD_ARCH}")
+    message(STATUS "macOS htslib arch: ${OSX_BUILD_ARCH}")
 endif()
 
 if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
