@@ -38,3 +38,7 @@ update_duckdb_headers_custom:
 
 clean: clean_build clean_cmake
 clean_all: clean clean_configure
+
+# Render README.md from README.Rmd (GitHub-flavored markdown)
+rdm:
+	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
