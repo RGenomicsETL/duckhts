@@ -178,14 +178,17 @@ cd "${HTSLIB_DIR}"
 HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
 
 if [ "$HAS_BZ2" = "no" ]; then
+  echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-bz2"
 fi
 
 if [ "$HAS_LZMA" = "no" ]; then
+  echo "INFO: liblzma not found - disabling XZ support in htslib"
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-lzma"
 fi
 
 if [ "$HAS_CURL" = "no" ]; then
+  echo "INFO: libcurl not found - disabling remote URL support in htslib"
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
 elif [ "$HAS_OPENSSL" = "no" ]; then

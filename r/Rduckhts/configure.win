@@ -147,21 +147,25 @@ fi
 if try_compile "bz2" "-lbz2" "yes"; then
     HAS_BZ2=yes
     LIBS="$LIBS -lbz2"
+    echo "INFO: libbz2 found - BZ2 support enabled in htslib"
 fi
 
 if try_compile "lzma" "-llzma" "no"; then
     HAS_LZMA=yes
     LIBS="$LIBS -llzma"
+    echo "INFO: liblzma found - XZ support enabled in htslib"
 fi
 
 if try_compile "curl" "-lcurl" "no"; then
     HAS_CURL=yes
     LIBS="$LIBS -lcurl"
+    echo "INFO: libcurl found - remote URL support enabled in htslib"
 fi
 
 if try_compile "ssl" "-lssl" "no"; then
     HAS_OPENSSL=yes
     LIBS="$LIBS -lssl -lcrypto"
+    echo "INFO: OpenSSL found - HTTPS support enabled in htslib"
 fi
 
 # MinGW regex (regcomp/regexec are in libgnurx or libregex)
@@ -187,14 +191,17 @@ cd "${HTSLIB_DIR}"
 HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
 
 if [ "$HAS_BZ2" = "no" ]; then
+    echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-bz2"
 fi
 
 if [ "$HAS_LZMA" = "no" ]; then
+    echo "INFO: liblzma not found - disabling XZ support in htslib"
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-lzma"
 fi
 
 if [ "$HAS_CURL" = "no" ]; then
+    echo "INFO: libcurl not found - disabling remote URL support in htslib"
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
 fi
 
