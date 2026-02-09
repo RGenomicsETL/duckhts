@@ -7,6 +7,10 @@
     {
       "name": "htslib",
       "platform": "windows & !mingw"
+    },
+    {
+      "name": "pthreads",
+      "platform": "windows & !mingw"
     }
   ],
   "default-features": ["compression", "net"],
