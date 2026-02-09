@@ -2,159 +2,115 @@
 output: github_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
 # Rduckhts: DuckDB HTS File Reader Extension for R
 
 [![CRAN Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)
 [![R-CMD-check](https://github.com/RGenomicsETL/duckhts/workflows/CRAN-check/badge.svg)](https://github.com/RGenomicsETL/duckhts/actions)
 
-The Rduckhts package provides an R interface to the DuckDB HTS (High Throughput Sequencing) file reader extension. It enables reading common bioinformatics file formats such as VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, and tabix-indexed files directly from R using SQL queries via DuckDB.
+We provide an R interface to the DuckDB HTS (High Throughput Sequencing) file reader extension. We enable reading common bioinformatics file formats such as VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, and tabix-indexed files directly from R using SQL queries via DuckDB.
 
 ## Key Features
 
-- **Table-based interface** (like RBCFTools) - Creates DuckDB tables instead of returning data frames
-- **Comprehensive format support** - VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, tabix
-- **Region queries** - Efficiently query specific genomic regions
-- **Cross-platform** - Works on Linux, macOS, and Windows (MinGW)
-- **Self-contained** - Bundles htslib 1.23, no external dependencies during runtime
+We follow the RBCFTools table pattern and create DuckDB tables instead of returning data frames. We support VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, and tabix. We support region queries for indexed files, and we target Linux, macOS, and Windows (MinGW). We bundle htslib 1.23 so runtime dependencies stay minimal.
 
 ## Installation
 
 ```r
-# Install from CRAN (when available)
 install.packages("Rduckhts")
-
-# Or install from GitHub
 remotes::install_github("RGenomicsETL/duckhts", subdir = "r/Rduckhts")
 ```
 
-## Quick Start
+## Quick Start (runnable example)
 
-```r
-library(DBI)
-library(duckdb)
-library(Rduckhts)
+```{r}
+if (requireNamespace("duckdb", quietly = TRUE) &&
+		requireNamespace("Rduckhts", quietly = TRUE)) {
+	library(DBI)
+	library(duckdb)
+	library(Rduckhts)
 
-# Create DuckDB connection with unsigned extensions allowed
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+	ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
+	if (!file.exists(ext_path)) {
+		ext_path <- file.path("inst", "extdata", "duckhts.duckdb_extension")
+	}
 
-# Load the DuckHTS extension
-rduckhts_load(con)
+	if (file.exists(ext_path)) {
+		tmp_dir <- tempdir()
+		fasta_path <- file.path(tmp_dir, "example.fa")
+		fastq_path <- file.path(tmp_dir, "example.fq")
 
-# Create tables from files (like RBCFTools pattern)
-rduckhts_bcf(con, "variants", "path/to/file.vcf.gz")
-rduckhts_bam(con, "reads", "path/to/file.bam")
-rduckhts_fasta(con, "sequences", "path/to/file.fa")
-rduckhts_fastq(con, "reads", "path/to/reads.fq")
-rduckhts_gff(con, "annotations", "path/to/file.gff3.gz", attributes_map = TRUE)
-rduckhts_gtf(con, "transcripts", "path/to/file.gtf", attributes_map = TRUE)
-rduckhts_tabix(con, "bed_data", "path/to/file.bed.gz", region = "chr1:1000-2000")
+		writeLines(c(">seq1", "ACGTACGT", ">seq2", "TTGGCCAA"), fasta_path)
+		writeLines(c("@r1", "ACGT", "+", "IIII"), fastq_path)
 
-# Query the tables using SQL
-variants <- dbGetQuery(con, "SELECT * FROM variants WHERE QUAL > 100 LIMIT 10")
-read_count <- dbGetQuery(con, "SELECT COUNT(*) FROM reads WHERE FLAG & 4 = 0")
-genes <- dbGetQuery(con, "SELECT * FROM annotations WHERE feature = 'gene'")
+		con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+		rduckhts_load(con, extension_path = ext_path)
 
-# Clean up
-dbDisconnect(con, shutdown = TRUE)
+		rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE)
+		rduckhts_fastq(con, "reads", fastq_path, overwrite = TRUE)
+
+		dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
+		dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
+
+		dbDisconnect(con, shutdown = TRUE)
+	} else {
+		cat("Extension not found; skipping example.\n")
+	}
+} else {
+	cat("duckdb or Rduckhts not available; skipping example.\n")
+}
 ```
 
 ## Available Functions
 
-### Core Function
-
-- `rduckhts_load(con, extension_path = NULL)` - Load DuckHTS extension
-
-### Table Creation Functions
-
-- `rduckhts_bcf(con, table_name, path, region = NULL, tidy_format = FALSE, overwrite = FALSE)`
-- `rduckhts_bam(con, table_name, path, region = NULL, reference = NULL, overwrite = FALSE)`
-- `rduckhts_fasta(con, table_name, path, overwrite = FALSE)`
-- `rduckhts_fastq(con, table_name, path, mate_path = NULL, interleaved = FALSE, overwrite = FALSE)`
-- `rduckhts_gff(con, table_name, path, region = NULL, attributes_map = FALSE, overwrite = FALSE)`
-- `rduckhts_gtf(con, table_name, path, region = NULL, attributes_map = FALSE, overwrite = FALSE)`
-- `rduckhts_tabix(con, table_name, path, region = NULL, overwrite = FALSE)`
+We load the extension with `rduckhts_load(con, extension_path = NULL)`. We create tables with `rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the parameters documented in their help pages.
 
 ## Advanced Examples
 
 ### Region Queries
 
 ```r
-# Create a table from specific region
 rduckhts_bcf(con, "chr1_variants", "file.vcf.gz", region = "chr1:1000000-2000000")
-
-# Query specific region
 chr1_variants <- dbGetQuery(con, "SELECT * FROM chr1_variants WHERE POS BETWEEN 1500000 AND 1600000")
 ```
 
 ### Paired FASTQ
 
 ```r
-# Paired FASTQ files
 rduckhts_fastq(con, "paired_reads", "r1.fq", mate_path = "r2.fq")
-
-# Interleaved paired FASTQ
 rduckhts_fastq(con, "interleaved_reads", "interleaved.fq", interleaved = TRUE)
-
-# Query paired reads
 pairs <- dbGetQuery(con, "SELECT * FROM paired_reads WHERE MATE = 1")
 ```
 
 ### Attributes Map for GFF/GTF
 
 ```r
-# Create table with attributes as MAP for easier querying
 rduckhts_gff(con, "genes", "annotations.gff3.gz", attributes_map = TRUE)
-
-# Query specific attributes
 gene_annotations <- dbGetQuery(con, "SELECT seqname, start, end, attributes['gene_id'], attributes['gene_name'] FROM genes WHERE feature = 'gene'")
 ```
 
 ### CRAM with Reference
 
 ```r
-# Read CRAM files with explicit reference
 rduckhts_bam(con, "cram_reads", "reads.cram", reference = "reference.fa")
-
-# Query CRAM data
 cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads")
 ```
 
 ## System Requirements
 
-The package requires the following build-time dependencies:
-
-- **Required**: zlib, libbz2
-- **Optional**: liblzma, libcurl, openssl (development headers)
-- **Build tools**: cmake, GNU make, C compiler (GCC/Clang)
-
-On Ubuntu/Debian:
-```bash
-sudo apt-get install build-essential cmake zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev
-```
-
-On macOS:
-```bash
-brew install cmake htslib
-```
-
-On Windows (Rtools):
-- Required libraries are included in Rtools
-- Use MinGW/RTools for Windows builds
+We require zlib and libbz2, and we optionally use liblzma, libcurl, and openssl during build. We build with cmake, GNU make, and a C compiler. On Ubuntu/Debian we install build-essential, cmake, and the listed dev packages. On macOS we install cmake and htslib. On Windows we use Rtools and MinGW.
 
 ## Notes
 
-- Follows the same pattern as RBCFTools - creates DuckDB tables rather than returning data frames
-- All functions check for existing tables and require `overwrite = TRUE` to replace them
-- Region queries are efficient for indexed files (VCF/BCF with CSI/BAI/TBI, BAM/CRAM with BAI/CSI)
-- The package bundles htslib 1.23 - no external htslib installation required
-- Plugins are disabled for CRAN compliance
+We follow the RBCFTools pattern and create DuckDB tables rather than returning data frames. We check for existing tables and require `overwrite = TRUE` to replace them. We use region queries for indexed files, we bundle htslib 1.23, and we enable plugins where supported.
 
 ## References
 
-- [DuckDB](https://duckdb.org/)
-- [htslib](https://github.com/samtools/htslib)
-- [RBCFTools](https://github.com/R-Bioconductor/Rbcftools) - Inspired the table creation pattern
+We reference DuckDB, htslib, and RBCFTools as the primary upstream projects that inform this work.
 
 ## License
 
-MIT License. See the LICENSE file for details.
+GPL-3.

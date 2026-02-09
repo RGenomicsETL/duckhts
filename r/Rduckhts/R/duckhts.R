@@ -13,6 +13,17 @@
 #' @importFrom DBI dbExecute dbExistsTable dbRemoveTable
 "_PACKAGE"
 
+build_param_str <- function(params) {
+  if (length(params) == 0) {
+    return("")
+  }
+  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
+  if (nchar(param_str) > 0) {
+    return(paste0(", ", param_str))
+  }
+  ""
+}
+
 #' Load DuckHTS Extension
 #'
 #' Loads the DuckHTS extension into a DuckDB connection. This must be called
@@ -115,10 +126,7 @@ rduckhts_bcf <- function(
     params$tidy_format <- "true"
   }
 
-  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
-  if (nchar(param_str) > 0) {
-    param_str <- paste0(", ", param_str)
-  }
+  param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
@@ -190,10 +198,7 @@ rduckhts_bam <- function(
     params$reference <- sprintf("'%s'", reference)
   }
 
-  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
-  if (nchar(param_str) > 0) {
-    param_str <- paste0(", ", param_str)
-  }
+  param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
@@ -316,10 +321,7 @@ rduckhts_fastq <- function(
     params$interleaved <- "true"
   }
 
-  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
-  if (nchar(param_str) > 0) {
-    param_str <- paste0(", ", param_str)
-  }
+  param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
@@ -391,10 +393,7 @@ rduckhts_gff <- function(
     params$attributes_map <- "true"
   }
 
-  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
-  if (nchar(param_str) > 0) {
-    param_str <- paste0(", ", param_str)
-  }
+  param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
@@ -466,10 +465,7 @@ rduckhts_gtf <- function(
     params$attributes_map <- "true"
   }
 
-  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
-  if (nchar(param_str) > 0) {
-    param_str <- paste0(", ", param_str)
-  }
+  param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(

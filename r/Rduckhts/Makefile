@@ -28,6 +28,8 @@ install: build
 
 check: build
 	R CMD check --as-cran --no-manual $(PKG_NAME)_$(PKG_VERSION).tar.gz
+readme:
+	R -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
 rd: 
 	R -e 'roxygen2::roxygenize(".",load_code=NULL)'
 
