@@ -1,0 +1,28 @@
+#!/bin/sh
+# cleanup script for Rduckhts package (Unix systems)
+# This script is used during package cleanup and CRAN checks
+
+set -eu
+
+# Remove build artifacts
+rm -f src/*.o src/*.so src/*.dll
+rm -f inst/duckhts_extension/*.o inst/duckhts_extension/*.so
+rm -f inst/duckhts_extension/*.dll
+
+# Clean up htslib build artifacts if they exist
+if [ -d "inst/duckhts_extension/htslib" ]; then
+    cd inst/duckhts_extension/htslib
+    make clean 2>/dev/null || true
+    rm -f config.log config.status
+    rm -f libhts.a libhts.so*
+    rm -f htslib.pc
+    cd ../../..
+fi
+
+# Remove any generated extension binaries
+rm -f inst/extdata/*.duckdb_extension
+
+# Remove R CMD check artifacts
+rm -rf ../Rduckhts.Rcheck/
+
+echo "Cleanup complete."
