@@ -3,7 +3,11 @@
   "version-string": "0.1.0",
   "description": "DuckDB extension for reading HTS file formats via htslib",
   "dependencies": [
-    "zlib"
+    "zlib",
+    {
+      "name": "htslib",
+      "platform": "windows & !mingw"
+    }
   ],
   "default-features": ["compression", "net"],
   "features": {

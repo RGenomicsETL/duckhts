@@ -119,16 +119,15 @@ find_package(OpenSSL QUIET)
 find_package(Threads REQUIRED)
 
 # ------------------------------------------------------------------
-# Build paths for htslib's configure.
+# Build paths for htslib's Makefile.
 #
 # When vcpkg is active, libraries are installed under
 #   ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/
-# and htslib's autotools configure needs CPPFLAGS/LDFLAGS/PKG_CONFIG_PATH
-# pointing there.  On plain system builds these are empty and harmless.
+# and we pass CPPFLAGS/LDFLAGS/LIBS directly to make. On plain system builds
+# these are empty and harmless.
 # ------------------------------------------------------------------
 set(HTSLIB_EXTRA_CFLAGS "")
 set(HTSLIB_EXTRA_LDFLAGS "")
-set(HTSLIB_PKG_CONFIG_PATH "")
 
 # ------------------------------------------------------------------
 # macOS cross-compilation support.
@@ -171,7 +170,6 @@ if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     if(EXISTS "${_vcpkg_prefix}")
         set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -I${_vcpkg_prefix}/include")
         set(HTSLIB_EXTRA_LDFLAGS "${HTSLIB_EXTRA_LDFLAGS} -L${_vcpkg_prefix}/lib")
-        set(HTSLIB_PKG_CONFIG_PATH "${_vcpkg_prefix}/lib/pkgconfig")
         message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
     endif()
 endif()
@@ -180,27 +178,15 @@ endif()
 string(STRIP "${HTSLIB_EXTRA_CFLAGS}" HTSLIB_EXTRA_CFLAGS)
 string(STRIP "${HTSLIB_EXTRA_LDFLAGS}" HTSLIB_EXTRA_LDFLAGS)
 
-set(HTSLIB_CONFIGURE_ARGS
-    "CFLAGS=-fPIC -O2 ${HTSLIB_EXTRA_CFLAGS}"
+set(HTSLIB_MAKE_ARGS
+    "CC=${CMAKE_C_COMPILER}"
+    "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
-    "--disable-plugins"
 )
 
-# --host for cross-compilation (must come before variable assignments)
-if(NOT "${HTSLIB_HOST_FLAG}" STREQUAL "")
-    list(INSERT HTSLIB_CONFIGURE_ARGS 0 "${HTSLIB_HOST_FLAG}")
-endif()
-
-# Autotools convention: CPPFLAGS for -I, CFLAGS for -O/-f etc.
-# Some configure scripts only honour CPPFLAGS for include-path probes.
 # Only pass -I flags in CPPFLAGS (not -arch or other compiler flags).
 if(DEFINED _vcpkg_prefix AND EXISTS "${_vcpkg_prefix}")
-    list(APPEND HTSLIB_CONFIGURE_ARGS "CPPFLAGS=-I${_vcpkg_prefix}/include")
-endif()
-
-# Pass PKG_CONFIG_PATH so configure's pkg-config checks find vcpkg libs
-if(NOT "${HTSLIB_PKG_CONFIG_PATH}" STREQUAL "")
-    list(APPEND HTSLIB_CONFIGURE_ARGS "PKG_CONFIG_PATH=${HTSLIB_PKG_CONFIG_PATH}")
+    list(APPEND HTSLIB_MAKE_ARGS "CPPFLAGS=-I${_vcpkg_prefix}/include")
 endif()
 
 # Static-library transitive dependencies.
@@ -235,63 +221,46 @@ else()
     list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
 endif()
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
-list(APPEND HTSLIB_CONFIGURE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
+list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
 
-if(BZIP2_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-bz2")
+message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
+
+if(WIN32 AND NOT MINGW)
+    # MSVC builds can't run autotools configure. Use vcpkg/system htslib.
+    find_path(HTSLIB_INCLUDE_DIR NAMES htslib/hts.h)
+    find_library(HTSLIB_LIBRARY NAMES htslib hts)
+    if(NOT HTSLIB_INCLUDE_DIR OR NOT HTSLIB_LIBRARY)
+        message(FATAL_ERROR "htslib not found. On Windows MSVC, install htslib via vcpkg or provide HTSLIB_INCLUDE_DIR/HTSLIB_LIBRARY.")
+    endif()
+    add_library(hts UNKNOWN IMPORTED GLOBAL)
+    set_target_properties(hts PROPERTIES
+        IMPORTED_LOCATION "${HTSLIB_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_INCLUDE_DIR}"
+    )
 else()
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-bz2")
+    # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
+    # even when the outer CMake build uses Ninja.
+    find_program(MAKE_COMMAND NAMES gmake make REQUIRED)
+
+    ExternalProject_Add(htslib_build
+        SOURCE_DIR        "${HTSLIB_SRC_DIR}"
+        BUILD_IN_SOURCE   TRUE
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
+        INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
+        BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
+        LOG_CONFIGURE     TRUE
+        LOG_BUILD         TRUE
+    )
+
+    # Import the static library so CMake knows about it
+    add_library(hts STATIC IMPORTED GLOBAL)
+    set_target_properties(hts PROPERTIES
+        IMPORTED_LOCATION "${HTSLIB_BUILD_DIR}/libhts.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_SRC_DIR}"
+    )
+    add_dependencies(hts htslib_build)
 endif()
-
-if(LIBLZMA_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-lzma")
-else()
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-lzma")
-endif()
-
-if(CURL_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-libcurl")
-else()
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-libcurl")
-endif()
-
-if(CURL_FOUND AND OPENSSL_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-gcs" "--enable-s3")
-else()
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--disable-gcs" "--disable-s3")
-endif()
-
-if(LIBDEFLATE_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--with-libdeflate")
-else()
-    list(APPEND HTSLIB_CONFIGURE_ARGS "--without-libdeflate")
-endif()
-
-message(STATUS "htslib configure args: ${HTSLIB_CONFIGURE_ARGS}")
-
-# htslib uses GNU Makefiles (not Ninja), so we must always use `make`
-# even when the outer CMake build uses Ninja.
-find_program(MAKE_COMMAND NAMES gmake make REQUIRED)
-
-ExternalProject_Add(htslib_build
-    SOURCE_DIR        "${HTSLIB_SRC_DIR}"
-    BUILD_IN_SOURCE   TRUE
-    CONFIGURE_COMMAND "${HTSLIB_SRC_DIR}/configure"
-                      ${HTSLIB_CONFIGURE_ARGS}
-    BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static
-    INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
-    BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
-    LOG_CONFIGURE     TRUE
-    LOG_BUILD         TRUE
-)
-
-# Import the static library so CMake knows about it
-add_library(hts STATIC IMPORTED GLOBAL)
-set_target_properties(hts PROPERTIES
-    IMPORTED_LOCATION "${HTSLIB_BUILD_DIR}/libhts.a"
-    INTERFACE_INCLUDE_DIRECTORIES "${HTSLIB_SRC_DIR}"
-)
-add_dependencies(hts htslib_build)
 
 # ------------------------------------------------------------------
 # Link hts + transitive dependencies (only what was found).
@@ -318,8 +287,8 @@ endif()
 # Threads::Threads is portable (pthread on Linux, nothing on macOS)
 list(APPEND HTSLIB_LINK_LIBS Threads::Threads)
 
-# libm: needed on Linux/musl, harmless no-op on macOS
-if(NOT APPLE)
+# libm: needed on Linux/musl, not present on Windows
+if(NOT APPLE AND NOT WIN32)
     list(APPEND HTSLIB_LINK_LIBS m)
 endif()
 
