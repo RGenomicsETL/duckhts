@@ -10,7 +10,6 @@ Description: Bundles the duckhts DuckDB extension for reading HTS file
     vendored sources during package installation.
 License: GPL-3
 Encoding: UTF-8
-OS_type: unix
 SystemRequirements: GNU make, cmake, zlib, libbz2, liblzma, libcurl, openssl (development headers)
 Depends:
     R (>= 4.0.0)
