@@ -136,6 +136,8 @@ HAS_LZMA=no
 HAS_CURL=no
 HAS_OPENSSL=no
 HAS_REGEX=no
+HAS_LIBDEFLATE=no
+HAS_DLOPEN=no
 
 LIBS=""
 
@@ -168,6 +170,17 @@ if try_compile "ssl" "-lssl" "no"; then
     echo "INFO: OpenSSL found - HTTPS support enabled in htslib"
 fi
 
+if try_compile "libdeflate" "-ldeflate" "no"; then
+    HAS_LIBDEFLATE=yes
+    LIBS="$LIBS -ldeflate"
+    echo "INFO: libdeflate found - deflate support enabled in htslib"
+fi
+
+if try_compile "dl" "-ldl" "no"; then
+    HAS_DLOPEN=yes
+    LIBS="$LIBS -ldl"
+fi
+
 # MinGW regex (regcomp/regexec are in libgnurx or libregex)
 case "${OS_NAME}" in
     *MINGW*|*MSYS*|*CYGWIN*)
@@ -188,7 +201,7 @@ echo "---------- Configuring htslib (Windows) ----------"
 cd "${HTSLIB_DIR}"
 
 # Build htslib configure flags
-HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
+HTSLIB_CONFIGURE_FLAGS="--disable-plugins"
 
 if [ "$HAS_BZ2" = "no" ]; then
     echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
@@ -203,6 +216,11 @@ fi
 if [ "$HAS_CURL" = "no" ]; then
     echo "INFO: libcurl not found - disabling remote URL support in htslib"
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
+fi
+
+if [ "$HAS_LIBDEFLATE" = "no" ]; then
+    echo "INFO: libdeflate not found - disabling libdeflate support in htslib"
+    HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libdeflate"
 fi
 
 # Configure htslib for Windows/MinGW
