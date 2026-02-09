@@ -4,38 +4,56 @@
 # Rduckhts: DuckDB HTS File Reader Extension for R
 
 [![CRAN
-Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)
-[![R-CMD-check](https://github.com/RGenomicsETL/duckhts/workflows/R-CMD-check/badge.svg)](https://github.com/RGenomicsETL/duckhts/actions)
+Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)[![R-universe
+version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
 
-We provide an R interface to the [DuckDB](https://duckdb.org/) HTS (High
-Throughput Sequencing) file reader extension. We enable reading common
-bioinformatics file formats such as VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ,
-GFF, GTF, and tabix-indexed files directly from R using SQL queries via
-[DuckDB](https://duckdb.org/).
+`Rduckhts` provides an R interface to a [DuckDB](https://duckdb.org/)
+`HTS` (High Throughput Sequencing) file reader extension. This enables
+reading common bioinformatics file formats such as VCF/BCF,
+SAM/BAM/CRAM, FASTA, FASTQ, GFF, GTF, and tabix-indexed files directly
+from `R` using `SQL` queries via [`duckhts`](./inst/duckhts_extension).
 
-## Key Features
+## How it works
 
-We follow the [RBCFTools](https://github.com/RGenomicsETL/RBCFTools)
-table pattern and create [DuckDB](https://duckdb.org/) tables instead of
-returning data frames. We support VCF/BCF, SAM/BAM/CRAM, FASTA, FASTQ,
-GFF, GTF, and tabix. We support region queries for indexed files, and we
-target Linux, macOS, and Windows (MinGW). We bundle
-[htslib](https://github.com/samtools/htslib) 1.23 so runtime
-dependencies stay minimal.
+Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools) table
+pattern and tables are created and returned instead of data frames.
+`VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and
+`tabix` formats can be queried. We support region queries for indexed
+files, and we target Linux, macOS, and RTools.
+[`htslib`](https://github.com/samtools/htslib) 1.23 is bundled so build
+dependencies stay minimal. The extensnion is built by adapting the
+generic extension infracstructure by using only makefiles unlike unlike
+the submitted communtity extension [`duckhts`](../../duckhts).
 
 ## Installation
 
-We install from GitHub with
-`remotes::install_github("RGenomicsETL/duckhts", subdir = "r/Rduckhts")`.
+The package can be installed from github
 
-## Quick Start (runnable example)
+``` r
+remotes::install_github(
+    "RGenomicsETL/duckhts", subdir = "r/Rduckhts")`.
+```
+
+## System Requirements
+
+Installation requires `htslib` dependencies such ad zlib and libbz2, and
+optionally for full functionally liblzma, libcurl, and openssl. The
+package requires GNU make. On Windows’s Rtools, `htslib` plugins are not
+enable.
+
+## Quick Start
+
+The extension is loaded with
+`rduckhts_load(con, extension_path = NULL)`. We can create tables with
+`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
+`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
+parameters documented in their help pages
 
 ``` r
 library(DBI)
 library(duckdb)
 library(Rduckhts)
 
-setup_hts_env()
 
 ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
 fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
@@ -58,12 +76,7 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 message("Loaded example data and created tables.")
 ```
 
-We load the extension with `rduckhts_load(con, extension_path = NULL)`.
-We create tables with `rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`,
-`rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix`
-using the parameters documented in their help pages.
-
-## Advanced Examples
+## Examples
 
 ### Region Queries
 
@@ -98,7 +111,10 @@ variants
 #> 5         NULL
 ```
 
-### Remote VCF on S3 (requires libcurl)
+### Remote VCF on S3
+
+S3 files can be query when `htslib` is built with plugins enable. This
+is not the case on RTools
 
 ``` r
 # Enable htslib plugins for remote access (S3/GCS/HTTP)
@@ -116,6 +132,10 @@ dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
 #>   CHROM  n
 #> 1 chr22 11
 ```
+
+### FASTQ files
+
+Three modes for fastq files, single, paired and interleaved
 
 ``` r
 r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
@@ -151,6 +171,10 @@ pairs
 #> 5    1 HS25_09827:2:1201:1624:69925#49
 ```
 
+### GFF files
+
+These can be open with or with attributes maps
+
 ``` r
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
 rduckhts_gff(con, "genes", gff_path, attributes_map = TRUE, overwrite = TRUE)
@@ -159,6 +183,11 @@ gene_annotations
 #>   seqname   start     end
 #> 1       X 2934816 2964270
 ```
+
+### BAM/CRAM
+
+When built with htslib codec, `CRAM` can be opened in addition to `BAM`
+files
 
 ``` r
 cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
@@ -174,23 +203,9 @@ cram_reads
 #> 5  HS18_09653:4:1303:4347:38100   83 1137   37
 ```
 
-## System Requirements
-
-We require zlib and libbz2, and we optionally use liblzma, libcurl, and
-openssl during build. We build with cmake, GNU make, and a C compiler.
-On Ubuntu/Debian we install build-essential, cmake, and the listed dev
-packages. On macOS we install cmake and
-[htslib](https://github.com/samtools/htslib). On Windows we use Rtools
-and MinGW.
-
-## Notes
-
-We follow the [RBCFTools](https://github.com/RGenomicsETL/RBCFTools)
-pattern and create [DuckDB](https://duckdb.org/) tables rather than
-returning data frames. We check for existing tables and require
-`overwrite = TRUE` to replace them. We use region queries for indexed
-files, we bundle [htslib](https://github.com/samtools/htslib) 1.23, and
-we enable plugins where supported.
+``` r
+dbDisconnect(con, shutdown = TRUE)
+```
 
 ## References
 
@@ -204,7 +219,3 @@ we enable plugins where supported.
 ## License
 
 GPL-3.
-
-``` r
-dbDisconnect(con, shutdown = TRUE)
-```
