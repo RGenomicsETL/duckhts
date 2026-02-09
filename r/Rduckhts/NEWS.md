@@ -1,5 +1,9 @@
 # Rduckhts 0.1.1-0.0.2
 
+- misspeling
+
+# Rduckhts 0.1.1-0.0.2
+
 - CRAN resubmission: apply DuckDB C API header patch to avoid strict-prototypes warnings.
 
 # Rduckhts 0.1.1-0.0.1
