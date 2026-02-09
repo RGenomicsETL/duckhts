@@ -144,6 +144,29 @@ if(NOT "${HTSLIB_PKG_CONFIG_PATH}" STREQUAL "")
     list(APPEND HTSLIB_CONFIGURE_ARGS "PKG_CONFIG_PATH=${HTSLIB_PKG_CONFIG_PATH}")
 endif()
 
+# Static-library transitive dependencies.
+# When vcpkg (or similar) provides static .a archives, configure's link
+# checks like `gcc test.c -lcurl` fail because libcurl.a itself needs
+# -lssl -lcrypto -lz -lpthread etc.  Autotools' LIBS variable is
+# appended to every link check, so we collect all transitive deps here.
+set(HTSLIB_EXTRA_LIBS "")
+if(OPENSSL_FOUND)
+    list(APPEND HTSLIB_EXTRA_LIBS "-lssl" "-lcrypto")
+endif()
+list(APPEND HTSLIB_EXTRA_LIBS "-lz")
+if(LIBLZMA_FOUND)
+    list(APPEND HTSLIB_EXTRA_LIBS "-llzma")
+endif()
+if(BZIP2_FOUND)
+    list(APPEND HTSLIB_EXTRA_LIBS "-lbz2")
+endif()
+list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
+if(NOT APPLE)
+    list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
+endif()
+list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
+list(APPEND HTSLIB_CONFIGURE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
+
 if(BZIP2_FOUND)
     list(APPEND HTSLIB_CONFIGURE_ARGS "--enable-bz2")
 else()
