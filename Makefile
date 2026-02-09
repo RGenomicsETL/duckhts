@@ -16,6 +16,13 @@ TARGET_DUCKDB_VERSION=v1.2.0
 # The DuckDB release to fetch headers from
 DUCKDB_HEADER_VERSION=v1.4.3
 
+# Allow unsupported vcpkg ports on MSVC (htslib/htscodecs are marked !windows).
+ifeq ($(DUCKDB_PLATFORM),windows_amd64)
+	CMAKE_EXTRA_BUILD_FLAGS += -DVCPKG_INSTALL_OPTIONS=--allow-unsupported
+else ifeq ($(DUCKDB_PLATFORM),windows_arm64)
+	CMAKE_EXTRA_BUILD_FLAGS += -DVCPKG_INSTALL_OPTIONS=--allow-unsupported
+endif
+
 all: configure release
 
 # Include makefiles from DuckDB
