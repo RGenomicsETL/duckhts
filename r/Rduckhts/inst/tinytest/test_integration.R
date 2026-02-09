@@ -20,6 +20,7 @@ test_table_creation <- function() {
   fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
   gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
   tabix_path <- system.file("extdata", "rg.sam.gz", package = "Rduckhts")
+  vep_path <- system.file("extdata", "test_vep.vcf", package = "Rduckhts")
 
   expect_true(file.exists(bcf_path))
   expect_true(file.exists(bam_path))
@@ -28,6 +29,7 @@ test_table_creation <- function() {
   expect_true(file.exists(fastq_r2))
   expect_true(file.exists(gff_path))
   expect_true(file.exists(tabix_path))
+  expect_true(file.exists(vep_path))
 
   expect_silent(rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE))
   expect_silent(rduckhts_bam(con, "reads", bam_path, overwrite = TRUE))
@@ -35,6 +37,7 @@ test_table_creation <- function() {
   expect_silent(rduckhts_fastq(con, "fastq_reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE))
   expect_silent(rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE))
   expect_silent(rduckhts_tabix(con, "tabix_data", tabix_path, overwrite = TRUE))
+  expect_silent(rduckhts_bcf(con, "vep_variants", vep_path, overwrite = TRUE))
 
   expect_true(DBI::dbExistsTable(con, "variants"))
   if (DBI::dbExistsTable(con, "variants")) {
@@ -64,6 +67,11 @@ test_table_creation <- function() {
   expect_true(DBI::dbExistsTable(con, "tabix_data"))
   if (DBI::dbExistsTable(con, "tabix_data")) {
     expect_silent(DBI::dbGetQuery(con, "SELECT * FROM tabix_data LIMIT 1"))
+  }
+
+  expect_true(DBI::dbExistsTable(con, "vep_variants"))
+  if (DBI::dbExistsTable(con, "vep_variants")) {
+    expect_silent(DBI::dbGetQuery(con, "SELECT VEP_Allele FROM vep_variants LIMIT 1"))
   }
 
   # Test overwrite parameter validation

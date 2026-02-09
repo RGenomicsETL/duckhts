@@ -43,6 +43,14 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', re
 ----
 2
 
+# --- VEP/CSQ annotations (if present) ---
+query I
+SELECT CASE WHEN VEP_Allele IS NOT NULL THEN 1 ELSE 0 END
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/test_vep.vcf')
+LIMIT 1;
+----
+1
+
 # ==============================================================
 # read_bam – SAM/BAM/CRAM reader
 # ==============================================================

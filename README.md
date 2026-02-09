@@ -39,6 +39,17 @@ WHERE CHROM = '1' AND POS > 1000000;
 -- Region query on an indexed VCF (requires .tbi or .csi index)
 SELECT * FROM read_bcf('test/data/vcf_file.bcf', region := '1:3000150-3000151');
 
+-- VEP annotations (CSQ/BCSQ/ANN when present)
+SELECT CHROM, POS, VEP_Allele, VEP_Consequence
+FROM read_bcf('test/data/test_vep.vcf')
+LIMIT 1;
+
+-- Convert a VCF slice to Parquet using DuckDB COPY
+COPY (
+  SELECT *
+  FROM read_bcf('test/data/vcf_file.bcf', region := '1:3000000-3000500')
+) TO 'variants.parquet' (FORMAT PARQUET);
+
 -- Read a BAM file
 SELECT QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, READ_GROUP_ID, SAMPLE_ID
 FROM read_bam('test/data/range.bam')
@@ -197,6 +208,15 @@ dbGetQuery(con, "
 #> 1     1 100  a   A   T   NA   PASS        S1         a
 #> 2     1 100  a   A   T   NA   PASS        S²   bbbbbbb
 #> 3     1 100  a   A   T   NA   PASS        S3 ccccccccc
+
+parquet_path <- tempfile(fileext = ".parquet")
+dbExecute(con, sprintf(
+  "COPY (SELECT * FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)) TO '%s' (FORMAT PARQUET)",
+  parquet_path
+))
+#> [1] 3
+file.exists(parquet_path)
+#> [1] TRUE
 
 dbGetQuery(con, "
   SELECT NAME, SEQUENCE, QUALITY, MATE, PAIR_ID

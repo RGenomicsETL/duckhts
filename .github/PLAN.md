@@ -37,19 +37,20 @@
 - [x] Basic R package structure with DESCRIPTION, NAMESPACE
 - [x] Bootstrap script for building extension
 - [x] Vendored htslib in R package structure
-- [ ] Adapt R package to use CMAKE and configure/configure.win
-- [ ] Add cleanup and cleanup.win scripts
-- [ ] Simplify package bootstrapping to copy needed extension files
-- [ ] Ensure self-contained package (assume cmake, make available)
-- [ ] Update package versioning scheme (duckhtsVersion-x)
-- [ ] Remove vcpkg dependency for CRAN compatibility
-- [ ] Add comprehensive R package tests
-- [ ] Update DESCRIPTION with proper dependencies and SystemRequirements
+- [x] Adapt R package to use CMAKE and configure/configure.win
+- [x] Add cleanup and cleanup.win scripts
+- [x] Simplify package bootstrapping to copy needed extension files
+- [x] Ensure self-contained package (assume cmake, make available)
+- [x] Update package versioning scheme (duckhtsVersion-x)
+- [x] Remove vcpkg dependency for CRAN compatibility
+- [x] Add comprehensive R package tests
+- [x] Update DESCRIPTION with proper dependencies and SystemRequirements
 
 ## 📋 Phase 7 — Enhanced Testing & Documentation
 - [ ] Add more comprehensive edge case tests
 - [ ] Add performance benchmarks
 - [ ] Update README.Rmd with CRAN-specific installation instructions
+- [ ] Add DuckDB COPY-to-Parquet usage example
 - [ ] Add vignettes for common use cases
 - [ ] Test across multiple platforms (Linux, macOS, Windows MinGW)
 
@@ -62,7 +63,6 @@
 
 ## ⏸️ Phase 9 — Write Path (FUTURE)
 - [ ] Implement write path for VCF/BCF (if needed)
-- [ ] Add `COPY` integration where feasible
 - [ ] Consider based on community feedback after CRAN release
 
 ## 📝 Notes
