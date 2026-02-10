@@ -136,9 +136,10 @@ Notes:
   the session and set it first.
 
 If you don’t have htslib plugins installed locally, download the
-prebuilt htslib plugin bundles from the GitHub Releases page and point
-`HTS_PATH` at the extracted htslib/libexec/htslib directory:
-<https://github.com/RGenomicsETL/duckhts/releases>
+prebuilt binaries from the r-universe-binaries GitHub release and point
+`HTS_PATH` at the extracted htslib/libexec/htslib directory inside the
+package bundle.
+<https://github.com/RGenomicsETL/duckhts/releases/tag/r-universe-binaries>
 
 ### S3 credentials and configuration
 
