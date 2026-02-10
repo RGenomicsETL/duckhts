@@ -153,8 +153,6 @@ rduckhts_load <- function(con, extension_path = NULL) {
 #' @param path Path to the VCF/BCF file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
 #' @param tidy_format Logical. If TRUE, FORMAT columns are returned in tidy format
-#' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns
-#' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -228,6 +226,8 @@ rduckhts_bcf <- function(
 #' @param path Path to the SAM/BAM/CRAM file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
 #' @param reference Optional reference file path for CRAM files
+#' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns
+#' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -629,14 +629,20 @@ rduckhts_tabix <- function(
     if (!is.character(header_names)) {
       stop("header_names must be a character vector")
     }
-    params$header_names <- sprintf("[%s]", paste(sprintf("'%s'", header_names), collapse = ", "))
+    params$header_names <- sprintf(
+      "[%s]",
+      paste(sprintf("'%s'", header_names), collapse = ", ")
+    )
   }
   if (!is.null(column_types)) {
     if (!is.character(column_types)) {
       stop("column_types must be a character vector")
     }
     normalized_types <- normalize_tabix_types(column_types)
-    params$column_types <- sprintf("[%s]", paste(sprintf("'%s'", normalized_types), collapse = ", "))
+    params$column_types <- sprintf(
+      "[%s]",
+      paste(sprintf("'%s'", normalized_types), collapse = ", ")
+    )
   }
 
   param_str <- build_param_str(params)

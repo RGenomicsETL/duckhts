@@ -26,6 +26,10 @@ rduckhts_bam(
 
 \item{reference}{Optional reference file path for CRAM files}
 
+\item{standard_tags}{Logical. If TRUE, include typed standard SAMtags columns}
+
+\item{auxiliary_tags}{Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags}
+
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }
 \value{
