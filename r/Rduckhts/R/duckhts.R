@@ -25,36 +25,6 @@ build_param_str <- function(params) {
   ""
 }
 
-normalize_tabix_types <- function(types) {
-  if (length(types) == 0) {
-    return(types)
-  }
-  mappings <- duckdb_type_mappings()$r_to_duckdb
-  cleaned <- trimws(types)
-  lowered <- tolower(cleaned)
-  mapped <- character(length(cleaned))
-  for (i in seq_along(cleaned)) {
-    mapped[i] <- switch(
-      lowered[i],
-      "integer" = "BIGINT",
-      "int" = "BIGINT",
-      "int32" = "BIGINT",
-      "int64" = "BIGINT",
-      "numeric" = "DOUBLE",
-      "double" = "DOUBLE",
-      "float" = "DOUBLE",
-      "character" = "VARCHAR",
-      "string" = "VARCHAR",
-      "chr" = "VARCHAR",
-      "logical" = "BOOLEAN",
-      "bool" = "BOOLEAN",
-      "boolean" = "BOOLEAN",
-      toupper(cleaned[i])
-    )
-  }
-  mapped
-}
-
 #' Setup HTSlib Environment
 #'
 #' Sets the `HTS_PATH` environment variable to point to the bundled htslib
@@ -538,6 +508,42 @@ rduckhts_bam <- function(
   invisible(TRUE)
 }
 
+#' Normalize R Data Types to DuckDB Types for Tabix
+#'
+#' Normalizes R data type names to their corresponding DuckDB types for use with
+#' tabix readers. This function handles common R type name variations and maps them
+#' to appropriate DuckDB column types.
+#'
+#' @param types A character vector of R data type names to be normalized.
+#'
+#' @return A character vector of normalized DuckDB type names suitable for tabix columns.
+#'
+#' @details
+#' The function performs the following normalizations:
+#' \itemize{
+#' \item Integer types (integer, int, int32, int64) -> BIGINT
+#' \item Numeric types (numeric, double, float) -> DOUBLE
+#' \item Character types (character, string, chr) -> VARCHAR
+#' \item Logical types (logical, bool, boolean) -> BOOLEAN
+#' \item Other types -> Converted to uppercase as-is
+#' }
+#' If an empty vector is provided, it returns the empty vector unchanged.
+#'
+#' @examples
+#' \dontrun{
+#' # Normalize mixed type names
+#' normalize_tabix_types(c("integer", "character", "numeric"))
+#' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")
+#'
+#' # Handle variations
+#' normalize_tabix_types(c("int", "string", "float"))
+#' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")
+#' }
+#'
+#' @seealso
+#' \code{\link{rduckhts_tabix}} for using normalized types with tabix readers,
+#' \code{\link{duckdb_type_mappings}} for the complete type mapping table.
+#'
 #' @export
 normalize_tabix_types <- function(types) {
   if (length(types) == 0) {
