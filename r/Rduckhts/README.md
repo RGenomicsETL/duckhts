@@ -44,11 +44,10 @@ enable.
 
 ## Quick Start
 
-The extension is loaded with
-`rduckhts_load(con, extension_path = NULL)`. We can create tables with
-`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
-`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
-parameters documented in their help pages
+The extension is loaded with `rduckhts_load(con, extension_path =
+NULL)`. We can create tables with `rduckhts_bcf`, `rduckhts_bam`,
+`rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and
+`rduckhts_tabix` using the parameters documented in their help pages
 
 ``` r
 library(DBI)
@@ -172,7 +171,8 @@ pairs
 
 ### GFF files
 
-These can be open with or with attributes maps
+These can be open with or with attributes
+maps
 
 ``` r
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
@@ -202,18 +202,74 @@ cram_reads
 #> 5  HS18_09653:4:1303:4347:38100   83 1137   37
 ```
 
+### SAMtags + auxiliary tags
+
+Standard SAMtags can be exposed as typed columns, and any remaining tags
+are available via `AUXILIARY_TAGS`:
+
+``` r
+aux_path <- system.file("extdata", "aux.sam.gz", package = "Rduckhts")
+rduckhts_bam(con, "aux_reads", aux_path, standard_tags = TRUE, auxiliary_tags = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux_reads LIMIT 1")
+#>   RG NM  XZ
+#> 1 x1  2 foo
+```
+
+### Tabix headers + types
+
+Use `header = TRUE` to use the first non-meta row as column names, and
+`auto_detect = TRUE` / `column_types` to control column
+typing:
+
+``` r
+tabix_header <- system.file("extdata", "header_tabix.tsv.gz", package = "Rduckhts")
+tabix_meta <- system.file("extdata", "meta_tabix.tsv.gz", package = "Rduckhts")
+
+rduckhts_tabix(con, "header_tabix", tabix_header, header = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT chrom, pos FROM header_tabix LIMIT 2")
+#>   chrom pos
+#> 1  chr1   1
+#> 2  chr1   2
+
+rduckhts_tabix(con, "typed_tabix", tabix_meta, auto_detect = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT typeof(column1) AS column1_type FROM typed_tabix LIMIT 1")
+#>   column1_type
+#> 1       BIGINT
+
+rduckhts_tabix(con, "typed_tabix_explicit", tabix_header,
+               header = TRUE,
+               column_types = c("VARCHAR", "BIGINT", "VARCHAR"),
+               overwrite = TRUE)
+dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 1")
+#>   pos_plus_one
+#> 1            2
+```
+
+### Remote GTEx tabix example
+
+GTEx eQTL matrices on EBI are tabix-indexed. Remote access requires
+htslib plugins (see `setup_hts_env()`).
+
+``` r
+setup_hts_env()
+gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
+rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
+               header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
+```
+
 ``` r
 dbDisconnect(con, shutdown = TRUE)
 ```
 
 ## References
 
-- DuckDB: <https://duckdb.org/>
-- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
-- DuckDB extension template (C):
-  <https://github.com/duckdb/extension-template-c>
-- htslib: <https://github.com/samtools/htslib>
-- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
+  - DuckDB: <https://duckdb.org/>
+  - DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+  - DuckDB extension template (C):
+    <https://github.com/duckdb/extension-template-c>
+  - htslib: <https://github.com/samtools/htslib>
+  - RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 
