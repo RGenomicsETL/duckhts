@@ -286,7 +286,7 @@ captured in a map for ad hoc access:
 ``` r
 dbGetQuery(con, "
   SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ
-  FROM read_bam('test/data/aux.sam.gz', standard_tags := true, auxiliary_tags := true)
+  FROM read_bam('test/data/aux_tags.sam.gz', standard_tags := true, auxiliary_tags := true)
   LIMIT 1
 ")
 #>   RG NM  XZ

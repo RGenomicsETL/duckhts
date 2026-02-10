@@ -208,7 +208,7 @@ Standard SAMtags can be exposed as typed columns, and any remaining tags
 are available via `AUXILIARY_TAGS`:
 
 ``` r
-aux_path <- system.file("extdata", "aux.sam.gz", package = "Rduckhts")
+aux_path <- system.file("extdata", "aux_tags.sam.gz", package = "Rduckhts")
 rduckhts_bam(con, "aux_reads", aux_path, standard_tags = TRUE, auxiliary_tags = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux_reads LIMIT 1")
 #>   RG NM  XZ

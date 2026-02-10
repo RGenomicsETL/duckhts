@@ -98,7 +98,7 @@ SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/rg.sam.gz') WHERE
 # --- standard tags + auxiliary tags ---
 query III
 SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ')
-FROM read_bam('__WORKING_DIRECTORY__/test/data/aux.sam.gz', standard_tags := true, auxiliary_tags := true)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/aux_tags.sam.gz', standard_tags := true, auxiliary_tags := true)
 LIMIT 1;
 ----
 x1	2	[foo]
