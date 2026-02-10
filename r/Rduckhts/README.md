@@ -44,10 +44,11 @@ enable.
 
 ## Quick Start
 
-The extension is loaded with `rduckhts_load(con, extension_path =
-NULL)`. We can create tables with `rduckhts_bcf`, `rduckhts_bam`,
-`rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and
-`rduckhts_tabix` using the parameters documented in their help pages
+The extension is loaded with
+`rduckhts_load(con, extension_path = NULL)`. We can create tables with
+`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
+`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
+parameters documented in their help pages
 
 ``` r
 library(DBI)
@@ -171,8 +172,7 @@ pairs
 
 ### GFF files
 
-These can be open with or with attributes
-maps
+These can be open with or with attributes maps
 
 ``` r
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
@@ -218,8 +218,7 @@ dbGetQuery(con, "SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux
 ### Tabix headers + types
 
 Use `header = TRUE` to use the first non-meta row as column names, and
-`auto_detect = TRUE` / `column_types` to control column
-typing:
+`auto_detect = TRUE` / `column_types` to control column typing:
 
 ``` r
 tabix_header <- system.file("extdata", "header_tabix.tsv.gz", package = "Rduckhts")
@@ -282,12 +281,12 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## References
 
-  - DuckDB: <https://duckdb.org/>
-  - DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
-  - DuckDB extension template (C):
-    <https://github.com/duckdb/extension-template-c>
-  - htslib: <https://github.com/samtools/htslib>
-  - RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
+- DuckDB: <https://duckdb.org/>
+- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+- DuckDB extension template (C):
+  <https://github.com/duckdb/extension-template-c>
+- htslib: <https://github.com/samtools/htslib>
+- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 

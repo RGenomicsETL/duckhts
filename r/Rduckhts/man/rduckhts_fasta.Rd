@@ -21,12 +21,3 @@ Invisible TRUE on success
 \description{
 Creates a DuckDB table from FASTA files using the DuckHTS extension.
 }
-\examples{
-\dontrun{
-con <- dbConnect(duckdb::duckdb())
-rduckhts_load(con)
-rduckhts_fasta(con, "sequences", "file.fa")
-dbGetQuery(con, "SELECT NAME, length(SEQUENCE) as len FROM sequences")
-}
-
-}

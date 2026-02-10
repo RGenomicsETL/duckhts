@@ -32,12 +32,3 @@ Invisible TRUE on success
 \description{
 Creates a DuckDB table from FASTQ files using the DuckHTS extension.
 }
-\examples{
-\dontrun{
-con <- dbConnect(duckdb::duckdb())
-rduckhts_load(con)
-rduckhts_fastq(con, "reads", "file.fq")
-dbGetQuery(con, "SELECT COUNT(*) FROM reads")
-}
-
-}

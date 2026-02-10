@@ -41,12 +41,3 @@ Invisible TRUE on success
 \description{
 Creates a DuckDB table from any tabix-indexed file using the DuckHTS extension.
 }
-\examples{
-\dontrun{
-con <- dbConnect(duckdb::duckdb())
-rduckhts_load(con)
-rduckhts_tabix(con, "bed_data", "file.bed.gz", region = "chr1:1000-2000")
-dbGetQuery(con, "SELECT * FROM bed_data")
-}
-
-}

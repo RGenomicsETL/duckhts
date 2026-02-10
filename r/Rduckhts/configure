@@ -225,7 +225,10 @@ fi
   ${HTSLIB_CONFIGURE_FLAGS}
 
 echo "---------- Building htslib (static + shared) ----------"
-${MAKE} -j1 libhts.a libhts.${SHLIB_EXT} plugins
+# chek if thread is set or default to 1
+THREADS=${THREADS:-1}
+
+${MAKE} -j${THREADS} libhts.a libhts.${SHLIB_EXT} plugins
 ${MAKE} install
 
 rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true

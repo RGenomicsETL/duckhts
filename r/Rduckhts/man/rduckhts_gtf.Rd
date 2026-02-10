@@ -32,12 +32,3 @@ Invisible TRUE on success
 \description{
 Creates a DuckDB table from GTF files using the DuckHTS extension.
 }
-\examples{
-\dontrun{
-con <- dbConnect(duckdb::duckdb())
-rduckhts_load(con)
-rduckhts_gtf(con, "annotations", "file.gtf", attributes_map = TRUE)
-dbGetQuery(con, "SELECT * FROM annotations WHERE feature = 'exon'")
-}
-
-}

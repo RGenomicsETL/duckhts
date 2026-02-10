@@ -32,12 +32,3 @@ Invisible TRUE on success
 \description{
 Creates a DuckDB table from GFF3 files using the DuckHTS extension.
 }
-\examples{
-\dontrun{
-con <- dbConnect(duckdb::duckdb())
-rduckhts_load(con)
-rduckhts_gff(con, "annotations", "file.gff3.gz", attributes_map = TRUE)
-dbGetQuery(con, "SELECT * FROM annotations WHERE feature = 'gene'")
-}
-
-}
