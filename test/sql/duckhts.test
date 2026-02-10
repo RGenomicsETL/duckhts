@@ -95,6 +95,14 @@ SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/rg.sam.gz') WHERE
 ----
 2
 
+# --- standard tags + auxiliary tags ---
+query III
+SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ')
+FROM read_bam('__WORKING_DIRECTORY__/test/data/aux.sam.gz', standard_tags := true, auxiliary_tags := true)
+LIMIT 1;
+----
+x1	2	[foo]
+
 # --- CRAM with explicit reference ---
 query I
 SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram', reference := '__WORKING_DIRECTORY__/test/data/ce.fa');
@@ -234,6 +242,18 @@ X	Vega	exon	2934816	2935190
 # --- respect meta header lines in generic tabix ---
 query II
 SELECT column0, column1 FROM read_tabix('__WORKING_DIRECTORY__/test/data/meta_tabix.tsv.gz') LIMIT 1;
+----
+chr1	1
+
+# --- use header row as column names ---
+query II
+SELECT chrom, pos FROM read_tabix('__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz', header := true) LIMIT 1;
+----
+chr1	1
+
+# --- override column names explicitly ---
+query II
+SELECT chrom, pos FROM read_tabix('__WORKING_DIRECTORY__/test/data/meta_tabix.tsv.gz', header_names := ['chrom','pos','value']) LIMIT 1;
 ----
 chr1	1
 

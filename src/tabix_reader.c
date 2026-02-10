@@ -4,7 +4,7 @@
  * Table functions for reading tabix-indexed tab-delimited files,
  * with specialised parsers for GTF and GFF3 formats.
  *
- * read_tabix(path, [region])  → generic: splits lines by \t into columns
+ * read_tabix(path, [region, header, header_names])  → generic: splits lines by \t into columns
  * read_gtf(path, [region])    → GTF-aware: typed SEQNAME..ATTRIBUTES + parsed attrs
  * read_gff(path, [region])    → GFF3-aware: same structure as GTF
  *
@@ -78,6 +78,12 @@ typedef struct {
     tabix_mode_t mode;
     int  n_cols;           /* detected or fixed (9 for GTF/GFF) */
     int  include_attr_map;
+    int  header;
+    int  skip_header_line;
+    int  header_names_count;
+    char **header_names;
+    char meta_char;
+    int  line_skip;
 } tabix_bind_data_t;
 
 static void tabix_bind_data_destroy(void *data) {
@@ -85,6 +91,12 @@ static void tabix_bind_data_destroy(void *data) {
     if (bd) {
         free(bd->file_path);
         free(bd->region);
+        if (bd->header_names) {
+            for (int i = 0; i < bd->header_names_count; i++) {
+                free(bd->header_names[i]);
+            }
+            free(bd->header_names);
+        }
         free(bd);
     }
 }
@@ -101,6 +113,8 @@ typedef struct {
     bool       finished;
     idx_t     *column_ids;      /* logical column indices (for projection pushdown) */
     idx_t      n_projected_cols;
+    int        skip_remaining;
+    int        skipped_header;
 } tabix_init_data_t;
 
 static void tabix_init_data_destroy(void *data) {
@@ -165,6 +179,37 @@ static void trim_span(const char **start, int *len) {
     }
     *start = s;
     *len = l;
+}
+
+static char *dup_field_name(const char *start, int len) {
+    trim_span(&start, &len);
+    char *name = (char *)malloc((size_t)len + 1);
+    if (!name) return NULL;
+    memcpy(name, start, (size_t)len);
+    name[len] = '\0';
+    return name;
+}
+
+static int parse_header_names(const char *line, char ***out_names) {
+    int n = count_fields(line);
+    char **names = (char **)malloc(sizeof(char *) * (size_t)n);
+    if (!names) return 0;
+    for (int i = 0; i < n; i++) {
+        int len = 0;
+        const char *start = get_field(line, i, &len);
+        if (!start) {
+            names[i] = dup_field_name("", 0);
+        } else {
+            names[i] = dup_field_name(start, len);
+        }
+        if (!names[i]) {
+            for (int j = 0; j < i; j++) free(names[j]);
+            free(names);
+            return 0;
+        }
+    }
+    *out_names = names;
+    return n;
 }
 
 static int count_gff_pairs(const char *s) {
@@ -312,6 +357,8 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         return;
     }
     bd->mode = mode;
+    bd->meta_char = '#';
+    bd->line_skip = 0;
 
     /* positional param: file path */
     duckdb_value val = duckdb_bind_get_parameter(info, 0);
@@ -371,6 +418,28 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
             duckdb_destroy_logical_type(&map_type);
         }
     } else {
+        /* Optional header handling for generic tabix */
+        val = duckdb_bind_get_named_parameter(info, "header");
+        if (val && !duckdb_is_null_value(val)) {
+            bd->header = duckdb_get_bool(val) ? 1 : 0;
+        }
+        if (val) duckdb_destroy_value(&val);
+
+        val = duckdb_bind_get_named_parameter(info, "header_names");
+        if (val && !duckdb_is_null_value(val)) {
+            idx_t n = duckdb_get_list_size(val);
+            if (n > 0) {
+                bd->header_names = (char **)malloc(sizeof(char *) * (size_t)n);
+                bd->header_names_count = (int)n;
+                for (idx_t i = 0; i < n; i++) {
+                    duckdb_value elem = duckdb_get_list_child(val, i);
+                    bd->header_names[i] = duckdb_get_varchar(elem);
+                    duckdb_destroy_value(&elem);
+                }
+            }
+        }
+        if (val) duckdb_destroy_value(&val);
+
         /* Generic tabix: if indexed, use header/meta settings; otherwise peek */
         htsFile *fp = hts_open(bd->file_path, "r");
         if (!fp) {
@@ -382,6 +451,8 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         int n_cols = 0;
         char meta_char = '#';
         int skip_lines = 0;
+        int header_from_skip = 0;
+        char *header_candidate = NULL;
 
         tbx_t *tbx = tbx_index_load(bd->file_path);
         if (tbx) {
@@ -389,18 +460,27 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
             meta_char = conf.meta_char ? conf.meta_char : '#';
             skip_lines = conf.line_skip;
         }
+        bd->meta_char = meta_char;
+        bd->line_skip = skip_lines;
 
         /* Skip comment/header lines (meta char or line_skip prefix) */
         while (hts_getline(fp, '\n', &line) >= 0) {
             if (line.l == 0) continue;
             if (skip_lines > 0) {
+                if (bd->header && !bd->header_names && line.l > 0) {
+                    free(header_candidate);
+                    header_candidate = strdup(line.s);
+                    header_from_skip = 1;
+                }
                 skip_lines--;
                 continue;
             }
             if (meta_char && line.s[0] == meta_char) {
                 continue;
             }
-            {
+            if (bd->header && !bd->header_names && !header_candidate) {
+                header_candidate = strdup(line.s);
+            } else {
                 n_cols = count_fields(line.s);
                 break;
             }
@@ -409,6 +489,16 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         hts_close(fp);
         if (tbx) tbx_destroy(tbx);
 
+        if (bd->header_names && bd->header_names_count > 0) {
+            n_cols = bd->header_names_count;
+            bd->skip_header_line = bd->header ? 1 : 0;
+        } else if (bd->header && header_candidate) {
+            bd->header_names_count = parse_header_names(header_candidate, &bd->header_names);
+            n_cols = bd->header_names_count;
+            bd->skip_header_line = header_from_skip ? 0 : 1;
+        }
+        free(header_candidate);
+
         if (n_cols == 0) n_cols = 1;
         if (n_cols > TABIX_MAX_GENERIC_COLS) n_cols = TABIX_MAX_GENERIC_COLS;
         bd->n_cols = n_cols;
@@ -416,8 +506,13 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
         for (int i = 0; i < n_cols; i++) {
             char col_name[32];
-            snprintf(col_name, sizeof(col_name), "column%d", i);
-            duckdb_bind_add_result_column(info, col_name, varchar_type);
+            if (bd->header_names && i < bd->header_names_count &&
+                bd->header_names[i] && bd->header_names[i][0] != '\0') {
+                duckdb_bind_add_result_column(info, bd->header_names[i], varchar_type);
+            } else {
+                snprintf(col_name, sizeof(col_name), "column%d", i);
+                duckdb_bind_add_result_column(info, col_name, varchar_type);
+            }
         }
         duckdb_destroy_logical_type(&varchar_type);
     }
@@ -475,6 +570,8 @@ static void tabix_init(duckdb_init_info info) {
     id->line.l = 0;
     id->line.m = 0;
     id->line.s = NULL;
+    id->skip_remaining = bd->line_skip;
+    id->skipped_header = 0;
 
     /* Store projection pushdown column mapping */
     id->n_projected_cols = duckdb_init_get_column_count(info);
@@ -530,7 +627,16 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
         }
 
         /* Skip comment/header lines */
-        if (id->line.l == 0 || id->line.s[0] == '#') continue;
+        if (id->line.l == 0) continue;
+        if (!id->itr && id->skip_remaining > 0) {
+            id->skip_remaining--;
+            continue;
+        }
+        if (bd->meta_char && id->line.s[0] == bd->meta_char) continue;
+        if (!id->itr && bd->skip_header_line && !id->skipped_header) {
+            id->skipped_header = 1;
+            continue;
+        }
 
         if (chunk_col_count > 0) {
         if (bd->mode == TABIX_MODE_GTF || bd->mode == TABIX_MODE_GFF) {
@@ -649,6 +755,16 @@ static duckdb_table_function create_tabix_tf(const char *name,
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_table_function_add_named_parameter(tf, "attributes_map", bool_type);
     duckdb_destroy_logical_type(&bool_type);
+
+    duckdb_logical_type header_bool = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_table_function_add_named_parameter(tf, "header", header_bool);
+    duckdb_destroy_logical_type(&header_bool);
+
+    duckdb_logical_type list_child = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type list_type = duckdb_create_list_type(list_child);
+    duckdb_table_function_add_named_parameter(tf, "header_names", list_type);
+    duckdb_destroy_logical_type(&list_child);
+    duckdb_destroy_logical_type(&list_type);
 
     duckdb_table_function_set_bind(tf, bind_fn);
     duckdb_table_function_set_init(tf, tabix_init);

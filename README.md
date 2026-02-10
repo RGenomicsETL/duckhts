@@ -16,15 +16,15 @@ MinGW/RTools for Windows.
 
 ## Functions
 
-| Function                                     | Description                 | Schema                                                                                                      |
-| -------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `read_bcf(path, [region, tidy_format])`      | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                  |
-| `read_bam(path, [region, reference])`        | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID            |
-| `read_fasta(path)`                           | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                 |
-| `read_fastq(path, [mate_path, interleaved])` | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                             |
-| `read_gff(path, [region, attributes_map])`   | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled) |
-| `read_gtf(path, [region, attributes_map])`   | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled) |
-| `read_tabix(path, [region])`                 | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                         |
+| Function                                                             | Description                 | Schema                                                                                                             |
+| -------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `read_bcf(path, [region, tidy_format])`                              | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                         |
+| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])` | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID (+ SAMtags / AUX) |
+| `read_fasta(path)`                                                   | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                        |
+| `read_fastq(path, [mate_path, interleaved])`                         | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                                    |
+| `read_gff(path, [region, attributes_map])`                           | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
+| `read_gtf(path, [region, attributes_map])`                           | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
+| `read_tabix(path, [region, header, header_names])`                   | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                                |
 
 Notes:
 
@@ -35,6 +35,11 @@ Notes:
   - `read_tabix` column inference now respects tabix header/meta
     configuration (meta char + line\_skip), so header lines are not
     mistaken as data.
+  - `read_tabix` supports `header := true` to use the first non-meta
+    line as column names, and `header_names := [...]` to override names.
+  - `read_bam` supports `standard_tags := true` for typed SAMtags
+    columns and `auxiliary_tags := true` for a string map of all
+    remaining tags.
 
 ## Examples
 
@@ -269,6 +274,21 @@ dbGetQuery(con, "
 #> 3    c1    xx   1          <NA>      <NA>
 #> 4    a2    xx  11            x1        x1
 #> 5    b2    xx  11            x2        x2
+```
+
+### SAMtags + auxiliary tags
+
+Standard SAMtags can be surfaced as typed columns and non-standard tags
+captured in a map for ad hoc access:
+
+``` r
+dbGetQuery(con, "
+  SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ
+  FROM read_bam('test/data/aux.sam.gz', standard_tags := true, auxiliary_tags := true)
+  LIMIT 1
+")
+#>   RG NM  XZ
+#> 1 x1  2 foo
 
 dbGetQuery(con, "
   SELECT seqname, feature, start, \"end\", attributes_map
@@ -289,6 +309,15 @@ dbGetQuery(con, "
 #>   column0 column1
 #> 1    chr1       1
 #> 2    chr1       2
+
+dbGetQuery(con, "
+  SELECT chrom, pos
+  FROM read_tabix('test/data/header_tabix.tsv.gz', header := true)
+  LIMIT 2
+")
+#>   chrom pos
+#> 1  chr1   1
+#> 2  chr1   2
 
 dbDisconnect(con, shutdown = TRUE)
 ```
@@ -315,6 +344,8 @@ Rendering this document requires a built extension at
     duckdb_capi/
       duckdb.h           # DuckDB C API headers
       duckdb_extension.h
+    r/
+      Rduckhts/          # R package harness
 
 ## References
 
