@@ -30,6 +30,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 #include <htslib/hts.h>
 #include <htslib/kstring.h>
+#include <htslib/kstring.h>
 
 /* ================================================================
  * Helpers
@@ -39,6 +40,147 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
     duckdb_vector_ensure_validity_writable(vec);
     uint64_t *v = duckdb_vector_get_validity(vec);
     v[row / 64] &= ~((uint64_t)1 << (row % 64));
+}
+
+/* ================================================================
+ * Standard SAM AUX tags (SAMtags) for typed columns
+ * ================================================================ */
+
+typedef struct {
+    const char *tag;
+    char type;     /* A, i, f, Z, H, B */
+    char subtype;  /* for B arrays: c,C,s,S,i,I,f */
+} bam_std_tag_t;
+
+static const bam_std_tag_t BAM_STD_TAGS[] = {
+    {"AM", 'i', 0}, {"AS", 'i', 0}, {"BC", 'Z', 0}, {"BQ", 'Z', 0},
+    {"BZ", 'Z', 0}, {"CB", 'Z', 0}, {"CC", 'Z', 0}, {"CG", 'B', 'I'},
+    {"CM", 'i', 0}, {"CO", 'Z', 0}, {"CP", 'i', 0}, {"CQ", 'Z', 0},
+    {"CR", 'Z', 0}, {"CS", 'Z', 0}, {"CT", 'Z', 0}, {"CY", 'Z', 0},
+    {"E2", 'Z', 0}, {"FI", 'i', 0}, {"FS", 'Z', 0}, {"FZ", 'B', 'S'},
+    {"H0", 'i', 0}, {"H1", 'i', 0}, {"H2", 'i', 0}, {"HI", 'i', 0},
+    {"IH", 'i', 0}, {"LB", 'Z', 0}, {"MC", 'Z', 0}, {"MD", 'Z', 0},
+    {"MI", 'Z', 0}, {"ML", 'B', 'C'}, {"MM", 'Z', 0}, {"MN", 'i', 0},
+    {"MQ", 'i', 0}, {"NH", 'i', 0}, {"NM", 'i', 0}, {"OA", 'Z', 0},
+    {"OC", 'Z', 0}, {"OP", 'i', 0}, {"OQ", 'Z', 0}, {"OX", 'Z', 0},
+    {"PG", 'Z', 0}, {"PQ", 'i', 0}, {"PT", 'Z', 0}, {"PU", 'Z', 0},
+    {"Q2", 'Z', 0}, {"QT", 'Z', 0}, {"QX", 'Z', 0}, {"R2", 'Z', 0},
+    {"RG", 'Z', 0}, {"RX", 'Z', 0}, {"SA", 'Z', 0}, {"SM", 'i', 0},
+    {"TC", 'i', 0}, {"TS", 'A', 0}, {"U2", 'Z', 0}, {"UQ", 'i', 0},
+    {NULL, 0, 0}
+};
+
+static int bam_std_tag_index(const char *tag) {
+    for (int i = 0; BAM_STD_TAGS[i].tag; i++) {
+        if (tag[0] == BAM_STD_TAGS[i].tag[0] &&
+            tag[1] == BAM_STD_TAGS[i].tag[1] &&
+            tag[2] == '\0') {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static duckdb_logical_type bam_std_tag_type(const bam_std_tag_t *t) {
+    switch (t->type) {
+        case 'A':
+        case 'Z':
+        case 'H':
+            return duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+        case 'i':
+            return duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+        case 'f':
+            return duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+        case 'B': {
+            duckdb_logical_type child =
+                (t->subtype == 'f') ? duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE)
+                                    : duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+            duckdb_logical_type list = duckdb_create_list_type(child);
+            duckdb_destroy_logical_type(&child);
+            return list;
+        }
+        default:
+            return duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    }
+}
+
+static void bam_assign_list_int(duckdb_vector vec, idx_t row, const uint8_t *aux) {
+    uint32_t len = bam_auxB_len(aux);
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = len;
+    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+
+    duckdb_vector child = duckdb_list_vector_get_child(vec);
+    int64_t *data = (int64_t *)duckdb_vector_get_data(child);
+    for (uint32_t i = 0; i < len; i++) {
+        data[entry.offset + i] = bam_auxB2i(aux, i);
+    }
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+}
+
+static void bam_assign_list_double(duckdb_vector vec, idx_t row, const uint8_t *aux) {
+    uint32_t len = bam_auxB_len(aux);
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = len;
+    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+
+    duckdb_vector child = duckdb_list_vector_get_child(vec);
+    double *data = (double *)duckdb_vector_get_data(child);
+    for (uint32_t i = 0; i < len; i++) {
+        data[entry.offset + i] = bam_auxB2f(aux, i);
+    }
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+}
+
+static void bam_aux_to_string(const uint8_t *aux, kstring_t *ks) {
+    ks->l = 0;
+    char type = bam_aux_type(aux);
+    switch (type) {
+        case 'A': {
+            kputc(bam_aux2A(aux), ks);
+            break;
+        }
+        case 'i':
+        case 'I':
+        case 's':
+        case 'S':
+        case 'c':
+        case 'C':
+            ksprintf(ks, "%" PRId64, bam_aux2i(aux));
+            break;
+        case 'f':
+        case 'd':
+            ksprintf(ks, "%g", bam_aux2f(aux));
+            break;
+        case 'Z':
+        case 'H': {
+            const char *z = bam_aux2Z(aux);
+            if (z) kputs(z, ks);
+            break;
+        }
+        case 'B': {
+            char subtype = aux[1];
+            uint32_t len = bam_auxB_len(aux);
+            kputc(subtype, ks);
+            for (uint32_t i = 0; i < len; i++) {
+                kputc(',', ks);
+                if (subtype == 'f' || subtype == 'd') {
+                    ksprintf(ks, "%g", bam_auxB2f(aux, i));
+                } else {
+                    ksprintf(ks, "%" PRId64, bam_auxB2i(aux, i));
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 /* ================================================================
@@ -78,6 +220,11 @@ typedef struct {
 
     int has_index;
     int n_contigs;      /* sam_hdr_nref(); used for parallel partitioning */
+    int standard_tags;
+    int auxiliary_tags;
+    int std_col_start;
+    int std_col_count;
+    int aux_col_idx;
 } bam_bind_data_t;
 
 /* ================================================================
@@ -304,9 +451,27 @@ static void bam_read_bind(duckdb_bind_info info) {
     bind->reference = reference;
     bind->region = region;
     bind->n_contigs = sam_hdr_nref(hdr);
+    bind->standard_tags = 0;
+    bind->auxiliary_tags = 0;
+    bind->std_col_start = BAM_COL_CORE_COUNT;
+    bind->std_col_count = 0;
+    bind->aux_col_idx = -1;
 
     /* Parse comma-separated regions (if any) */
     parse_regions(region, &bind->regions, &bind->n_regions);
+
+    /* Optional tag controls */
+    duckdb_value std_val = duckdb_bind_get_named_parameter(info, "standard_tags");
+    if (std_val && !duckdb_is_null_value(std_val)) {
+        bind->standard_tags = duckdb_get_bool(std_val) ? 1 : 0;
+    }
+    if (std_val) duckdb_destroy_value(&std_val);
+
+    duckdb_value aux_val = duckdb_bind_get_named_parameter(info, "auxiliary_tags");
+    if (aux_val && !duckdb_is_null_value(aux_val)) {
+        bind->auxiliary_tags = duckdb_get_bool(aux_val) ? 1 : 0;
+    }
+    if (aux_val) duckdb_destroy_value(&aux_val);
 
     /* Check for index availability */
     hts_idx_t *idx = sam_index_load(fp, file_path);
@@ -337,6 +502,29 @@ static void bam_read_bind(duckdb_bind_info info) {
     duckdb_bind_add_result_column(info, "QUAL",  varchar_type);
     duckdb_bind_add_result_column(info, "READ_GROUP_ID", varchar_type);
     duckdb_bind_add_result_column(info, "SAMPLE_ID", varchar_type);
+
+    if (bind->standard_tags) {
+        bind->std_col_start = BAM_COL_CORE_COUNT;
+        int count = 0;
+        for (int i = 0; BAM_STD_TAGS[i].tag; i++) {
+            duckdb_logical_type t = bam_std_tag_type(&BAM_STD_TAGS[i]);
+            duckdb_bind_add_result_column(info, BAM_STD_TAGS[i].tag, t);
+            duckdb_destroy_logical_type(&t);
+            count++;
+        }
+        bind->std_col_count = count;
+    }
+
+    if (bind->auxiliary_tags) {
+        duckdb_logical_type key_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+        duckdb_logical_type val_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+        duckdb_logical_type map_type = duckdb_create_map_type(key_type, val_type);
+        bind->aux_col_idx = BAM_COL_CORE_COUNT + bind->std_col_count;
+        duckdb_bind_add_result_column(info, "AUXILIARY_TAGS", map_type);
+        duckdb_destroy_logical_type(&key_type);
+        duckdb_destroy_logical_type(&val_type);
+        duckdb_destroy_logical_type(&map_type);
+    }
 
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&int32_type);
@@ -510,6 +698,8 @@ static int claim_next_contig(bam_local_init_data_t *local,
  * ================================================================ */
 
 static void bam_read_function(duckdb_function_info info, duckdb_data_chunk output) {
+    bam_bind_data_t *bind =
+        (bam_bind_data_t *)duckdb_function_get_bind_data(info);
     bam_global_init_data_t *global =
         (bam_global_init_data_t *)duckdb_function_get_init_data(info);
     bam_local_init_data_t *local =
@@ -695,8 +885,118 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 break;
             }
 
-            default:
+            default: {
+                if (col_id >= BAM_COL_CORE_COUNT) {
+                    if (bind->standard_tags &&
+                        col_id < (idx_t)(BAM_COL_CORE_COUNT + bind->std_col_count)) {
+                        int std_idx = (int)(col_id - BAM_COL_CORE_COUNT);
+                        const bam_std_tag_t *st = &BAM_STD_TAGS[std_idx];
+                        uint8_t *aux = bam_aux_get(b, st->tag);
+                        if (!aux) {
+                            set_null(vec, row_count);
+                            break;
+                        }
+                        switch (st->type) {
+                            case 'A': {
+                                char tmp[2] = { bam_aux2A(aux), '\0' };
+                                duckdb_vector_assign_string_element(vec, row_count, tmp);
+                                break;
+                            }
+                            case 'Z':
+                            case 'H': {
+                                const char *z = bam_aux2Z(aux);
+                                if (z) duckdb_vector_assign_string_element(vec, row_count, z);
+                                else set_null(vec, row_count);
+                                break;
+                            }
+                            case 'i': {
+                                int64_t *data = (int64_t *)duckdb_vector_get_data(vec);
+                                data[row_count] = bam_aux2i(aux);
+                                break;
+                            }
+                            case 'f': {
+                                double *data = (double *)duckdb_vector_get_data(vec);
+                                data[row_count] = bam_aux2f(aux);
+                                break;
+                            }
+                            case 'B': {
+                                char subtype = aux[1];
+                                if (subtype == 'f' || subtype == 'd') {
+                                    bam_assign_list_double(vec, row_count, aux);
+                                } else {
+                                    bam_assign_list_int(vec, row_count, aux);
+                                }
+                                break;
+                            }
+                            default:
+                                set_null(vec, row_count);
+                                break;
+                        }
+                    } else if (bind->auxiliary_tags &&
+                               (int)col_id == bind->aux_col_idx) {
+                        uint8_t *aux = bam_aux_first(b);
+                        int count = 0;
+                        while (aux) {
+                            char tagbuf[3] = {0, 0, 0};
+                            const char *tag = bam_aux_tag(aux);
+                            tagbuf[0] = tag[0];
+                            tagbuf[1] = tag[1];
+                            if (!(bind->standard_tags && bam_std_tag_index(tagbuf) >= 0)) {
+                                count++;
+                            }
+                            aux = bam_aux_next(b, aux);
+                        }
+
+                        if (count == 0) {
+                            duckdb_vector_ensure_validity_writable(vec);
+                            uint64_t *validity = duckdb_vector_get_validity(vec);
+                            duckdb_validity_set_row_invalid(validity, row_count);
+                            duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
+                            duckdb_list_entry *list_data =
+                                (duckdb_list_entry *)duckdb_vector_get_data(vec);
+                            list_data[row_count] = entry;
+                            break;
+                        }
+
+                        duckdb_list_entry entry;
+                        entry.offset = duckdb_list_vector_get_size(vec);
+                        entry.length = count;
+                        duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+                        duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+
+                        duckdb_vector child = duckdb_list_vector_get_child(vec);
+                        duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
+                        duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+
+                        kstring_t ks = {0, 0, NULL};
+                        aux = bam_aux_first(b);
+                        int write_idx = 0;
+                        while (aux && write_idx < count) {
+                            char tagbuf[3] = {0, 0, 0};
+                            const char *tag = bam_aux_tag(aux);
+                            tagbuf[0] = tag[0];
+                            tagbuf[1] = tag[1];
+                            if (bind->standard_tags && bam_std_tag_index(tagbuf) >= 0) {
+                                aux = bam_aux_next(b, aux);
+                                continue;
+                            }
+                            duckdb_vector_assign_string_element(
+                                key_vec, entry.offset + write_idx, tagbuf);
+                            bam_aux_to_string(aux, &ks);
+                            duckdb_vector_assign_string_element(
+                                val_vec, entry.offset + write_idx, ks.s ? ks.s : "");
+                            write_idx++;
+                            aux = bam_aux_next(b, aux);
+                        }
+                        free(ks.s);
+
+                        duckdb_list_entry *list_data =
+                            (duckdb_list_entry *)duckdb_vector_get_data(vec);
+                        list_data[row_count] = entry;
+                    }
+                }
                 break;
+            }
             } /* switch */
         } /* for columns */
 
@@ -719,6 +1019,11 @@ void register_read_bam_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "reference", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
+
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_table_function_add_named_parameter(tf, "standard_tags", bool_type);
+    duckdb_table_function_add_named_parameter(tf, "auxiliary_tags", bool_type);
+    duckdb_destroy_logical_type(&bool_type);
 
     duckdb_table_function_set_bind(tf, bam_read_bind);
     duckdb_table_function_set_init(tf, bam_read_global_init);

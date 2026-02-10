@@ -808,14 +808,16 @@ static void bcf_read_local_init(duckdb_init_info info) {
             local->itr = tbx_itr_querys(local->tbx, bind->region);
         }
         
-        // If iterator is NULL, the region/contig was not found
-        // TODO: distinguish between contig not found vs. no overlapping records
+        // If iterator is NULL, avoid hard failure for non-conforming headers.
+        // Return an empty result and emit a warning instead.
         if (!local->itr) {
-            char err[512];
-            snprintf(err, sizeof(err), 
-                     "Region not found in file (contig may not exist in header): %s", bind->region);
-            duckdb_init_set_error(info, err);
-            destroy_init_data(local);
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "Region query returned no iterator; returning empty result for region: %s",
+                     bind->region);
+            vcf_emit_warning(msg);
+            local->done = 1;
+            duckdb_init_set_init_data(info, local, destroy_init_data);
             return;
         }
     }
@@ -1765,4 +1767,3 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_register_table_function(connection, tf);
     duckdb_destroy_table_function(&tf);
 }
-

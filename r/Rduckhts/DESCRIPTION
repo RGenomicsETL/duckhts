@@ -1,6 +1,6 @@
 Package: Rduckhts
 Title: 'DuckDB' 'HTS' File Reader Extension for 'R'
-Version: 0.1.1-0.0.4.9000
+Version: 0.1.2-0.0.9000
 Authors@R: c(
         person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
