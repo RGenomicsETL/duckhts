@@ -371,7 +371,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
             duckdb_destroy_logical_type(&map_type);
         }
     } else {
-        /* Generic tabix: peek at first line to determine column count */
+        /* Generic tabix: if indexed, use header/meta settings; otherwise peek */
         htsFile *fp = hts_open(bd->file_path, "r");
         if (!fp) {
             duckdb_bind_set_error(info, "Cannot open file");
@@ -380,16 +380,34 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         }
         kstring_t line = {0, 0, NULL};
         int n_cols = 0;
+        char meta_char = '#';
+        int skip_lines = 0;
 
-        /* Skip comment/header lines (starting with # or meta_char) */
+        tbx_t *tbx = tbx_index_load(bd->file_path);
+        if (tbx) {
+            tbx_conf_t conf = tbx->conf;
+            meta_char = conf.meta_char ? conf.meta_char : '#';
+            skip_lines = conf.line_skip;
+        }
+
+        /* Skip comment/header lines (meta char or line_skip prefix) */
         while (hts_getline(fp, '\n', &line) >= 0) {
-            if (line.l > 0 && line.s[0] != '#') {
+            if (line.l == 0) continue;
+            if (skip_lines > 0) {
+                skip_lines--;
+                continue;
+            }
+            if (meta_char && line.s[0] == meta_char) {
+                continue;
+            }
+            {
                 n_cols = count_fields(line.s);
                 break;
             }
         }
         free(line.s);
         hts_close(fp);
+        if (tbx) tbx_destroy(tbx);
 
         if (n_cols == 0) n_cols = 1;
         if (n_cols > TABIX_MAX_GENERIC_COLS) n_cols = TABIX_MAX_GENERIC_COLS;

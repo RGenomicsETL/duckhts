@@ -354,8 +354,11 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 const char *q1 = bam_get_qname(init->rec);
                 const char *q2 = bam_get_qname(init->rec_mate);
                 if (!q1 || !q2 || strcmp(q1, q2) != 0) {
-                    duckdb_function_set_error(info,
-                        "read_fastq: mate files out of sync (QNAME mismatch)");
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                        "read_fastq: mate files out of sync (QNAME mismatch: '%s' vs '%s')",
+                        q1 ? q1 : "", q2 ? q2 : "");
+                    duckdb_function_set_error(info, msg);
                     init->done = 1;
                     duckdb_data_chunk_set_size(output, 0);
                     return;
@@ -366,11 +369,18 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             }
         } else {
             int ret = sam_read1(init->fp, init->hdr, init->rec);
-        if (ret < 0) {
-            /* -1 = EOF, < -1 = error */
-            init->done = 1;
-            break;
-        }
+            if (ret < 0) {
+                /* -1 = EOF, < -1 = error */
+                if (init->interleaved && init->interleaved_mate == 2) {
+                    duckdb_function_set_error(info,
+                        "read_fastq: interleaved file has an unpaired record");
+                    init->done = 1;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
+                init->done = 1;
+                break;
+            }
             b = init->rec;
             if (init->interleaved) {
                 mate = init->interleaved_mate;

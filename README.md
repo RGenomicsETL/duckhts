@@ -26,6 +26,16 @@ MinGW/RTools for Windows.
 | `read_gtf(path, [region, attributes_map])`   | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled) |
 | `read_tabix(path, [region])`                 | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                         |
 
+Notes:
+
+  - `read_fastq` with `mate_path` requires exact QNAME pairing;
+    mismatches raise an error.
+  - `read_bcf` region queries on files missing `##contig` headers return
+    an empty result (with a warning) instead of erroring.
+  - `read_tabix` column inference now respects tabix header/meta
+    configuration (meta char + line\_skip), so header lines are not
+    mistaken as data.
+
 ## Examples
 
 ``` sql
@@ -270,6 +280,15 @@ dbGetQuery(con, "
 #> 1       X    gene 2934816 2964270
 #>                                                              attributes_map
 #> 1 ID, Name, biotype, OTTHUMG00000137358, OTTHUMG00000137358, protein_coding
+
+dbGetQuery(con, "
+  SELECT column0, column1
+  FROM read_tabix('test/data/meta_tabix.tsv.gz')
+  LIMIT 2
+")
+#>   column0 column1
+#> 1    chr1       1
+#> 2    chr1       2
 
 dbDisconnect(con, shutdown = TRUE)
 ```

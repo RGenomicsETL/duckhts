@@ -166,7 +166,7 @@ SELECT count(DISTINCT PAIR_ID) FROM read_fastq('__WORKING_DIRECTORY__/test/data/
 statement error
 SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/mate_mismatch_r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/mate_mismatch_r2.fq');
 ----
-read_fastq: mate files out of sync
+read_fastq: mate files out of sync (QNAME mismatch: 'readA' vs 'readB')
 
 # --- interleaved FASTQ ---
 query I
@@ -189,13 +189,25 @@ SELECT count(DISTINCT PAIR_ID) FROM read_fastq('__WORKING_DIRECTORY__/test/data/
 ----
 5
 
+# --- interleaved FASTQ odd record count ---
+statement error
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/odd_interleaved.fq', interleaved := true);
+----
+read_fastq: interleaved file has an unpaired record
+
 # ==============================================================
 # read_bcf – VCF/BCF reader
 # ==============================================================
 
+# --- non-conforming VCF without ##contig ---
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/no_contig.vcf.gz');
+----
+1
+
 # --- region query with missing contig headers (non-conforming VCF) ---
 query I
-SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', region := 'no_such_contig:1-10');
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/no_contig.vcf.gz', region := 'no_such_contig:1-10');
 ----
 0
 
@@ -214,6 +226,16 @@ query IIIII
 SELECT seqname, source, feature, start, "end" FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') LIMIT 1;
 ----
 X	Vega	exon	2934816	2935190
+
+# ==============================================================
+# read_tabix – generic reader (header/meta)
+# ==============================================================
+
+# --- respect meta header lines in generic tabix ---
+query II
+SELECT column0, column1 FROM read_tabix('__WORKING_DIRECTORY__/test/data/meta_tabix.tsv.gz') LIMIT 1;
+----
+chr1	1
 
 # --- projection pushdown: single column ---
 query I

@@ -33,6 +33,12 @@ Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTo
 | `read_gtf(path, [region, attributes_map])` | Read GTF files | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
 | `read_tabix(path, [region])` | Read any tabix-indexed file | column0, column1, … (auto-detected) |
 
+Notes:
+
+- `read_fastq` with `mate_path` requires exact QNAME pairing; mismatches raise an error.
+- `read_bcf` region queries on files missing `##contig` headers return an empty result (with a warning) instead of erroring.
+- `read_tabix` column inference now respects tabix header/meta configuration (meta char + line_skip), so header lines are not mistaken as data.
+
 ## Examples
 
 ```sql
@@ -225,6 +231,12 @@ dbGetQuery(con, "
   FROM read_gff('test/data/gff_file.gff.gz', attributes_map := true)
   WHERE feature = 'gene'
   LIMIT 5
+")
+
+dbGetQuery(con, "
+  SELECT column0, column1
+  FROM read_tabix('test/data/meta_tabix.tsv.gz')
+  LIMIT 2
 ")
 
 dbDisconnect(con, shutdown = TRUE)
