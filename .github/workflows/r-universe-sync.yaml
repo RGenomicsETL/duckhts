@@ -35,7 +35,11 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
           release_url="$GH_API/repos/$GITHUB_REPOSITORY/releases/tags/r-universe-binaries"
-          release_json=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$release_url" || true)
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            release_json=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$release_url" || true)
+          else
+            release_json=$(curl -s -H "Accept: application/vnd.github+json" "$release_url" || true)
+          fi
 
           mkdir -p dist/binaries dist/zips
 
