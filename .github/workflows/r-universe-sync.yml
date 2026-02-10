@@ -20,7 +20,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get install -y jq zip
 
       - name: Download R-universe artifacts
         env:
@@ -31,7 +31,6 @@ jobs:
           set -euo pipefail
           json=$(curl -s "$API_URL")
           version=$(echo "$json" | jq -r '.Version')
-          source_fileid=$(echo "$json" | jq -r '._fileid')
 
           if echo "$version" | grep -Eq '\.9[0-9]{2,}($|[.-])'; then
             echo "Skipping dev version: $version"
@@ -49,11 +48,7 @@ jobs:
             fi
           fi
 
-          mkdir -p dist/source dist/binaries
-
-          if [ -n "$source_fileid" ] && [ "$source_fileid" != "null" ]; then
-            curl -L -o "dist/source/Rduckhts_${version}.tar.gz" "$CDN_URL/$source_fileid"
-          fi
+          mkdir -p dist/binaries dist/zips
 
           echo "$json" | jq -r '._binaries[] | @base64' | while read -r row; do
             _jq() { echo "$row" | base64 -d | jq -r "$1"; }
@@ -72,7 +67,13 @@ jobs:
           for osdir in dist/binaries/*; do
             [ -d "$osdir" ] || continue
             osname=$(basename "$osdir")
-            tar -C dist/binaries -czf "dist/Rduckhts_${version}_${osname}.tar.gz" "$osname"
+            case "$osname" in
+              win) triplet="windows_amd64_mingw";;
+              mac) triplet="osx_arm64";;
+              linux) triplet="linux_amd64";;
+              *) triplet="$osname";;
+            esac
+            (cd dist/binaries && zip -r "../zips/Rduckhts_${version}_${triplet}.zip" "$osname")
           done
 
           echo "$version" > dist/latest-version.txt
@@ -82,15 +83,15 @@ jobs:
         with:
           name: r-universe-sync
           path: |
-            dist/*.tar.gz
+            dist/zips/*.zip
             dist/latest-version.txt
 
       - name: Publish nightly release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: r-universe-nightly
-          name: r-universe-nightly
+          tag_name: r-universe-binaries
+          name: r-universe-binaries
           prerelease: true
           files: |
-            dist/*.tar.gz
+            dist/zips/*.zip
             dist/latest-version.txt

@@ -135,6 +135,11 @@ Notes:
 - If `HTS_PATH` is set after the extension is already loaded, restart
   the session and set it first.
 
+If you don’t have htslib plugins installed locally, download the
+prebuilt htslib plugin bundles from the GitHub Releases page and point
+`HTS_PATH` at the extracted htslib/libexec/htslib directory:
+<https://github.com/RGenomicsETL/duckhts/releases>
+
 ### S3 credentials and configuration
 
 The htslib S3 plugin supports credentials embedded in the URL or
