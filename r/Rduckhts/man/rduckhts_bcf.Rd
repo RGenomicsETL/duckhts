@@ -25,6 +25,10 @@ rduckhts_bcf(
 \item{tidy_format}{Logical. If TRUE, FORMAT columns are returned in tidy format}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
+
+\item{standard_tags}{Logical. If TRUE, include typed standard SAMtags columns}
+
+\item{auxiliary_tags}{Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags}
 }
 \value{
 Invisible TRUE on success

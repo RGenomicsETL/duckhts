@@ -135,6 +135,52 @@ cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads LIM
 cram_reads
 ```
 
+### SAMtags + auxiliary tags
+
+Standard SAMtags can be exposed as typed columns, and any remaining tags are
+available via `AUXILIARY_TAGS`:
+
+```{r}
+aux_path <- system.file("extdata", "aux.sam.gz", package = "Rduckhts")
+rduckhts_bam(con, "aux_reads", aux_path, standard_tags = TRUE, auxiliary_tags = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux_reads LIMIT 1")
+```
+
+### Tabix headers + types
+
+Use `header = TRUE` to use the first non-meta row as column names, and
+`auto_detect = TRUE` / `column_types` to control column typing:
+
+```{r}
+tabix_header <- system.file("extdata", "header_tabix.tsv.gz", package = "Rduckhts")
+tabix_meta <- system.file("extdata", "meta_tabix.tsv.gz", package = "Rduckhts")
+
+rduckhts_tabix(con, "header_tabix", tabix_header, header = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT chrom, pos FROM header_tabix LIMIT 2")
+
+rduckhts_tabix(con, "typed_tabix", tabix_meta, auto_detect = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT typeof(column1) AS column1_type FROM typed_tabix LIMIT 1")
+
+rduckhts_tabix(con, "typed_tabix_explicit", tabix_header,
+               header = TRUE,
+               column_types = c("VARCHAR", "BIGINT", "VARCHAR"),
+               overwrite = TRUE)
+dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 1")
+```
+
+### Remote GTEx tabix example
+
+GTEx eQTL matrices on EBI are tabix-indexed. Remote access requires htslib
+plugins (see `setup_hts_env()`).
+
+```{r, eval=FALSE}
+setup_hts_env()
+gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
+rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
+               header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
+```
+
 ```{r}
 dbDisconnect(con, shutdown = TRUE)
 ```
@@ -150,4 +196,3 @@ dbDisconnect(con, shutdown = TRUE)
 ## License
 
 GPL-3.
-

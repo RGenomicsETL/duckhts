@@ -1,4 +1,8 @@
-# Rduckhts 0.1.1-0.0.4.9000
+# Rduckhts 0.1.2-0.0.9000
+
+- Update bootstrapped extension code to match duckhts 0.1.2.
+- Add SAMtags + auxiliary tag support (standard_tags, auxiliary_tags).
+- Add tabix header/typing options (header, header_names, auto_detect, column_types).
 
 
 # Rduckhts 0.1.1-0.0.3

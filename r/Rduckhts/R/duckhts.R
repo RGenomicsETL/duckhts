@@ -124,6 +124,8 @@ rduckhts_load <- function(con, extension_path = NULL) {
 #' @param path Path to the VCF/BCF file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
 #' @param tidy_format Logical. If TRUE, FORMAT columns are returned in tidy format
+#' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns
+#' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -216,6 +218,8 @@ rduckhts_bam <- function(
   path,
   region = NULL,
   reference = NULL,
+  standard_tags = NULL,
+  auxiliary_tags = NULL,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -237,6 +241,12 @@ rduckhts_bam <- function(
   }
   if (!is.null(reference)) {
     params$reference <- sprintf("'%s'", reference)
+  }
+  if (!is.null(standard_tags)) {
+    params$standard_tags <- if (isTRUE(standard_tags)) "true" else "false"
+  }
+  if (!is.null(auxiliary_tags)) {
+    params$auxiliary_tags <- if (isTRUE(auxiliary_tags)) "true" else "false"
   }
 
   param_str <- build_param_str(params)
@@ -535,6 +545,10 @@ rduckhts_gtf <- function(
 #' @param table_name Name for the created table
 #' @param path Path to the tabix-indexed file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
+#' @param header Logical. If TRUE, use first non-meta line as column names
+#' @param header_names Character vector to override column names
+#' @param auto_detect Logical. If TRUE, infer basic numeric column types
+#' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -553,6 +567,10 @@ rduckhts_tabix <- function(
   table_name,
   path,
   region = NULL,
+  header = NULL,
+  header_names = NULL,
+  auto_detect = NULL,
+  column_types = NULL,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -568,11 +586,30 @@ rduckhts_tabix <- function(
     }
   }
 
+  params <- list()
   if (!is.null(region)) {
-    param_str <- sprintf(", region := '%s'", region)
-  } else {
-    param_str <- ""
+    params$region <- sprintf("'%s'", region)
   }
+  if (!is.null(header)) {
+    params$header <- if (isTRUE(header)) "true" else "false"
+  }
+  if (!is.null(auto_detect)) {
+    params$auto_detect <- if (isTRUE(auto_detect)) "true" else "false"
+  }
+  if (!is.null(header_names)) {
+    if (!is.character(header_names)) {
+      stop("header_names must be a character vector")
+    }
+    params$header_names <- sprintf("[%s]", paste(sprintf("'%s'", header_names), collapse = ", "))
+  }
+  if (!is.null(column_types)) {
+    if (!is.character(column_types)) {
+      stop("column_types must be a character vector")
+    }
+    params$column_types <- sprintf("[%s]", paste(sprintf("'%s'", column_types), collapse = ", "))
+  }
+
+  param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(

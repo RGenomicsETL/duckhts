@@ -10,6 +10,8 @@ rduckhts_bam(
   path,
   region = NULL,
   reference = NULL,
+  standard_tags = NULL,
+  auxiliary_tags = NULL,
   overwrite = FALSE
 )
 }
