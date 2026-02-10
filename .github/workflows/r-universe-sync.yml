@@ -56,27 +56,34 @@ jobs:
           echo "$json" | jq -r '._binaries[] | @base64' | while read -r row; do
             _jq() { echo "$row" | base64 -d | jq -r "$1"; }
             os=$(_jq '.os')
+            rver=$(_jq '.r')
+            distro=$(_jq '.distro')
             fileid=$(_jq '.fileid')
 
             if [ -z "$fileid" ] || [ "$fileid" = "null" ]; then
               continue
             fi
 
-            outdir="dist/binaries/${os}"
-            mkdir -p "$outdir"
-            (cd "$outdir" && curl -L -O -J "$CDN_URL/$fileid")
-          done
-
-          for osdir in dist/binaries/*; do
-            [ -d "$osdir" ] || continue
-            osname=$(basename "$osdir")
-            case "$osname" in
+            case "$os" in
               win) triplet="windows_amd64_mingw";;
               mac) triplet="osx_arm64";;
               linux) triplet="linux_amd64";;
-              *) triplet="$osname";;
+              *) triplet="$os";;
             esac
-            (cd dist/binaries && zip -r "../zips/Rduckhts_${version}_${triplet}.zip" "$osname")
+
+            suffix="${triplet}_r${rver}"
+            if [ -n "$distro" ] && [ "$distro" != "null" ] && [ "$os" = "linux" ]; then
+              suffix="${suffix}_${distro}"
+            fi
+
+            outdir="dist/binaries/${suffix}"
+            mkdir -p "$outdir"
+            (cd "$outdir" && curl -L -O -J "$CDN_URL/$fileid")
+
+            pkg_file=$(ls -t "$outdir" | head -n 1)
+            if [ -n "$pkg_file" ]; then
+              (cd "$outdir" && zip -r "../../zips/Rduckhts_${version}_${suffix}.zip" "$pkg_file")
+            fi
           done
 
           if ! ls dist/zips/*.zip >/dev/null 2>&1; then
