@@ -1,0 +1,73 @@
+name: Sync R-universe artifacts (nightly)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync R-universe binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Download R-universe artifacts
+        env:
+          API_URL: https://rgenomicsetl.r-universe.dev/api/packages/Rduckhts
+          CDN_URL: https://cdn.r-universe.dev
+        run: |
+          set -euo pipefail
+          json=$(curl -s "$API_URL")
+          version=$(echo "$json" | jq -r '.Version')
+          source_fileid=$(echo "$json" | jq -r '._fileid')
+
+          mkdir -p dist/source dist/binaries
+
+          if [ -n "$source_fileid" ] && [ "$source_fileid" != "null" ]; then
+            curl -L -o "dist/source/Rduckhts_${version}.tar.gz" "$CDN_URL/$source_fileid"
+          fi
+
+          echo "$json" | jq -r '._binaries[] | @base64' | while read -r row; do
+            _jq() { echo "$row" | base64 -d | jq -r "$1"; }
+            os=$(_jq '.os')
+            fileid=$(_jq '.fileid')
+
+            if [ -z "$fileid" ] || [ "$fileid" = "null" ]; then
+              continue
+            fi
+
+            outdir="dist/binaries/${os}"
+            mkdir -p "$outdir"
+            (cd "$outdir" && curl -L -O -J "$CDN_URL/$fileid")
+          done
+
+          for osdir in dist/binaries/*; do
+            [ -d "$osdir" ] || continue
+            osname=$(basename "$osdir")
+            tar -C dist/binaries -czf "dist/Rduckhts_${version}_${osname}.tar.gz" "$osname"
+          done
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: r-universe-sync
+          path: dist/*.tar.gz
+
+      - name: Publish nightly release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: r-universe-nightly
+          name: r-universe-nightly
+          prerelease: true
+          files: dist/*.tar.gz
