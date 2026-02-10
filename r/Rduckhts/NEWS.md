@@ -1,5 +1,9 @@
 # Rduckhts 0.1.1-0.0.3
 
+- make the build single threaded
+
+# Rduckhts 0.1.1-0.0.3
+
 - misspeling correction
 
 # Rduckhts 0.1.1-0.0.2
