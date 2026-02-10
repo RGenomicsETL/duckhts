@@ -26,11 +26,28 @@ jobs:
         env:
           API_URL: https://rgenomicsetl.r-universe.dev/api/packages/Rduckhts
           CDN_URL: https://cdn.r-universe.dev
+          GH_API: https://api.github.com
         run: |
           set -euo pipefail
           json=$(curl -s "$API_URL")
           version=$(echo "$json" | jq -r '.Version')
           source_fileid=$(echo "$json" | jq -r '._fileid')
+
+          if echo "$version" | grep -Eq '\.9[0-9]{2,}($|[.-])'; then
+            echo "Skipping dev version: $version"
+            exit 0
+          fi
+
+          release_url="$GH_API/repos/$GITHUB_REPOSITORY/releases/tags/r-universe-nightly"
+          release_json=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$release_url" || true)
+          last_version_url=$(echo "$release_json" | jq -r '.assets[]? | select(.name=="latest-version.txt") | .browser_download_url' | head -n 1)
+          if [ -n "$last_version_url" ] && [ "$last_version_url" != "null" ]; then
+            last_version=$(curl -s -L "$last_version_url" | tr -d '\n')
+            if [ "$last_version" = "$version" ]; then
+              echo "Already synced version: $version"
+              exit 0
+            fi
+          fi
 
           mkdir -p dist/source dist/binaries
 
@@ -58,11 +75,15 @@ jobs:
             tar -C dist/binaries -czf "dist/Rduckhts_${version}_${osname}.tar.gz" "$osname"
           done
 
+          echo "$version" > dist/latest-version.txt
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: r-universe-sync
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/latest-version.txt
 
       - name: Publish nightly release assets
         uses: softprops/action-gh-release@v2
@@ -70,4 +91,6 @@ jobs:
           tag_name: r-universe-nightly
           name: r-universe-nightly
           prerelease: true
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/latest-version.txt
