@@ -225,7 +225,7 @@ fi
   ${HTSLIB_CONFIGURE_FLAGS}
 
 echo "---------- Building htslib (static + shared) ----------"
-${MAKE} -j libhts.a libhts.${SHLIB_EXT} plugins
+${MAKE} -j1 libhts.a libhts.${SHLIB_EXT} plugins
 ${MAKE} install
 
 rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true

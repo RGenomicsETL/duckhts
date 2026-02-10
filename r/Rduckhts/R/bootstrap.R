@@ -153,7 +153,7 @@ duckhts_build <- function(build_dir = NULL, force = FALSE, verbose = TRUE) {
 
     bld_status <- system2(
       make,
-      c("-C", htslib_dir, "-j", "lib-static"),
+      c("-C", htslib_dir, "-j1", "lib-static"),
       stdout = if (verbose) "" else FALSE,
       stderr = if (verbose) "" else FALSE
     )
