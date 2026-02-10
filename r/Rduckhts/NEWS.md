@@ -1,5 +1,7 @@
 # Rduckhts 0.1.2-0.0.9000
 
+- modified configure to attemp to support wasm
+
 - Update bootstrapped extension code to match `duckhts` 0.1.2.
 - Add SAMtags + auxiliary tag support (standard_tags, auxiliary_tags).
 - Add tabix header/typing options (header, header_names, auto_detect, column_types).

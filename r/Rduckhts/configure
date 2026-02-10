@@ -8,6 +8,13 @@ THIS_DIR=`cd "$THIS_DIR" && pwd`
 # Capture configure arguments (--host, --build, etc.)
 CONFIGURE_ARGS="$@"
 
+HOST_TRIPLET=""
+for arg in "$@"; do
+  case "$arg" in
+    --host=*) HOST_TRIPLET="${arg#--host=}";;
+  esac
+done
+
 MAKE=`"${R_HOME}/bin/R" CMD config MAKE`
 CC=`"${R_HOME}/bin/R" CMD config CC | cut -f1 -d' '`
 AR=`"${R_HOME}/bin/R" CMD config AR`
@@ -16,6 +23,14 @@ R_CPPFLAGS=`"${R_HOME}/bin/R" CMD config CPPFLAGS`
 R_CFLAGS=`"${R_HOME}/bin/R" CMD config CFLAGS`
 R_CPICFLAGS=`"${R_HOME}/bin/R" CMD config CPICFLAGS`
 R_LDFLAGS=`"${R_HOME}/bin/R" CMD config LDFLAGS`
+
+WASM_BUILD=no
+if echo "${CC}" | grep -q "emcc" || echo "${CC}" | grep -q "wasm"; then
+  WASM_BUILD=yes
+fi
+if echo "${HOST_TRIPLET}" | grep -q "wasm" || echo "${HOST_TRIPLET}" | grep -q "emscripten"; then
+  WASM_BUILD=yes
+fi
 
 if [ "`uname`" = "Darwin" ]; then
   SHLIB_EXT="dylib"
@@ -88,20 +103,25 @@ fi
 OS_NAME=`uname -s`
 ARCH_NAME=`uname -m`
 DUCKDB_PLATFORM=""
-case "${OS_NAME}" in
-  Linux)
-    case "${ARCH_NAME}" in
-      x86_64) DUCKDB_PLATFORM="linux_amd64";;
-      aarch64|arm64) DUCKDB_PLATFORM="linux_arm64";;
-    esac
-    ;;
-  Darwin)
-    case "${ARCH_NAME}" in
-      x86_64) DUCKDB_PLATFORM="osx_amd64";;
-      arm64) DUCKDB_PLATFORM="osx_arm64";;
-    esac
-    ;;
-esac
+if [ "${WASM_BUILD}" = "yes" ]; then
+  DUCKDB_PLATFORM="wasm_mvp"
+fi
+if [ -z "${DUCKDB_PLATFORM}" ]; then
+  case "${OS_NAME}" in
+    Linux)
+      case "${ARCH_NAME}" in
+        x86_64) DUCKDB_PLATFORM="linux_amd64";;
+        aarch64|arm64) DUCKDB_PLATFORM="linux_arm64";;
+      esac
+      ;;
+    Darwin)
+      case "${ARCH_NAME}" in
+        x86_64) DUCKDB_PLATFORM="osx_amd64";;
+        arm64) DUCKDB_PLATFORM="osx_arm64";;
+      esac
+      ;;
+  esac
+fi
 
 if [ -z "${DUCKDB_PLATFORM}" ]; then
   echo "ERROR: Unsupported platform: ${OS_NAME}/${ARCH_NAME}"
@@ -192,7 +212,21 @@ LIBS="$LIBS -lpthread"
 echo "---------- Configuring htslib ----------"
 cd "${HTSLIB_DIR}"
 
-HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
+CONFIGURE_EXTRA_FLAGS=""
+HTSLIB_PLUGINS="--enable-plugins"
+HTSLIB_S3="--enable-s3"
+HTSLIB_GCS="--enable-gcs"
+
+if [ "${WASM_BUILD}" = "yes" ]; then
+  echo "Detected WebAssembly/r-wasm build environment"
+  echo "Disabling plugins, S3, and GCS support (not available in wasm)"
+  CONFIGURE_EXTRA_FLAGS="ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no"
+  HTSLIB_PLUGINS="--disable-plugins"
+  HTSLIB_S3="--disable-s3"
+  HTSLIB_GCS="--disable-gcs"
+fi
+
+HTSLIB_CONFIGURE_FLAGS="${HTSLIB_PLUGINS} ${HTSLIB_S3} ${HTSLIB_GCS}"
 
 if [ "$HAS_BZ2" = "no" ]; then
   echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
@@ -206,13 +240,12 @@ fi
 
 if [ "$HAS_CURL" = "no" ]; then
   echo "INFO: libcurl not found - disabling remote URL support in htslib"
-  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
-  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
+  HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl --disable-s3 --disable-gcs"
 elif [ "$HAS_OPENSSL" = "no" ]; then
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
 fi
 
-./configure \
+${CONFIGURE_EXTRA_FLAGS} ./configure \
   ${CONFIGURE_ARGS} \
   --prefix="${HTSLIB_DIR}" \
   CC="${CC}" \
@@ -228,7 +261,12 @@ echo "---------- Building htslib (static + shared) ----------"
 # chek if thread is set or default to 1
 THREADS=${THREADS:-1}
 
-${MAKE} -j${THREADS} libhts.a libhts.${SHLIB_EXT} plugins
+HTSLIB_BUILD_TARGETS="libhts.a libhts.${SHLIB_EXT}"
+if [ "${HTSLIB_PLUGINS}" = "--enable-plugins" ]; then
+  HTSLIB_BUILD_TARGETS="$HTSLIB_BUILD_TARGETS plugins"
+fi
+
+${MAKE} -j${THREADS} ${HTSLIB_BUILD_TARGETS}
 ${MAKE} install
 
 rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true

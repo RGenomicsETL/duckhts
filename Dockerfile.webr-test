@@ -1,0 +1,13 @@
+FROM ghcr.io/r-wasm/webr:main
+
+# Copy the package source to /work
+COPY . /work
+
+# Set working directory
+WORKDIR /work/r/Rduckhts
+
+# Install the package using pak
+RUN THREADS=4 Rscript -e 'pak::pak(".", ask = FALSE)'
+RUN THREADS=4 Rscript -e 'pak::pak("tinytest", ask = FALSE)'
+# Default command to show package info
+CMD ["Rscript", "-e", "library(Rduckhts); tinytest::test_package('Rduckhts')"]
