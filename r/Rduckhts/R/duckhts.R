@@ -341,11 +341,10 @@ extract_map_data <- function(map_col, operation = "keys", default = NA) {
   }))
 }
 
-# Continue with original HTS functions...
 
 #' @keywords internal
 duckhts_extension_dir <- function() {
-  ext_path <- system.file("extdata", package = "Rduckhts", mustWork = FALSE)
+  ext_path <- system.file("duckhts_extension", package = "Rduckhts", mustWork = FALSE)
   if (nzchar(ext_path) && dir.exists(ext_path)) {
     return(ext_path)
   }
@@ -554,8 +553,7 @@ normalize_tabix_types <- function(types) {
   lowered <- tolower(cleaned)
   mapped <- character(length(cleaned))
   for (i in seq_along(cleaned)) {
-    mapped[i] <- switch(
-      lowered[i],
+    mapped[i] <- switch(lowered[i],
       "integer" = "BIGINT",
       "int" = "BIGINT",
       "int32" = "BIGINT",
