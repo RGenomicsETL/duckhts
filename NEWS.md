@@ -10,3 +10,5 @@
 - read_tabix supports header-based column names via header := true and header_names
 - read_bam supports standard_tags (typed SAMtags columns) and auxiliary_tags (map of remaining tags)
 - standard_tags + auxiliary_tags demo added to README R examples
+- read_tabix supports auto_detect for basic numeric inference and column_types overrides
+- added SQL/R demos and tests for tabix type inference and column overrides

@@ -31,7 +31,7 @@ Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTo
 | `read_fastq(path, [mate_path, interleaved])` | Read FASTQ files | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR_ID when paired/interleaved) |
 | `read_gff(path, [region, attributes_map])` | Read GFF3 files | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
 | `read_gtf(path, [region, attributes_map])` | Read GTF files | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
-| `read_tabix(path, [region, header, header_names])` | Read any tabix-indexed file | column0, column1, … (auto-detected) |
+| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file | column0, column1, … (auto-detected) |
 
 Notes:
 
@@ -39,6 +39,7 @@ Notes:
 - `read_bcf` region queries on files missing `##contig` headers return an empty result (with a warning) instead of erroring.
 - `read_tabix` column inference now respects tabix header/meta configuration (meta char + line_skip), so header lines are not mistaken as data.
 - `read_tabix` supports `header := true` to use the first non-meta line as column names, and `header_names := [...]` to override names.
+- `read_tabix` supports `auto_detect := true` to infer numeric types and `column_types := [...]` to set types explicitly.
 - `read_bam` supports `standard_tags := true` for typed SAMtags columns and `auxiliary_tags := true` for a string map of all remaining tags.
 
 ## Examples
@@ -258,6 +259,19 @@ dbGetQuery(con, "
   SELECT chrom, pos
   FROM read_tabix('test/data/header_tabix.tsv.gz', header := true)
   LIMIT 2
+")
+
+dbGetQuery(con, "
+  SELECT typeof(column1) AS column1_type
+  FROM read_tabix('test/data/meta_tabix.tsv.gz', auto_detect := true)
+  LIMIT 1
+")
+
+dbGetQuery(con, "
+  SELECT pos + 1 AS pos_plus_one
+  FROM read_tabix('test/data/header_tabix.tsv.gz', header := true,
+                  column_types := ['VARCHAR','BIGINT','VARCHAR'])
+  LIMIT 1
 ")
 
 dbDisconnect(con, shutdown = TRUE)

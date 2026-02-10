@@ -34,6 +34,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdbool.h>
 #include <math.h>
+#include <strings.h>
 
 #include <htslib/hts.h>
 #include <htslib/tbx.h>
@@ -45,6 +46,12 @@ DUCKDB_EXTENSION_EXTERN
 
 #define TABIX_BATCH_SIZE 2048
 #define TABIX_MAX_GENERIC_COLS 256
+
+static inline void set_null(duckdb_vector vec, idx_t row) {
+    duckdb_vector_ensure_validity_writable(vec);
+    uint64_t *v = duckdb_vector_get_validity(vec);
+    v[row / 64] &= ~((uint64_t)1 << (row % 64));
+}
 
 /* GTF/GFF column indices */
 enum {
@@ -84,6 +91,9 @@ typedef struct {
     char **header_names;
     char meta_char;
     int  line_skip;
+    int  auto_detect;
+    int  col_types_provided;
+    int *col_types;
 } tabix_bind_data_t;
 
 static void tabix_bind_data_destroy(void *data) {
@@ -97,6 +107,7 @@ static void tabix_bind_data_destroy(void *data) {
             }
             free(bd->header_names);
         }
+        free(bd->col_types);
         free(bd);
     }
 }
@@ -141,6 +152,44 @@ static int count_fields(const char *s) {
         s++;
     }
     return n;
+}
+
+static int is_integer_field(const char *s, int len) {
+    if (len == 0) return 0;
+    int i = 0;
+    if (s[i] == '-' || s[i] == '+') i++;
+    if (i >= len) return 0;
+    for (; i < len; i++) {
+        if (s[i] < '0' || s[i] > '9') return 0;
+    }
+    return 1;
+}
+
+static int is_float_field(const char *s, int len) {
+    if (len == 0) return 0;
+    char *tmp = (char *)malloc((size_t)len + 1);
+    if (!tmp) return 0;
+    memcpy(tmp, s, (size_t)len);
+    tmp[len] = '\0';
+    char *end = NULL;
+    strtod(tmp, &end);
+    int ok = (end && *end == '\0');
+    free(tmp);
+    return ok;
+}
+
+static int parse_type_name(const char *s) {
+    if (!s) return DUCKDB_TYPE_VARCHAR;
+    if (strcasecmp(s, "INT") == 0 || strcasecmp(s, "INTEGER") == 0)
+        return DUCKDB_TYPE_INTEGER;
+    if (strcasecmp(s, "BIGINT") == 0 || strcasecmp(s, "LONG") == 0)
+        return DUCKDB_TYPE_BIGINT;
+    if (strcasecmp(s, "DOUBLE") == 0 || strcasecmp(s, "FLOAT") == 0 ||
+        strcasecmp(s, "REAL") == 0)
+        return DUCKDB_TYPE_DOUBLE;
+    if (strcasecmp(s, "VARCHAR") == 0 || strcasecmp(s, "STRING") == 0)
+        return DUCKDB_TYPE_VARCHAR;
+    return DUCKDB_TYPE_VARCHAR;
 }
 
 /* Get n-th tab-separated field (0-based). Returns pointer into s, sets *len.
@@ -359,6 +408,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
     bd->mode = mode;
     bd->meta_char = '#';
     bd->line_skip = 0;
+    bd->col_types_provided = 0;
 
     /* positional param: file path */
     duckdb_value val = duckdb_bind_get_parameter(info, 0);
@@ -425,6 +475,12 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         }
         if (val) duckdb_destroy_value(&val);
 
+        val = duckdb_bind_get_named_parameter(info, "auto_detect");
+        if (val && !duckdb_is_null_value(val)) {
+            bd->auto_detect = duckdb_get_bool(val) ? 1 : 0;
+        }
+        if (val) duckdb_destroy_value(&val);
+
         val = duckdb_bind_get_named_parameter(info, "header_names");
         if (val && !duckdb_is_null_value(val)) {
             idx_t n = duckdb_get_list_size(val);
@@ -436,6 +492,24 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                     bd->header_names[i] = duckdb_get_varchar(elem);
                     duckdb_destroy_value(&elem);
                 }
+            }
+        }
+        if (val) duckdb_destroy_value(&val);
+
+        val = duckdb_bind_get_named_parameter(info, "column_types");
+        if (val && !duckdb_is_null_value(val)) {
+            idx_t n = duckdb_get_list_size(val);
+            if (n > 0) {
+                bd->col_types = (int *)malloc(sizeof(int) * (size_t)n);
+                bd->col_types_provided = 1;
+                for (idx_t i = 0; i < n; i++) {
+                    duckdb_value elem = duckdb_get_list_child(val, i);
+                    const char *tname = duckdb_get_varchar(elem);
+                    bd->col_types[i] = parse_type_name(tname);
+                    duckdb_free((void *)tname);
+                    duckdb_destroy_value(&elem);
+                }
+                bd->n_cols = (int)n;
             }
         }
         if (val) duckdb_destroy_value(&val);
@@ -501,18 +575,81 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
 
         if (n_cols == 0) n_cols = 1;
         if (n_cols > TABIX_MAX_GENERIC_COLS) n_cols = TABIX_MAX_GENERIC_COLS;
-        bd->n_cols = n_cols;
+        if (bd->n_cols == 0) bd->n_cols = n_cols;
+
+        if (bd->col_types && bd->n_cols != n_cols) {
+            duckdb_bind_set_error(info, "column_types length does not match detected column count");
+            tabix_bind_data_destroy(bd);
+            return;
+        }
+
+        if (!bd->col_types) {
+            bd->col_types = (int *)malloc(sizeof(int) * (size_t)bd->n_cols);
+            for (int i = 0; i < bd->n_cols; i++) bd->col_types[i] = DUCKDB_TYPE_VARCHAR;
+        }
+
+        if (bd->auto_detect && !bd->col_types_provided) {
+            int *type_state = (int *)malloc(sizeof(int) * (size_t)bd->n_cols);
+            for (int i = 0; i < bd->n_cols; i++) type_state[i] = DUCKDB_TYPE_INTEGER;
+
+            /* Reopen to scan for type inference */
+            htsFile *fp2 = hts_open(bd->file_path, "r");
+            if (fp2) {
+                kstring_t l2 = {0, 0, NULL};
+                int skip2 = bd->line_skip;
+                int skip_header = bd->skip_header_line;
+                int seen = 0;
+                while (seen < 100 && hts_getline(fp2, '\n', &l2) >= 0) {
+                    if (l2.l == 0) continue;
+                    if (skip2 > 0) { skip2--; continue; }
+                    if (bd->meta_char && l2.s[0] == bd->meta_char) continue;
+                    if (skip_header) { skip_header = 0; continue; }
+
+                    for (int i = 0; i < bd->n_cols; i++) {
+                        int flen = 0;
+                        const char *fld = get_field(l2.s, i, &flen);
+                        if (!fld || flen == 0 || (flen == 1 && fld[0] == '.')) continue;
+                        if (is_integer_field(fld, flen)) {
+                            continue;
+                        } else if (is_float_field(fld, flen)) {
+                            if (type_state[i] != DUCKDB_TYPE_VARCHAR)
+                                type_state[i] = DUCKDB_TYPE_DOUBLE;
+                        } else {
+                            type_state[i] = DUCKDB_TYPE_VARCHAR;
+                        }
+                    }
+                    seen++;
+                }
+                free(l2.s);
+                hts_close(fp2);
+            }
+
+            for (int i = 0; i < bd->n_cols; i++) {
+                if (type_state[i] == DUCKDB_TYPE_INTEGER) {
+                    bd->col_types[i] = DUCKDB_TYPE_BIGINT;
+                } else if (type_state[i] == DUCKDB_TYPE_DOUBLE) {
+                    bd->col_types[i] = DUCKDB_TYPE_DOUBLE;
+                } else {
+                    bd->col_types[i] = DUCKDB_TYPE_VARCHAR;
+                }
+            }
+            free(type_state);
+        }
 
         duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-        for (int i = 0; i < n_cols; i++) {
+        for (int i = 0; i < bd->n_cols; i++) {
             char col_name[32];
+            duckdb_logical_type col_type = duckdb_create_logical_type((duckdb_type)bd->col_types[i]);
+            const char *name = NULL;
             if (bd->header_names && i < bd->header_names_count &&
                 bd->header_names[i] && bd->header_names[i][0] != '\0') {
-                duckdb_bind_add_result_column(info, bd->header_names[i], varchar_type);
+                name = bd->header_names[i];
             } else {
                 snprintf(col_name, sizeof(col_name), "column%d", i);
-                duckdb_bind_add_result_column(info, col_name, varchar_type);
+                name = col_name;
             }
+            duckdb_bind_add_result_column(info, name, col_type);
+            duckdb_destroy_logical_type(&col_type);
         }
         duckdb_destroy_logical_type(&varchar_type);
     }
@@ -717,16 +854,43 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 }
             }
         } else {
-            /* Generic mode: all VARCHAR, with projection pushdown */
+            /* Generic mode with optional typing */
             for (idx_t c = 0; c < chunk_col_count; c++) {
                 int logical_col = (int)id->column_ids[c];
                 if (logical_col >= n_cols) continue;
                 int flen = 0;
                 const char *fld = get_field(id->line.s, logical_col, &flen);
-                if (fld) {
-                    duckdb_vector_assign_string_element_len(vectors[c], row_count, fld, flen);
+                if (!fld || flen == 0 || (flen == 1 && fld[0] == '.')) {
+                    set_null(vectors[c], row_count);
+                    continue;
+                }
+                int t = bd->col_types ? bd->col_types[logical_col] : DUCKDB_TYPE_VARCHAR;
+                if (t == DUCKDB_TYPE_INTEGER || t == DUCKDB_TYPE_BIGINT) {
+                    char *buf = (char *)alloca((size_t)flen + 1);
+                    memcpy(buf, fld, (size_t)flen);
+                    buf[flen] = '\0';
+                    char *end = NULL;
+                    int64_t v = strtoll(buf, &end, 10);
+                    if (end && *end == '\0') {
+                        int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
+                        data[row_count] = v;
+                    } else {
+                        set_null(vectors[c], row_count);
+                    }
+                } else if (t == DUCKDB_TYPE_DOUBLE) {
+                    char *buf = (char *)alloca((size_t)flen + 1);
+                    memcpy(buf, fld, (size_t)flen);
+                    buf[flen] = '\0';
+                    char *end = NULL;
+                    double v = strtod(buf, &end);
+                    if (end && *end == '\0') {
+                        double *data = (double *)duckdb_vector_get_data(vectors[c]);
+                        data[row_count] = v;
+                    } else {
+                        set_null(vectors[c], row_count);
+                    }
                 } else {
-                    duckdb_vector_assign_string_element_len(vectors[c], row_count, "", 0);
+                    duckdb_vector_assign_string_element_len(vectors[c], row_count, fld, flen);
                 }
             }
         }
@@ -765,6 +929,16 @@ static duckdb_table_function create_tabix_tf(const char *name,
     duckdb_table_function_add_named_parameter(tf, "header_names", list_type);
     duckdb_destroy_logical_type(&list_child);
     duckdb_destroy_logical_type(&list_type);
+
+    duckdb_logical_type auto_bool = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_table_function_add_named_parameter(tf, "auto_detect", auto_bool);
+    duckdb_destroy_logical_type(&auto_bool);
+
+    duckdb_logical_type types_child = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type types_list = duckdb_create_list_type(types_child);
+    duckdb_table_function_add_named_parameter(tf, "column_types", types_list);
+    duckdb_destroy_logical_type(&types_child);
+    duckdb_destroy_logical_type(&types_list);
 
     duckdb_table_function_set_bind(tf, bind_fn);
     duckdb_table_function_set_init(tf, tabix_init);

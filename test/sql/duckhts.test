@@ -257,6 +257,18 @@ SELECT chrom, pos FROM read_tabix('__WORKING_DIRECTORY__/test/data/meta_tabix.ts
 ----
 chr1	1
 
+# --- auto-detect column types ---
+query I
+SELECT typeof(column1) FROM read_tabix('__WORKING_DIRECTORY__/test/data/meta_tabix.tsv.gz', auto_detect := true) LIMIT 1;
+----
+BIGINT
+
+# --- override column types ---
+query I
+SELECT pos + 1 FROM read_tabix('__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz', header := true, column_types := ['VARCHAR','BIGINT','VARCHAR']) LIMIT 1;
+----
+2
+
 # --- projection pushdown: single column ---
 query I
 SELECT feature FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') LIMIT 1;
