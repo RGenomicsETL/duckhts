@@ -11,37 +11,36 @@ high-throughput sequencing (HTS) file formats using
 Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed
 files directly using SQL.
 
-Note: MSVC builds (windows\_amd64/windows\_arm64) are not supported. Use
+Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use
 MinGW/RTools for Windows.
 
 ## Functions
 
-| Function                                                                      | Description                 | Schema                                                                                                             |
-| ----------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                         |
-| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID (+ SAMtags / AUX) |
-| `read_fasta(path)`                                                            | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                        |
-| `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                                    |
-| `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
-| `read_gtf(path, [region, attributes_map])`                                    | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
-| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                                |
+| Function                                                                      | Description                 | Schema                                                                                                          |
+|-------------------------------------------------------------------------------|-----------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                      |
+| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ_GROUP_ID, SAMPLE_ID (+ SAMtags / AUX) |
+| `read_fasta(path)`                                                            | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                     |
+| `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR_ID when paired/interleaved)                                  |
+| `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled)      |
+| `read_gtf(path, [region, attributes_map])`                                    | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled)      |
+| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                             |
 
 Notes:
 
-  - `read_fastq` with `mate_path` requires exact QNAME pairing;
-    mismatches raise an error.
-  - `read_bcf` region queries on files missing `##contig` headers return
-    an empty result (with a warning) instead of erroring.
-  - `read_tabix` column inference now respects tabix header/meta
-    configuration (meta char + line\_skip), so header lines are not
-    mistaken as data.
-  - `read_tabix` supports `header := true` to use the first non-meta
-    line as column names, and `header_names := [...]` to override names.
-  - `read_tabix` supports `auto_detect := true` to infer numeric types
-    and `column_types := [...]` to set types explicitly.
-  - `read_bam` supports `standard_tags := true` for typed SAMtags
-    columns and `auxiliary_tags := true` for a string map of all
-    remaining tags.
+- `read_fastq` with `mate_path` requires exact QNAME pairing; mismatches
+  raise an error.
+- `read_bcf` region queries on files missing `##contig` headers return
+  an empty result (with a warning) instead of erroring.
+- `read_tabix` column inference now respects tabix header/meta
+  configuration (meta char + line_skip), so header lines are not
+  mistaken as data.
+- `read_tabix` supports `header := true` to use the first non-meta line
+  as column names, and `header_names := [...]` to override names.
+- `read_tabix` supports `auto_detect := true` to infer numeric types and
+  `column_types := [...]` to set types explicitly.
+- `read_bam` supports `standard_tags := true` for typed SAMtags columns
+  and `auxiliary_tags := true` for a string map of all remaining tags.
 
 ## Examples
 
@@ -103,6 +102,60 @@ WHERE feature = 'gene';
 SELECT * FROM read_tabix('test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
 ```
 
+## Remote URLs and HTS_PATH
+
+Remote URLs (S3/GCS/HTTP/S) are supported when htslib is built with
+plugins enabled. htslib loads these plugins from the directory specified
+by the `HTS_PATH` environment variable. Set `HTS_PATH` **before**
+loading the extension so the plugins can be discovered.
+
+Example (using the packaged htslib plugins directory):
+
+``` bash
+export HTS_PATH=/usr/local/lib/R/site-library/Rduckhts/duckhts_extension/htslib/libexec/htslib
+duckdb -unsigned <<'SQL'
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SELECT CHROM, COUNT(*) AS n
+FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
+              region := 'chr22:16050000-16050500')
+GROUP BY CHROM;
+SQL
+#> ┌─────────┬───────┐
+#> │  CHROM  │   n   │
+#> │ varchar │ int64 │
+#> ├─────────┼───────┤
+#> │ chr22   │    11 │
+#> └─────────┴───────┘
+```
+
+Notes:
+
+- On Windows (MinGW/RTools), plugins are typically disabled, so remote
+  URLs will not work.
+- If `HTS_PATH` is set after the extension is already loaded, restart
+  the session and set it first.
+
+### S3 credentials and configuration
+
+The htslib S3 plugin supports credentials embedded in the URL or
+provided via environment variables or standard credentials files. For
+AWS-style credentials, the most common variables are:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN` (optional, for temporary credentials)
+- `AWS_DEFAULT_REGION`
+- `AWS_PROFILE` / `AWS_DEFAULT_PROFILE`
+- `AWS_SHARED_CREDENTIALS_FILE` (override credentials file location)
+
+You can also configure htslib-specific settings like
+`HTS_S3_ADDRESS_STYLE`, `HTS_S3_HOST`, and `HTS_S3_S3CFG` for
+non-default S3 endpoints or path-style access.
+
+See the htslib S3 plugin documentation for full details, URL syntax, and
+short‑lived credentials support:
+<https://www.htslib.org/doc/htslib-s3-plugin.html>
+
 ## Building
 
 ### Environment setup
@@ -114,18 +167,18 @@ platform settings:
 make configure
 ```
 
-Note: MSVC builds (windows\_amd64/windows\_arm64) are not supported. Use
+Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use
 MinGW/RTools for Windows.
 
 ### Prerequisites
 
-  - C compiler (GCC or Clang)
-  - CMake ≥ 3.5
-  - Make
-  - Python 3 + venv
-  - Git
-  - [htslib](https://github.com/samtools/htslib) build dependencies:
-    zlib, libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
+- C compiler (GCC or Clang)
+- CMake ≥ 3.5
+- Make
+- Python 3 + venv
+- Git
+- [htslib](https://github.com/samtools/htslib) build dependencies: zlib,
+  libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
 
 On Debian/Ubuntu:
 
@@ -368,12 +421,12 @@ Rendering this document requires a built extension at
 
 ## References
 
-  - DuckDB: <https://duckdb.org/>
-  - DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
-  - DuckDB extension template (C):
-    <https://github.com/duckdb/extension-template-c>
-  - htslib: <https://github.com/samtools/htslib>
-  - RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
+- DuckDB: <https://duckdb.org/>
+- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+- DuckDB extension template (C):
+  <https://github.com/duckdb/extension-template-c>
+- htslib: <https://github.com/samtools/htslib>
+- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 

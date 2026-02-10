@@ -102,6 +102,44 @@ WHERE feature = 'gene';
 SELECT * FROM read_tabix('test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
 ```
 
+## Remote URLs and HTS_PATH
+
+Remote URLs (S3/GCS/HTTP/S) are supported when htslib is built with plugins enabled. htslib loads these plugins from the directory specified by the `HTS_PATH` environment variable. Set `HTS_PATH` **before** loading the extension so the plugins can be discovered.
+
+Example (using the packaged htslib plugins directory):
+
+```{bash, eval=TRUE}
+export HTS_PATH=/usr/local/lib/R/site-library/Rduckhts/duckhts_extension/htslib/libexec/htslib
+duckdb -unsigned <<'SQL'
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SELECT CHROM, COUNT(*) AS n
+FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
+              region := 'chr22:16050000-16050500')
+GROUP BY CHROM;
+SQL
+```
+
+Notes:
+
+- On Windows (MinGW/RTools), plugins are typically disabled, so remote URLs will not work.
+- If `HTS_PATH` is set after the extension is already loaded, restart the session and set it first.
+
+### S3 credentials and configuration
+
+The htslib S3 plugin supports credentials embedded in the URL or provided via environment variables or standard credentials files. For AWS-style credentials, the most common variables are:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN` (optional, for temporary credentials)
+- `AWS_DEFAULT_REGION`
+- `AWS_PROFILE` / `AWS_DEFAULT_PROFILE`
+- `AWS_SHARED_CREDENTIALS_FILE` (override credentials file location)
+
+You can also configure htslib-specific settings like `HTS_S3_ADDRESS_STYLE`, `HTS_S3_HOST`, and `HTS_S3_S3CFG` for non-default S3 endpoints or path-style access.
+
+See the htslib S3 plugin documentation for full details, URL syntax, and short‑lived credentials support:
+https://www.htslib.org/doc/htslib-s3-plugin.html
+
 ## Building
 
 ### Environment setup
