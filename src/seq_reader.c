@@ -340,8 +340,25 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 int r1 = sam_read1(init->fp, init->hdr, init->rec);
                 int r2 = sam_read1(init->fp_mate, init->hdr_mate, init->rec_mate);
                 if (r1 < 0 || r2 < 0) {
+                    if (r1 < 0 && r2 < 0) {
+                        init->done = 1;
+                        break;
+                    }
+                    duckdb_function_set_error(info,
+                        "read_fastq: mate files have different record counts");
                     init->done = 1;
-                    break;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
+
+                const char *q1 = bam_get_qname(init->rec);
+                const char *q2 = bam_get_qname(init->rec_mate);
+                if (!q1 || !q2 || strcmp(q1, q2) != 0) {
+                    duckdb_function_set_error(info,
+                        "read_fastq: mate files out of sync (QNAME mismatch)");
+                    init->done = 1;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
                 }
                 b = init->rec;
                 mate = 1;

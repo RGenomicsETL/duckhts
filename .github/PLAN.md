@@ -45,6 +45,7 @@
 - [x] Remove vcpkg dependency for CRAN compatibility
 - [x] Add comprehensive R package tests
 - [x] Update DESCRIPTION with proper dependencies and SystemRequirements
+- [x] CRAN submission completed at 0.1.1-0.0.4 (extension baseline)
 
 ## 📋 Phase 7 — Enhanced Testing & Documentation
 - [ ] Add more comprehensive edge case tests
@@ -71,3 +72,11 @@
 - **Documentation**: Primary documentation in README.Rmd
 - **Build**: Self-contained package, no vcpkg on CRAN
 - **Testing**: Comprehensive conformance and edge case coverage required
+- **Versioning**: Extension bumps use .9000 dev suffix; R package tracks release as 0.1.x-0.0.y (e.g., next 0.1.2-0.0.1 after extension news release)
+
+## 🔍 Review Feedback (2026-02-10)
+- bcf_reader: region lookup currently errors for both “contig not found” and “no overlapping records” (TODO in `src/bcf_reader.c`); consider distinguishing to avoid false failures on empty regions.
+- seq_reader: paired FASTQ path assumes reads are in lockstep but doesn’t validate QNAME pairing; mismatched mates will silently pair (recommend add name check + test).
+- seq_reader: interleaved mode toggles mate 1/2 regardless of QNAME suffix or odd record count; consider handling trailing unpaired read and/or validating suffixes.
+- tabix_reader (generic): column count inferred from first non-# line only; files with variable columns or non-# meta-char may mis-bind schema (consider using tabix conf/meta-char when indexed, and add tests for varying columns).
+- behavior consistency: bcf_reader errors on “region not found” while tabix_reader returns empty; decide on a consistent contract and document it in README/tests.

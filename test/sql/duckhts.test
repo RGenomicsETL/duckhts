@@ -162,6 +162,12 @@ SELECT count(DISTINCT PAIR_ID) FROM read_fastq('__WORKING_DIRECTORY__/test/data/
 ----
 5
 
+# --- paired FASTQ mismatch (mate_path) ---
+statement error
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/mate_mismatch_r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/mate_mismatch_r2.fq');
+----
+read_fastq: mate files out of sync
+
 # --- interleaved FASTQ ---
 query I
 SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/interleaved.fq', interleaved := true);
@@ -182,6 +188,16 @@ query I
 SELECT count(DISTINCT PAIR_ID) FROM read_fastq('__WORKING_DIRECTORY__/test/data/interleaved.fq', interleaved := true);
 ----
 5
+
+# ==============================================================
+# read_bcf – VCF/BCF reader
+# ==============================================================
+
+# --- region query with missing contig headers (non-conforming VCF) ---
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', region := 'no_such_contig:1-10');
+----
+0
 
 # ==============================================================
 # read_gff – GFF3 reader (bgzipped + tabix indexed)
