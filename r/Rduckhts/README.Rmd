@@ -173,7 +173,7 @@ dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 
 GTEx eQTL matrices on EBI are tabix-indexed. Remote access requires htslib
 plugins (see `setup_hts_env()`).
 
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 setup_hts_env()
 gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
