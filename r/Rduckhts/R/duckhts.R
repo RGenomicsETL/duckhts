@@ -25,6 +25,35 @@ build_param_str <- function(params) {
   ""
 }
 
+normalize_tabix_types <- function(types) {
+  if (length(types) == 0) {
+    return(types)
+  }
+  cleaned <- trimws(types)
+  lowered <- tolower(cleaned)
+  mapped <- character(length(cleaned))
+  for (i in seq_along(cleaned)) {
+    mapped[i] <- switch(
+      lowered[i],
+      "integer" = "BIGINT",
+      "int" = "BIGINT",
+      "int32" = "BIGINT",
+      "int64" = "BIGINT",
+      "numeric" = "DOUBLE",
+      "double" = "DOUBLE",
+      "float" = "DOUBLE",
+      "character" = "VARCHAR",
+      "string" = "VARCHAR",
+      "chr" = "VARCHAR",
+      "logical" = "BOOLEAN",
+      "bool" = "BOOLEAN",
+      "boolean" = "BOOLEAN",
+      toupper(cleaned[i])
+    )
+  }
+  mapped
+}
+
 #' Setup HTSlib Environment
 #'
 #' Sets the `HTS_PATH` environment variable to point to the bundled htslib
@@ -606,7 +635,8 @@ rduckhts_tabix <- function(
     if (!is.character(column_types)) {
       stop("column_types must be a character vector")
     }
-    params$column_types <- sprintf("[%s]", paste(sprintf("'%s'", column_types), collapse = ", "))
+    normalized_types <- normalize_tabix_types(column_types)
+    params$column_types <- sprintf("[%s]", paste(sprintf("'%s'", normalized_types), collapse = ", "))
   }
 
   param_str <- build_param_str(params)

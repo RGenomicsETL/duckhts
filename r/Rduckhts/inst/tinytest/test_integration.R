@@ -20,6 +20,8 @@ test_table_creation <- function() {
   fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
   gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
   tabix_path <- system.file("extdata", "rg.sam.gz", package = "Rduckhts")
+  header_tabix_path <- system.file("extdata", "header_tabix.tsv.gz", package = "Rduckhts")
+  meta_tabix_path <- system.file("extdata", "meta_tabix.tsv.gz", package = "Rduckhts")
   vep_path <- system.file("extdata", "test_vep.vcf", package = "Rduckhts")
 
   expect_true(file.exists(bcf_path))
@@ -29,6 +31,8 @@ test_table_creation <- function() {
   expect_true(file.exists(fastq_r2))
   expect_true(file.exists(gff_path))
   expect_true(file.exists(tabix_path))
+  expect_true(file.exists(header_tabix_path))
+  expect_true(file.exists(meta_tabix_path))
   expect_true(file.exists(vep_path))
 
   expect_silent(rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE))
@@ -68,6 +72,34 @@ test_table_creation <- function() {
   if (DBI::dbExistsTable(con, "tabix_data")) {
     expect_silent(DBI::dbGetQuery(con, "SELECT * FROM tabix_data LIMIT 1"))
   }
+
+  expect_silent(rduckhts_tabix(con, "tabix_header", header_tabix_path, header = TRUE, overwrite = TRUE))
+  tabix_header_cols <- DBI::dbGetQuery(con, "PRAGMA table_info('tabix_header')")
+  expect_equal(tabix_header_cols$name, c("chrom", "pos", "value"))
+
+  expect_silent(rduckhts_tabix(
+    con,
+    "tabix_named",
+    meta_tabix_path,
+    header_names = c("chr", "pos", "val"),
+    overwrite = TRUE
+  ))
+  tabix_named_cols <- DBI::dbGetQuery(con, "PRAGMA table_info('tabix_named')")
+  expect_equal(tabix_named_cols$name, c("chr", "pos", "val"))
+
+  expect_silent(rduckhts_tabix(con, "tabix_auto", meta_tabix_path, auto_detect = TRUE, overwrite = TRUE))
+  tabix_auto_type <- DBI::dbGetQuery(con, "SELECT typeof(column1) AS t FROM tabix_auto LIMIT 1")$t[1]
+  expect_equal(tabix_auto_type, "BIGINT")
+
+  expect_silent(rduckhts_tabix(
+    con,
+    "tabix_types",
+    meta_tabix_path,
+    column_types = c("VARCHAR", "BIGINT", "VARCHAR"),
+    overwrite = TRUE
+  ))
+  tabix_types_type <- DBI::dbGetQuery(con, "SELECT typeof(column1) AS t FROM tabix_types LIMIT 1")$t[1]
+  expect_equal(tabix_types_type, "BIGINT")
 
   expect_true(DBI::dbExistsTable(con, "vep_variants"))
   if (DBI::dbExistsTable(con, "vep_variants")) {

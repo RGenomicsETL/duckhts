@@ -36,6 +36,8 @@ rd:
 test: install
 	R -e "tinytest::test_package('$(PKG_NAME)')"
 
+test2: 
+	R -e "library(Rduckhts); tinytest::run_test_dir('inst/tinytest')"
 test-integration: install
 	R -e "source('inst/tinytest/test_integration.R')"
 
