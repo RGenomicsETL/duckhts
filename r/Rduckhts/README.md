@@ -130,6 +130,8 @@ s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
 # Query remote VCF directly with DuckDB + DuckHTS (region-scoped)
 rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:16050000-16050500", overwrite = TRUE)
 dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
+#>   CHROM  n
+#> 1 chr22 11
 ```
 
 ### FASTQ files
@@ -253,6 +255,24 @@ gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Br
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
+#>          variant r2    pvalue molecular_trait_object_id molecular_trait_id
+#> 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290
+#> 2 chr1_13550_G_A NA 0.0303633           ENSG00000230699    ENSG00000230699
+#> 3 chr1_13550_G_A NA 0.1057900           ENSG00000177757    ENSG00000177757
+#> 4 chr1_13550_G_A NA 0.1617190           ENSG00000241860    ENSG00000241860
+#> 5 chr1_13550_G_A NA 0.1919580           ENSG00000198744    ENSG00000198744
+#>         maf         gene_id median_tpm      beta       se  an ac chromosome
+#> 1 0.0114286 ENSG00000188290  6.3960000  0.633986 0.270285 350  4          1
+#> 2 0.0114286 ENSG00000230699  0.0674459 -0.980082 0.447861 350  4          1
+#> 3 0.0114286 ENSG00000177757  1.2659000  0.631359 0.387738 350  4          1
+#> 4 0.0114286 ENSG00000241860  0.1081970 -0.791695 0.562674 350  4          1
+#> 5 0.0114286 ENSG00000198744 21.6284000 -0.592354 0.451705 350  4          1
+#>   position ref alt type        rsid
+#> 1    13550   G   A  SNP rs554008981
+#> 2    13550   G   A  SNP rs554008981
+#> 3    13550   G   A  SNP rs554008981
+#> 4    13550   G   A  SNP rs554008981
+#> 5    13550   G   A  SNP rs554008981
 ```
 
 ``` r

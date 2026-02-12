@@ -84,7 +84,7 @@ variants
 
 S3 files can be query when `htslib` is built with plugins enable. This is not the case on RTools
 
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 # Not run on CRAN because it requires network access.
 # Enable htslib plugins for remote access (S3/GCS/HTTP)
 setup_hts_env()
@@ -174,7 +174,7 @@ dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 
 
 GTEx eQTL matrices on EBI are tabix-indexed 
 
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                header = TRUE, auto_detect = TRUE, overwrite = TRUE)
