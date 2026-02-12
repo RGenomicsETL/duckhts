@@ -106,11 +106,14 @@ duckhts_bootstrap <- function(repo_root = NULL) {
 #'
 #' @param build_dir Where to build. Required. Use a writable location such as
 #'   \code{tempdir()} when the installed package directory is read-only.
+#' @param make Optional GNU make command to use (e.g., "gmake" or "make").
+#'   When NULL, auto-detects gmake or make. If a non-GNU make is used,
+#'   htslib's configure step will fail.
 #' @param force Rebuild even if the extension file already exists.
 #' @param verbose Print build output.
 #' @return Path to the built \code{duckhts.duckdb_extension} file.
 #' @export
-duckhts_build <- function(build_dir = NULL, force = FALSE, verbose = TRUE) {
+duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose = TRUE) {
   ext_dir <- duckhts_extension_dir()
 
   if (is.null(build_dir)) {
@@ -137,9 +140,11 @@ duckhts_build <- function(build_dir = NULL, force = FALSE, verbose = TRUE) {
     if (verbose) {
       message("Building htslib...")
     }
-    make <- Sys.which("gmake")
-    if (!nzchar(make)) {
-      make <- Sys.which("make")
+    if (is.null(make)) {
+      make <- Sys.which("gmake")
+      if (!nzchar(make)) {
+        make <- Sys.which("make")
+      }
     }
     if (!nzchar(make)) {
       stop("GNU make not found", call. = FALSE)

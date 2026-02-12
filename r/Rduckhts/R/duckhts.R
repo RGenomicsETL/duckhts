@@ -31,18 +31,28 @@ build_param_str <- function(params) {
 #' plugins directory. This enables remote file access via libcurl plugins
 #' (e.g., s3://, gs://, http://) when plugins are available.
 #'
+#' @param plugins_dir Optional path to the htslib plugins directory. When NULL,
+#'   uses the bundled plugins directory if available.
+#'
 #' @return Invisibly returns the previous value of `HTS_PATH` (or `NA` if unset).
 #'
 #' @details
 #' Call this before querying remote URLs to allow htslib to locate its plugins.
 #'
 #' @examples
+#' # Use bundled plugins if present
 #' setup_hts_env()
 #'
+#' # Or set an explicit plugins directory
+#' # plugins_path <- "/path/to/htslib/plugins"
+#' # setup_hts_env(plugins_dir = plugins_path)
+#'
 #' @export
-setup_hts_env <- function() {
+setup_hts_env <- function(plugins_dir = NULL) {
   old_value <- Sys.getenv("HTS_PATH", unset = NA)
-  plugins_dir <- duckhts_htslib_plugins_dir()
+  if (is.null(plugins_dir)) {
+    plugins_dir <- duckhts_htslib_plugins_dir()
+  }
   if (nzchar(plugins_dir) && dir.exists(plugins_dir)) {
     Sys.setenv(HTS_PATH = plugins_dir)
   }
@@ -77,14 +87,12 @@ duckhts_htslib_plugins_dir <- function() {
 #' @return TRUE if the extension was loaded successfully
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
 #' library(DBI)
 #' library(duckdb)
 #'
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
-#' }
+#' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 rduckhts_load <- function(con, extension_path = NULL) {
@@ -108,6 +116,7 @@ rduckhts_load <- function(con, extension_path = NULL) {
   }
 
   # Enable unsigned extensions if needed
+  DBI::dbExecute(con, "SET allow_unsigned_extensions = true")
   DBI::dbExecute(con, "SET enable_progress_bar = false")
 
   # Load the extension
@@ -147,12 +156,9 @@ rduckhts_load <- function(con, extension_path = NULL) {
 #' }
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
 #' mappings <- duckdb_type_mappings()
 #' mappings$duckdb_to_r["BIGINT"]
 #' mappings$r_to_duckdb["integer"]
-#' }
 #'
 #' @export
 duckdb_type_mappings <- function() {
@@ -221,14 +227,16 @@ duckdb_type_mappings <- function() {
 #'   column_name, column_type, and a description of R type.
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
+#' library(DBI)
+#' library(duckdb)
+#'
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
-#' rduckhts_bcf(con, "variants", "file.vcf.gz")
+#' bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+#' rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 #' complex_cols <- detect_complex_types(con, "variants")
 #' print(complex_cols)
-#' }
+#' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 detect_complex_types <- function(con, table_name) {
@@ -270,14 +278,17 @@ detect_complex_types <- function(con, table_name) {
 #' @return The array element at the specified index, or full array if index is NULL
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
-#' # Assuming 'alt' is an ARRAY column from a VCF
+#' library(DBI)
+#' library(duckdb)
+#'
 #' con <- dbConnect(duckdb::duckdb())
-#' data <- dbGetQuery(con, "SELECT ALT FROM variants")
+#' rduckhts_load(con)
+#' bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+#' rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+#' data <- dbGetQuery(con, "SELECT ALT FROM variants LIMIT 5")
 #' first_alt <- extract_array_element(data$ALT, 1)
 #' all_alts <- extract_array_element(data$ALT)
-#' }
+#' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 extract_array_element <- function(array_col, index = NULL, default = NA) {
@@ -310,14 +321,17 @@ extract_array_element <- function(array_col, index = NULL, default = NA) {
 #' @return Extracted data based on the operation
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
-#' # Assuming 'attributes_map' is a MAP column from a GFF
+#' library(DBI)
+#' library(duckdb)
+#'
 #' con <- dbConnect(duckdb::duckdb())
-#' data <- dbGetQuery(con, "SELECT attributes_map FROM annotations")
-#' keys <- extract_map_data(data$attributes_map, "keys")
-#' name_values <- extract_map_data(data$attributes_map, "Name")
-#' }
+#' rduckhts_load(con)
+#' gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
+#' rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE)
+#' data <- dbGetQuery(con, "SELECT attributes FROM annotations LIMIT 5")
+#' keys <- extract_map_data(data$attributes, "keys")
+#' name_values <- extract_map_data(data$attributes, "Name")
+#' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 extract_map_data <- function(map_col, operation = "keys", default = NA) {
@@ -349,7 +363,11 @@ extract_map_data <- function(map_col, operation = "keys", default = NA) {
 
 #' @keywords internal
 duckhts_extension_dir <- function() {
-  ext_path <- system.file("duckhts_extension", package = "Rduckhts", mustWork = FALSE)
+  ext_path <- system.file(
+    "duckhts_extension",
+    package = "Rduckhts",
+    mustWork = FALSE
+  )
   if (nzchar(ext_path) && dir.exists(ext_path)) {
     return(ext_path)
   }
@@ -371,13 +389,15 @@ duckhts_extension_dir <- function() {
 #' @return Invisible TRUE on success
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
+#' library(DBI)
+#' library(duckdb)
+#'
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
-#' rduckhts_bcf(con, "variants", "file.vcf.gz")
-#' dbGetQuery(con, "SELECT * FROM variants WHERE QUAL > 100 LIMIT 10")
-#' }
+#' bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+#' rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+#' dbGetQuery(con, "SELECT * FROM variants LIMIT 2")
+#' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 rduckhts_bcf <- function(
@@ -447,13 +467,15 @@ rduckhts_bcf <- function(
 #' @return Invisible TRUE on success
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
+#' library(DBI)
+#' library(duckdb)
+#'
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
-#' rduckhts_bam(con, "reads", "file.bam")
+#' bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+#' rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)
 #' dbGetQuery(con, "SELECT COUNT(*) FROM reads WHERE FLAG & 4 = 0")
-#' }
+#' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 rduckhts_bam <- function(
@@ -536,8 +558,6 @@ rduckhts_bam <- function(
 #' If an empty vector is provided, it returns the empty vector unchanged.
 #'
 #' @examples
-#' \dontrun{
-#' # Not run on CRAN because it requires compiling the bundled extension.
 #' # Normalize mixed type names
 #' normalize_tabix_types(c("integer", "character", "numeric"))
 #' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")
@@ -545,7 +565,6 @@ rduckhts_bam <- function(
 #' # Handle variations
 #' normalize_tabix_types(c("int", "string", "float"))
 #' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")
-#' }
 #'
 #' @seealso
 #' \code{\link{rduckhts_tabix}} for using normalized types with tabix readers,
@@ -561,7 +580,8 @@ normalize_tabix_types <- function(types) {
   lowered <- tolower(cleaned)
   mapped <- character(length(cleaned))
   for (i in seq_along(cleaned)) {
-    mapped[i] <- switch(lowered[i],
+    mapped[i] <- switch(
+      lowered[i],
       "integer" = "BIGINT",
       "int" = "BIGINT",
       "int32" = "BIGINT",

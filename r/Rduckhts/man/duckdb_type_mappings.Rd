@@ -38,11 +38,8 @@ This is useful for understanding type conversions when reading
 HTS files or when specifying column types in tabix functions.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
 mappings <- duckdb_type_mappings()
 mappings$duckdb_to_r["BIGINT"]
 mappings$r_to_duckdb["integer"]
-}
 
 }

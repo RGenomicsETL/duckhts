@@ -4,11 +4,15 @@
 \alias{duckhts_build}
 \title{Build the duckhts DuckDB extension}
 \usage{
-duckhts_build(build_dir = NULL, force = FALSE, verbose = TRUE)
+duckhts_build(build_dir = NULL, make = NULL, force = FALSE, verbose = TRUE)
 }
 \arguments{
 \item{build_dir}{Where to build. Required. Use a writable location such as
 \code{tempdir()} when the installed package directory is read-only.}
+
+\item{make}{Optional GNU make command to use (e.g., "gmake" or "make").
+When NULL, auto-detects gmake or make. If a non-GNU make is used,
+htslib's configure step will fail.}
 
 \item{force}{Rebuild even if the extension file already exists.}
 

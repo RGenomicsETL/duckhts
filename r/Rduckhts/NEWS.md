@@ -1,7 +1,12 @@
 # Rduckhts 0.1.2-0.0.9000
 
-- modified configure to attemp to support wasm
+- Different fixes for CRAN submission
+    - Updated DESCRIPTION Title/Description formatting and added HTSlib reference.
+    - Removed default write paths in bootstrap/build helpers; now require explicit paths.
+    - setup_hts_env now accepts an explicit plugins_dir parameter.
+    - duckhts_build now accepts a make argument (GNU make required).
 
+- modified configure to attemp to support wasm
 - Update bootstrapped extension code to match `duckhts` 0.1.2.
 - Add SAMtags + auxiliary tag support (standard_tags, auxiliary_tags).
 - Add tabix header/typing options (header, header_names, auto_detect, column_types).

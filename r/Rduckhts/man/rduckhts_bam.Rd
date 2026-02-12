@@ -39,12 +39,14 @@ Invisible TRUE on success
 Creates a DuckDB table from SAM, BAM, or CRAM files using the DuckHTS extension.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
+library(DBI)
+library(duckdb)
+
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
-rduckhts_bam(con, "reads", "file.bam")
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT COUNT(*) FROM reads WHERE FLAG & 4 = 0")
-}
+dbDisconnect(con, shutdown = TRUE)
 
 }

@@ -4,7 +4,11 @@
 \alias{setup_hts_env}
 \title{Setup HTSlib Environment}
 \usage{
-setup_hts_env()
+setup_hts_env(plugins_dir = NULL)
+}
+\arguments{
+\item{plugins_dir}{Optional path to the htslib plugins directory. When NULL,
+uses the bundled plugins directory if available.}
 }
 \value{
 Invisibly returns the previous value of `HTS_PATH` (or `NA` if unset).
@@ -18,6 +22,11 @@ plugins directory. This enables remote file access via libcurl plugins
 Call this before querying remote URLs to allow htslib to locate its plugins.
 }
 \examples{
+# Use bundled plugins if present
 setup_hts_env()
+
+# Or set an explicit plugins directory
+# plugins_path <- "/path/to/htslib/plugins"
+# setup_hts_env(plugins_dir = plugins_path)
 
 }

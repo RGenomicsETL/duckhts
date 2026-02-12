@@ -20,13 +20,15 @@ Identifies columns in a DuckDB table that contain complex types
 (ARRAY or MAP) that will be returned as R lists.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
+library(DBI)
+library(duckdb)
+
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
-rduckhts_bcf(con, "variants", "file.vcf.gz")
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 complex_cols <- detect_complex_types(con, "variants")
 print(complex_cols)
-}
+dbDisconnect(con, shutdown = TRUE)
 
 }

@@ -21,13 +21,16 @@ Helper function to work with DuckDB MAP data (returned as data frames).
 Can extract keys, values, or search for specific key-value pairs.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
-# Assuming 'attributes_map' is a MAP column from a GFF
+library(DBI)
+library(duckdb)
+
 con <- dbConnect(duckdb::duckdb())
-data <- dbGetQuery(con, "SELECT attributes_map FROM annotations")
-keys <- extract_map_data(data$attributes_map, "keys")
-name_values <- extract_map_data(data$attributes_map, "Name")
-}
+rduckhts_load(con)
+gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
+rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE)
+data <- dbGetQuery(con, "SELECT attributes FROM annotations LIMIT 5")
+keys <- extract_map_data(data$attributes, "keys")
+name_values <- extract_map_data(data$attributes, "Name")
+dbDisconnect(con, shutdown = TRUE)
 
 }

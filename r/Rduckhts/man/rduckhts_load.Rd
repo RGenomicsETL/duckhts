@@ -20,13 +20,11 @@ Loads the DuckHTS extension into a DuckDB connection. This must be called
 before using any of the HTS reader functions.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
 library(DBI)
 library(duckdb)
 
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
-}
+dbDisconnect(con, shutdown = TRUE)
 
 }

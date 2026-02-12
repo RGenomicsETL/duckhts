@@ -21,13 +21,16 @@ Helper function to safely extract elements from DuckDB arrays
 (returned as R lists) with proper error handling.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
-# Assuming 'alt' is an ARRAY column from a VCF
+library(DBI)
+library(duckdb)
+
 con <- dbConnect(duckdb::duckdb())
-data <- dbGetQuery(con, "SELECT ALT FROM variants")
+rduckhts_load(con)
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+data <- dbGetQuery(con, "SELECT ALT FROM variants LIMIT 5")
 first_alt <- extract_array_element(data$ALT, 1)
 all_alts <- extract_array_element(data$ALT)
-}
+dbDisconnect(con, shutdown = TRUE)
 
 }

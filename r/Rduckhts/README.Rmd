@@ -25,20 +25,22 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ## How it works
 
-Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.23 is bundled so build dependencies stay minimal. The extensnion is built by adapting the generic extension infracstructure by using only makefiles unlike unlike the submitted communtity extension [`duckhts`](../../duckhts).
+Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.23 is bundled so build dependencies stay minimal. The extensnion is built by adapting the generic extension infracstructure by using only makefiles unlike  the submitted communtity extension [`duckhts`](https://github.com/RGenomicsETL/duckhts).
 
 ## Installation
 
-The package can be installed from github
+The package can be installed from r-universe
 
 ```r
-remotes::install_github(
-    "RGenomicsETL/duckhts", subdir = "r/Rduckhts")`.
+# Install 'Rduckhts' in R:
+install.packages('Rduckhts', repos = c('https://rgenomicsetl.r-universe.dev', 'https://cloud.r-project.org'))
+# When on CRAN
+install.packages("Rduckhts")
 ```
 
 ## System Requirements
 
-Installation requires `htslib` dependencies such ad zlib and libbz2, and  optionally for full functionally liblzma, libcurl, and openssl. The package requires GNU make. On Windows's Rtools, `htslib` plugins are not enable. 
+Installation requires `htslib` dependencies such ad zlib and libbz2, and  optionally for full functionally liblzma, libcurl, and openssl. The package requires GNU make. On Windows's Rtools, `htslib` plugins are not enabled. 
 
 
 ## Quick Start 
@@ -171,12 +173,9 @@ dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 
 
 ### Remote GTEx tabix example
 
-GTEx eQTL matrices on EBI are tabix-indexed. Remote access requires htslib
-plugins (see `setup_hts_env()`).
+GTEx eQTL matrices on EBI are tabix-indexed 
 
 ```{r, eval=FALSE}
-# Not run on CRAN because it requires network access.
-setup_hts_env()
 gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                header = TRUE, auto_detect = TRUE, overwrite = TRUE)

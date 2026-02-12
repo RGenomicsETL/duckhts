@@ -34,12 +34,14 @@ Creates a DuckDB table from a VCF or BCF file using the DuckHTS extension.
 This follows the RBCFTools pattern of creating a table that can be queried.
 }
 \examples{
-\dontrun{
-# Not run on CRAN because it requires compiling the bundled extension.
+library(DBI)
+library(duckdb)
+
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
-rduckhts_bcf(con, "variants", "file.vcf.gz")
-dbGetQuery(con, "SELECT * FROM variants WHERE QUAL > 100 LIMIT 10")
-}
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM variants LIMIT 2")
+dbDisconnect(con, shutdown = TRUE)
 
 }
