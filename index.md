@@ -9,7 +9,7 @@ version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://R
 reading common bioinformatics file formats such as `VCF`/`BCF`,
 `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and tabix-indexed
 files directly from `R` using `SQL` queries via
-[`duckhts`](https://rgenomicsetl.github.io/duckhts/inst/duckhts_extension).
+[`duckhts`](https://github.com/RGenomicsETL/duckhts).
 
 ## How it works
 
