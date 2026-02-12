@@ -24,7 +24,7 @@ Helper function to safely extract elements from DuckDB arrays
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb())
+con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)

@@ -24,7 +24,7 @@ Can extract keys, values, or search for specific key-value pairs.
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb())
+con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
 rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE)

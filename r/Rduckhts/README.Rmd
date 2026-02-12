@@ -53,12 +53,11 @@ library(duckdb)
 library(Rduckhts)
 
 
-ext_path <- system.file("extdata", "duckhts.duckdb_extension", package = "Rduckhts")
 fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
 fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
 fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con, extension_path = ext_path)
+rduckhts_load(con)
 
 rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE)
 rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)

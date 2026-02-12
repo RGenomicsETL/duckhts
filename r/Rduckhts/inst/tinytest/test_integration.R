@@ -8,14 +8,8 @@ test_table_creation <- function() {
   drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
   con <- dbConnect(drv)
 
-  # Ensure bundled extension exists and can be loaded
-  ext_path <- system.file(
-    "extdata",
-    "duckhts.duckdb_extension",
-    package = "Rduckhts"
-  )
-  expect_true(file.exists(ext_path))
-  expect_silent(rduckhts_load(con, ext_path))
+  # Ensure bundled extension can be loaded
+  expect_silent(rduckhts_load(con))
 
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")

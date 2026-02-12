@@ -80,6 +80,10 @@ duckhts_htslib_plugins_dir <- function() {
 #' Loads the DuckHTS extension into a DuckDB connection. This must be called
 #' before using any of the HTS reader functions.
 #'
+#' @details
+#' The DuckDB connection must be created with
+#' \code{allow_unsigned_extensions = "true"}.
+#'
 #' @param con A DuckDB connection object
 #' @param extension_path Optional path to the duckhts extension file. If NULL,
 #'   will try to use the bundled extension.
@@ -90,20 +94,22 @@ duckhts_htslib_plugins_dir <- function() {
 #' library(DBI)
 #' library(duckdb)
 #'
-#' con <- dbConnect(duckdb::duckdb())
+#' con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #' rduckhts_load(con)
 #' dbDisconnect(con, shutdown = TRUE)
 #'
 #' @export
 rduckhts_load <- function(con, extension_path = NULL) {
   if (is.null(extension_path)) {
-    # Try to use the bundled extension
-    extension_path <- system.file(
-      "extdata",
-      "duckhts.duckdb_extension",
-      package = "Rduckhts",
-      mustWork = FALSE
-    )
+    # Try to use the bundled extension build directory
+    ext_dir <- duckhts_extension_dir()
+    if (is.null(ext_dir)) {
+      stop(
+        "duckhts_extension directory not found in installed package.",
+        call. = FALSE
+      )
+    }
+    extension_path <- file.path(ext_dir, "build", "duckhts.duckdb_extension")
   }
 
   if (!file.exists(extension_path)) {
@@ -115,8 +121,18 @@ rduckhts_load <- function(con, extension_path = NULL) {
     )
   }
 
-  # Enable unsigned extensions if needed
-  DBI::dbExecute(con, "SET allow_unsigned_extensions = true")
+  # Ensure unsigned extensions are allowed (must be set at connection creation)
+  setting <- DBI::dbGetQuery(
+    con,
+    "SELECT value FROM duckdb_settings() WHERE name = 'allow_unsigned_extensions'"
+  )
+  if (nrow(setting) == 1 && tolower(setting$value[1]) != "true") {
+    stop(
+      "DuckDB connection must allow unsigned extensions. Recreate the ",
+      "connection with duckdb::duckdb(config = list(allow_unsigned_extensions = \"true\")).",
+      call. = FALSE
+    )
+  }
   DBI::dbExecute(con, "SET enable_progress_bar = false")
 
   # Load the extension
@@ -230,7 +246,7 @@ duckdb_type_mappings <- function() {
 #' library(DBI)
 #' library(duckdb)
 #'
-#' con <- dbConnect(duckdb::duckdb())
+#' con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #' rduckhts_load(con)
 #' bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 #' rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
@@ -281,7 +297,7 @@ detect_complex_types <- function(con, table_name) {
 #' library(DBI)
 #' library(duckdb)
 #'
-#' con <- dbConnect(duckdb::duckdb())
+#' con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #' rduckhts_load(con)
 #' bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 #' rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
@@ -324,7 +340,7 @@ extract_array_element <- function(array_col, index = NULL, default = NA) {
 #' library(DBI)
 #' library(duckdb)
 #'
-#' con <- dbConnect(duckdb::duckdb())
+#' con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #' rduckhts_load(con)
 #' gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
 #' rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE)
@@ -335,28 +351,66 @@ extract_array_element <- function(array_col, index = NULL, default = NA) {
 #'
 #' @export
 extract_map_data <- function(map_col, operation = "keys", default = NA) {
+  is_empty_map <- function(x) {
+    if (is.null(x)) {
+      return(TRUE)
+    }
+    if (length(x) == 0) {
+      return(TRUE)
+    }
+    if (length(x) == 1 && is.na(x)) {
+      return(TRUE)
+    }
+    if (is.data.frame(x) && nrow(x) == 0) {
+      return(TRUE)
+    }
+    FALSE
+  }
+
+  extract_kv <- function(x, field) {
+    if (is_empty_map(x)) {
+      return(character(0))
+    }
+    if (is.data.frame(x) && field %in% names(x)) {
+      return(x[[field]])
+    }
+    if (is.list(x) && !is.data.frame(x) && field %in% names(x)) {
+      return(x[[field]])
+    }
+    if (is.character(x) || is.numeric(x)) {
+      return(character(0))
+    }
+    character(0)
+  }
+
   if (operation == "keys") {
-    return(lapply(map_col, function(x) {
-      if (is.null(x) || nrow(x) == 0) character(0) else x$key
-    }))
+    return(lapply(map_col, function(x) extract_kv(x, "key")))
   }
 
   if (operation == "values") {
-    return(lapply(map_col, function(x) {
-      if (is.null(x) || nrow(x) == 0) character(0) else x$value
-    }))
+    return(lapply(map_col, function(x) extract_kv(x, "value")))
   }
 
   # Search for specific key
   return(lapply(map_col, function(x) {
-    if (is.null(x) || nrow(x) == 0) {
+    if (is_empty_map(x)) {
       return(default)
     }
-    key_pos <- which(x$key == operation)
-    if (length(key_pos) == 0) {
-      return(default)
+    if (is.data.frame(x) && "key" %in% names(x) && "value" %in% names(x)) {
+      key_pos <- which(x$key == operation)
+      if (length(key_pos) == 0) {
+        return(default)
+      }
+      return(x$value[key_pos[1]])
     }
-    return(x$value[key_pos[1]])
+    if (is.list(x) && !is.data.frame(x) && "key" %in% names(x) && "value" %in% names(x)) {
+      key_pos <- which(x[["key"]] == operation)
+      if (length(key_pos) == 0) {
+        return(default)
+      }
+      return(x[["value"]][key_pos[1]])
+    }
+    return(default)
   }))
 }
 
@@ -392,7 +446,7 @@ duckhts_extension_dir <- function() {
 #' library(DBI)
 #' library(duckdb)
 #'
-#' con <- dbConnect(duckdb::duckdb())
+#' con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #' rduckhts_load(con)
 #' bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 #' rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
@@ -470,7 +524,7 @@ rduckhts_bcf <- function(
 #' library(DBI)
 #' library(duckdb)
 #'
-#' con <- dbConnect(duckdb::duckdb())
+#' con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #' rduckhts_load(con)
 #' bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
 #' rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)

@@ -316,23 +316,23 @@ for src_file in $C_SOURCES; do
     OBJECT_FILES="$OBJECT_FILES $obj_file"
 done
 
-# Create extension directory
-mkdir -p "${THIS_DIR}/inst/extdata"
+BUILD_DIR="${THIS_DIR}/inst/duckhts_extension/build"
+mkdir -p "${BUILD_DIR}"
 
 EXT_RPATH=""
 case "${OS_NAME}" in
   Linux)
-    EXT_RPATH="-Wl,--disable-new-dtags -Wl,-rpath,\$ORIGIN/../duckhts_extension/htslib/lib"
+    EXT_RPATH="-Wl,--disable-new-dtags -Wl,-rpath,\$ORIGIN/../htslib/lib"
     ;;
   Darwin)
-    EXT_RPATH="-Wl,-rpath,@loader_path/../duckhts_extension/htslib/lib"
+    EXT_RPATH="-Wl,-rpath,@loader_path/../htslib/lib"
     ;;
 esac
 
 # Link the extension (raw, metadata appended later)
 echo "Linking DuckHTS extension..."
-RAW_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension.raw"
-FINAL_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension"
+RAW_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension.raw"
+FINAL_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension"
 ${CC} -shared -fPIC ${EXT_RPATH} -o "${RAW_EXT_FILE}" \
     $OBJECT_FILES \
   -L"${HTSLIB_DIR}/lib" -lhts \

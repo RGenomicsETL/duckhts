@@ -108,10 +108,12 @@ Remote URLs (S3/GCS/HTTP/S) are supported when htslib is built with plugins enab
 
 Example (using the packaged htslib plugins directory):
 
-```{bash, eval=TRUE}
-export HTS_PATH=/usr/local/lib/R/site-library/Rduckhts/duckhts_extension/htslib/libexec/htslib
-duckdb -unsigned <<'SQL'
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+```{bash, eval=FALSE}
+# Not run by default because it requires network access and a built extension.
+extension_path=$(R -e 'cat(Rduckhts:::duckhts_extension_dir(),sep="")')/build/duckhts.duckdb_extension
+export HTS_PATH=$(R -e 'cat(Rduckhts:::duckhts_htslib_plugins_dir(),sep="")')
+duckdb -unsigned <<SQL
+LOAD '${extension_path}';
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')

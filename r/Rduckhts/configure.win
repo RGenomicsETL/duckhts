@@ -274,13 +274,13 @@ for src_file in $C_SOURCES; do
     OBJECT_FILES="$OBJECT_FILES $obj_file"
 done
 
-# Create extension directory
-mkdir -p "${THIS_DIR}/inst/extdata"
+BUILD_DIR="${THIS_DIR}/inst/duckhts_extension/build"
+mkdir -p "${BUILD_DIR}"
 
 # Link the extension for Windows
 echo "Linking DuckHTS extension for Windows..."
-RAW_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension.raw"
-FINAL_EXT_FILE="${THIS_DIR}/inst/extdata/duckhts.duckdb_extension"
+RAW_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension.raw"
+FINAL_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension"
 ${CC} -shared -o "${RAW_EXT_FILE}" \
     $OBJECT_FILES \
     ./htslib/libhts.a \

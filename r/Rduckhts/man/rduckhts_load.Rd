@@ -19,11 +19,15 @@ TRUE if the extension was loaded successfully
 Loads the DuckHTS extension into a DuckDB connection. This must be called
 before using any of the HTS reader functions.
 }
+\details{
+The DuckDB connection must be created with
+\code{allow_unsigned_extensions = "true"}.
+}
 \examples{
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb())
+con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
 dbDisconnect(con, shutdown = TRUE)
 

@@ -42,7 +42,7 @@ Creates a DuckDB table from SAM, BAM, or CRAM files using the DuckHTS extension.
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb())
+con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
 bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
 rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)
