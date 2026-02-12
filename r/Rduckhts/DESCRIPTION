@@ -9,10 +9,9 @@ Authors@R: c(
     person(given = "DuckDB C Extension API authors", role = "ctb")
     )
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughput
-    Sequencing file formats from 'R' via 'DuckDB'. The 'DuckDB' C extension API
-    <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' dependency are
-    compiled from vendored sources during package installation. Bonfield et al.
-    (2021) <doi:10.1093/gigascience/giab007>.
+    Sequencing file formats from 'R' via 'DuckDB'. The 'DuckDB' 'C' extension API
+    <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' <doi:10.1093/gigascience/giab007> dependency are
+    compiled from vendored sources during package installation.
 License: GPL-3
 Copyright: See inst/COPYRIGHT
 Encoding: UTF-8
