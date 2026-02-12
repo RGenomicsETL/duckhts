@@ -23,7 +23,7 @@ jobs:
 
       - name: Build pkgdown site
         working-directory: r/Rduckhts
-        run: R -q -e "pkgdown::build_site(override = list(destination = '../../docs'))"
+        run: (mkdir -p ../../docs || true) && R -e "pkgdown::build_site(override = list(destination = '../../docs'))"
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4

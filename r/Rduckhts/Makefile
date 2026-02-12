@@ -27,7 +27,7 @@ install: build
 .PHONY: check
 
 check: build
-	R CMD check --as-cran --no-manual $(PKG_NAME)_$(PKG_VERSION).tar.gz
+	R CMD check --as-cran  $(PKG_NAME)_$(PKG_VERSION).tar.gz
 readme:
 	R -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
 rd: 

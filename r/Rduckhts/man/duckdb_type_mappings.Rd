@@ -16,12 +16,12 @@ A named list with two elements:
 \description{
 The mapping covers the most common data types used in HTS file processing:
 \itemize{
-  \item BIGINT ↔ double (not integer due to 64-bit overflow protection)
-  \item DOUBLE ↔ numeric/double
-  \item VARCHAR ↔ character/string
-  \item BOOLEAN ↔ logical
-  \item ARRAY types (e.g., VARCHAR[], BIGINT[]) ↔ list
-  \item MAP types (e.g., MAP(VARCHAR, VARCHAR)) ↔ data.frame
+  \item BIGINT <-> double (not integer due to 64-bit overflow protection)
+  \item DOUBLE <-> numeric/double
+  \item VARCHAR <-> character/string
+  \item BOOLEAN <-> logical
+  \item ARRAY types (e.g., VARCHAR[], BIGINT[]) <-> list
+  \item MAP types (e.g., MAP(VARCHAR, VARCHAR)) <-> data.frame
 }
 
 Important notes:
