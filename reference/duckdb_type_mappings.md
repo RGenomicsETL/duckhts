@@ -3,17 +3,17 @@
 The mapping covers the most common data types used in HTS file
 processing:
 
-- BIGINT ↔ double (not integer due to 64-bit overflow protection)
+- BIGINT \<-\> double (not integer due to 64-bit overflow protection)
 
-- DOUBLE ↔ numeric/double
+- DOUBLE \<-\> numeric/double
 
-- VARCHAR ↔ character/string
+- VARCHAR \<-\> character/string
 
-- BOOLEAN ↔ logical
+- BOOLEAN \<-\> logical
 
-- ARRAY types (e.g., VARCHAR\[\], BIGINT\[\]) ↔ list
+- ARRAY types (e.g., VARCHAR\[\], BIGINT\[\]) \<-\> list
 
-- MAP types (e.g., MAP(VARCHAR, VARCHAR)) ↔ data.frame
+- MAP types (e.g., MAP(VARCHAR, VARCHAR)) \<-\> data.frame
 
 Important notes:
 
