@@ -151,7 +151,9 @@
 <span></span>
 <span><span class="co"># Query remote VCF directly with DuckDB + DuckHTS (region-scoped)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bcf.html">rduckhts_bcf</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"s3_variants"</span>, <span class="va">s3_vcf_uri</span>, region <span class="op">=</span> <span class="st">"chr22:16050000-16050500"</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   CHROM  n</span></span>
+<span><span class="co">#&gt; 1 chr22 11</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="fastq-files">FASTQ files<a class="anchor" aria-label="anchor" href="#fastq-files"></a>
@@ -265,7 +267,25 @@
 <code class="sourceCode R"><span><span class="va">gtex_url</span> <span class="op">&lt;-</span> <span class="st">"http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"</span></span>
 <span><span class="fu"><a href="reference/rduckhts_tabix.html">rduckhts_tabix</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"gtex_eqtl"</span>, <span class="va">gtex_url</span>, region <span class="op">=</span> <span class="st">"1:11868-14409"</span>,</span>
 <span>               header <span class="op">=</span> <span class="cn">TRUE</span>, auto_detect <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM gtex_eqtl LIMIT 5"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM gtex_eqtl LIMIT 5"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;          variant r2    pvalue molecular_trait_object_id molecular_trait_id</span></span>
+<span><span class="co">#&gt; 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290</span></span>
+<span><span class="co">#&gt; 2 chr1_13550_G_A NA 0.0303633           ENSG00000230699    ENSG00000230699</span></span>
+<span><span class="co">#&gt; 3 chr1_13550_G_A NA 0.1057900           ENSG00000177757    ENSG00000177757</span></span>
+<span><span class="co">#&gt; 4 chr1_13550_G_A NA 0.1617190           ENSG00000241860    ENSG00000241860</span></span>
+<span><span class="co">#&gt; 5 chr1_13550_G_A NA 0.1919580           ENSG00000198744    ENSG00000198744</span></span>
+<span><span class="co">#&gt;         maf         gene_id median_tpm      beta       se  an ac chromosome</span></span>
+<span><span class="co">#&gt; 1 0.0114286 ENSG00000188290  6.3960000  0.633986 0.270285 350  4          1</span></span>
+<span><span class="co">#&gt; 2 0.0114286 ENSG00000230699  0.0674459 -0.980082 0.447861 350  4          1</span></span>
+<span><span class="co">#&gt; 3 0.0114286 ENSG00000177757  1.2659000  0.631359 0.387738 350  4          1</span></span>
+<span><span class="co">#&gt; 4 0.0114286 ENSG00000241860  0.1081970 -0.791695 0.562674 350  4          1</span></span>
+<span><span class="co">#&gt; 5 0.0114286 ENSG00000198744 21.6284000 -0.592354 0.451705 350  4          1</span></span>
+<span><span class="co">#&gt;   position ref alt type        rsid</span></span>
+<span><span class="co">#&gt; 1    13550   G   A  SNP rs554008981</span></span>
+<span><span class="co">#&gt; 2    13550   G   A  SNP rs554008981</span></span>
+<span><span class="co">#&gt; 3    13550   G   A  SNP rs554008981</span></span>
+<span><span class="co">#&gt; 4    13550   G   A  SNP rs554008981</span></span>
+<span><span class="co">#&gt; 5    13550   G   A  SNP rs554008981</span></span></code></pre></div>
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 </div>
