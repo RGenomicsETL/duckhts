@@ -4,9 +4,11 @@
 
 - **Sounkou Mahamane Toure**. Author, maintainer.
 
-- **htslib authors**. Contributor.
+- **James K Bonfield, John Marshall,Petr Danecek ,Heng Li , Valeriu
+  Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies**. Contributor.  
+  Htslib Authors
 
-- **DuckDB C Extension API authors**. Contributor.
+- **DuckDB C Extension API Authors**. Contributor.
 
 ## Citation
 
