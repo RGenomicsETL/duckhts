@@ -1,6 +1,6 @@
 Package: Rduckhts
 Title: 'DuckDB' High Throughput Sequencing File Formats Reader Extension for 'R'
-Version: 0.1.2-0.1.0
+Version: 0.1.2-0.1.1
 Authors@R: c(
         person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
@@ -11,7 +11,7 @@ Authors@R: c(
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughput
     Sequencing file formats from 'R' via 'DuckDB'. The 'DuckDB' C extension API
     <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' dependency are
-    compiled from vendored sources during package installation. James K Bonfield et al. (2021) <doi:10.1093/gigascience/giab007>.
+    compiled from vendored sources during package installation. James K Bonfield and co-authors (2021) <doi:10.1093/gigascience/giab007>.
 License: GPL-3
 Copyright: See inst/COPYRIGHT
 Encoding: UTF-8
