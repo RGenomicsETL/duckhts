@@ -5,13 +5,13 @@ Authors@R: c(
         person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
     role = c("aut", "cre")),
-    person(given = "htslib authors", role = "ctb"),
-    person(given = "DuckDB C Extension API authors", role = "ctb")
+    person(given = "James K Bonfield, John Marshall,Petr Danecek ,Heng Li , Valeriu Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies", role = "ctb", comment = "Htslib Authors"),
+    person(given = "DuckDB C Extension API Authors", role = "ctb")
     )
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughput
-    Sequencing file formats from 'R' via 'DuckDB'. The 'DuckDB' 'C' extension API
-    <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' <doi:10.1093/gigascience/giab007> dependency are
-    compiled from vendored sources during package installation.
+    Sequencing file formats from 'R' via 'DuckDB'. The 'DuckDB' C extension API
+    <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' dependency are
+    compiled from vendored sources during package installation. James K Bonfield et al. (2021) <doi:10.1093/gigascience/giab007>.
 License: GPL-3
 Copyright: See inst/COPYRIGHT
 Encoding: UTF-8
