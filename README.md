@@ -114,8 +114,8 @@ Example (using the packaged htslib plugins directory):
 
 ``` bash
 # Not run by default because it requires network access and a built extension.
-extension_path=$(R -e 'cat(Rduckhts:::duckhts_extension_dir(),sep="")')/build/duckhts.duckdb_extension
-export HTS_PATH=$(R -e 'cat(Rduckhts:::duckhts_htslib_plugins_dir(),sep="")')
+extension_path=$(Rscript  --quiet -e 'cat(Rduckhts:::duckhts_extension_dir(),sep="")' )/build/duckhts.duckdb_extension
+export HTS_PATH=$(Rscript --quiet -e 'cat(Rduckhts:::duckhts_htslib_plugins_dir(),sep="")')
 duckdb -unsigned <<SQL
 LOAD '${extension_path}';
 SELECT CHROM, COUNT(*) AS n
@@ -123,6 +123,12 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
               region := 'chr22:16050000-16050500')
 GROUP BY CHROM;
 SQL
+#> ┌─────────┬───────┐
+#> │  CHROM  │   n   │
+#> │ varchar │ int64 │
+#> ├─────────┼───────┤
+#> │ chr22   │    11 │
+#> └─────────┴───────┘
 ```
 
 Notes:
