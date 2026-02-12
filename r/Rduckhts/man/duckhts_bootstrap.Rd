@@ -7,8 +7,7 @@
 duckhts_bootstrap(repo_root = NULL)
 }
 \arguments{
-\item{repo_root}{Path to the duckhts repository root. Default auto-detects
-from the package source directory (assumes \code{<repo>/r/duckhts}).}
+\item{repo_root}{Path to the duckhts repository root. Required.}
 }
 \value{
 Invisibly returns the destination directory.

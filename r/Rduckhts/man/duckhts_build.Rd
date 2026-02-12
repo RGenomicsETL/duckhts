@@ -7,9 +7,8 @@
 duckhts_build(build_dir = NULL, force = FALSE, verbose = TRUE)
 }
 \arguments{
-\item{build_dir}{Where to build. Defaults to a \code{build/} sub-directory
-inside the bundled extension sources. When the installed package directory
-is read-only, set this to a writable location such as \code{tempdir()}.}
+\item{build_dir}{Where to build. Required. Use a writable location such as
+\code{tempdir()} when the installed package directory is read-only.}
 
 \item{force}{Rebuild even if the extension file already exists.}
 

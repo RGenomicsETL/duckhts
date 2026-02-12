@@ -8,13 +8,15 @@
 #' \code{inst/duckhts_extension/} so the R package becomes self-contained.
 #' Run this before \code{R CMD build} to prepare the source tarball.
 #'
-#' @param repo_root Path to the duckhts repository root. Default auto-detects
-#'   from the package source directory (assumes \code{<repo>/r/duckhts}).
+#' @param repo_root Path to the duckhts repository root. Required.
 #' @return Invisibly returns the destination directory.
 #' @export
 duckhts_bootstrap <- function(repo_root = NULL) {
   if (is.null(repo_root)) {
-    repo_root <- duckhts_find_repo()
+    stop(
+      "repo_root is required. Pass the duckhts repository root explicitly.",
+      call. = FALSE
+    )
   }
   repo_root <- normalizePath(repo_root, mustWork = TRUE)
   message("Repo root: ", repo_root)
@@ -102,9 +104,8 @@ duckhts_bootstrap <- function(repo_root = NULL) {
 #' installed R package. The built \code{.duckdb_extension} file is placed in
 #' the extension directory.
 #'
-#' @param build_dir Where to build. Defaults to a \code{build/} sub-directory
-#'   inside the bundled extension sources. When the installed package directory
-#'   is read-only, set this to a writable location such as \code{tempdir()}.
+#' @param build_dir Where to build. Required. Use a writable location such as
+#'   \code{tempdir()} when the installed package directory is read-only.
 #' @param force Rebuild even if the extension file already exists.
 #' @param verbose Print build output.
 #' @return Path to the built \code{duckhts.duckdb_extension} file.
@@ -113,7 +114,10 @@ duckhts_build <- function(build_dir = NULL, force = FALSE, verbose = TRUE) {
   ext_dir <- duckhts_extension_dir()
 
   if (is.null(build_dir)) {
-    build_dir <- file.path(ext_dir, "build")
+    stop(
+      "build_dir is required. Use a writable location such as tempdir().",
+      call. = FALSE
+    )
   }
   dir.create(build_dir, recursive = TRUE, showWarnings = FALSE)
 

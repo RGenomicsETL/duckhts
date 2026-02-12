@@ -30,6 +30,7 @@ If an empty vector is provided, it returns the empty vector unchanged.
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 # Normalize mixed type names
 normalize_tabix_types(c("integer", "character", "numeric"))
 # Returns: c("BIGINT", "VARCHAR", "DOUBLE")

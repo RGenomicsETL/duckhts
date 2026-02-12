@@ -21,6 +21,7 @@ before using any of the HTS reader functions.
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 library(DBI)
 library(duckdb)
 

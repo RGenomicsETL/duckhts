@@ -78,6 +78,7 @@ duckhts_htslib_plugins_dir <- function() {
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' library(DBI)
 #' library(duckdb)
 #'
@@ -147,6 +148,7 @@ rduckhts_load <- function(con, extension_path = NULL) {
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' mappings <- duckdb_type_mappings()
 #' mappings$duckdb_to_r["BIGINT"]
 #' mappings$r_to_duckdb["integer"]
@@ -220,6 +222,7 @@ duckdb_type_mappings <- function() {
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
 #' rduckhts_bcf(con, "variants", "file.vcf.gz")
@@ -268,6 +271,7 @@ detect_complex_types <- function(con, table_name) {
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' # Assuming 'alt' is an ARRAY column from a VCF
 #' con <- dbConnect(duckdb::duckdb())
 #' data <- dbGetQuery(con, "SELECT ALT FROM variants")
@@ -307,6 +311,7 @@ extract_array_element <- function(array_col, index = NULL, default = NA) {
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' # Assuming 'attributes_map' is a MAP column from a GFF
 #' con <- dbConnect(duckdb::duckdb())
 #' data <- dbGetQuery(con, "SELECT attributes_map FROM annotations")
@@ -367,6 +372,7 @@ duckhts_extension_dir <- function() {
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
 #' rduckhts_bcf(con, "variants", "file.vcf.gz")
@@ -442,6 +448,7 @@ rduckhts_bcf <- function(
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' con <- dbConnect(duckdb::duckdb())
 #' rduckhts_load(con)
 #' rduckhts_bam(con, "reads", "file.bam")
@@ -530,6 +537,7 @@ rduckhts_bam <- function(
 #'
 #' @examples
 #' \dontrun{
+#' # Not run on CRAN because it requires compiling the bundled extension.
 #' # Normalize mixed type names
 #' normalize_tabix_types(c("integer", "character", "numeric"))
 #' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")

@@ -35,6 +35,7 @@ This follows the RBCFTools pattern of creating a table that can be queried.
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
 rduckhts_bcf(con, "variants", "file.vcf.gz")

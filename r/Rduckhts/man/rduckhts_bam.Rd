@@ -40,6 +40,7 @@ Creates a DuckDB table from SAM, BAM, or CRAM files using the DuckHTS extension.
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
 rduckhts_bam(con, "reads", "file.bam")

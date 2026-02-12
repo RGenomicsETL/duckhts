@@ -22,6 +22,7 @@ Helper function to safely extract elements from DuckDB arrays
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 # Assuming 'alt' is an ARRAY column from a VCF
 con <- dbConnect(duckdb::duckdb())
 data <- dbGetQuery(con, "SELECT ALT FROM variants")

@@ -21,6 +21,7 @@ Identifies columns in a DuckDB table that contain complex types
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 con <- dbConnect(duckdb::duckdb())
 rduckhts_load(con)
 rduckhts_bcf(con, "variants", "file.vcf.gz")

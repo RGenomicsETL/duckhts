@@ -22,6 +22,7 @@ Can extract keys, values, or search for specific key-value pairs.
 }
 \examples{
 \dontrun{
+# Not run on CRAN because it requires compiling the bundled extension.
 # Assuming 'attributes_map' is a MAP column from a GFF
 con <- dbConnect(duckdb::duckdb())
 data <- dbGetQuery(con, "SELECT attributes_map FROM annotations")
