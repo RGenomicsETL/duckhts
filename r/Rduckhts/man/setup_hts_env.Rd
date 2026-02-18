@@ -22,11 +22,12 @@ plugins directory. This enables remote file access via libcurl plugins
 Call this before querying remote URLs to allow htslib to locate its plugins.
 }
 \examples{
-# Use bundled plugins if present
+\dontrun{
 setup_hts_env()
 
-# Or set an explicit plugins directory
-# plugins_path <- "/path/to/htslib/plugins"
-# setup_hts_env(plugins_dir = plugins_path)
-
+plugins_path <- tempfile("hts_plugins_")
+dir.create(plugins_path)
+setup_hts_env(plugins_dir = plugins_path)
+unlink(plugins_path, recursive = TRUE)
+}
 }

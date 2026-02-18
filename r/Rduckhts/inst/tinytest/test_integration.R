@@ -66,20 +66,18 @@ test_table_creation <- function() {
 
     # Check MAP types specifically
     schema <- DBI::dbGetQuery(con, "DESCRIBE annotations")
-    cat("GFF schema with attributes_map=TRUE:\n")
-    print(schema)
+    message("GFF schema with attributes_map=TRUE:\n", paste(capture.output(schema), collapse = "\n"))
 
     # Check what type the attributes column has
     attr_type <- DBI::dbGetQuery(
       con,
       "SELECT typeof(attributes) as attr_type FROM annotations LIMIT 1"
     )$attr_type[1]
-    cat("Attributes column type:", attr_type, "\n")
+    message("Attributes column type: ", attr_type)
 
     # Get sample to see MAP structure
     sample <- DBI::dbGetQuery(con, "SELECT attributes FROM annotations LIMIT 1")
-    cat("Sample MAP content:\n")
-    print(sample)
+    message("Sample MAP content:\n", paste(capture.output(sample), collapse = "\n"))
   }
 
   expect_true(DBI::dbExistsTable(con, "reads"))

@@ -40,13 +40,14 @@ build_param_str <- function(params) {
 #' Call this before querying remote URLs to allow htslib to locate its plugins.
 #'
 #' @examples
-#' # Use bundled plugins if present
+#' \dontrun{
 #' setup_hts_env()
 #'
-#' # Or set an explicit plugins directory
-#' # plugins_path <- "/path/to/htslib/plugins"
-#' # setup_hts_env(plugins_dir = plugins_path)
-#'
+#' plugins_path <- tempfile("hts_plugins_")
+#' dir.create(plugins_path)
+#' setup_hts_env(plugins_dir = plugins_path)
+#' unlink(plugins_path, recursive = TRUE)
+#' }
 #' @export
 setup_hts_env <- function(plugins_dir = NULL) {
   old_value <- Sys.getenv("HTS_PATH", unset = NA)
@@ -612,13 +613,8 @@ rduckhts_bam <- function(
 #' If an empty vector is provided, it returns the empty vector unchanged.
 #'
 #' @examples
-#' # Normalize mixed type names
 #' normalize_tabix_types(c("integer", "character", "numeric"))
-#' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")
-#'
-#' # Handle variations
 #' normalize_tabix_types(c("int", "string", "float"))
-#' # Returns: c("BIGINT", "VARCHAR", "DOUBLE")
 #'
 #' @seealso
 #' \code{\link{rduckhts_tabix}} for using normalized types with tabix readers,

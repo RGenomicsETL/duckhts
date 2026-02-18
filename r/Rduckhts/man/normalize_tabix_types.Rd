@@ -29,13 +29,8 @@ The function performs the following normalizations:
 If an empty vector is provided, it returns the empty vector unchanged.
 }
 \examples{
-# Normalize mixed type names
 normalize_tabix_types(c("integer", "character", "numeric"))
-# Returns: c("BIGINT", "VARCHAR", "DOUBLE")
-
-# Handle variations
 normalize_tabix_types(c("int", "string", "float"))
-# Returns: c("BIGINT", "VARCHAR", "DOUBLE")
 
 }
 \seealso{
