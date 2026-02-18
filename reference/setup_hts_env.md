@@ -30,10 +30,12 @@ plugins.
 ## Examples
 
 ``` r
-# Use bundled plugins if present
+if (FALSE) { # \dontrun{
 setup_hts_env()
 
-# Or set an explicit plugins directory
-# plugins_path <- "/path/to/htslib/plugins"
-# setup_hts_env(plugins_dir = plugins_path)
+plugins_path <- tempfile("hts_plugins_")
+dir.create(plugins_path)
+setup_hts_env(plugins_dir = plugins_path)
+unlink(plugins_path, recursive = TRUE)
+} # }
 ```

@@ -47,13 +47,8 @@ for the complete type mapping table.
 ## Examples
 
 ``` r
-# Normalize mixed type names
 normalize_tabix_types(c("integer", "character", "numeric"))
 #> [1] "BIGINT"  "VARCHAR" "DOUBLE" 
-# Returns: c("BIGINT", "VARCHAR", "DOUBLE")
-
-# Handle variations
 normalize_tabix_types(c("int", "string", "float"))
 #> [1] "BIGINT"  "VARCHAR" "DOUBLE" 
-# Returns: c("BIGINT", "VARCHAR", "DOUBLE")
 ```
