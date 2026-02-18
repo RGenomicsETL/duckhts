@@ -366,5 +366,9 @@ fi
 
 rm -f "${RAW_EXT_FILE}"
 
+# let's remove detritus from htslib build *.o
+find "${HTSLIB_DIR}" -name "*.o" -delete || true
+# only keep ${HTSLIB_DIR}/lib and ${HTSLIB_DIR}/include for the extension, remove everything else
+find "${HTSLIB_DIR}" -mindepth 1 -maxdepth 1 ! -name "lib" ! -name "include" -exec rm -rf {} \; || true
 cd "${THIS_DIR}"
 echo "Configure complete"

@@ -76,6 +76,7 @@ set(EXTENSION_SOURCES
         src/seq_reader.c
         src/tabix_reader.c
         src/vep_parser.c
+        src/hts_meta_reader.c
 )
 
 if (DUCKDB_WASM_EXTENSION)

@@ -319,3 +319,24 @@ query I
 SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
 ----
 4
+
+# ==============================================================
+# read_hts_header & read_hts_index
+# ==============================================================
+
+# --- header map extraction (VCF) ---
+query I
+SELECT map_extract(key_values, 'Description')
+FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')
+WHERE record_type = 'FORMAT'
+LIMIT 1;
+----
+Text
+
+# --- index type extracted from VCF/BCF ---
+query I
+SELECT index_type
+FROM read_hts_index('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')
+LIMIT 1;
+----
+CSI
