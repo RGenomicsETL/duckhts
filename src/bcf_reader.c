@@ -92,6 +92,8 @@ typedef struct {
     char* file_path;
     char* index_path;          // Optional explicit index path
     char* region;              // Optional region filter
+    char** regions;            // Parsed comma-separated regions
+    unsigned int n_regions;
     int include_info;          // Include INFO fields
     int include_format;        // Include FORMAT/sample fields
     int n_samples;             // Number of samples
@@ -163,6 +165,7 @@ typedef struct {
     int assigned_contig;       // Which contig this thread is scanning (-1 = all)
     const char* contig_name;   // Name of assigned contig (reference, don't free)
     int needs_next_contig;     // Flag to request next contig assignment
+    unsigned int next_region_idx; // Region cursor for chained region scans
     
     // Tidy format state: tracks which sample we're emitting for current record
     int tidy_current_sample;   // Current sample index in tidy mode (-1 = need to read next record)
@@ -197,6 +200,12 @@ static void destroy_bind_data(void* data) {
     if (bind->file_path) duckdb_free(bind->file_path);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->region) duckdb_free(bind->region);
+    if (bind->regions) {
+        for (unsigned int i = 0; i < bind->n_regions; i++) {
+            if (bind->regions[i]) duckdb_free(bind->regions[i]);
+        }
+        duckdb_free(bind->regions);
+    }
     
     if (bind->sample_names) {
         for (int i = 0; i < bind->n_samples; i++) {
@@ -267,6 +276,51 @@ static char* strdup_duckdb(const char* s) {
     char* copy = (char*)duckdb_malloc(len);
     if (copy) memcpy(copy, s, len);
     return copy;
+}
+
+static void parse_regions_duckdb(const char *region_str, char ***out_regions, unsigned int *out_count) {
+    *out_regions = NULL;
+    *out_count = 0;
+    if (!region_str || region_str[0] == '\0') return;
+
+    unsigned int count = 1;
+    for (const char *p = region_str; *p; p++) {
+        if (*p == ',') count++;
+    }
+
+    char **arr = (char **)duckdb_malloc(sizeof(char *) * count);
+    char *dup = (char *)duckdb_malloc(strlen(region_str) + 1);
+    if (!arr || !dup) {
+        if (arr) duckdb_free(arr);
+        if (dup) duckdb_free(dup);
+        return;
+    }
+    strcpy(dup, region_str);
+
+    unsigned int idx = 0;
+    char *tok = strtok(dup, ",");
+    while (tok && idx < count) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        int len = (int)strlen(tok);
+        while (len > 0 && (tok[len - 1] == ' ' || tok[len - 1] == '\t')) {
+            tok[--len] = '\0';
+        }
+        if (len > 0) {
+            arr[idx] = strdup_duckdb(tok);
+            if (!arr[idx]) {
+                for (unsigned int i = 0; i < idx; i++) duckdb_free(arr[i]);
+                duckdb_free(arr);
+                duckdb_free(dup);
+                return;
+            }
+            idx++;
+        }
+        tok = strtok(NULL, ",");
+    }
+
+    duckdb_free(dup);
+    *out_regions = arr;
+    *out_count = idx;
 }
 
 // =============================================================================
@@ -403,6 +457,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->file_path = file_path;
     bind->index_path = index_path;
     bind->region = region;
+    parse_regions_duckdb(region, &bind->regions, &bind->n_regions);
     bind->include_info = 1;
     bind->include_format = 1;
     bind->n_samples = bcf_hdr_nsamples(hdr);
@@ -655,7 +710,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->contig_names = NULL;
     
     // Only set up parallel scan if no user-specified region
-    if (!region || strlen(region) == 0) {
+    if (bind->n_regions == 0) {
         // Try to load index using *_load3 with minimal flags to avoid network timeouts
         // Only use HTS_IDX_SAVE_REMOTE for actual remote protocols
         int is_remote = (strncmp(file_path, "http://", 7) == 0 || 
@@ -723,7 +778,7 @@ static void bcf_read_global_init(duckdb_init_info info) {
     memset(global, 0, sizeof(bcf_global_init_data_t));
     
     global->current_contig = 0;
-    global->has_region = (bind->region && strlen(bind->region) > 0);
+    global->has_region = (bind->n_regions > 0);
     
     // Enable parallel scan if:
     // 1. Index exists
@@ -758,8 +813,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     memset(local, 0, sizeof(bcf_init_data_t));
     
     // Check if we're in parallel mode based on bind data
-    int is_parallel = (bind->has_index && bind->n_contigs > 1 && 
-                       (!bind->region || strlen(bind->region) == 0));
+    int is_parallel = (bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
     
     // Initialize parallel scan state
     local->is_parallel = is_parallel;
@@ -789,7 +843,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     
     // Load index for parallel scanning or region queries
     // Use *_load3 with HTS_IDX_SAVE_REMOTE for remote file support
-    if (is_parallel || (bind->region && strlen(bind->region) > 0)) {
+    if (is_parallel || bind->n_regions > 0) {
         enum htsExactFormat fmt = hts_get_format(local->fp)->format;
         
         if (fmt == bcf) {
@@ -803,7 +857,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     }
     
     // Set up region query if user specified a region (non-parallel case)
-    if (!is_parallel && bind->region && strlen(bind->region) > 0) {
+    if (!is_parallel && bind->n_regions > 0) {
         // First check if we have an index
         if (!local->idx && !local->tbx) {
             char err[512];
@@ -813,22 +867,30 @@ static void bcf_read_local_init(duckdb_init_info info) {
             destroy_init_data(local);
             return;
         }
-        
-        // Try to create iterator for the region
-        if (local->idx) {
-            local->itr = bcf_itr_querys(local->idx, local->hdr, bind->region);
-        } else if (local->tbx) {
-            local->itr = tbx_itr_querys(local->tbx, bind->region);
+
+        if (bind->n_regions > 1) {
+            vcf_emit_warning("Multi-region BCF/VCF queries are executed as a chained union of single-region iterators; overlapping regions may return duplicate rows");
         }
         
-        // If iterator is NULL, avoid hard failure for non-conforming headers.
-        // Return an empty result and emit a warning instead.
-        if (!local->itr) {
+        local->next_region_idx = 0;
+        while (local->next_region_idx < bind->n_regions) {
+            const char *query_region = bind->regions[local->next_region_idx++];
+            if (local->idx) {
+                local->itr = bcf_itr_querys(local->idx, local->hdr, query_region);
+            } else if (local->tbx) {
+                local->itr = tbx_itr_querys(local->tbx, query_region);
+            }
+            if (local->itr) break;
+
+            // Avoid hard failure for non-conforming headers.
             char msg[512];
             snprintf(msg, sizeof(msg),
-                     "Region query returned no iterator; returning empty result for region: %s",
-                     bind->region);
+                     "Region query returned no iterator; skipping region: %s",
+                     query_region);
             vcf_emit_warning(msg);
+        }
+        
+        if (!local->itr) {
             local->done = 1;
             duckdb_init_set_init_data(info, local, destroy_init_data);
             return;
@@ -1119,6 +1181,23 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     // Try to claim next contig
                     if (claim_next_contig(init, global)) {
                         continue;  // Continue reading from new contig
+                    }
+                } else if (bind->n_regions > 0) {
+                    if (init->itr) {
+                        hts_itr_destroy(init->itr);
+                        init->itr = NULL;
+                    }
+                    while (init->next_region_idx < bind->n_regions) {
+                        const char *query_region = bind->regions[init->next_region_idx++];
+                        if (init->idx) {
+                            init->itr = bcf_itr_querys(init->idx, init->hdr, query_region);
+                        } else if (init->tbx) {
+                            init->itr = tbx_itr_querys(init->tbx, query_region);
+                        }
+                        if (init->itr) break;
+                    }
+                    if (init->itr) {
+                        continue;
                     }
                 }
                 init->done = 1;

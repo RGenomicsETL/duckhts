@@ -43,6 +43,21 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', re
 ----
 2
 
+# --- BCF multi-region query (comma-separated) ---
+query I
+WITH r1 AS (
+  SELECT count(*) AS c FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151')
+),
+r2 AS (
+  SELECT count(*) AS c FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3062915-3062915')
+),
+mr AS (
+  SELECT count(*) AS c FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151,1:3062915-3062915')
+)
+SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) THEN 1 ELSE 0 END;
+----
+1
+
 # --- VEP/CSQ annotations (if present) ---
 query I
 SELECT CASE WHEN VEP_Allele IS NOT NULL THEN 1 ELSE 0 END
@@ -78,6 +93,18 @@ query I
 SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
 ----
 2
+
+# --- BAM multi-region query (dedup on overlapping regions) ---
+query I
+WITH single_region AS (
+  SELECT count(*) AS c FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000')
+),
+multi_region AS (
+  SELECT count(*) AS c FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000,CHROMOSOME_I:1-1000')
+)
+SELECT CASE WHEN (SELECT c FROM single_region) = (SELECT c FROM multi_region) THEN 1 ELSE 0 END;
+----
+1
 
 # --- read group / sample ---
 query I
@@ -319,6 +346,21 @@ query I
 SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
 ----
 4
+
+# --- tabix multi-region query (comma-separated) ---
+query I
+WITH r1 AS (
+  SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190')
+),
+r2 AS (
+  SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2937010-2937500')
+),
+mr AS (
+  SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190,X:2937010-2937500')
+)
+SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) THEN 1 ELSE 0 END;
+----
+1
 
 # ==============================================================
 # read_hts_header & read_hts_index

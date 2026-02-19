@@ -45,6 +45,8 @@ Notes:
 - `read_tabix` supports `header := true` to use the first non-meta line as column names, and `header_names := [...]` to override names.
 - `read_tabix` supports `auto_detect := true` to infer numeric types and `column_types := [...]` to set types explicitly.
 - `read_bam` supports `standard_tags := true` for typed SAMtags columns and `auxiliary_tags := true` for a string map of all remaining tags.
+- `region := 'r1,r2,...'` (comma-separated) is supported for `read_bam`, `read_bcf`, `read_gff`, `read_gtf`, and `read_tabix`.
+- `read_bam`/`read_cram` region lists use htslib multi-region iterators and deduplicate overlapping regions; `read_bcf`/`read_gff`/`read_gtf`/`read_tabix` chain single-region iterators, so overlapping regions may duplicate rows.
 
 ## Examples
 
@@ -58,6 +60,10 @@ WHERE CHROM = '1' AND POS > 1000000;
 
 -- Region query on an indexed VCF (requires .tbi or .csi index)
 SELECT * FROM read_bcf('test/data/vcf_file.bcf', region := '1:3000150-3000151');
+
+-- Multiple regions (comma-separated)
+SELECT count(*) FROM read_bcf('test/data/vcf_file.bcf',
+                              region := '1:3000150-3000151,1:3062915-3062915');
 
 -- Explicit index path (non-standard index name/location)
 SELECT * FROM read_bcf('test/data/vcf_file.bcf',
@@ -82,6 +88,10 @@ WHERE FLAG & 4 = 0;  -- mapped reads only
 
 -- Region query on an indexed BAM
 SELECT count(*) FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
+
+-- BAM multi-region query (deduplicated by htslib)
+SELECT count(*) FROM read_bam('test/data/range.bam',
+                              region := 'CHROMOSOME_I:1-1000,CHROMOSOME_I:1-1000');
 
 -- Explicit BAM index path
 SELECT count(*) FROM read_bam('test/data/range.bam',
