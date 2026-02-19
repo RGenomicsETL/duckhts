@@ -9,6 +9,7 @@ rduckhts_bam(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   reference = NULL,
   standard_tags = NULL,
   auxiliary_tags = NULL,
@@ -23,6 +24,8 @@ rduckhts_bam(
 \item{path}{Path to the SAM/BAM/CRAM file}
 
 \item{region}{Optional genomic region (e.g., "chr1:1000-2000")}
+
+\item{index_path}{Optional explicit path to index file (.bai/.csi/.crai)}
 
 \item{reference}{Optional reference file path for CRAM files}
 

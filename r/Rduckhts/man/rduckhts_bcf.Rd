@@ -9,6 +9,7 @@ rduckhts_bcf(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   tidy_format = FALSE,
   overwrite = FALSE
 )
@@ -21,6 +22,8 @@ rduckhts_bcf(
 \item{path}{Path to the VCF/BCF file}
 
 \item{region}{Optional genomic region (e.g., "chr1:1000-2000")}
+
+\item{index_path}{Optional explicit path to index file (.csi/.tbi)}
 
 \item{tidy_format}{Logical. If TRUE, FORMAT columns are returned in tidy format}
 

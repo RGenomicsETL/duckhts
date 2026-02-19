@@ -21,6 +21,9 @@ extern void register_read_fastq_function(duckdb_connection connection);
 extern void register_read_tabix_function(duckdb_connection connection);
 extern void register_read_gtf_function(duckdb_connection connection);
 extern void register_read_gff_function(duckdb_connection connection);
+/* hts_meta_reader.c */
+extern void register_read_hts_header_function(duckdb_connection connection);
+extern void register_read_hts_index_function(duckdb_connection connection);
 
 DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
                             duckdb_extension_info info,
@@ -35,6 +38,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_tabix_function(connection);
     register_read_gtf_function(connection);
     register_read_gff_function(connection);
+    register_read_hts_header_function(connection);
+    register_read_hts_index_function(connection);
 
     return true;
 }

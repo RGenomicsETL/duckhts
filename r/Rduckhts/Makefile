@@ -22,14 +22,14 @@ build: deps
 .PHONY: install check build rd test test-integration clean cran-ready help
 
 install: build
-	R CMD INSTALL $(PKG_NAME)_$(PKG_VERSION).tar.gz
+	THREADS=4 R CMD INSTALL $(PKG_NAME)_$(PKG_VERSION).tar.gz
 
 .PHONY: check
 
 check: build
 	R CMD check --as-cran  $(PKG_NAME)_$(PKG_VERSION).tar.gz
 readme:
-	R -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
+	R -e "rmarkdown::render('README.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 rd: 
 	R -e 'roxygen2::roxygenize(".",load_code=NULL)'
 

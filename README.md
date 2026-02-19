@@ -16,15 +16,17 @@ MinGW/RTools for Windows.
 
 ## Functions
 
-| Function                                                                      | Description                 | Schema                                                                                                             |
-| ----------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files          | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                         |
-| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files     | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID (+ SAMtags / AUX) |
-| `read_fasta(path)`                                                            | Read FASTA files            | NAME, DESCRIPTION, SEQUENCE                                                                                        |
-| `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files            | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                                    |
-| `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files             | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
-| `read_gtf(path, [region, attributes_map])`                                    | Read GTF files              | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
-| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file | column0, column1, … (auto-detected)                                                                                |
+| Function                                                                      | Description                    | Schema                                                                                                             |
+| ----------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files             | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                         |
+| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files        | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID (+ SAMtags / AUX) |
+| `read_fasta(path)`                                                            | Read FASTA files               | NAME, DESCRIPTION, SEQUENCE                                                                                        |
+| `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files               | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                                    |
+| `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files                | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
+| `read_gtf(path, [region, attributes_map])`                                    | Read GTF files                 | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
+| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file    | column0, column1, … (auto-detected)                                                                                |
+| `read_hts_header(path, [format])`                                             | Read parsed HTS header records | file\_format, record\_type, id, number, value\_type, key\_values, raw                                              |
+| `read_hts_index(path, [format, index_path])`                                  | Read index metadata            | file\_format, seqname, tid, length, mapped, unmapped, index\_type, meta                                            |
 
 Notes:
 
@@ -56,6 +58,11 @@ WHERE CHROM = '1' AND POS > 1000000;
 -- Region query on an indexed VCF (requires .tbi or .csi index)
 SELECT * FROM read_bcf('test/data/vcf_file.bcf', region := '1:3000150-3000151');
 
+-- Explicit index path (non-standard index name/location)
+SELECT * FROM read_bcf('test/data/vcf_file.bcf',
+                       region := '1:3000150-3000151',
+                       index_path := 'test/data/vcf_file.bcf.csi');
+
 -- VEP annotations (CSQ/BCSQ/ANN when present)
 SELECT CHROM, POS, VEP_Allele, VEP_Consequence
 FROM read_bcf('test/data/test_vep.vcf')
@@ -74,6 +81,11 @@ WHERE FLAG & 4 = 0;  -- mapped reads only
 
 -- Region query on an indexed BAM
 SELECT count(*) FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
+
+-- Explicit BAM index path
+SELECT count(*) FROM read_bam('test/data/range.bam',
+                              region := 'CHROMOSOME_I:1-1000',
+                              index_path := 'test/data/range.bam.bai');
 
 -- CRAM with explicit reference
 SELECT count(*) FROM read_bam('test/data/range.cram', reference := 'test/data/ce.fa');
@@ -101,6 +113,17 @@ WHERE feature = 'gene';
 
 -- Read a tabix-indexed BED file
 SELECT * FROM read_tabix('test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
+
+-- Header metadata from bundled test VCF
+SELECT record_type, id, map_extract(key_values, 'Description') AS description
+FROM read_hts_header('test/data/formatcols.vcf.gz')
+WHERE record_type = 'FORMAT'
+LIMIT 1;
+
+-- Index metadata from bundled test VCF
+SELECT seqname, mapped, unmapped, index_type
+FROM read_hts_index('test/data/formatcols.vcf.gz')
+LIMIT 4;
 ```
 
 ## Remote URLs and HTS\_PATH

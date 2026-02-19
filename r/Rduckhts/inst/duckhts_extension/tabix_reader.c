@@ -81,6 +81,7 @@ typedef enum {
 
 typedef struct {
     char *file_path;
+    char *index_path;
     char *region;          /* NULL = full scan */
     tabix_mode_t mode;
     int  n_cols;           /* detected or fixed (9 for GTF/GFF) */
@@ -100,6 +101,7 @@ static void tabix_bind_data_destroy(void *data) {
     tabix_bind_data_t *bd = (tabix_bind_data_t *)data;
     if (bd) {
         free(bd->file_path);
+        free(bd->index_path);
         free(bd->region);
         if (bd->header_names) {
             for (int i = 0; i < bd->header_names_count; i++) {
@@ -439,6 +441,17 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_destroy_value(&val);
     }
 
+    /* named param: explicit index path */
+    val = duckdb_bind_get_named_parameter(info, "index_path");
+    if (val) {
+        if (duckdb_get_type_id(duckdb_get_value_type(val)) == DUCKDB_TYPE_VARCHAR) {
+            const char *idx = duckdb_get_varchar(val);
+            if (idx && idx[0]) bd->index_path = strdup(idx);
+            duckdb_free((void *)idx);
+        }
+        duckdb_destroy_value(&val);
+    }
+
     /* Schema: GTF/GFF have fixed 9 columns; generic auto-detects */
     if (mode == TABIX_MODE_GTF || mode == TABIX_MODE_GFF) {
         /* File has 9 fixed columns; attributes_map is a derived column. */
@@ -528,7 +541,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         int header_from_skip = 0;
         char *header_candidate = NULL;
 
-        tbx_t *tbx = tbx_index_load(bd->file_path);
+        tbx_t *tbx = tbx_index_load2(bd->file_path, bd->index_path);
         if (tbx) {
             tbx_conf_t conf = tbx->conf;
             meta_char = conf.meta_char ? conf.meta_char : '#';
@@ -683,7 +696,7 @@ static void tabix_init(duckdb_init_info info) {
     }
 
     /* Try to load tabix index */
-    id->tbx = tbx_index_load(bd->file_path);
+    id->tbx = tbx_index_load2(bd->file_path, bd->index_path);
 
     if (bd->region && bd->region[0]) {
         if (!id->tbx) {
@@ -914,6 +927,7 @@ static duckdb_table_function create_tabix_tf(const char *name,
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);

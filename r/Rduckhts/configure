@@ -300,7 +300,7 @@ echo "---------- Building DuckHTS extension ----------"
 
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c bcf_reader.c bam_reader.c seq_reader.c tabix_reader.c vep_parser.c"
+C_SOURCES="duckhts.c bcf_reader.c bam_reader.c seq_reader.c tabix_reader.c hts_meta_reader.c vep_parser.c"
 INCLUDES="-I./include -I./duckdb_capi -I./htslib"
 
 echo "Compiling extension sources..."
@@ -369,6 +369,6 @@ rm -f "${RAW_EXT_FILE}"
 # let's remove detritus from htslib build *.o
 find "${HTSLIB_DIR}" -name "*.o" -delete || true
 # only keep ${HTSLIB_DIR}/lib and ${HTSLIB_DIR}/include for the extension, remove everything else
-find "${HTSLIB_DIR}" -mindepth 1 -maxdepth 1 ! -name "lib" ! -name "include" -exec rm -rf {} \; || true
+find "${HTSLIB_DIR}" -mindepth 1 -maxdepth 1 ! -name "libexec" ! -name "lib" ! -name "include" -exec rm -rf {} \; || true
 cd "${THIS_DIR}"
 echo "Configure complete"

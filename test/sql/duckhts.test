@@ -325,13 +325,13 @@ SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz
 # ==============================================================
 
 # --- header map extraction (VCF) ---
-query I
+query T
 SELECT map_extract(key_values, 'Description')
 FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')
 WHERE record_type = 'FORMAT'
 LIMIT 1;
 ----
-Text
+['"Text"']
 
 # --- index type extracted from VCF/BCF ---
 query I
@@ -340,3 +340,25 @@ FROM read_hts_index('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')
 LIMIT 1;
 ----
 CSI
+
+# --- explicit index_path for read_bcf ---
+query I
+SELECT count(*)
+FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/vcf_file.bcf',
+  region := '1:3000150-3000151',
+  index_path := '__WORKING_DIRECTORY__/test/data/vcf_file.bcf.csi'
+);
+----
+2
+
+# --- explicit index_path for read_bam ---
+query I
+SELECT count(*)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:1-1000',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+);
+----
+2

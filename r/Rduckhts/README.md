@@ -246,6 +246,31 @@ dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 
 #> 1            2
 ```
 
+### HTS header and index metadata
+
+Use the metadata helpers to inspect parsed headers and index summaries.
+
+``` r
+bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
+
+header_meta <- rduckhts_hts_header(con, bcf_path)
+head(header_meta[, c("record_type", "id", "number", "value_type")], 5)
+#>   record_type   id number value_type
+#> 1  fileformat <NA>   <NA>       <NA>
+#> 2      FILTER PASS   <NA>       <NA>
+#> 3        INFO TEST      1    Integer
+#> 4      FORMAT   TT      A    Integer
+#> 5        INFO  DP4      4    Integer
+
+index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
+head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
+#>   seqname mapped unmapped index_type
+#> 1       1     11        0        CSI
+#> 2       2      1        0        CSI
+#> 3       3      1        0        CSI
+#> 4       4      2        0        CSI
+```
+
 ### Remote GTEx tabix example
 
 GTEx eQTL matrices on EBI are tabix-indexed

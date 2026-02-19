@@ -438,6 +438,7 @@ duckhts_extension_dir <- function() {
 #' @param table_name Name for the created table
 #' @param path Path to the VCF/BCF file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
+#' @param index_path Optional explicit path to index file (.csi/.tbi)
 #' @param tidy_format Logical. If TRUE, FORMAT columns are returned in tidy format
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
@@ -460,6 +461,7 @@ rduckhts_bcf <- function(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   tidy_format = FALSE,
   overwrite = FALSE
 ) {
@@ -480,6 +482,9 @@ rduckhts_bcf <- function(
   params <- list()
   if (!is.null(region)) {
     params$region <- sprintf("'%s'", region)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
   }
   if (tidy_format) {
     params$tidy_format <- "true"
@@ -514,6 +519,7 @@ rduckhts_bcf <- function(
 #' @param table_name Name for the created table
 #' @param path Path to the SAM/BAM/CRAM file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
+#' @param index_path Optional explicit path to index file (.bai/.csi/.crai)
 #' @param reference Optional reference file path for CRAM files
 #' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns
 #' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags
@@ -538,6 +544,7 @@ rduckhts_bam <- function(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   reference = NULL,
   standard_tags = NULL,
   auxiliary_tags = NULL,
@@ -559,6 +566,9 @@ rduckhts_bam <- function(
   params <- list()
   if (!is.null(region)) {
     params$region <- sprintf("'%s'", region)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
   }
   if (!is.null(reference)) {
     params$reference <- sprintf("'%s'", reference)
@@ -894,6 +904,7 @@ rduckhts_gtf <- function(
 #' @param table_name Name for the created table
 #' @param path Path to the tabix-indexed file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
+#' @param index_path Optional explicit path to index file (.tbi/.csi)
 #' @param header Logical. If TRUE, use first non-meta line as column names
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
@@ -908,6 +919,7 @@ rduckhts_tabix <- function(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   header = NULL,
   header_names = NULL,
   auto_detect = NULL,
@@ -930,6 +942,9 @@ rduckhts_tabix <- function(
   params <- list()
   if (!is.null(region)) {
     params$region <- sprintf("'%s'", region)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
   }
   if (!is.null(header)) {
     params$header <- if (isTRUE(header)) "true" else "false"
@@ -976,4 +991,50 @@ rduckhts_tabix <- function(
 
   DBI::dbExecute(con, create_query)
   invisible(TRUE)
+}
+
+#' Read HTS Header Metadata
+#'
+#' Reads file header records from HTS-supported formats using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to input HTS file
+#' @param format Optional format hint (e.g., "auto", "vcf", "bcf", "bam", "cram", "tabix")
+#'
+#' @return A data frame with parsed header metadata.
+#'
+#' @export
+rduckhts_hts_header <- function(con, path, format = NULL) {
+  params <- list()
+  if (!is.null(format)) {
+    params$format <- sprintf("'%s'", format)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM read_hts_header('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Read HTS Index Metadata
+#'
+#' Reads index metadata from HTS-supported index files via DuckHTS.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to input HTS file
+#' @param format Optional format hint (e.g., "auto", "vcf", "bcf", "bam", "cram", "tabix")
+#' @param index_path Optional explicit path to index file
+#'
+#' @return A data frame with index metadata.
+#'
+#' @export
+rduckhts_hts_index <- function(con, path, format = NULL, index_path = NULL) {
+  params <- list()
+  if (!is.null(format)) {
+    params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM read_hts_index('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
 }

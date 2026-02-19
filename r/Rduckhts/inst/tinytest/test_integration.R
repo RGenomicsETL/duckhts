@@ -12,11 +12,14 @@ test_table_creation <- function() {
   expect_silent(rduckhts_load(con))
 
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+  bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+  bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
   fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
   fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
   gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
+  gff_index_path <- system.file("extdata", "gff_file.gff.gz.tbi", package = "Rduckhts")
   tabix_path <- system.file("extdata", "rg.sam.gz", package = "Rduckhts")
   header_tabix_path <- system.file(
     "extdata",
@@ -31,18 +34,37 @@ test_table_creation <- function() {
   vep_path <- system.file("extdata", "test_vep.vcf", package = "Rduckhts")
 
   expect_true(file.exists(bcf_path))
+  expect_true(file.exists(bcf_index_path))
   expect_true(file.exists(bam_path))
+  expect_true(file.exists(bam_index_path))
   expect_true(file.exists(fasta_path))
   expect_true(file.exists(fastq_r1))
   expect_true(file.exists(fastq_r2))
   expect_true(file.exists(gff_path))
+  expect_true(file.exists(gff_index_path))
   expect_true(file.exists(tabix_path))
   expect_true(file.exists(header_tabix_path))
   expect_true(file.exists(meta_tabix_path))
   expect_true(file.exists(vep_path))
 
   expect_silent(rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE))
+  expect_silent(rduckhts_bcf(
+    con,
+    "variants_idx",
+    bcf_path,
+    region = "1:3000150-3000151",
+    index_path = bcf_index_path,
+    overwrite = TRUE
+  ))
   expect_silent(rduckhts_bam(con, "reads", bam_path, overwrite = TRUE))
+  expect_silent(rduckhts_bam(
+    con,
+    "reads_idx",
+    bam_path,
+    region = "CHROMOSOME_I:1-1000",
+    index_path = bam_index_path,
+    overwrite = TRUE
+  ))
   expect_silent(rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE))
   expect_silent(rduckhts_fastq(
     con,
@@ -59,7 +81,26 @@ test_table_creation <- function() {
     overwrite = TRUE
   ))
   expect_silent(rduckhts_tabix(con, "tabix_data", tabix_path, overwrite = TRUE))
+  expect_silent(rduckhts_tabix(
+    con,
+    "tabix_idx",
+    gff_path,
+    region = "X:2934816-2935190",
+    index_path = gff_index_path,
+    overwrite = TRUE
+  ))
   expect_silent(rduckhts_bcf(con, "vep_variants", vep_path, overwrite = TRUE))
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")$n[1] == 2)
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM reads_idx")$n[1] == 2)
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM tabix_idx")$n[1] == 4)
+
+  header_meta <- rduckhts_hts_header(con, bcf_path)
+  expect_true(nrow(header_meta) > 0)
+  expect_true("record_type" %in% names(header_meta))
+
+  index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
+  expect_true(nrow(index_meta) > 0)
+  expect_true("index_type" %in% names(index_meta))
   expect_true(DBI::dbExistsTable(con, "annotations"))
   if (DBI::dbExistsTable(con, "annotations")) {
     expect_silent(DBI::dbGetQuery(con, "SELECT * FROM annotations LIMIT 1"))

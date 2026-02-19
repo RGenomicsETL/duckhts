@@ -90,6 +90,7 @@ typedef struct {
 
 typedef struct {
     char* file_path;
+    char* index_path;          // Optional explicit index path
     char* region;              // Optional region filter
     int include_info;          // Include INFO fields
     int include_format;        // Include FORMAT/sample fields
@@ -194,6 +195,7 @@ static void destroy_bind_data(void* data) {
     if (!bind) return;
     
     if (bind->file_path) duckdb_free(bind->file_path);
+    if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->region) duckdb_free(bind->region);
     
     if (bind->sample_names) {
@@ -356,6 +358,14 @@ static void bcf_read_bind(duckdb_bind_info info) {
         region = duckdb_get_varchar(region_val);
     }
     if (region_val) duckdb_destroy_value(&region_val);
+
+    // Optional explicit index path
+    char* index_path = NULL;
+    duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
+    if (idx_val && !duckdb_is_null_value(idx_val)) {
+        index_path = duckdb_get_varchar(idx_val);
+    }
+    if (idx_val) duckdb_destroy_value(&idx_val);
     
     // Get optional tidy_format named parameter (default: false)
     int tidy_format = 0;
@@ -372,6 +382,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
         snprintf(err, sizeof(err), "Failed to open BCF/VCF file: %s", file_path);
         duckdb_bind_set_error(info, err);
         duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
         return;
     }
@@ -381,6 +392,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
         hts_close(fp);
         duckdb_bind_set_error(info, "Failed to read BCF/VCF header");
         duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
         return;
     }
@@ -389,6 +401,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bcf_bind_data_t* bind = (bcf_bind_data_t*)duckdb_malloc(sizeof(bcf_bind_data_t));
     memset(bind, 0, sizeof(bcf_bind_data_t));
     bind->file_path = file_path;
+    bind->index_path = index_path;
     bind->region = region;
     bind->include_info = 1;
     bind->include_format = 1;
@@ -660,11 +673,11 @@ static void bcf_read_bind(duckdb_bind_info info) {
         }
         
         if (fmt == bcf) {
-            idx = bcf_index_load3(file_path, NULL, flags);
+            idx = bcf_index_load3(file_path, index_path, flags);
         } else {
-            tbx = tbx_index_load3(file_path, NULL, flags);
+            tbx = tbx_index_load3(file_path, index_path, flags);
             if (!tbx) {
-                idx = bcf_index_load3(file_path, NULL, flags);
+                idx = bcf_index_load3(file_path, index_path, flags);
             }
         }
         
@@ -780,11 +793,11 @@ static void bcf_read_local_init(duckdb_init_info info) {
         enum htsExactFormat fmt = hts_get_format(local->fp)->format;
         
         if (fmt == bcf) {
-            local->idx = bcf_index_load3(bind->file_path, NULL, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
+            local->idx = bcf_index_load3(bind->file_path, bind->index_path, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
         } else {
-            local->tbx = tbx_index_load3(bind->file_path, NULL, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
+            local->tbx = tbx_index_load3(bind->file_path, bind->index_path, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
             if (!local->tbx) {
-                local->idx = bcf_index_load3(bind->file_path, NULL, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
+                local->idx = bcf_index_load3(bind->file_path, bind->index_path, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
             }
         }
     }
@@ -1750,6 +1763,7 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_table_function_add_parameter(tf, varchar_type);  // file_path
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);  // optional region
+    duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);  // optional explicit index path
     duckdb_table_function_add_named_parameter(tf, "tidy_format", bool_type);  // optional tidy format
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bool_type);

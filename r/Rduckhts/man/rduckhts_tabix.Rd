@@ -9,6 +9,7 @@ rduckhts_tabix(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   header = NULL,
   header_names = NULL,
   auto_detect = NULL,
@@ -24,6 +25,8 @@ rduckhts_tabix(
 \item{path}{Path to the tabix-indexed file}
 
 \item{region}{Optional genomic region (e.g., "chr1:1000-2000")}
+
+\item{index_path}{Optional explicit path to index file (.tbi/.csi)}
 
 \item{header}{Logical. If TRUE, use first non-meta line as column names}
 
