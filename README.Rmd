@@ -32,8 +32,10 @@ Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTo
 | `read_gff(path, [region, attributes_map])` | Read GFF3 files | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
 | `read_gtf(path, [region, attributes_map])` | Read GTF files | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled) |
 | `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file | column0, column1, … (auto-detected) |
-| `read_hts_header(path, [format])` | Read parsed HTS header records | file_format, record_type, id, number, value_type, key_values, raw |
+| `read_hts_header(path, [format, mode])` | Read HTS header metadata (`mode`: parsed/raw/both) | parsed: file_format, record_type, id, number, value_type, key_values; raw: idx, raw |
 | `read_hts_index(path, [format, index_path])` | Read index metadata | file_format, seqname, tid, length, mapped, unmapped, index_type, meta |
+| `read_hts_index_spans(path, [format, index_path])` | Read span-oriented index metadata view | file_format, seqname, tid, bin, chunk_beg_vo, chunk_end_vo, chunk_bytes, index_type, meta |
+| `read_hts_index_raw(path, [format, index_path])` | Read raw index metadata blob view | index_type, index_path, raw |
 
 Notes:
 
@@ -119,10 +121,24 @@ FROM read_hts_header('test/data/formatcols.vcf.gz')
 WHERE record_type = 'FORMAT'
 LIMIT 1;
 
+-- Raw header lines only
+SELECT idx, raw
+FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+LIMIT 3;
+
 -- Index metadata from bundled test VCF
 SELECT seqname, mapped, unmapped, index_type
 FROM read_hts_index('test/data/formatcols.vcf.gz')
 LIMIT 4;
+
+-- Span-oriented index view
+SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+LIMIT 4;
+
+-- Raw index blob view
+SELECT index_type, octet_length(raw) AS raw_bytes
+FROM read_hts_index_raw('test/data/formatcols.vcf.gz');
 ```
 
 ## Remote URLs and HTS_PATH
@@ -293,6 +309,23 @@ dbGetQuery(con, "
   SELECT QNAME, RNAME, POS, READ_GROUP_ID, SAMPLE_ID
   FROM read_bam('test/data/rg.sam.gz')
   LIMIT 5
+")
+
+dbGetQuery(con, "
+  SELECT idx, raw
+  FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+  LIMIT 3
+")
+
+dbGetQuery(con, "
+  SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+  FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+  LIMIT 3
+")
+
+dbGetQuery(con, "
+  SELECT index_type, octet_length(raw) AS raw_bytes
+  FROM read_hts_index_raw('test/data/formatcols.vcf.gz')
 ")
 ```
 

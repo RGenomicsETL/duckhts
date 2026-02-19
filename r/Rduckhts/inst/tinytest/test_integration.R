@@ -13,6 +13,8 @@ test_table_creation <- function() {
 
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
   bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
+  formatcols_vcf_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")
+  formatcols_vcf_index_path <- system.file("extdata", "formatcols.vcf.gz.csi", package = "Rduckhts")
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
@@ -35,6 +37,8 @@ test_table_creation <- function() {
 
   expect_true(file.exists(bcf_path))
   expect_true(file.exists(bcf_index_path))
+  expect_true(file.exists(formatcols_vcf_path))
+  expect_true(file.exists(formatcols_vcf_index_path))
   expect_true(file.exists(bam_path))
   expect_true(file.exists(bam_index_path))
   expect_true(file.exists(fasta_path))
@@ -97,10 +101,23 @@ test_table_creation <- function() {
   header_meta <- rduckhts_hts_header(con, bcf_path)
   expect_true(nrow(header_meta) > 0)
   expect_true("record_type" %in% names(header_meta))
+  header_raw <- rduckhts_hts_header(con, bcf_path, mode = "raw")
+  expect_true(nrow(header_raw) > 0)
+  expect_true("raw" %in% names(header_raw))
 
   index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
   expect_true(nrow(index_meta) > 0)
   expect_true("index_type" %in% names(index_meta))
+  index_spans <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
+  expect_true(nrow(index_spans) > 0)
+  expect_true("chunk_beg_vo" %in% names(index_spans))
+  index_raw <- rduckhts_hts_index_raw(
+    con,
+    formatcols_vcf_path,
+    index_path = formatcols_vcf_index_path
+  )
+  expect_true(nrow(index_raw) == 1)
+  expect_true("raw" %in% names(index_raw))
   expect_true(DBI::dbExistsTable(con, "annotations"))
   if (DBI::dbExistsTable(con, "annotations")) {
     expect_silent(DBI::dbGetQuery(con, "SELECT * FROM annotations LIMIT 1"))

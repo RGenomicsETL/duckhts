@@ -16,17 +16,19 @@ MinGW/RTools for Windows.
 
 ## Functions
 
-| Function                                                                      | Description                    | Schema                                                                                                             |
-| ----------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files             | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                         |
-| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files        | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID (+ SAMtags / AUX) |
-| `read_fasta(path)`                                                            | Read FASTA files               | NAME, DESCRIPTION, SEQUENCE                                                                                        |
-| `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files               | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                                    |
-| `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files                | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
-| `read_gtf(path, [region, attributes_map])`                                    | Read GTF files                 | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
-| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file    | column0, column1, … (auto-detected)                                                                                |
-| `read_hts_header(path, [format])`                                             | Read parsed HTS header records | file\_format, record\_type, id, number, value\_type, key\_values, raw                                              |
-| `read_hts_index(path, [format, index_path])`                                  | Read index metadata            | file\_format, seqname, tid, length, mapped, unmapped, index\_type, meta                                            |
+| Function                                                                      | Description                                        | Schema                                                                                                             |
+| ----------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files                                 | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                         |
+| `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files                            | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ\_GROUP\_ID, SAMPLE\_ID (+ SAMtags / AUX) |
+| `read_fasta(path)`                                                            | Read FASTA files                                   | NAME, DESCRIPTION, SEQUENCE                                                                                        |
+| `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files                                   | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR\_ID when paired/interleaved)                                    |
+| `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files                                    | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
+| `read_gtf(path, [region, attributes_map])`                                    | Read GTF files                                     | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes\_map MAP when enabled)        |
+| `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file                        | column0, column1, … (auto-detected)                                                                                |
+| `read_hts_header(path, [format, mode])`                                       | Read HTS header metadata (`mode`: parsed/raw/both) | parsed: file\_format, record\_type, id, number, value\_type, key\_values; raw: idx, raw                            |
+| `read_hts_index(path, [format, index_path])`                                  | Read index metadata                                | file\_format, seqname, tid, length, mapped, unmapped, index\_type, meta                                            |
+| `read_hts_index_spans(path, [format, index_path])`                            | Read span-oriented index metadata view             | file\_format, seqname, tid, bin, chunk\_beg\_vo, chunk\_end\_vo, chunk\_bytes, index\_type, meta                   |
+| `read_hts_index_raw(path, [format, index_path])`                              | Read raw index metadata blob view                  | index\_type, index\_path, raw                                                                                      |
 
 Notes:
 
@@ -120,10 +122,24 @@ FROM read_hts_header('test/data/formatcols.vcf.gz')
 WHERE record_type = 'FORMAT'
 LIMIT 1;
 
+-- Raw header lines only
+SELECT idx, raw
+FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+LIMIT 3;
+
 -- Index metadata from bundled test VCF
 SELECT seqname, mapped, unmapped, index_type
 FROM read_hts_index('test/data/formatcols.vcf.gz')
 LIMIT 4;
+
+-- Span-oriented index view
+SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+LIMIT 4;
+
+-- Raw index blob view
+SELECT index_type, octet_length(raw) AS raw_bytes
+FROM read_hts_index_raw('test/data/formatcols.vcf.gz');
 ```
 
 ## Remote URLs and HTS\_PATH
@@ -361,6 +377,31 @@ dbGetQuery(con, "
 #> 3    c1    xx   1          <NA>      <NA>
 #> 4    a2    xx  11            x1        x1
 #> 5    b2    xx  11            x2        x2
+
+dbGetQuery(con, "
+  SELECT idx, raw
+  FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+  LIMIT 3
+")
+#>   idx                  raw
+#> 1   0 ##fileformat=VCFv4.3
+#> 2   1 ##fileformat=VCFv4.3
+#> 3   2 ##fileformat=VCFv4.3
+
+dbGetQuery(con, "
+  SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+  FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+  LIMIT 3
+")
+#>   seqname tid index_type chunk_beg_vo chunk_end_vo
+#> 1       1   0        CSI           NA           NA
+
+dbGetQuery(con, "
+  SELECT index_type, octet_length(raw) AS raw_bytes
+  FROM read_hts_index_raw('test/data/formatcols.vcf.gz')
+")
+#>   index_type raw_bytes
+#> 1        CSI        30
 ```
 
 ### SAMtags + auxiliary tags

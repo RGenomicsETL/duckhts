@@ -73,11 +73,27 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
 ### Region Queries
 
+Region queries can use implicit sidecar indexes or an explicit `index_path`
+for custom index names/locations.
+
 ```{r}
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 variants <- dbGetQuery(con, "SELECT * FROM variants LIMIT 5")
 variants
+
+rduckhts_bcf(
+  con, "variants_idx", bcf_path,
+  region = "1:3000150-3000151",
+  index_path = bcf_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")
+
+# Span-oriented index view from the same file
+index_spans_preview <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
+head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
 ```
 
 ### Remote VCF on S3
@@ -85,7 +101,6 @@ variants
 S3 files can be query when `htslib` is built with plugins enable. This is not the case on RTools
 
 ```{r, eval=TRUE}
-# Not run on CRAN because it requires network access.
 # Enable htslib plugins for remote access (S3/GCS/HTTP)
 setup_hts_env()
 
@@ -95,7 +110,6 @@ s3_path <- "gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/"
 s3_vcf_file <- "3202_samples_cohort_gg_chr22.vcf.gz"
 s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
 
-# Query remote VCF directly with DuckDB + DuckHTS (region-scoped)
 rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:16050000-16050500", overwrite = TRUE)
 dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
 ```
@@ -127,14 +141,26 @@ gene_annotations
 
 ### BAM/CRAM
 
-When built with htslib codec, `CRAM` can be opened in addition to `BAM` files
+When built with htslib codec, `CRAM` can be opened in addition to `BAM` files.
+`index_path` can also be passed for region scans with non-standard index names.
 
 ```{r}
 cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
 ref_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+
 rduckhts_bam(con, "cram_reads", cram_path, reference = ref_path, overwrite = TRUE)
 cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads LIMIT 5")
 cram_reads
+
+rduckhts_bam(
+  con, "bam_idx_reads", bam_path,
+  region = "CHROMOSOME_I:1-1000",
+  index_path = bam_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT count(*) AS n FROM bam_idx_reads")
 ```
 
 ### SAMtags + auxiliary tags
@@ -172,26 +198,24 @@ dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 
 
 ### HTS header and index metadata
 
-Use the metadata helpers to inspect parsed headers and index summaries.
+Use metadata helpers to inspect parsed headers, raw header lines, index summaries,
+span-oriented index views, and raw index blobs.
 
 ```{r}
-bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
-
 header_meta <- rduckhts_hts_header(con, bcf_path)
 head(header_meta[, c("record_type", "id", "number", "value_type")], 5)
+
+header_raw <- rduckhts_hts_header(con, bcf_path, mode = "raw")
+head(header_raw[, c("idx", "raw")], 5)
 
 index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
 head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
 
-bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
-bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
-rduckhts_bam(
-  con, "bam_idx_reads", bam_path,
-  region = "CHROMOSOME_I:1-1000",
-  index_path = bam_index_path,
-  overwrite = TRUE
-)
-dbGetQuery(con, "SELECT count(*) AS n FROM bam_idx_reads")
+index_spans <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
+head(index_spans[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
+
+index_raw <- rduckhts_hts_index_raw(con, bcf_path, index_path = bcf_index_path)
+head(index_raw, 1)
 ```
 
 ### Remote GTEx tabix example
@@ -199,10 +223,11 @@ dbGetQuery(con, "SELECT count(*) AS n FROM bam_idx_reads")
 GTEx eQTL matrices on EBI are tabix-indexed 
 
 ```{r, eval=TRUE}
-gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
+gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
-               header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+                 header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
+
 ```
 
 ```{r}

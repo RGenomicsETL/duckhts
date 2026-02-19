@@ -1000,14 +1000,18 @@ rduckhts_tabix <- function(
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param path Path to input HTS file
 #' @param format Optional format hint (e.g., "auto", "vcf", "bcf", "bam", "cram", "tabix")
+#' @param mode Header output mode: "parsed" (default), "raw", or "both"
 #'
 #' @return A data frame with parsed header metadata.
 #'
 #' @export
-rduckhts_hts_header <- function(con, path, format = NULL) {
+rduckhts_hts_header <- function(con, path, format = NULL, mode = NULL) {
   params <- list()
   if (!is.null(format)) {
     params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(mode)) {
+    params$mode <- sprintf("'%s'", mode)
   }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM read_hts_header('%s'%s)", path, param_str)
@@ -1036,5 +1040,55 @@ rduckhts_hts_index <- function(con, path, format = NULL, index_path = NULL) {
   }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM read_hts_index('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Read HTS Index Spans
+#'
+#' Returns index span-oriented metadata for planning range workloads.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to input HTS file
+#' @param format Optional format hint
+#' @param index_path Optional explicit path to index file
+#'
+#' @return A data frame with span-oriented index metadata.
+#'
+#' @export
+rduckhts_hts_index_spans <- function(con, path, format = NULL, index_path = NULL) {
+  params <- list()
+  if (!is.null(format)) {
+    params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM read_hts_index_spans('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Read Raw HTS Index Blob
+#'
+#' Returns raw index metadata blob data for a file index.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to input HTS file
+#' @param format Optional format hint
+#' @param index_path Optional explicit path to index file
+#'
+#' @return A data frame with raw index blob metadata.
+#'
+#' @export
+rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) {
+  params <- list()
+  if (!is.null(format)) {
+    params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM read_hts_index_raw('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
 }

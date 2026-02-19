@@ -15,6 +15,8 @@ expect_true(exists("rduckhts_gtf"))
 expect_true(exists("rduckhts_tabix"))
 expect_true(exists("rduckhts_hts_header"))
 expect_true(exists("rduckhts_hts_index"))
+expect_true(exists("rduckhts_hts_index_spans"))
+expect_true(exists("rduckhts_hts_index_raw"))
 
 # Test function signatures
 expect_equal(length(formals(rduckhts_load)), 2)
@@ -25,8 +27,10 @@ expect_equal(length(formals(rduckhts_fastq)), 6)
 expect_equal(length(formals(rduckhts_gff)), 6)
 expect_equal(length(formals(rduckhts_gtf)), 6)
 expect_equal(length(formals(rduckhts_tabix)), 10)
-expect_equal(length(formals(rduckhts_hts_header)), 3)
+expect_equal(length(formals(rduckhts_hts_header)), 4)
 expect_equal(length(formals(rduckhts_hts_index)), 4)
+expect_equal(length(formals(rduckhts_hts_index_spans)), 4)
+expect_equal(length(formals(rduckhts_hts_index_raw)), 4)
 
 # Test that DBI is available
 expect_true(requireNamespace("DBI", quietly = TRUE))
@@ -94,5 +98,7 @@ expect_error(rduckhts_gtf(NULL, "test", "nonexistent.gtf"))
 expect_error(rduckhts_tabix(NULL, "test", "nonexistent.bed.gz"))
 expect_error(rduckhts_hts_header(NULL, "nonexistent.bcf"))
 expect_error(rduckhts_hts_index(NULL, "nonexistent.bcf"))
+expect_error(rduckhts_hts_index_spans(NULL, "nonexistent.bcf"))
+expect_error(rduckhts_hts_index_raw(NULL, "nonexistent.bcf"))
 
 message("All basic tests passed!")

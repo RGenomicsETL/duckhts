@@ -333,6 +333,14 @@ LIMIT 1;
 ----
 ['"Text"']
 
+# --- raw header mode ---
+query I
+SELECT count(*)
+FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', mode := 'raw')
+WHERE raw LIKE '##%';
+----
+6
+
 # --- index type extracted from VCF/BCF ---
 query I
 SELECT index_type
@@ -340,6 +348,20 @@ FROM read_hts_index('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')
 LIMIT 1;
 ----
 CSI
+
+# --- index spans macro available ---
+query I
+SELECT count(*)
+FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
+----
+1
+
+# --- index raw macro available ---
+query I
+SELECT CASE WHEN octet_length(raw) > 0 THEN 1 ELSE 0 END
+FROM read_hts_index_raw('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
+----
+1
 
 # --- explicit index_path for read_bcf ---
 query I
