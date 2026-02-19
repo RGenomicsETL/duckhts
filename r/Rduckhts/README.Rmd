@@ -182,6 +182,16 @@ head(header_meta[, c("record_type", "id", "number", "value_type")], 5)
 
 index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
 head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
+
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+rduckhts_bam(
+  con, "bam_idx_reads", bam_path,
+  region = "CHROMOSOME_I:1-1000",
+  index_path = bam_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT count(*) AS n FROM bam_idx_reads")
 ```
 
 ### Remote GTEx tabix example
