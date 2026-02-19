@@ -11,6 +11,7 @@ rduckhts_tabix(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   header = NULL,
   header_names = NULL,
   auto_detect = NULL,
@@ -36,6 +37,10 @@ rduckhts_tabix(
 - region:
 
   Optional genomic region (e.g., "chr1:1000-2000")
+
+- index_path:
+
+  Optional explicit path to index file (.tbi/.csi)
 
 - header:
 

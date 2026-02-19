@@ -1,5 +1,14 @@
 # Changelog
 
+## Rduckhts 0.1.2-0.1.5
+
+- Fixed inadvertant removal of libexec
+- Updated the plugin to add header table functions
+
+## Rduckhts 0.1.2-0.1.4
+
+CRAN Submission
+
 ## Rduckhts 0.1.2-0.0.9000
 
 - Different fixes for CRAN submission

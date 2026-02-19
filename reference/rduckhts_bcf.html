@@ -9,7 +9,7 @@ This follows the RBCFTools pattern of creating a table that can be queried."></h
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2-0.1.4</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -47,6 +47,7 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 <span>  <span class="va">table_name</span>,</span>
 <span>  <span class="va">path</span>,</span>
 <span>  region <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  tidy_format <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -70,6 +71,10 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 
 <dt id="arg-region">region<a class="anchor" aria-label="anchor" href="#arg-region"></a></dt>
 <dd><p>Optional genomic region (e.g., "chr1:1000-2000")</p></dd>
+
+
+<dt id="arg-index-path">index_path<a class="anchor" aria-label="anchor" href="#arg-index-path"></a></dt>
+<dd><p>Optional explicit path to index file (.csi/.tbi)</p></dd>
 
 
 <dt id="arg-tidy-format">tidy_format<a class="anchor" aria-label="anchor" href="#arg-tidy-format"></a></dt>

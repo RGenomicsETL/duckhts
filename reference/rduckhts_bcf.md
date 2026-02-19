@@ -12,6 +12,7 @@ rduckhts_bcf(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   tidy_format = FALSE,
   overwrite = FALSE
 )
@@ -34,6 +35,10 @@ rduckhts_bcf(
 - region:
 
   Optional genomic region (e.g., "chr1:1000-2000")
+
+- index_path:
+
+  Optional explicit path to index file (.csi/.tbi)
 
 - tidy_format:
 

@@ -11,6 +11,7 @@ rduckhts_bam(
   table_name,
   path,
   region = NULL,
+  index_path = NULL,
   reference = NULL,
   standard_tags = NULL,
   auxiliary_tags = NULL,
@@ -35,6 +36,10 @@ rduckhts_bam(
 - region:
 
   Optional genomic region (e.g., "chr1:1000-2000")
+
+- index_path:
+
+  Optional explicit path to index file (.bai/.csi/.crai)
 
 - reference:
 
