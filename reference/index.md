@@ -30,6 +30,10 @@
   : Create GFF3 Table
 - [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md)
   : Create GTF Table
+- [`rduckhts_hts_header()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_header.md)
+  : Read HTS Header Metadata
+- [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.md)
+  : Read HTS Index Metadata
 - [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
   : Load DuckHTS Extension
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)

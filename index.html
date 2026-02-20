@@ -266,7 +266,7 @@
 <div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bcf_index_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf.csi"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">header_meta</span> <span class="op">&lt;-</span> <span class="fu">rduckhts_hts_header</span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span><span class="op">)</span></span>
+<span><span class="va">header_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">header_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"record_type"</span>, <span class="st">"id"</span>, <span class="st">"number"</span>, <span class="st">"value_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   record_type   id number value_type</span></span>
 <span><span class="co">#&gt; 1  fileformat &lt;NA&gt;   &lt;NA&gt;       &lt;NA&gt;</span></span>
@@ -275,7 +275,7 @@
 <span><span class="co">#&gt; 4      FORMAT   TT      A    Integer</span></span>
 <span><span class="co">#&gt; 5        INFO  DP4      4    Integer</span></span>
 <span></span>
-<span><span class="va">index_meta</span> <span class="op">&lt;-</span> <span class="fu">rduckhts_hts_index</span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
+<span><span class="va">index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index.html">rduckhts_hts_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"seqname"</span>, <span class="st">"mapped"</span>, <span class="st">"unmapped"</span>, <span class="st">"index_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   seqname mapped unmapped index_type</span></span>
 <span><span class="co">#&gt; 1       1     11        0        CSI</span></span>
