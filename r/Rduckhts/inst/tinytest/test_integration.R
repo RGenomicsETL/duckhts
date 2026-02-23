@@ -18,6 +18,7 @@ test_table_creation <- function() {
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
+  fasta_index_path <- system.file("extdata", "ce.fa.fai", package = "Rduckhts")
   fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
   fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
   gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
@@ -42,6 +43,7 @@ test_table_creation <- function() {
   expect_true(file.exists(bam_path))
   expect_true(file.exists(bam_index_path))
   expect_true(file.exists(fasta_path))
+  expect_true(file.exists(fasta_index_path))
   expect_true(file.exists(fastq_r1))
   expect_true(file.exists(fastq_r2))
   expect_true(file.exists(gff_path))
@@ -70,6 +72,15 @@ test_table_creation <- function() {
     overwrite = TRUE
   ))
   expect_silent(rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE))
+  expect_silent(rduckhts_fasta(
+    con,
+    "sequences_region",
+    fasta_path,
+    region = "CHROMOSOME_I:1-10",
+    index_path = fasta_index_path,
+    overwrite = TRUE
+  ))
+  expect_silent(rduckhts_fasta_index(con, fasta_path))
   expect_silent(rduckhts_fastq(
     con,
     "fastq_reads",
@@ -97,6 +108,8 @@ test_table_creation <- function() {
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")$n[1] == 2)
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM reads_idx")$n[1] == 2)
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM tabix_idx")$n[1] == 4)
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sequences_region")$n[1] == 1)
+  expect_true(DBI::dbGetQuery(con, "SELECT length(SEQUENCE) AS n FROM sequences_region")$n[1] == 10)
 
   header_meta <- rduckhts_hts_header(con, bcf_path)
   expect_true(nrow(header_meta) > 0)

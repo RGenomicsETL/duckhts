@@ -20,8 +20,9 @@ MinGW/RTools for Windows.
 |-------------------------------------------------------------------------------|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `read_bcf(path, [region, tidy_format])`                                       | Read VCF/BCF files                                 | CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO\_*, FORMAT\_*                                                      |
 | `read_bam(path, [region, reference, standard_tags, auxiliary_tags])`          | Read SAM/BAM/CRAM files                            | QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL, READ_GROUP_ID, SAMPLE_ID (+ SAMtags / AUX) |
-| `read_fasta(path)`                                                            | Read FASTA files                                   | NAME, DESCRIPTION, SEQUENCE                                                                                     |
+| `read_fasta(path, [region, index_path])`                                      | Read FASTA files (full scan or indexed regions)    | NAME, DESCRIPTION, SEQUENCE                                                                                     |
 | `read_fastq(path, [mate_path, interleaved])`                                  | Read FASTQ files                                   | NAME, DESCRIPTION, SEQUENCE, QUALITY (+ MATE, PAIR_ID when paired/interleaved)                                  |
+| `fasta_index(path, [index_path])`                                             | Build FASTA index (.fai)                           | success, index_path                                                                                             |
 | `read_gff(path, [region, attributes_map])`                                    | Read GFF3 files                                    | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled)      |
 | `read_gtf(path, [region, attributes_map])`                                    | Read GTF files                                     | seqname, source, feature, start, end, score, strand, frame, attributes (+ attributes_map MAP when enabled)      |
 | `read_tabix(path, [region, header, header_names, auto_detect, column_types])` | Read any tabix-indexed file                        | column0, column1, … (auto-detected)                                                                             |
@@ -30,129 +31,72 @@ MinGW/RTools for Windows.
 | `read_hts_index_spans(path, [format, index_path])`                            | Read span-oriented index metadata view             | file_format, seqname, tid, bin, chunk_beg_vo, chunk_end_vo, chunk_bytes, index_type, meta                       |
 | `read_hts_index_raw(path, [format, index_path])`                              | Read raw index metadata blob view                  | index_type, index_path, raw                                                                                     |
 
-Notes:
-
-- `read_fastq` with `mate_path` requires exact QNAME pairing; mismatches
-  raise an error.
-- `read_bcf` region queries on files missing `##contig` headers return
-  an empty result (with a warning) instead of erroring.
-- `read_tabix` column inference now respects tabix header/meta
-  configuration (meta char + line_skip), so header lines are not
-  mistaken as data.
-- `read_tabix` supports `header := true` to use the first non-meta line
-  as column names, and `header_names := [...]` to override names.
-- `read_tabix` supports `auto_detect := true` to infer numeric types and
-  `column_types := [...]` to set types explicitly.
-- `read_bam` supports `standard_tags := true` for typed SAMtags columns
-  and `auxiliary_tags := true` for a string map of all remaining tags.
-- `region := 'r1,r2,...'` (comma-separated) is supported for `read_bam`,
-  `read_bcf`, `read_gff`, `read_gtf`, and `read_tabix`.
-- `read_bam`/`read_cram` region lists use htslib multi-region iterators
-  and deduplicate overlapping regions;
-  `read_bcf`/`read_gff`/`read_gtf`/`read_tabix` chain single-region
-  iterators, so overlapping regions may duplicate rows.
+`read_fastq` with `mate_path` requires exact QNAME pairing. `read_bam`
+supports typed `standard_tags` and `auxiliary_tags` maps. `read_tabix`
+supports header-aware parsing (`header`, `header_names`) and optional
+type inference (`auto_detect`, `column_types`). Region lists in
+comma-separated form are supported by `read_bam`, `read_bcf`,
+`read_fasta`, `read_gff`, `read_gtf`, and `read_tabix`. `read_bam`
+multi-region queries are deduplicated by htslib, while
+`read_bcf`/`read_fasta`/`read_gff`/`read_gtf`/`read_tabix` chain regions
+and can return duplicates for overlaps.
 
 ## Examples
 
-``` sql
-LOAD 'duckhts';
+The examples below run directly against bundled local test files and
+show the main reader APIs, including FASTA indexing and region queries.
 
--- Read a VCF file (tidy FORMAT columns)
-SELECT CHROM, POS, REF, ALT, QUAL, FORMAT_GT
-FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
-WHERE CHROM = '1' AND POS > 1000000;
+``` r
+library(DBI)
+library(duckdb)
 
--- Region query on an indexed VCF (requires .tbi or .csi index)
-SELECT * FROM read_bcf('test/data/vcf_file.bcf', region := '1:3000150-3000151');
+drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+con <- dbConnect(drv, dbdir = ":memory:")
+ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
+dbExecute(con, sprintf("LOAD '%s'", ext_path))
+#> [1] 0
 
--- Multiple regions (comma-separated)
-SELECT count(*) FROM read_bcf('test/data/vcf_file.bcf',
-                              region := '1:3000150-3000151,1:3062915-3062915');
+dbGetQuery(con, "
+  SELECT CHROM, POS, REF, ALT
+  FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
+  LIMIT 3
+")
+#>   CHROM POS REF ALT
+#> 1     1 100   A   T
+#> 2     1 100   A   T
+#> 3     1 100   A   T
 
--- Explicit index path (non-standard index name/location)
-SELECT * FROM read_bcf('test/data/vcf_file.bcf',
-                       region := '1:3000150-3000151',
-                       index_path := 'test/data/vcf_file.bcf.csi');
+dbGetQuery(con, "
+  SELECT count(*) AS n
+  FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000')
+")
+#>   n
+#> 1 2
 
--- VEP annotations (CSQ/BCSQ/ANN when present)
-SELECT CHROM, POS, VEP_Allele, VEP_Consequence
-FROM read_bcf('test/data/test_vep.vcf')
-LIMIT 1;
+dbGetQuery(con, "
+  SELECT * FROM fasta_index('test/data/ce.fa')
+")
+#>   success index_path
+#> 1    TRUE
 
--- Convert a VCF slice to Parquet using DuckDB COPY
-COPY (
-  SELECT *
-  FROM read_bcf('test/data/vcf_file.bcf', region := '1:3000000-3000500')
-) TO 'variants.parquet' (FORMAT PARQUET);
+dbGetQuery(con, "
+  SELECT NAME, length(SEQUENCE) AS seq_length
+  FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25')
+")
+#>           NAME seq_length
+#> 1 CHROMOSOME_I         25
 
--- Read a BAM file
-SELECT QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, READ_GROUP_ID, SAMPLE_ID
-FROM read_bam('test/data/range.bam')
-WHERE FLAG & 4 = 0;  -- mapped reads only
+dbGetQuery(con, "
+  SELECT NAME, MATE, PAIR_ID
+  FROM read_fastq('test/data/interleaved.fq', interleaved := true)
+  LIMIT 3
+")
+#>                              NAME MATE                         PAIR_ID
+#> 1 HS25_09827:2:1201:1505:59795#49    1 HS25_09827:2:1201:1505:59795#49
+#> 2 HS25_09827:2:1201:1505:59795#49    2 HS25_09827:2:1201:1505:59795#49
+#> 3 HS25_09827:2:1201:1559:70726#49    1 HS25_09827:2:1201:1559:70726#49
 
--- Region query on an indexed BAM
-SELECT count(*) FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
-
--- BAM multi-region query (deduplicated by htslib)
-SELECT count(*) FROM read_bam('test/data/range.bam',
-                              region := 'CHROMOSOME_I:1-1000,CHROMOSOME_I:1-1000');
-
--- Explicit BAM index path
-SELECT count(*) FROM read_bam('test/data/range.bam',
-                              region := 'CHROMOSOME_I:1-1000',
-                              index_path := 'test/data/range.bam.bai');
-
--- CRAM with explicit reference
-SELECT count(*) FROM read_bam('test/data/range.cram', reference := 'test/data/ce.fa');
-
--- Read FASTA sequences
-SELECT NAME, length(SEQUENCE) as seq_length
-FROM read_fasta('test/data/ce.fa');
-
--- Read FASTQ and compute average quality
-SELECT NAME, length(SEQUENCE) as read_length
-FROM read_fastq('test/data/r1.fq');
-
--- Paired FASTQ (mate_path)
-SELECT NAME, MATE, PAIR_ID
-FROM read_fastq('test/data/r1.fq', mate_path := 'test/data/r2.fq');
-
--- Interleaved FASTQ
-SELECT NAME, MATE, PAIR_ID
-FROM read_fastq('test/data/interleaved.fq', interleaved := true);
-
--- Read GFF3 annotations
-SELECT seqname, feature, start, "end", attributes, attributes_map
-FROM read_gff('test/data/gff_file.gff.gz', attributes_map := true)
-WHERE feature = 'gene';
-
--- Read a tabix-indexed BED file
-SELECT * FROM read_tabix('test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
-
--- Header metadata from bundled test VCF
-SELECT record_type, id, map_extract(key_values, 'Description') AS description
-FROM read_hts_header('test/data/formatcols.vcf.gz')
-WHERE record_type = 'FORMAT'
-LIMIT 1;
-
--- Raw header lines only
-SELECT idx, raw
-FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
-LIMIT 3;
-
--- Index metadata from bundled test VCF
-SELECT seqname, mapped, unmapped, index_type
-FROM read_hts_index('test/data/formatcols.vcf.gz')
-LIMIT 4;
-
--- Span-oriented index view
-SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
-FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
-LIMIT 4;
-
--- Raw index blob view
-SELECT index_type, octet_length(raw) AS raw_bytes
-FROM read_hts_index_raw('test/data/formatcols.vcf.gz');
+dbDisconnect(con, shutdown = TRUE)
 ```
 
 ## Remote URLs and HTS_PATH
@@ -175,20 +119,11 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
               region := 'chr22:16050000-16050500')
 GROUP BY CHROM;
 SQL
-#> ┌─────────┬───────┐
-#> │  CHROM  │   n   │
-#> │ varchar │ int64 │
-#> ├─────────┼───────┤
-#> │ chr22   │    11 │
-#> └─────────┴───────┘
 ```
 
-Notes:
-
-- On Windows (MinGW/RTools), plugins are typically disabled, so remote
-  URLs will not work.
-- If `HTS_PATH` is set after the extension is already loaded, restart
-  the session and set it first.
+On Windows (MinGW/RTools), plugins are typically disabled so remote URLs
+generally do not work. Set `HTS_PATH` before loading the extension; if
+you change it later, restart the session and reload.
 
 If you don’t have htslib plugins installed locally, download the
 prebuilt binaries from the r-universe-binaries GitHub release and point
@@ -315,7 +250,7 @@ make test_release
 
 ## R demo
 
-The R package lives under r/Rduckhts and provides helpers to load the
+The R package lives under `r/Rduckhts` and provides helpers to load the
 extension and create [DuckDB](https://duckdb.org/) tables from HTS
 files. See its README for R-specific usage:
 [r/Rduckhts/README.Rmd](r/Rduckhts/README.Rmd).
@@ -479,9 +414,6 @@ dbGetQuery(con, "
 
 dbDisconnect(con, shutdown = TRUE)
 ```
-
-Rendering this document requires a built extension at
-`build/release/duckhts.duckdb_extension`.
 
 ## Project Structure
 

@@ -51,7 +51,8 @@ The extension is loaded with
 `rduckhts_load(con, extension_path = NULL)`. We can create tables with
 `rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
 `rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
-parameters documented in their help pages
+parameters documented in their help pages. FASTA indexes can be created
+with `rduckhts_fasta_index()`.
 
 ``` r
 library(DBI)
@@ -75,6 +76,27 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #>    n
 #> 1 10
+```
+
+### FASTA region queries
+
+`read_fasta` now supports indexed region queries via
+`rduckhts_fasta(..., region = ...)`.
+
+``` r
+fai_info <- rduckhts_fasta_index(con, fasta_path)
+fai_info
+#>   success index_path
+#> 1    TRUE
+
+rduckhts_fasta(
+  con, "fasta_region", fasta_path,
+  region = "CHROMOSOME_I:1-25",
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT NAME, length(SEQUENCE) AS n FROM fasta_region")
+#>           NAME  n
+#> 1 CHROMOSOME_I 25
 ```
 
 ## Examples
