@@ -276,7 +276,14 @@ cp -f libhts.a "${HTSLIB_DIR}/lib/libhts.a"
 if [ -f "libhts.${SHLIB_EXT}" ]; then
   cp -f "libhts.${SHLIB_EXT}" "${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}"
 fi
-if [ -f "libhts.3.${SHLIB_EXT}" ]; then
+if [ "${SHLIB_EXT}" = "so" ]; then
+  # htslib on Linux typically produces libhts.so and libhts.so.3.
+  if [ -e "libhts.so.3" ]; then
+    cp -f "libhts.so.3" "${HTSLIB_DIR}/lib/libhts.so.3"
+  elif [ -f "libhts.so" ]; then
+    ln -sf "libhts.so" "${HTSLIB_DIR}/lib/libhts.so.3"
+  fi
+elif [ -f "libhts.3.${SHLIB_EXT}" ]; then
   cp -f "libhts.3.${SHLIB_EXT}" "${HTSLIB_DIR}/lib/libhts.3.${SHLIB_EXT}"
 fi
 cp -f htslib/*.h "${HTSLIB_DIR}/include/htslib/" || true

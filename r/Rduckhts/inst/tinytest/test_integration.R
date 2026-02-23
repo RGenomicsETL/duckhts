@@ -80,7 +80,9 @@ test_table_creation <- function() {
     index_path = fasta_index_path,
     overwrite = TRUE
   ))
-  expect_silent(rduckhts_fasta_index(con, fasta_path))
+  tmp_fai <- tempfile("duckhts_fasta_", fileext = ".fai")
+  expect_silent(rduckhts_fasta_index(con, fasta_path, index_path = tmp_fai))
+  expect_true(file.exists(tmp_fai))
   expect_silent(rduckhts_fastq(
     con,
     "fastq_reads",
@@ -105,9 +107,13 @@ test_table_creation <- function() {
     overwrite = TRUE
   ))
   expect_silent(rduckhts_bcf(con, "vep_variants", vep_path, overwrite = TRUE))
+  expect_true(DBI::dbExistsTable(con, "variants_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")$n[1] == 2)
+  expect_true(DBI::dbExistsTable(con, "reads_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM reads_idx")$n[1] == 2)
+  expect_true(DBI::dbExistsTable(con, "tabix_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM tabix_idx")$n[1] == 4)
+  expect_true(DBI::dbExistsTable(con, "sequences_region"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sequences_region")$n[1] == 1)
   expect_true(DBI::dbGetQuery(con, "SELECT length(SEQUENCE) AS n FROM sequences_region")$n[1] == 10)
 
