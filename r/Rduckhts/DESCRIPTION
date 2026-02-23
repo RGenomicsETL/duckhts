@@ -1,6 +1,6 @@
 Package: Rduckhts
 Title: 'DuckDB' High Throughput Sequencing File Formats Reader Extension
-Version: 0.1.2-0.1.5.9000
+Version: 0.1.3-0.1.5.9000
 Authors@R: c(
         person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",

@@ -145,11 +145,11 @@ EOF
 
   if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} conftest.c ${lib_flag} -o conftest 2>/dev/null; then
     echo "  ${lib_name}: found"
-    rm -f conftest conftest.c
+    rm -rf conftest conftest.c conftest.dSYM
     return 0
   else
     echo "  ${lib_name}: not found"
-    rm -f conftest conftest.c
+    rm -rf conftest conftest.c conftest.dSYM
     if [ "${required}" = "yes" ]; then
       echo "ERROR: ${lib_name} is required but not found"
       exit 1
@@ -267,9 +267,29 @@ if [ "${HTSLIB_PLUGINS}" = "--enable-plugins" ]; then
 fi
 
 ${MAKE} -j${THREADS} ${HTSLIB_BUILD_TARGETS}
-${MAKE} install
 
-rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true
+# Avoid "make install" in bundled builds: platform install tools differ and
+# CRAN build sandboxes don't need a system-style installation layout.
+# Stage the minimal runtime/dev artifacts directly under ${HTSLIB_DIR}.
+mkdir -p "${HTSLIB_DIR}/lib" "${HTSLIB_DIR}/include/htslib" "${HTSLIB_DIR}/libexec/htslib"
+cp -f libhts.a "${HTSLIB_DIR}/lib/libhts.a"
+if [ -f "libhts.${SHLIB_EXT}" ]; then
+  cp -f "libhts.${SHLIB_EXT}" "${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}"
+fi
+if [ -f "libhts.3.${SHLIB_EXT}" ]; then
+  cp -f "libhts.3.${SHLIB_EXT}" "${HTSLIB_DIR}/lib/libhts.3.${SHLIB_EXT}"
+fi
+cp -f htslib/*.h "${HTSLIB_DIR}/include/htslib/" || true
+if [ "${HTSLIB_PLUGINS}" = "--enable-plugins" ]; then
+  for p in hfile_libcurl.${SHLIB_EXT} hfile_gcs.${SHLIB_EXT} hfile_s3.${SHLIB_EXT} \
+           hfile_libcurl.bundle hfile_gcs.bundle hfile_s3.bundle; do
+    if [ -f "$p" ]; then
+      cp -f "$p" "${HTSLIB_DIR}/libexec/htslib/"
+    fi
+  done
+fi
+
+rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" "${HTSLIB_DIR}/share" || true
 
 if [ ! -f "libhts.a" ]; then
   echo "ERROR: htslib build failed - libhts.a not found"
