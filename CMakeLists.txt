@@ -242,6 +242,7 @@ ExternalProject_Add(htslib_build
     BUILD_IN_SOURCE   TRUE
     CONFIGURE_COMMAND ""
     BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
+    BUILD_ALWAYS      TRUE
     INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
     BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
     LOG_CONFIGURE     TRUE

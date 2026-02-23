@@ -44,7 +44,7 @@ and can return duplicates for overlaps.
 ## Examples
 
 The examples below run directly against bundled local test files and
-show the main reader APIs, including FASTA indexing and region queries.
+show the main reader APIs using the `R` `DBI` and `duckdb` packages.
 
 ``` r
 library(DBI)
@@ -101,17 +101,21 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## Remote URLs and HTS_PATH
 
-Remote URLs (S3/GCS/HTTP/S) are supported when htslib is built with
-plugins enabled. htslib loads these plugins from the directory specified
-by the `HTS_PATH` environment variable. Set `HTS_PATH` **before**
-loading the extension so the plugins can be discovered.
+Remote URLs (S3/GCS/HTTP/S) can work in two htslib build modes:
 
-Example (using the packaged htslib plugins directory):
+1.  Dynamic plugin mode (`ENABLE_PLUGINS`): remote handlers are loaded
+    from `HTS_PATH`.
+2.  Static-handler mode (plugins disabled): handlers are compiled into
+    `libhts` and `HTS_PATH` is not needed.
+
+Use `HTS_PATH` only when you want dynamic plugin discovery (for example,
+to point at an external htslib plugin directory).
+
+Example (works in static-handler mode and plugin mode):
 
 ``` bash
 # Not run by default because it requires network access and a built extension.
-extension_path=$(Rscript  --quiet -e 'cat(Rduckhts:::duckhts_extension_dir(),sep="")' )/build/duckhts.duckdb_extension
-export HTS_PATH=$(Rscript --quiet -e 'cat(Rduckhts:::duckhts_htslib_plugins_dir(),sep="")')
+extension_path=build/release/duckhts.duckdb_extension
 duckdb -unsigned <<SQL
 LOAD '${extension_path}';
 SELECT CHROM, COUNT(*) AS n
@@ -127,9 +131,15 @@ SQL
 #> └─────────┴───────┘
 ```
 
-On Windows (MinGW/RTools), plugins are typically disabled so remote URLs
-generally do not work. Set `HTS_PATH` before loading the extension; if
-you change it later, restart the session and reload.
+If you need dynamic plugin mode, set `HTS_PATH` before loading the
+extension, for example:
+
+``` bash
+export HTS_PATH=$(Rscript --quiet -e 'cat(Rduckhts:::duckhts_htslib_plugins_dir(),sep="")')
+```
+
+If `HTS_PATH` is changed after loading, restart the session and reload
+the extension.
 
 If you don’t have htslib plugins installed locally, download the
 prebuilt binaries from the r-universe-binaries GitHub release and point
