@@ -119,6 +119,12 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
               region := 'chr22:16050000-16050500')
 GROUP BY CHROM;
 SQL
+#> ┌─────────┬───────┐
+#> │  CHROM  │   n   │
+#> │ varchar │ int64 │
+#> ├─────────┼───────┤
+#> │ chr22   │    11 │
+#> └─────────┴───────┘
 ```
 
 On Windows (MinGW/RTools), plugins are typically disabled so remote URLs
