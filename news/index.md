@@ -9,7 +9,7 @@
 
 CRAN release: 2026-02-23
 
-CRAN Submission
+- CRAN Submission
 
 ## Rduckhts 0.1.2-0.0.9000
 

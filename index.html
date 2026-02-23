@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.3-0.0.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -74,7 +74,7 @@
 <div class="section level2">
 <h2 id="quick-start">Quick Start<a class="anchor" aria-label="anchor" href="#quick-start"></a>
 </h2>
-<p>The extension is loaded with <code>rduckhts_load(con, extension_path = NULL)</code>. We can create tables with <code>rduckhts_bcf</code>, <code>rduckhts_bam</code>, <code>rduckhts_fasta</code>, <code>rduckhts_fastq</code>, <code>rduckhts_gff</code>, <code>rduckhts_gtf</code>, and <code>rduckhts_tabix</code> using the parameters documented in their help pages</p>
+<p>The extension is loaded with <code>rduckhts_load(con, extension_path = NULL)</code>. We can create tables with <code>rduckhts_bcf</code>, <code>rduckhts_bam</code>, <code>rduckhts_fasta</code>, <code>rduckhts_fastq</code>, <code>rduckhts_gff</code>, <code>rduckhts_gtf</code>, and <code>rduckhts_tabix</code> using the parameters documented in their help pages. FASTA indexes can be created with <code><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index()</a></code>.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://dbi.r-dbi.org" class="external-link">DBI</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r.duckdb.org/" class="external-link">duckdb</a></span><span class="op">)</span></span>
@@ -97,6 +97,25 @@
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT COUNT(*) AS n FROM reads"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    n</span></span>
 <span><span class="co">#&gt; 1 10</span></span></code></pre></div>
+<div class="section level3">
+<h3 id="fasta-region-queries">FASTA region queries<a class="anchor" aria-label="anchor" href="#fasta-region-queries"></a>
+</h3>
+<p><code>read_fasta</code> now supports indexed region queries via <code>rduckhts_fasta(..., region = ...)</code>.</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span><span class="op">)</span></span>
+<span><span class="va">fai_info</span></span>
+<span><span class="co">#&gt;   success index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="st">"fasta_region"</span>, <span class="va">fasta_path</span>,</span>
+<span>  region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-25"</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT NAME, length(SEQUENCE) AS n FROM fasta_region"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;           NAME  n</span></span>
+<span><span class="co">#&gt; 1 CHROMOSOME_I 25</span></span></code></pre></div>
+</div>
 </div>
 <div class="section level2">
 <h2 id="examples">Examples<a class="anchor" aria-label="anchor" href="#examples"></a>
@@ -104,8 +123,10 @@
 <div class="section level3">
 <h3 id="region-queries">Region Queries<a class="anchor" aria-label="anchor" href="#region-queries"></a>
 </h3>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<p>Region queries can use implicit sidecar indexes or an explicit <code>index_path</code> for custom index names/locations.</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bcf_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="va">bcf_index_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf.csi"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bcf.html">rduckhts_bcf</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"variants"</span>, <span class="va">bcf_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">variants</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM variants LIMIT 5"</span><span class="op">)</span></span>
 <span><span class="va">variants</span></span>
@@ -132,15 +153,33 @@
 <span><span class="co">#&gt; 2         NULL</span></span>
 <span><span class="co">#&gt; 3 -20, -5, -20</span></span>
 <span><span class="co">#&gt; 4 -20, -5, -20</span></span>
-<span><span class="co">#&gt; 5         NULL</span></span></code></pre></div>
+<span><span class="co">#&gt; 5         NULL</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/rduckhts_bcf.html">rduckhts_bcf</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="st">"variants_idx"</span>, <span class="va">bcf_path</span>,</span>
+<span>  region <span class="op">=</span> <span class="st">"1:3000150-3000151"</span>,</span>
+<span>  index_path <span class="op">=</span> <span class="va">bcf_index_path</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT count(*) AS n FROM variants_idx"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   n</span></span>
+<span><span class="co">#&gt; 1 2</span></span>
+<span></span>
+<span><span class="co"># Span-oriented index view from the same file</span></span>
+<span><span class="va">index_spans_preview</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index_spans.html">rduckhts_hts_index_spans</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_spans_preview</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"seqname"</span>, <span class="st">"tid"</span>, <span class="st">"index_type"</span>, <span class="st">"chunk_beg_vo"</span>, <span class="st">"chunk_end_vo"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   seqname tid index_type chunk_beg_vo chunk_end_vo</span></span>
+<span><span class="co">#&gt; 1       1   0        CSI           NA           NA</span></span>
+<span><span class="co">#&gt; 2       2   1        CSI           NA           NA</span></span>
+<span><span class="co">#&gt; 3       3   2        CSI           NA           NA</span></span>
+<span><span class="co">#&gt; 4       4   3        CSI           NA           NA</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="remote-vcf-on-s3">Remote VCF on S3<a class="anchor" aria-label="anchor" href="#remote-vcf-on-s3"></a>
 </h3>
 <p>S3 files can be query when <code>htslib</code> is built with plugins enable. This is not the case on RTools</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Not run on CRAN because it requires network access.</span></span>
-<span><span class="co"># Enable htslib plugins for remote access (S3/GCS/HTTP)</span></span>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Enable htslib plugins for remote access (S3/GCS/HTTP)</span></span>
 <span><span class="fu"><a href="reference/setup_hts_env.html">setup_hts_env</a></span><span class="op">(</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Example S3 URL (1000 Genomes cohort VCF)</span></span>
@@ -149,7 +188,6 @@
 <span><span class="va">s3_vcf_file</span> <span class="op">&lt;-</span> <span class="st">"3202_samples_cohort_gg_chr22.vcf.gz"</span></span>
 <span><span class="va">s3_vcf_uri</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">s3_base</span>, <span class="va">s3_path</span>, <span class="va">s3_vcf_file</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># Query remote VCF directly with DuckDB + DuckHTS (region-scoped)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bcf.html">rduckhts_bcf</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"s3_variants"</span>, <span class="va">s3_vcf_uri</span>, region <span class="op">=</span> <span class="st">"chr22:16050000-16050500"</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   CHROM  n</span></span>
@@ -159,7 +197,7 @@
 <h3 id="fastq-files">FASTQ files<a class="anchor" aria-label="anchor" href="#fastq-files"></a>
 </h3>
 <p>Three modes for fastq files, single, paired and interleaved</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">r1</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">r2</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">interleaved</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"interleaved.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -196,7 +234,7 @@
 <h3 id="gff-files">GFF files<a class="anchor" aria-label="anchor" href="#gff-files"></a>
 </h3>
 <p>These can be open with or with attributes maps</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gff_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"gff_file.gff.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_gff.html">rduckhts_gff</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"genes"</span>, <span class="va">gff_path</span>, attributes_map <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">gene_annotations</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5"</span><span class="op">)</span></span>
@@ -207,10 +245,13 @@
 <div class="section level3">
 <h3 id="bamcram">BAM/CRAM<a class="anchor" aria-label="anchor" href="#bamcram"></a>
 </h3>
-<p>When built with htslib codec, <code>CRAM</code> can be opened in addition to <code>BAM</code> files</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<p>When built with htslib codec, <code>CRAM</code> can be opened in addition to <code>BAM</code> files. <code>index_path</code> can also be passed for region scans with non-standard index names.</p>
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cram_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.cram"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">ref_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"ce.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="va">bam_index_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam.bai"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span></span>
 <span><span class="fu"><a href="reference/rduckhts_bam.html">rduckhts_bam</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"cram_reads"</span>, <span class="va">cram_path</span>, reference <span class="op">=</span> <span class="va">ref_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">cram_reads</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads LIMIT 5"</span><span class="op">)</span></span>
 <span><span class="va">cram_reads</span></span>
@@ -219,13 +260,23 @@
 <span><span class="co">#&gt; 2 HS18_09653:4:1308:11522:27107  161  934    0</span></span>
 <span><span class="co">#&gt; 3 HS18_09653:4:2314:14991:85680   83 1020   10</span></span>
 <span><span class="co">#&gt; 4 HS18_09653:4:2108:14085:93656  147 1122   60</span></span>
-<span><span class="co">#&gt; 5  HS18_09653:4:1303:4347:38100   83 1137   37</span></span></code></pre></div>
+<span><span class="co">#&gt; 5  HS18_09653:4:1303:4347:38100   83 1137   37</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/rduckhts_bam.html">rduckhts_bam</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="st">"bam_idx_reads"</span>, <span class="va">bam_path</span>,</span>
+<span>  region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-1000"</span>,</span>
+<span>  index_path <span class="op">=</span> <span class="va">bam_index_path</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT count(*) AS n FROM bam_idx_reads"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   n</span></span>
+<span><span class="co">#&gt; 1 2</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="samtags--auxiliary-tags">SAMtags + auxiliary tags<a class="anchor" aria-label="anchor" href="#samtags--auxiliary-tags"></a>
 </h3>
 <p>Standard SAMtags can be exposed as typed columns, and any remaining tags are available via <code>AUXILIARY_TAGS</code>:</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">aux_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"aux_tags.sam.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bam.html">rduckhts_bam</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"aux_reads"</span>, <span class="va">aux_path</span>, standard_tags <span class="op">=</span> <span class="cn">TRUE</span>, auxiliary_tags <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux_reads LIMIT 1"</span><span class="op">)</span></span>
@@ -236,7 +287,7 @@
 <h3 id="tabix-headers--types">Tabix headers + types<a class="anchor" aria-label="anchor" href="#tabix-headers--types"></a>
 </h3>
 <p>Use <code>header = TRUE</code> to use the first non-meta row as column names, and <code>auto_detect = TRUE</code> / <code>column_types</code> to control column typing:</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">tabix_header</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"header_tabix.tsv.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"meta_tabix.tsv.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
@@ -262,11 +313,9 @@
 <div class="section level3">
 <h3 id="hts-header-and-index-metadata">HTS header and index metadata<a class="anchor" aria-label="anchor" href="#hts-header-and-index-metadata"></a>
 </h3>
-<p>Use the metadata helpers to inspect parsed headers and index summaries.</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">bcf_index_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf.csi"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
-<span></span>
-<span><span class="va">header_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span><span class="op">)</span></span>
+<p>Use metadata helpers to inspect parsed headers, raw header lines, index summaries, span-oriented index views, and raw index blobs.</p>
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">header_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">header_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"record_type"</span>, <span class="st">"id"</span>, <span class="st">"number"</span>, <span class="st">"value_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   record_type   id number value_type</span></span>
 <span><span class="co">#&gt; 1  fileformat &lt;NA&gt;   &lt;NA&gt;       &lt;NA&gt;</span></span>
@@ -275,22 +324,46 @@
 <span><span class="co">#&gt; 4      FORMAT   TT      A    Integer</span></span>
 <span><span class="co">#&gt; 5        INFO  DP4      4    Integer</span></span>
 <span></span>
+<span><span class="va">header_raw</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, mode <span class="op">=</span> <span class="st">"raw"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">header_raw</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"idx"</span>, <span class="st">"raw"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   idx                  raw</span></span>
+<span><span class="co">#&gt; 1   0 ##fileformat=VCFv4.1</span></span>
+<span><span class="co">#&gt; 2   1 ##fileformat=VCFv4.1</span></span>
+<span><span class="co">#&gt; 3   2 ##fileformat=VCFv4.1</span></span>
+<span><span class="co">#&gt; 4   3 ##fileformat=VCFv4.1</span></span>
+<span><span class="co">#&gt; 5   4 ##fileformat=VCFv4.1</span></span>
+<span></span>
 <span><span class="va">index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index.html">rduckhts_hts_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"seqname"</span>, <span class="st">"mapped"</span>, <span class="st">"unmapped"</span>, <span class="st">"index_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   seqname mapped unmapped index_type</span></span>
 <span><span class="co">#&gt; 1       1     11        0        CSI</span></span>
 <span><span class="co">#&gt; 2       2      1        0        CSI</span></span>
 <span><span class="co">#&gt; 3       3      1        0        CSI</span></span>
-<span><span class="co">#&gt; 4       4      2        0        CSI</span></span></code></pre></div>
+<span><span class="co">#&gt; 4       4      2        0        CSI</span></span>
+<span></span>
+<span><span class="va">index_spans</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index_spans.html">rduckhts_hts_index_spans</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_spans</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"seqname"</span>, <span class="st">"tid"</span>, <span class="st">"index_type"</span>, <span class="st">"chunk_beg_vo"</span>, <span class="st">"chunk_end_vo"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   seqname tid index_type chunk_beg_vo chunk_end_vo</span></span>
+<span><span class="co">#&gt; 1       1   0        CSI           NA           NA</span></span>
+<span><span class="co">#&gt; 2       2   1        CSI           NA           NA</span></span>
+<span><span class="co">#&gt; 3       3   2        CSI           NA           NA</span></span>
+<span><span class="co">#&gt; 4       4   3        CSI           NA           NA</span></span>
+<span></span>
+<span><span class="va">index_raw</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index_raw.html">rduckhts_hts_index_raw</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_raw</span>, <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] index_type                                                       </span></span>
+<span><span class="co">#&gt; [2] '/usr/local/lib/R/site-library/Rduckhts/extdata/vcf_file.bcf.csi'</span></span>
+<span><span class="co">#&gt; [3] raw                                                              </span></span>
+<span><span class="co">#&gt; &lt;0 rows&gt; (or 0-length row.names)</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="remote-gtex-tabix-example">Remote GTEx tabix example<a class="anchor" aria-label="anchor" href="#remote-gtex-tabix-example"></a>
 </h3>
 <p>GTEx eQTL matrices on EBI are tabix-indexed</p>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">gtex_url</span> <span class="op">&lt;-</span> <span class="st">"http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"</span></span>
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">gtex_url</span> <span class="op">&lt;-</span> <span class="st">"http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"</span> </span>
 <span><span class="fu"><a href="reference/rduckhts_tabix.html">rduckhts_tabix</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"gtex_eqtl"</span>, <span class="va">gtex_url</span>, region <span class="op">=</span> <span class="st">"1:11868-14409"</span>,</span>
-<span>               header <span class="op">=</span> <span class="cn">TRUE</span>, auto_detect <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span>                 header <span class="op">=</span> <span class="cn">TRUE</span>, auto_detect <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM gtex_eqtl LIMIT 5"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;          variant r2    pvalue molecular_trait_object_id molecular_trait_id</span></span>
 <span><span class="co">#&gt; 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290</span></span>
@@ -310,7 +383,7 @@
 <span><span class="co">#&gt; 3    13550   G   A  SNP rs554008981</span></span>
 <span><span class="co">#&gt; 4    13550   G   A  SNP rs554008981</span></span>
 <span><span class="co">#&gt; 5    13550   G   A  SNP rs554008981</span></span></code></pre></div>
-<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>

@@ -60,18 +60,25 @@ library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
-#> [1] TRUE
+#> Error in duckdb_result(connection = conn, stmt_lst = stmt_lst, arrow = arrow): Invalid Error: IO Error: Extension "/tmp/RtmpWan7sJ/temp_libpath1b8825a39529/Rduckhts/duckhts_extension/build/duckhts.duckdb_extension" could not be loaded: libhts.so.3: cannot open shared object file: No such file or directory
+#> ℹ Context: rapi_execute
+#> ℹ Error type: INVALID
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+#> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table Function with name read_bcf does not exist!
+#> Did you mean "read_csv"?
+#> 
+#> LINE 1: CREATE TABLE variants AS SELECT * FROM read_bcf('/tmp/RtmpWan7sJ/temp_libpath1b8825a39529/Rduckhts...
+#>                                                ^
+#> ℹ Context: rapi_prepare
+#> ℹ Error type: CATALOG
 dbGetQuery(con, "SELECT * FROM variants LIMIT 2")
-#>   CHROM     POS   ID REF ALT QUAL FILTER INFO_TEST INFO_DP4 INFO_AC INFO_AN
-#> 1     1 3000150 <NA>   C   T 59.2   PASS        NA       NA       2       4
-#> 2     1 3000151 <NA>   C   T 59.2   PASS        NA       NA       2       4
-#>   INFO_INDEL INFO_STR FORMAT_TT_A FORMAT_GT_A FORMAT_GQ_A FORMAT_DP_A
-#> 1      FALSE     <NA>        NULL         0/1         245          NA
-#> 2      FALSE     <NA>        NULL         0/1         245          32
-#>   FORMAT_GL_A FORMAT_TT_B FORMAT_GT_B FORMAT_GQ_B FORMAT_DP_B FORMAT_GL_B
-#> 1        NULL        NULL         0/1         245          NA        NULL
-#> 2        NULL        NULL         0/1         245          32        NULL
+#> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table with name variants does not exist!
+#> Did you mean "pg_views"?
+#> 
+#> LINE 1: SELECT * FROM variants LIMIT 2
+#>                       ^
+#> ℹ Context: rapi_prepare
+#> ℹ Error type: CATALOG
 dbDisconnect(con, shutdown = TRUE)
 ```
