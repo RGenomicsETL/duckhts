@@ -24,8 +24,6 @@
   : Create VCF/BCF Table
 - [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta.md)
   : Create FASTA Table
-- [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.md)
-  : Build FASTA Index
 - [`rduckhts_fastq()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq.md)
   : Create FASTQ Table
 - [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
@@ -36,10 +34,6 @@
   : Read HTS Header Metadata
 - [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.md)
   : Read HTS Index Metadata
-- [`rduckhts_hts_index_raw()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_raw.md)
-  : Read Raw HTS Index Blob
-- [`rduckhts_hts_index_spans()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_spans.md)
-  : Read HTS Index Spans
 - [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
   : Load DuckHTS Extension
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)

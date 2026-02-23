@@ -19,14 +19,11 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta.html</loc></url>
-<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_header.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.html</loc></url>
-<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_raw.html</loc></url>
-<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_spans.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/setup_hts_env.html</loc></url>
