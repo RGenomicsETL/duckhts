@@ -69,7 +69,7 @@ library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
-#> Error in duckdb_result(connection = conn, stmt_lst = stmt_lst, arrow = arrow): Invalid Error: IO Error: Extension "/tmp/Rtmph6uSWP/temp_libpath1c158c0eee2/Rduckhts/duckhts_extension/build/duckhts.duckdb_extension" could not be loaded: libhts.so.3: cannot open shared object file: No such file or directory
+#> Error in duckdb_result(connection = conn, stmt_lst = stmt_lst, arrow = arrow): Invalid Error: IO Error: Extension "/tmp/Rtmp2c5zRL/temp_libpath1b721f882f92/Rduckhts/duckhts_extension/build/duckhts.duckdb_extension" could not be loaded: libhts.so.3: cannot open shared object file: No such file or directory
 #> ℹ Context: rapi_execute
 #> ℹ Error type: INVALID
 bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
@@ -77,7 +77,7 @@ rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)
 #> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table Function with name read_bam does not exist!
 #> Did you mean "read_blob"?
 #> 
-#> LINE 1: CREATE TABLE reads AS SELECT * FROM read_bam('/tmp/Rtmph6uSWP/temp_libpath1c158c0eee2/Rduckhts...
+#> LINE 1: CREATE TABLE reads AS SELECT * FROM read_bam('/tmp/Rtmp2c5zRL/temp_libpath1b721f882f92/Rduckhts...
 #>                                             ^
 #> ℹ Context: rapi_prepare
 #> ℹ Error type: CATALOG

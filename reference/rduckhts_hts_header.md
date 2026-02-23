@@ -6,7 +6,7 @@ extension.
 ## Usage
 
 ``` r
-rduckhts_hts_header(con, path, format = NULL)
+rduckhts_hts_header(con, path, format = NULL, mode = NULL)
 ```
 
 ## Arguments
@@ -23,6 +23,10 @@ rduckhts_hts_header(con, path, format = NULL)
 
   Optional format hint (e.g., "auto", "vcf", "bcf", "bam", "cram",
   "tabix")
+
+- mode:
+
+  Header output mode: "parsed" (default), "raw", or "both"
 
 ## Value
 
