@@ -57,14 +57,14 @@ dbExecute(con, sprintf("LOAD '%s'", ext_path))
 #> [1] 0
 
 dbGetQuery(con, "
-  SELECT CHROM, POS, REF, ALT
+  SELECT CHROM, POS, REF, ALT, SAMPLE_ID
   FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
   LIMIT 3
 ")
-#>   CHROM POS REF ALT
-#> 1     1 100   A   T
-#> 2     1 100   A   T
-#> 3     1 100   A   T
+#>   CHROM POS REF ALT SAMPLE_ID
+#> 1     1 100   A   T        S1
+#> 2     1 100   A   T        S²
+#> 3     1 100   A   T        S3
 
 dbGetQuery(con, "
   SELECT count(*) AS n

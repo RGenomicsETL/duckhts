@@ -54,7 +54,7 @@ ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = F
 dbExecute(con, sprintf("LOAD '%s'", ext_path))
 
 dbGetQuery(con, "
-  SELECT CHROM, POS, REF, ALT
+  SELECT CHROM, POS, REF, ALT, SAMPLE_ID
   FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
   LIMIT 3
 ")
