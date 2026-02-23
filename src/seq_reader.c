@@ -128,8 +128,11 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
 static void ensure_buf(char **buf, size_t *cap, int need) {
     size_t n = (size_t)(need + 1);
     if (n > *cap) {
-        *cap = n * 2;
-        *buf = (char *)realloc(*buf, *cap);
+        size_t new_cap = n * 2;
+        char *new_buf = (char *)realloc(*buf, new_cap);
+        if (!new_buf) return;
+        *buf = new_buf;
+        *cap = new_cap;
     }
 }
 
@@ -424,6 +427,12 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             case SEQ_COL_SEQUENCE: {
                 if (seq_len > 0) {
                     ensure_buf(&init->seq_buf, &init->seq_buf_cap, seq_len);
+                    if (!init->seq_buf) {
+                        duckdb_function_set_error(info, "read_seq: out of memory allocating sequence buffer");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                     decode_seq(bam_get_seq(b), seq_len, init->seq_buf);
                     duckdb_vector_assign_string_element(vec, row_count,
                                                          init->seq_buf);
@@ -436,6 +445,12 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             case SEQ_COL_QUALITY: {
                 if (seq_len > 0 && bam_get_qual(b)[0] != 255) {
                     ensure_buf(&init->qual_buf, &init->qual_buf_cap, seq_len);
+                    if (!init->qual_buf) {
+                        duckdb_function_set_error(info, "read_seq: out of memory allocating quality buffer");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                     decode_qual(bam_get_qual(b), seq_len, init->qual_buf);
                     duckdb_vector_assign_string_element(vec, row_count,
                                                          init->qual_buf);
@@ -459,6 +474,12 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 if (init->is_fastq && (init->paired || init->interleaved)) {
                     const char *name = bam_get_qname(b);
                     ensure_buf(&init->pair_buf, &init->pair_buf_cap, (int)strlen(name));
+                    if (!init->pair_buf) {
+                        duckdb_function_set_error(info, "read_seq: out of memory allocating pair buffer");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                     const char *pair_id = strip_pair_suffix(name, init->pair_buf, init->pair_buf_cap);
                     duckdb_vector_assign_string_element(vec, row_count, pair_id);
                 } else {

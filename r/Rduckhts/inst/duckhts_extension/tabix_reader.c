@@ -47,11 +47,36 @@ DUCKDB_EXTENSION_EXTERN
 
 #define TABIX_BATCH_SIZE 2048
 #define TABIX_MAX_GENERIC_COLS 256
+#define TABIX_NUM_PARSE_BUF 128
 
 static inline void set_null(duckdb_vector vec, idx_t row) {
     duckdb_vector_ensure_validity_writable(vec);
     uint64_t *v = duckdb_vector_get_validity(vec);
     v[row / 64] &= ~((uint64_t)1 << (row % 64));
+}
+
+static int parse_int64_span(const char *s, int len, int64_t *out) {
+    if (!s || len <= 0 || len >= TABIX_NUM_PARSE_BUF) return 0;
+    char buf[TABIX_NUM_PARSE_BUF];
+    memcpy(buf, s, (size_t)len);
+    buf[len] = '\0';
+    char *end = NULL;
+    int64_t v = strtoll(buf, &end, 10);
+    if (!end || *end != '\0') return 0;
+    *out = v;
+    return 1;
+}
+
+static int parse_double_span(const char *s, int len, double *out) {
+    if (!s || len <= 0 || len >= TABIX_NUM_PARSE_BUF) return 0;
+    char buf[TABIX_NUM_PARSE_BUF];
+    memcpy(buf, s, (size_t)len);
+    buf[len] = '\0';
+    char *end = NULL;
+    double v = strtod(buf, &end);
+    if (!end || *end != '\0') return 0;
+    *out = v;
+    return 1;
 }
 
 /* GTF/GFF column indices */
@@ -536,15 +561,21 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         }
         if (attr_map_val) duckdb_destroy_value(&attr_map_val);
 
-        duckdb_bind_add_result_column(info, "seqname",    duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
-        duckdb_bind_add_result_column(info, "source",     duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
-        duckdb_bind_add_result_column(info, "feature",    duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
-        duckdb_bind_add_result_column(info, "start",      duckdb_create_logical_type(DUCKDB_TYPE_BIGINT));
-        duckdb_bind_add_result_column(info, "end",        duckdb_create_logical_type(DUCKDB_TYPE_BIGINT));
-        duckdb_bind_add_result_column(info, "score",      duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE));
-        duckdb_bind_add_result_column(info, "strand",     duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
-        duckdb_bind_add_result_column(info, "frame",      duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
-        duckdb_bind_add_result_column(info, "attributes", duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR));
+        duckdb_logical_type gxf_varchar = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+        duckdb_logical_type gxf_bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+        duckdb_logical_type gxf_double = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+        duckdb_bind_add_result_column(info, "seqname", gxf_varchar);
+        duckdb_bind_add_result_column(info, "source", gxf_varchar);
+        duckdb_bind_add_result_column(info, "feature", gxf_varchar);
+        duckdb_bind_add_result_column(info, "start", gxf_bigint);
+        duckdb_bind_add_result_column(info, "end", gxf_bigint);
+        duckdb_bind_add_result_column(info, "score", gxf_double);
+        duckdb_bind_add_result_column(info, "strand", gxf_varchar);
+        duckdb_bind_add_result_column(info, "frame", gxf_varchar);
+        duckdb_bind_add_result_column(info, "attributes", gxf_varchar);
+        duckdb_destroy_logical_type(&gxf_varchar);
+        duckdb_destroy_logical_type(&gxf_bigint);
+        duckdb_destroy_logical_type(&gxf_double);
         if (bd->include_attr_map) {
             duckdb_logical_type key_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
             duckdb_logical_type val_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -834,7 +865,13 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
     /* Pre-fetch column vectors */
     duckdb_vector *vectors = NULL;
     if (chunk_col_count > 0) {
-        vectors = (duckdb_vector *)alloca(sizeof(duckdb_vector) * chunk_col_count);
+        vectors = (duckdb_vector *)malloc(sizeof(duckdb_vector) * chunk_col_count);
+        if (!vectors) {
+            duckdb_function_set_error(info, "tabix_scan: out of memory allocating vectors");
+            id->finished = true;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
         for (idx_t c = 0; c < chunk_col_count; c++) {
             vectors[c] = duckdb_data_chunk_get_vector(output, c);
         }
@@ -879,15 +916,23 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                     const char *fld = NULL;
                     int flen = 0;
                     fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
-                    char *tmp = NULL;
-                    if (fld && flen > 0) {
-                        tmp = (char *)alloca((size_t)flen + 1);
-                        memcpy(tmp, fld, (size_t)flen);
-                        tmp[flen] = '\0';
+                        char *tmp = NULL;
+                        if (fld && flen > 0) {
+                            tmp = (char *)malloc((size_t)flen + 1);
+                            if (!tmp) {
+                                duckdb_function_set_error(info, "tabix_scan: out of memory parsing attributes");
+                                id->finished = true;
+                                if (vectors) free(vectors);
+                                duckdb_data_chunk_set_size(output, 0);
+                                return;
+                            }
+                            memcpy(tmp, fld, (size_t)flen);
+                            tmp[flen] = '\0';
+                        }
+                        fill_attr_map(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF);
+                        if (tmp) free(tmp);
+                        continue;
                     }
-                    fill_attr_map(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF);
-                    continue;
-                }
                 if (logical_col >= GXF_COL_COUNT - 1) continue;
 
                 int flen = 0;
@@ -919,23 +964,21 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 switch (logical_col) {
                     case GXF_COL_START:
                     case GXF_COL_END: {
-                        /* Parse as int64 */
-                        char buf[32];
-                        int copy_len = flen < 31 ? flen : 31;
-                        memcpy(buf, fld, copy_len);
-                        buf[copy_len] = '\0';
-                        int64_t ival = strtoll(buf, NULL, 10);
+                        int64_t ival = 0;
+                        if (!parse_int64_span(fld, flen, &ival)) {
+                            set_null(vectors[c], row_count);
+                            break;
+                        }
                         int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
                         data[row_count] = ival;
                         break;
                     }
                     case GXF_COL_SCORE: {
-                        /* Parse as double, '.' = NULL */
-                        char buf[64];
-                        int copy_len = flen < 63 ? flen : 63;
-                        memcpy(buf, fld, copy_len);
-                        buf[copy_len] = '\0';
-                        double dval = strtod(buf, NULL);
+                        double dval = 0.0;
+                        if (!parse_double_span(fld, flen, &dval)) {
+                            set_null(vectors[c], row_count);
+                            break;
+                        }
                         double *data = (double *)duckdb_vector_get_data(vectors[c]);
                         data[row_count] = dval;
                         break;
@@ -959,24 +1002,16 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 }
                 int t = bd->col_types ? bd->col_types[logical_col] : DUCKDB_TYPE_VARCHAR;
                 if (t == DUCKDB_TYPE_INTEGER || t == DUCKDB_TYPE_BIGINT) {
-                    char *buf = (char *)alloca((size_t)flen + 1);
-                    memcpy(buf, fld, (size_t)flen);
-                    buf[flen] = '\0';
-                    char *end = NULL;
-                    int64_t v = strtoll(buf, &end, 10);
-                    if (end && *end == '\0') {
+                    int64_t v = 0;
+                    if (parse_int64_span(fld, flen, &v)) {
                         int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
                         data[row_count] = v;
                     } else {
                         set_null(vectors[c], row_count);
                     }
                 } else if (t == DUCKDB_TYPE_DOUBLE) {
-                    char *buf = (char *)alloca((size_t)flen + 1);
-                    memcpy(buf, fld, (size_t)flen);
-                    buf[flen] = '\0';
-                    char *end = NULL;
-                    double v = strtod(buf, &end);
-                    if (end && *end == '\0') {
+                    double v = 0.0;
+                    if (parse_double_span(fld, flen, &v)) {
                         double *data = (double *)duckdb_vector_get_data(vectors[c]);
                         data[row_count] = v;
                     } else {
@@ -992,6 +1027,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
         row_count++;
     }
 
+    if (vectors) free(vectors);
     duckdb_data_chunk_set_size(output, row_count);
 }
 

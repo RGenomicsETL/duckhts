@@ -1,0 +1,236 @@
+---
+title: "DuckHTS Benchmark"
+output: github_document
+---
+
+<!-- Benchmark.md is generated from Benchmark.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# Goal
+
+Benchmark `read_bcf()` performance on realistic files (ClinVar and larger VEP-annotated VCF/BCF), with focus on:
+
+- Full scan throughput
+- Projection pushdown impact
+- INFO and FORMAT parsing cost
+- Tidy vs wide FORMAT output
+- Region query performance
+
+# Setup
+
+```{r setup}
+library(DBI)
+library(duckdb)
+
+drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+con <- dbConnect(drv, dbdir = ":memory:")
+
+# Load extension from local build output (adjust if needed)
+ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
+# DuckDB may block unsigned local extensions by default.
+try(DBI::dbExecute(con, "SET allow_unsigned_extensions=true;"), silent = TRUE)
+DBI::dbExecute(con, sprintf("LOAD '%s';", gsub("\\\\", "/", ext_path)))
+
+# Optional: control parallelism for reproducibility
+DBI::dbExecute(con, "PRAGMA threads=4;")
+
+sessionInfo()
+```
+
+# File Paths
+
+```{r paths}
+clinvar_vcf <- "clinvar.vcf.gz"
+vep_vcf <- Sys.getenv("VEP_VCF", unset = "")
+
+stopifnot(file.exists(clinvar_vcf))
+has_vep <- nzchar(vep_vcf) && file.exists(vep_vcf)
+```
+
+# Helpers
+
+```{r helpers}
+build_read_bcf <- function(path, ..., tidy = FALSE) {
+  named <- list(...)
+  args <- c(sprintf("'%s'", gsub("'", "''", path)))
+  if (length(named) > 0) {
+    kv <- vapply(names(named), function(k) {
+      v <- named[[k]]
+      if (is.character(v)) sprintf("%s := '%s'", k, gsub("'", "''", v))
+      else if (isTRUE(v) || identical(v, FALSE)) sprintf("%s := %s", k, tolower(as.character(v)))
+      else sprintf("%s := %s", k, as.character(v))
+    }, FUN.VALUE = character(1))
+    args <- c(args, kv)
+  }
+  if (isTRUE(tidy)) args <- c(args, "tidy_format := true")
+  sprintf("read_bcf(%s)", paste(args, collapse = ", "))
+}
+
+run_bench <- function(con, name, sql, iterations = 5, warmup = 1) {
+  cat("\\n---\\n", name, "\\n", sep = "")
+  cat(sql, "\\n")
+
+  # Warmup
+  for (i in seq_len(warmup)) DBI::dbGetQuery(con, sql)
+
+  times <- numeric(iterations)
+  rows <- integer(iterations)
+  for (i in seq_len(iterations)) {
+    gc()
+    t0 <- proc.time()[["elapsed"]]
+    out <- DBI::dbGetQuery(con, sql)
+    t1 <- proc.time()[["elapsed"]]
+    times[i] <- t1 - t0
+    rows[i] <- if (is.data.frame(out)) nrow(out) else NA_integer_
+  }
+
+  data.frame(
+    case = name,
+    iterations = iterations,
+    min_sec = min(times),
+    median_sec = stats::median(times),
+    mean_sec = mean(times),
+    max_sec = max(times),
+    rows = stats::median(rows)
+  )
+}
+
+get_bcf_columns <- function(con, path, tidy = FALSE) {
+  src <- build_read_bcf(path, tidy = tidy)
+  q <- sprintf("DESCRIBE SELECT * FROM %s", src)
+  DBI::dbGetQuery(con, q)$column_name
+}
+```
+
+# ClinVar Benchmarks
+
+```{r clinvar}
+clinvar_src <- build_read_bcf(clinvar_vcf)
+clinvar_cols <- get_bcf_columns(con, clinvar_vcf)
+
+cases <- list(
+  list(
+    name = "clinvar_count_all",
+    sql = sprintf("SELECT COUNT(*) AS n FROM %s", clinvar_src)
+  ),
+  list(
+    name = "clinvar_core_projection",
+    sql = sprintf(
+      "SELECT CHROM, POS, REF, ALT FROM %s WHERE POS > 0 LIMIT 200000",
+      clinvar_src
+    )
+  )
+)
+
+# Add an INFO-heavy case if available
+info_cols <- grep("^INFO_", clinvar_cols, value = TRUE)
+if (length(info_cols) > 0) {
+  pick <- paste(head(info_cols, 6), collapse = ", ")
+  cases[[length(cases) + 1]] <- list(
+    name = "clinvar_info_projection",
+    sql = sprintf("SELECT %s FROM %s LIMIT 200000", pick, clinvar_src)
+  )
+}
+
+# Region query case (update region to contig naming style in your file)
+cases[[length(cases) + 1]] <- list(
+  name = "clinvar_region_count",
+  sql = sprintf("SELECT COUNT(*) AS n FROM %s", build_read_bcf(clinvar_vcf, region = "chr1:1-5000000"))
+)
+
+clinvar_results <- do.call(
+  rbind,
+  lapply(cases, function(x) run_bench(con, x$name, x$sql, iterations = 5, warmup = 1))
+)
+clinvar_results
+```
+
+# VEP Benchmarks
+
+```{r vep}
+if (has_vep) {
+  vep_src <- build_read_bcf(vep_vcf)
+  vep_tidy_src <- build_read_bcf(vep_vcf, tidy = TRUE)
+  vep_cols <- get_bcf_columns(con, vep_vcf)
+  vep_tidy_cols <- get_bcf_columns(con, vep_vcf, tidy = TRUE)
+
+  vep_cases <- list(
+    list(
+      name = "vep_count_all",
+      sql = sprintf("SELECT COUNT(*) AS n FROM %s", vep_src)
+    )
+  )
+
+  vep_ann_cols <- grep("^VEP_", vep_cols, value = TRUE)
+  if (length(vep_ann_cols) > 0) {
+    pick_vep <- paste(head(vep_ann_cols, 8), collapse = ", ")
+    vep_cases[[length(vep_cases) + 1]] <- list(
+      name = "vep_annotation_projection",
+      sql = sprintf("SELECT %s FROM %s LIMIT 200000", pick_vep, vep_src)
+    )
+  }
+
+  fmt_cols_wide <- grep("^FORMAT_", vep_cols, value = TRUE)
+  fmt_cols_tidy <- grep("^FORMAT_", vep_tidy_cols, value = TRUE)
+  if (length(fmt_cols_wide) > 0 && length(fmt_cols_tidy) > 0) {
+    pick_wide <- paste(head(fmt_cols_wide, 8), collapse = ", ")
+    pick_tidy <- paste(head(fmt_cols_tidy, 8), collapse = ", ")
+
+    vep_cases[[length(vep_cases) + 1]] <- list(
+      name = "vep_format_wide_projection",
+      sql = sprintf("SELECT %s FROM %s LIMIT 100000", pick_wide, vep_src)
+    )
+    vep_cases[[length(vep_cases) + 1]] <- list(
+      name = "vep_format_tidy_projection",
+      sql = sprintf("SELECT SAMPLE_ID, %s FROM %s LIMIT 100000", pick_tidy, vep_tidy_src)
+    )
+  }
+
+  vep_results <- do.call(
+    rbind,
+    lapply(vep_cases, function(x) run_bench(con, x$name, x$sql, iterations = 5, warmup = 1))
+  )
+  vep_results
+} else {
+  vep_results <- data.frame()
+  message("Skipping VEP benchmarks. Set env var VEP_VCF to a local VEP VCF/BCF file.")
+}
+```
+
+# Optional: Export Results
+
+```{r export}
+out <- rbind(clinvar_results, vep_results)
+write.csv(out, "benchmark_results.csv", row.names = FALSE)
+out
+```
+
+# Notes For Reproducibility
+
+- Record CPU model, core count, RAM, and storage type (NVMe/SATA/network).
+- Keep `PRAGMA threads` fixed across runs.
+- Run each case multiple times and report median.
+- Prefer local files for stable throughput comparisons.
+
+# Larger VEP VCF Candidates
+
+Good options for larger VEP-annotated files:
+
+- Publicly released VCF/BCF from projects that include `INFO/CSQ` (or `ANN`/`BCSQ`) in headers.
+- Any cohort VCF you already have can be VEP-annotated with `vep` (offline cache mode) to generate a controlled benchmark input.
+- Keep one "wide FORMAT" dataset (many samples) and one "deep annotation" dataset (many VEP subfields) to separate bottlenecks.
+
+Quick check that a file has VEP-like annotation fields:
+
+```{r vep-check}
+if (has_vep) {
+  q <- sprintf(
+    "SELECT DISTINCT id FROM read_hts_header('%s') WHERE record_type = 'INFO' AND id IN ('CSQ','ANN','BCSQ')",
+    gsub("'", "''", vep_vcf)
+  )
+  DBI::dbGetQuery(con, q)
+}
+```

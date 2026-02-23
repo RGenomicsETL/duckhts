@@ -57,6 +57,7 @@ DUCKDB_EXTENSION_EXTERN
 
 // Debug/progress tracking
 #define BCF_READER_PROGRESS_INTERVAL 100000  // Print progress every N records
+#define BCF_READER_ENABLE_PROGRESS 0
 
 // Column indices for core VCF fields
 enum {
@@ -1000,6 +1001,7 @@ static void process_comma_separated_list(duckdb_vector vec, idx_t row, const cha
     list_data[row] = entry;
 }
 
+#if BCF_READER_ENABLE_PROGRESS
 // =============================================================================
 // Helper: Print debug progress
 // =============================================================================
@@ -1042,6 +1044,7 @@ static void print_progress(bcf_init_data_t* init, const char* context) {
                 context, init->total_records_processed, records_per_sec);
     }
 }
+#endif
 
 // =============================================================================
 // Helper: Claim next contig for parallel scanning
@@ -1144,6 +1147,91 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     int tidy_mode = bind->tidy_format && bind->n_samples > 0;
     int current_sample = 0;  // Which sample we're emitting (only used in tidy mode)
     
+    // Per-record FORMAT cache to avoid repeated bcf_get_format_* calls across
+    // projected columns/samples for the same record.
+    int *fmt_loaded = NULL;
+    int *fmt_ret = NULL;
+    int *fmt_n_values = NULL;
+    int32_t **fmt_i32 = NULL;
+    float **fmt_f32 = NULL;
+    char ***fmt_str = NULL;
+    int gt_loaded = 0;
+    int gt_ret = 0;
+    int gt_n_values = 0;
+    int32_t *gt_arr = NULL;
+    if (bind->n_format_fields > 0) {
+        size_t nfmt = (size_t)bind->n_format_fields;
+        fmt_loaded = (int *)duckdb_malloc(nfmt * sizeof(int));
+        fmt_ret = (int *)duckdb_malloc(nfmt * sizeof(int));
+        fmt_n_values = (int *)duckdb_malloc(nfmt * sizeof(int));
+        fmt_i32 = (int32_t **)duckdb_malloc(nfmt * sizeof(int32_t *));
+        fmt_f32 = (float **)duckdb_malloc(nfmt * sizeof(float *));
+        fmt_str = (char ***)duckdb_malloc(nfmt * sizeof(char **));
+        if (!fmt_loaded || !fmt_ret || !fmt_n_values || !fmt_i32 || !fmt_f32 || !fmt_str) {
+            duckdb_function_set_error(info, "read_bcf: out of memory allocating format cache");
+            if (fmt_loaded) duckdb_free(fmt_loaded);
+            if (fmt_ret) duckdb_free(fmt_ret);
+            if (fmt_n_values) duckdb_free(fmt_n_values);
+            if (fmt_i32) duckdb_free(fmt_i32);
+            if (fmt_f32) duckdb_free(fmt_f32);
+            if (fmt_str) duckdb_free(fmt_str);
+            duckdb_free(vectors);
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+        memset(fmt_loaded, 0, nfmt * sizeof(int));
+        memset(fmt_ret, 0, nfmt * sizeof(int));
+        memset(fmt_n_values, 0, nfmt * sizeof(int));
+        memset(fmt_i32, 0, nfmt * sizeof(int32_t *));
+        memset(fmt_f32, 0, nfmt * sizeof(float *));
+        memset(fmt_str, 0, nfmt * sizeof(char **));
+    }
+    
+    // Per-record INFO cache (same rationale as FORMAT cache above).
+    int *info_loaded = NULL;
+    int *info_ret = NULL;
+    int *info_n_values = NULL;
+    int *info_flag = NULL;
+    int32_t **info_i32 = NULL;
+    float **info_f32 = NULL;
+    char **info_str = NULL;
+    if (bind->n_info_fields > 0) {
+        size_t ninfo = (size_t)bind->n_info_fields;
+        info_loaded = (int *)duckdb_malloc(ninfo * sizeof(int));
+        info_ret = (int *)duckdb_malloc(ninfo * sizeof(int));
+        info_n_values = (int *)duckdb_malloc(ninfo * sizeof(int));
+        info_flag = (int *)duckdb_malloc(ninfo * sizeof(int));
+        info_i32 = (int32_t **)duckdb_malloc(ninfo * sizeof(int32_t *));
+        info_f32 = (float **)duckdb_malloc(ninfo * sizeof(float *));
+        info_str = (char **)duckdb_malloc(ninfo * sizeof(char *));
+        if (!info_loaded || !info_ret || !info_n_values || !info_flag || !info_i32 || !info_f32 || !info_str) {
+            duckdb_function_set_error(info, "read_bcf: out of memory allocating info cache");
+            if (info_loaded) duckdb_free(info_loaded);
+            if (info_ret) duckdb_free(info_ret);
+            if (info_n_values) duckdb_free(info_n_values);
+            if (info_flag) duckdb_free(info_flag);
+            if (info_i32) duckdb_free(info_i32);
+            if (info_f32) duckdb_free(info_f32);
+            if (info_str) duckdb_free(info_str);
+            if (fmt_loaded) duckdb_free(fmt_loaded);
+            if (fmt_ret) duckdb_free(fmt_ret);
+            if (fmt_n_values) duckdb_free(fmt_n_values);
+            if (fmt_i32) duckdb_free(fmt_i32);
+            if (fmt_f32) duckdb_free(fmt_f32);
+            if (fmt_str) duckdb_free(fmt_str);
+            duckdb_free(vectors);
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+        memset(info_loaded, 0, ninfo * sizeof(int));
+        memset(info_ret, 0, ninfo * sizeof(int));
+        memset(info_n_values, 0, ninfo * sizeof(int));
+        memset(info_flag, 0, ninfo * sizeof(int));
+        memset(info_i32, 0, ninfo * sizeof(int32_t *));
+        memset(info_f32, 0, ninfo * sizeof(float *));
+        memset(info_str, 0, ninfo * sizeof(char *));
+    }
+    
     // Read records
     while (row_count < vector_size) {
         // In tidy mode, only read a new record when we've emitted all samples
@@ -1215,12 +1303,21 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             }
             
             // Update debug/progress counters (only when reading a new record)
+#if BCF_READER_ENABLE_PROGRESS
             if (!init->timing_initialized) {
                 // First record - start timing
                 clock_gettime(CLOCK_MONOTONIC, &init->batch_start_time);
                 init->last_progress_time = init->batch_start_time;
                 init->timing_initialized = 1;
             }
+#endif
+            if (bind->n_format_fields > 0) {
+                memset(fmt_loaded, 0, (size_t)bind->n_format_fields * sizeof(int));
+            }
+            if (bind->n_info_fields > 0) {
+                memset(info_loaded, 0, (size_t)bind->n_info_fields * sizeof(int));
+            }
+            gt_loaded = 0;
         }
 
         // Parse VEP annotation once per record if needed (only on first sample in tidy mode)
@@ -1406,16 +1503,27 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 if (field->header_type == BCF_HT_FLAG) {
                     // Boolean field
                     bool* data = (bool*)duckdb_vector_get_data(vec);
-                    int* dummy = NULL;
-                    int ndummy = 0;
-                    int ret_info = bcf_get_info_flag(init->hdr, init->rec, tag, &dummy, &ndummy);
-                    if (dummy) free(dummy);  // Only free if allocated
-                    data[row_count] = (ret_info == 1);
+                    if (!info_loaded[field_idx]) {
+                        int* dummy = NULL;
+                        int ndummy = 0;
+                        info_ret[field_idx] = bcf_get_info_flag(init->hdr, init->rec, tag, &dummy, &ndummy);
+                        if (dummy) free(dummy);  // Only free if allocated
+                        info_flag[field_idx] = (info_ret[field_idx] == 1);
+                        info_loaded[field_idx] = 1;
+                    }
+                    data[row_count] = (info_flag[field_idx] != 0);
                 }
                 else if (field->header_type == BCF_HT_INT) {
                     int32_t* values = NULL;
-                    int n_values = 0;
-                    int ret_info = bcf_get_info_int32(init->hdr, init->rec, tag, &values, &n_values);
+                    int ret_info = 0;
+                    if (!info_loaded[field_idx]) {
+                        info_ret[field_idx] = bcf_get_info_int32(init->hdr, init->rec, tag,
+                                                                  &info_i32[field_idx],
+                                                                  &info_n_values[field_idx]);
+                        info_loaded[field_idx] = 1;
+                    }
+                    values = info_i32[field_idx];
+                    ret_info = info_ret[field_idx];
                     
                     if (ret_info > 0 && values) {
                         if (field->is_list) {
@@ -1474,12 +1582,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             list_data[row_count] = entry;
                         }
                     }
-                    free(values);
                 }
                 else if (field->header_type == BCF_HT_REAL) {
                     float* values = NULL;
-                    int n_values = 0;
-                    int ret_info = bcf_get_info_float(init->hdr, init->rec, tag, &values, &n_values);
+                    int ret_info = 0;
+                    if (!info_loaded[field_idx]) {
+                        info_ret[field_idx] = bcf_get_info_float(init->hdr, init->rec, tag,
+                                                                  &info_f32[field_idx],
+                                                                  &info_n_values[field_idx]);
+                        info_loaded[field_idx] = 1;
+                    }
+                    values = info_f32[field_idx];
+                    ret_info = info_ret[field_idx];
                     
                     if (ret_info > 0 && values) {
                         if (field->is_list) {
@@ -1537,13 +1651,19 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             list_data[row_count] = entry;
                         }
                     }
-                    free(values);
                 }
                 else {
                     // String type
                     char* value = NULL;
-                    int n_value = 0;
-                    int ret_info = bcf_get_info_string(init->hdr, init->rec, tag, &value, &n_value);
+                    int ret_info = 0;
+                    if (!info_loaded[field_idx]) {
+                        info_ret[field_idx] = bcf_get_info_string(init->hdr, init->rec, tag,
+                                                                   &info_str[field_idx],
+                                                                   &info_n_values[field_idx]);
+                        info_loaded[field_idx] = 1;
+                    }
+                    value = info_str[field_idx];
+                    ret_info = info_ret[field_idx];
                     
                     if (ret_info > 0 && value && strcmp(value, ".") != 0) {
                         if (field->is_list) {
@@ -1563,7 +1683,6 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             list_data[row_count] = entry;
                         }
                     }
-                    free(value);
                 }
             }
             else if (tidy_mode && col_id == (idx_t)bind->sample_id_col_idx) {
@@ -1592,8 +1711,15 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     
                     if (field->header_type == BCF_HT_INT) {
                         int32_t* values = NULL;
-                        int n_values = 0;
-                        int ret_fmt = bcf_get_format_int32(init->hdr, init->rec, tag, &values, &n_values);
+                        int ret_fmt = 0;
+                        if (!fmt_loaded[field_idx]) {
+                            fmt_ret[field_idx] = bcf_get_format_int32(init->hdr, init->rec, tag,
+                                                                       &fmt_i32[field_idx],
+                                                                       &fmt_n_values[field_idx]);
+                            fmt_loaded[field_idx] = 1;
+                        }
+                        values = fmt_i32[field_idx];
+                        ret_fmt = fmt_ret[field_idx];
                         
                         if (ret_fmt > 0 && values) {
                             int vals_per_sample = ret_fmt / bind->n_samples;
@@ -1654,12 +1780,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 list_data[row_count] = entry;
                             }
                         }
-                        free(values);
                     }
                     else if (field->header_type == BCF_HT_REAL) {
                         float* values = NULL;
-                        int n_values = 0;
-                        int ret_fmt = bcf_get_format_float(init->hdr, init->rec, tag, &values, &n_values);
+                        int ret_fmt = 0;
+                        if (!fmt_loaded[field_idx]) {
+                            fmt_ret[field_idx] = bcf_get_format_float(init->hdr, init->rec, tag,
+                                                                       &fmt_f32[field_idx],
+                                                                       &fmt_n_values[field_idx]);
+                            fmt_loaded[field_idx] = 1;
+                        }
+                        values = fmt_f32[field_idx];
+                        ret_fmt = fmt_ret[field_idx];
                         
                         if (ret_fmt > 0 && values) {
                             int vals_per_sample = ret_fmt / bind->n_samples;
@@ -1720,15 +1852,16 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 list_data[row_count] = entry;
                             }
                         }
-                        free(values);
                     }
                     else {
                         // String type - GT needs special handling
                         if (strcmp(tag, "GT") == 0) {
                             // GT is stored as encoded integers, use bcf_get_genotypes()
-                            int32_t* gt_arr = NULL;
-                            int n_gt = 0;
-                            int ret_gt = bcf_get_genotypes(init->hdr, init->rec, &gt_arr, &n_gt);
+                            if (!gt_loaded) {
+                                gt_ret = bcf_get_genotypes(init->hdr, init->rec, &gt_arr, &gt_n_values);
+                                gt_loaded = 1;
+                            }
+                            int ret_gt = gt_ret;
                             
                             if (ret_gt > 0 && gt_arr) {
                                 int ploidy = ret_gt / bind->n_samples;
@@ -1767,12 +1900,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 uint64_t* validity = duckdb_vector_get_validity(vec);
                                 set_validity_bit(validity, row_count, 0);
                             }
-                            free(gt_arr);
                         } else {
                             // Other string FORMAT fields
                             char** values = NULL;
-                            int n_values = 0;
-                            int ret_fmt = bcf_get_format_string(init->hdr, init->rec, tag, &values, &n_values);
+                            int ret_fmt = 0;
+                            if (!fmt_loaded[field_idx]) {
+                                fmt_ret[field_idx] = bcf_get_format_string(init->hdr, init->rec, tag,
+                                                                            &fmt_str[field_idx],
+                                                                            &fmt_n_values[field_idx]);
+                                fmt_loaded[field_idx] = 1;
+                            }
+                            values = fmt_str[field_idx];
+                            ret_fmt = fmt_ret[field_idx];
                             
                             if (ret_fmt > 0 && values && values[sample_idx]) {
                                 duckdb_vector_assign_string_element(vec, row_count, values[sample_idx]);
@@ -1782,11 +1921,6 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 set_validity_bit(validity, row_count, 0);
                             }
                             
-                            if (values) {
-                                // htslib: for string FORMAT fields, free only the array
-                                // The string pointers within are managed by htslib
-                                free(values);
-                            }
                         }
                     }
                 }
@@ -1812,6 +1946,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         }
         
         // Print progress every N records (only count actual VCF records, not per-sample rows)
+#if BCF_READER_ENABLE_PROGRESS
         if (!tidy_mode || !init->tidy_record_valid) {
             if (init->is_parallel && init->contig_name) {
                 char context[256];
@@ -1821,10 +1956,39 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 print_progress(init, "scan");
             }
         }
+#endif
     }
     
     // Cleanup cached vectors
     duckdb_free(vectors);
+    if (bind->n_format_fields > 0) {
+        for (int i = 0; i < bind->n_format_fields; i++) {
+            if (fmt_i32 && fmt_i32[i]) free(fmt_i32[i]);
+            if (fmt_f32 && fmt_f32[i]) free(fmt_f32[i]);
+            if (fmt_str && fmt_str[i]) free(fmt_str[i]);
+        }
+        if (gt_arr) free(gt_arr);
+        if (fmt_loaded) duckdb_free(fmt_loaded);
+        if (fmt_ret) duckdb_free(fmt_ret);
+        if (fmt_n_values) duckdb_free(fmt_n_values);
+        if (fmt_i32) duckdb_free(fmt_i32);
+        if (fmt_f32) duckdb_free(fmt_f32);
+        if (fmt_str) duckdb_free(fmt_str);
+    }
+    if (bind->n_info_fields > 0) {
+        for (int i = 0; i < bind->n_info_fields; i++) {
+            if (info_i32 && info_i32[i]) free(info_i32[i]);
+            if (info_f32 && info_f32[i]) free(info_f32[i]);
+            if (info_str && info_str[i]) free(info_str[i]);
+        }
+        if (info_loaded) duckdb_free(info_loaded);
+        if (info_ret) duckdb_free(info_ret);
+        if (info_n_values) duckdb_free(info_n_values);
+        if (info_flag) duckdb_free(info_flag);
+        if (info_i32) duckdb_free(info_i32);
+        if (info_f32) duckdb_free(info_f32);
+        if (info_str) duckdb_free(info_str);
+    }
     
     duckdb_data_chunk_set_size(output, row_count);
 }

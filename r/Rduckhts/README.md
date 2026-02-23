@@ -47,10 +47,11 @@ enabled.
 
 ## Quick Start
 
-The extension is loaded with `rduckhts_load(con, extension_path =
-NULL)`. We can create tables with `rduckhts_bcf`, `rduckhts_bam`,
-`rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and
-`rduckhts_tabix` using the parameters documented in their help pages
+The extension is loaded with
+`rduckhts_load(con, extension_path = NULL)`. We can create tables with
+`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
+`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
+parameters documented in their help pages
 
 ``` r
 library(DBI)
@@ -364,12 +365,12 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## References
 
-  - DuckDB: <https://duckdb.org/>
-  - DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
-  - DuckDB extension template (C):
-    <https://github.com/duckdb/extension-template-c>
-  - htslib: <https://github.com/samtools/htslib>
-  - RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
+- DuckDB: <https://duckdb.org/>
+- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+- DuckDB extension template (C):
+  <https://github.com/duckdb/extension-template-c>
+- htslib: <https://github.com/samtools/htslib>
+- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 
