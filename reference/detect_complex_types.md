@@ -32,18 +32,27 @@ library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
-#> [1] TRUE
+#> Error in duckdb_result(connection = conn, stmt_lst = stmt_lst, arrow = arrow): Invalid Error: IO Error: Extension "/tmp/Rtmph6uSWP/temp_libpath1c158c0eee2/Rduckhts/duckhts_extension/build/duckhts.duckdb_extension" could not be loaded: libhts.so.3: cannot open shared object file: No such file or directory
+#> ℹ Context: rapi_execute
+#> ℹ Error type: INVALID
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
+#> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table Function with name read_bcf does not exist!
+#> Did you mean "read_csv"?
+#> 
+#> LINE 1: CREATE TABLE variants AS SELECT * FROM read_bcf('/tmp/Rtmph6uSWP/temp_libpath1c158c0eee2/Rduckhts...
+#>                                                ^
+#> ℹ Context: rapi_prepare
+#> ℹ Error type: CATALOG
 complex_cols <- detect_complex_types(con, "variants")
+#> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table with name variants does not exist!
+#> Did you mean "pg_views"?
+#> 
+#> LINE 1: DESCRIBE variants
+#>                  ^
+#> ℹ Context: rapi_prepare
+#> ℹ Error type: CATALOG
 print(complex_cols)
-#>    column_name column_type r_type                   description
-#> 5          ALT   VARCHAR[] vector ARRAY type - will be R vector
-#> 7       FILTER   VARCHAR[] vector ARRAY type - will be R vector
-#> 10     INFO_AC   INTEGER[] vector ARRAY type - will be R vector
-#> 14 FORMAT_TT_A   INTEGER[] vector ARRAY type - will be R vector
-#> 18 FORMAT_GL_A     FLOAT[] vector ARRAY type - will be R vector
-#> 19 FORMAT_TT_B   INTEGER[] vector ARRAY type - will be R vector
-#> 23 FORMAT_GL_B     FLOAT[] vector ARRAY type - will be R vector
+#> Error: object 'complex_cols' not found
 dbDisconnect(con, shutdown = TRUE)
 ```

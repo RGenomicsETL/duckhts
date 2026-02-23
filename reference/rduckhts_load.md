@@ -37,6 +37,8 @@ library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
-#> [1] TRUE
+#> Error in duckdb_result(connection = conn, stmt_lst = stmt_lst, arrow = arrow): Invalid Error: IO Error: Extension "/tmp/Rtmph6uSWP/temp_libpath1c158c0eee2/Rduckhts/duckhts_extension/build/duckhts.duckdb_extension" could not be loaded: libhts.so.3: cannot open shared object file: No such file or directory
+#> ℹ Context: rapi_execute
+#> ℹ Error type: INVALID
 dbDisconnect(con, shutdown = TRUE)
 ```
