@@ -69,25 +69,11 @@ library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
-#> Error in duckdb_result(connection = conn, stmt_lst = stmt_lst, arrow = arrow): Invalid Error: IO Error: Extension "/tmp/RtmpWan7sJ/temp_libpath1b8825a39529/Rduckhts/duckhts_extension/build/duckhts.duckdb_extension" could not be loaded: libhts.so.3: cannot open shared object file: No such file or directory
-#> ℹ Context: rapi_execute
-#> ℹ Error type: INVALID
+#> [1] TRUE
 bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
 rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)
-#> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table Function with name read_bam does not exist!
-#> Did you mean "read_blob"?
-#> 
-#> LINE 1: CREATE TABLE reads AS SELECT * FROM read_bam('/tmp/RtmpWan7sJ/temp_libpath1b8825a39529/Rduckhts...
-#>                                             ^
-#> ℹ Context: rapi_prepare
-#> ℹ Error type: CATALOG
 dbGetQuery(con, "SELECT COUNT(*) FROM reads WHERE FLAG & 4 = 0")
-#> Error in dbSendQuery(conn, statement, ...): Catalog Error: Table with name reads does not exist!
-#> Did you mean "pg_prepared_statements"?
-#> 
-#> LINE 1: SELECT COUNT(*) FROM reads WHERE FLAG & 4 = 0
-#>                              ^
-#> ℹ Context: rapi_prepare
-#> ℹ Error type: CATALOG
+#>   count_star()
+#> 1          112
 dbDisconnect(con, shutdown = TRUE)
 ```
