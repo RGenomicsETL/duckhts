@@ -269,8 +269,6 @@ fi
 ${MAKE} -j${THREADS} ${HTSLIB_BUILD_TARGETS}
 
 # Avoid "make install" in bundled builds: platform install tools differ and
-# CRAN build sandboxes don't need a system-style installation layout.
-# Stage the minimal runtime/dev artifacts directly under ${HTSLIB_DIR}.
 mkdir -p "${HTSLIB_DIR}/lib" "${HTSLIB_DIR}/include/htslib" "${HTSLIB_DIR}/libexec/htslib"
 cp -f libhts.a "${HTSLIB_DIR}/lib/libhts.a"
 if [ -f "libhts.${SHLIB_EXT}" ]; then
