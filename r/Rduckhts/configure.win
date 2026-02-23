@@ -10,7 +10,7 @@ THIS_DIR=`cd "$THIS_DIR" && pwd`
 # Windows plugin toggle for CI stability:
 # 1 = try to build/stage htslib plugins, 0 = force-disable plugins.
 # Can be overridden by environment variable HTSLIB_ENABLE_PLUGINS_WINDOWS.
-HTSLIB_ENABLE_PLUGINS_WINDOWS="${HTSLIB_ENABLE_PLUGINS_WINDOWS:-1}"
+HTSLIB_ENABLE_PLUGINS_WINDOWS="${HTSLIB_ENABLE_PLUGINS_WINDOWS:-0}"
 if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" != "0" ] && [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" != "1" ]; then
     echo "ERROR: HTSLIB_ENABLE_PLUGINS_WINDOWS must be 0 or 1 (got '${HTSLIB_ENABLE_PLUGINS_WINDOWS}')"
     exit 1
@@ -211,6 +211,14 @@ cd "${HTSLIB_DIR}"
 
 # Build htslib configure flags
 HTSLIB_CONFIGURE_FLAGS=""
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ] && ! command -v gendef >/dev/null 2>&1; then
+    echo "INFO: gendef not found; disabling Windows htslib plugins for compatibility"
+    HTSLIB_ENABLE_PLUGINS_WINDOWS="0"
+fi
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ] && ! command -v dlltool >/dev/null 2>&1; then
+    echo "INFO: dlltool not found; disabling Windows htslib plugins for compatibility"
+    HTSLIB_ENABLE_PLUGINS_WINDOWS="0"
+fi
 if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ]; then
     HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
     echo "INFO: Windows htslib plugins: enabled by HTSLIB_ENABLE_PLUGINS_WINDOWS=1"
