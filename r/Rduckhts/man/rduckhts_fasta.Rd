@@ -4,7 +4,14 @@
 \alias{rduckhts_fasta}
 \title{Create FASTA Table}
 \usage{
-rduckhts_fasta(con, table_name, path, overwrite = FALSE)
+rduckhts_fasta(
+  con,
+  table_name,
+  path,
+  region = NULL,
+  index_path = NULL,
+  overwrite = FALSE
+)
 }
 \arguments{
 \item{con}{A DuckDB connection with DuckHTS loaded}
@@ -12,6 +19,10 @@ rduckhts_fasta(con, table_name, path, overwrite = FALSE)
 \item{table_name}{Name for the created table}
 
 \item{path}{Path to the FASTA file}
+
+\item{region}{Optional genomic region (e.g., "chr1:1000-2000" or "chr1:1-10,chr2:5-20")}
+
+\item{index_path}{Optional explicit path to FASTA index file (.fai)}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

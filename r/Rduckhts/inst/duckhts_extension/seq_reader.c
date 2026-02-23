@@ -29,6 +29,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
+#include <htslib/faidx.h>
 
 /* ================================================================
  * Column indices
@@ -51,6 +52,10 @@ enum {
 typedef struct {
     char *file_path;
     char *mate_path;
+    char *index_path;
+    char *region;
+    char **regions;
+    unsigned int n_regions;
     int is_fastq;
     int interleaved;
     int paired;
@@ -73,6 +78,10 @@ typedef struct {
     int paired;
     int pending_mate;
     int interleaved_mate;
+    faidx_t *fai;
+    unsigned int n_regions;
+    unsigned int next_region_idx;
+    char **regions;  /* reference to bind regions */
 
     idx_t column_count;
     idx_t *column_ids;
@@ -96,6 +105,14 @@ static void destroy_seq_bind(void *data) {
     if (!b) return;
     if (b->file_path) duckdb_free(b->file_path);
     if (b->mate_path) duckdb_free(b->mate_path);
+    if (b->index_path) duckdb_free(b->index_path);
+    if (b->region) duckdb_free(b->region);
+    if (b->regions) {
+        for (unsigned int i = 0; i < b->n_regions; i++) {
+            if (b->regions[i]) duckdb_free(b->regions[i]);
+        }
+        duckdb_free(b->regions);
+    }
     duckdb_free(b);
 }
 
@@ -105,6 +122,7 @@ static void destroy_seq_init(void *data) {
     if (init->rec) bam_destroy1(init->rec);
     if (init->hdr) sam_hdr_destroy(init->hdr);
     if (init->fp) sam_close(init->fp);
+    if (init->fai) fai_destroy(init->fai);
     if (init->rec_mate) bam_destroy1(init->rec_mate);
     if (init->hdr_mate) sam_hdr_destroy(init->hdr_mate);
     if (init->fp_mate) sam_close(init->fp_mate);
@@ -128,8 +146,11 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
 static void ensure_buf(char **buf, size_t *cap, int need) {
     size_t n = (size_t)(need + 1);
     if (n > *cap) {
-        *cap = n * 2;
-        *buf = (char *)realloc(*buf, *cap);
+        size_t new_cap = n * 2;
+        char *new_buf = (char *)realloc(*buf, new_cap);
+        if (!new_buf) return;
+        *buf = new_buf;
+        *cap = new_cap;
     }
 }
 
@@ -158,6 +179,53 @@ static const char *strip_pair_suffix(const char *name, char *buf, size_t buf_cap
     memcpy(buf, name, len);
     buf[len] = '\0';
     return buf;
+}
+
+static char *strdup_duckdb(const char *s) {
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+    char *copy = (char *)duckdb_malloc(len);
+    if (copy) memcpy(copy, s, len);
+    return copy;
+}
+
+static void parse_regions_duckdb(const char *region_str, char ***out_regions, unsigned int *out_count) {
+    *out_regions = NULL;
+    *out_count = 0;
+    if (!region_str || region_str[0] == '\0') return;
+
+    unsigned int count = 1;
+    for (const char *p = region_str; *p; p++) if (*p == ',') count++;
+
+    char **arr = (char **)duckdb_malloc(sizeof(char *) * count);
+    char *dup = strdup_duckdb(region_str);
+    if (!arr || !dup) {
+        if (arr) duckdb_free(arr);
+        if (dup) duckdb_free(dup);
+        return;
+    }
+
+    unsigned int idx = 0;
+    char *tok = strtok(dup, ",");
+    while (tok && idx < count) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        size_t len = strlen(tok);
+        while (len > 0 && (tok[len - 1] == ' ' || tok[len - 1] == '\t')) tok[--len] = '\0';
+        if (len > 0) {
+            arr[idx] = strdup_duckdb(tok);
+            if (!arr[idx]) {
+                for (unsigned int i = 0; i < idx; i++) duckdb_free(arr[i]);
+                duckdb_free(arr);
+                duckdb_free(dup);
+                return;
+            }
+            idx++;
+        }
+        tok = strtok(NULL, ",");
+    }
+    duckdb_free(dup);
+    *out_regions = arr;
+    *out_count = idx;
 }
 
 /* ================================================================
@@ -221,6 +289,19 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
             destroy_seq_bind(bind);
             return;
         }
+    } else {
+        duckdb_value region_val = duckdb_bind_get_named_parameter(info, "region");
+        if (region_val && !duckdb_is_null_value(region_val)) {
+            bind->region = duckdb_get_varchar(region_val);
+            parse_regions_duckdb(bind->region, &bind->regions, &bind->n_regions);
+        }
+        if (region_val) duckdb_destroy_value(&region_val);
+
+        duckdb_value index_val = duckdb_bind_get_named_parameter(info, "index_path");
+        if (index_val && !duckdb_is_null_value(index_val)) {
+            bind->index_path = duckdb_get_varchar(index_val);
+        }
+        if (index_val) duckdb_destroy_value(&index_val);
     }
 
     /* Define schema */
@@ -279,6 +360,9 @@ static void seq_read_init(duckdb_init_info info) {
     init->interleaved = bind->interleaved;
     init->pending_mate = 0;
     init->interleaved_mate = 1;
+    init->n_regions = bind->n_regions;
+    init->next_region_idx = 0;
+    init->regions = bind->regions;
 
     if (bind->paired) {
         init->fp_mate = sam_open(bind->mate_path, "r");
@@ -294,6 +378,15 @@ static void seq_read_init(duckdb_init_info info) {
             return;
         }
         init->rec_mate = bam_init1();
+    }
+
+    if (!bind->is_fastq && bind->n_regions > 0) {
+        init->fai = fai_load3_format(bind->file_path, bind->index_path, NULL, 0, FAI_FASTA);
+        if (!init->fai) {
+            duckdb_init_set_error(info, "read_fasta: region query requires a FASTA index (.fai); run fasta_index(path) first");
+            destroy_seq_init(init);
+            return;
+        }
     }
 
     init->done = 0;
@@ -329,6 +422,55 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     idx_t row_count = 0;
 
     while (row_count < vector_size) {
+        if (init->fai && init->n_regions > 0) {
+            if (init->next_region_idx >= init->n_regions) {
+                init->done = 1;
+                break;
+            }
+            const char *region = init->regions[init->next_region_idx++];
+            hts_pos_t len = 0;
+            char *seq = fai_fetch64(init->fai, region, &len);
+            if (!seq || len < 0) {
+                if (seq) free(seq);
+                char msg[512];
+                snprintf(msg, sizeof(msg), "read_fasta: invalid or missing region '%s'", region ? region : "");
+                duckdb_function_set_error(info, msg);
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+
+            const char *name = region;
+            size_t name_len = strlen(region);
+            const char *colon = strchr(region, ':');
+            if (colon) name_len = (size_t)(colon - region);
+            ensure_buf(&init->pair_buf, &init->pair_buf_cap, (int)name_len);
+            if (!init->pair_buf) {
+                free(seq);
+                duckdb_function_set_error(info, "read_fasta: out of memory allocating name buffer");
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+            memcpy(init->pair_buf, name, name_len);
+            init->pair_buf[name_len] = '\0';
+
+            for (idx_t i = 0; i < init->column_count; i++) {
+                idx_t col_id = init->column_ids[i];
+                duckdb_vector vec = duckdb_data_chunk_get_vector(output, i);
+                if (col_id == SEQ_COL_NAME) {
+                    duckdb_vector_assign_string_element(vec, row_count, init->pair_buf);
+                } else if (col_id == SEQ_COL_DESCRIPTION) {
+                    set_null(vec, row_count);
+                } else if (col_id == SEQ_COL_SEQUENCE) {
+                    duckdb_vector_assign_string_element_len(vec, row_count, seq, len);
+                }
+            }
+            free(seq);
+            row_count++;
+            continue;
+        }
+
         bam1_t *b = NULL;
         int mate = 0;
         if (init->paired) {
@@ -424,6 +566,12 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             case SEQ_COL_SEQUENCE: {
                 if (seq_len > 0) {
                     ensure_buf(&init->seq_buf, &init->seq_buf_cap, seq_len);
+                    if (!init->seq_buf) {
+                        duckdb_function_set_error(info, "read_seq: out of memory allocating sequence buffer");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                     decode_seq(bam_get_seq(b), seq_len, init->seq_buf);
                     duckdb_vector_assign_string_element(vec, row_count,
                                                          init->seq_buf);
@@ -436,6 +584,12 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             case SEQ_COL_QUALITY: {
                 if (seq_len > 0 && bam_get_qual(b)[0] != 255) {
                     ensure_buf(&init->qual_buf, &init->qual_buf_cap, seq_len);
+                    if (!init->qual_buf) {
+                        duckdb_function_set_error(info, "read_seq: out of memory allocating quality buffer");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                     decode_qual(bam_get_qual(b), seq_len, init->qual_buf);
                     duckdb_vector_assign_string_element(vec, row_count,
                                                          init->qual_buf);
@@ -459,6 +613,12 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 if (init->is_fastq && (init->paired || init->interleaved)) {
                     const char *name = bam_get_qname(b);
                     ensure_buf(&init->pair_buf, &init->pair_buf_cap, (int)strlen(name));
+                    if (!init->pair_buf) {
+                        duckdb_function_set_error(info, "read_seq: out of memory allocating pair buffer");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                     const char *pair_id = strip_pair_suffix(name, init->pair_buf, init->pair_buf_cap);
                     duckdb_vector_assign_string_element(vec, row_count, pair_id);
                 } else {
@@ -488,6 +648,8 @@ void register_read_fasta_function(duckdb_connection connection) {
 
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_table_function_add_parameter(tf, varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     duckdb_table_function_set_bind(tf, fasta_read_bind);
@@ -495,6 +657,94 @@ void register_read_fasta_function(duckdb_connection connection) {
     duckdb_table_function_set_function(tf, seq_read_function);
     duckdb_table_function_supports_projection_pushdown(tf, true);
 
+    duckdb_register_table_function(connection, tf);
+    duckdb_destroy_table_function(&tf);
+}
+
+typedef struct {
+    char *index_path;
+    int emitted;
+} fasta_index_bind_t;
+
+static void destroy_fasta_index_bind(void *data) {
+    fasta_index_bind_t *b = (fasta_index_bind_t *)data;
+    if (!b) return;
+    if (b->index_path) duckdb_free(b->index_path);
+    duckdb_free(b);
+}
+
+static void fasta_index_bind(duckdb_bind_info info) {
+    duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
+    char *file_path = duckdb_get_varchar(path_val);
+    duckdb_destroy_value(&path_val);
+    if (!file_path || strlen(file_path) == 0) {
+        duckdb_bind_set_error(info, "fasta_index requires a file path");
+        if (file_path) duckdb_free(file_path);
+        return;
+    }
+
+    char *index_path = NULL;
+    duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
+    if (idx_val && !duckdb_is_null_value(idx_val)) {
+        index_path = duckdb_get_varchar(idx_val);
+    }
+    if (idx_val) duckdb_destroy_value(&idx_val);
+
+    if (fai_build3(file_path, index_path, NULL) != 0) {
+        char err[512];
+        snprintf(err, sizeof(err), "fasta_index: failed to build index for %s", file_path);
+        duckdb_bind_set_error(info, err);
+        duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
+
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_bind_add_result_column(info, "success", bool_type);
+    duckdb_bind_add_result_column(info, "index_path", varchar_type);
+    duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_logical_type(&varchar_type);
+
+    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_malloc(sizeof(fasta_index_bind_t));
+    bind->index_path = index_path ? index_path : strdup_duckdb("");
+    bind->emitted = 0;
+    duckdb_bind_set_bind_data(info, bind, destroy_fasta_index_bind);
+    duckdb_free(file_path);
+}
+
+static void fasta_index_init(duckdb_init_info info) {
+    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_init_get_bind_data(info);
+    bind->emitted = 0;
+}
+
+static void fasta_index_scan(duckdb_function_info info, duckdb_data_chunk output) {
+    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_function_get_bind_data(info);
+    if (bind->emitted) {
+        duckdb_data_chunk_set_size(output, 0);
+        return;
+    }
+    duckdb_vector success_vec = duckdb_data_chunk_get_vector(output, 0);
+    duckdb_vector index_vec = duckdb_data_chunk_get_vector(output, 1);
+    bool *success_data = (bool *)duckdb_vector_get_data(success_vec);
+    success_data[0] = true;
+    duckdb_vector_assign_string_element(index_vec, 0, bind->index_path ? bind->index_path : "");
+    bind->emitted = 1;
+    duckdb_data_chunk_set_size(output, 1);
+}
+
+void register_fasta_index_function(duckdb_connection connection) {
+    duckdb_table_function tf = duckdb_create_table_function();
+    duckdb_table_function_set_name(tf, "fasta_index");
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_table_function_add_parameter(tf, varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
+    duckdb_destroy_logical_type(&varchar_type);
+
+    duckdb_table_function_set_bind(tf, fasta_index_bind);
+    duckdb_table_function_set_init(tf, fasta_index_init);
+    duckdb_table_function_set_function(tf, fasta_index_scan);
     duckdb_register_table_function(connection, tf);
     duckdb_destroy_table_function(&tf);
 }

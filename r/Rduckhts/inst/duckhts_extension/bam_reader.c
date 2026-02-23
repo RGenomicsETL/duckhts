@@ -347,13 +347,22 @@ static void parse_regions(const char *region_str, char ***out_regions, unsigned 
  * Ensure reusable buffers are large enough
  * ================================================================ */
 
-static void ensure_seq_buf(bam_local_init_data_t *l, int seq_len) {
+static int ensure_seq_buf(bam_local_init_data_t *l, int seq_len) {
     size_t need = (size_t)(seq_len + 1);
     if (need > l->seq_buf_cap) {
-        l->seq_buf_cap = need * 2;
-        l->seq_buf = (char *)realloc(l->seq_buf, l->seq_buf_cap);
-        l->qual_buf = (char *)realloc(l->qual_buf, l->seq_buf_cap);
+        size_t new_cap = need * 2;
+        char *new_seq = (char *)realloc(l->seq_buf, new_cap);
+        if (!new_seq) return 0;
+        char *new_qual = (char *)realloc(l->qual_buf, new_cap);
+        if (!new_qual) {
+            l->seq_buf = new_seq;
+            return 0;
+        }
+        l->seq_buf = new_seq;
+        l->qual_buf = new_qual;
+        l->seq_buf_cap = new_cap;
     }
+    return 1;
 }
 
 /* ================================================================
@@ -759,7 +768,12 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         int seq_len = b->core.l_qseq;
 
         /* Grow SEQ/QUAL conversion buffers if needed */
-        ensure_seq_buf(local, seq_len);
+        if (!ensure_seq_buf(local, seq_len)) {
+            duckdb_function_set_error(info, "read_bam: out of memory allocating sequence buffers");
+            local->done = 1;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
 
         for (idx_t i = 0; i < local->column_count; i++) {
             idx_t col_id = local->column_ids[i];

@@ -43,6 +43,21 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', re
 ----
 2
 
+# --- BCF multi-region query (comma-separated) ---
+query I
+WITH r1 AS (
+  SELECT count(*) AS c FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151')
+),
+r2 AS (
+  SELECT count(*) AS c FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3062915-3062915')
+),
+mr AS (
+  SELECT count(*) AS c FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151,1:3062915-3062915')
+)
+SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) THEN 1 ELSE 0 END;
+----
+1
+
 # --- VEP/CSQ annotations (if present) ---
 query I
 SELECT CASE WHEN VEP_Allele IS NOT NULL THEN 1 ELSE 0 END
@@ -78,6 +93,18 @@ query I
 SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
 ----
 2
+
+# --- BAM multi-region query (dedup on overlapping regions) ---
+query I
+WITH single_region AS (
+  SELECT count(*) AS c FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000')
+),
+multi_region AS (
+  SELECT count(*) AS c FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:1-1000,CHROMOSOME_I:1-1000')
+)
+SELECT CASE WHEN (SELECT c FROM single_region) = (SELECT c FROM multi_region) THEN 1 ELSE 0 END;
+----
+1
 
 # --- read group / sample ---
 query I
@@ -132,6 +159,26 @@ SELECT NAME, length(SEQUENCE) FROM read_fasta('__WORKING_DIRECTORY__/test/data/c
 CHROMOSOME_I	1009800
 CHROMOSOME_II	5000
 CHROMOSOME_III	5000
+
+# --- region query using FASTA index (.fai) ---
+query II
+SELECT NAME, length(SEQUENCE)
+FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I:1-10');
+----
+CHROMOSOME_I	10
+
+# --- multi-region query (comma-separated) ---
+query I
+SELECT count(*)
+FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I:1-10,CHROMOSOME_II:1-5');
+----
+2
+
+# --- explicit index build helper ---
+query I
+SELECT success::INT FROM fasta_index('__WORKING_DIRECTORY__/test/data/ce.fa');
+----
+1
 
 # ==============================================================
 # read_fastq – FASTQ reader
@@ -320,6 +367,21 @@ SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz
 ----
 4
 
+# --- tabix multi-region query (comma-separated) ---
+query I
+WITH r1 AS (
+  SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190')
+),
+r2 AS (
+  SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2937010-2937500')
+),
+mr AS (
+  SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190,X:2937010-2937500')
+)
+SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) THEN 1 ELSE 0 END;
+----
+1
+
 # ==============================================================
 # read_hts_header & read_hts_index
 # ==============================================================
@@ -333,6 +395,14 @@ LIMIT 1;
 ----
 ['"Text"']
 
+# --- raw header mode ---
+query I
+SELECT count(*)
+FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', mode := 'raw')
+WHERE raw LIKE '##%';
+----
+6
+
 # --- index type extracted from VCF/BCF ---
 query I
 SELECT index_type
@@ -340,6 +410,20 @@ FROM read_hts_index('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')
 LIMIT 1;
 ----
 CSI
+
+# --- index spans macro available ---
+query I
+SELECT count(*)
+FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
+----
+1
+
+# --- index raw macro available ---
+query I
+SELECT CASE WHEN octet_length(raw) > 0 THEN 1 ELSE 0 END
+FROM read_hts_index_raw('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
+----
+1
 
 # --- explicit index_path for read_bcf ---
 query I

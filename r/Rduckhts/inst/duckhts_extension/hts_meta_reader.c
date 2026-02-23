@@ -5,6 +5,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "htslib/hts.h"
 #include "htslib/kstring.h"
@@ -61,6 +62,11 @@ static hts_kind_t parse_format_hint(const char *s) {
     if (strcmp(buf, "fastq") == 0) return HTS_KIND_FASTQ;
     if (strcmp(buf, "tabix") == 0) return HTS_KIND_TABIX;
     return HTS_KIND_UNKNOWN;
+}
+
+static int valid_header_mode(const char *s) {
+    if (!s || !*s) return 1;
+    return strcasecmp(s, "parsed") == 0 || strcasecmp(s, "raw") == 0 || strcasecmp(s, "both") == 0;
 }
 
 static hts_kind_t kind_from_hts_format(const htsFormat *fmt) {
@@ -387,11 +393,26 @@ static void read_hts_header_bind(duckdb_bind_info info) {
     }
     if (fmt_val) duckdb_destroy_value(&fmt_val);
 
+    char *mode = NULL;
+    duckdb_value mode_val = duckdb_bind_get_named_parameter(info, "mode");
+    if (mode_val && !duckdb_is_null_value(mode_val)) {
+        mode = duckdb_get_varchar(mode_val);
+    }
+    if (mode_val) duckdb_destroy_value(&mode_val);
+    if (mode && !valid_header_mode(mode)) {
+        duckdb_bind_set_error(info, "mode must be one of: parsed, raw, both");
+        if (file_path) duckdb_free(file_path);
+        if (format_hint) duckdb_free(format_hint);
+        if (mode) duckdb_free(mode);
+        return;
+    }
+
     hts_header_bind_t *bind = (hts_header_bind_t *)calloc(1, sizeof(hts_header_bind_t));
     if (!bind) {
         duckdb_bind_set_error(info, "Out of memory");
         if (file_path) duckdb_free(file_path);
         if (format_hint) duckdb_free(format_hint);
+        if (mode) duckdb_free(mode);
         return;
     }
     bind->file_path = dup_str(file_path);
@@ -403,6 +424,7 @@ static void read_hts_header_bind(duckdb_bind_info info) {
         destroy_hts_header_bind(bind);
         duckdb_free(file_path);
         if (format_hint) duckdb_free(format_hint);
+        if (mode) duckdb_free(mode);
         return;
     }
 
@@ -422,6 +444,7 @@ static void read_hts_header_bind(duckdb_bind_info info) {
             destroy_hts_header_bind(bind);
             duckdb_free(file_path);
             if (format_hint) duckdb_free(format_hint);
+            if (mode) duckdb_free(mode);
             return;
         }
         build_vcf_header_entries(hdr, bind);
@@ -440,6 +463,7 @@ static void read_hts_header_bind(duckdb_bind_info info) {
     hts_close(fp);
     duckdb_free(file_path);
     if (format_hint) duckdb_free(format_hint);
+    if (mode) duckdb_free(mode);
 
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -997,6 +1021,7 @@ void register_read_hts_header_function(duckdb_connection connection) {
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "format", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "mode", varchar_type);
 
     duckdb_table_function_set_bind(tf, read_hts_header_bind);
     duckdb_table_function_set_init(tf, read_hts_header_init);

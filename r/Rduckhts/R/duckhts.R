@@ -668,12 +668,21 @@ normalize_tabix_types <- function(types) {
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param table_name Name for the created table
 #' @param path Path to the FASTA file
+#' @param region Optional genomic region (e.g., "chr1:1000-2000" or "chr1:1-10,chr2:5-20")
+#' @param index_path Optional explicit path to FASTA index file (.fai)
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
 #'
 #' @export
-rduckhts_fasta <- function(con, table_name, path, overwrite = FALSE) {
+rduckhts_fasta <- function(
+  con,
+  table_name,
+  path,
+  region = NULL,
+  index_path = NULL,
+  overwrite = FALSE
+) {
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
@@ -687,21 +696,57 @@ rduckhts_fasta <- function(con, table_name, path, overwrite = FALSE) {
     }
   }
 
+  params <- list()
+  if (!is.null(region)) {
+    params$region <- sprintf("'%s'", region)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_fasta('%s')",
+      "CREATE TABLE %s AS SELECT * FROM read_fasta('%s'%s)",
       table_name,
-      path
+      path,
+      param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW fasta_data AS SELECT * FROM read_fasta('%s')",
-      path
+      "CREATE VIEW fasta_data AS SELECT * FROM read_fasta('%s'%s)",
+      path,
+      param_str
     )
   }
 
   DBI::dbExecute(con, create_query)
   invisible(TRUE)
+}
+
+#' Build FASTA Index
+#'
+#' Builds a FASTA index (.fai) using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the FASTA file
+#' @param index_path Optional explicit output path for FASTA index file (.fai)
+#'
+#' @return A data frame with columns `success` and `index_path`
+#'
+#' @export
+rduckhts_fasta_index <- function(con, path, index_path = NULL) {
+  params <- list()
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf(
+    "SELECT * FROM fasta_index('%s'%s)",
+    path,
+    param_str
+  )
+  DBI::dbGetQuery(con, query)
 }
 
 #' Create FASTQ Table
@@ -1000,14 +1045,18 @@ rduckhts_tabix <- function(
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param path Path to input HTS file
 #' @param format Optional format hint (e.g., "auto", "vcf", "bcf", "bam", "cram", "tabix")
+#' @param mode Header output mode: "parsed" (default), "raw", or "both"
 #'
 #' @return A data frame with parsed header metadata.
 #'
 #' @export
-rduckhts_hts_header <- function(con, path, format = NULL) {
+rduckhts_hts_header <- function(con, path, format = NULL, mode = NULL) {
   params <- list()
   if (!is.null(format)) {
     params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(mode)) {
+    params$mode <- sprintf("'%s'", mode)
   }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM read_hts_header('%s'%s)", path, param_str)
@@ -1036,5 +1085,55 @@ rduckhts_hts_index <- function(con, path, format = NULL, index_path = NULL) {
   }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM read_hts_index('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Read HTS Index Spans
+#'
+#' Returns index span-oriented metadata for planning range workloads.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to input HTS file
+#' @param format Optional format hint
+#' @param index_path Optional explicit path to index file
+#'
+#' @return A data frame with span-oriented index metadata.
+#'
+#' @export
+rduckhts_hts_index_spans <- function(con, path, format = NULL, index_path = NULL) {
+  params <- list()
+  if (!is.null(format)) {
+    params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM read_hts_index_spans('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Read Raw HTS Index Blob
+#'
+#' Returns raw index metadata blob data for a file index.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to input HTS file
+#' @param format Optional format hint
+#' @param index_path Optional explicit path to index file
+#'
+#' @return A data frame with raw index blob metadata.
+#'
+#' @export
+rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) {
+  params <- list()
+  if (!is.null(format)) {
+    params$format <- sprintf("'%s'", format)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM read_hts_index_raw('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
 }

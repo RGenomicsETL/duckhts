@@ -6,7 +6,7 @@
 
 # Rduckhts 0.1.2-0.1.4
 
-CRAN Submission
+- CRAN Submission
 
 # Rduckhts 0.1.2-0.0.9000
 

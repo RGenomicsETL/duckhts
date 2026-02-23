@@ -7,6 +7,15 @@ set -eu
 THIS_DIR=`dirname "$0"`
 THIS_DIR=`cd "$THIS_DIR" && pwd`
 
+# Windows plugin toggle for CI stability:
+# 1 = try to build/stage htslib plugins, 0 = force-disable plugins.
+# Can be overridden by environment variable HTSLIB_ENABLE_PLUGINS_WINDOWS.
+HTSLIB_ENABLE_PLUGINS_WINDOWS="${HTSLIB_ENABLE_PLUGINS_WINDOWS:-1}"
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" != "0" ] && [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" != "1" ]; then
+    echo "ERROR: HTSLIB_ENABLE_PLUGINS_WINDOWS must be 0 or 1 (got '${HTSLIB_ENABLE_PLUGINS_WINDOWS}')"
+    exit 1
+fi
+
 EXT_DIR="${THIS_DIR}/inst/duckhts_extension"
 
 if [ ! -d "${EXT_DIR}/htslib" ]; then
@@ -201,7 +210,14 @@ echo "---------- Configuring htslib (Windows) ----------"
 cd "${HTSLIB_DIR}"
 
 # Build htslib configure flags
-HTSLIB_CONFIGURE_FLAGS="--disable-plugins"
+HTSLIB_CONFIGURE_FLAGS=""
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ]; then
+    HTSLIB_CONFIGURE_FLAGS="--enable-plugins"
+    echo "INFO: Windows htslib plugins: enabled by HTSLIB_ENABLE_PLUGINS_WINDOWS=1"
+else
+    HTSLIB_CONFIGURE_FLAGS="--disable-plugins"
+    echo "INFO: Windows htslib plugins: disabled by HTSLIB_ENABLE_PLUGINS_WINDOWS=0"
+fi
 
 if [ "$HAS_BZ2" = "no" ]; then
     echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
@@ -216,6 +232,10 @@ fi
 if [ "$HAS_CURL" = "no" ]; then
     echo "INFO: libcurl not found - disabling remote URL support in htslib"
     HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl"
+fi
+
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ] && [ "$HAS_CURL" = "no" ]; then
+    echo "INFO: plugins enabled but libcurl unavailable; plugin build may succeed without remote URL handlers"
 fi
 
 if [ "$HAS_LIBDEFLATE" = "no" ]; then
@@ -244,7 +264,23 @@ fi
     ${HTSLIB_CONFIGURE_FLAGS}
 
 echo "---------- Building htslib (static) ----------"
-${MAKE} -j1 lib-static
+HTSLIB_BUILD_TARGETS="lib-static"
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ]; then
+    HTSLIB_BUILD_TARGETS="${HTSLIB_BUILD_TARGETS} lib-shared plugins"
+fi
+${MAKE} -j1 ${HTSLIB_BUILD_TARGETS}
+
+if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ]; then
+    mkdir -p "${HTSLIB_DIR}/libexec/htslib"
+    for p in hfile_libcurl.dll hfile_gcs.dll hfile_s3.dll; do
+        if [ -f "$p" ]; then
+            cp -f "$p" "${HTSLIB_DIR}/libexec/htslib/"
+        fi
+    done
+    if [ -f "hts-3.dll" ]; then
+        cp -f "hts-3.dll" "${HTSLIB_DIR}/libexec/htslib/"
+    fi
+fi
 
 rm -rf "${HTSLIB_DIR}/bin" "${HTSLIB_DIR}/htscodecs/tests" "${HTSLIB_DIR}/test" || true
 

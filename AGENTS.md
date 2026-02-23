@@ -55,6 +55,7 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - Use CMAKE and configure/configure.win scripts for cross-platform builds
 - Include cleanup and cleanup.win scripts for proper cleanup
 - Simplify package bootstrapping to copy necessary extension files
+- When upstream extension sources under `src/` change, update the bundled R package copy by running `Rscript bootstrap.R ~/duckhts/` from `r/Rduckhts/`, then reinstall the package before running tests.
 - Version scheme: duckhtsVersion-x format
 - All R package modifications must maintain CRAN compatibility
 

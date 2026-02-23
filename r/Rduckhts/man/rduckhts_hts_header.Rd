@@ -4,7 +4,7 @@
 \alias{rduckhts_hts_header}
 \title{Read HTS Header Metadata}
 \usage{
-rduckhts_hts_header(con, path, format = NULL)
+rduckhts_hts_header(con, path, format = NULL, mode = NULL)
 }
 \arguments{
 \item{con}{A DuckDB connection with DuckHTS loaded}
@@ -12,6 +12,8 @@ rduckhts_hts_header(con, path, format = NULL)
 \item{path}{Path to input HTS file}
 
 \item{format}{Optional format hint (e.g., "auto", "vcf", "bcf", "bam", "cram", "tabix")}
+
+\item{mode}{Header output mode: "parsed" (default), "raw", or "both"}
 }
 \value{
 A data frame with parsed header metadata.

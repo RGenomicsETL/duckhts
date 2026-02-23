@@ -47,10 +47,12 @@ enabled.
 
 ## Quick Start
 
-The extension is loaded with `rduckhts_load(con, extension_path =
-NULL)`. We can create tables with `rduckhts_bcf`, `rduckhts_bam`,
-`rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and
-`rduckhts_tabix` using the parameters documented in their help pages
+The extension is loaded with
+`rduckhts_load(con, extension_path = NULL)`. We can create tables with
+`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
+`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
+parameters documented in their help pages. FASTA indexes can be created
+with `rduckhts_fasta_index()`.
 
 ``` r
 library(DBI)
@@ -76,12 +78,37 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #> 1 10
 ```
 
+### FASTA region queries
+
+`read_fasta` now supports indexed region queries via
+`rduckhts_fasta(..., region = ...)`.
+
+``` r
+fai_info <- rduckhts_fasta_index(con, fasta_path)
+fai_info
+#>   success index_path
+#> 1    TRUE
+
+rduckhts_fasta(
+  con, "fasta_region", fasta_path,
+  region = "CHROMOSOME_I:1-25",
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT NAME, length(SEQUENCE) AS n FROM fasta_region")
+#>           NAME  n
+#> 1 CHROMOSOME_I 25
+```
+
 ## Examples
 
 ### Region Queries
 
+Region queries can use implicit sidecar indexes or an explicit
+`index_path` for custom index names/locations.
+
 ``` r
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 variants <- dbGetQuery(con, "SELECT * FROM variants LIMIT 5")
 variants
@@ -109,6 +136,25 @@ variants
 #> 3 -20, -5, -20
 #> 4 -20, -5, -20
 #> 5         NULL
+
+rduckhts_bcf(
+  con, "variants_idx", bcf_path,
+  region = "1:3000150-3000151",
+  index_path = bcf_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")
+#>   n
+#> 1 2
+
+# Span-oriented index view from the same file
+index_spans_preview <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
+head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
+#>   seqname tid index_type chunk_beg_vo chunk_end_vo
+#> 1       1   0        CSI           NA           NA
+#> 2       2   1        CSI           NA           NA
+#> 3       3   2        CSI           NA           NA
+#> 4       4   3        CSI           NA           NA
 ```
 
 ### Remote VCF on S3
@@ -117,7 +163,6 @@ S3 files can be query when `htslib` is built with plugins enable. This
 is not the case on RTools
 
 ``` r
-# Not run on CRAN because it requires network access.
 # Enable htslib plugins for remote access (S3/GCS/HTTP)
 setup_hts_env()
 
@@ -127,7 +172,6 @@ s3_path <- "gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/"
 s3_vcf_file <- "3202_samples_cohort_gg_chr22.vcf.gz"
 s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
 
-# Query remote VCF directly with DuckDB + DuckHTS (region-scoped)
 rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:16050000-16050500", overwrite = TRUE)
 dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
 #>   CHROM  n
@@ -188,11 +232,15 @@ gene_annotations
 ### BAM/CRAM
 
 When built with htslib codec, `CRAM` can be opened in addition to `BAM`
-files
+files. `index_path` can also be passed for region scans with
+non-standard index names.
 
 ``` r
 cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
 ref_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+
 rduckhts_bam(con, "cram_reads", cram_path, reference = ref_path, overwrite = TRUE)
 cram_reads <- dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM cram_reads LIMIT 5")
 cram_reads
@@ -202,6 +250,16 @@ cram_reads
 #> 3 HS18_09653:4:2314:14991:85680   83 1020   10
 #> 4 HS18_09653:4:2108:14085:93656  147 1122   60
 #> 5  HS18_09653:4:1303:4347:38100   83 1137   37
+
+rduckhts_bam(
+  con, "bam_idx_reads", bam_path,
+  region = "CHROMOSOME_I:1-1000",
+  index_path = bam_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT count(*) AS n FROM bam_idx_reads")
+#>   n
+#> 1 2
 ```
 
 ### SAMtags + auxiliary tags
@@ -248,11 +306,10 @@ dbGetQuery(con, "SELECT pos + 1 AS pos_plus_one FROM typed_tabix_explicit LIMIT 
 
 ### HTS header and index metadata
 
-Use the metadata helpers to inspect parsed headers and index summaries.
+Use metadata helpers to inspect parsed headers, raw header lines, index
+summaries, span-oriented index views, and raw index blobs.
 
 ``` r
-bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
-
 header_meta <- rduckhts_hts_header(con, bcf_path)
 head(header_meta[, c("record_type", "id", "number", "value_type")], 5)
 #>   record_type   id number value_type
@@ -262,6 +319,15 @@ head(header_meta[, c("record_type", "id", "number", "value_type")], 5)
 #> 4      FORMAT   TT      A    Integer
 #> 5        INFO  DP4      4    Integer
 
+header_raw <- rduckhts_hts_header(con, bcf_path, mode = "raw")
+head(header_raw[, c("idx", "raw")], 5)
+#>   idx                  raw
+#> 1   0 ##fileformat=VCFv4.1
+#> 2   1 ##fileformat=VCFv4.1
+#> 3   2 ##fileformat=VCFv4.1
+#> 4   3 ##fileformat=VCFv4.1
+#> 5   4 ##fileformat=VCFv4.1
+
 index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
 head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
 #>   seqname mapped unmapped index_type
@@ -269,6 +335,21 @@ head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
 #> 2       2      1        0        CSI
 #> 3       3      1        0        CSI
 #> 4       4      2        0        CSI
+
+index_spans <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
+head(index_spans[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
+#>   seqname tid index_type chunk_beg_vo chunk_end_vo
+#> 1       1   0        CSI           NA           NA
+#> 2       2   1        CSI           NA           NA
+#> 3       3   2        CSI           NA           NA
+#> 4       4   3        CSI           NA           NA
+
+index_raw <- rduckhts_hts_index_raw(con, bcf_path, index_path = bcf_index_path)
+head(index_raw, 1)
+#> [1] index_type                                                       
+#> [2] '/usr/local/lib/R/site-library/Rduckhts/extdata/vcf_file.bcf.csi'
+#> [3] raw                                                              
+#> <0 rows> (or 0-length row.names)
 ```
 
 ### Remote GTEx tabix example
@@ -276,9 +357,9 @@ head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
 GTEx eQTL matrices on EBI are tabix-indexed
 
 ``` r
-gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
+gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
-               header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+                 header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
 #>          variant r2    pvalue molecular_trait_object_id molecular_trait_id
 #> 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290
@@ -306,12 +387,12 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## References
 
-  - DuckDB: <https://duckdb.org/>
-  - DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
-  - DuckDB extension template (C):
-    <https://github.com/duckdb/extension-template-c>
-  - htslib: <https://github.com/samtools/htslib>
-  - RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
+- DuckDB: <https://duckdb.org/>
+- DuckDB Extension API: <https://duckdb.org/docs/extensions/overview>
+- DuckDB extension template (C):
+  <https://github.com/duckdb/extension-template-c>
+- htslib: <https://github.com/samtools/htslib>
+- RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
 
 ## License
 
