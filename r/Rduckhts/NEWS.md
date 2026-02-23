@@ -1,4 +1,10 @@
 
+# 0.1.3-0.0.0.9000
+
+- Updates the configure script to avoid check faillure on CRAN MacOS 
+
+- Update the extension version to 0.1.3
+
 # Rduckhts  0.1.2-0.1.5
 
 - Fixed inadvertant removal of libexec
