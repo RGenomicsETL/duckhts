@@ -1,5 +1,7 @@
 
-# 0.1.3-0.0.0.9000
+# 0.1.3-0.0.2
+
+- Conditionaly enable plugins in windows
 
 - Updates the configure script to avoid check faillure on CRAN MacOS 
 
