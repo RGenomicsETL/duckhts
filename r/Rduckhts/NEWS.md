@@ -1,5 +1,7 @@
 
-# 0.1.3-0.0.2
+# Rduckhts 0.1.3-0.0.2.9000
+
+# Rduckhts 0.1.3-0.0.2
 
 - Conditionaly enable plugins in windows
 
