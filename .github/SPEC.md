@@ -75,6 +75,7 @@ third_party/
   htslib/
   bcftools/
   samtools/
+  cgranges/
   patches/
   licenses/
 ```

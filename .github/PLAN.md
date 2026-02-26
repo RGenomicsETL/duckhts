@@ -66,6 +66,69 @@
 - [ ] Implement write path for VCF/BCF (if needed)
 - [ ] Consider based on community feedback after CRAN release
 
+## 🧬 Phase 10 — Genomic Coverage & Ranges APIs (PROPOSED)
+
+### 10.1 Design Principles
+- [ ] Keep base-level read semantics in BAM/CRAM-native table functions (htslib-backed), not post-load SQL only.
+- [ ] Keep interval analytics composable in DuckDB SQL (joins/windows/aggregations on loaded tables).
+- [ ] Add C genomic ranges bindings for interval algebra primitives, not as a replacement for pileup/depth engines.
+
+### 10.2 New Table Functions (Draft)
+- [ ] `bam_depth(path, [region, region_file, region_mode, region_merge, region_combine, min_mapq, min_baseq, overlap, max_depth, excl_flags, incl_flags, index_path, reference])`
+- [ ] `bam_coverage(path, [region, region_file, region_mode, region_merge, region_combine, min_mapq, min_baseq, overlap, max_depth, bins, excl_flags, incl_flags, index_path, reference])`
+- [ ] `bam_pileup(path, [region, region_file, region_mode, region_merge, region_combine, min_mapq, min_baseq, overlap, include_deletions, include_insertions, max_depth, excl_flags, incl_flags, index_path, reference])`
+
+### 10.3 Region Input Contract
+- [ ] Support both `region := 'chr:start-end,...'` and `region_file := 'targets.bed[.gz|.bgz]'`.
+- [ ] Add `region_mode := 'union' | 'per_interval'`:
+  - `union`: merge overlapping target intervals before counting.
+  - `per_interval`: keep intervals separate and return per-target metrics.
+- [ ] Add `region_merge := true|false` for explicit overlap merge control.
+- [ ] Add `region_combine := 'intersect' | 'union' | 'error'` when both `region` and `region_file` are supplied.
+- [ ] Normalize BED coordinates from 0-based half-open to 1-based closed internally.
+- [ ] Carry target labels (`name`/`region_id`) in `per_interval` mode.
+
+### 10.4 Overlap Semantics (Paired-End)
+- [ ] Make overlap policy explicit in all depth/coverage/pileup APIs:
+  - `overlap := 'none'` (read-level counting; overlap can be double counted)
+  - `overlap := 'fragment'` (count fragment once in mate-overlap span)
+  - `overlap := 'samtools'` (mpileup-style overlap handling)
+- [ ] Document defaults per function and samtools parity rationale.
+- [ ] Avoid hidden behavior changes: overlap removal must be opt-in/out via a clear argument.
+
+### 10.5 Coverage Output Shape (GRanges-Compatible)
+- [ ] Return GRanges-like columns directly from DuckDB:
+  - `seqnames`, `start`, `end`, `width`, `strand`
+  - `region_id`, `region_name` (nullable; populated in `per_interval`)
+  - `numreads`, `covbases`, `coverage_pct`, `mean_depth`, `mean_baseq`, `mean_mapq`
+- [ ] Keep naming stable and R-friendly; add R wrapper option `as_granges = TRUE` for conversion to `GenomicRanges::GRanges`.
+
+### 10.6 Base Reader Enhancements (Proposed)
+- [ ] Add `region_file` support to base readers where indexed region pushdown exists:
+  - `read_bam`, `read_bcf`, `read_fasta`, `read_gff`, `read_gtf`, `read_tabix`
+- [ ] Preserve existing `region` behavior for backward compatibility.
+- [ ] Document duplicate semantics clearly for overlapping region lists/files.
+
+### 10.7 Performance & Memory Considerations
+- [ ] Require/encourage index-backed scanning for region file workflows.
+- [ ] Pre-sort and optionally coalesce many BED intervals by contig to reduce iterator churn.
+- [ ] Maintain streaming behavior (bounded memory), including mate-pair overlap bookkeeping.
+- [ ] Benchmark BAM-native depth/coverage vs equivalent SQL-on-materialized reads.
+
+### 10.8 Validation & Tests
+- [ ] Add synthetic tests for paired-end overlap cases:
+  - overlapping mates, non-overlapping mates, discordant pairs, cross-contig mates.
+- [ ] Add BED region tests:
+  - union vs per-interval mode, overlapping targets, duplicate targets, mixed contig ordering.
+- [ ] Add coordinate conversion tests (BED 0-based half-open edge cases).
+- [ ] Add regression tests for flags, mapping/base quality thresholds, and max-depth clipping.
+- [ ] Add parity checks versus selected samtools behaviors and document intentional deviations.
+
+### 10.9 Documentation & Rollout
+- [ ] Update `README.Rmd` with new function signatures and deterministic examples using local test data.
+- [ ] Add R package examples returning GRanges-compatible outputs.
+- [ ] Mark APIs as experimental initially; freeze signatures after one release cycle of feedback.
+
 ## 📝 Notes
 - **Scope**: Focus on READERS ONLY - application code will handle format conversion (e.g., to parquet)
 - **Target**: DuckDB 1.4+ C API compatibility maintained
