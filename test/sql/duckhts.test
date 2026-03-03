@@ -403,6 +403,18 @@ WHERE raw LIKE '##%';
 ----
 6
 
+# --- raw header mode preserves distinct line content ---
+query T
+SELECT string_agg(raw, '|')
+FROM (
+  SELECT idx, raw
+  FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', mode := 'raw')
+  ORDER BY idx
+  LIMIT 3
+) t;
+----
+##fileformat=VCFv4.3|##FILTER=<ID=PASS,Description="All filters passed">|##contig=<ID=1>
+
 # --- index type extracted from VCF/BCF ---
 query I
 SELECT index_type

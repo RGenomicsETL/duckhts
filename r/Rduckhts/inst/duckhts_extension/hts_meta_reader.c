@@ -214,13 +214,18 @@ static void build_vcf_header_entries(bcf_hdr_t *hdr, hts_header_bind_t *bind) {
             header_add_kv(e, "value", hrec->value);
         }
 
+        // bcf_hrec_format appends to the destination kstring; reset between records.
+        ks.l = 0;
+        if (ks.s) ks.s[0] = '\0';
         if (bcf_hrec_format(hrec, &ks) == 0 && ks.s) {
-            size_t len = strlen(ks.s);
-            while (len > 0 && (ks.s[len - 1] == '\n' || ks.s[len - 1] == '\r')) {
-                ks.s[len - 1] = '\0';
-                len--;
+            size_t len = ks.l;
+            while (len > 0 && (ks.s[len - 1] == '\n' || ks.s[len - 1] == '\r')) len--;
+            char *raw = (char *)malloc(len + 1);
+            if (raw) {
+                memcpy(raw, ks.s, len);
+                raw[len] = '\0';
+                e->raw = raw;
             }
-            e->raw = dup_str(ks.s);
         }
 
         const char *id = header_kv_value(e, "ID");

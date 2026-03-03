@@ -80,6 +80,12 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - Bundle all runtime data under inst/extdata for R and keep README examples runnable with local files.
 - Keep README examples deterministic and short; use eval=FALSE only when external network access is required.
 
+## Heng Li Component Scope
+- Treat `cgranges` as the interval engine (overlap/contain/index) for BED/GRanges-style operations.
+- Treat `seqtk` ideas (`kseq`/buffered stream parsing patterns) as parser implementation guidance for FASTA/FASTQ-like read paths.
+- Do not conflate `cgranges` and `seqtk`; they address different layers.
+- When adding interval APIs, keep base-level BAM/CRAM pileup/depth logic in htslib-native code paths and use `cgranges` for interval algebra.
+
 ## Current Focus Areas
 1. **CRAN Preparation**: Adapt R package build system, remove vcpkg dependency
 2. **Enhanced Testing**: Add more comprehensive tests and edge cases

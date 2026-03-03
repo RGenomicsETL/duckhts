@@ -72,6 +72,10 @@
 - [ ] Keep base-level read semantics in BAM/CRAM-native table functions (htslib-backed), not post-load SQL only.
 - [ ] Keep interval analytics composable in DuckDB SQL (joins/windows/aggregations on loaded tables).
 - [ ] Add C genomic ranges bindings for interval algebra primitives, not as a replacement for pileup/depth engines.
+- [ ] Keep responsibilities explicit across Heng Li components:
+  - `cgranges` for interval indexing/overlap/contain queries (BED/GRanges operations).
+  - `seqtk` parsing style (`kseq`/buffered streaming patterns) for FASTA/FASTQ streaming and low-allocation readers.
+  - Do not conflate `seqtk` with `cgranges`; they solve different layers.
 
 ### 10.2 New Table Functions (Draft)
 - [ ] `bam_depth(path, [region, region_file, region_mode, region_merge, region_combine, min_mapq, min_baseq, overlap, max_depth, excl_flags, incl_flags, index_path, reference])`
@@ -114,6 +118,7 @@
 - [ ] Pre-sort and optionally coalesce many BED intervals by contig to reduce iterator churn.
 - [ ] Maintain streaming behavior (bounded memory), including mate-pair overlap bookkeeping.
 - [ ] Benchmark BAM-native depth/coverage vs equivalent SQL-on-materialized reads.
+- [ ] For parser-heavy code paths, prefer seqtk-like buffered/chunked line parsing over byte-wise reads.
 
 ### 10.8 Validation & Tests
 - [ ] Add synthetic tests for paired-end overlap cases:
