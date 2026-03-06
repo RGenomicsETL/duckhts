@@ -74,6 +74,7 @@ set(EXTENSION_SOURCES
         src/bcf_reader.c
         src/bam_reader.c
         src/seq_reader.c
+        src/kmer_udf.c
         src/tabix_reader.c
         src/vep_parser.c
         src/hts_meta_reader.c

@@ -480,3 +480,51 @@ FROM read_bam(
 );
 ----
 2
+
+# ==============================================================
+# Sequence UDFs (k-mer utilities)
+# ==============================================================
+
+# --- reverse complement ---
+query T
+SELECT seq_revcomp('ACGTN');
+----
+NACGT
+
+# --- canonical sequence representation ---
+query T
+SELECT seq_canonical('TTA');
+----
+TAA
+
+# --- 2-bit hash encoding (A=0,C=1,G=2,T=3) ---
+query I
+SELECT seq_hash_2bit('ACGT');
+----
+27
+
+# --- invalid base yields NULL in 2-bit hash ---
+query I
+SELECT seq_hash_2bit('ACNT') IS NULL;
+----
+1
+
+# --- k-mer emission ---
+query T
+SELECT string_agg(kmer, ',' ORDER BY pos)
+FROM seq_kmers('ACGTA', 3);
+----
+ACG,CGT,GTA
+
+# --- canonical k-mer emission ---
+query T
+SELECT string_agg(kmer, ',' ORDER BY pos)
+FROM seq_kmers('ACGTA', 3, canonical := true);
+----
+ACG,ACG,GTA
+
+# --- no rows when k > sequence length ---
+query I
+SELECT count(*) FROM seq_kmers('AC', 3);
+----
+0

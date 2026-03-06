@@ -30,7 +30,6 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 #include <htslib/hts.h>
 #include <htslib/kstring.h>
-#include <htslib/kstring.h>
 
 /* ================================================================
  * Helpers
@@ -262,7 +261,8 @@ typedef struct {
     size_t seq_buf_cap;
     char *qual_buf;
     size_t qual_buf_cap;
-    char cigar_buf[8192];
+    kstring_t cigar_tmp;
+    kstring_t aux_tmp;
 
     /* Read group caching */
     char *last_rg_id;
@@ -306,7 +306,9 @@ static void destroy_bam_local(void *data) {
     if (l->qual_buf) free(l->qual_buf);
     if (l->last_rg_id) free(l->last_rg_id);
     if (l->last_sample_id) free(l->last_sample_id);
-    free(l->rg_tmp.s);
+    ks_free(&l->rg_tmp);
+    ks_free(&l->cigar_tmp);
+    ks_free(&l->aux_tmp);
     duckdb_free(l);
 }
 
@@ -370,15 +372,14 @@ static int ensure_seq_buf(bam_local_init_data_t *l, int seq_len) {
  * Uses bam_cigar_op / bam_cigar_oplen / bam_cigar_opchr from sam.h
  * ================================================================ */
 
-static void cigar_to_string(const uint32_t *cigar, int n_cigar,
-                            char *buf, size_t buf_size) {
-    size_t pos = 0;
-    for (int i = 0; i < n_cigar && pos + 12 < buf_size; i++) {
-        pos += (size_t)snprintf(buf + pos, buf_size - pos, "%d%c",
-                                bam_cigar_oplen(cigar[i]),
-                                bam_cigar_opchr(bam_cigar_op(cigar[i])));
+static int cigar_to_kstring(const uint32_t *cigar, int n_cigar, kstring_t *ks) {
+    ks->l = 0;
+    if (ks->s) ks->s[0] = '\0';
+    for (int i = 0; i < n_cigar; i++) {
+        if (kputw((int)bam_cigar_oplen(cigar[i]), ks) < 0) return -1;
+        if (kputc(bam_cigar_opchr(bam_cigar_op(cigar[i])), ks) < 0) return -1;
     }
-    buf[pos] = '\0';
+    return 0;
 }
 
 /* ================================================================
@@ -817,10 +818,15 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
             case BAM_COL_CIGAR: {
                 if (b->core.n_cigar > 0) {
-                    cigar_to_string(bam_get_cigar(b), (int)b->core.n_cigar,
-                                    local->cigar_buf, sizeof(local->cigar_buf));
-                    duckdb_vector_assign_string_element(vec, row_count,
-                                                         local->cigar_buf);
+                    if (cigar_to_kstring(bam_get_cigar(b), (int)b->core.n_cigar,
+                                         &local->cigar_tmp) == 0 &&
+                        local->cigar_tmp.s) {
+                        duckdb_vector_assign_string_element_len(vec, row_count,
+                                                                local->cigar_tmp.s,
+                                                                local->cigar_tmp.l);
+                    } else {
+                        duckdb_vector_assign_string_element(vec, row_count, "*");
+                    }
                 } else {
                     duckdb_vector_assign_string_element(vec, row_count, "*");
                 }
@@ -994,7 +1000,6 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
                         duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
 
-                        kstring_t ks = {0, 0, NULL};
                         aux = bam_aux_first(b);
                         int write_idx = 0;
                         while (aux && write_idx < count) {
@@ -1008,13 +1013,13 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             duckdb_vector_assign_string_element(
                                 key_vec, entry.offset + write_idx, tagbuf);
-                            bam_aux_to_string(aux, &ks);
+                            bam_aux_to_string(aux, &local->aux_tmp);
                             duckdb_vector_assign_string_element(
-                                val_vec, entry.offset + write_idx, ks.s ? ks.s : "");
+                                val_vec, entry.offset + write_idx,
+                                local->aux_tmp.s ? local->aux_tmp.s : "");
                             write_idx++;
                             aux = bam_aux_next(b, aux);
                         }
-                        free(ks.s);
 
                         duckdb_list_entry *list_data =
                             (duckdb_list_entry *)duckdb_vector_get_data(vec);
