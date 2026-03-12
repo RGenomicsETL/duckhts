@@ -137,6 +137,38 @@ dbGetQuery(con, "
 #> 2 HS25_09827:2:1201:1505:59795#49    2 HS25_09827:2:1201:1505:59795#49
 #> 3 HS25_09827:2:1201:1559:70726#49    1 HS25_09827:2:1201:1559:70726#49
 
+dbGetQuery(con, "
+  SELECT
+    NAME,
+    seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
+    seq_encode_4bit(substr(SEQUENCE, 1, 16)) AS codes,
+    seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 16))) AS roundtrip
+  FROM read_fasta('test/data/ce.fa')
+  LIMIT 2
+")
+#>            NAME hash_2bit_prefix                                          codes
+#> 1  CHROMOSOME_I          9898352 4, 2, 2, 8, 1, 1, 4, 2, 2, 8, 1, 1, 4, 2, 2, 8
+#> 2 CHROMOSOME_II          6038978 2, 2, 8, 1, 1, 4, 2, 2, 8, 1, 1, 4, 2, 2, 8, 1
+#>          roundtrip
+#> 1 GCCTAAGCCTAAGCCT
+#> 2 CCTAAGCCTAAGCCTA
+
+dbGetQuery(con, "
+  SELECT
+    NAME,
+    MATE,
+    seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
+    seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
+  FROM read_fastq('test/data/interleaved.fq', interleaved := true)
+  LIMIT 2
+")
+#>                              NAME MATE                              codes
+#> 1 HS25_09827:2:1201:1505:59795#49    1 2, 2, 4, 8, 8, 1, 4, 1, 4, 2, 1, 8
+#> 2 HS25_09827:2:1201:1505:59795#49    2 1, 1, 4, 4, 1, 1, 1, 4, 1, 1, 4, 4
+#>      roundtrip
+#> 1 CCGTTAGAGCAT
+#> 2 AAGGAAAGAAGG
+
 dbDisconnect(con, shutdown = TRUE)
 ```
 
@@ -155,7 +187,6 @@ to point at an external htslib plugin directory).
 Example (works in static-handler mode and plugin mode):
 
 ``` bash
-# Not run by default because it requires network access and a built extension.
 extension_path=build/release/duckhts.duckdb_extension
 duckdb -unsigned <<SQL
 LOAD '${extension_path}';

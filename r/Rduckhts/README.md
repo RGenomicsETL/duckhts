@@ -139,6 +139,48 @@ This section is generated from `functions.yaml`.
 | `is_duplicate`                 | scalar | BOOLEAN |          | Test whether the alignment is flagged as a duplicate.                   |
 | `is_supplementary`             | scalar | BOOLEAN |          | Test whether the alignment is marked as supplementary.                  |
 
+## Sequence UDFs
+
+The extension also exposes sequence utility UDFs directly in DuckDB SQL,
+including the new 4-bit IUPAC DNA encode/decode helpers. These can be
+applied to `SEQUENCE` columns from FASTA and FASTQ scans.
+
+``` r
+dbGetQuery(
+  con,
+  "SELECT
+     NAME,
+     seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
+     seq_encode_4bit(substr(SEQUENCE, 1, 16)) AS codes,
+     seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 16))) AS roundtrip
+   FROM sequences
+   LIMIT 2"
+)
+#>            NAME hash_2bit_prefix                                          codes
+#> 1  CHROMOSOME_I          9898352 4, 2, 2, 8, 1, 1, 4, 2, 2, 8, 1, 1, 4, 2, 2, 8
+#> 2 CHROMOSOME_II          6038978 2, 2, 8, 1, 1, 4, 2, 2, 8, 1, 1, 4, 2, 2, 8, 1
+#>          roundtrip
+#> 1 GCCTAAGCCTAAGCCT
+#> 2 CCTAAGCCTAAGCCTA
+
+dbGetQuery(
+  con,
+  "SELECT
+     NAME,
+     MATE,
+     seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
+     seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
+   FROM reads
+   LIMIT 2"
+)
+#>                              NAME MATE                              codes
+#> 1 HS25_09827:2:1201:1505:59795#49    1 2, 2, 4, 8, 8, 1, 4, 1, 4, 2, 1, 8
+#> 2 HS25_09827:2:1201:1505:59795#49    2 1, 1, 4, 4, 1, 1, 1, 4, 1, 1, 4, 4
+#>      roundtrip
+#> 1 CCGTTAGAGCAT
+#> 2 AAGGAAAGAAGG
+```
+
 ### FASTA region queries
 
 `read_fasta` now supports indexed region queries via
@@ -149,7 +191,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpsFTZLs/duckhts_readme_3a9dd157bf4bfd.fai
+#> 1    TRUE /tmp/RtmpIMVlkW/duckhts_readme_3ac4d24488cf01.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
