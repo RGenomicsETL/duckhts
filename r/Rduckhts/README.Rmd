@@ -75,6 +75,34 @@ Use `rduckhts_functions()` inside R to inspect the generated extension catalog.
 cat(paste(readLines("inst/function_catalog/functions.md"), collapse = "\n"))
 ```
 
+## Sequence UDFs
+
+The extension also exposes sequence utility UDFs directly in DuckDB SQL, including the new 4-bit IUPAC DNA encode/decode helpers. These can be applied to `SEQUENCE` columns from FASTA and FASTQ scans.
+
+```{r}
+dbGetQuery(
+  con,
+  "SELECT
+     NAME,
+     seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
+     seq_encode_4bit(substr(SEQUENCE, 1, 16)) AS codes,
+     seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 16))) AS roundtrip
+   FROM sequences
+   LIMIT 2"
+)
+
+dbGetQuery(
+  con,
+  "SELECT
+     NAME,
+     MATE,
+     seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
+     seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
+   FROM reads
+   LIMIT 2"
+)
+```
+
 ### FASTA region queries
 
 `read_fasta` now supports indexed region queries via `rduckhts_fasta(..., region = ...)`.
