@@ -563,6 +563,37 @@ SELECT seq_hash_2bit('ACNT') IS NULL;
 ----
 1
 
+# --- 4-bit encoding supports IUPAC DNA codes including N ---
+query T
+SELECT string_agg(CAST(code AS VARCHAR), ',' ORDER BY ord)
+FROM UNNEST(seq_encode_4bit('ACGTRYSWKMBDHVN')) WITH ORDINALITY AS t(code, ord);
+----
+1,2,4,8,5,10,6,9,12,3,14,13,11,7,15
+
+# --- 4-bit decoding round-trips canonical IUPAC codes ---
+query T
+SELECT seq_decode_4bit(seq_encode_4bit('ACGTRYSWKMBDHVN'));
+----
+ACGTRYSWKMBDHVN
+
+# --- invalid bases yield NULL in 4-bit encoding ---
+query I
+SELECT seq_encode_4bit('ACGU') IS NULL;
+----
+1
+
+# --- invalid 4-bit code yields NULL on decode ---
+query I
+SELECT seq_decode_4bit([1::UTINYINT, 0::UTINYINT]) IS NULL;
+----
+1
+
+# --- empty 4-bit list decodes to empty string ---
+query I
+SELECT length(seq_decode_4bit([]::UTINYINT[]));
+----
+0
+
 # --- GC content ignores N and returns fraction over called bases ---
 query TT
 SELECT printf('%.3f', seq_gc_content('ACGTNN')), seq_gc_content('NNNN') IS NULL;

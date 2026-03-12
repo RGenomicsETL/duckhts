@@ -53,6 +53,48 @@ static inline int dna_to_2bit(char c) {
     }
 }
 
+static inline int iupac_to_4bit(char c) {
+    switch ((unsigned char)toupper((unsigned char)c)) {
+    case 'A': return 0x1;
+    case 'C': return 0x2;
+    case 'G': return 0x4;
+    case 'T': return 0x8;
+    case 'M': return 0x3;
+    case 'R': return 0x5;
+    case 'S': return 0x6;
+    case 'V': return 0x7;
+    case 'W': return 0x9;
+    case 'Y': return 0xa;
+    case 'H': return 0xb;
+    case 'K': return 0xc;
+    case 'D': return 0xd;
+    case 'B': return 0xe;
+    case 'N': return 0xf;
+    default:  return -1;
+    }
+}
+
+static inline char bit4_to_iupac(uint8_t code) {
+    switch (code) {
+    case 0x1: return 'A';
+    case 0x2: return 'C';
+    case 0x4: return 'G';
+    case 0x8: return 'T';
+    case 0x3: return 'M';
+    case 0x5: return 'R';
+    case 0x6: return 'S';
+    case 0x7: return 'V';
+    case 0x9: return 'W';
+    case 0xa: return 'Y';
+    case 0xb: return 'H';
+    case 0xc: return 'K';
+    case 0xd: return 'D';
+    case 0xe: return 'B';
+    case 0xf: return 'N';
+    default:  return '\0';
+    }
+}
+
 static inline const char *get_string_at(duckdb_vector vector, idx_t row, idx_t *len) {
     duckdb_string_t *data = (duckdb_string_t *)duckdb_vector_get_data(vector);
     duckdb_string_t *val = &data[row];
@@ -228,6 +270,107 @@ static void seq_hash_2bit_scalar(duckdb_function_info info, duckdb_data_chunk in
         }
 
         out_data[row] = h;
+    }
+}
+
+static void seq_encode_4bit_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(output);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    idx_t child_offset = duckdb_list_vector_get_size(output);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        list_data[row].offset = child_offset;
+        list_data[row].length = 0;
+
+        if (!row_is_valid(seq_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        idx_t len = 0;
+        const char *seq = get_string_at(seq_vec, row, &len);
+        if (duckdb_list_vector_reserve(output, child_offset + len) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "seq_encode_4bit: failed to reserve list storage");
+            return;
+        }
+        if (duckdb_list_vector_set_size(output, child_offset + len) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "seq_encode_4bit: failed to grow list storage");
+            return;
+        }
+
+        uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
+        int valid = 1;
+        for (idx_t i = 0; i < len; i++) {
+            int code = iupac_to_4bit(seq[i]);
+            if (code < 0) {
+                valid = 0;
+                break;
+            }
+            child_data[child_offset + i] = (uint8_t)code;
+        }
+
+        if (!valid) {
+            set_null_at(output, row);
+            if (duckdb_list_vector_set_size(output, child_offset) != DuckDBSuccess) {
+                duckdb_scalar_function_set_error(info, "seq_encode_4bit: failed to roll back list storage");
+                return;
+            }
+            continue;
+        }
+
+        list_data[row].length = len;
+        child_offset += len;
+    }
+}
+
+static void seq_decode_4bit_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector codes_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(codes_vec);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(codes_vec);
+    uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(codes_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        duckdb_list_entry entry = list_data[row];
+        char *decoded = (char *)duckdb_malloc((size_t)entry.length + 1);
+        if (!decoded) {
+            duckdb_scalar_function_set_error(info, "seq_decode_4bit: out of memory");
+            return;
+        }
+
+        int valid = 1;
+        for (idx_t i = 0; i < entry.length; i++) {
+            idx_t child_index = entry.offset + i;
+            if (!row_is_valid(child_vec, child_index)) {
+                valid = 0;
+                break;
+            }
+            char base = bit4_to_iupac(child_data[child_index]);
+            if (!base) {
+                valid = 0;
+                break;
+            }
+            decoded[i] = base;
+        }
+
+        if (!valid) {
+            set_null_at(output, row);
+            duckdb_free(decoded);
+            continue;
+        }
+
+        decoded[entry.length] = '\0';
+        duckdb_vector_assign_string_element_len(output, row, decoded, entry.length);
+        duckdb_free(decoded);
     }
 }
 
@@ -586,6 +729,44 @@ static void register_seq_hash_2bit_function(duckdb_connection connection) {
     duckdb_destroy_scalar_function(&fn);
 }
 
+static void register_seq_encode_4bit_function(duckdb_connection connection) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "seq_encode_4bit");
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+    duckdb_logical_type list_type = duckdb_create_list_type(utinyint_type);
+    duckdb_scalar_function_add_parameter(fn, varchar_type);
+    duckdb_scalar_function_set_return_type(fn, list_type);
+    duckdb_scalar_function_set_function(fn, seq_encode_4bit_scalar);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&utinyint_type);
+    duckdb_destroy_logical_type(&list_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
+static void register_seq_decode_4bit_function(duckdb_connection connection) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "seq_decode_4bit");
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+    duckdb_logical_type list_type = duckdb_create_list_type(utinyint_type);
+    duckdb_scalar_function_add_parameter(fn, list_type);
+    duckdb_scalar_function_set_return_type(fn, varchar_type);
+    duckdb_scalar_function_set_function(fn, seq_decode_4bit_scalar);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&utinyint_type);
+    duckdb_destroy_logical_type(&list_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
 static void register_seq_gc_content_function(duckdb_connection connection) {
     duckdb_scalar_function fn = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(fn, "seq_gc_content");
@@ -650,6 +831,8 @@ void register_kmer_udf_functions(duckdb_connection connection) {
     register_seq_revcomp_function(connection);
     register_seq_canonical_function(connection);
     register_seq_hash_2bit_function(connection);
+    register_seq_encode_4bit_function(connection);
+    register_seq_decode_4bit_function(connection);
     register_seq_gc_content_function(connection);
     register_seq_kmers_function(connection);
     register_sam_flag_predicate_function(connection, "is_segmented", sam_is_segmented_scalar);

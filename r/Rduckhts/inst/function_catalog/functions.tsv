@@ -14,6 +14,8 @@ read_hts_index_raw	table_macro	Metadata	read_hts_index_raw(path, format := NULL,
 seq_revcomp	scalar	Sequence UDFs	seq_revcomp(sequence)	VARCHAR		Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.	SELECT seq_revcomp('ACGTN');
 seq_canonical	scalar	Sequence UDFs	seq_canonical(sequence)	VARCHAR		Return the lexicographically smaller of a sequence and its reverse complement.	SELECT seq_canonical('ACGTN');
 seq_hash_2bit	scalar	Sequence UDFs	seq_hash_2bit(sequence)	UBIGINT		Encode a short DNA sequence as a 2-bit unsigned integer hash.	SELECT seq_hash_2bit('ACGT');
+seq_encode_4bit	scalar	Sequence UDFs	seq_encode_4bit(sequence)	UTINYINT[]		Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.	SELECT seq_encode_4bit('ACGTRYSWKMBDHVN');
+seq_decode_4bit	scalar	Sequence UDFs	seq_decode_4bit(codes)	VARCHAR		Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.	SELECT seq_decode_4bit(seq_encode_4bit('ACGTRYSWKMBDHVN'));
 seq_gc_content	scalar	Sequence UDFs	seq_gc_content(sequence)	DOUBLE		Compute GC fraction for a DNA sequence as a value between 0 and 1.	SELECT seq_gc_content('ACGT');
 seq_kmers	table	Sequence UDFs	seq_kmers(sequence, k, canonical := FALSE)	table		Expand a sequence into positional k-mers with optional canonicalization.	SELECT * FROM seq_kmers('ACGT', 2);
 is_segmented	scalar	SAM Flag UDFs	is_segmented(flag)	BOOLEAN		Test whether the SAM flag marks a read as part of a segmented template.	SELECT is_segmented(99);

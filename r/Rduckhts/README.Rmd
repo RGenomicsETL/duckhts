@@ -126,7 +126,7 @@ head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "ch
 
 S3 files can be query when `htslib` is built with plugins enable. This is not the case on RTools
 
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 # Enable htslib plugins for remote access (S3/GCS/HTTP)
 setup_hts_env()
 
@@ -248,7 +248,7 @@ head(index_raw, 1)
 
 GTEx eQTL matrices on EBI are tabix-indexed 
 
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                  header = TRUE, auto_detect = TRUE, overwrite = TRUE)

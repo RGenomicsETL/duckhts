@@ -228,6 +228,30 @@
       ]
     },
     {
+      "name": "seq_encode_4bit",
+      "kind": "scalar",
+      "category": "Sequence UDFs",
+      "signature": "seq_encode_4bit(sequence)",
+      "returns": "UTINYINT[]",
+      "r_wrapper": "",
+      "description": "Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.",
+      "examples": [
+        "SELECT seq_encode_4bit('ACGTRYSWKMBDHVN');"
+      ]
+    },
+    {
+      "name": "seq_decode_4bit",
+      "kind": "scalar",
+      "category": "Sequence UDFs",
+      "signature": "seq_decode_4bit(codes)",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.",
+      "examples": [
+        "SELECT seq_decode_4bit(seq_encode_4bit('ACGTRYSWKMBDHVN'));"
+      ]
+    },
+    {
       "name": "seq_gc_content",
       "kind": "scalar",
       "category": "Sequence UDFs",

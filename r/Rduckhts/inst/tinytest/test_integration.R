@@ -236,6 +236,18 @@ test_table_creation <- function() {
     ))
   }
 
+  encoded_roundtrip <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT seq_decode_4bit(seq_encode_4bit('ACGTRYSWKMBDHVN')) AS seq,",
+      "       seq_encode_4bit('ACGU') IS NULL AS invalid_encode,",
+      "       seq_decode_4bit([1::UTINYINT, 0::UTINYINT]) IS NULL AS invalid_decode"
+    )
+  )
+  expect_equal(encoded_roundtrip$seq[1], "ACGTRYSWKMBDHVN")
+  expect_true(encoded_roundtrip$invalid_encode[1])
+  expect_true(encoded_roundtrip$invalid_decode[1])
+
   # Test overwrite parameter validation
   if (DBI::dbExistsTable(con, "test_table")) {
     DBI::dbRemoveTable(con, "test_table")

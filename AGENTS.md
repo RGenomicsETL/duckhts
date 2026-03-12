@@ -60,6 +60,7 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - Simplify package bootstrapping to copy necessary extension files
 - Keep `r/Rduckhts/README.Rmd` wired to the generated function catalog instead of duplicating extension function lists by hand.
 - When upstream extension sources under `src/` change, update the bundled R package copy by running `Rscript bootstrap.R ~/duckhts/` from `r/Rduckhts/`, then reinstall the package before running tests.
+- Never run `R CMD INSTALL .` from `r/Rduckhts/`: it mutates `inst/duckhts_extension/htslib` in place and removes the vendored htslib source tree needed for subsequent installs. Build a tarball with `R CMD build .` and install the resulting tarball instead.
 - Version scheme: duckhtsVersion-x format
 - All R package modifications must maintain CRAN compatibility
 
