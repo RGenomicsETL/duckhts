@@ -17,6 +17,8 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 
 ## Documentation Conventions
 - **Primary documentation**: README.Rmd (R Markdown format)
+- Extension function documentation is sourced from [functions.yaml](functions.yaml); keep it updated whenever functions/macros/UDFs are added, removed, or renamed.
+- Regenerate the package-bundled function catalog from `functions.yaml` with `python3 scripts/render_function_catalog.py` and keep the generated files in `r/Rduckhts/inst/function_catalog/` in sync.
 - New specs go in [./.github/SPEC.md](SPEC.md).
 - The implementation plan is tracked in [./.github/PLAN.md](PLAN.md).
 - Update description.yml when needed for extension metadata.
@@ -55,6 +57,7 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - Use CMAKE and configure/configure.win scripts for cross-platform builds
 - Include cleanup and cleanup.win scripts for proper cleanup
 - Simplify package bootstrapping to copy necessary extension files
+- Keep `r/Rduckhts/README.Rmd` wired to the generated function catalog instead of duplicating extension function lists by hand.
 - When upstream extension sources under `src/` change, update the bundled R package copy by running `Rscript bootstrap.R ~/duckhts/` from `r/Rduckhts/`, then reinstall the package before running tests.
 - Version scheme: duckhtsVersion-x format
 - All R package modifications must maintain CRAN compatibility

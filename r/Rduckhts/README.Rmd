@@ -67,12 +67,21 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
 ```
 
+## Function Catalog
+
+Use `rduckhts_functions()` inside R to inspect the generated extension catalog.
+
+```{r function-catalog, echo=FALSE, results='asis'}
+cat(paste(readLines("inst/function_catalog/functions.md"), collapse = "\n"))
+```
+
 ### FASTA region queries
 
 `read_fasta` now supports indexed region queries via `rduckhts_fasta(..., region = ...)`.
 
 ```{r}
-fai_info <- rduckhts_fasta_index(con, fasta_path)
+fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 
 rduckhts_fasta(
@@ -81,6 +90,7 @@ rduckhts_fasta(
   overwrite = TRUE
 )
 dbGetQuery(con, "SELECT NAME, length(SEQUENCE) AS n FROM fasta_region")
+unlink(fai_path)
 ```
 
 
@@ -116,7 +126,7 @@ head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "ch
 
 S3 files can be query when `htslib` is built with plugins enable. This is not the case on RTools
 
-```{r, eval=TRUE}
+```{r, eval=FALSE}
 # Enable htslib plugins for remote access (S3/GCS/HTTP)
 setup_hts_env()
 
@@ -238,7 +248,7 @@ head(index_raw, 1)
 
 GTEx eQTL matrices on EBI are tabix-indexed 
 
-```{r, eval=TRUE}
+```{r, eval=FALSE}
 gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                  header = TRUE, auto_detect = TRUE, overwrite = TRUE)

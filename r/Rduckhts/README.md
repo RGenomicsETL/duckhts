@@ -78,16 +78,76 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #> 1 10
 ```
 
+## Function Catalog
+
+Use `rduckhts_functions()` inside R to inspect the generated extension
+catalog.
+
+## Extension Function Catalog
+
+This section is generated from `functions.yaml`.
+
+### Readers
+
+| Function      | Kind  | Returns | R helper               | Description                                                                             |
+|---------------|-------|---------|------------------------|-----------------------------------------------------------------------------------------|
+| `read_bcf`    | table | table   | `rduckhts_bcf`         | Read VCF and BCF variant data with typed INFO, FORMAT, and optional tidy sample output. |
+| `read_bam`    | table | table   | `rduckhts_bam`         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps.  |
+| `read_fasta`  | table | table   | `rduckhts_fasta`       | Read FASTA records or indexed FASTA regions as sequence rows.                           |
+| `read_fastq`  | table | table   | `rduckhts_fastq`       | Read single-end, paired-end, or interleaved FASTQ files.                                |
+| `read_gff`    | table | table   | `rduckhts_gff`         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.  |
+| `read_gtf`    | table | table   | `rduckhts_gtf`         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.  |
+| `read_tabix`  | table | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.  |
+| `fasta_index` | table | table   | `rduckhts_fasta_index` | Build a FASTA index and return the index path used by the operation.                    |
+
+### Metadata
+
+| Function               | Kind        | Returns | R helper                   | Description                                                                             |
+|------------------------|-------------|---------|----------------------------|-----------------------------------------------------------------------------------------|
+| `read_hts_header`      | table       | table   | `rduckhts_hts_header`      | Inspect HTS headers in parsed, raw, or combined form across supported formats.          |
+| `read_hts_index`       | table       | table   | `rduckhts_hts_index`       | Inspect high-level HTS index metadata such as sequence names and mapped counts.         |
+| `read_hts_index_spans` | table_macro | table   | `rduckhts_hts_index_spans` | Expand index metadata into span and chunk rows suitable for low-level index inspection. |
+| `read_hts_index_raw`   | table_macro | table   | `rduckhts_hts_index_raw`   | Return the raw on-disk HTS index blob together with basic identifying metadata.         |
+
+### Sequence UDFs
+
+| Function         | Kind   | Returns | R helper | Description                                                                     |
+|------------------|--------|---------|----------|---------------------------------------------------------------------------------|
+| `seq_revcomp`    | scalar | VARCHAR |          | Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases. |
+| `seq_canonical`  | scalar | VARCHAR |          | Return the lexicographically smaller of a sequence and its reverse complement.  |
+| `seq_hash_2bit`  | scalar | UBIGINT |          | Encode a short DNA sequence as a 2-bit unsigned integer hash.                   |
+| `seq_gc_content` | scalar | DOUBLE  |          | Compute GC fraction for a DNA sequence as a value between 0 and 1.              |
+| `seq_kmers`      | table  | table   |          | Expand a sequence into positional k-mers with optional canonicalization.        |
+
+### SAM Flag UDFs
+
+| Function                       | Kind   | Returns | R helper | Description                                                             |
+|--------------------------------|--------|---------|----------|-------------------------------------------------------------------------|
+| `is_segmented`                 | scalar | BOOLEAN |          | Test whether the SAM flag marks a read as part of a segmented template. |
+| `is_properly_aligned`          | scalar | BOOLEAN |          | Test whether the SAM flag indicates a properly aligned read pair.       |
+| `is_properly_segmented`        | scalar | BOOLEAN |          | Alias for is_properly_aligned(flag) using segmented-read terminology.   |
+| `is_unmapped`                  | scalar | BOOLEAN |          | Test whether the read itself is unmapped according to the SAM flag.     |
+| `is_mate_unmapped`             | scalar | BOOLEAN |          | Test whether the mate read is flagged as unmapped.                      |
+| `is_reverse_complemented`      | scalar | BOOLEAN |          | Test whether the read is aligned to the reverse strand.                 |
+| `is_mate_reverse_complemented` | scalar | BOOLEAN |          | Test whether the mate read is aligned to the reverse strand.            |
+| `is_first_segment`             | scalar | BOOLEAN |          | Test whether the read is marked as the first segment in the template.   |
+| `is_last_segment`              | scalar | BOOLEAN |          | Test whether the read is marked as the last segment in the template.    |
+| `is_secondary`                 | scalar | BOOLEAN |          | Test whether the alignment is marked as secondary.                      |
+| `is_qc_fail`                   | scalar | BOOLEAN |          | Test whether the read failed vendor or pipeline quality checks.         |
+| `is_duplicate`                 | scalar | BOOLEAN |          | Test whether the alignment is flagged as a duplicate.                   |
+| `is_supplementary`             | scalar | BOOLEAN |          | Test whether the alignment is marked as supplementary.                  |
+
 ### FASTA region queries
 
 `read_fasta` now supports indexed region queries via
 `rduckhts_fasta(..., region = ...)`.
 
 ``` r
-fai_info <- rduckhts_fasta_index(con, fasta_path)
+fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success index_path
-#> 1    TRUE
+#>   success                                        index_path
+#> 1    TRUE /tmp/Rtmpxdd1oY/duckhts_readme_3a0e163e74cfb7.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
@@ -97,6 +157,7 @@ rduckhts_fasta(
 dbGetQuery(con, "SELECT NAME, length(SEQUENCE) AS n FROM fasta_region")
 #>           NAME  n
 #> 1 CHROMOSOME_I 25
+unlink(fai_path)
 ```
 
 ## Examples
@@ -128,7 +189,7 @@ variants
 #> 1                       NULL        NULL         0/1         245          NA
 #> 2                       NULL        NULL         0/1         245          32
 #> 3               -20, -5, -20        NULL         0/1         409          35
-#> 4 -20, -5, -20, -20, -5, -20        0, 1          2|         409          35
+#> 4 -20, -5, -20, -20, -5, -20        0, 1           2         409          35
 #> 5                       NULL        NULL         0/1         245          32
 #>    FORMAT_GL_B
 #> 1         NULL
@@ -174,8 +235,6 @@ s3_vcf_uri <- paste0(s3_base, s3_path, s3_vcf_file)
 
 rduckhts_bcf(con, "s3_variants", s3_vcf_uri, region = "chr22:16050000-16050500", overwrite = TRUE)
 dbGetQuery(con, "SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM")
-#>   CHROM  n
-#> 1 chr22 11
 ```
 
 ### FASTQ files
@@ -321,12 +380,18 @@ head(header_meta[, c("record_type", "id", "number", "value_type")], 5)
 
 header_raw <- rduckhts_hts_header(con, bcf_path, mode = "raw")
 head(header_raw[, c("idx", "raw")], 5)
-#>   idx                  raw
-#> 1   0 ##fileformat=VCFv4.1
-#> 2   1 ##fileformat=VCFv4.1
-#> 3   2 ##fileformat=VCFv4.1
-#> 4   3 ##fileformat=VCFv4.1
-#> 5   4 ##fileformat=VCFv4.1
+#>   idx
+#> 1   0
+#> 2   1
+#> 3   2
+#> 4   3
+#> 5   4
+#>                                                                                                                                                          raw
+#> 1                                                                                                                                       ##fileformat=VCFv4.1
+#> 2                                                                                                        ##FILTER=<ID=PASS,Description="All filters passed">
+#> 3                                                                                           ##INFO=<ID=TEST,Number=1,Type=Integer,Description="Testing Tag">
+#> 4 ##FORMAT=<ID=TT,Number=A,Type=Integer,Description="Testing Tag, with commas and \\"escapes\\" and escaped escapes combined with \\\\\\"quotes\\\\\\\\\\"">
+#> 5                       ##INFO=<ID=DP4,Number=4,Type=Integer,Description="# high-quality ref-forward bases, ref-reverse, alt-forward and alt-reverse bases">
 
 index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
 head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
@@ -361,24 +426,6 @@ gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Br
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                  header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
-#>          variant r2    pvalue molecular_trait_object_id molecular_trait_id
-#> 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290
-#> 2 chr1_13550_G_A NA 0.0303633           ENSG00000230699    ENSG00000230699
-#> 3 chr1_13550_G_A NA 0.1057900           ENSG00000177757    ENSG00000177757
-#> 4 chr1_13550_G_A NA 0.1617190           ENSG00000241860    ENSG00000241860
-#> 5 chr1_13550_G_A NA 0.1919580           ENSG00000198744    ENSG00000198744
-#>         maf         gene_id median_tpm      beta       se  an ac chromosome
-#> 1 0.0114286 ENSG00000188290  6.3960000  0.633986 0.270285 350  4          1
-#> 2 0.0114286 ENSG00000230699  0.0674459 -0.980082 0.447861 350  4          1
-#> 3 0.0114286 ENSG00000177757  1.2659000  0.631359 0.387738 350  4          1
-#> 4 0.0114286 ENSG00000241860  0.1081970 -0.791695 0.562674 350  4          1
-#> 5 0.0114286 ENSG00000198744 21.6284000 -0.592354 0.451705 350  4          1
-#>   position ref alt type        rsid
-#> 1    13550   G   A  SNP rs554008981
-#> 2    13550   G   A  SNP rs554008981
-#> 3    13550   G   A  SNP rs554008981
-#> 4    13550   G   A  SNP rs554008981
-#> 5    13550   G   A  SNP rs554008981
 ```
 
 ``` r

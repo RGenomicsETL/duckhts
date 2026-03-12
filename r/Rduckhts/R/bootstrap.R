@@ -92,6 +92,23 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   )
   message("  Copied htslib source tree")
 
+  render_script <- file.path(repo_root, "scripts", "render_function_catalog.py")
+  if (!file.exists(render_script)) {
+    stop("Function catalog renderer not found at: ", render_script, call. = FALSE)
+  }
+  python <- Sys.which("python3")
+  if (!nzchar(python)) {
+    python <- Sys.which("python")
+  }
+  if (!nzchar(python)) {
+    stop("python3/python is required to render the function catalog", call. = FALSE)
+  }
+  render_status <- system2(python, c(render_script, repo_root))
+  if (!identical(render_status, 0L)) {
+    stop("Failed to render function catalog from functions.yaml", call. = FALSE)
+  }
+  message("  Rendered function catalog from functions.yaml")
+
   message("Bootstrap complete. Run 'R CMD build .' to create the tarball.")
   invisible(dest)
 }

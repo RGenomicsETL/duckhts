@@ -1,4 +1,4 @@
-.PHONY: clean clean_all
+.PHONY: clean clean_all function_catalog
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -55,7 +55,9 @@ clean: clean_build clean_cmake
 clean_all: clean clean_configure
 
 # Render README.md from README.Rmd (GitHub-flavored markdown)
-rdm:
+function_catalog:
+	python3 scripts/render_function_catalog.py
+rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
 bench:
 	Rscript -e "rmarkdown::render('Benchmark.Rmd', output_format = 'github_document')"

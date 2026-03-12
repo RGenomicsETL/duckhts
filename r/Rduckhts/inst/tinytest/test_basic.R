@@ -14,6 +14,7 @@ expect_true(exists("rduckhts_fastq"))
 expect_true(exists("rduckhts_gff"))
 expect_true(exists("rduckhts_gtf"))
 expect_true(exists("rduckhts_tabix"))
+expect_true(exists("rduckhts_functions"))
 expect_true(exists("rduckhts_hts_header"))
 expect_true(exists("rduckhts_hts_index"))
 expect_true(exists("rduckhts_hts_index_spans"))
@@ -29,6 +30,7 @@ expect_equal(length(formals(rduckhts_fastq)), 6)
 expect_equal(length(formals(rduckhts_gff)), 6)
 expect_equal(length(formals(rduckhts_gtf)), 6)
 expect_equal(length(formals(rduckhts_tabix)), 10)
+expect_equal(length(formals(rduckhts_functions)), 2)
 expect_equal(length(formals(rduckhts_hts_header)), 4)
 expect_equal(length(formals(rduckhts_hts_index)), 4)
 expect_equal(length(formals(rduckhts_hts_index_spans)), 4)
@@ -89,6 +91,19 @@ expect_true(file.exists(system.file(
   "vcf_file.bcf",
   package = "Rduckhts"
 )))
+expect_true(file.exists(system.file(
+  "function_catalog",
+  "functions.tsv",
+  package = "Rduckhts"
+)))
+
+catalog <- rduckhts_functions()
+expect_true(is.data.frame(catalog))
+expect_true(all(c("name", "kind", "category", "signature", "description") %in% names(catalog)))
+expect_true("seq_revcomp" %in% catalog$name)
+expect_true("read_bcf" %in% catalog$name)
+expect_equal(unique(rduckhts_functions(kind = "scalar")$kind), "scalar")
+expect_equal(unique(rduckhts_functions(category = "Readers")$category), "Readers")
 
 # Test parameter validation - these should fail gracefully without a connection
 expect_error(rduckhts_bcf(NULL, "test", "nonexistent.vcf"))

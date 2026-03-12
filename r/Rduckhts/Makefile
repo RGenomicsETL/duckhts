@@ -29,6 +29,7 @@ install: build
 check: build
 	R CMD check --as-cran  $(PKG_NAME)_$(PKG_VERSION).tar.gz
 readme:
+	python3 ../../scripts/render_function_catalog.py ../..
 	R -e "rmarkdown::render('README.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 rd: 
 	R -e 'roxygen2::roxygenize(".",load_code=NULL)'

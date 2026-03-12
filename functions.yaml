@@ -1,0 +1,365 @@
+{
+  "manifest_version": 1,
+  "functions": [
+    {
+      "name": "read_bcf",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bcf",
+      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, and optional tidy sample output.",
+      "examples": [
+        "SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_bam",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bam(path, standard_tags := FALSE, auxiliary_tags := FALSE, region := NULL, index_path := NULL, reference := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bam",
+      "description": "Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps.",
+      "examples": [
+        "SELECT QNAME, FLAG, RNAME, POS FROM read_bam('range.bam') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_fasta",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_fasta(path, region := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_fasta",
+      "description": "Read FASTA records or indexed FASTA regions as sequence rows.",
+      "examples": [
+        "SELECT NAME, length(SEQUENCE) FROM read_fasta('ce.fa');"
+      ]
+    },
+    {
+      "name": "read_fastq",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_fastq(path, interleaved := FALSE, mate_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_fastq",
+      "description": "Read single-end, paired-end, or interleaved FASTQ files.",
+      "examples": [
+        "SELECT NAME, MATE FROM read_fastq('r1.fq', mate_path := 'r2.fq') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_gff",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, region := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_gff",
+      "description": "Read GFF annotations with optional parsed attribute maps and indexed region filtering.",
+      "examples": [
+        "SELECT seqname, feature, start, \"end\" FROM read_gff('gff_file.gff.gz') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_gtf",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, region := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_gtf",
+      "description": "Read GTF annotations with optional parsed attribute maps and indexed region filtering.",
+      "examples": [
+        "SELECT seqname, feature, start, \"end\" FROM read_gtf('annotations.gtf.gz') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_tabix",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_tabix(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, region := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_tabix",
+      "description": "Read generic tabix-indexed text data with optional header handling and type inference.",
+      "examples": [
+        "SELECT * FROM read_tabix('meta_tabix.tsv.gz') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "fasta_index",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "fasta_index(path, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_fasta_index",
+      "description": "Build a FASTA index and return the index path used by the operation.",
+      "examples": [
+        "SELECT * FROM fasta_index('ce.fa');"
+      ]
+    },
+    {
+      "name": "read_hts_header",
+      "kind": "table",
+      "category": "Metadata",
+      "signature": "read_hts_header(path, format := NULL, mode := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_hts_header",
+      "description": "Inspect HTS headers in parsed, raw, or combined form across supported formats.",
+      "examples": [
+        "SELECT record_type, id FROM read_hts_header('formatcols.vcf.gz') LIMIT 10;"
+      ]
+    },
+    {
+      "name": "read_hts_index",
+      "kind": "table",
+      "category": "Metadata",
+      "signature": "read_hts_index(path, format := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_hts_index",
+      "description": "Inspect high-level HTS index metadata such as sequence names and mapped counts.",
+      "examples": [
+        "SELECT seqname, index_type FROM read_hts_index('vcf_file.bcf');"
+      ]
+    },
+    {
+      "name": "read_hts_index_spans",
+      "kind": "table_macro",
+      "category": "Metadata",
+      "signature": "read_hts_index_spans(path, format := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_hts_index_spans",
+      "description": "Expand index metadata into span and chunk rows suitable for low-level index inspection.",
+      "examples": [
+        "SELECT seqname, chunk_beg_vo, chunk_end_vo FROM read_hts_index_spans('vcf_file.bcf') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_hts_index_raw",
+      "kind": "table_macro",
+      "category": "Metadata",
+      "signature": "read_hts_index_raw(path, format := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_hts_index_raw",
+      "description": "Return the raw on-disk HTS index blob together with basic identifying metadata.",
+      "examples": [
+        "SELECT length(raw) FROM read_hts_index_raw('formatcols.vcf.gz');"
+      ]
+    },
+    {
+      "name": "seq_revcomp",
+      "kind": "scalar",
+      "category": "Sequence UDFs",
+      "signature": "seq_revcomp(sequence)",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.",
+      "examples": [
+        "SELECT seq_revcomp('ACGTN');"
+      ]
+    },
+    {
+      "name": "seq_canonical",
+      "kind": "scalar",
+      "category": "Sequence UDFs",
+      "signature": "seq_canonical(sequence)",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Return the lexicographically smaller of a sequence and its reverse complement.",
+      "examples": [
+        "SELECT seq_canonical('ACGTN');"
+      ]
+    },
+    {
+      "name": "seq_hash_2bit",
+      "kind": "scalar",
+      "category": "Sequence UDFs",
+      "signature": "seq_hash_2bit(sequence)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Encode a short DNA sequence as a 2-bit unsigned integer hash.",
+      "examples": [
+        "SELECT seq_hash_2bit('ACGT');"
+      ]
+    },
+    {
+      "name": "seq_gc_content",
+      "kind": "scalar",
+      "category": "Sequence UDFs",
+      "signature": "seq_gc_content(sequence)",
+      "returns": "DOUBLE",
+      "r_wrapper": "",
+      "description": "Compute GC fraction for a DNA sequence as a value between 0 and 1.",
+      "examples": [
+        "SELECT seq_gc_content('ACGT');"
+      ]
+    },
+    {
+      "name": "seq_kmers",
+      "kind": "table",
+      "category": "Sequence UDFs",
+      "signature": "seq_kmers(sequence, k, canonical := FALSE)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Expand a sequence into positional k-mers with optional canonicalization.",
+      "examples": [
+        "SELECT * FROM seq_kmers('ACGT', 2);"
+      ]
+    },
+    {
+      "name": "is_segmented",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_segmented(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the SAM flag marks a read as part of a segmented template.",
+      "examples": [
+        "SELECT is_segmented(99);"
+      ]
+    },
+    {
+      "name": "is_properly_aligned",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_properly_aligned(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the SAM flag indicates a properly aligned read pair.",
+      "examples": [
+        "SELECT is_properly_aligned(99);"
+      ]
+    },
+    {
+      "name": "is_properly_segmented",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_properly_segmented(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Alias for is_properly_aligned(flag) using segmented-read terminology.",
+      "examples": [
+        "SELECT is_properly_segmented(99);"
+      ]
+    },
+    {
+      "name": "is_unmapped",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_unmapped(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the read itself is unmapped according to the SAM flag.",
+      "examples": [
+        "SELECT is_unmapped(4);"
+      ]
+    },
+    {
+      "name": "is_mate_unmapped",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_mate_unmapped(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the mate read is flagged as unmapped.",
+      "examples": [
+        "SELECT is_mate_unmapped(9);"
+      ]
+    },
+    {
+      "name": "is_reverse_complemented",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_reverse_complemented(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the read is aligned to the reverse strand.",
+      "examples": [
+        "SELECT is_reverse_complemented(16);"
+      ]
+    },
+    {
+      "name": "is_mate_reverse_complemented",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_mate_reverse_complemented(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the mate read is aligned to the reverse strand.",
+      "examples": [
+        "SELECT is_mate_reverse_complemented(32);"
+      ]
+    },
+    {
+      "name": "is_first_segment",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_first_segment(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the read is marked as the first segment in the template.",
+      "examples": [
+        "SELECT is_first_segment(64);"
+      ]
+    },
+    {
+      "name": "is_last_segment",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_last_segment(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the read is marked as the last segment in the template.",
+      "examples": [
+        "SELECT is_last_segment(128);"
+      ]
+    },
+    {
+      "name": "is_secondary",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_secondary(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the alignment is marked as secondary.",
+      "examples": [
+        "SELECT is_secondary(256);"
+      ]
+    },
+    {
+      "name": "is_qc_fail",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_qc_fail(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the read failed vendor or pipeline quality checks.",
+      "examples": [
+        "SELECT is_qc_fail(512);"
+      ]
+    },
+    {
+      "name": "is_duplicate",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_duplicate(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the alignment is flagged as a duplicate.",
+      "examples": [
+        "SELECT is_duplicate(1024);"
+      ]
+    },
+    {
+      "name": "is_supplementary",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_supplementary(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the alignment is marked as supplementary.",
+      "examples": [
+        "SELECT is_supplementary(2048);"
+      ]
+    }
+  ]
+}
