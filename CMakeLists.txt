@@ -73,6 +73,8 @@ set(EXTENSION_SOURCES
         src/duckhts.c
         src/bcf_reader.c
         src/bam_reader.c
+        src/bgzip.c
+        src/hts_index_builder.c
         src/seq_reader.c
         src/kmer_udf.c
         src/tabix_reader.c

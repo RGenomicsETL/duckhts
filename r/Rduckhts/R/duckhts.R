@@ -793,6 +793,171 @@ rduckhts_fasta_index <- function(con, path, index_path = NULL) {
   DBI::dbGetQuery(con, query)
 }
 
+#' BGZF Compress a File
+#'
+#' Compresses a plain file to BGZF using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the input file
+#' @param output_path Optional explicit output path
+#' @param threads BGZF worker thread count
+#' @param level Compression level, or -1 for the htslib default
+#' @param keep Keep the original input file after compression
+#' @param overwrite Overwrite an existing output file
+#'
+#' @return A data frame describing the created BGZF file
+#'
+#' @export
+rduckhts_bgzip <- function(
+  con,
+  path,
+  output_path = NULL,
+  threads = 4,
+  level = -1,
+  keep = TRUE,
+  overwrite = FALSE
+) {
+  params <- list(threads = threads, level = level)
+  if (!is.null(output_path)) params$output_path <- sprintf("'%s'", output_path)
+  if (keep) params$keep <- "true"
+  if (overwrite) params$overwrite <- "true"
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM bgzip('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' BGZF Decompress a File
+#'
+#' Decompresses a BGZF file using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the BGZF-compressed input file
+#' @param output_path Optional explicit output path
+#' @param threads BGZF worker thread count
+#' @param keep Keep the compressed input file after decompression
+#' @param overwrite Overwrite an existing output file
+#'
+#' @return A data frame describing the created output file
+#'
+#' @export
+rduckhts_bgunzip <- function(
+  con,
+  path,
+  output_path = NULL,
+  threads = 4,
+  keep = TRUE,
+  overwrite = FALSE
+) {
+  params <- list(threads = threads)
+  if (!is.null(output_path)) params$output_path <- sprintf("'%s'", output_path)
+  if (keep) params$keep <- "true"
+  if (overwrite) params$overwrite <- "true"
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM bgunzip('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Build BAM or CRAM Index
+#'
+#' Builds a BAM or CRAM index using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the input BAM or CRAM file
+#' @param index_path Optional explicit output path for the created index
+#' @param min_shift Index format selector used by htslib
+#' @param threads htslib indexing thread count
+#'
+#' @return A data frame with `success`, `index_path`, and `index_format`
+#'
+#' @export
+rduckhts_bam_index <- function(
+  con,
+  path,
+  index_path = NULL,
+  min_shift = 0,
+  threads = 4
+) {
+  params <- list(min_shift = min_shift, threads = threads)
+  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM bam_index('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Build VCF or BCF Index
+#'
+#' Builds a TBI or CSI index for a VCF/BCF file using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the input VCF/BCF file
+#' @param index_path Optional explicit output path for the created index
+#' @param min_shift Optional explicit min_shift passed to htslib
+#' @param threads htslib indexing thread count
+#'
+#' @return A data frame with `success`, `index_path`, and `index_format`
+#'
+#' @export
+rduckhts_bcf_index <- function(
+  con,
+  path,
+  index_path = NULL,
+  min_shift = NULL,
+  threads = 4
+) {
+  params <- list(threads = threads)
+  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
+  if (!is.null(min_shift)) params$min_shift <- min_shift
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM bcf_index('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
+#' Build Tabix Index
+#'
+#' Builds a tabix index for a BGZF-compressed text file using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the BGZF-compressed input file
+#' @param preset Optional preset such as `"vcf"`, `"bed"`, `"gff"`, or `"sam"`
+#' @param index_path Optional explicit output path for the created index
+#' @param min_shift Index format selector used by htslib
+#' @param threads htslib indexing thread count
+#' @param seq_col,start_col,end_col Optional explicit tabix coordinate columns
+#' @param comment_char Optional tabix comment/header prefix
+#' @param skip_lines Optional fixed number of header lines to skip
+#'
+#' @return A data frame with `success`, `index_path`, and `index_format`
+#'
+#' @export
+rduckhts_tabix_index <- function(
+  con,
+  path,
+  preset = "vcf",
+  index_path = NULL,
+  min_shift = 0,
+  threads = 4,
+  seq_col = NULL,
+  start_col = NULL,
+  end_col = NULL,
+  comment_char = NULL,
+  skip_lines = NULL
+) {
+  params <- list(
+    preset = sprintf("'%s'", preset),
+    min_shift = min_shift,
+    threads = threads
+  )
+  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
+  if (!is.null(seq_col)) params$seq_col <- seq_col
+  if (!is.null(start_col)) params$start_col <- start_col
+  if (!is.null(end_col)) params$end_col <- end_col
+  if (!is.null(comment_char)) params$comment_char <- sprintf("'%s'", comment_char)
+  if (!is.null(skip_lines)) params$skip_lines <- skip_lines
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM tabix_index('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
 #' Create FASTQ Table
 #'
 #' Creates a DuckDB table from FASTQ files using the DuckHTS extension.

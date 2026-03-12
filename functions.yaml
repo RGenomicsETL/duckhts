@@ -144,6 +144,66 @@
       ]
     },
     {
+      "name": "bgzip",
+      "kind": "table",
+      "category": "Compression",
+      "signature": "bgzip(path, output_path := NULL, threads := 4, level := -1, keep := TRUE, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bgzip",
+      "description": "Compress a plain file to BGZF and return the created output path and byte counts.",
+      "examples": [
+        "SELECT * FROM bgzip('regions.bed');"
+      ]
+    },
+    {
+      "name": "bgunzip",
+      "kind": "table",
+      "category": "Compression",
+      "signature": "bgunzip(path, output_path := NULL, threads := 4, keep := TRUE, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bgunzip",
+      "description": "Decompress a BGZF-compressed file and return the created output path and byte counts.",
+      "examples": [
+        "SELECT * FROM bgunzip('regions.bed.gz');"
+      ]
+    },
+    {
+      "name": "bam_index",
+      "kind": "table",
+      "category": "Indexing",
+      "signature": "bam_index(path, index_path := NULL, min_shift := 0, threads := 4)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bam_index",
+      "description": "Build a BAM or CRAM index and report the written index path and format.",
+      "examples": [
+        "SELECT * FROM bam_index('range.bam');"
+      ]
+    },
+    {
+      "name": "bcf_index",
+      "kind": "table",
+      "category": "Indexing",
+      "signature": "bcf_index(path, index_path := NULL, min_shift := NULL, threads := 4)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bcf_index",
+      "description": "Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.",
+      "examples": [
+        "SELECT * FROM bcf_index('formatcols.vcf.gz');"
+      ]
+    },
+    {
+      "name": "tabix_index",
+      "kind": "table",
+      "category": "Indexing",
+      "signature": "tabix_index(path, preset := 'vcf', index_path := NULL, min_shift := 0, threads := 4, seq_col := NULL, start_col := NULL, end_col := NULL, comment_char := NULL, skip_lines := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_tabix_index",
+      "description": "Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns.",
+      "examples": [
+        "SELECT * FROM tabix_index('gff_file.gff.gz', preset := 'gff');"
+      ]
+    },
+    {
       "name": "read_hts_header",
       "kind": "table",
       "category": "Metadata",

@@ -18,6 +18,13 @@ extern void register_read_bam_function(duckdb_connection connection);
 extern void register_read_fasta_function(duckdb_connection connection);
 extern void register_read_fastq_function(duckdb_connection connection);
 extern void register_fasta_index_function(duckdb_connection connection);
+/* bgzip.c */
+extern void register_bgzip_function(duckdb_connection connection);
+extern void register_bgunzip_function(duckdb_connection connection);
+/* hts_index_builder.c */
+extern void register_bam_index_function(duckdb_connection connection);
+extern void register_bcf_index_function(duckdb_connection connection);
+extern void register_tabix_index_function(duckdb_connection connection);
 /* kmer_udf.c */
 extern void register_kmer_udf_functions(duckdb_connection connection);
 /* tabix_reader.c */
@@ -46,6 +53,11 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_fasta_function(connection);
     register_read_fastq_function(connection);
     register_fasta_index_function(connection);
+    register_bgzip_function(connection);
+    register_bgunzip_function(connection);
+    register_bam_index_function(connection);
+    register_bcf_index_function(connection);
+    register_tabix_index_function(connection);
     register_kmer_udf_functions(connection);
     register_read_tabix_function(connection);
     register_read_gtf_function(connection);
