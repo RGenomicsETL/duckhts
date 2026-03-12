@@ -97,15 +97,338 @@
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT COUNT(*) AS n FROM reads"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    n</span></span>
 <span><span class="co">#&gt; 1 10</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="function-catalog">Function Catalog<a class="anchor" aria-label="anchor" href="#function-catalog"></a>
+</h2>
+<p>Use <code><a href="reference/rduckhts_functions.html">rduckhts_functions()</a></code> inside R to inspect the generated extension catalog.</p>
+</div>
+<div class="section level2">
+<h2 id="extension-function-catalog">Extension Function Catalog<a class="anchor" aria-label="anchor" href="#extension-function-catalog"></a>
+</h2>
+<p>This section is generated from <code>functions.yaml</code>.</p>
+<div class="section level3">
+<h3 id="readers">Readers<a class="anchor" aria-label="anchor" href="#readers"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="10%">
+<col width="4%">
+<col width="6%">
+<col width="16%">
+<col width="61%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><code>read_bcf</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_bcf</code></td>
+<td>Read VCF and BCF variant data with typed INFO, FORMAT, and optional tidy sample output.</td>
+</tr>
+<tr class="even">
+<td><code>read_bam</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_bam</code></td>
+<td>Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps.</td>
+</tr>
+<tr class="odd">
+<td><code>read_fasta</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_fasta</code></td>
+<td>Read FASTA records or indexed FASTA regions as sequence rows.</td>
+</tr>
+<tr class="even">
+<td><code>read_fastq</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_fastq</code></td>
+<td>Read single-end, paired-end, or interleaved FASTQ files.</td>
+</tr>
+<tr class="odd">
+<td><code>read_gff</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_gff</code></td>
+<td>Read GFF annotations with optional parsed attribute maps and indexed region filtering.</td>
+</tr>
+<tr class="even">
+<td><code>read_gtf</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_gtf</code></td>
+<td>Read GTF annotations with optional parsed attribute maps and indexed region filtering.</td>
+</tr>
+<tr class="odd">
+<td><code>read_tabix</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_tabix</code></td>
+<td>Read generic tabix-indexed text data with optional header handling and type inference.</td>
+</tr>
+<tr class="even">
+<td><code>fasta_index</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_fasta_index</code></td>
+<td>Build a FASTA index and return the index path used by the operation.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section level3">
+<h3 id="metadata">Metadata<a class="anchor" aria-label="anchor" href="#metadata"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="14%">
+<col width="7%">
+<col width="5%">
+<col width="17%">
+<col width="54%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><code>read_hts_header</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_hts_header</code></td>
+<td>Inspect HTS headers in parsed, raw, or combined form across supported formats.</td>
+</tr>
+<tr class="even">
+<td><code>read_hts_index</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_hts_index</code></td>
+<td>Inspect high-level HTS index metadata such as sequence names and mapped counts.</td>
+</tr>
+<tr class="odd">
+<td><code>read_hts_index_spans</code></td>
+<td>table_macro</td>
+<td>table</td>
+<td><code>rduckhts_hts_index_spans</code></td>
+<td>Expand index metadata into span and chunk rows suitable for low-level index inspection.</td>
+</tr>
+<tr class="even">
+<td><code>read_hts_index_raw</code></td>
+<td>table_macro</td>
+<td>table</td>
+<td><code>rduckhts_hts_index_raw</code></td>
+<td>Return the raw on-disk HTS index blob together with basic identifying metadata.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section level3">
+<h3 id="sequence-udfs">Sequence UDFs<a class="anchor" aria-label="anchor" href="#sequence-udfs"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="12%">
+<col width="5%">
+<col width="9%">
+<col width="6%">
+<col width="66%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><code>seq_revcomp</code></td>
+<td>scalar</td>
+<td>VARCHAR</td>
+<td></td>
+<td>Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.</td>
+</tr>
+<tr class="even">
+<td><code>seq_canonical</code></td>
+<td>scalar</td>
+<td>VARCHAR</td>
+<td></td>
+<td>Return the lexicographically smaller of a sequence and its reverse complement.</td>
+</tr>
+<tr class="odd">
+<td><code>seq_hash_2bit</code></td>
+<td>scalar</td>
+<td>UBIGINT</td>
+<td></td>
+<td>Encode a short DNA sequence as a 2-bit unsigned integer hash.</td>
+</tr>
+<tr class="even">
+<td><code>seq_encode_4bit</code></td>
+<td>scalar</td>
+<td>UTINYINT[]</td>
+<td></td>
+<td>Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.</td>
+</tr>
+<tr class="odd">
+<td><code>seq_decode_4bit</code></td>
+<td>scalar</td>
+<td>VARCHAR</td>
+<td></td>
+<td>Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.</td>
+</tr>
+<tr class="even">
+<td><code>seq_gc_content</code></td>
+<td>scalar</td>
+<td>DOUBLE</td>
+<td></td>
+<td>Compute GC fraction for a DNA sequence as a value between 0 and 1.</td>
+</tr>
+<tr class="odd">
+<td><code>seq_kmers</code></td>
+<td>table</td>
+<td>table</td>
+<td></td>
+<td>Expand a sequence into positional k-mers with optional canonicalization.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section level3">
+<h3 id="sam-flag-udfs">SAM Flag UDFs<a class="anchor" aria-label="anchor" href="#sam-flag-udfs"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="24%">
+<col width="6%">
+<col width="6%">
+<col width="7%">
+<col width="55%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><code>is_segmented</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the SAM flag marks a read as part of a segmented template.</td>
+</tr>
+<tr class="even">
+<td><code>is_properly_aligned</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the SAM flag indicates a properly aligned read pair.</td>
+</tr>
+<tr class="odd">
+<td><code>is_properly_segmented</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Alias for is_properly_aligned(flag) using segmented-read terminology.</td>
+</tr>
+<tr class="even">
+<td><code>is_unmapped</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the read itself is unmapped according to the SAM flag.</td>
+</tr>
+<tr class="odd">
+<td><code>is_mate_unmapped</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the mate read is flagged as unmapped.</td>
+</tr>
+<tr class="even">
+<td><code>is_reverse_complemented</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the read is aligned to the reverse strand.</td>
+</tr>
+<tr class="odd">
+<td><code>is_mate_reverse_complemented</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the mate read is aligned to the reverse strand.</td>
+</tr>
+<tr class="even">
+<td><code>is_first_segment</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the read is marked as the first segment in the template.</td>
+</tr>
+<tr class="odd">
+<td><code>is_last_segment</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the read is marked as the last segment in the template.</td>
+</tr>
+<tr class="even">
+<td><code>is_secondary</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the alignment is marked as secondary.</td>
+</tr>
+<tr class="odd">
+<td><code>is_qc_fail</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the read failed vendor or pipeline quality checks.</td>
+</tr>
+<tr class="even">
+<td><code>is_duplicate</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the alignment is flagged as a duplicate.</td>
+</tr>
+<tr class="odd">
+<td><code>is_supplementary</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td></td>
+<td>Test whether the alignment is marked as supplementary.</td>
+</tr>
+</tbody>
+</table>
+</div>
 <div class="section level3">
 <h3 id="fasta-region-queries">FASTA region queries<a class="anchor" aria-label="anchor" href="#fasta-region-queries"></a>
 </h3>
 <p><code>read_fasta</code> now supports indexed region queries via <code>rduckhts_fasta(..., region = ...)</code>.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
+<span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span></span>
-<span><span class="co">#&gt;   success index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE</span></span>
+<span><span class="co">#&gt;   success                                        index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpsFTZLs/duckhts_readme_3a9dd157bf4bfd.fai</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="st">"fasta_region"</span>, <span class="va">fasta_path</span>,</span>
@@ -114,7 +437,8 @@
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT NAME, length(SEQUENCE) AS n FROM fasta_region"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;           NAME  n</span></span>
-<span><span class="co">#&gt; 1 CHROMOSOME_I 25</span></span></code></pre></div>
+<span><span class="co">#&gt; 1 CHROMOSOME_I 25</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">fai_path</span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -146,7 +470,7 @@
 <span><span class="co">#&gt; 1                       NULL        NULL         0/1         245          NA</span></span>
 <span><span class="co">#&gt; 2                       NULL        NULL         0/1         245          32</span></span>
 <span><span class="co">#&gt; 3               -20, -5, -20        NULL         0/1         409          35</span></span>
-<span><span class="co">#&gt; 4 -20, -5, -20, -20, -5, -20        0, 1          2|         409          35</span></span>
+<span><span class="co">#&gt; 4 -20, -5, -20, -20, -5, -20        0, 1           2         409          35</span></span>
 <span><span class="co">#&gt; 5                       NULL        NULL         0/1         245          32</span></span>
 <span><span class="co">#&gt;    FORMAT_GL_B</span></span>
 <span><span class="co">#&gt; 1         NULL</span></span>
@@ -326,12 +650,18 @@
 <span></span>
 <span><span class="va">header_raw</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, mode <span class="op">=</span> <span class="st">"raw"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">header_raw</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"idx"</span>, <span class="st">"raw"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   idx                  raw</span></span>
-<span><span class="co">#&gt; 1   0 ##fileformat=VCFv4.1</span></span>
-<span><span class="co">#&gt; 2   1 ##fileformat=VCFv4.1</span></span>
-<span><span class="co">#&gt; 3   2 ##fileformat=VCFv4.1</span></span>
-<span><span class="co">#&gt; 4   3 ##fileformat=VCFv4.1</span></span>
-<span><span class="co">#&gt; 5   4 ##fileformat=VCFv4.1</span></span>
+<span><span class="co">#&gt;   idx</span></span>
+<span><span class="co">#&gt; 1   0</span></span>
+<span><span class="co">#&gt; 2   1</span></span>
+<span><span class="co">#&gt; 3   2</span></span>
+<span><span class="co">#&gt; 4   3</span></span>
+<span><span class="co">#&gt; 5   4</span></span>
+<span><span class="co">#&gt;                                                                                                                                                          raw</span></span>
+<span><span class="co">#&gt; 1                                                                                                                                       ##fileformat=VCFv4.1</span></span>
+<span><span class="co">#&gt; 2                                                                                                        ##FILTER=&lt;ID=PASS,Description="All filters passed"&gt;</span></span>
+<span><span class="co">#&gt; 3                                                                                           ##INFO=&lt;ID=TEST,Number=1,Type=Integer,Description="Testing Tag"&gt;</span></span>
+<span><span class="co">#&gt; 4 ##FORMAT=&lt;ID=TT,Number=A,Type=Integer,Description="Testing Tag, with commas and \\"escapes\\" and escaped escapes combined with \\\\\\"quotes\\\\\\\\\\""&gt;</span></span>
+<span><span class="co">#&gt; 5                       ##INFO=&lt;ID=DP4,Number=4,Type=Integer,Description="# high-quality ref-forward bases, ref-reverse, alt-forward and alt-reverse bases"&gt;</span></span>
 <span></span>
 <span><span class="va">index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index.html">rduckhts_hts_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"seqname"</span>, <span class="st">"mapped"</span>, <span class="st">"unmapped"</span>, <span class="st">"index_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
