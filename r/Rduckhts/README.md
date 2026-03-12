@@ -100,6 +100,21 @@ This section is generated from `functions.yaml`.
 | `read_tabix`  | table | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.  |
 | `fasta_index` | table | table   | `rduckhts_fasta_index` | Build a FASTA index and return the index path used by the operation.                    |
 
+### Compression
+
+| Function  | Kind  | Returns | R helper           | Description                                                                           |
+|-----------|-------|---------|--------------------|---------------------------------------------------------------------------------------|
+| `bgzip`   | table | table   | `rduckhts_bgzip`   | Compress a plain file to BGZF and return the created output path and byte counts.     |
+| `bgunzip` | table | table   | `rduckhts_bgunzip` | Decompress a BGZF-compressed file and return the created output path and byte counts. |
+
+### Indexing
+
+| Function      | Kind  | Returns | R helper               | Description                                                                                        |
+|---------------|-------|---------|------------------------|----------------------------------------------------------------------------------------------------|
+| `bam_index`   | table | table   | `rduckhts_bam_index`   | Build a BAM or CRAM index and report the written index path and format.                            |
+| `bcf_index`   | table | table   | `rduckhts_bcf_index`   | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.       |
+| `tabix_index` | table | table   | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
+
 ### Metadata
 
 | Function               | Kind        | Returns | R helper                   | Description                                                                             |
@@ -191,7 +206,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpIMVlkW/duckhts_readme_3ac4d24488cf01.fai
+#> 1    TRUE /tmp/RtmpfJHiNU/duckhts_readme_3cacbe6efe50b4.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
