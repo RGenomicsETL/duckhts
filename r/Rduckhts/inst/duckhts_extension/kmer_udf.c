@@ -450,52 +450,9 @@ static void sam_flag_scalar(duckdb_function_info info,
     }
 }
 
-static void sam_is_segmented_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_PAIRED);
-}
-
-static void sam_is_properly_aligned_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_PROPER_PAIR);
-}
-
-static void sam_is_unmapped_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_UNMAPPED);
-}
-
-static void sam_is_mate_unmapped_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_MATE_UNMAPPED);
-}
-
-static void sam_is_reverse_complemented_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_REVERSE);
-}
-
-static void sam_is_mate_reverse_complemented_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_MATE_REVERSE);
-}
-
-static void sam_is_first_segment_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_READ1);
-}
-
-static void sam_is_last_segment_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_READ2);
-}
-
-static void sam_is_secondary_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_SECONDARY);
-}
-
-static void sam_is_qc_fail_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_QCFAIL);
-}
-
-static void sam_is_duplicate_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_DUPLICATE);
-}
-
-static void sam_is_supplementary_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    sam_flag_scalar(info, input, output, SAM_FLAG_SUPPLEMENTARY);
+static void sam_flag_predicate_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    uint16_t mask = (uint16_t)(uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    sam_flag_scalar(info, input, output, mask);
 }
 
 typedef struct {
@@ -786,7 +743,7 @@ static void register_seq_gc_content_function(duckdb_connection connection) {
 
 static void register_sam_flag_predicate_function(duckdb_connection connection,
                                                  const char *name,
-                                                 duckdb_scalar_function_t function) {
+                                                 uint16_t mask) {
     duckdb_scalar_function fn = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(fn, name);
 
@@ -794,7 +751,8 @@ static void register_sam_flag_predicate_function(duckdb_connection connection,
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_scalar_function_add_parameter(fn, usmallint_type);
     duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_function(fn, function);
+    duckdb_scalar_function_set_function(fn, sam_flag_predicate_scalar);
+    duckdb_scalar_function_set_extra_info(fn, (void *)(uintptr_t)mask, NULL);
 
     duckdb_register_scalar_function(connection, fn);
 
@@ -835,16 +793,16 @@ void register_kmer_udf_functions(duckdb_connection connection) {
     register_seq_decode_4bit_function(connection);
     register_seq_gc_content_function(connection);
     register_seq_kmers_function(connection);
-    register_sam_flag_predicate_function(connection, "is_segmented", sam_is_segmented_scalar);
-    register_sam_flag_predicate_function(connection, "is_properly_aligned", sam_is_properly_aligned_scalar);
-    register_sam_flag_predicate_function(connection, "is_unmapped", sam_is_unmapped_scalar);
-    register_sam_flag_predicate_function(connection, "is_mate_unmapped", sam_is_mate_unmapped_scalar);
-    register_sam_flag_predicate_function(connection, "is_reverse_complemented", sam_is_reverse_complemented_scalar);
-    register_sam_flag_predicate_function(connection, "is_mate_reverse_complemented", sam_is_mate_reverse_complemented_scalar);
-    register_sam_flag_predicate_function(connection, "is_first_segment", sam_is_first_segment_scalar);
-    register_sam_flag_predicate_function(connection, "is_last_segment", sam_is_last_segment_scalar);
-    register_sam_flag_predicate_function(connection, "is_secondary", sam_is_secondary_scalar);
-    register_sam_flag_predicate_function(connection, "is_qc_fail", sam_is_qc_fail_scalar);
-    register_sam_flag_predicate_function(connection, "is_duplicate", sam_is_duplicate_scalar);
-    register_sam_flag_predicate_function(connection, "is_supplementary", sam_is_supplementary_scalar);
+    register_sam_flag_predicate_function(connection, "is_segmented", SAM_FLAG_PAIRED);
+    register_sam_flag_predicate_function(connection, "is_properly_aligned", SAM_FLAG_PROPER_PAIR);
+    register_sam_flag_predicate_function(connection, "is_unmapped", SAM_FLAG_UNMAPPED);
+    register_sam_flag_predicate_function(connection, "is_mate_unmapped", SAM_FLAG_MATE_UNMAPPED);
+    register_sam_flag_predicate_function(connection, "is_reverse_complemented", SAM_FLAG_REVERSE);
+    register_sam_flag_predicate_function(connection, "is_mate_reverse_complemented", SAM_FLAG_MATE_REVERSE);
+    register_sam_flag_predicate_function(connection, "is_first_segment", SAM_FLAG_READ1);
+    register_sam_flag_predicate_function(connection, "is_last_segment", SAM_FLAG_READ2);
+    register_sam_flag_predicate_function(connection, "is_secondary", SAM_FLAG_SECONDARY);
+    register_sam_flag_predicate_function(connection, "is_qc_fail", SAM_FLAG_QCFAIL);
+    register_sam_flag_predicate_function(connection, "is_duplicate", SAM_FLAG_DUPLICATE);
+    register_sam_flag_predicate_function(connection, "is_supplementary", SAM_FLAG_SUPPLEMENTARY);
 }
