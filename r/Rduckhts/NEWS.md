@@ -1,4 +1,13 @@
 
+# Rduckhts 0.1.3-0.0.2.9001
+
+- Bundle the `duckhts` `0.1.3.9001` extension update.
+- Add `rduckhts_bgzip()`, `rduckhts_bgunzip()`, `rduckhts_bam_index()`, `rduckhts_bcf_index()`, and `rduckhts_tabix_index()` wrappers for the new extension compression and indexing functions.
+- Expose the newer bundled extension surface in the package catalog, including HTS metadata readers, additional sequence helpers, and the expanded SAM/tag and tabix reader capabilities.
+- Bootstrap the new extension sources into the package build and update `configure`/`configure.win` so the bundled extension compiles them on Unix and Windows.
+- Regenerate the package-bundled function catalog and roxygen documentation for the new wrappers.
+- Add installed-package tinytest coverage for BGZF round-trips, tabix indexing, and BAM/BCF index creation.
+
 # Rduckhts 0.1.3-0.0.2.9000
 
 # Rduckhts 0.1.3-0.0.2

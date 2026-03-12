@@ -25,7 +25,6 @@ seq_gc_content	scalar	Sequence UDFs	seq_gc_content(sequence)	DOUBLE		Compute GC 
 seq_kmers	table	Sequence UDFs	seq_kmers(sequence, k, canonical := FALSE)	table		Expand a sequence into positional k-mers with optional canonicalization.	SELECT * FROM seq_kmers('ACGT', 2);
 is_segmented	scalar	SAM Flag UDFs	is_segmented(flag)	BOOLEAN		Test whether the SAM flag marks a read as part of a segmented template.	SELECT is_segmented(99);
 is_properly_aligned	scalar	SAM Flag UDFs	is_properly_aligned(flag)	BOOLEAN		Test whether the SAM flag indicates a properly aligned read pair.	SELECT is_properly_aligned(99);
-is_properly_segmented	scalar	SAM Flag UDFs	is_properly_segmented(flag)	BOOLEAN		Alias for is_properly_aligned(flag) using segmented-read terminology.	SELECT is_properly_segmented(99);
 is_unmapped	scalar	SAM Flag UDFs	is_unmapped(flag)	BOOLEAN		Test whether the read itself is unmapped according to the SAM flag.	SELECT is_unmapped(4);
 is_mate_unmapped	scalar	SAM Flag UDFs	is_mate_unmapped(flag)	BOOLEAN		Test whether the mate read is flagged as unmapped.	SELECT is_mate_unmapped(9);
 is_reverse_complemented	scalar	SAM Flag UDFs	is_reverse_complemented(flag)	BOOLEAN		Test whether the read is aligned to the reverse strand.	SELECT is_reverse_complemented(16);

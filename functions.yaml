@@ -360,18 +360,6 @@
       ]
     },
     {
-      "name": "is_properly_segmented",
-      "kind": "scalar",
-      "category": "SAM Flag UDFs",
-      "signature": "is_properly_segmented(flag)",
-      "returns": "BOOLEAN",
-      "r_wrapper": "",
-      "description": "Alias for is_properly_aligned(flag) using segmented-read terminology.",
-      "examples": [
-        "SELECT is_properly_segmented(99);"
-      ]
-    },
-    {
       "name": "is_unmapped",
       "kind": "scalar",
       "category": "SAM Flag UDFs",

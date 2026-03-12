@@ -57,7 +57,6 @@ This section is generated from `functions.yaml`.
 | --- | --- | --- | --- | --- |
 | `is_segmented` | scalar | BOOLEAN |  | Test whether the SAM flag marks a read as part of a segmented template. |
 | `is_properly_aligned` | scalar | BOOLEAN |  | Test whether the SAM flag indicates a properly aligned read pair. |
-| `is_properly_segmented` | scalar | BOOLEAN |  | Alias for is_properly_aligned(flag) using segmented-read terminology. |
 | `is_unmapped` | scalar | BOOLEAN |  | Test whether the read itself is unmapped according to the SAM flag. |
 | `is_mate_unmapped` | scalar | BOOLEAN |  | Test whether the mate read is flagged as unmapped. |
 | `is_reverse_complemented` | scalar | BOOLEAN |  | Test whether the read is aligned to the reverse strand. |

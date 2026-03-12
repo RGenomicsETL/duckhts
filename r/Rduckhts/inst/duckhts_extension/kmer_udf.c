@@ -837,7 +837,6 @@ void register_kmer_udf_functions(duckdb_connection connection) {
     register_seq_kmers_function(connection);
     register_sam_flag_predicate_function(connection, "is_segmented", sam_is_segmented_scalar);
     register_sam_flag_predicate_function(connection, "is_properly_aligned", sam_is_properly_aligned_scalar);
-    register_sam_flag_predicate_function(connection, "is_properly_segmented", sam_is_properly_aligned_scalar);
     register_sam_flag_predicate_function(connection, "is_unmapped", sam_is_unmapped_scalar);
     register_sam_flag_predicate_function(connection, "is_mate_unmapped", sam_is_mate_unmapped_scalar);
     register_sam_flag_predicate_function(connection, "is_reverse_complemented", sam_is_reverse_complemented_scalar);

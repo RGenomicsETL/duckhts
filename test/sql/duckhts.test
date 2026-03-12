@@ -633,12 +633,10 @@ LIMIT 1;
 ----
 true	false	false	true	true
 
-# --- duplicate Exon-compatible aliases stay aligned ---
-query TT
-SELECT
-  CAST(is_properly_aligned(FLAG) AS VARCHAR),
-  CAST(is_properly_segmented(FLAG) AS VARCHAR)
+# --- properly aligned SAM flag helper ---
+query T
+SELECT CAST(is_properly_aligned(FLAG) AS VARCHAR)
 FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
 LIMIT 1;
 ----
-false	false
+false

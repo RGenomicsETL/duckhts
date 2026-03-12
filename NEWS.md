@@ -1,5 +1,16 @@
 # DuckHTS Extension News
 
+## duckhts 0.1.3.9001 (2026-03-13)
+
+- add BGZF compression and decompression table functions: `bgzip(...)` and `bgunzip(...)`, both defaulting to preserving the source file unless `keep := FALSE` is requested
+- add HTS index builders: `bam_index(...)`, `bcf_index(...)`, and `tabix_index(...)`
+- add HTS metadata readers: `read_hts_header(...)`, `read_hts_index(...)`, `read_hts_index_spans(...)`, and `read_hts_index_raw(...)`
+- add sequence helpers: `seq_encode_4bit(...)`, `seq_decode_4bit(...)`, `seq_gc_content(...)`, and `seq_kmers(...)`
+- extend `read_bam(...)` with `standard_tags := TRUE` typed SAM tag columns and `auxiliary_tags := TRUE` for the remaining tags as a map
+- improve `read_tabix(...)`, `read_gff(...)`, and `read_gtf(...)` with header-based column names, basic type inference, explicit column type overrides, and tabix metadata-aware parsing
+- harden region-query behavior for files with incomplete contig metadata by returning empty results with a warning instead of failing
+- add SQL coverage for the new metadata readers, sequence/SAM-flag helpers, typed tabix parsing, and BGZF/index round-trips
+
 ## duckhts 0.1.1.9000 (2026-02-10)
 
 - validate paired FASTQ mate files by exact QNAME match and equal record counts
