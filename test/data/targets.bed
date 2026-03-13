@@ -1,0 +1,4 @@
+CHROMOSOME_I	0	10	target1	100	+	0	10	255,0,0	2	5,5	0,5
+CHROMOSOME_I	10	20	target2	200	-	10	20	0,0,255	1	10	0
+CHROMOSOME_II	0	8	target3
+CHROMOSOME_III	0	6	target4	50	+	0	6	0	1	6	0	extra_note=foo

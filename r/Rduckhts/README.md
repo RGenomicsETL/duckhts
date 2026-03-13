@@ -48,11 +48,21 @@ enabled.
 ## Quick Start
 
 The extension is loaded with
-`rduckhts_load(con, extension_path = NULL)`. We can create tables with
-`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
-`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
-parameters documented in their help pages. FASTA indexes can be created
-with `rduckhts_fasta_index()`.
+`rduckhts_load(con, extension_path = NULL)`. The wrappers break down
+into:
+
+- readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`,
+  `rduckhts_fastq()`, `rduckhts_gff()`, `rduckhts_gtf()`,
+  `rduckhts_tabix()`, `rduckhts_bed()`
+- reference helpers: `rduckhts_fasta_index()`, `rduckhts_fasta_nuc()`
+- compression/indexing: `rduckhts_bgzip()`, `rduckhts_bgunzip()`,
+  `rduckhts_bam_index()`, `rduckhts_bcf_index()`,
+  `rduckhts_tabix_index()`
+- metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`,
+  `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
+
+Start with one reader, then materialize tables and compose the richer
+helpers around them.
 
 ``` r
 library(DBI)
@@ -89,16 +99,33 @@ This section is generated from `functions.yaml`.
 
 ### Readers
 
-| Function      | Kind  | Returns | R helper               | Description                                                                             |
-|---------------|-------|---------|------------------------|-----------------------------------------------------------------------------------------|
-| `read_bcf`    | table | table   | `rduckhts_bcf`         | Read VCF and BCF variant data with typed INFO, FORMAT, and optional tidy sample output. |
-| `read_bam`    | table | table   | `rduckhts_bam`         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps.  |
-| `read_fasta`  | table | table   | `rduckhts_fasta`       | Read FASTA records or indexed FASTA regions as sequence rows.                           |
-| `read_fastq`  | table | table   | `rduckhts_fastq`       | Read single-end, paired-end, or interleaved FASTQ files.                                |
-| `read_gff`    | table | table   | `rduckhts_gff`         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.  |
-| `read_gtf`    | table | table   | `rduckhts_gtf`         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.  |
-| `read_tabix`  | table | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.  |
-| `fasta_index` | table | table   | `rduckhts_fasta_index` | Build a FASTA index and return the index path used by the operation.                    |
+| Function      | Kind  | Returns | R helper               | Description                                                                                                                        |
+|---------------|-------|---------|------------------------|------------------------------------------------------------------------------------------------------------------------------------|
+| `read_bcf`    | table | table   | `rduckhts_bcf`         | Read VCF and BCF variant data with typed INFO, FORMAT, and optional tidy sample output.                                            |
+| `read_bam`    | table | table   | `rduckhts_bam`         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps.                                             |
+| `read_fasta`  | table | table   | `rduckhts_fasta`       | Read FASTA records or indexed FASTA regions as sequence rows.                                                                      |
+| `read_bed`    | table | table   | `rduckhts_bed`         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                            |
+| `fasta_nuc`   | table | table   | `rduckhts_fasta_nuc`   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. |
+| `read_fastq`  | table | table   | `rduckhts_fastq`       | Read single-end, paired-end, or interleaved FASTQ files.                                                                           |
+| `read_gff`    | table | table   | `rduckhts_gff`         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                             |
+| `read_gtf`    | table | table   | `rduckhts_gtf`         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                             |
+| `read_tabix`  | table | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.                                             |
+| `fasta_index` | table | table   | `rduckhts_fasta_index` | Build a FASTA index and return the index path used by the operation.                                                               |
+
+### Compression
+
+| Function  | Kind  | Returns | R helper           | Description                                                                           |
+|-----------|-------|---------|--------------------|---------------------------------------------------------------------------------------|
+| `bgzip`   | table | table   | `rduckhts_bgzip`   | Compress a plain file to BGZF and return the created output path and byte counts.     |
+| `bgunzip` | table | table   | `rduckhts_bgunzip` | Decompress a BGZF-compressed file and return the created output path and byte counts. |
+
+### Indexing
+
+| Function      | Kind  | Returns | R helper               | Description                                                                                        |
+|---------------|-------|---------|------------------------|----------------------------------------------------------------------------------------------------|
+| `bam_index`   | table | table   | `rduckhts_bam_index`   | Build a BAM or CRAM index and report the written index path and format.                            |
+| `bcf_index`   | table | table   | `rduckhts_bcf_index`   | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.       |
+| `tabix_index` | table | table   | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
 
 ### Metadata
 
@@ -123,27 +150,143 @@ This section is generated from `functions.yaml`.
 
 ### SAM Flag UDFs
 
-| Function                       | Kind   | Returns | R helper | Description                                                             |
-|--------------------------------|--------|---------|----------|-------------------------------------------------------------------------|
-| `is_segmented`                 | scalar | BOOLEAN |          | Test whether the SAM flag marks a read as part of a segmented template. |
-| `is_properly_aligned`          | scalar | BOOLEAN |          | Test whether the SAM flag indicates a properly aligned read pair.       |
-| `is_properly_segmented`        | scalar | BOOLEAN |          | Alias for is_properly_aligned(flag) using segmented-read terminology.   |
-| `is_unmapped`                  | scalar | BOOLEAN |          | Test whether the read itself is unmapped according to the SAM flag.     |
-| `is_mate_unmapped`             | scalar | BOOLEAN |          | Test whether the mate read is flagged as unmapped.                      |
-| `is_reverse_complemented`      | scalar | BOOLEAN |          | Test whether the read is aligned to the reverse strand.                 |
-| `is_mate_reverse_complemented` | scalar | BOOLEAN |          | Test whether the mate read is aligned to the reverse strand.            |
-| `is_first_segment`             | scalar | BOOLEAN |          | Test whether the read is marked as the first segment in the template.   |
-| `is_last_segment`              | scalar | BOOLEAN |          | Test whether the read is marked as the last segment in the template.    |
-| `is_secondary`                 | scalar | BOOLEAN |          | Test whether the alignment is marked as secondary.                      |
-| `is_qc_fail`                   | scalar | BOOLEAN |          | Test whether the read failed vendor or pipeline quality checks.         |
-| `is_duplicate`                 | scalar | BOOLEAN |          | Test whether the alignment is flagged as a duplicate.                   |
-| `is_supplementary`             | scalar | BOOLEAN |          | Test whether the alignment is marked as supplementary.                  |
+| Function                               | Kind   | Returns | R helper | Description                                                                                                                                                                        |
+|----------------------------------------|--------|---------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `sam_flag_bits`                        | scalar | STRUCT  |          | Decode a SAM flag into a struct of boolean bit fields using explicit SAM-oriented names such as `is_paired`, `is_proper_pair`, `is_next_segment_unmapped`, and `is_supplementary`. |
+| `sam_flag_has`                         | scalar | BOOLEAN |          | Test whether any bits from the provided SAM flag mask are set in a flag value.                                                                                                     |
+| `is_forward_aligned`                   | scalar | BOOLEAN |          | Test whether a mapped segment is aligned to the forward strand. Returns `NULL` for unmapped segments because SAM flag `0x10` does not define genomic strand when `0x4` is set.     |
+| `is_paired`                            | scalar | BOOLEAN |          | Test whether the SAM flag indicates that the template has multiple segments in sequencing (`0x1`).                                                                                 |
+| `is_proper_pair`                       | scalar | BOOLEAN |          | Test whether the SAM flag indicates that each segment is properly aligned according to the aligner (`0x2`).                                                                        |
+| `is_unmapped`                          | scalar | BOOLEAN |          | Test whether the read itself is unmapped according to the SAM flag.                                                                                                                |
+| `is_next_segment_unmapped`             | scalar | BOOLEAN |          | Test whether the next segment in the template is flagged as unmapped (`0x8`).                                                                                                      |
+| `is_reverse_complemented`              | scalar | BOOLEAN |          | Test whether `SEQ` is stored reverse complemented (`0x10`); for mapped reads this corresponds to reverse-strand alignment.                                                         |
+| `is_next_segment_reverse_complemented` | scalar | BOOLEAN |          | Test whether `SEQ` of the next segment in the template is stored reverse complemented (`0x20`).                                                                                    |
+| `is_first_segment`                     | scalar | BOOLEAN |          | Test whether the read is marked as the first segment in the template.                                                                                                              |
+| `is_last_segment`                      | scalar | BOOLEAN |          | Test whether the read is marked as the last segment in the template.                                                                                                               |
+| `is_secondary`                         | scalar | BOOLEAN |          | Test whether the alignment is marked as secondary.                                                                                                                                 |
+| `is_qc_fail`                           | scalar | BOOLEAN |          | Test whether the read failed vendor or pipeline quality checks.                                                                                                                    |
+| `is_duplicate`                         | scalar | BOOLEAN |          | Test whether the alignment is flagged as a duplicate.                                                                                                                              |
+| `is_supplementary`                     | scalar | BOOLEAN |          | Test whether the alignment is marked as supplementary.                                                                                                                             |
+
+### CIGAR Utils
+
+| Function                     | Kind   | Returns | R helper | Description                                                                                                         |
+|------------------------------|--------|---------|----------|---------------------------------------------------------------------------------------------------------------------|
+| `cigar_has_soft_clip`        | scalar | BOOLEAN |          | Test whether a CIGAR string contains any soft-clipped segment (`S`).                                                |
+| `cigar_has_hard_clip`        | scalar | BOOLEAN |          | Test whether a CIGAR string contains any hard-clipped segment (`H`).                                                |
+| `cigar_left_soft_clip`       | scalar | BIGINT  |          | Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`.      |
+| `cigar_right_soft_clip`      | scalar | BIGINT  |          | Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`.       |
+| `cigar_query_length`         | scalar | BIGINT  |          | Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`.                        |
+| `cigar_aligned_query_length` | scalar | BIGINT  |          | Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. |
+| `cigar_reference_length`     | scalar | BIGINT  |          | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`.                    |
+| `cigar_has_op`               | scalar | BOOLEAN |          | Test whether a CIGAR string contains at least one instance of the requested operator.                               |
+
+## Common Workflows
+
+### Region-aware variant and alignment queries
+
+``` r
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+
+rduckhts_bcf(
+  con, "variants_idx", bcf_path,
+  region = "1:3000150-3000151",
+  index_path = bcf_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT CHROM, POS, REF, ALT FROM variants_idx")
+#>   CHROM     POS REF ALT
+#> 1     1 3000150   C   T
+#> 2     1 3000151   C   T
+
+rduckhts_bam(
+  con, "bam_idx_reads", bam_path,
+  region = "CHROMOSOME_I:1-1000",
+  index_path = bam_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
+#>                           QNAME FLAG POS MAPQ
+#> 1 HS18_09653:4:1315:19857:61712  145 914   23
+#> 2 HS18_09653:4:1308:11522:27107  161 934    0
+```
+
+### Interval + reference helpers
+
+``` r
+bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
+fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_readme_3e9f5bf176fbb.fai
+
+rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
+dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
+#>            chrom start end    name block_count
+#> 1   CHROMOSOME_I     0  10 target1           2
+#> 2   CHROMOSOME_I    10  20 target2           1
+#> 3  CHROMOSOME_II     0   8 target3          NA
+#> 4 CHROMOSOME_III     0   6 target4           1
+
+rduckhts_fasta_nuc(con, fasta_path, bed_path = bed_path, index_path = fai_path)
+#>            chrom start end pct_at pct_gc num_a num_c num_g num_t num_n
+#> 1   CHROMOSOME_I     0  10  0.400  0.600     2     4     2     2     0
+#> 2   CHROMOSOME_I    10  20  0.500  0.500     4     3     2     1     0
+#> 3  CHROMOSOME_II     0   8  0.375  0.625     2     4     1     1     0
+#> 4 CHROMOSOME_III     0   6  0.500  0.500     2     2     1     1     0
+#>   num_other seq_len
+#> 1         0      10
+#> 2         0      10
+#> 3         0       8
+#> 4         0       6
+rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20", index_path = fai_path)
+#>          chrom start end pct_at pct_gc num_a num_c num_g num_t num_n num_other
+#> 1 CHROMOSOME_I     0  10    0.4    0.6     2     4     2     2     0         0
+#> 2 CHROMOSOME_I    10  20    0.5    0.5     4     3     2     1     0         0
+#>   seq_len
+#> 1      10
+#> 2      10
+unlink(fai_path)
+```
+
+### Compression + tabix round-trips
+
+``` r
+tmp_bed <- tempfile("duckhts_targets_", fileext = ".bed")
+tmp_bgz <- paste0(tmp_bed, ".gz")
+tmp_tbi <- paste0(tmp_bgz, ".tbi")
+writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
+
+rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
+#>   success                                           output_path bytes_in
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_targets_3e9f5b6ea4bffc.bed.gz       25
+#>   bytes_out
+#> 1        84
+rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
+#>   success                                                index_path
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_targets_3e9f5b6ea4bffc.bed.gz.tbi
+#>   index_format
+#> 1          TBI
+rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM targets_idx")
+#>   chrom start end name score strand thick_start thick_end item_rgb block_count
+#> 1  chr1     0  10    a  <NA>   <NA>          NA        NA     <NA>          NA
+#> 2  chr1    10  20    b  <NA>   <NA>          NA        NA     <NA>          NA
+#>   block_sizes block_starts extra
+#> 1        <NA>         <NA>  <NA>
+#> 2        <NA>         <NA>  <NA>
+
+unlink(c(tmp_bed, tmp_bgz, tmp_tbi))
+```
 
 ## Sequence UDFs
 
 The extension also exposes sequence utility UDFs directly in DuckDB SQL,
-including the new 4-bit IUPAC DNA encode/decode helpers. These can be
-applied to `SEQUENCE` columns from FASTA and FASTQ scans.
+including 4-bit IUPAC DNA encode/decode helpers. These can be applied to
+`SEQUENCE` columns from FASTA and FASTQ scans.
 
 ``` r
 dbGetQuery(
@@ -183,15 +326,15 @@ dbGetQuery(
 
 ### FASTA region queries
 
-`read_fasta` now supports indexed region queries via
+`read_fasta` supports indexed region queries via
 `rduckhts_fasta(..., region = ...)`.
 
 ``` r
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                        index_path
-#> 1    TRUE /tmp/RtmpIMVlkW/duckhts_readme_3ac4d24488cf01.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_readme_3e9f5b3b1617d.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

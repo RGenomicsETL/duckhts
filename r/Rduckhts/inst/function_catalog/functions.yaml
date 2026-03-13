@@ -84,6 +84,30 @@
       ]
     },
     {
+      "name": "read_bed",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bed(path, region := NULL, index_path := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bed",
+      "description": "Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.",
+      "examples": [
+        "SELECT chrom, start, \"end\", name FROM read_bed('targets.bed') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "fasta_nuc",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "fasta_nuc(path, bed_path := NULL, bin_width := NULL, region := NULL, index_path := NULL, bed_index_path := NULL, include_seq := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_fasta_nuc",
+      "description": "Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.",
+      "examples": [
+        "SELECT chrom, start, \"end\", pct_gc FROM fasta_nuc('ce.fa', bin_width := 1000) LIMIT 5;"
+      ]
+    },
+    {
       "name": "read_fastq",
       "kind": "table",
       "category": "Readers",
@@ -141,6 +165,66 @@
       "description": "Build a FASTA index and return the index path used by the operation.",
       "examples": [
         "SELECT * FROM fasta_index('ce.fa');"
+      ]
+    },
+    {
+      "name": "bgzip",
+      "kind": "table",
+      "category": "Compression",
+      "signature": "bgzip(path, output_path := NULL, threads := 4, level := -1, keep := TRUE, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bgzip",
+      "description": "Compress a plain file to BGZF and return the created output path and byte counts.",
+      "examples": [
+        "SELECT * FROM bgzip('regions.bed');"
+      ]
+    },
+    {
+      "name": "bgunzip",
+      "kind": "table",
+      "category": "Compression",
+      "signature": "bgunzip(path, output_path := NULL, threads := 4, keep := TRUE, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bgunzip",
+      "description": "Decompress a BGZF-compressed file and return the created output path and byte counts.",
+      "examples": [
+        "SELECT * FROM bgunzip('regions.bed.gz');"
+      ]
+    },
+    {
+      "name": "bam_index",
+      "kind": "table",
+      "category": "Indexing",
+      "signature": "bam_index(path, index_path := NULL, min_shift := 0, threads := 4)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bam_index",
+      "description": "Build a BAM or CRAM index and report the written index path and format.",
+      "examples": [
+        "SELECT * FROM bam_index('range.bam');"
+      ]
+    },
+    {
+      "name": "bcf_index",
+      "kind": "table",
+      "category": "Indexing",
+      "signature": "bcf_index(path, index_path := NULL, min_shift := NULL, threads := 4)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bcf_index",
+      "description": "Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.",
+      "examples": [
+        "SELECT * FROM bcf_index('formatcols.vcf.gz');"
+      ]
+    },
+    {
+      "name": "tabix_index",
+      "kind": "table",
+      "category": "Indexing",
+      "signature": "tabix_index(path, preset := 'vcf', index_path := NULL, min_shift := 0, threads := 4, seq_col := NULL, start_col := NULL, end_col := NULL, comment_char := NULL, skip_lines := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_tabix_index",
+      "description": "Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns.",
+      "examples": [
+        "SELECT * FROM tabix_index('gff_file.gff.gz', preset := 'gff');"
       ]
     },
     {
@@ -276,39 +360,159 @@
       ]
     },
     {
-      "name": "is_segmented",
+      "name": "sam_flag_bits",
       "kind": "scalar",
       "category": "SAM Flag UDFs",
-      "signature": "is_segmented(flag)",
-      "returns": "BOOLEAN",
+      "signature": "sam_flag_bits(flag)",
+      "returns": "STRUCT",
       "r_wrapper": "",
-      "description": "Test whether the SAM flag marks a read as part of a segmented template.",
+      "description": "Decode a SAM flag into a struct of boolean bit fields using explicit SAM-oriented names such as `is_paired`, `is_proper_pair`, `is_next_segment_unmapped`, and `is_supplementary`.",
       "examples": [
-        "SELECT is_segmented(99);"
+        "SELECT (sam_flag_bits(99)).is_proper_pair;"
       ]
     },
     {
-      "name": "is_properly_aligned",
+      "name": "sam_flag_has",
       "kind": "scalar",
       "category": "SAM Flag UDFs",
-      "signature": "is_properly_aligned(flag)",
+      "signature": "sam_flag_has(flag, mask)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether the SAM flag indicates a properly aligned read pair.",
+      "description": "Test whether any bits from the provided SAM flag mask are set in a flag value.",
       "examples": [
-        "SELECT is_properly_aligned(99);"
+        "SELECT sam_flag_has(99, 2);"
       ]
     },
     {
-      "name": "is_properly_segmented",
+      "name": "is_forward_aligned",
       "kind": "scalar",
       "category": "SAM Flag UDFs",
-      "signature": "is_properly_segmented(flag)",
+      "signature": "is_forward_aligned(flag)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Alias for is_properly_aligned(flag) using segmented-read terminology.",
+      "description": "Test whether a mapped segment is aligned to the forward strand. Returns `NULL` for unmapped segments because SAM flag `0x10` does not define genomic strand when `0x4` is set.",
       "examples": [
-        "SELECT is_properly_segmented(99);"
+        "SELECT is_forward_aligned(0);"
+      ]
+    },
+    {
+      "name": "cigar_has_soft_clip",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_has_soft_clip(cigar)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether a CIGAR string contains any soft-clipped segment (`S`).",
+      "examples": [
+        "SELECT cigar_has_soft_clip('5S90M5S');"
+      ]
+    },
+    {
+      "name": "cigar_has_hard_clip",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_has_hard_clip(cigar)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether a CIGAR string contains any hard-clipped segment (`H`).",
+      "examples": [
+        "SELECT cigar_has_hard_clip('5H95M');"
+      ]
+    },
+    {
+      "name": "cigar_left_soft_clip",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_left_soft_clip(cigar)",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`.",
+      "examples": [
+        "SELECT cigar_left_soft_clip('5S90M5S');"
+      ]
+    },
+    {
+      "name": "cigar_right_soft_clip",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_right_soft_clip(cigar)",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`.",
+      "examples": [
+        "SELECT cigar_right_soft_clip('5S90M5S');"
+      ]
+    },
+    {
+      "name": "cigar_query_length",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_query_length(cigar)",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`.",
+      "examples": [
+        "SELECT cigar_query_length('5S90M5I');"
+      ]
+    },
+    {
+      "name": "cigar_aligned_query_length",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_aligned_query_length(cigar)",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions.",
+      "examples": [
+        "SELECT cigar_aligned_query_length('5S90M5I');"
+      ]
+    },
+    {
+      "name": "cigar_reference_length",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_reference_length(cigar)",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`.",
+      "examples": [
+        "SELECT cigar_reference_length('90M5D');"
+      ]
+    },
+    {
+      "name": "cigar_has_op",
+      "kind": "scalar",
+      "category": "CIGAR Utils",
+      "signature": "cigar_has_op(cigar, op)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether a CIGAR string contains at least one instance of the requested operator.",
+      "examples": [
+        "SELECT cigar_has_op('5S90M5S', 'S');"
+      ]
+    },
+    {
+      "name": "is_paired",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_paired(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the SAM flag indicates that the template has multiple segments in sequencing (`0x1`).",
+      "examples": [
+        "SELECT is_paired(99);"
+      ]
+    },
+    {
+      "name": "is_proper_pair",
+      "kind": "scalar",
+      "category": "SAM Flag UDFs",
+      "signature": "is_proper_pair(flag)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Test whether the SAM flag indicates that each segment is properly aligned according to the aligner (`0x2`).",
+      "examples": [
+        "SELECT is_proper_pair(99);"
       ]
     },
     {
@@ -324,15 +528,15 @@
       ]
     },
     {
-      "name": "is_mate_unmapped",
+      "name": "is_next_segment_unmapped",
       "kind": "scalar",
       "category": "SAM Flag UDFs",
-      "signature": "is_mate_unmapped(flag)",
+      "signature": "is_next_segment_unmapped(flag)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether the mate read is flagged as unmapped.",
+      "description": "Test whether the next segment in the template is flagged as unmapped (`0x8`).",
       "examples": [
-        "SELECT is_mate_unmapped(9);"
+        "SELECT is_next_segment_unmapped(9);"
       ]
     },
     {
@@ -342,21 +546,21 @@
       "signature": "is_reverse_complemented(flag)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether the read is aligned to the reverse strand.",
+      "description": "Test whether `SEQ` is stored reverse complemented (`0x10`); for mapped reads this corresponds to reverse-strand alignment.",
       "examples": [
         "SELECT is_reverse_complemented(16);"
       ]
     },
     {
-      "name": "is_mate_reverse_complemented",
+      "name": "is_next_segment_reverse_complemented",
       "kind": "scalar",
       "category": "SAM Flag UDFs",
-      "signature": "is_mate_reverse_complemented(flag)",
+      "signature": "is_next_segment_reverse_complemented(flag)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether the mate read is aligned to the reverse strand.",
+      "description": "Test whether `SEQ` of the next segment in the template is stored reverse complemented (`0x20`).",
       "examples": [
-        "SELECT is_mate_reverse_complemented(32);"
+        "SELECT is_next_segment_reverse_complemented(32);"
       ]
     },
     {
