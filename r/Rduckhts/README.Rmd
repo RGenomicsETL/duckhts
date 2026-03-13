@@ -45,7 +45,14 @@ Installation requires `htslib` dependencies such ad zlib and libbz2, and  option
 
 ## Quick Start 
 
-The extension is loaded with `rduckhts_load(con, extension_path = NULL)`. We can create tables with `rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`, `rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the parameters documented in their help pages. FASTA indexes can be created with `rduckhts_fasta_index()`.
+The extension is loaded with `rduckhts_load(con, extension_path = NULL)`. The wrappers break down into:
+
+- readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`, `rduckhts_fastq()`, `rduckhts_gff()`, `rduckhts_gtf()`, `rduckhts_tabix()`, `rduckhts_bed()`
+- reference helpers: `rduckhts_fasta_index()`, `rduckhts_fasta_nuc()`
+- compression/indexing: `rduckhts_bgzip()`, `rduckhts_bgunzip()`, `rduckhts_bam_index()`, `rduckhts_bcf_index()`, `rduckhts_tabix_index()`
+- metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`, `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
+
+Start with one reader, then materialize tables and compose the richer helpers around them.
 
 ```{r}
 library(DBI)
@@ -75,9 +82,67 @@ Use `rduckhts_functions()` inside R to inspect the generated extension catalog.
 cat(paste(readLines("inst/function_catalog/functions.md"), collapse = "\n"))
 ```
 
+## Common Workflows
+
+### Region-aware variant and alignment queries
+
+```{r}
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+
+rduckhts_bcf(
+  con, "variants_idx", bcf_path,
+  region = "1:3000150-3000151",
+  index_path = bcf_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT CHROM, POS, REF, ALT FROM variants_idx")
+
+rduckhts_bam(
+  con, "bam_idx_reads", bam_path,
+  region = "CHROMOSOME_I:1-1000",
+  index_path = bam_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
+```
+
+### Interval + reference helpers
+
+```{r}
+bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
+fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
+
+rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
+dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
+
+rduckhts_fasta_nuc(con, fasta_path, bed_path = bed_path, index_path = fai_path)
+rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20", index_path = fai_path)
+unlink(fai_path)
+```
+
+### Compression + tabix round-trips
+
+```{r}
+tmp_bed <- tempfile("duckhts_targets_", fileext = ".bed")
+tmp_bgz <- paste0(tmp_bed, ".gz")
+tmp_tbi <- paste0(tmp_bgz, ".tbi")
+writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
+
+rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
+rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
+rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM targets_idx")
+
+unlink(c(tmp_bed, tmp_bgz, tmp_tbi))
+```
+
 ## Sequence UDFs
 
-The extension also exposes sequence utility UDFs directly in DuckDB SQL, including the new 4-bit IUPAC DNA encode/decode helpers. These can be applied to `SEQUENCE` columns from FASTA and FASTQ scans.
+The extension also exposes sequence utility UDFs directly in DuckDB SQL, including 4-bit IUPAC DNA encode/decode helpers. These can be applied to `SEQUENCE` columns from FASTA and FASTQ scans.
 
 ```{r}
 dbGetQuery(
@@ -105,7 +170,7 @@ dbGetQuery(
 
 ### FASTA region queries
 
-`read_fasta` now supports indexed region queries via `rduckhts_fasta(..., region = ...)`.
+`read_fasta` supports indexed region queries via `rduckhts_fasta(..., region = ...)`.
 
 ```{r}
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")

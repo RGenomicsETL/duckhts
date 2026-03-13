@@ -116,8 +116,8 @@ and can return duplicates for overlaps.
 
 ## Examples
 
-The examples below run directly against bundled local test files and
-show the main reader APIs using the `R` `DBI` and `duckdb` packages.
+The examples below run directly against bundled local test files using
+the `R` `DBI` and `duckdb` packages.
 
 ``` r
 library(DBI)
@@ -128,6 +128,11 @@ con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
 dbExecute(con, sprintf("LOAD '%s'", ext_path))
 #> [1] 0
+```
+
+### Core readers
+
+``` r
 
 dbGetQuery(con, "
   SELECT CHROM, POS, REF, ALT, SAMPLE_ID
@@ -147,12 +152,6 @@ dbGetQuery(con, "
 #> 1 2
 
 dbGetQuery(con, "
-  SELECT * FROM fasta_index('test/data/ce.fa')
-")
-#>   success index_path
-#> 1    TRUE
-
-dbGetQuery(con, "
   SELECT NAME, length(SEQUENCE) AS seq_length
   FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25')
 ")
@@ -168,6 +167,51 @@ dbGetQuery(con, "
 #> 1 HS25_09827:2:1201:1505:59795#49    1 HS25_09827:2:1201:1505:59795#49
 #> 2 HS25_09827:2:1201:1505:59795#49    2 HS25_09827:2:1201:1505:59795#49
 #> 3 HS25_09827:2:1201:1559:70726#49    1 HS25_09827:2:1201:1559:70726#49
+```
+
+### Interval + reference helpers
+
+``` r
+
+dbGetQuery(con, "
+  SELECT chrom, start, \"end\", name, block_count
+  FROM read_bed('test/data/targets.bed')
+")
+#>            chrom start end    name block_count
+#> 1   CHROMOSOME_I     0  10 target1           2
+#> 2   CHROMOSOME_I    10  20 target2           1
+#> 3  CHROMOSOME_II     0   8 target3          NA
+#> 4 CHROMOSOME_III     0   6 target4           1
+
+dbGetQuery(con, "
+  SELECT chrom, start, \"end\", pct_gc, num_a, num_c, num_g, num_t
+  FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
+  ORDER BY chrom, start
+")
+#>            chrom start end pct_gc num_a num_c num_g num_t
+#> 1   CHROMOSOME_I     0  10  0.600     2     4     2     2
+#> 2   CHROMOSOME_I    10  20  0.500     4     3     2     1
+#> 3  CHROMOSOME_II     0   8  0.625     2     4     1     1
+#> 4 CHROMOSOME_III     0   6  0.500     2     2     1     1
+
+dbGetQuery(con, "
+  SELECT chrom, start, \"end\", seq_len, pct_gc
+  FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20')
+")
+#>          chrom start end seq_len pct_gc
+#> 1 CHROMOSOME_I     0  10      10    0.6
+#> 2 CHROMOSOME_I    10  20      10    0.5
+
+dbGetQuery(con, "
+  SELECT * FROM fasta_index('test/data/ce.fa')
+")
+#>   success index_path
+#> 1    TRUE
+```
+
+### Sequence utilities
+
+``` r
 
 dbGetQuery(con, "
   SELECT
@@ -200,8 +244,61 @@ dbGetQuery(con, "
 #>      roundtrip
 #> 1 CCGTTAGAGCAT
 #> 2 AAGGAAAGAAGG
+```
+
+### Metadata + export/index helpers
+
+``` r
+
+dbGetQuery(con, "
+  SELECT idx, raw
+  FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+  LIMIT 3
+")
+#>   idx                                                 raw
+#> 1   0                                ##fileformat=VCFv4.3
+#> 2   1 ##FILTER=<ID=PASS,Description="All filters passed">
+#> 3   2                                     ##contig=<ID=1>
+
+dbGetQuery(con, "
+  SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+  FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+  LIMIT 3
+")
+#>   seqname tid index_type chunk_beg_vo chunk_end_vo
+#> 1       1   0        CSI           NA           NA
+
+dbGetQuery(con, "
+  SELECT index_type, octet_length(raw) AS raw_bytes
+  FROM read_hts_index_raw('test/data/formatcols.vcf.gz')
+")
+#>   index_type raw_bytes
+#> 1        CSI        30
+
+dbExecute(con, "
+  COPY (
+    SELECT chrom, start, \"end\", name
+    FROM read_bed('test/data/targets.bed')
+  ) TO 'test_targets_readme.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE)
+")
+#> [1] 4
+
+dbGetQuery(con, "
+  SELECT success, output_path, bytes_out
+  FROM bgzip('test_targets_readme.bed', output_path := 'test_targets_readme.bed.gz', keep := TRUE, overwrite := TRUE)
+")
+#>   success                output_path bytes_out
+#> 1    TRUE test_targets_readme.bed.gz       107
+
+dbGetQuery(con, "
+  SELECT success, index_format, index_path
+  FROM tabix_index('test_targets_readme.bed.gz', preset := 'bed', index_path := 'test_targets_readme.bed.gz.tbi')
+")
+#>   success index_format                     index_path
+#> 1    TRUE          TBI test_targets_readme.bed.gz.tbi
 
 dbDisconnect(con, shutdown = TRUE)
+unlink(c('test_targets_readme.bed', 'test_targets_readme.bed.gz', 'test_targets_readme.bed.gz.tbi'))
 ```
 
 ## Remote URLs and HTS_PATH

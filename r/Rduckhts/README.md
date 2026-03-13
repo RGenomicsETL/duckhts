@@ -48,11 +48,21 @@ enabled.
 ## Quick Start
 
 The extension is loaded with
-`rduckhts_load(con, extension_path = NULL)`. We can create tables with
-`rduckhts_bcf`, `rduckhts_bam`, `rduckhts_fasta`, `rduckhts_fastq`,
-`rduckhts_gff`, `rduckhts_gtf`, and `rduckhts_tabix` using the
-parameters documented in their help pages. FASTA indexes can be created
-with `rduckhts_fasta_index()`.
+`rduckhts_load(con, extension_path = NULL)`. The wrappers break down
+into:
+
+- readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`,
+  `rduckhts_fastq()`, `rduckhts_gff()`, `rduckhts_gtf()`,
+  `rduckhts_tabix()`, `rduckhts_bed()`
+- reference helpers: `rduckhts_fasta_index()`, `rduckhts_fasta_nuc()`
+- compression/indexing: `rduckhts_bgzip()`, `rduckhts_bgunzip()`,
+  `rduckhts_bam_index()`, `rduckhts_bcf_index()`,
+  `rduckhts_tabix_index()`
+- metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`,
+  `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
+
+Start with one reader, then materialize tables and compose the richer
+helpers around them.
 
 ``` r
 library(DBI)
@@ -171,11 +181,112 @@ This section is generated from `functions.yaml`.
 | `cigar_reference_length`     | scalar | BIGINT  |          | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`.                    |
 | `cigar_has_op`               | scalar | BOOLEAN |          | Test whether a CIGAR string contains at least one instance of the requested operator.                               |
 
+## Common Workflows
+
+### Region-aware variant and alignment queries
+
+``` r
+bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+
+rduckhts_bcf(
+  con, "variants_idx", bcf_path,
+  region = "1:3000150-3000151",
+  index_path = bcf_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT CHROM, POS, REF, ALT FROM variants_idx")
+#>   CHROM     POS REF ALT
+#> 1     1 3000150   C   T
+#> 2     1 3000151   C   T
+
+rduckhts_bam(
+  con, "bam_idx_reads", bam_path,
+  region = "CHROMOSOME_I:1-1000",
+  index_path = bam_index_path,
+  overwrite = TRUE
+)
+dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
+#>                           QNAME FLAG POS MAPQ
+#> 1 HS18_09653:4:1315:19857:61712  145 914   23
+#> 2 HS18_09653:4:1308:11522:27107  161 934    0
+```
+
+### Interval + reference helpers
+
+``` r
+bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
+fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_readme_3e9f5bf176fbb.fai
+
+rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
+dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
+#>            chrom start end    name block_count
+#> 1   CHROMOSOME_I     0  10 target1           2
+#> 2   CHROMOSOME_I    10  20 target2           1
+#> 3  CHROMOSOME_II     0   8 target3          NA
+#> 4 CHROMOSOME_III     0   6 target4           1
+
+rduckhts_fasta_nuc(con, fasta_path, bed_path = bed_path, index_path = fai_path)
+#>            chrom start end pct_at pct_gc num_a num_c num_g num_t num_n
+#> 1   CHROMOSOME_I     0  10  0.400  0.600     2     4     2     2     0
+#> 2   CHROMOSOME_I    10  20  0.500  0.500     4     3     2     1     0
+#> 3  CHROMOSOME_II     0   8  0.375  0.625     2     4     1     1     0
+#> 4 CHROMOSOME_III     0   6  0.500  0.500     2     2     1     1     0
+#>   num_other seq_len
+#> 1         0      10
+#> 2         0      10
+#> 3         0       8
+#> 4         0       6
+rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20", index_path = fai_path)
+#>          chrom start end pct_at pct_gc num_a num_c num_g num_t num_n num_other
+#> 1 CHROMOSOME_I     0  10    0.4    0.6     2     4     2     2     0         0
+#> 2 CHROMOSOME_I    10  20    0.5    0.5     4     3     2     1     0         0
+#>   seq_len
+#> 1      10
+#> 2      10
+unlink(fai_path)
+```
+
+### Compression + tabix round-trips
+
+``` r
+tmp_bed <- tempfile("duckhts_targets_", fileext = ".bed")
+tmp_bgz <- paste0(tmp_bed, ".gz")
+tmp_tbi <- paste0(tmp_bgz, ".tbi")
+writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
+
+rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
+#>   success                                           output_path bytes_in
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_targets_3e9f5b6ea4bffc.bed.gz       25
+#>   bytes_out
+#> 1        84
+rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
+#>   success                                                index_path
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_targets_3e9f5b6ea4bffc.bed.gz.tbi
+#>   index_format
+#> 1          TBI
+rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM targets_idx")
+#>   chrom start end name score strand thick_start thick_end item_rgb block_count
+#> 1  chr1     0  10    a  <NA>   <NA>          NA        NA     <NA>          NA
+#> 2  chr1    10  20    b  <NA>   <NA>          NA        NA     <NA>          NA
+#>   block_sizes block_starts extra
+#> 1        <NA>         <NA>  <NA>
+#> 2        <NA>         <NA>  <NA>
+
+unlink(c(tmp_bed, tmp_bgz, tmp_tbi))
+```
+
 ## Sequence UDFs
 
 The extension also exposes sequence utility UDFs directly in DuckDB SQL,
-including the new 4-bit IUPAC DNA encode/decode helpers. These can be
-applied to `SEQUENCE` columns from FASTA and FASTQ scans.
+including 4-bit IUPAC DNA encode/decode helpers. These can be applied to
+`SEQUENCE` columns from FASTA and FASTQ scans.
 
 ``` r
 dbGetQuery(
@@ -215,15 +326,15 @@ dbGetQuery(
 
 ### FASTA region queries
 
-`read_fasta` now supports indexed region queries via
+`read_fasta` supports indexed region queries via
 `rduckhts_fasta(..., region = ...)`.
 
 ``` r
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                        index_path
-#> 1    TRUE /tmp/Rtmp6xKeTN/duckhts_readme_3e91187b842ba6.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmp6SSmNU/duckhts_readme_3e9f5b3b1617d.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

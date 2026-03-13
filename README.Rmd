@@ -31,7 +31,7 @@ cat(paste(readLines("r/Rduckhts/inst/function_catalog/functions.md"), collapse =
 
 ## Examples
 
-The examples below run directly against bundled local test files and show the main reader APIs using the `R` `DBI` and `duckdb` packages.
+The examples below run directly against bundled local test files using the `R` `DBI` and `duckdb` packages.
 
 ```{r eval=TRUE}
 library(DBI)
@@ -41,6 +41,11 @@ drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
 dbExecute(con, sprintf("LOAD '%s'", ext_path))
+```
+
+### Core readers
+
+```{r eval=TRUE}
 
 dbGetQuery(con, "
   SELECT CHROM, POS, REF, ALT, SAMPLE_ID
@@ -54,10 +59,6 @@ dbGetQuery(con, "
 ")
 
 dbGetQuery(con, "
-  SELECT * FROM fasta_index('test/data/ce.fa')
-")
-
-dbGetQuery(con, "
   SELECT NAME, length(SEQUENCE) AS seq_length
   FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25')
 ")
@@ -67,6 +68,36 @@ dbGetQuery(con, "
   FROM read_fastq('test/data/interleaved.fq', interleaved := true)
   LIMIT 3
 ")
+```
+
+### Interval + reference helpers
+
+```{r eval=TRUE}
+
+dbGetQuery(con, "
+  SELECT chrom, start, \"end\", name, block_count
+  FROM read_bed('test/data/targets.bed')
+")
+
+dbGetQuery(con, "
+  SELECT chrom, start, \"end\", pct_gc, num_a, num_c, num_g, num_t
+  FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
+  ORDER BY chrom, start
+")
+
+dbGetQuery(con, "
+  SELECT chrom, start, \"end\", seq_len, pct_gc
+  FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20')
+")
+
+dbGetQuery(con, "
+  SELECT * FROM fasta_index('test/data/ce.fa')
+")
+```
+
+### Sequence utilities
+
+```{r eval=TRUE}
 
 dbGetQuery(con, "
   SELECT
@@ -87,8 +118,48 @@ dbGetQuery(con, "
   FROM read_fastq('test/data/interleaved.fq', interleaved := true)
   LIMIT 2
 ")
+```
+
+### Metadata + export/index helpers
+
+```{r eval=TRUE}
+
+dbGetQuery(con, "
+  SELECT idx, raw
+  FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+  LIMIT 3
+")
+
+dbGetQuery(con, "
+  SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+  FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+  LIMIT 3
+")
+
+dbGetQuery(con, "
+  SELECT index_type, octet_length(raw) AS raw_bytes
+  FROM read_hts_index_raw('test/data/formatcols.vcf.gz')
+")
+
+dbExecute(con, "
+  COPY (
+    SELECT chrom, start, \"end\", name
+    FROM read_bed('test/data/targets.bed')
+  ) TO 'test_targets_readme.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE)
+")
+
+dbGetQuery(con, "
+  SELECT success, output_path, bytes_out
+  FROM bgzip('test_targets_readme.bed', output_path := 'test_targets_readme.bed.gz', keep := TRUE, overwrite := TRUE)
+")
+
+dbGetQuery(con, "
+  SELECT success, index_format, index_path
+  FROM tabix_index('test_targets_readme.bed.gz', preset := 'bed', index_path := 'test_targets_readme.bed.gz.tbi')
+")
 
 dbDisconnect(con, shutdown = TRUE)
+unlink(c('test_targets_readme.bed', 'test_targets_readme.bed.gz', 'test_targets_readme.bed.gz.tbi'))
 ```
 
 ## Remote URLs and HTS_PATH

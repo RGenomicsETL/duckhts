@@ -18,6 +18,7 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 
 ## Documentation Conventions
 - **Primary documentation**: README.Rmd (R Markdown format)
+- In README sources, organize examples by workflow/use-case rather than by implementation history, but keep that as document structure rather than explanatory README prose.
 - **Changelog discipline is mandatory**: every user-visible change must update both top-level [NEWS.md](NEWS.md) for the extension and [r/Rduckhts/NEWS.md](r/Rduckhts/NEWS.md) for the R package in the same change, with **newest entries first**.
 - Extension function documentation and community-extension descriptor metadata are sourced from [functions.yaml](functions.yaml); keep it updated whenever functions/macros/UDFs are added, removed, renamed, or re-described.
 - Regenerate the package-bundled function catalog and the checked-in community extension descriptor from `functions.yaml` with `python3 scripts/render_function_catalog.py`.
