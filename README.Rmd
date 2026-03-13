@@ -14,12 +14,17 @@ knitr::opts_chunk$set(
 ```
 # DuckHTS
 
-A [DuckDB](https://duckdb.org/) extension (see the [DuckDB Extension API](https://duckdb.org/docs/extensions/overview)) for reading high-throughput sequencing (HTS)
-file formats using [htslib](https://github.com/samtools/htslib).
+A [DuckDB](https://duckdb.org/) extension for reading high-throughput sequencing (HTS) file formats and running interval-oriented genomics workflows directly in SQL.
 
-Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed files directly using SQL.
+DuckHTS brings sequencing alignments, variants, reference sequences, annotations, and interval text files into DuckDB through [htslib](https://github.com/samtools/htslib). Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, BED, and tabix-indexed files with standard SQL, then compose metadata inspection, compression/indexing, sequence utilities, and interval/reference helpers in the same session.
 
-Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTools for Windows.
+It covers the sequencing side of the stack: raw/reference data access, annotation parsing, BGZF/tabix utilities, and building blocks for coverage, CNV, QC, and downstream export workflows.
+
+> **Part of a growing genomics stack in DuckDB.**
+> DuckHTS covers sequencing and reference-oriented formats. [PlinkingDuck](https://github.com/teaguesterling/plinking_duck) extends the same idea to PLINK genotype workflows and explicitly builds on DuckHTS for the sequencing side of the stack. See also its documentation: https://plinking-duck.readthedocs.io . Together, these tools are pushing DuckDB toward a broader genomics analysis environment built around portable file readers, SQL-native analytics, and composable local workflows. After all, most of Genomics File Formats are Tables/Arrays in disguise.
+
+
+This extention does not support MSVC builds (windows_amd64/windows_arm64). Use MinGW/RTools for Windows.
 
 ## Functions
 
