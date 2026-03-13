@@ -76,6 +76,7 @@ set(EXTENSION_SOURCES
         src/bgzip.c
         src/hts_index_builder.c
         src/seq_reader.c
+        src/interval_udf.c
         src/kmer_udf.c
         src/tabix_reader.c
         src/vep_parser.c

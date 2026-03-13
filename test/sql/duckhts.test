@@ -235,6 +235,88 @@ SELECT success::INT FROM fasta_index('__WORKING_DIRECTORY__/test/data/ce.fa');
 1
 
 # ==============================================================
+# read_bed / fasta_nuc
+# ==============================================================
+
+query I
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed');
+----
+4
+
+query TIIITIII
+SELECT chrom, start, "end", name, score, strand, thick_start, block_count
+FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed')
+LIMIT 1;
+----
+CHROMOSOME_I	0	10	target1	100	+	0	2
+
+query T
+SELECT extra
+FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed')
+WHERE name = 'target4';
+----
+extra_note=foo
+
+statement ok
+SELECT * FROM bgzip(
+  '__WORKING_DIRECTORY__/test/data/targets.bed',
+  output_path := '__WORKING_DIRECTORY__/test_targets.bed.gz',
+  keep := TRUE,
+  overwrite := TRUE
+);
+
+statement ok
+SELECT * FROM tabix_index(
+  '__WORKING_DIRECTORY__/test_targets.bed.gz',
+  preset := 'bed',
+  index_path := '__WORKING_DIRECTORY__/test_targets.bed.gz.tbi',
+  threads := 1
+);
+
+query I
+SELECT count(*)
+FROM read_bed(
+  '__WORKING_DIRECTORY__/test_targets.bed.gz',
+  region := 'CHROMOSOME_I:1-20',
+  index_path := '__WORKING_DIRECTORY__/test_targets.bed.gz.tbi'
+);
+----
+2
+
+query RRIIIIIII
+SELECT pct_at, pct_gc, num_a, num_c, num_g, num_t, num_n, num_other, seq_len
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/targets.bed'
+)
+WHERE chrom = 'CHROMOSOME_I' AND start = 0
+LIMIT 1;
+----
+0.4	0.6	2	4	2	2	0	0	10
+
+query II
+SELECT count(*), sum(seq_len)
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  bin_width := 10,
+  region := 'CHROMOSOME_I:1-20'
+);
+----
+2	20
+
+query T
+SELECT seq
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/targets.bed',
+  include_seq := TRUE
+)
+WHERE chrom = 'CHROMOSOME_I' AND start = 0
+LIMIT 1;
+----
+GCCTAAGCCT
+
+# ==============================================================
 # read_fastq – FASTQ reader
 # ==============================================================
 
@@ -623,9 +705,9 @@ SELECT count(*) FROM seq_kmers('AC', 3);
 # --- SAM flag predicates on BAM FLAG column ---
 query TTTTT
 SELECT
-  CAST(is_segmented(FLAG) AS VARCHAR),
+  CAST(is_paired(FLAG) AS VARCHAR),
   CAST(is_unmapped(FLAG) AS VARCHAR),
-  CAST(is_mate_unmapped(FLAG) AS VARCHAR),
+  CAST(is_next_segment_unmapped(FLAG) AS VARCHAR),
   CAST(is_reverse_complemented(FLAG) AS VARCHAR),
   CAST(is_last_segment(FLAG) AS VARCHAR)
 FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
@@ -633,10 +715,68 @@ LIMIT 1;
 ----
 true	false	false	true	true
 
-# --- properly aligned SAM flag helper ---
+# --- proper-pair SAM flag helper ---
 query T
-SELECT CAST(is_properly_aligned(FLAG) AS VARCHAR)
+SELECT CAST(is_proper_pair(FLAG) AS VARCHAR)
 FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
 LIMIT 1;
 ----
 false
+
+# --- forward alignment helper ---
+query TTT
+SELECT
+  CAST(is_forward_aligned(0) AS VARCHAR),
+  CAST(is_forward_aligned(16) AS VARCHAR),
+  COALESCE(CAST(is_forward_aligned(4) AS VARCHAR), 'NULL');
+----
+true	false	NULL
+
+# --- CIGAR utility helpers on literal examples ---
+query TTTIIIIIT
+SELECT
+  CAST(cigar_has_soft_clip('5S90M5S') AS VARCHAR),
+  CAST(cigar_has_hard_clip('5H95M') AS VARCHAR),
+  CAST(cigar_has_op('5S90M5S', 'S') AS VARCHAR),
+  cigar_left_soft_clip('5S90M5S'),
+  cigar_right_soft_clip('5S90M5S'),
+  cigar_query_length('5S90M5I'),
+  cigar_aligned_query_length('5S90M5I'),
+  cigar_reference_length('90M5D'),
+  CAST(cigar_has_op('90M5D', 'I') AS VARCHAR);
+----
+true	true	true	5	5	100	90	95	false
+
+# --- CIGAR utility helpers on BAM CIGAR values ---
+query TTT
+SELECT
+  CAST(cigar_has_op(CIGAR, 'M') AS VARCHAR),
+  CAST(cigar_has_soft_clip(CIGAR) AS VARCHAR),
+  CAST(cigar_reference_length(CIGAR) > 0 AS VARCHAR)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
+LIMIT 1;
+----
+true	false	true
+
+# --- bulk SAM flag decoder ---
+query TTTT
+SELECT
+  CAST(struct_extract(sam_flag_bits(FLAG), 'is_paired') AS VARCHAR),
+  CAST(struct_extract(sam_flag_bits(FLAG), 'is_reverse_complemented') AS VARCHAR),
+  CAST(struct_extract(sam_flag_bits(FLAG), 'is_last_segment') AS VARCHAR),
+  CAST(struct_extract(sam_flag_bits(FLAG), 'is_duplicate') AS VARCHAR)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
+LIMIT 1;
+----
+true	true	true	false
+
+# --- generic SAM flag mask helper ---
+query TTT
+SELECT
+  CAST(sam_flag_has(FLAG, 1) AS VARCHAR),
+  CAST(sam_flag_has(FLAG, 16) AS VARCHAR),
+  CAST(sam_flag_has(FLAG, 1024) AS VARCHAR)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
+LIMIT 1;
+----
+true	true	false

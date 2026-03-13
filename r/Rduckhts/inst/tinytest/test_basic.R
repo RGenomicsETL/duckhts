@@ -113,11 +113,15 @@ expect_true(all(c("name", "kind", "category", "signature", "description") %in% n
 expect_true("seq_revcomp" %in% catalog$name)
 expect_true("seq_encode_4bit" %in% catalog$name)
 expect_true("seq_decode_4bit" %in% catalog$name)
+expect_true("cigar_has_soft_clip" %in% catalog$name)
+expect_true("cigar_reference_length" %in% catalog$name)
+expect_true("sam_flag_bits" %in% catalog$name)
 expect_true("read_bcf" %in% catalog$name)
 expect_true("bgzip" %in% catalog$name)
 expect_true("bam_index" %in% catalog$name)
 expect_equal(unique(rduckhts_functions(kind = "scalar")$kind), "scalar")
 expect_equal(unique(rduckhts_functions(category = "Readers")$category), "Readers")
+expect_equal(unique(rduckhts_functions(category = "CIGAR Utils")$category), "CIGAR Utils")
 
 # Test parameter validation - these should fail gracefully without a connection
 expect_error(rduckhts_bcf(NULL, "test", "nonexistent.vcf"))

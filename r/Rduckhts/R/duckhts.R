@@ -768,6 +768,108 @@ rduckhts_fasta <- function(
   invisible(TRUE)
 }
 
+#' Create BED Table
+#'
+#' Creates a DuckDB table from a BED file using the DuckHTS extension.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param table_name Name for the created table
+#' @param path Path to the BED file
+#' @param region Optional genomic region for tabix-backed BED queries
+#' @param index_path Optional explicit path to a BED tabix index
+#' @param overwrite Logical. If TRUE, overwrites an existing table
+#'
+#' @return Invisible TRUE on success
+#'
+#' @export
+rduckhts_bed <- function(
+  con,
+  table_name,
+  path,
+  region = NULL,
+  index_path = NULL,
+  overwrite = FALSE
+) {
+  if (!missing(table_name) && !is.null(table_name)) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+      stop(
+        "Table '",
+        table_name,
+        "' already exists. Use overwrite = TRUE to replace it."
+      )
+    }
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
+    }
+  }
+
+  params <- list()
+  if (!is.null(region)) {
+    params$region <- sprintf("'%s'", region)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  param_str <- build_param_str(params)
+
+  if (!is.null(table_name)) {
+    create_query <- sprintf(
+      "CREATE TABLE %s AS SELECT * FROM read_bed('%s'%s)",
+      table_name,
+      path,
+      param_str
+    )
+  } else {
+    create_query <- sprintf(
+      "CREATE VIEW bed_data AS SELECT * FROM read_bed('%s'%s)",
+      path,
+      param_str
+    )
+  }
+
+  DBI::dbExecute(con, create_query)
+  invisible(TRUE)
+}
+
+#' Compute FASTA Interval Nucleotide Composition
+#'
+#' Computes bedtools nuc-style nucleotide composition over either a BED file or
+#' generated fixed-width bins.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the FASTA file
+#' @param bed_path Optional BED path. Supply exactly one of `bed_path` or `bin_width`.
+#' @param bin_width Optional fixed bin width in base pairs
+#' @param region Optional FASTA region filter
+#' @param index_path Optional explicit FASTA index path
+#' @param bed_index_path Optional explicit BED tabix index path
+#' @param include_seq Include the fetched interval sequence
+#'
+#' @return A data frame with interval composition statistics
+#'
+#' @export
+rduckhts_fasta_nuc <- function(
+  con,
+  path,
+  bed_path = NULL,
+  bin_width = NULL,
+  region = NULL,
+  index_path = NULL,
+  bed_index_path = NULL,
+  include_seq = FALSE
+) {
+  params <- list()
+  if (!is.null(bed_path)) params$bed_path <- sprintf("'%s'", bed_path)
+  if (!is.null(bin_width)) params$bin_width <- bin_width
+  if (!is.null(region)) params$region <- sprintf("'%s'", region)
+  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
+  if (!is.null(bed_index_path)) params$bed_index_path <- sprintf("'%s'", bed_index_path)
+  if (include_seq) params$include_seq <- "true"
+  param_str <- build_param_str(params)
+  query <- sprintf("SELECT * FROM fasta_nuc('%s'%s)", path, param_str)
+  DBI::dbGetQuery(con, query)
+}
+
 #' Build FASTA Index
 #'
 #' Builds a FASTA index (.fai) using the DuckHTS extension.

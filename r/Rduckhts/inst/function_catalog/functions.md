@@ -9,6 +9,8 @@ This section is generated from `functions.yaml`.
 | `read_bcf` | table | table | `rduckhts_bcf` | Read VCF and BCF variant data with typed INFO, FORMAT, and optional tidy sample output. |
 | `read_bam` | table | table | `rduckhts_bam` | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. |
 | `read_fasta` | table | table | `rduckhts_fasta` | Read FASTA records or indexed FASTA regions as sequence rows. |
+| `read_bed` | table | table | `rduckhts_bed` | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. |
+| `fasta_nuc` | table | table | `rduckhts_fasta_nuc` | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. |
 | `read_fastq` | table | table | `rduckhts_fastq` | Read single-end, paired-end, or interleaved FASTQ files. |
 | `read_gff` | table | table | `rduckhts_gff` | Read GFF annotations with optional parsed attribute maps and indexed region filtering. |
 | `read_gtf` | table | table | `rduckhts_gtf` | Read GTF annotations with optional parsed attribute maps and indexed region filtering. |
@@ -55,16 +57,32 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
-| `is_segmented` | scalar | BOOLEAN |  | Test whether the SAM flag marks a read as part of a segmented template. |
-| `is_properly_aligned` | scalar | BOOLEAN |  | Test whether the SAM flag indicates a properly aligned read pair. |
+| `sam_flag_bits` | scalar | STRUCT |  | Decode a SAM flag into a struct of boolean bit fields using explicit SAM-oriented names such as `is_paired`, `is_proper_pair`, `is_next_segment_unmapped`, and `is_supplementary`. |
+| `sam_flag_has` | scalar | BOOLEAN |  | Test whether any bits from the provided SAM flag mask are set in a flag value. |
+| `is_forward_aligned` | scalar | BOOLEAN |  | Test whether a mapped segment is aligned to the forward strand. Returns `NULL` for unmapped segments because SAM flag `0x10` does not define genomic strand when `0x4` is set. |
+| `is_paired` | scalar | BOOLEAN |  | Test whether the SAM flag indicates that the template has multiple segments in sequencing (`0x1`). |
+| `is_proper_pair` | scalar | BOOLEAN |  | Test whether the SAM flag indicates that each segment is properly aligned according to the aligner (`0x2`). |
 | `is_unmapped` | scalar | BOOLEAN |  | Test whether the read itself is unmapped according to the SAM flag. |
-| `is_mate_unmapped` | scalar | BOOLEAN |  | Test whether the mate read is flagged as unmapped. |
-| `is_reverse_complemented` | scalar | BOOLEAN |  | Test whether the read is aligned to the reverse strand. |
-| `is_mate_reverse_complemented` | scalar | BOOLEAN |  | Test whether the mate read is aligned to the reverse strand. |
+| `is_next_segment_unmapped` | scalar | BOOLEAN |  | Test whether the next segment in the template is flagged as unmapped (`0x8`). |
+| `is_reverse_complemented` | scalar | BOOLEAN |  | Test whether `SEQ` is stored reverse complemented (`0x10`); for mapped reads this corresponds to reverse-strand alignment. |
+| `is_next_segment_reverse_complemented` | scalar | BOOLEAN |  | Test whether `SEQ` of the next segment in the template is stored reverse complemented (`0x20`). |
 | `is_first_segment` | scalar | BOOLEAN |  | Test whether the read is marked as the first segment in the template. |
 | `is_last_segment` | scalar | BOOLEAN |  | Test whether the read is marked as the last segment in the template. |
 | `is_secondary` | scalar | BOOLEAN |  | Test whether the alignment is marked as secondary. |
 | `is_qc_fail` | scalar | BOOLEAN |  | Test whether the read failed vendor or pipeline quality checks. |
 | `is_duplicate` | scalar | BOOLEAN |  | Test whether the alignment is flagged as a duplicate. |
 | `is_supplementary` | scalar | BOOLEAN |  | Test whether the alignment is marked as supplementary. |
+
+### CIGAR Utils
+
+| Function | Kind | Returns | R helper | Description |
+| --- | --- | --- | --- | --- |
+| `cigar_has_soft_clip` | scalar | BOOLEAN |  | Test whether a CIGAR string contains any soft-clipped segment (`S`). |
+| `cigar_has_hard_clip` | scalar | BOOLEAN |  | Test whether a CIGAR string contains any hard-clipped segment (`H`). |
+| `cigar_left_soft_clip` | scalar | BIGINT |  | Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`. |
+| `cigar_right_soft_clip` | scalar | BIGINT |  | Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`. |
+| `cigar_query_length` | scalar | BIGINT |  | Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`. |
+| `cigar_aligned_query_length` | scalar | BIGINT |  | Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. |
+| `cigar_reference_length` | scalar | BIGINT |  | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`. |
+| `cigar_has_op` | scalar | BOOLEAN |  | Test whether a CIGAR string contains at least one instance of the requested operator. |
 

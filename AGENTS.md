@@ -135,12 +135,15 @@ Phase 10 adds coverage/interval analytics as orthogonal building blocks for CNV,
 - **Layer 1**: BED/interval primitives (`read_bed`, `fasta_nuc`, `interval_merge`, `interval_overlap`, `interval_nearest`)
 - **Layer 2**: Native counting kernels (`bam_bin_counts`, `bam_bedcov`, `bam_coverage`, `bam_depth`, `bam_pileup`)
 - **Layer 3**: Indexed export/interoperability over canonical BED-like outputs
+- **Later**: candidate/active-site detection and `mpileup`-style richer pileup summaries once the coverage kernels are stable
 
 ### Key Design Rules
 - **Optimize for a small canonical API**: prefer one function per counting model rather than proliferating wrappers and macros.
 - **Use BED-compatible outputs as the main interoperability contract** (`chrom`, `start`, `end`, metrics...).
+- **Keep `bam_bin_counts` first-class in the immediate coverage design**: its input contract and stable output schema must cover both WisecondorX-style combined counts and NIPTeR-style strand-split counts without separate public kernels.
 - **Do not conflate bin counting with pileup**: read-start binning (WisecondorX/NIPTeR) and per-base depth (Rsamtools) are separate primitives with separate implementations.
-- **Expose filtering policy primarily through explicit include/exclude flag masks and quality thresholds**; add higher-level knobs only when an upstream behavior cannot be expressed clearly that way.
+- **Do not conflate coverage with candidate-site discovery**: active/candidate-site heuristics are a later analysis layer on top of stable coverage/pileup primitives.
+- **Expose filtering policy primarily through explicit `include_flags`, `require_flags`, `exclude_flags`, and quality thresholds**; add higher-level knobs only when an upstream behavior cannot be expressed clearly that way.
 - **Prefer symbolic SAM flag names in user-facing docs and R wrappers**; keep raw integer masks as the low-level/compatibility path underneath.
 - **Do not hide region merge/combine logic inside BAM scan functions**: use interval preprocessing UDFs.
 - **Fixed-width bins use arithmetic** (`pos / bin_width`); `cgranges` is for irregular interval joins only.
@@ -163,8 +166,17 @@ Phase 10 adds coverage/interval analytics as orthogonal building blocks for CNV,
 
 ### Semantic Parameters
 - `count_model := 'read_start'` for fixed-bin CNV counting; pileup/depth are separate functions
-- `require_flags` / `exclude_flags` are the primary filtering controls for pair, duplicate, secondary, supplementary, QC-fail, and unmapped behavior
+- `include_flags`, `require_flags`, and `exclude_flags` are the primary filtering controls for pair, duplicate, secondary, supplementary, QC-fail, and unmapped behavior
 - `strand_mode := 'combined' | 'split'`
+- overlap/proper-pair behavior must be documented per function; do not assume bin counting, depth, pileup, and BED coverage should share the same mate-handling rules
+- `bam_bin_counts` input contract must support regular fixed bins plus optional region restriction, explicit index/reference paths, and optional annotation/mask inputs without changing the canonical output columns
+- `bam_bin_counts` output contract must remain stable across WisecondorX-like and NIPTeR-like use:
+  - always `chrom`, `start`, `end`, `bin_id`, `count_total`, `count_fwd`, `count_rev`
+  - `strand_mode := 'combined'` still emits `count_fwd` / `count_rev` for compatibility, with `count_total = count_fwd + count_rev`
+- WisecondorX-like and NIPTeR-like outputs should be expressed as documented parameter sets over one canonical kernel/output contract, not as `profile := 'wisecondorx'` / `profile := 'nipter'` public APIs
+- contig selection must be explicit where it matters:
+  - support `region`/indexed restriction for targeted scans
+  - plan explicit contig include/exclude controls for workflows that want autosomes-only or custom chromosome subsets
 - Coordinate contract: 0-based half-open on disk (BED); SQL outputs may add convenience columns.
 
 ### DuckDB Parallelism Pattern (CRITICAL)
@@ -195,6 +207,10 @@ All new table functions should start from the proven contig-level parallelism pa
 - Confirm whether `hts_set_threads(fp, 2)` per DuckDB worker is still the right default once multiple DuckDB threads and multi-region scans are in play; avoid hard-coding a pattern that oversubscribes CPU or regresses small-region workloads.
 - Treat contig-level partitioning as the default fast path for full indexed scans, not as a blanket rule for every region-restricted or pileup/depth workload.
 - Keep base-level coordinate conventions (`bam_depth`, `bam_pileup`) explicitly under review; do not assume BED-style 0-based half-open semantics without confirming compatibility targets.
+- Re-check overlap/proper-pair behavior against upstream mirrors before claiming compatibility:
+  - WisecondorX counts read starts, requires proper pairs for paired reads, and does not have pileup-style mate-overlap handling
+  - NIPTeR bins read positions from `scanBam()` output and is not explicitly pair-aware in its binning path
+- Re-check chromosome include/exclude behavior before freezing APIs for autosome-only or sex-chromosome-aware workflows.
 
 For `bam_bin_counts` specifically, per-contig bin arrays are **independent** — no cross-thread synchronization needed during accumulation. Each thread scans a contig, fills its bin array, emits rows, frees, and claims the next contig.
 
@@ -203,10 +219,12 @@ See [.github/PLAN.md](.github/PLAN.md) Phase 10 for full architecture, code sket
 
 ## Current Focus Areas
 1. **Implement First**: `bgzip`, `bgunzip`, `bam_index`, `bcf_index`, `tabix_index`
-2. **Phase 10 Design Freeze**: Finalize the minimal public API and output contracts for `read_bed`, `fasta_nuc`, `bam_bin_counts`, `bam_bedcov`, `bam_coverage`, `bam_depth`, and `bam_pileup`
-3. **cgranges Integration**: Wire vendored cgranges into build for irregular BED/interval joins
-4. **R Surface**: Add and test R wrappers for every public function, and keep `functions.yaml`/generated catalogs synchronized
-5. **Cross-platform**: Maintain builds on Linux, macOS, Windows MinGW
+2. **Next Interval Layer**: implement `read_bed` and `fasta_nuc` before the BAM coverage/count operations
+3. **Coverage Ops**: implement and validate `bam_bin_counts`, `bam_bedcov`, `bam_coverage`, `bam_depth`, and `bam_pileup` against WisecondorX/NIPTeR/samtools/Rsamtools semantics
+4. **Phase 10 Design Freeze**: finalize the minimal public API and output contracts for `read_bed`, `fasta_nuc`, `bam_bin_counts`, `bam_bedcov`, `bam_coverage`, `bam_depth`, and `bam_pileup`
+4. **cgranges Integration**: wire vendored cgranges into build for irregular BED/interval joins
+5. **R Surface**: add and test R wrappers for every public function, and keep `functions.yaml`/generated catalogs synchronized
+6. **Later Analysis Layer**: defer candidate/active-site detection and `mpileup`-style richer site summarization until the coverage primitives are stable
 
 ## Style
 - Keep changes minimal and focused.

@@ -784,7 +784,8 @@ true
 - [ ] Keep primitives orthogonal:
   - fixed-bin read counting is not per-base pileup,
   - pileup overlap handling is not CNV bin semantics,
-  - interval preprocessing is not BAM scan policy.
+  - interval preprocessing is not BAM scan policy,
+  - candidate/active-site discovery is not the same layer as coverage or pileup extraction.
 - [ ] Keep semantics explicit:
   - every counting API must declare its counting unit, overlap behavior, and filtering contract.
 - [ ] Prefer composable building blocks over tool-specific one-offs.
@@ -808,14 +809,27 @@ true
 
 ### 10.4 Reference Semantics to Preserve
 - [ ] WisecondorX compatibility:
-  - count read starts per fixed-width bin,
-  - for paired reads, skip improper pairs,
-  - require `MAPQ >= 1`,
-  - by default suppress duplicates heuristically by repeated `(read.pos, mate.pos)` or repeated `read.pos`; `--normdup` disables that suppression,
+  - count read starts per fixed-width bin by iterating `pysam.AlignmentFile.fetch(chr)` record-by-record in chromosome iteration order,
+  - for paired reads, skip any record where `read.is_proper_pair` is false,
+  - require `read.mapping_quality >= 1`,
+  - duplicate suppression is the exact adjacent-record algorithm from `convert_tools.py`, not SAM duplicate-flag filtering:
+    - maintain `larp` = previous processed read start and `larp2` = previous processed mate start,
+    - for paired reads: if `not normdup` and `read.pos == larp` and `read.next_reference_start == larp2`, suppress the current record as duplicate,
+    - for unpaired reads: if `not normdup` and `read.pos == larp`, suppress the current record as duplicate,
+    - after each processed proper-pair record, update `larp = read.pos` and `larp2 = read.next_reference_start`,
+    - after each processed unpaired record, update `larp = read.pos`,
+    - this is adjacency-based suppression in fetch order; it does **not** inspect `read.is_duplicate` and does **not** globally deduplicate all identical starts,
+  - there is no pileup-style mate-overlap suppression:
+    - records are counted independently,
+    - a paired fragment can contribute two counts if both read records are visited and pass the filters,
+    - the only paired-read reduction in `convert_tools.py` is the improper-pair skip plus the adjacent `(pos, mate_pos)` suppression above,
+  - operate per chromosome reference sequence and ignore contigs outside the expected autosome/X/Y set,
   - keep export compatible with indexed tabular outputs instead of NPZ-only exchange.
 - [ ] NIPTeR / NIPTmer compatibility:
   - NIPTeR currently bins BAM `pos` values into fixed 50 kb bins with optional strand separation,
   - current NIPTeR code relies on `scanBam()` and does not expose an explicit proper-pair / duplicate / MAPQ filter in the binning API,
+  - NIPTeR binning is not explicitly mate-overlap aware; compatibility claims should stay limited to strand splitting and position-based binning unless proven otherwise,
+  - NIPTeR downstream modeling also carries chromosome include/exclude concepts for autosomal vs sex-chromosome and predictor selection workflows,
   - preserve forward/reverse counts separately when requested,
   - keep room for later GC-aware normalization columns.
 - [ ] WisecondorX masking behavior:
@@ -837,12 +851,32 @@ true
 - [ ] samtools `depth` compatibility:
   - add a per-position depth path with `-a` / `-aa` style zero-depth controls,
   - support BED-driven region restriction, overlap suppression (`-s`), deletion inclusion (`-J`), flag filters, read-length, mapq, and baseq options.
+- [ ] samtools / bcftools `mpileup` compatibility (later phase, after coverage kernels):
+  - add an `mpileup`-style base-summary primitive only after `bam_depth` / `bam_pileup` semantics are stable,
+  - verify exact output contract, overlap handling, BAQ/base-quality interactions, and text-vs-structured representation before naming the API.
+- [ ] Candidate / active-site detection (later phase, after coverage and pileup):
+  - treat active-site discovery as a downstream analysis layer built on stable pileup/coverage primitives,
+  - plan for mismatch/indel/soft-clip/depth heuristics without freezing a caller-specific API yet.
+- [ ] Targeted-capture insert/bait attribution (research topic, later phase):
+  - track the GATK CNV idea that targeted WES coverage should often be modeled at the insert/fragment level rather than as independent read counts,
+  - keep this explicitly separate from `bam_bin_counts`, which is a read-start/read-level primitive for WisecondorX-like and NIPTeR-like workflows,
+  - investigate a future bait-driven API such as `bam_insert_bait_counts(...)` / `bam_fragment_bait_counts(...)` that would:
+    - take a BED/bait input,
+    - count fragments/inserts rather than individual reads,
+    - handle cases where one insert overlaps multiple baits,
+    - support fractional or probabilistic bait membership assignment in ambiguous cases,
+    - allow later estimation of bait-specific "effective GC" from expected captured fragments rather than bait sequence alone,
+  - review the archived GATK discussion around insert-to-bait attribution and empirical bait-capture distributions before freezing any such API.
 
 ### 10.4A Consistency Notes to Verify Before Freezing APIs
 - [ ] **Threading pattern**: the plan currently assumes contig-level partitioning plus per-handle `hts_set_threads(fp, 2)` broadly. Re-check this against htslib 1.23 and actual workloads before treating it as mandatory for every function.
 - [ ] **Multi-region BAM iteration**: confirm the exact htslib 1.23 API and dedup semantics for multi-region iteration before standardizing on `sam_itr_regarray()` language across docs and code.
 - [ ] **Flag defaults**: keep default excluded-flag sets explicit per compatibility target. Do not casually reuse `0x704` where supplementary (`0x800`) behavior also matters.
-- [ ] **Pair / duplicate compatibility**: `require_flags` / `exclude_flags` are the preferred generic controls, but WisecondorX duplicate suppression is heuristic rather than pure flag-based. Mark any claimed compatibility as partial until tested against `.sync/WisecondorX`.
+- [ ] **Pair / duplicate compatibility**: `include_flags`, `require_flags`, and `exclude_flags` are the preferred generic controls, but WisecondorX duplicate suppression is heuristic rather than pure flag-based. Mark any claimed compatibility as partial until tested against `.sync/WisecondorX`.
+- [ ] **Overlap / proper-pair compatibility**: keep read-start binning semantics distinct from pileup/depth overlap suppression.
+  - WisecondorX requires proper pairs for paired reads and then counts record starts; it does not collapse mates into fragments and does not suppress overlapping mates as a separate step.
+  - NIPTeR binning uses `scanBam()` records and strand splitting; its current path is likewise not a mate-overlap-suppressed fragment counter.
+- [ ] **Contig include/exclude semantics**: decide whether autosome-only / sex-chromosome-aware filtering belongs as explicit `include_contigs` / `exclude_contigs` parameters, a BED/region preprocessing step, or a later wrapper layer. Do not hard-code WisecondorX/NIPTeR chromosome assumptions silently.
 - [ ] **Coordinate conventions**: BED/bin outputs can remain 0-based half-open, but base-level outputs (`bam_depth`, `bam_pileup`) must have their coordinate contract checked against `samtools` / Rsamtools expectations before freezing docs or wrappers.
 - [ ] **`bam_bedcov` naming**: verify whether the output metric should represent summed depth, covered bases above threshold, read count, or multiple columns; avoid implying `bedcov` semantics with the wrong column names.
 - [ ] **`bam_depth` scope**: current test notes mention possible multi-file behavior while the proposed signature is single-path. Decide explicitly whether multi-file depth is in scope for v1.
@@ -864,7 +898,7 @@ SELECT RNAME AS chrom,
        SUM(CASE WHEN NOT is_reverse_complemented(FLAG) THEN 1 ELSE 0 END) AS count_fwd,
        SUM(CASE WHEN is_reverse_complemented(FLAG) THEN 1 ELSE 0 END) AS count_rev
 FROM read_bam('sample.bam')
-WHERE is_properly_aligned(FLAG)
+WHERE is_proper_pair(FLAG)
   AND NOT is_duplicate(FLAG)
   AND NOT is_secondary(FLAG)
   AND NOT is_supplementary(FLAG)
@@ -878,7 +912,7 @@ ORDER BY RNAME, start;
 SELECT RNAME, POS, seq_gc_content(SEQ) AS gc,
        LENGTH(SEQ) AS read_len
 FROM read_bam('sample.bam')
-WHERE is_properly_aligned(FLAG)
+WHERE is_proper_pair(FLAG)
   AND NOT is_unmapped(FLAG)
   AND MAPQ >= 20;
 ```
@@ -963,12 +997,18 @@ GROUP BY t.chrom, t.start, t.end;
   - `bam_pileup(path, [...])`
 - [ ] Do not add compatibility wrappers until these kernels and their R wrappers are stable.
 
+#### 10.5.4 Later Analysis Layer
+- [ ] Add a future `mpileup`-style primitive once `bam_depth` and `bam_pileup` are stable and benchmarked.
+- [ ] Add future candidate/active-site detection helpers on top of stable pileup/coverage outputs rather than mixing those heuristics into the first coverage kernels.
+- [ ] Keep this later layer explicitly separate from the immediate coverage deliverables.
+
 **Kernel sketch summary:**
 - `bam_bin_counts` follows the contig-parallel pattern already proven in `bam_reader.c`.
 - The hot path computes `bin_id = pos / bin_width` and updates total / forward / reverse counts in one pass.
-- Filtering is expressed with `require_flags`, `exclude_flags`, and `min_mapq`.
+- Filtering is expressed with `include_flags`, `require_flags`, `exclude_flags`, and `min_mapq`.
 - Sparse output is the default; `emit_zero_bins := TRUE` is an explicit export-oriented mode.
 - Region-restricted scans use the existing htslib index iterator path; full indexed scans use contig partitioning.
+- WisecondorX-like and NIPTeR-like outputs should be documented as explicit parameter sets over the same kernel, not as `profile := 'wisecondorx'` / `profile := 'nipter'` public APIs.
 
 **Expected SQL usage for counting kernels:**
 ```sql
@@ -978,7 +1018,7 @@ FROM bam_bin_counts(
     'sample.bam',
     bin_width := 5000,
     min_mapq := 1,
-    require_flags := 0x2,   -- proper pair
+    include_flags := 0x2,   -- has proper-pair bit set
     exclude_flags := 0x704  -- unmapped/secondary/qcfail/duplicate; supplementary handled separately if needed
 );
 
@@ -1049,17 +1089,26 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
 - [ ] Avoid a wide `count_model` enum unless a new mode cannot be expressed by a separate function with a clearer contract.
 
 #### 10.6.2 Filtering Contract
-- [ ] Use `require_flags` and `exclude_flags` as the primary filtering controls for counting APIs.
+- [ ] Use `include_flags`, `require_flags`, and `exclude_flags` as the primary filtering controls for counting APIs.
 - [ ] Keep `min_mapq` and `min_baseq` explicit where applicable.
 - [ ] Prefer symbolic SAM flag names in docs and R wrappers; keep raw integer masks available as the exact low-level form for SQL power users and compatibility work.
 - [ ] Add a higher-level duplicate or pair parameter only if a required upstream behavior cannot be represented cleanly with flags plus overlap settings.
+- [ ] Keep any WisecondorX-style heuristic duplicate suppression separate from pure SAM-flag filtering so the contract stays honest.
+- [ ] Be explicit that `exclude_flags` alone cannot reproduce WisecondorX duplicate behavior, because the upstream algorithm is adjacency-based on `(read.pos, read.next_reference_start)` rather than `FLAG & DUP`.
+- [ ] Prefer `include_flags` in examples when that is cognitively clearer than a negated `exclude_flags` expression; keep both available because the samtools family uses both inclusion and exclusion flag idioms.
 
 #### 10.6.3 Strand Policy
 - [ ] Support `strand_mode := 'combined' | 'split'`.
 - [ ] Make `count_total`, `count_fwd`, and `count_rev` part of the stable bin-count contract.
+- [ ] Keep those three columns present even for WisecondorX-like combined output so one canonical schema also works for NIPTeR-style strand-aware workflows.
 
 #### 10.6.4 Overlap Policy
 - [ ] Keep overlap handling explicit and local to the functions where it matters.
+- [ ] `bam_bin_counts` must document that read-start binning is not pileup-style mate-overlap suppression; paired-read handling is a filter/pair-policy problem, not a base-overlap problem.
+- [ ] `bam_bin_counts` should document two distinct compatibility parameter sets:
+  - WisecondorX-like: per-record start counting with explicit proper-pair gating, MAPQ thresholding, canonical-contig filtering, and optional adjacent-start duplicate suppression,
+  - NIPTeR-like: per-record start/position counting with optional strand splitting, independent MAPQ thresholding, optional duplicate-flag exclusion, and no separate mate-overlap suppression.
+- [ ] If a proper-pair convenience option is added later, define it as syntactic sugar over `require_flags`, not a separate counting model.
 - [ ] `bam_bedcov` must document whether deletions and ref-skips contribute, matching `samtools bedcov -j`.
 - [ ] `bam_depth` must document `-s` overlap suppression and `-J` deletion inclusion explicitly.
 - [ ] `bam_pileup` remains separate for richer base-level Rsamtools-like output.
@@ -1083,6 +1132,10 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
 - [ ] Keep region preprocessing separate from BAM scan policy.
 - [ ] Preprocess irregular target sets with interval primitives rather than burying merge policy in BAM APIs.
 - [ ] Document exact behavior for region strings, region files, merged targets, and overlapping intervals.
+- [ ] Decide explicitly how contig include/exclude should work for CNV workflows:
+  - `region` for indexed subsetting,
+  - potential `include_contigs` / `exclude_contigs` parameters for autosome-only or custom chromosome subsets,
+  - no silent dropping of noncanonical contigs unless the user asked for it or a compatibility profile makes it explicit.
 
 ### 10.7 Proposed API Backlog (Prioritized)
 
@@ -1107,7 +1160,14 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
 - [ ] `interval_nearest(left, right, [k := 1, max_distance := NULL])`
 
 #### 10.7.2 Native Bin-Count Kernel
-- [ ] `bam_bin_counts(path, bin_width := 5000, strand_mode := 'combined', min_mapq := 0, require_flags := NULL, exclude_flags := NULL, region := NULL, index_path := NULL, reference := NULL, emit_zero_bins := FALSE)`
+- [ ] `bam_bin_counts(path, bin_width := 5000, strand_mode := 'combined', min_mapq := 0, include_flags := NULL, require_flags := NULL, exclude_flags := NULL, region := NULL, index_path := NULL, reference := NULL, emit_zero_bins := FALSE)`
+- [ ] Stable input contract:
+  - `path` accepts BAM/CRAM alignment input
+  - `bin_width` defines regular fixed bins for WisecondorX- and NIPTeR-like workflows
+  - `region` and `index_path` provide explicit indexed subsetting without changing output schema
+  - plan explicit contig include/exclude controls for autosome-only and chromosome-subset workflows
+  - `reference` enables optional annotation columns only; it must not change the core count columns
+  - later optional mask/blacklist inputs may add metadata columns but must not change the canonical count columns
 - [ ] Stable output columns:
   - `chrom`
   - `start`
@@ -1116,6 +1176,12 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
   - `count_total`
   - `count_fwd`
   - `count_rev`
+- [ ] Compatibility expectations:
+  - WisecondorX-style consumers use `count_total` with the same row layout and can ignore `count_fwd` / `count_rev`
+  - NIPTeR-style consumers use `count_fwd` / `count_rev` directly without needing a separate binning API
+  - `count_total` must always equal `count_fwd + count_rev`
+  - any WisecondorX-style proper-pair or adjacent-start duplicate behavior must be documented as an explicit parameter set, not hidden default magic
+  - any NIPTeR-style strand-separated output must preserve the same canonical rows and only vary whether downstream users consume `count_total` or per-strand counts
 - [ ] Optional annotation columns, computed only when requested with a reference FASTA:
   - `pct_at`
   - `pct_gc`
@@ -1130,9 +1196,10 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
   - `is_masked_ref`
   - `is_masked_blacklist`
 - [ ] Default behavior should favor sparse output; zero-filled bins are opt-in.
+- [ ] Keep the canonical row sort order deterministic: `chrom`, `start`, `end`.
 
 #### 10.7.3 BED Coverage and Pileup Kernels
-- [ ] `bam_bedcov(path, bed_path, min_mapq := 0, require_flags := NULL, exclude_flags := DEFAULT_BEDCOV_EXCLUDES, count_deletions := TRUE, count_ref_skips := TRUE, region := NULL, index_path := NULL, reference := NULL)`
+- [ ] `bam_bedcov(path, bed_path, min_mapq := 0, include_flags := NULL, require_flags := NULL, exclude_flags := DEFAULT_BEDCOV_EXCLUDES, count_deletions := TRUE, count_ref_skips := TRUE, region := NULL, index_path := NULL, reference := NULL)`
 - [ ] Stable output columns:
   - `chrom`
   - `start`
@@ -1142,7 +1209,7 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
   - `strand` (nullable passthrough)
   - `bases_covered`
   - `read_count` (optional when requested)
-- [ ] `bam_coverage(path, [bam_list := NULL, region := NULL, min_read_len := 0, min_mapq := 0, min_baseq := 0, require_flags := NULL, exclude_flags := DEFAULT_COVERAGE_EXCLUDES, max_depth := 1000000, min_depth := 1, index_path := NULL, reference := NULL])`
+- [ ] `bam_coverage(path, [bam_list := NULL, region := NULL, min_read_len := 0, min_mapq := 0, min_baseq := 0, include_flags := NULL, require_flags := NULL, exclude_flags := DEFAULT_COVERAGE_EXCLUDES, max_depth := 1000000, min_depth := 1, index_path := NULL, reference := NULL])`
 - [ ] Stable output columns:
   - `chrom`
   - `start`
@@ -1153,12 +1220,12 @@ SELECT * FROM read_tabix('sample_bins.bed.gz',
   - `meandepth`
   - `meanbaseq`
   - `meanmapq`
-- [ ] `bam_depth(path, [all_positions := FALSE, all_reference_positions := FALSE, bed_path := NULL, region := NULL, min_read_len := 0, min_mapq := 0, min_baseq := 0, include_deletions := FALSE, suppress_overlaps := FALSE, require_flags := NULL, exclude_flags := DEFAULT_DEPTH_EXCLUDES, index_path := NULL, reference := NULL])`
+- [ ] `bam_depth(path, [all_positions := FALSE, all_reference_positions := FALSE, bed_path := NULL, region := NULL, min_read_len := 0, min_mapq := 0, min_baseq := 0, include_deletions := FALSE, suppress_overlaps := FALSE, include_flags := NULL, require_flags := NULL, exclude_flags := DEFAULT_DEPTH_EXCLUDES, index_path := NULL, reference := NULL])`
 - [ ] Stable output columns:
   - `chrom`
   - `pos`
   - `depth`
-- [ ] `bam_pileup(path, [min_mapq, min_baseq, require_flags, exclude_flags, include_deletions, include_insertions, distinguish_strands, region, index_path, reference])`
+- [ ] `bam_pileup(path, [min_mapq, min_baseq, include_flags, require_flags, exclude_flags, include_deletions, include_insertions, distinguish_strands, region, index_path, reference])`
 - [ ] Keep overlap handling in `bam_depth` / `bam_pileup`, not as a substitute for CNV bin semantics.
 
 #### 10.7.4 Export / Interoperability Layer
@@ -1410,6 +1477,8 @@ The R package tests should validate the packaged product, not just the extension
 - [ ] Implement `bam_bedcov` for samtools-compatible BED-guided summed coverage.
 - [ ] Implement `bam_coverage` and `bam_depth` to mirror `samtools coverage` and `samtools depth`.
 - [ ] Implement separate `bam_pileup` for richer Rsamtools-like base-level output.
+- [ ] Revisit `mpileup`-style summaries only after `bam_depth` / `bam_pileup` output contracts are frozen.
+- [ ] Revisit candidate/active-site discovery only after the coverage and pileup primitives have stable semantics and tests.
 - [ ] Add export/index writer logic and round-trip tests.
 - [ ] Document SQL-first GC recipes and defer native GC until benchmarks justify it.
 - [ ] Add R wrappers for all public functions.

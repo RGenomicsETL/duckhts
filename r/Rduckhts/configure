@@ -325,7 +325,7 @@ echo "---------- Building DuckHTS extension ----------"
 
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c bcf_reader.c bam_reader.c bgzip.c hts_index_builder.c seq_reader.c tabix_reader.c hts_meta_reader.c vep_parser.c kmer_udf.c"
+C_SOURCES="duckhts.c bcf_reader.c bam_reader.c bgzip.c hts_index_builder.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c vep_parser.c kmer_udf.c"
 INCLUDES="-I./include -I./duckdb_capi -I./htslib"
 
 echo "Compiling extension sources..."

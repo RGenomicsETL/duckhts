@@ -18,6 +18,9 @@ extern void register_read_bam_function(duckdb_connection connection);
 extern void register_read_fasta_function(duckdb_connection connection);
 extern void register_read_fastq_function(duckdb_connection connection);
 extern void register_fasta_index_function(duckdb_connection connection);
+/* interval_udf.c */
+extern void register_read_bed_function(duckdb_connection connection);
+extern void register_fasta_nuc_function(duckdb_connection connection);
 /* bgzip.c */
 extern void register_bgzip_function(duckdb_connection connection);
 extern void register_bgunzip_function(duckdb_connection connection);
@@ -53,6 +56,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_fasta_function(connection);
     register_read_fastq_function(connection);
     register_fasta_index_function(connection);
+    register_read_bed_function(connection);
+    register_fasta_nuc_function(connection);
     register_bgzip_function(connection);
     register_bgunzip_function(connection);
     register_bam_index_function(connection);

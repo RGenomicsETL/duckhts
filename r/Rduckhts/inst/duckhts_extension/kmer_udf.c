@@ -18,6 +18,59 @@ DUCKDB_EXTENSION_EXTERN
 #define SAM_FLAG_DUPLICATE 0x400
 #define SAM_FLAG_SUPPLEMENTARY 0x800
 
+static const char *SAM_FLAG_FIELD_NAMES[] = {
+    "is_paired",
+    "is_proper_pair",
+    "is_unmapped",
+    "is_next_segment_unmapped",
+    "is_reverse_complemented",
+    "is_next_segment_reverse_complemented",
+    "is_first_segment",
+    "is_last_segment",
+    "is_secondary",
+    "is_qc_fail",
+    "is_duplicate",
+    "is_supplementary"
+};
+
+static const uint16_t SAM_FLAG_FIELD_MASKS[] = {
+    SAM_FLAG_PAIRED,
+    SAM_FLAG_PROPER_PAIR,
+    SAM_FLAG_UNMAPPED,
+    SAM_FLAG_MATE_UNMAPPED,
+    SAM_FLAG_REVERSE,
+    SAM_FLAG_MATE_REVERSE,
+    SAM_FLAG_READ1,
+    SAM_FLAG_READ2,
+    SAM_FLAG_SECONDARY,
+    SAM_FLAG_QCFAIL,
+    SAM_FLAG_DUPLICATE,
+    SAM_FLAG_SUPPLEMENTARY
+};
+
+enum { SAM_FLAG_FIELD_COUNT = (int)(sizeof(SAM_FLAG_FIELD_MASKS) / sizeof(SAM_FLAG_FIELD_MASKS[0])) };
+
+typedef struct {
+    int valid;
+    int has_soft_clip;
+    int has_hard_clip;
+    int64_t left_soft_clip;
+    int64_t right_soft_clip;
+    int64_t query_length;
+    int64_t aligned_query_length;
+    int64_t reference_length;
+} cigar_metrics_t;
+
+enum {
+    CIGAR_METRIC_HAS_SOFT_CLIP = 1,
+    CIGAR_METRIC_HAS_HARD_CLIP = 2,
+    CIGAR_METRIC_LEFT_SOFT_CLIP = 3,
+    CIGAR_METRIC_RIGHT_SOFT_CLIP = 4,
+    CIGAR_METRIC_QUERY_LENGTH = 5,
+    CIGAR_METRIC_ALIGNED_QUERY_LENGTH = 6,
+    CIGAR_METRIC_REFERENCE_LENGTH = 7
+};
+
 static inline void set_null_at(duckdb_vector vector, idx_t row) {
     duckdb_vector_ensure_validity_writable(vector);
     uint64_t *validity = duckdb_vector_get_validity(vector);
@@ -139,6 +192,106 @@ static inline int64_t get_int64_at(duckdb_vector vector, idx_t row) {
     }
     duckdb_destroy_logical_type(&logical_type);
     return result;
+}
+
+static int parse_cigar_metrics(const char *cigar, idx_t len, cigar_metrics_t *metrics) {
+    int64_t op_len = 0;
+    int saw_op = 0;
+    char first_op = '\0';
+    int64_t first_len = 0;
+    char last_op = '\0';
+    int64_t last_len = 0;
+
+    memset(metrics, 0, sizeof(*metrics));
+    if (!cigar || len == 0 || (len == 1 && cigar[0] == '*')) {
+        return 0;
+    }
+
+    for (idx_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)cigar[i];
+        if (isdigit(c)) {
+            op_len = op_len * 10 + (int64_t)(c - '0');
+            continue;
+        }
+        if (op_len <= 0) {
+            return 0;
+        }
+
+        switch (c) {
+        case 'M':
+        case '=':
+        case 'X':
+            metrics->query_length += op_len;
+            metrics->aligned_query_length += op_len;
+            metrics->reference_length += op_len;
+            break;
+        case 'I':
+            metrics->query_length += op_len;
+            break;
+        case 'S':
+            metrics->query_length += op_len;
+            metrics->has_soft_clip = 1;
+            break;
+        case 'H':
+            metrics->has_hard_clip = 1;
+            break;
+        case 'D':
+        case 'N':
+            metrics->reference_length += op_len;
+            break;
+        case 'P':
+            break;
+        default:
+            return 0;
+        }
+
+        if (!saw_op) {
+            first_op = (char)c;
+            first_len = op_len;
+        }
+        last_op = (char)c;
+        last_len = op_len;
+        saw_op = 1;
+        op_len = 0;
+    }
+
+    if (!saw_op || op_len != 0) {
+        return 0;
+    }
+    if (first_op == 'S') {
+        metrics->left_soft_clip = first_len;
+    }
+    if (last_op == 'S') {
+        metrics->right_soft_clip = last_len;
+    }
+    metrics->valid = 1;
+    return 1;
+}
+
+static int cigar_has_operator_text(const char *cigar, idx_t cigar_len, char op) {
+    int64_t op_len = 0;
+
+    if (!cigar || cigar_len == 0 || (cigar_len == 1 && cigar[0] == '*')) {
+        return 0;
+    }
+    for (idx_t i = 0; i < cigar_len; i++) {
+        unsigned char c = (unsigned char)cigar[i];
+        if (isdigit(c)) {
+            op_len = op_len * 10 + (int64_t)(c - '0');
+            continue;
+        }
+        if (op_len <= 0) {
+            return -1;
+        }
+        if ((char)c == op) {
+            return 1;
+        }
+        op_len = 0;
+    }
+    if (op_len != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static void seq_revcomp_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
@@ -455,6 +608,187 @@ static void sam_flag_predicate_scalar(duckdb_function_info info, duckdb_data_chu
     sam_flag_scalar(info, input, output, mask);
 }
 
+static void sam_is_forward_aligned_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector flag_vec = duckdb_data_chunk_get_vector(input, 0);
+    bool *out_data = (bool *)duckdb_vector_get_data(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(flag_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        int64_t flag_value = get_int64_at(flag_vec, row);
+        if (flag_value < 0 || flag_value > 0xffff) {
+            set_null_at(output, row);
+            continue;
+        }
+        uint16_t flag = (uint16_t)flag_value;
+        if ((flag & SAM_FLAG_UNMAPPED) != 0) {
+            set_null_at(output, row);
+            continue;
+        }
+        out_data[row] = ((flag & SAM_FLAG_REVERSE) == 0);
+    }
+}
+
+static void sam_flag_has_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector flag_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector mask_vec = duckdb_data_chunk_get_vector(input, 1);
+    bool *out_data = (bool *)duckdb_vector_get_data(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(flag_vec, row) || !row_is_valid(mask_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        int64_t flag_value = get_int64_at(flag_vec, row);
+        int64_t mask_value = get_int64_at(mask_vec, row);
+        if (flag_value < 0 || flag_value > 0xffff || mask_value < 0 || mask_value > 0xffff) {
+            set_null_at(output, row);
+            continue;
+        }
+        out_data[row] = ((((uint16_t)flag_value) & ((uint16_t)mask_value)) != 0);
+    }
+}
+
+static void sam_flag_bits_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector flag_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector child_vecs[SAM_FLAG_FIELD_COUNT];
+    bool *child_data[SAM_FLAG_FIELD_COUNT];
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (int i = 0; i < SAM_FLAG_FIELD_COUNT; i++) {
+        child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
+        child_data[i] = (bool *)duckdb_vector_get_data(child_vecs[i]);
+    }
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(flag_vec, row)) {
+            set_null_at(output, row);
+            for (int i = 0; i < SAM_FLAG_FIELD_COUNT; i++) {
+                set_null_at(child_vecs[i], row);
+            }
+            continue;
+        }
+
+        int64_t flag_value = get_int64_at(flag_vec, row);
+        if (flag_value < 0 || flag_value > 0xffff) {
+            set_null_at(output, row);
+            for (int i = 0; i < SAM_FLAG_FIELD_COUNT; i++) {
+                set_null_at(child_vecs[i], row);
+            }
+            continue;
+        }
+
+        uint16_t flag_bits = (uint16_t)flag_value;
+        for (int i = 0; i < SAM_FLAG_FIELD_COUNT; i++) {
+            child_data[i][row] = ((flag_bits & SAM_FLAG_FIELD_MASKS[i]) != 0);
+        }
+    }
+}
+
+static void cigar_metric_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    uintptr_t metric_id = (uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    cigar_metrics_t metrics;
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        idx_t cigar_len = 0;
+        const char *cigar = get_string_at(cigar_vec, row, &cigar_len);
+        if (!parse_cigar_metrics(cigar, cigar_len, &metrics)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        if (metric_id == CIGAR_METRIC_HAS_SOFT_CLIP || metric_id == CIGAR_METRIC_HAS_HARD_CLIP) {
+            bool *out_data = (bool *)duckdb_vector_get_data(output);
+            out_data[row] = (metric_id == CIGAR_METRIC_HAS_SOFT_CLIP) ? (metrics.has_soft_clip != 0)
+                                                                       : (metrics.has_hard_clip != 0);
+        } else {
+            int64_t *out_data = (int64_t *)duckdb_vector_get_data(output);
+            switch (metric_id) {
+            case CIGAR_METRIC_LEFT_SOFT_CLIP:
+                out_data[row] = metrics.left_soft_clip;
+                break;
+            case CIGAR_METRIC_RIGHT_SOFT_CLIP:
+                out_data[row] = metrics.right_soft_clip;
+                break;
+            case CIGAR_METRIC_QUERY_LENGTH:
+                out_data[row] = metrics.query_length;
+                break;
+            case CIGAR_METRIC_ALIGNED_QUERY_LENGTH:
+                out_data[row] = metrics.aligned_query_length;
+                break;
+            case CIGAR_METRIC_REFERENCE_LENGTH:
+                out_data[row] = metrics.reference_length;
+                break;
+            default:
+                set_null_at(output, row);
+                break;
+            }
+        }
+    }
+}
+
+static void cigar_has_op_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector op_vec = duckdb_data_chunk_get_vector(input, 1);
+    bool *out_data = (bool *)duckdb_vector_get_data(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(op_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        idx_t cigar_len = 0;
+        idx_t op_len = 0;
+        const char *cigar = get_string_at(cigar_vec, row, &cigar_len);
+        const char *op_text = get_string_at(op_vec, row, &op_len);
+        if (op_len != 1) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        char op = (char)toupper((unsigned char)op_text[0]);
+        switch (op) {
+        case 'M':
+        case 'I':
+        case 'D':
+        case 'N':
+        case 'S':
+        case 'H':
+        case 'P':
+        case '=':
+        case 'X':
+            break;
+        default:
+            set_null_at(output, row);
+            continue;
+        }
+
+        int has_op = cigar_has_operator_text(cigar, cigar_len, op);
+        if (has_op < 0) {
+            set_null_at(output, row);
+            continue;
+        }
+        out_data[row] = (has_op != 0);
+    }
+}
+
 typedef struct {
     char *sequence;
     idx_t seq_len;
@@ -761,6 +1095,107 @@ static void register_sam_flag_predicate_function(duckdb_connection connection,
     duckdb_destroy_scalar_function(&fn);
 }
 
+static void register_sam_flag_has_function(duckdb_connection connection) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "sam_flag_has");
+
+    duckdb_logical_type usmallint_type = duckdb_create_logical_type(DUCKDB_TYPE_USMALLINT);
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_scalar_function_add_parameter(fn, usmallint_type);
+    duckdb_scalar_function_add_parameter(fn, usmallint_type);
+    duckdb_scalar_function_set_return_type(fn, bool_type);
+    duckdb_scalar_function_set_function(fn, sam_flag_has_scalar);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&usmallint_type);
+    duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
+static void register_sam_is_forward_aligned_function(duckdb_connection connection) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "is_forward_aligned");
+
+    duckdb_logical_type int_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_scalar_function_add_parameter(fn, int_type);
+    duckdb_scalar_function_set_return_type(fn, bool_type);
+    duckdb_scalar_function_set_function(fn, sam_is_forward_aligned_scalar);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&int_type);
+    duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
+static void register_sam_flag_bits_function(duckdb_connection connection) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "sam_flag_bits");
+
+    duckdb_logical_type usmallint_type = duckdb_create_logical_type(DUCKDB_TYPE_USMALLINT);
+    duckdb_logical_type bool_types[SAM_FLAG_FIELD_COUNT];
+    duckdb_logical_type struct_type;
+
+    for (int i = 0; i < SAM_FLAG_FIELD_COUNT; i++) {
+        bool_types[i] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    }
+    struct_type = duckdb_create_struct_type(bool_types, SAM_FLAG_FIELD_NAMES, SAM_FLAG_FIELD_COUNT);
+
+    duckdb_scalar_function_add_parameter(fn, usmallint_type);
+    duckdb_scalar_function_set_return_type(fn, struct_type);
+    duckdb_scalar_function_set_function(fn, sam_flag_bits_scalar);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&usmallint_type);
+    for (int i = 0; i < SAM_FLAG_FIELD_COUNT; i++) {
+        duckdb_destroy_logical_type(&bool_types[i]);
+    }
+    duckdb_destroy_logical_type(&struct_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
+static void register_cigar_metric_function(duckdb_connection connection,
+                                           const char *name,
+                                           uintptr_t metric_id,
+                                           duckdb_type return_type_id) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, name);
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type return_type = duckdb_create_logical_type(return_type_id);
+    duckdb_scalar_function_add_parameter(fn, varchar_type);
+    duckdb_scalar_function_set_return_type(fn, return_type);
+    duckdb_scalar_function_set_function(fn, cigar_metric_scalar);
+    duckdb_scalar_function_set_extra_info(fn, (void *)metric_id, NULL);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&return_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
+static void register_cigar_has_op_function(duckdb_connection connection) {
+    duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "cigar_has_op");
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_scalar_function_add_parameter(fn, varchar_type);
+    duckdb_scalar_function_add_parameter(fn, varchar_type);
+    duckdb_scalar_function_set_return_type(fn, bool_type);
+    duckdb_scalar_function_set_function(fn, cigar_has_op_scalar);
+
+    duckdb_register_scalar_function(connection, fn);
+
+    duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_scalar_function(&fn);
+}
+
 static void register_seq_kmers_function(duckdb_connection connection) {
     duckdb_table_function tf = duckdb_create_table_function();
     duckdb_table_function_set_name(tf, "seq_kmers");
@@ -793,12 +1228,23 @@ void register_kmer_udf_functions(duckdb_connection connection) {
     register_seq_decode_4bit_function(connection);
     register_seq_gc_content_function(connection);
     register_seq_kmers_function(connection);
-    register_sam_flag_predicate_function(connection, "is_segmented", SAM_FLAG_PAIRED);
-    register_sam_flag_predicate_function(connection, "is_properly_aligned", SAM_FLAG_PROPER_PAIR);
+    register_cigar_metric_function(connection, "cigar_has_soft_clip", CIGAR_METRIC_HAS_SOFT_CLIP, DUCKDB_TYPE_BOOLEAN);
+    register_cigar_metric_function(connection, "cigar_has_hard_clip", CIGAR_METRIC_HAS_HARD_CLIP, DUCKDB_TYPE_BOOLEAN);
+    register_cigar_metric_function(connection, "cigar_left_soft_clip", CIGAR_METRIC_LEFT_SOFT_CLIP, DUCKDB_TYPE_BIGINT);
+    register_cigar_metric_function(connection, "cigar_right_soft_clip", CIGAR_METRIC_RIGHT_SOFT_CLIP, DUCKDB_TYPE_BIGINT);
+    register_cigar_metric_function(connection, "cigar_query_length", CIGAR_METRIC_QUERY_LENGTH, DUCKDB_TYPE_BIGINT);
+    register_cigar_metric_function(connection, "cigar_aligned_query_length", CIGAR_METRIC_ALIGNED_QUERY_LENGTH, DUCKDB_TYPE_BIGINT);
+    register_cigar_metric_function(connection, "cigar_reference_length", CIGAR_METRIC_REFERENCE_LENGTH, DUCKDB_TYPE_BIGINT);
+    register_cigar_has_op_function(connection);
+    register_sam_flag_bits_function(connection);
+    register_sam_flag_has_function(connection);
+    register_sam_is_forward_aligned_function(connection);
+    register_sam_flag_predicate_function(connection, "is_paired", SAM_FLAG_PAIRED);
+    register_sam_flag_predicate_function(connection, "is_proper_pair", SAM_FLAG_PROPER_PAIR);
     register_sam_flag_predicate_function(connection, "is_unmapped", SAM_FLAG_UNMAPPED);
-    register_sam_flag_predicate_function(connection, "is_mate_unmapped", SAM_FLAG_MATE_UNMAPPED);
+    register_sam_flag_predicate_function(connection, "is_next_segment_unmapped", SAM_FLAG_MATE_UNMAPPED);
     register_sam_flag_predicate_function(connection, "is_reverse_complemented", SAM_FLAG_REVERSE);
-    register_sam_flag_predicate_function(connection, "is_mate_reverse_complemented", SAM_FLAG_MATE_REVERSE);
+    register_sam_flag_predicate_function(connection, "is_next_segment_reverse_complemented", SAM_FLAG_MATE_REVERSE);
     register_sam_flag_predicate_function(connection, "is_first_segment", SAM_FLAG_READ1);
     register_sam_flag_predicate_function(connection, "is_last_segment", SAM_FLAG_READ2);
     register_sam_flag_predicate_function(connection, "is_secondary", SAM_FLAG_SECONDARY);
