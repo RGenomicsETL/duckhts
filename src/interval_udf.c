@@ -124,15 +124,6 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
     v[row / 64] &= ~((uint64_t)1 << (row % 64));
 }
 
-static char *duckdb_strdup_local(const char *s) {
-    if (!s) return NULL;
-    size_t n = strlen(s) + 1;
-    char *out = (char *)duckdb_malloc(n);
-    if (!out) return NULL;
-    memcpy(out, s, n);
-    return out;
-}
-
 static int parse_int64_span_local(const char *s, int len, int64_t *out) {
     if (!s || len <= 0) return 0;
     char *tmp = (char *)malloc((size_t)len + 1);
