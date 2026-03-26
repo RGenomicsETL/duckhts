@@ -1597,7 +1597,7 @@ rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) 
 
 #' Lift Over Variant Coordinates Against a Query
 #'
-#' Applies the DuckHTS `liftover(...)` table macro to rows from a SQL query or
+#' Applies the DuckHTS `duckdb_liftover(...)` table macro to rows from a SQL query or
 #' table expression with chromosome and position columns, plus optional reference
 #' and alternate alleles.
 #'
@@ -1629,37 +1629,25 @@ rduckhts_liftover <- function(
   max_snp_gap = 1,
   max_indel_inc = 250
 ) {
-  ref_expr <- if (is.null(ref_col)) "NULL" else sprintf("src.%s", ref_col)
-  alt_expr <- if (is.null(alt_col)) "NULL" else sprintf("src.%s", alt_col)
-  extra <- ""
-  if (!is.null(src_fasta_ref)) {
-    extra <- paste0(extra, sprintf(", src_fasta_ref := '%s'", src_fasta_ref))
-  }
-  sql <- sprintf(
-    paste(
-      "SELECT l.*",
-      "FROM (%s) AS src,",
-      "LATERAL liftover(",
-      "src.%s,",
-      "src.%s,",
-      "ref := %s,",
-      "alt := %s,",
-      "chain_path := '%s',",
-      "dst_fasta_ref := '%s'%s,",
-      "max_snp_gap := %d,",
-      "max_indel_inc := %d",
-      ") AS l"
-    ),
-    query,
-    chrom_col,
-    pos_col,
-    ref_expr,
-    alt_expr,
-    chain_path,
-    dst_fasta_ref,
-    extra,
-    max_snp_gap,
-    max_indel_inc
+  table_sql <- gsub("'", "''", query, fixed = TRUE)
+  params <- list(
+    sprintf("'%s'", table_sql),
+    sprintf("'%s'", chrom_col),
+    sprintf("'%s'", pos_col)
   )
+  if (!is.null(ref_col)) params <- c(params, sprintf("ref_col := '%s'", ref_col))
+  if (!is.null(alt_col)) params <- c(params, sprintf("alt_col := '%s'", alt_col))
+  params <- c(
+    params,
+    sprintf("chain_path := '%s'", chain_path),
+    sprintf("dst_fasta_ref := '%s'", dst_fasta_ref)
+  )
+  if (!is.null(src_fasta_ref)) params <- c(params, sprintf("src_fasta_ref := '%s'", src_fasta_ref))
+  params <- c(
+    params,
+    sprintf("max_snp_gap := %d", max_snp_gap),
+    sprintf("max_indel_inc := %d", max_indel_inc)
+  )
+  sql <- sprintf("SELECT * FROM duckdb_liftover(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }

@@ -242,7 +242,7 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
         memset(chain, 0, sizeof(*chain));
         int ncols = ksplit_core(str.s, 0, &moff, &off);
         if (ncols != 13 || strcmp(&str.s[off[0]], "chain") != 0) {
-            *errbuf = dup_cstr("liftover_variant: malformed chain header");
+            *errbuf = dup_cstr("bcftools_liftover: malformed chain header");
             free(off);
             free(str.s);
             return -1;
@@ -250,7 +250,7 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
 
         chain->score = (uint64_t)strtoull(&str.s[off[1]], &tmp, 10);
         if (*tmp) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse chain score");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse chain score");
             free(off);
             free(str.s);
             return -1;
@@ -258,27 +258,27 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
         chain->t_name = canonical_contig_name(&str.s[off[2]]);
         chain->t_size = (int)strtol(&str.s[off[3]], &tmp, 10);
         if (*tmp || !chain->t_name) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse source contig");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse source contig");
             free(off);
             free(str.s);
             return -1;
         }
         if (str.s[off[4]] != '+') {
-            *errbuf = dup_cstr("liftover_variant: chain source strand must be +");
+            *errbuf = dup_cstr("bcftools_liftover: chain source strand must be +");
             free(off);
             free(str.s);
             return -1;
         }
         chain->t_start = (int)strtol(&str.s[off[5]], &tmp, 10);
         if (*tmp) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse source start");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse source start");
             free(off);
             free(str.s);
             return -1;
         }
         chain->t_end = (int)strtol(&str.s[off[6]], &tmp, 10);
         if (*tmp) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse source end");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse source end");
             free(off);
             free(str.s);
             return -1;
@@ -286,13 +286,13 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
         chain->q_name = dup_cstr(&str.s[off[7]]);
         chain->q_size = (int)strtol(&str.s[off[8]], &tmp, 10);
         if (*tmp || !chain->q_name) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse destination contig");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse destination contig");
             free(off);
             free(str.s);
             return -1;
         }
         if (str.s[off[9]] != '+' && str.s[off[9]] != '-') {
-            *errbuf = dup_cstr("liftover_variant: chain destination strand must be +/-");
+            *errbuf = dup_cstr("bcftools_liftover: chain destination strand must be +/-");
             free(off);
             free(str.s);
             return -1;
@@ -300,21 +300,21 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
         chain->q_strand = (str.s[off[9]] == '-');
         chain->q_start = (int)strtol(&str.s[off[10]], &tmp, 10);
         if (*tmp) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse destination start");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse destination start");
             free(off);
             free(str.s);
             return -1;
         }
         chain->q_end = (int)strtol(&str.s[off[11]], &tmp, 10);
         if (*tmp) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse destination end");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse destination end");
             free(off);
             free(str.s);
             return -1;
         }
         chain->id = (int)strtol(&str.s[off[12]], &tmp, 10);
         if (*tmp) {
-            *errbuf = dup_cstr("liftover_variant: failed to parse chain id");
+            *errbuf = dup_cstr("bcftools_liftover: failed to parse chain id");
             free(off);
             free(str.s);
             return -1;
@@ -327,14 +327,14 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
             int bncols = ksplit_core(str.s, 0, &moff, &off);
             int size;
             if (bncols != 1 && bncols != 3) {
-                *errbuf = dup_cstr("liftover_variant: malformed chain block");
+                *errbuf = dup_cstr("bcftools_liftover: malformed chain block");
                 free(off);
                 free(str.s);
                 return -1;
             }
             size = (int)strtol(&str.s[off[0]], &tmp, 10);
             if (*tmp) {
-                *errbuf = dup_cstr("liftover_variant: failed to parse block size");
+                *errbuf = dup_cstr("bcftools_liftover: failed to parse block size");
                 free(off);
                 free(str.s);
                 return -1;
@@ -367,14 +367,14 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
 
             dt = (int)strtol(&str.s[off[1]], &tmp, 10);
             if (*tmp) {
-                *errbuf = dup_cstr("liftover_variant: failed to parse source gap");
+                *errbuf = dup_cstr("bcftools_liftover: failed to parse source gap");
                 free(off);
                 free(str.s);
                 return -1;
             }
             dq = (int)strtol(&str.s[off[2]], &tmp, 10);
             if (*tmp) {
-                *errbuf = dup_cstr("liftover_variant: failed to parse destination gap");
+                *errbuf = dup_cstr("bcftools_liftover: failed to parse destination gap");
                 free(off);
                 free(str.s);
                 return -1;
@@ -651,7 +651,7 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
     return g_liftover_cache;
 }
 
-static void liftover_variant_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     duckdb_vector chrom_vec = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector pos_vec = duckdb_data_chunk_get_vector(input, 1);
     duckdb_vector ref_vec = duckdb_data_chunk_get_vector(input, 2);
@@ -719,7 +719,7 @@ static void liftover_variant_scalar(duckdb_function_info info, duckdb_data_chunk
             continue;
         }
         if (!chain_path || chain_len == 0 || !dst_fasta_ref || dst_fasta_len == 0) {
-            duckdb_function_set_error(info, "liftover_variant: chain_path and dst_fasta_ref must be non-null");
+            duckdb_function_set_error(info, "bcftools_liftover: chain_path and dst_fasta_ref must be non-null");
             return;
         }
         chain_path_copy = dup_span(chain_path, chain_len);
@@ -730,7 +730,7 @@ static void liftover_variant_scalar(duckdb_function_info info, duckdb_data_chunk
         free(dst_fasta_ref_copy);
         free(src_fasta_ref_copy);
         if (!bind) {
-            duckdb_function_set_error(info, "liftover_variant: failed to load chain or FASTA context");
+            duckdb_function_set_error(info, "bcftools_liftover: failed to load chain or FASTA context");
             return;
         }
 
@@ -873,7 +873,7 @@ void register_liftover_functions(duckdb_connection connection) {
     duckdb_logical_type fields[OUT_COUNT];
     duckdb_logical_type struct_type;
 
-    duckdb_scalar_function_set_name(fn, "liftover_variant");
+    duckdb_scalar_function_set_name(fn, "bcftools_liftover");
     duckdb_scalar_function_add_parameter(fn, varchar_type);
     duckdb_scalar_function_add_parameter(fn, bigint_type);
     duckdb_scalar_function_add_parameter(fn, varchar_type);
@@ -900,7 +900,7 @@ void register_liftover_functions(duckdb_connection connection) {
 
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
-    duckdb_scalar_function_set_function(fn, liftover_variant_scalar);
+    duckdb_scalar_function_set_function(fn, bcftools_liftover_scalar);
     duckdb_register_scalar_function(connection, fn);
 
     duckdb_destroy_scalar_function(&fn);

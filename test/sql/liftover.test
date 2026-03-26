@@ -1,0 +1,92 @@
+# name: test/sql/liftover.test
+# description: Test duckhts extension liftover table macro
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_src.fa.fai'
+);
+----
+1
+
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa.fai'
+);
+----
+1
+
+query TITTIIIT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       CASE WHEN lo.reverse_complemented THEN 1 ELSE 0 END,
+       lo.swap,
+       coalesce(lo.warning, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, 'C', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250
+  ) AS lo
+) s;
+----
+chrLiftF	2	C	T	1	0	0	OK
+
+query TITTIIIT
+SELECT dest_chrom, dest_pos, dest_ref, dest_alt,
+       CASE WHEN mapped THEN 1 ELSE 0 END,
+       CASE WHEN reverse_complemented THEN 1 ELSE 0 END,
+       swap,
+       coalesce(warning, 'OK')
+FROM duckdb_liftover(
+  '(VALUES (''chrR'', 2, ''A'', ''G'')) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+chrLiftR	9	T	C	1	1	0	OK
+
+query ITI
+SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.warning, ''),
+       lo.dest_pos
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, NULL, 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    NULL,
+    1, 250
+  ) AS lo
+) s;
+----
+1	IFFY	2
+
+query ITI
+SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.warning, ''),
+       CASE WHEN lo.dest_pos IS NULL THEN -1 ELSE lo.dest_pos END
+FROM (
+  SELECT bcftools_liftover(
+    'chrMissing', 2, 'A', 'C',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    NULL,
+    1, 250
+  ) AS lo
+) s;
+----
+0	UNMAPPED	-1

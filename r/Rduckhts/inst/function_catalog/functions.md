@@ -46,7 +46,8 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
-| `liftover` | table_macro | table | `rduckhts_liftover` | Lift over variant-like rows from one assembly to another using a chain file, returning source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning strings such as IFFY or UNMAPPED. |
+| `bcftools_liftover` | scalar | STRUCT |  | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning a per-row STRUCT with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning text. |
+| `duckdb_liftover` | table_macro | table | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes a table/query name plus column-name strings for chrom/pos/ref/alt and returns the lifted table. |
 
 ### Sequence UDFs
 
