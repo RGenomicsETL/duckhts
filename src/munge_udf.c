@@ -108,14 +108,6 @@ static void seq_to_upper_ascii(char *seq) {
     }
 }
 
-static char *canonical_contig_name(const char *chr) {
-    const char *s = chr;
-    if (!chr || !*chr) return NULL;
-    if (strncasecmp(s, "chr", 3) == 0 && s[3] != '\0') s += 3;
-    if (strcasecmp(s, "M") == 0 || strcasecmp(s, "MT") == 0) return dup_cstr("MT");
-    return dup_cstr(s);
-}
-
 static char *fetch_sequence_flexible(faidx_t *fai, const char *chrom, hts_pos_t start, hts_pos_t end) {
     static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
     char with_chr[512];
@@ -266,7 +258,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
     for (int i = 0; i < MUNGE_OUT_COUNT; i++) child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
 
     for (idx_t row = 0; row < row_count; row++) {
-        idx_t chrom_len = 0, a1_len = 0, a2_len = 0, id_len = 0, fasta_len = 0, tag_len = 0, mismatch_len = 0, dire_len = 0;
+        idx_t chrom_len = 0, a1_len = 0, a2_len = 0, id_len = 0, fasta_len = 0, tag_len = 4, mismatch_len = 12, dire_len = 0;
         const char *chrom;
         const char *a1;
         const char *a2;
@@ -280,7 +272,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         char *norm_alt = NULL;
         char *norm_ref = NULL;
         char *ref_fetch = NULL;
-        char *canon = NULL;
+        char *chrom_cstr = NULL;
         faidx_t *fai = NULL;
         double ns = NAN, ez = NAN, si = NAN, nc = NAN, es = NAN, se = NAN, lp = NAN, af = NAN, ac = NAN, ne = NAN, i2 = NAN, cq = NAN;
         bool swapped = false;
@@ -372,9 +364,20 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             return;
         }
 
-        canon = canonical_contig_name(chrom);
-        ref_fetch = fetch_sequence_flexible(fai, canon ? canon : chrom, pos, pos + (hts_pos_t)((strlen(norm_ref) > strlen(norm_alt) ? strlen(norm_ref) : strlen(norm_alt))) - 1);
-        free(canon);
+        chrom_cstr = dup_span(chrom, chrom_len);
+        if (!chrom_cstr) {
+            set_munge_error(info, "bcftools_munge_row: out of memory");
+            free(norm_alt);
+            free(norm_ref);
+            return;
+        }
+        ref_fetch = fetch_sequence_flexible(
+            fai,
+            chrom_cstr,
+            pos,
+            pos + (hts_pos_t)((strlen(norm_ref) > strlen(norm_alt) ? strlen(norm_ref) : strlen(norm_alt))) - 1
+        );
+        free(chrom_cstr);
         if (!ref_fetch) {
             set_munge_error(info, "bcftools_munge_row: failed to fetch reference sequence");
             free(norm_alt);
@@ -395,9 +398,9 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
                 if (!isnan(af)) af = 1.0 - af;
                 if (!isnan(ac) && !isnan(ns)) ac = 2.0 * ns - ac;
             } else if (ref_match && alt_match) {
-                duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_FILTER], row, iffy_tag);
+                duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_FILTER], row, iffy_tag, tag_len);
             } else if (!ref_match && !alt_match) {
-                duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_FILTER], row, mismatch_tag);
+                duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_FILTER], row, mismatch_tag, mismatch_len);
             } else {
                 set_null_at(child_vecs[MUNGE_OUT_FILTER], row);
             }
