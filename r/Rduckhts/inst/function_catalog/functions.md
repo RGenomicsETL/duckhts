@@ -46,8 +46,8 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
-| `bcftools_liftover` | scalar | STRUCT |  | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning a per-row STRUCT with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning text. |
-| `duckdb_liftover` | table_macro | table | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes a table/query name plus column-name strings for chrom/pos/ref/alt and returns the lifted table. |
+| `bcftools_liftover` | scalar | STRUCT |  | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning text. |
+| `duckdb_liftover` | table_macro | table | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. |
 
 ### Sequence UDFs
 
