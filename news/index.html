@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.3-0.0.2.9001</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.3-0.0.2.9002</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -34,7 +34,12 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.3-0.0.2.9001" id="rduckhts-013-0029001">Rduckhts 0.1.3-0.0.2.9001<a class="anchor" aria-label="anchor" href="#rduckhts-013-0029001"></a></h2>
-<ul><li>Bundle the <code>duckhts</code> <code>0.1.3.9001</code> extension update.</li>
+<ul><li>harden bundled liftover diagnostics: <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code> now surfaces explicit SQL errors for invalid <code>chrom</code>/<code>pos</code> rows through <code>duckdb_liftover(...)</code>, direct <code>bcftools_liftover(...)</code> calls also error on invalid required inputs, and the package tests cover both wrapper-level and scalar invalid-row paths</li>
+<li>align bundled liftover outputs with <code>bcftools +liftover</code> semantics by replacing the old <code>warning</code> field with <code>reject_reason</code> for rejected rows and <code>note</code> for emitted rows that carry extra annotations</li>
+<li>add README liftover examples and broaden <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code> tinytest coverage for unmapped rows plus chain/FASTA and parameter validation failures</li>
+<li>expose the bundled <code>liftover(...)</code> table macro for score-style variant rows via a new <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code> helper that runs the macro against an input SQL query/table expression and returns lifted coordinates, alleles, reject reasons, and note annotations</li>
+<li>Keep the generated community extension metadata in sync with the bundled extension version by sourcing the emitted top-level <code>version</code> field from the repo-level <code>description.yml</code>.</li>
+<li>Bundle the <code>duckhts</code> <code>0.1.3.9001</code> extension update.</li>
 <li>Add <code>quality_representation</code> to <code><a href="../reference/rduckhts_bam.html">rduckhts_bam()</a></code> and <code><a href="../reference/rduckhts_fastq.html">rduckhts_fastq()</a></code> so qualities can be returned as raw <code>UTINYINT[]</code> Phred values.</li>
 <li>Add <code>input_quality_encoding</code> to <code><a href="../reference/rduckhts_fastq.html">rduckhts_fastq()</a></code>, defaulting to modern <code>phred33</code> while allowing explicit legacy FASTQ decoding; expose <code><a href="../reference/rduckhts_detect_quality_encoding.html">rduckhts_detect_quality_encoding()</a></code> for heuristic FASTQ encoding inspection.</li>
 <li>Add <code>sequence_encoding</code> parameter to <code><a href="../reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="../reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, and <code><a href="../reference/rduckhts_fastq.html">rduckhts_fastq()</a></code> wrappers, forwarding <code>sequence_encoding := 'nt16'</code> to the extension readers for raw nt16-encoded sequence output as <code>UTINYINT[]</code>.</li>

@@ -32,21 +32,21 @@ wrapper, short description, and example SQL.
 catalog <- rduckhts_functions()
 subset(catalog, category == "Sequence UDFs", select = c("name", "description"))
 #>               name
-#> 21     seq_revcomp
-#> 22   seq_canonical
-#> 23   seq_hash_2bit
-#> 24 seq_encode_4bit
-#> 25 seq_decode_4bit
-#> 26  seq_gc_content
-#> 27       seq_kmers
+#> 23     seq_revcomp
+#> 24   seq_canonical
+#> 25   seq_hash_2bit
+#> 26 seq_encode_4bit
+#> 27 seq_decode_4bit
+#> 28  seq_gc_content
+#> 29       seq_kmers
 #>                                                                                              description
-#> 21                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.
-#> 22                        Return the lexicographically smaller of a sequence and its reverse complement.
-#> 23                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.
-#> 24 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.
-#> 25                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.
-#> 26                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.
-#> 27                              Expand a sequence into positional k-mers with optional canonicalization.
+#> 23                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.
+#> 24                        Return the lexicographically smaller of a sequence and its reverse complement.
+#> 25                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.
+#> 26 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.
+#> 27                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.
+#> 28                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.
+#> 29                              Expand a sequence into positional k-mers with optional canonicalization.
 subset(rduckhts_functions(kind = "table"), select = c("name", "r_wrapper"))
 #>                       name                        r_wrapper
 #> 1                 read_bcf                     rduckhts_bcf
