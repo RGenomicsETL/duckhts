@@ -77,6 +77,32 @@ test_liftover <- function() {
   expect_equal(nrow(row_iffy), 1)
   expect_true(row_iffy$mapped[1])
   expect_equal(row_iffy$warning[1], "IFFY")
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('chrF', 0, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa
+    ),
+    "pos must be >= 1"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES (NULL, 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa
+    ),
+    "chrom must be non-null"
+  )
 }
 
 test_liftover()

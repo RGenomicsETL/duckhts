@@ -16,7 +16,6 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/regidx.h>
 
 #define LIFTOVER_WARNING_BUF 256
-
 typedef struct {
     int t_start;
     int q_start;
@@ -124,6 +123,39 @@ static char *dup_span(const char *s, size_t n) {
     if (!out) return NULL;
     memcpy(out, s, n);
     out[n] = '\0';
+    return out;
+}
+
+static char *fmt_message(const char *prefix, const char *detail) {
+    size_t prefix_len;
+    size_t detail_len;
+    char *out;
+    if (!prefix) return dup_cstr(detail);
+    if (!detail || !*detail) return dup_cstr(prefix);
+    prefix_len = strlen(prefix);
+    detail_len = strlen(detail);
+    out = (char *)malloc(prefix_len + 2 + detail_len + 1);
+    if (!out) return NULL;
+    memcpy(out, prefix, prefix_len);
+    out[prefix_len] = ':';
+    out[prefix_len + 1] = ' ';
+    memcpy(out + prefix_len + 2, detail, detail_len + 1);
+    return out;
+}
+
+static char *fmt_path_message(const char *prefix, const char *path) {
+    size_t prefix_len;
+    size_t path_len;
+    char *out;
+    if (!path || !*path) return dup_cstr(prefix);
+    prefix_len = strlen(prefix);
+    path_len = strlen(path);
+    out = (char *)malloc(prefix_len + 2 + path_len + 1);
+    if (!out) return NULL;
+    memcpy(out, prefix, prefix_len);
+    out[prefix_len] = ':';
+    out[prefix_len + 1] = ' ';
+    memcpy(out + prefix_len + 2, path, path_len + 1);
     return out;
 }
 
@@ -241,8 +273,16 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
         if (str.l == 0) continue;
 
         if (n_chains >= m_chains) {
+            lo_chain_t *new_chains;
             m_chains = m_chains ? m_chains * 2 : 64;
-            *chains = (lo_chain_t *)realloc(*chains, (size_t)m_chains * sizeof(lo_chain_t));
+            new_chains = (lo_chain_t *)realloc(*chains, (size_t)m_chains * sizeof(lo_chain_t));
+            if (!new_chains) {
+                *errbuf = dup_cstr("bcftools_liftover: out of memory while growing chain list");
+                free(off);
+                free(str.s);
+                return -1;
+            }
+            *chains = new_chains;
         }
         chain = &(*chains)[n_chains];
         memset(chain, 0, sizeof(*chain));
@@ -350,8 +390,16 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
                 block->size += size;
             } else {
                 if (n_blocks >= m_blocks) {
+                    lo_block_t *new_blocks;
                     m_blocks = m_blocks ? m_blocks * 2 : 256;
-                    *blocks = (lo_block_t *)realloc(*blocks, (size_t)m_blocks * sizeof(lo_block_t));
+                    new_blocks = (lo_block_t *)realloc(*blocks, (size_t)m_blocks * sizeof(lo_block_t));
+                    if (!new_blocks) {
+                        *errbuf = dup_cstr("bcftools_liftover: out of memory while growing block list");
+                        free(off);
+                        free(str.s);
+                        return -1;
+                    }
+                    *blocks = new_blocks;
                 }
                 block = &(*blocks)[n_blocks++];
                 block->t_start = t_start;
@@ -600,7 +648,8 @@ static int liftover_indel(liftover_bind_t *bind, const char *src_chr, hts_pos_t 
 }
 
 static liftover_bind_t *load_liftover_context(const char *chain_path, const char *dst_fasta_ref,
-                                              const char *src_fasta_ref, int max_snp_gap, int max_indel_inc) {
+                                              const char *src_fasta_ref, int max_snp_gap, int max_indel_inc,
+                                              char **errbuf_out) {
     liftover_bind_t *bind = NULL;
     htsFile *chain_fp = NULL;
     char *errbuf = NULL;
@@ -615,25 +664,34 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
 
     chain_fp = hts_open(bind->chain_path, "r");
     if (!chain_fp) {
+        if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to open chain file", bind->chain_path);
         liftover_bind_destroy(bind);
         return NULL;
     }
     bind->n_chains = read_chains(chain_fp, bind->max_snp_gap, &bind->chains, &bind->blocks, &errbuf);
     hts_close(chain_fp);
     if (bind->n_chains < 0) {
+        if (errbuf_out) *errbuf_out = errbuf ? errbuf : dup_cstr("bcftools_liftover: failed to parse chain file");
+        else free(errbuf);
         liftover_bind_destroy(bind);
-        free(errbuf);
         return NULL;
     }
     bind->idx = regidx_init_chains(bind->chains, bind->n_chains, bind->blocks);
+    if (!bind->idx) {
+        if (errbuf_out) *errbuf_out = dup_cstr("bcftools_liftover: failed to build chain interval index");
+        liftover_bind_destroy(bind);
+        return NULL;
+    }
     bind->dst_fai = fai_load(bind->dst_fasta_ref);
     if (!bind->dst_fai) {
+        if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to load destination FASTA index", bind->dst_fasta_ref);
         liftover_bind_destroy(bind);
         return NULL;
     }
     if (bind->src_fasta_ref) {
         bind->src_fai = fai_load(bind->src_fasta_ref);
         if (!bind->src_fai) {
+            if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to load source FASTA index", bind->src_fasta_ref);
             liftover_bind_destroy(bind);
             return NULL;
         }
@@ -642,7 +700,8 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
 }
 
 static liftover_bind_t *get_liftover_context(const char *chain_path, const char *dst_fasta_ref,
-                                             const char *src_fasta_ref, int max_snp_gap, int max_indel_inc) {
+                                             const char *src_fasta_ref, int max_snp_gap, int max_indel_inc,
+                                             char **errbuf_out) {
     liftover_cache_entry_t *entry = NULL;
     liftover_bind_t *loaded = NULL;
 
@@ -661,7 +720,7 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
     }
     pthread_mutex_unlock(&g_liftover_cache_mutex);
 
-    loaded = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc);
+    loaded = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, errbuf_out);
     if (!loaded) return NULL;
 
     pthread_mutex_lock(&g_liftover_cache_mutex);
@@ -690,6 +749,10 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
     g_liftover_cache_head = entry;
     pthread_mutex_unlock(&g_liftover_cache_mutex);
     return loaded;
+}
+
+static void set_liftover_error(duckdb_function_info info, const char *msg) {
+    duckdb_scalar_function_set_error(info, msg ? msg : "bcftools_liftover: unknown error");
 }
 
 static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
@@ -729,6 +792,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         char *chain_path_copy = NULL;
         char *dst_fasta_ref_copy = NULL;
         char *src_fasta_ref_copy = NULL;
+        char *load_err = NULL;
         char warning[LIFTOVER_WARNING_BUF] = {0};
         char *src_ref_copy = NULL, *src_alt_copy = NULL;
         char *lift_ref = NULL, *lift_alt = NULL, *dst_ref = NULL;
@@ -759,19 +823,27 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             for (int i = 0; i < OUT_COUNT; i++) set_null_at(child_vecs[i], row);
             continue;
         }
-        if (!chain_path || chain_len == 0 || !dst_fasta_ref || dst_fasta_len == 0) {
-            duckdb_function_set_error(info, "bcftools_liftover: chain_path and dst_fasta_ref must be non-null");
+        if (max_snp_gap < 0) {
+            set_liftover_error(info, "bcftools_liftover: max_snp_gap must be >= 0");
+            return;
+        }
+        if (max_indel_inc < 0) {
+            set_liftover_error(info, "bcftools_liftover: max_indel_inc must be >= 0");
             return;
         }
         chain_path_copy = dup_span(chain_path, chain_len);
         dst_fasta_ref_copy = dup_span(dst_fasta_ref, dst_fasta_len);
         if (src_fasta_ref && src_fasta_len > 0) src_fasta_ref_copy = dup_span(src_fasta_ref, src_fasta_len);
-        bind = get_liftover_context(chain_path_copy, dst_fasta_ref_copy, src_fasta_ref_copy, max_snp_gap, max_indel_inc);
+        bind = get_liftover_context(chain_path_copy, dst_fasta_ref_copy, src_fasta_ref_copy, max_snp_gap, max_indel_inc,
+                                    &load_err);
         free(chain_path_copy);
         free(dst_fasta_ref_copy);
         free(src_fasta_ref_copy);
         if (!bind) {
-            duckdb_function_set_error(info, "bcftools_liftover: failed to load chain or FASTA context");
+            char *full_err = fmt_message("bcftools_liftover: failed to load chain or FASTA context", load_err);
+            set_liftover_error(info, full_err ? full_err : "bcftools_liftover: failed to load chain or FASTA context");
+            free(load_err);
+            free(full_err);
             return;
         }
 
@@ -781,7 +853,6 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             for (int i = 0; i < OUT_COUNT; i++) set_null_at(child_vecs[i], row);
             continue;
         }
-
         duckdb_vector_assign_string_element_len(child_vecs[OUT_SRC_CHROM], row, chrom, chrom_len);
         if (row_is_valid(ref_vec, row)) {
             ref = get_string_at(ref_vec, row, &ref_len);

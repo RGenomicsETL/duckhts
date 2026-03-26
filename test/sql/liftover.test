@@ -90,3 +90,35 @@ FROM (
 ) s;
 ----
 0	UNMAPPED	-1
+
+query ITI
+SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.warning, ''),
+       CASE WHEN lo.dest_pos IS NULL THEN -1 ELSE lo.dest_pos END
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 11, 'A', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250
+  ) AS lo
+) s;
+----
+0	UNMAPPED	-1
+
+query ITI
+SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.warning, ''),
+       CASE WHEN lo.dest_pos IS NULL THEN -1 ELSE lo.dest_pos END
+FROM (
+  SELECT bcftools_liftover(
+    'chrMissing', 2, 'AA', 'A',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250
+  ) AS lo
+) s;
+----
+0	UNMAPPED_ANCHORS	-1

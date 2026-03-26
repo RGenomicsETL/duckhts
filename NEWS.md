@@ -2,6 +2,7 @@
 
 ## duckhts 0.1.3.9001 (2026-03-13)
 
+- harden liftover error handling and diagnostics: `duckdb_liftover(...)` now raises explicit SQL errors for null/empty `chrom` and non-positive `pos`, liftover load failures surface the underlying chain/FASTA cause, macro registration no longer fails silently, and new SQL error-stress tests cover 1,000,000-row invalid-input paths
 - add a `liftover(...)` table macro for score-style variant rows (`chrom`, `pos`, optional `ref`/`alt`) backed by a new `liftover_variant(...)` scalar kernel that uses UCSC chain files plus destination/source FASTA references to return lifted coordinates, lifted alleles, reverse-complement/swap indicators, and warning strings such as `IFFY` and `UNMAPPED`
 - source the generated community extension descriptor `version` field from the repo-level `description.yml` instead of duplicating it in `functions.yaml`
 - add `quality_representation := 'phred'` to `read_bam(...)` and `read_fastq(...)` so base qualities can be returned as `UTINYINT[]` raw Phred values instead of SAM/FASTQ text

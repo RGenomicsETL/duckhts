@@ -42,11 +42,15 @@ extern void register_read_hts_index_function(duckdb_connection connection);
 /* quality_encoding_reader.c */
 extern void register_detect_quality_encoding_function(duckdb_connection connection);
 
-static void run_sql_no_fail(duckdb_connection connection, const char *sql) {
+static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
     duckdb_result result;
-    if (duckdb_query(connection, sql, &result) == DuckDBSuccess) {
+    duckdb_state state = duckdb_query(connection, sql, &result);
+    if (state != DuckDBSuccess) {
         duckdb_destroy_result(&result);
+        return false;
     }
+    duckdb_destroy_result(&result);
+    return true;
 }
 
 DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
@@ -75,7 +79,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_hts_header_function(connection);
     register_read_hts_index_function(connection);
     register_detect_quality_encoding_function(connection);
-    run_sql_no_fail(connection,
+    if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO read_hts_index_spans(path, format := NULL, index_path := NULL) AS TABLE "
         "SELECT "
         "file_format, seqname, tid, "
@@ -86,22 +90,34 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "CAST(NULL AS BIGINT) AS seq_start, "
         "length AS seq_end, "
         "mapped, unmapped, n_no_coor, index_type, index_path, meta "
-        "FROM read_hts_index(path, format := format, index_path := index_path)");
-    run_sql_no_fail(connection,
+        "FROM read_hts_index(path, format := format, index_path := index_path)")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO read_hts_index_raw(path, format := NULL, index_path := NULL) AS TABLE "
         "SELECT "
         "index_type, index_path, meta AS raw "
         "FROM read_hts_index(path, format := format, index_path := index_path) "
         "WHERE meta IS NOT NULL "
-        "LIMIT 1");
-    run_sql_no_fail(connection,
+        "LIMIT 1")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
         "chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250) AS TABLE "
         "SELECT lo.* "
         "FROM query('SELECT ' || chrom_col || ' AS __duckhts_chrom, ' || pos_col || ' AS __duckhts_pos, ' || "
         "coalesce(ref_col, 'NULL') || ' AS __duckhts_ref, ' || coalesce(alt_col, 'NULL') || ' AS __duckhts_alt FROM ' || table_name) src, "
-        "LATERAL (SELECT bcftools_liftover(src.__duckhts_chrom, src.__duckhts_pos, src.__duckhts_ref, src.__duckhts_alt, "
-        "chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc) AS lo) q");
+        "LATERAL (SELECT CASE "
+        "WHEN src.__duckhts_chrom IS NULL THEN error('bcftools_liftover: chrom must be non-null') "
+        "WHEN length(src.__duckhts_chrom) = 0 THEN error('bcftools_liftover: chrom must be non-empty') "
+        "WHEN src.__duckhts_pos IS NULL THEN error('bcftools_liftover: pos must be non-null') "
+        "WHEN src.__duckhts_pos < 1 THEN error('bcftools_liftover: pos must be >= 1') "
+        "ELSE bcftools_liftover(src.__duckhts_chrom, src.__duckhts_pos, src.__duckhts_ref, src.__duckhts_alt, "
+        "chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc) "
+        "END AS lo) q")) {
+        return false;
+    }
 
     return true;
 }
