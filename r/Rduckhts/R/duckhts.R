@@ -25,6 +25,39 @@ build_param_str <- function(params) {
   ""
 }
 
+sql_quote_string <- function(x) {
+  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+}
+
+sql_map_literal <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    stop("column_map must be non-empty", call. = FALSE)
+  }
+  nm <- names(x)
+  if (is.null(nm) || any(!nzchar(nm))) {
+    stop("column_map must be a named character vector with canonical names as names", call. = FALSE)
+  }
+  keys <- paste(vapply(nm, sql_quote_string, character(1)), collapse = ", ")
+  vals <- paste(vapply(as.character(x), sql_quote_string, character(1)), collapse = ", ")
+  sprintf("map([%s], [%s])", keys, vals)
+}
+
+read_munge_column_map_file <- function(path) {
+  tbl <- utils::read.delim(
+    path,
+    sep = "\t",
+    header = FALSE,
+    stringsAsFactors = FALSE,
+    quote = "",
+    comment.char = ""
+  )
+  if (ncol(tbl) < 2) {
+    stop("column_map_file must be a two-column TSV with source and canonical names", call. = FALSE)
+  }
+  out <- setNames(tbl[[1]], toupper(tbl[[2]]))
+  out[nzchar(names(out))]
+}
+
 #' Setup HTSlib Environment
 #'
 #' Sets the `HTS_PATH` environment variable to point to the bundled htslib
@@ -1653,5 +1686,75 @@ rduckhts_liftover <- function(
     sprintf("max_indel_inc := %d", max_indel_inc)
   )
   sql <- sprintf("SELECT * FROM duckdb_liftover(%s)", paste(params, collapse = ", "))
+  DBI::dbGetQuery(con, sql)
+}
+
+#' Munge Summary Statistics Rows
+#'
+#' Applies the DuckHTS `duckdb_munge(...)` table macro to rows from a SQL query or
+#' table expression, using either an upstream-style preset, a named column map,
+#' or a two-column mapping file. When no mapping mode is provided, the bundled
+#' `colheaders.tsv` alias file is used by default.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param query SQL query or table expression to normalize
+#' @param fasta_ref Path to the reference FASTA
+#' @param preset Optional preset such as `"PLINK"`, `"PLINK2"`, `"REGENIE"`,
+#'   `"SAIGE"`, `"BOLT"`, `"METAL"`, `"PGS"`, or `"SSF"`
+#' @param column_map Optional named character vector mapping canonical munge names
+#'   such as `"CHR"`, `"BP"`, `"A1"`, `"A2"` to source column names
+#' @param column_map_file Optional path to a two-column TSV mapping file in the
+#'   upstream `source<TAB>canonical` format
+#' @param iffy_tag FILTER tag for ambiguous reference resolution
+#' @param mismatch_tag FILTER tag for reference mismatches
+#' @param ns,nc,ne Optional global overrides for sample counts
+#'
+#' @return A data frame with normalized GWAS-VCF-style variant/effect columns.
+#'
+#' @export
+rduckhts_munge <- function(
+  con,
+  query,
+  fasta_ref,
+  preset = NULL,
+  column_map = NULL,
+  column_map_file = NULL,
+  iffy_tag = "IFFY",
+  mismatch_tag = "REF_MISMATCH",
+  ns = NULL,
+  nc = NULL,
+  ne = NULL
+) {
+  table_expr <- query
+  if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
+    table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
+  }
+  if (is.null(preset) && is.null(column_map) && is.null(column_map_file)) {
+    column_map_file <- system.file("extdata", "colheaders.tsv", package = "Rduckhts", mustWork = TRUE)
+  }
+  if (!is.null(column_map_file)) {
+    file_map <- read_munge_column_map_file(column_map_file)
+    if (!is.null(column_map)) {
+      column_map <- c(file_map, column_map)
+      column_map <- column_map[!duplicated(names(column_map), fromLast = TRUE)]
+    } else {
+      column_map <- file_map
+    }
+    column_map_file <- NULL
+  }
+  params <- list(sql_quote_string(gsub("'", "''", table_expr, fixed = TRUE)))
+  if (!is.null(preset)) params <- c(params, sprintf("preset := '%s'", preset))
+  if (!is.null(column_map)) params <- c(params, sprintf("column_map := %s", sql_map_literal(column_map)))
+  if (!is.null(column_map_file)) params <- c(params, sprintf("column_map_file := '%s'", column_map_file))
+  params <- c(
+    params,
+    sprintf("fasta_ref := '%s'", fasta_ref),
+    sprintf("iffy_tag := '%s'", iffy_tag),
+    sprintf("mismatch_tag := '%s'", mismatch_tag)
+  )
+  if (!is.null(ns)) params <- c(params, sprintf("ns := %s", format(ns, scientific = FALSE, trim = TRUE)))
+  if (!is.null(nc)) params <- c(params, sprintf("nc := %s", format(nc, scientific = FALSE, trim = TRUE)))
+  if (!is.null(ne)) params <- c(params, sprintf("ne := %s", format(ne, scientific = FALSE, trim = TRUE)))
+  sql <- sprintf("SELECT * FROM duckdb_munge(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }

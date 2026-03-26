@@ -1,0 +1,121 @@
+# name: test/sql/munge.test
+# description: Test bcftools_munge_row scalar semantics
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_src.fa.fai'
+);
+----
+1
+
+query TITTITRR
+SELECT m.chrom,
+       m.pos,
+       m.ref,
+       m.alt,
+       CASE WHEN m.swapped THEN 1 ELSE 0 END,
+       coalesce(m.filter, 'PASS'),
+       round(m.af, 3),
+       round(m.ns, 1)
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs1',
+    NULL, NULL, NULL, 0.25,
+    1000, NULL, NULL, NULL, 0.1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrF	2	C	A	0	PASS	0.1	1000.0
+
+query TITTITRRRR
+SELECT m.chrom,
+       m.pos,
+       m.ref,
+       m.alt,
+       CASE WHEN m.swapped THEN 1 ELSE 0 END,
+       coalesce(m.filter, 'PASS'),
+       round(m.af, 3),
+       round(m.ac, 1),
+       round(m.es, 3),
+       round(m.ez, 3)
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'C', 'A', 'rs2',
+    NULL, 2.0, NULL, 0.25,
+    1000, NULL, NULL, NULL, 0.1, NULL, NULL, 200.0, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrF	2	C	A	1	PASS	0.9	1800.0	-0.25	-2.0
+
+query TITTIT
+SELECT m.chrom,
+       m.pos,
+       m.ref,
+       m.alt,
+       CASE WHEN m.swapped THEN 1 ELSE 0 END,
+       coalesce(m.filter, 'PASS')
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'C', 'C', 'rs3',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrF	2	C	C	0	IFFY
+
+query TITTIT
+SELECT m.chrom,
+       m.pos,
+       m.ref,
+       m.alt,
+       CASE WHEN m.swapped THEN 1 ELSE 0 END,
+       coalesce(m.filter, 'PASS')
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'G', 'T', 'rs4',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrF	2	T	G	0	REF_MISMATCH
+
+query RRR
+SELECT round(m.ns, 1),
+       round(m.nc, 1),
+       round(m.ne, 1)
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs5',
+    0.01, NULL, NULL, NULL,
+    NULL, 300.0, 700.0, NULL, NULL, NULL, NULL, NULL, NULL, 400.0, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+1000.0	300.0	800.0
+
+query RR
+SELECT round(m.lp, 3),
+       round(m.es, 3)
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs6',
+    0.01, NULL, 1.0, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+2.0	0.0
