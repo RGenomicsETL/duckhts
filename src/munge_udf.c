@@ -393,6 +393,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
                 norm_ref = norm_alt;
                 norm_alt = tmp;
                 swapped = true;
+                set_null_at(child_vecs[MUNGE_OUT_FILTER], row);
                 if (!isnan(ez)) ez = -ez;
                 if (!isnan(es)) es = -es;
                 if (!isnan(af)) af = 1.0 - af;
