@@ -45,7 +45,7 @@ rduckhts_liftover(
 A data frame with source columns, lifted coordinates/alleles, and warnings.
 }
 \description{
-Applies the DuckHTS `liftover(...)` table macro to rows from a SQL query or
+Applies the DuckHTS `duckdb_liftover(...)` table macro to rows from a SQL query or
 table expression with chromosome and position columns, plus optional reference
 and alternate alleles.
 }

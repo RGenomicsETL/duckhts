@@ -7,6 +7,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include <htslib/faidx.h>
 #include <htslib/hts.h>
@@ -53,12 +54,17 @@ typedef struct {
     int n_chains;
     lo_block_t *blocks;
     regidx_t *idx;
-    regitr_t *itr;
     faidx_t *src_fai;
     faidx_t *dst_fai;
 } liftover_bind_t;
 
-static liftover_bind_t *g_liftover_cache = NULL;
+typedef struct liftover_cache_entry {
+    liftover_bind_t *bind;
+    struct liftover_cache_entry *next;
+} liftover_cache_entry_t;
+
+static liftover_cache_entry_t *g_liftover_cache_head = NULL;
+static pthread_mutex_t g_liftover_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 enum {
     OUT_SRC_CHROM = 0,
@@ -428,7 +434,6 @@ static void liftover_bind_destroy(void *ptr) {
     free(bind->chains);
     free(bind->blocks);
     if (bind->idx) regidx_destroy(bind->idx);
-    if (bind->itr) regitr_destroy(bind->itr);
     if (bind->src_fai) fai_destroy(bind->src_fai);
     if (bind->dst_fai) fai_destroy(bind->dst_fai);
     free(bind);
@@ -460,7 +465,6 @@ static liftover_bind_t *liftover_bind_copy_data(const liftover_bind_t *src) {
         return NULL;
     }
     bind->idx = regidx_init_chains(bind->chains, bind->n_chains, bind->blocks);
-    bind->itr = regitr_init(bind->idx);
     bind->dst_fai = fai_load(bind->dst_fasta_ref);
     if (!bind->dst_fai) {
         liftover_bind_destroy(bind);
@@ -480,20 +484,26 @@ static int liftover_bp(liftover_bind_t *bind, const char *t_chr, hts_pos_t t_pos
                        const char **q_chr, hts_pos_t *q_pos, int *q_strand, int *multi_match) {
     int block_ind = -1;
     char *canon = canonical_contig_name(t_chr);
+    regitr_t *itr = NULL;
     if (!canon) return -1;
+    itr = regitr_init(bind->idx);
+    if (!itr) {
+        free(canon);
+        return -1;
+    }
     *multi_match = 0;
-    if (regidx_overlap(bind->idx, canon, (uint32_t)t_pos, (uint32_t)t_pos, bind->itr)) {
-        for (int i = 0; regitr_overlap(bind->itr); i++) {
+    if (regidx_overlap(bind->idx, canon, (uint32_t)t_pos, (uint32_t)t_pos, itr)) {
+        for (int i = 0; regitr_overlap(itr); i++) {
             const lo_block_t *block;
             const lo_chain_t *chain;
             int block_pos;
             if (i > 0) *multi_match = 1;
-            block_ind = regitr_payload(bind->itr, int);
+            block_ind = regitr_payload(itr, int);
             block = &bind->blocks[block_ind];
             chain = &bind->chains[block->chain_ind];
             *q_chr = chain->q_name;
             *q_strand = chain->q_strand;
-            block_pos = (int)(t_pos - bind->itr->beg);
+            block_pos = (int)(t_pos - itr->beg);
             if (*q_strand) {
                 *q_pos = (hts_pos_t)(chain->q_size - chain->q_start - block->q_start - block_pos);
             } else {
@@ -501,6 +511,7 @@ static int liftover_bp(liftover_bind_t *bind, const char *t_chr, hts_pos_t t_pos
             }
         }
     }
+    regitr_destroy(itr);
     free(canon);
     return block_ind;
 }
@@ -615,7 +626,6 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
         return NULL;
     }
     bind->idx = regidx_init_chains(bind->chains, bind->n_chains, bind->blocks);
-    bind->itr = regitr_init(bind->idx);
     bind->dst_fai = fai_load(bind->dst_fasta_ref);
     if (!bind->dst_fai) {
         liftover_bind_destroy(bind);
@@ -633,22 +643,53 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
 
 static liftover_bind_t *get_liftover_context(const char *chain_path, const char *dst_fasta_ref,
                                              const char *src_fasta_ref, int max_snp_gap, int max_indel_inc) {
-    if (g_liftover_cache &&
-        strcmp(g_liftover_cache->chain_path, chain_path) == 0 &&
-        strcmp(g_liftover_cache->dst_fasta_ref, dst_fasta_ref) == 0 &&
-        ((g_liftover_cache->src_fasta_ref == NULL && src_fasta_ref == NULL) ||
-         (g_liftover_cache->src_fasta_ref && src_fasta_ref &&
-          strcmp(g_liftover_cache->src_fasta_ref, src_fasta_ref) == 0)) &&
-        g_liftover_cache->max_snp_gap == max_snp_gap &&
-        g_liftover_cache->max_indel_inc == max_indel_inc) {
-        return g_liftover_cache;
+    liftover_cache_entry_t *entry = NULL;
+    liftover_bind_t *loaded = NULL;
+
+    pthread_mutex_lock(&g_liftover_cache_mutex);
+    for (entry = g_liftover_cache_head; entry; entry = entry->next) {
+        liftover_bind_t *bind = entry->bind;
+        if (strcmp(bind->chain_path, chain_path) == 0 &&
+            strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
+            ((bind->src_fasta_ref == NULL && src_fasta_ref == NULL) ||
+             (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
+            bind->max_snp_gap == max_snp_gap &&
+            bind->max_indel_inc == max_indel_inc) {
+            pthread_mutex_unlock(&g_liftover_cache_mutex);
+            return bind;
+        }
     }
-    if (g_liftover_cache) {
-        liftover_bind_destroy(g_liftover_cache);
-        g_liftover_cache = NULL;
+    pthread_mutex_unlock(&g_liftover_cache_mutex);
+
+    loaded = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc);
+    if (!loaded) return NULL;
+
+    pthread_mutex_lock(&g_liftover_cache_mutex);
+    for (entry = g_liftover_cache_head; entry; entry = entry->next) {
+        liftover_bind_t *bind = entry->bind;
+        if (strcmp(bind->chain_path, chain_path) == 0 &&
+            strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
+            ((bind->src_fasta_ref == NULL && src_fasta_ref == NULL) ||
+             (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
+            bind->max_snp_gap == max_snp_gap &&
+            bind->max_indel_inc == max_indel_inc) {
+            pthread_mutex_unlock(&g_liftover_cache_mutex);
+            liftover_bind_destroy(loaded);
+            return bind;
+        }
     }
-    g_liftover_cache = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc);
-    return g_liftover_cache;
+
+    entry = (liftover_cache_entry_t *)calloc(1, sizeof(*entry));
+    if (!entry) {
+        pthread_mutex_unlock(&g_liftover_cache_mutex);
+        liftover_bind_destroy(loaded);
+        return NULL;
+    }
+    entry->bind = loaded;
+    entry->next = g_liftover_cache_head;
+    g_liftover_cache_head = entry;
+    pthread_mutex_unlock(&g_liftover_cache_mutex);
+    return loaded;
 }
 
 static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {

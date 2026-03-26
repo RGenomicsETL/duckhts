@@ -1629,7 +1629,11 @@ rduckhts_liftover <- function(
   max_snp_gap = 1,
   max_indel_inc = 250
 ) {
-  table_sql <- gsub("'", "''", query, fixed = TRUE)
+  table_expr <- query
+  if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
+    table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
+  }
+  table_sql <- gsub("'", "''", table_expr, fixed = TRUE)
   params <- list(
     sprintf("'%s'", table_sql),
     sprintf("'%s'", chrom_col),
