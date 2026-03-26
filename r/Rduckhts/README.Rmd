@@ -179,6 +179,33 @@ lifted[, c(
 unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```
 
+### Munge score-style rows
+
+```{r}
+munge_fasta <- tempfile("duckhts_munge_", fileext = ".fa")
+writeLines(c(
+  ">chrF",
+  "ACGTACGTAA"
+), munge_fasta)
+rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
+
+munge_out <- rduckhts_munge(
+  con,
+  query = paste(
+    "SELECT * FROM (VALUES",
+    "('rs1', 2, 'chrF', 'A', 'C', 0.01, 1.10, 0.20, 0.98, 0.10, 0.01, 1000),",
+    "('rs2', 2, 'chrF', 'C', 'A', 0.02, 0.90, -0.20, 0.98, 0.90, 0.01, 1000)",
+    ") AS t(SNP, BP, CHR, A1, A2, P, OR, BETA, INFO, FRQ, SE, N)"
+  ),
+  fasta_ref = munge_fasta,
+  preset = "PLINK"
+)
+
+munge_out[, c("chrom", "pos", "id", "ref", "alt", "swapped", "filter", "af", "es", "ns")]
+
+unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
+```
+
 ### Compression + tabix round-trips
 
 ```{r}
