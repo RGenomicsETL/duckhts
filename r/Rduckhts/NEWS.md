@@ -1,6 +1,7 @@
 
 # Rduckhts 0.1.3-0.0.2.9001
 
+- expose the bundled `liftover(...)` table macro for score-style variant rows via a new `rduckhts_liftover()` helper that runs the macro against an input SQL query/table expression and returns lifted coordinates, alleles, and warnings
 - Keep the generated community extension metadata in sync with the bundled extension version by sourcing the emitted top-level `version` field from the repo-level `description.yml`.
 - Bundle the `duckhts` `0.1.3.9001` extension update.
 - Add `quality_representation` to `rduckhts_bam()` and `rduckhts_fastq()` so qualities can be returned as raw `UTINYINT[]` Phred values.

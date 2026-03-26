@@ -2,6 +2,7 @@
 
 ## duckhts 0.1.3.9001 (2026-03-13)
 
+- add a `liftover(...)` table macro for score-style variant rows (`chrom`, `pos`, optional `ref`/`alt`) backed by a new `liftover_variant(...)` scalar kernel that uses UCSC chain files plus destination/source FASTA references to return lifted coordinates, lifted alleles, reverse-complement/swap indicators, and warning strings such as `IFFY` and `UNMAPPED`
 - source the generated community extension descriptor `version` field from the repo-level `description.yml` instead of duplicating it in `functions.yaml`
 - add `quality_representation := 'phred'` to `read_bam(...)` and `read_fastq(...)` so base qualities can be returned as `UTINYINT[]` raw Phred values instead of SAM/FASTQ text
 - add `input_quality_encoding := 'phred33' | 'auto' | 'phred64' | 'solexa64'` to `read_fastq(...)`; default to modern `phred33`, with optional legacy decoding and canonical Phred output on read

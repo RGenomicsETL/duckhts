@@ -36,7 +36,8 @@ rduckhts_fastq(
 \code{"phred"} returns raw Phred values as \code{UTINYINT[]}.}
 
 \item{input_quality_encoding}{Character. Input FASTQ quality encoding:
-\code{"phred33"} (default FASTQ convention), \code{"auto"}, \code{"phred64"}, or \code{"solexa64"}.}
+\code{"phred33"} (default FASTQ convention), \code{"auto"}, \code{"phred64"},
+or \code{"solexa64"}.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

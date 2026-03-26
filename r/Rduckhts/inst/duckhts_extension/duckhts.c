@@ -28,6 +28,8 @@ extern void register_bgunzip_function(duckdb_connection connection);
 extern void register_bam_index_function(duckdb_connection connection);
 extern void register_bcf_index_function(duckdb_connection connection);
 extern void register_tabix_index_function(duckdb_connection connection);
+/* liftover_udf.c */
+extern void register_liftover_functions(duckdb_connection connection);
 /* kmer_udf.c */
 extern void register_kmer_udf_functions(duckdb_connection connection);
 /* tabix_reader.c */
@@ -65,6 +67,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_bam_index_function(connection);
     register_bcf_index_function(connection);
     register_tabix_index_function(connection);
+    register_liftover_functions(connection);
     register_kmer_udf_functions(connection);
     register_read_tabix_function(connection);
     register_read_gtf_function(connection);
@@ -91,6 +94,22 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "FROM read_hts_index(path, format := format, index_path := index_path) "
         "WHERE meta IS NOT NULL "
         "LIMIT 1");
+    run_sql_no_fail(connection,
+        "CREATE OR REPLACE MACRO liftover(chrom, pos, ref := NULL, alt := NULL, chain_path := NULL, "
+        "dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250) AS TABLE "
+        "SELECT "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).src_chrom AS src_chrom, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).src_pos AS src_pos, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).src_ref AS src_ref, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).src_alt AS src_alt, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).dest_chrom AS dest_chrom, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).dest_pos AS dest_pos, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).dest_ref AS dest_ref, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).dest_alt AS dest_alt, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).mapped AS mapped, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).reverse_complemented AS reverse_complemented, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).swap AS swap, "
+        "(liftover_variant(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)).warning AS warning");
 
     return true;
 }

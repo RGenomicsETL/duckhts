@@ -42,6 +42,12 @@ This section is generated from `functions.yaml`.
 | `bcf_index` | table | table | `rduckhts_bcf_index` | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format. |
 | `tabix_index` | table | table | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
 
+### Variants
+
+| Function | Kind | Returns | R helper | Description |
+| --- | --- | --- | --- | --- |
+| `liftover` | table_macro | table | `rduckhts_liftover` | Lift over variant-like rows from one assembly to another using a chain file, returning source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning strings such as IFFY or UNMAPPED. |
+
 ### Sequence UDFs
 
 | Function | Kind | Returns | R helper | Description |

@@ -25,6 +25,7 @@ expect_true(exists("rduckhts_hts_header"))
 expect_true(exists("rduckhts_hts_index"))
 expect_true(exists("rduckhts_hts_index_spans"))
 expect_true(exists("rduckhts_hts_index_raw"))
+expect_true(exists("rduckhts_liftover"))
 
 # Test function signatures
 expect_identical(
@@ -117,6 +118,11 @@ expect_identical(
   names(formals(rduckhts_hts_index_raw)),
   c("con", "path", "format", "index_path")
 )
+expect_identical(
+  names(formals(rduckhts_liftover)),
+  c("con", "query", "chain_path", "dst_fasta_ref", "chrom_col", "pos_col",
+    "ref_col", "alt_col", "src_fasta_ref", "max_snp_gap", "max_indel_inc")
+)
 
 # Test that DBI is available
 expect_true(requireNamespace("DBI", quietly = TRUE))
@@ -193,6 +199,7 @@ expect_true("read_bcf" %in% catalog$name)
 expect_true("bgzip" %in% catalog$name)
 expect_true("bam_index" %in% catalog$name)
 expect_true("detect_quality_encoding" %in% catalog$name)
+expect_true("liftover" %in% catalog$name)
 expect_equal(unique(rduckhts_functions(kind = "scalar")$kind), "scalar")
 expect_equal(unique(rduckhts_functions(category = "Readers")$category), "Readers")
 expect_equal(unique(rduckhts_functions(category = "CIGAR Utils")$category), "CIGAR Utils")
@@ -216,5 +223,6 @@ expect_error(rduckhts_hts_header(NULL, "nonexistent.bcf"))
 expect_error(rduckhts_hts_index(NULL, "nonexistent.bcf"))
 expect_error(rduckhts_hts_index_spans(NULL, "nonexistent.bcf"))
 expect_error(rduckhts_hts_index_raw(NULL, "nonexistent.bcf"))
+expect_error(rduckhts_liftover(NULL, "SELECT 1 AS chrom, 1 AS pos", "x.chain", "y.fa"))
 
 message("All basic tests passed!")

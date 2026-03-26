@@ -75,6 +75,7 @@ set(EXTENSION_SOURCES
         src/bam_reader.c
         src/bgzip.c
         src/hts_index_builder.c
+        src/liftover_udf.c
         src/seq_reader.c
         src/interval_udf.c
         src/kmer_udf.c

@@ -45,6 +45,7 @@
 
 ## 📋 Phase 7 — Post-CRAN Hardening, Testing, Release Maintenance & Distribution
 - [ ] Add more comprehensive edge-case tests for current readers.
+- [ ] Keep the score-style `liftover(...)` variant utility aligned with the local `.sync/score` behavior, especially for indel normalization and warning-state coverage beyond the current `IFFY`/`UNMAPPED` paths.
 - [ ] Add performance benchmarks for hot paths and reader regressions.
 - [ ] Update `README.Rmd` with current CRAN and source installation instructions.
 - [ ] Add DuckDB `COPY` / export examples for downstream analytics workflows.

@@ -1594,3 +1594,72 @@ rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) 
   query <- sprintf("SELECT * FROM read_hts_index_raw('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
 }
+
+#' Lift Over Variant Coordinates Against a Query
+#'
+#' Applies the DuckHTS `liftover(...)` table macro to rows from a SQL query or
+#' table expression with chromosome and position columns, plus optional reference
+#' and alternate alleles.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param query SQL query or table expression to lift over
+#' @param chain_path Path to a UCSC chain file
+#' @param dst_fasta_ref Path to the destination FASTA reference
+#' @param chrom_col Source chromosome column name
+#' @param pos_col Source 1-based position column name
+#' @param ref_col Optional reference allele column name
+#' @param alt_col Optional alternate allele column name
+#' @param src_fasta_ref Optional source FASTA reference
+#' @param max_snp_gap Maximum chain block merge gap
+#' @param max_indel_inc Maximum indel anchor expansion
+#'
+#' @return A data frame with source columns, lifted coordinates/alleles, and warnings.
+#'
+#' @export
+rduckhts_liftover <- function(
+  con,
+  query,
+  chain_path,
+  dst_fasta_ref,
+  chrom_col = "chrom",
+  pos_col = "pos",
+  ref_col = NULL,
+  alt_col = NULL,
+  src_fasta_ref = NULL,
+  max_snp_gap = 1,
+  max_indel_inc = 250
+) {
+  ref_expr <- if (is.null(ref_col)) "NULL" else sprintf("src.%s", ref_col)
+  alt_expr <- if (is.null(alt_col)) "NULL" else sprintf("src.%s", alt_col)
+  extra <- ""
+  if (!is.null(src_fasta_ref)) {
+    extra <- paste0(extra, sprintf(", src_fasta_ref := '%s'", src_fasta_ref))
+  }
+  sql <- sprintf(
+    paste(
+      "SELECT l.*",
+      "FROM (%s) AS src,",
+      "LATERAL liftover(",
+      "src.%s,",
+      "src.%s,",
+      "ref := %s,",
+      "alt := %s,",
+      "chain_path := '%s',",
+      "dst_fasta_ref := '%s'%s,",
+      "max_snp_gap := %d,",
+      "max_indel_inc := %d",
+      ") AS l"
+    ),
+    query,
+    chrom_col,
+    pos_col,
+    ref_expr,
+    alt_expr,
+    chain_path,
+    dst_fasta_ref,
+    extra,
+    max_snp_gap,
+    max_indel_inc
+  )
+  DBI::dbGetQuery(con, sql)
+}

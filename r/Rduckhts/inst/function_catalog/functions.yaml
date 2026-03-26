@@ -288,6 +288,18 @@
       ]
     },
     {
+      "name": "liftover",
+      "kind": "table_macro",
+      "category": "Variants",
+      "signature": "liftover(chrom, pos, ref := NULL, alt := NULL, chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_liftover",
+      "description": "Lift over variant-like rows from one assembly to another using a chain file, returning source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning strings such as IFFY or UNMAPPED.",
+      "examples": [
+        "SELECT dest_chrom, dest_pos, warning FROM liftover('chr1', 12345, ref := 'A', alt := 'G', chain_path := 'hg19ToHg38.over.chain.gz', dst_fasta_ref := 'hg38.fa');"
+      ]
+    },
+    {
       "name": "seq_revcomp",
       "kind": "scalar",
       "category": "Sequence UDFs",
