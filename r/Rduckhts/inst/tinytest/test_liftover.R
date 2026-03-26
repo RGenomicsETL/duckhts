@@ -78,6 +78,34 @@ test_liftover <- function() {
   expect_true(row_iffy$mapped[1])
   expect_equal(row_iffy$warning[1], "IFFY")
 
+  unmapped <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrF', 11, 'A', 'T')) AS t(chrom, pos, ref, alt)",
+    chain_path = chain_path,
+    dst_fasta_ref = dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = src_fa
+  )
+  expect_equal(nrow(unmapped), 1)
+  expect_false(unmapped$mapped[1])
+  expect_equal(unmapped$warning[1], "UNMAPPED")
+  expect_true(is.na(unmapped$dest_pos[1]))
+
+  unmapped_indel <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrMissing', 2, 'AA', 'A')) AS t(chrom, pos, ref, alt)",
+    chain_path = chain_path,
+    dst_fasta_ref = dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = src_fa
+  )
+  expect_equal(nrow(unmapped_indel), 1)
+  expect_false(unmapped_indel$mapped[1])
+  expect_equal(unmapped_indel$warning[1], "UNMAPPED_ANCHORS")
+  expect_true(is.na(unmapped_indel$dest_pos[1]))
+
   expect_error(
     rduckhts_liftover(
       con,
@@ -102,6 +130,86 @@ test_liftover <- function() {
       src_fasta_ref = src_fa
     ),
     "chrom must be non-null"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa
+    ),
+    "chrom must be non-empty"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('chrF', NULL, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa
+    ),
+    "pos must be non-null"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa,
+      max_snp_gap = -1
+    ),
+    "max_snp_gap must be >= 0"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa,
+      max_indel_inc = -1
+    ),
+    "max_indel_inc must be >= 0"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = file.path(tmp_dir, "missing.chain"),
+      dst_fasta_ref = dst_fa,
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa
+    ),
+    "failed to load chain or FASTA context"
+  )
+
+  expect_error(
+    rduckhts_liftover(
+      con,
+      query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+      chain_path = chain_path,
+      dst_fasta_ref = file.path(tmp_dir, "missing.fa"),
+      ref_col = "ref",
+      alt_col = "alt",
+      src_fasta_ref = src_fa
+    ),
+    "failed to load chain or FASTA context"
   )
 }
 

@@ -2,6 +2,7 @@
 # Rduckhts 0.1.3-0.0.2.9001
 
 - harden bundled liftover diagnostics: `rduckhts_liftover()` now surfaces explicit SQL errors for invalid `chrom`/`pos` rows through `duckdb_liftover(...)`, and the package tests cover the wrapper-level invalid-row error paths
+- add README liftover examples and broaden `rduckhts_liftover()` tinytest coverage for unmapped rows plus chain/FASTA and parameter validation failures
 - expose the bundled `liftover(...)` table macro for score-style variant rows via a new `rduckhts_liftover()` helper that runs the macro against an input SQL query/table expression and returns lifted coordinates, alleles, and warnings
 - Keep the generated community extension metadata in sync with the bundled extension version by sourcing the emitted top-level `version` field from the repo-level `description.yml`.
 - Bundle the `duckhts` `0.1.3.9001` extension update.
