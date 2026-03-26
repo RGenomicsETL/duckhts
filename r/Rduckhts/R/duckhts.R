@@ -55,8 +55,43 @@ read_munge_column_map_file <- function(path) {
     stop("column_map_file must be a two-column TSV with source and canonical names", call. = FALSE)
   }
   out <- setNames(tbl[[1]], toupper(tbl[[2]]))
-  out <- out[nzchar(names(out))]
-  out[!duplicated(names(out))]
+  out[nzchar(names(out))]
+}
+
+resolve_munge_column_map <- function(raw_map, available_columns) {
+  if (is.null(raw_map) || length(raw_map) == 0 || is.null(available_columns) || length(available_columns) == 0) {
+    return(character())
+  }
+  available_columns <- as.character(available_columns)
+  available_upper <- toupper(available_columns)
+  canonical_names <- unique(names(raw_map))
+  selected <- character(length(canonical_names))
+  names(selected) <- canonical_names
+  for (i in seq_along(canonical_names)) {
+    canonical <- canonical_names[[i]]
+    candidates <- as.character(raw_map[names(raw_map) == canonical])
+    for (candidate in candidates) {
+      idx <- match(toupper(candidate), available_upper)
+      if (!is.na(idx)) {
+        selected[[i]] <- available_columns[[idx]]
+        break
+      }
+    }
+  }
+  selected[nzchar(selected)]
+}
+
+read_munge_preset_map <- function(con, preset) {
+  preset_sql <- sql_quote_string(preset)
+  out <- DBI::dbGetQuery(con, sprintf("SELECT duckdb_munge_preset_map(%s) AS m", preset_sql))
+  if (nrow(out) != 1 || is.null(out$m[[1]])) {
+    stop("duckdb_munge: unknown preset", call. = FALSE)
+  }
+  m <- out$m[[1]]
+  if (!is.data.frame(m) || !all(c("key", "value") %in% names(m))) {
+    stop("duckdb_munge: failed to read preset map", call. = FALSE)
+  }
+  setNames(as.character(m$value), toupper(as.character(m$key)))
 }
 
 #' Setup HTSlib Environment
@@ -1730,11 +1765,26 @@ rduckhts_munge <- function(
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
     table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
   }
+  provided_modes <- sum(!vapply(list(preset, column_map, column_map_file), is.null, logical(1)))
+  if (provided_modes > 1) {
+    stop("duckdb_munge: specify only one of preset, column_map, or column_map_file", call. = FALSE)
+  }
+
+  available_columns <- names(DBI::dbGetQuery(con, sprintf("SELECT * FROM %s LIMIT 0", table_expr)))
+
+  if (!is.null(preset)) {
+    default_map_path <- system.file("extdata", "colheaders.tsv", package = "Rduckhts", mustWork = TRUE)
+    alias_map <- resolve_munge_column_map(read_munge_column_map_file(default_map_path), available_columns)
+    preset_map <- resolve_munge_column_map(read_munge_preset_map(con, preset), available_columns)
+    column_map <- c(alias_map, preset_map)
+    column_map <- column_map[!duplicated(names(column_map), fromLast = TRUE)]
+    preset <- NULL
+  }
   if (is.null(preset) && is.null(column_map) && is.null(column_map_file)) {
     column_map_file <- system.file("extdata", "colheaders.tsv", package = "Rduckhts", mustWork = TRUE)
   }
   if (!is.null(column_map_file)) {
-    file_map <- read_munge_column_map_file(column_map_file)
+    file_map <- resolve_munge_column_map(read_munge_column_map_file(column_map_file), available_columns)
     if (!is.null(column_map)) {
       column_map <- c(file_map, column_map)
       column_map <- column_map[!duplicated(names(column_map), fromLast = TRUE)]

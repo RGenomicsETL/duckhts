@@ -24,14 +24,14 @@ SELECT m.chrom,
        round(m.ns, 1)
 FROM (
   SELECT bcftools_munge_row(
-    'chrF', 2, 'A', 'C', 'rs1',
+    'chrF', 2, 'C', 'A', 'rs1',
     NULL, NULL, NULL, 0.25,
     1000, NULL, NULL, NULL, 0.1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
   ) AS m
 ) s;
 ----
-chrF	2	C	A	0	PASS	0.1	1000.0
+chrF	2	C	A	1	PASS	0.9	1000.0
 
 query TITTITRRRR
 SELECT m.chrom,
@@ -97,7 +97,7 @@ SELECT round(m.ns, 1),
        round(m.ne, 1)
 FROM (
   SELECT bcftools_munge_row(
-    'chrF', 2, 'A', 'C', 'rs5',
+    'chrF', 2, 'C', 'A', 'rs5',
     0.01, NULL, NULL, NULL,
     NULL, 300.0, 700.0, NULL, NULL, NULL, NULL, NULL, NULL, 400.0, NULL, NULL, NULL, NULL,
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL

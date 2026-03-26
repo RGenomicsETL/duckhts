@@ -77,11 +77,11 @@ test_munge <- function() {
   expect_equal(scalar_out$chrom[1], "chrF")
   expect_equal(scalar_out$ref[1], "C")
   expect_equal(scalar_out$alt[1], "A")
-  expect_true(scalar_out$swapped[1])
-  expect_equal(round(scalar_out$af[1], 3), 0.9)
-  expect_equal(round(scalar_out$ac[1], 1), 1800)
-  expect_equal(round(scalar_out$es[1], 3), -0.25)
-  expect_equal(round(scalar_out$ez[1], 3), -2)
+  expect_false(scalar_out$swapped[1])
+  expect_equal(round(scalar_out$af[1], 3), 0.1)
+  expect_equal(round(scalar_out$ac[1], 1), 200)
+  expect_equal(round(scalar_out$es[1], 3), 0.25)
+  expect_equal(round(scalar_out$ez[1], 3), 2)
 
   wrapper_map <- rduckhts_munge(
     con,
@@ -95,12 +95,16 @@ test_munge <- function() {
     column_map = c(CHR = "CHR", BP = "BP", A1 = "A1", A2 = "A2", SNP = "SNP", FRQ = "FRQ", N = "N")
   )
   expect_equal(nrow(wrapper_map), 2)
-  expect_equal(wrapper_map$ref[1], "C")
-  expect_equal(wrapper_map$alt[1], "A")
-  expect_false(wrapper_map$swapped[1])
-  expect_equal(round(wrapper_map$af[1], 3), 0.1)
-  expect_equal(round(wrapper_map$ns[1], 1), 1000)
-  expect_equal(wrapper_map$filter[2], "IFFY")
+  wrapper_rs2 <- wrapper_map[wrapper_map$id == "rs2", , drop = FALSE]
+  wrapper_rs3 <- wrapper_map[wrapper_map$id == "rs3", , drop = FALSE]
+  expect_equal(nrow(wrapper_rs2), 1)
+  expect_equal(nrow(wrapper_rs3), 1)
+  expect_equal(wrapper_rs2$ref[1], "C")
+  expect_equal(wrapper_rs2$alt[1], "A")
+  expect_false(wrapper_rs2$swapped[1])
+  expect_equal(round(wrapper_rs2$af[1], 3), 0.1)
+  expect_equal(round(wrapper_rs2$ns[1], 1), 1000)
+  expect_equal(wrapper_rs3$filter[1], "IFFY")
 
   wrapper_default <- rduckhts_munge(
     con,
