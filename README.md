@@ -80,10 +80,10 @@ This section is generated from `functions.yaml`.
 
 ### Variants
 
-| Function            | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                               |
-|---------------------|-------------|---------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bcftools_liftover` | scalar      | STRUCT  |                     | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, and warning text. |
-| `duckdb_liftover`   | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.                                                                  |
+| Function            | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                    |
+|---------------------|-------------|---------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bcftools_liftover` | scalar      | STRUCT  |                     | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation. |
+| `duckdb_liftover`   | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.                                                                                                                                                       |
 
 ### Sequence UDFs
 
@@ -266,19 +266,24 @@ dbGetQuery(con, sprintf(
   "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
   lift_src, lift_src
 ))
-#>   success                                                index_path
-#> 1    TRUE /tmp/RtmpX0Mm8r/duckhts_liftover_src_ffe5e63c4c3df.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpWPgMQf/duckhts_liftover_src_1054db1fe1e730.fa.fai
 dbGetQuery(con, sprintf(
   "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
   lift_dst, lift_dst
 ))
-#>   success                                               index_path
-#> 1    TRUE /tmp/RtmpX0Mm8r/duckhts_liftover_dst_ffe5e20b6309.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpWPgMQf/duckhts_liftover_dst_1054db6cb183e6.fa.fai
 
 dbGetQuery(con, sprintf("
-  SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt, mapped, warning
+  SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
+         mapped, reverse_complemented, reject_reason, note
   FROM duckdb_liftover(
-    '(VALUES (''chrF'', 2, ''C'', ''T''), (''chrF'', 11, ''A'', ''T'')) AS t(chrom, pos, ref, alt)',
+    '(VALUES
+       (''chrF'', 2, ''C'', ''T''),
+       (''chrR'', 2, ''A'', ''G''),
+       (''chrF'', 11, ''A'', ''T'')
+     ) AS t(chrom, pos, ref, alt)',
     'chrom',
     'pos',
     ref_col := 'ref',
@@ -288,9 +293,14 @@ dbGetQuery(con, sprintf("
     src_fasta_ref := '%s'
   )
 ", lift_chain, lift_dst, lift_src))
-#>   src_chrom src_pos dest_chrom dest_pos dest_ref dest_alt mapped  warning
-#> 1      chrF       2   chrLiftF        2        C        T   TRUE     <NA>
-#> 2      chrF      11       <NA>       NA     <NA>     <NA>  FALSE UNMAPPED
+#>   src_chrom src_pos dest_chrom dest_pos dest_ref dest_alt mapped
+#> 1      chrF       2   chrLiftF        2        C        T   TRUE
+#> 2      chrF      11       <NA>       NA     <NA>     <NA>  FALSE
+#> 3      chrR       2   chrLiftR        9        T        C   TRUE
+#>   reverse_complemented   reject_reason note
+#> 1                FALSE            <NA> <NA>
+#> 2                FALSE UnmappedAnchors <NA>
+#> 3                 TRUE            <NA> <NA>
 
 unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```

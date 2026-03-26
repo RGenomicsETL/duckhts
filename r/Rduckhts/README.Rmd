@@ -154,15 +154,27 @@ writeLines(c(
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 
-rduckhts_liftover(
+lifted <- rduckhts_liftover(
   con,
-  query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T'), ('chrF', 11, 'A', 'T')) AS t(chrom, pos, ref, alt)",
+  query = paste(
+    "SELECT * FROM (VALUES",
+    "('chrF', 2, 'C', 'T'),",
+    "('chrR', 2, 'A', 'G'),",
+    "('chrF', 11, 'A', 'T')",
+    ") AS t(chrom, pos, ref, alt)"
+  ),
   chain_path = lift_chain,
   dst_fasta_ref = lift_dst,
   ref_col = "ref",
   alt_col = "alt",
   src_fasta_ref = lift_src
 )
+
+lifted[, c(
+  "src_chrom", "src_pos", "dest_chrom", "dest_pos",
+  "dest_ref", "dest_alt", "mapped", "reverse_complemented",
+  "reject_reason", "note"
+)]
 
 unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```

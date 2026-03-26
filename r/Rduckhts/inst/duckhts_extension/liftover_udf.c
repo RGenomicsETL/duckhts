@@ -77,14 +77,15 @@ enum {
     OUT_MAPPED,
     OUT_REVERSE_COMPLEMENTED,
     OUT_SWAP,
-    OUT_WARNING,
+    OUT_REJECT_REASON,
+    OUT_NOTE,
     OUT_COUNT
 };
 
 static const char *LIFTOVER_FIELD_NAMES[OUT_COUNT] = {
     "src_chrom", "src_pos", "src_ref", "src_alt",
     "dest_chrom", "dest_pos", "dest_ref", "dest_alt",
-    "mapped", "reverse_complemented", "swap", "warning"
+    "mapped", "reverse_complemented", "swap", "reject_reason", "note"
 };
 
 static inline int row_is_valid(duckdb_vector vector, idx_t row) {
@@ -205,16 +206,30 @@ static char *reverse_complement_copy(const char *s) {
     return out;
 }
 
-static void warning_append(char *warning, size_t warning_size, const char *tag) {
+static void tag_append(char *buf, size_t buf_size, const char *tag) {
     size_t cur;
-    if (!warning || !tag || !*tag) return;
-    cur = strlen(warning);
-    if (cur > 0 && cur + 1 < warning_size) {
-        warning[cur++] = ';';
-        warning[cur] = '\0';
+    if (!buf || !tag || !*tag) return;
+    cur = strlen(buf);
+    if (cur > 0 && cur + 1 < buf_size) {
+        buf[cur++] = ';';
+        buf[cur] = '\0';
     }
-    if (cur + strlen(tag) + 1 >= warning_size) return;
-    memcpy(warning + cur, tag, strlen(tag) + 1);
+    if (cur + strlen(tag) + 1 >= buf_size) return;
+    memcpy(buf + cur, tag, strlen(tag) + 1);
+}
+
+static int has_source_contig(const liftover_bind_t *bind, const char *chrom) {
+    char *canon = canonical_contig_name(chrom);
+    int found = 0;
+    if (!bind || !canon) return 0;
+    for (int i = 0; i < bind->n_chains; i++) {
+        if (strcmp(bind->chains[i].t_name, canon) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    free(canon);
+    return found;
 }
 
 static inline const lo_block_t *prev_block(const lo_block_t *block, const lo_block_t *blocks, const lo_chain_t *chains) {
@@ -793,7 +808,8 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         char *dst_fasta_ref_copy = NULL;
         char *src_fasta_ref_copy = NULL;
         char *load_err = NULL;
-        char warning[LIFTOVER_WARNING_BUF] = {0};
+        char reject_reason[LIFTOVER_WARNING_BUF] = {0};
+        char note[LIFTOVER_WARNING_BUF] = {0};
         char *src_ref_copy = NULL, *src_alt_copy = NULL;
         char *lift_ref = NULL, *lift_alt = NULL, *dst_ref = NULL;
         const char *dst_chr = NULL;
@@ -805,11 +821,21 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         int32_t max_indel_inc = 250;
         liftover_bind_t *bind = NULL;
 
-        if (!row_is_valid(chrom_vec, row) || !row_is_valid(pos_vec, row) ||
-            !row_is_valid(chain_vec, row) || !row_is_valid(dst_fasta_vec, row)) {
-            set_null_at(output, row);
-            for (int i = 0; i < OUT_COUNT; i++) set_null_at(child_vecs[i], row);
-            continue;
+        if (!row_is_valid(chrom_vec, row)) {
+            set_liftover_error(info, "bcftools_liftover: chrom must be non-null");
+            return;
+        }
+        if (!row_is_valid(pos_vec, row)) {
+            set_liftover_error(info, "bcftools_liftover: pos must be non-null");
+            return;
+        }
+        if (!row_is_valid(chain_vec, row)) {
+            set_liftover_error(info, "bcftools_liftover: chain_path must be non-null");
+            return;
+        }
+        if (!row_is_valid(dst_fasta_vec, row)) {
+            set_liftover_error(info, "bcftools_liftover: dst_fasta_ref must be non-null");
+            return;
         }
 
         chrom = get_string_at(chrom_vec, row, &chrom_len);
@@ -819,9 +845,16 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         if (row_is_valid(max_snp_gap_vec, row)) max_snp_gap = (int32_t)get_int64_at(max_snp_gap_vec, row);
         if (row_is_valid(max_indel_inc_vec, row)) max_indel_inc = (int32_t)get_int64_at(max_indel_inc_vec, row);
         if (!chrom || chrom_len == 0) {
-            set_null_at(output, row);
-            for (int i = 0; i < OUT_COUNT; i++) set_null_at(child_vecs[i], row);
-            continue;
+            set_liftover_error(info, "bcftools_liftover: chrom must be non-empty");
+            return;
+        }
+        if (!chain_path || chain_len == 0) {
+            set_liftover_error(info, "bcftools_liftover: chain_path must be non-empty");
+            return;
+        }
+        if (!dst_fasta_ref || dst_fasta_len == 0) {
+            set_liftover_error(info, "bcftools_liftover: dst_fasta_ref must be non-empty");
+            return;
         }
         if (max_snp_gap < 0) {
             set_liftover_error(info, "bcftools_liftover: max_snp_gap must be >= 0");
@@ -849,9 +882,8 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
 
         src_pos_data[row] = get_int64_at(pos_vec, row);
         if (src_pos_data[row] < 1) {
-            set_null_at(output, row);
-            for (int i = 0; i < OUT_COUNT; i++) set_null_at(child_vecs[i], row);
-            continue;
+            set_liftover_error(info, "bcftools_liftover: pos must be >= 1");
+            return;
         }
         duckdb_vector_assign_string_element_len(child_vecs[OUT_SRC_CHROM], row, chrom, chrom_len);
         if (row_is_valid(ref_vec, row)) {
@@ -879,25 +911,31 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             set_null_at(child_vecs[OUT_SRC_ALT], row);
         }
 
-        if (!src_ref_copy && src_alt_copy) warning_append(warning, sizeof(warning), "IFFY");
+        if (!src_ref_copy && src_alt_copy) tag_append(note, sizeof(note), "MissingSourceRef");
         if (src_alt_copy && (strchr(src_alt_copy, '<') || strchr(src_alt_copy, '*') || strchr(src_alt_copy, ','))) {
-            warning_append(warning, sizeof(warning), "SYMBOLIC");
+            tag_append(note, sizeof(note), "SymbolicAlleles");
         }
 
-        if (src_ref_copy && strlen(src_ref_copy) > 1) {
+        if (!has_source_contig(bind, chrom)) {
+            tag_append(reject_reason, sizeof(reject_reason), "MissingContig");
+        } else if (src_ref_copy && strlen(src_ref_copy) > 1) {
             int npad = 0;
             int ret = liftover_indel(bind, chrom, src_pos_data[row],
                                      src_pos_data[row] + (hts_pos_t)strlen(src_ref_copy) - 1,
                                      NULL, &dst_chr, &dst_pos5, &dst_pos3, &is_reverse, &npad);
             if (ret < 0) {
-                warning_append(warning, sizeof(warning),
-                               ret == -1 ? "UNMAPPED_ANCHORS" :
-                               ret == -2 ? "UNMAPPED_ANCHOR5" :
-                               ret == -3 ? "UNMAPPED_ANCHOR3" :
-                               ret == -4 ? "MISMATCH_ANCHORS" : "APART_ANCHORS");
+                tag_append(reject_reason, sizeof(reject_reason),
+                           ret == -1 ? "UnmappedAnchors" :
+                           ret == -2 ? "UnmappedAnchor5" :
+                           ret == -3 ? "UnmappedAnchor3" :
+                           ret == -4 ? "MismatchAnchors" : "ApartAnchors");
             } else {
-                mapped = 1;
-                if (npad != 0) warning_append(warning, sizeof(warning), bind->src_fai ? "PADDED" : "IFFY");
+                if (npad != 0 && !bind->src_fai) {
+                    tag_append(reject_reason, sizeof(reject_reason), "MissingFasta");
+                } else {
+                    mapped = 1;
+                    if (npad != 0) tag_append(note, sizeof(note), "Padded");
+                }
             }
         } else {
             int multi_match = 0;
@@ -905,9 +943,9 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             dst_pos3 = dst_pos5;
             if (block >= 0) {
                 mapped = 1;
-                if (multi_match) warning_append(warning, sizeof(warning), "MULTI_BLOCK");
+                if (multi_match) tag_append(note, sizeof(note), "MultiBlock");
             } else {
-                warning_append(warning, sizeof(warning), "UNMAPPED");
+                tag_append(reject_reason, sizeof(reject_reason), "UnmappedAnchors");
             }
         }
 
@@ -920,8 +958,10 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             set_null_at(child_vecs[OUT_DEST_POS], row);
             set_null_at(child_vecs[OUT_DEST_REF], row);
             set_null_at(child_vecs[OUT_DEST_ALT], row);
-            if (warning[0]) duckdb_vector_assign_string_element(child_vecs[OUT_WARNING], row, warning);
-            else set_null_at(child_vecs[OUT_WARNING], row);
+            if (reject_reason[0]) duckdb_vector_assign_string_element(child_vecs[OUT_REJECT_REASON], row, reject_reason);
+            else set_null_at(child_vecs[OUT_REJECT_REASON], row);
+            if (note[0]) duckdb_vector_assign_string_element(child_vecs[OUT_NOTE], row, note);
+            else set_null_at(child_vecs[OUT_NOTE], row);
             free(src_ref_copy);
             free(src_alt_copy);
             continue;
@@ -941,7 +981,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             dst_ref = fetch_sequence_flexible(bind->dst_fai, dst_chr, dst_pos5, dst_pos3);
         }
         if (!dst_ref) {
-            warning_append(warning, sizeof(warning), "MISSING_DST_REF");
+            tag_append(note, sizeof(note), "MissingDestinationRef");
         } else {
             if (lift_ref && strcmp(dst_ref, lift_ref) == 0) {
                 free(lift_ref);
@@ -952,7 +992,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
                 lift_alt = tmp;
                 swap = 1;
             } else if (lift_ref) {
-                warning_append(warning, sizeof(warning), "REF_MISMATCH");
+                tag_append(note, sizeof(note), "RefMismatch");
                 free(lift_ref);
                 lift_ref = dup_cstr(dst_ref);
             } else {
@@ -965,8 +1005,9 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         else set_null_at(child_vecs[OUT_DEST_REF], row);
         if (lift_alt) duckdb_vector_assign_string_element(child_vecs[OUT_DEST_ALT], row, lift_alt);
         else set_null_at(child_vecs[OUT_DEST_ALT], row);
-        if (warning[0]) duckdb_vector_assign_string_element(child_vecs[OUT_WARNING], row, warning);
-        else set_null_at(child_vecs[OUT_WARNING], row);
+        set_null_at(child_vecs[OUT_REJECT_REASON], row);
+        if (note[0]) duckdb_vector_assign_string_element(child_vecs[OUT_NOTE], row, note);
+        else set_null_at(child_vecs[OUT_NOTE], row);
 
         free(src_ref_copy);
         free(src_alt_copy);
@@ -1007,7 +1048,8 @@ void register_liftover_functions(duckdb_connection connection) {
     fields[OUT_MAPPED] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     fields[OUT_REVERSE_COMPLEMENTED] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     fields[OUT_SWAP] = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
-    fields[OUT_WARNING] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    fields[OUT_REJECT_REASON] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    fields[OUT_NOTE] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     struct_type = duckdb_create_struct_type(fields, LIFTOVER_FIELD_NAMES, OUT_COUNT);
 
     duckdb_scalar_function_set_return_type(fn, struct_type);

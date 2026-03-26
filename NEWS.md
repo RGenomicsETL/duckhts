@@ -2,9 +2,10 @@
 
 ## duckhts 0.1.3.9001 (2026-03-13)
 
-- harden liftover error handling and diagnostics: `duckdb_liftover(...)` now raises explicit SQL errors for null/empty `chrom` and non-positive `pos`, liftover load failures surface the underlying chain/FASTA cause, macro registration no longer fails silently, and new SQL error-stress tests cover 1,000,000-row invalid-input paths
+- harden liftover error handling and diagnostics: `duckdb_liftover(...)` and `bcftools_liftover(...)` now raise explicit SQL errors for invalid required inputs, liftover load failures surface the underlying chain/FASTA cause, macro registration no longer fails silently, and new SQL error-stress tests cover 1,000,000-row invalid-input paths
+- align liftover result semantics more closely with `bcftools +liftover` by splitting the old `warning` field into `reject_reason` for rejected rows and `note` for emitted rows with extra annotations, using upstream-style reject names such as `MissingContig`, `UnmappedAnchors`, `MismatchAnchors`, and `MissingFasta`
 - add README liftover examples and expand impossible-liftover coverage so unmapped rows and invalid-input error paths are exercised in both SQL and package-level tests
-- add a `liftover(...)` table macro for score-style variant rows (`chrom`, `pos`, optional `ref`/`alt`) backed by a new `liftover_variant(...)` scalar kernel that uses UCSC chain files plus destination/source FASTA references to return lifted coordinates, lifted alleles, reverse-complement/swap indicators, and warning strings such as `IFFY` and `UNMAPPED`
+- add a `liftover(...)` table macro for score-style variant rows (`chrom`, `pos`, optional `ref`/`alt`) backed by a new `liftover_variant(...)` scalar kernel that uses UCSC chain files plus destination/source FASTA references to return lifted coordinates, lifted alleles, reverse-complement/swap indicators, and liftover status annotations
 - source the generated community extension descriptor `version` field from the repo-level `description.yml` instead of duplicating it in `functions.yaml`
 - add `quality_representation := 'phred'` to `read_bam(...)` and `read_fastq(...)` so base qualities can be returned as `UTINYINT[]` raw Phred values instead of SAM/FASTQ text
 - add `input_quality_encoding := 'phred33' | 'auto' | 'phred64' | 'solexa64'` to `read_fastq(...)`; default to modern `phred33`, with optional legacy decoding and canonical Phred output on read

@@ -138,9 +138,14 @@ dbGetQuery(con, sprintf(
 ))
 
 dbGetQuery(con, sprintf("
-  SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt, mapped, warning
+  SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
+         mapped, reverse_complemented, reject_reason, note
   FROM duckdb_liftover(
-    '(VALUES (''chrF'', 2, ''C'', ''T''), (''chrF'', 11, ''A'', ''T'')) AS t(chrom, pos, ref, alt)',
+    '(VALUES
+       (''chrF'', 2, ''C'', ''T''),
+       (''chrR'', 2, ''A'', ''G''),
+       (''chrF'', 11, ''A'', ''T'')
+     ) AS t(chrom, pos, ref, alt)',
     'chrom',
     'pos',
     ref_col := 'ref',

@@ -58,7 +58,7 @@ test_liftover <- function() {
   expect_equal(nrow(out), 3)
   row_forward <- out[out$src_chrom == "chrF" & !is.na(out$src_ref), , drop = FALSE]
   row_reverse <- out[out$src_chrom == "chrR", , drop = FALSE]
-  row_iffy <- out[out$src_chrom == "chrF" & is.na(out$src_ref), , drop = FALSE]
+  row_missing_ref <- out[out$src_chrom == "chrF" & is.na(out$src_ref), , drop = FALSE]
 
   expect_equal(nrow(row_forward), 1)
   expect_equal(row_forward$dest_chrom[1], "chrLiftF")
@@ -74,9 +74,10 @@ test_liftover <- function() {
   expect_equal(row_reverse$dest_alt[1], "C")
   expect_true(row_reverse$reverse_complemented[1])
 
-  expect_equal(nrow(row_iffy), 1)
-  expect_true(row_iffy$mapped[1])
-  expect_equal(row_iffy$warning[1], "IFFY")
+  expect_equal(nrow(row_missing_ref), 1)
+  expect_true(row_missing_ref$mapped[1])
+  expect_true(is.na(row_missing_ref$reject_reason[1]))
+  expect_equal(row_missing_ref$note[1], "MissingSourceRef")
 
   unmapped <- rduckhts_liftover(
     con,
@@ -89,7 +90,8 @@ test_liftover <- function() {
   )
   expect_equal(nrow(unmapped), 1)
   expect_false(unmapped$mapped[1])
-  expect_equal(unmapped$warning[1], "UNMAPPED")
+  expect_equal(unmapped$reject_reason[1], "UnmappedAnchors")
+  expect_true(is.na(unmapped$note[1]))
   expect_true(is.na(unmapped$dest_pos[1]))
 
   unmapped_indel <- rduckhts_liftover(
@@ -103,7 +105,8 @@ test_liftover <- function() {
   )
   expect_equal(nrow(unmapped_indel), 1)
   expect_false(unmapped_indel$mapped[1])
-  expect_equal(unmapped_indel$warning[1], "UNMAPPED_ANCHORS")
+  expect_equal(unmapped_indel$reject_reason[1], "MissingContig")
+  expect_true(is.na(unmapped_indel$note[1]))
   expect_true(is.na(unmapped_indel$dest_pos[1]))
 
   expect_error(
@@ -115,6 +118,36 @@ test_liftover <- function() {
       ref_col = "ref",
       alt_col = "alt",
       src_fasta_ref = src_fa
+    ),
+    "pos must be >= 1"
+  )
+
+  expect_error(
+    DBI::dbGetQuery(
+      con,
+      sprintf(
+        paste(
+          "SELECT (bcftools_liftover(",
+          "NULL, 2, 'C', 'T', '%s', '%s', '%s', 1, 250",
+          ")).src_pos"
+        ),
+        chain_path, dst_fa, src_fa
+      )
+    ),
+    "chrom must be non-null"
+  )
+
+  expect_error(
+    DBI::dbGetQuery(
+      con,
+      sprintf(
+        paste(
+          "SELECT (bcftools_liftover(",
+          "'chrF', 0, 'C', 'T', '%s', '%s', '%s', 1, 250",
+          ")).src_pos"
+        ),
+        chain_path, dst_fa, src_fa
+      )
     ),
     "pos must be >= 1"
   )
