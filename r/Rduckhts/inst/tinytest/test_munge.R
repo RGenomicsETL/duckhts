@@ -45,7 +45,7 @@ test_munge <- function() {
       "NULL, 2.0, NULL, 0.25,",
       "1000, NULL, NULL, NULL, 0.1, NULL, NULL, 200.0, NULL, NULL, NULL, NULL, NULL, NULL,",
       "'%s', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL",
-      ")).swapped AS swapped,",
+      ")).alleles_swapped AS alleles_swapped,",
       "(bcftools_munge_row(",
       "'chrF', 2, 'A', 'C', 'rs1',",
       "NULL, 2.0, NULL, 0.25,",
@@ -77,7 +77,7 @@ test_munge <- function() {
   expect_equal(scalar_out$chrom[1], "chrF")
   expect_equal(scalar_out$ref[1], "C")
   expect_equal(scalar_out$alt[1], "A")
-  expect_false(scalar_out$swapped[1])
+  expect_false(scalar_out$alleles_swapped[1])
   expect_equal(round(scalar_out$af[1], 3), 0.1)
   expect_equal(round(scalar_out$ac[1], 1), 200)
   expect_equal(round(scalar_out$es[1], 3), 0.25)
@@ -101,7 +101,7 @@ test_munge <- function() {
   expect_equal(nrow(wrapper_rs3), 1)
   expect_equal(wrapper_rs2$ref[1], "C")
   expect_equal(wrapper_rs2$alt[1], "A")
-  expect_false(wrapper_rs2$swapped[1])
+  expect_false(wrapper_rs2$alleles_swapped[1])
   expect_equal(round(wrapper_rs2$af[1], 3), 0.1)
   expect_equal(round(wrapper_rs2$ns[1], 1), 1000)
   expect_equal(wrapper_rs3$filter[1], "IFFY")

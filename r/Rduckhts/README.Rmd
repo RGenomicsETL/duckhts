@@ -204,7 +204,7 @@ munge_out <- rduckhts_munge(
   )
 )
 
-munge_out[, c("chrom", "pos", "id", "ref", "alt", "swapped", "filter", "af", "es", "ns")]
+munge_out[, c("chrom", "pos", "id", "ref", "alt", "alleles_swapped", "filter", "af", "es", "ns")]
 
 unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
 ```

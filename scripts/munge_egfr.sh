@@ -46,7 +46,20 @@ SELECT
 FROM read_csv_auto('${IN_GZ}', delim := '\t', header := true);
 
 COPY (
-  SELECT *
+  SELECT
+    chrom,
+    pos,
+    id,
+    ref,
+    alt,
+    swapped AS alleles_swapped,
+    filter,
+    ns,
+    es,
+    se,
+    lp,
+    af,
+    ac
   FROM duckdb_munge(
     'munge_input',
     column_map := map(
