@@ -231,7 +231,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpwyUapr/duckhts_readme_12c9025f6b9a87.fai
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_readme_12d22f49cc0a30.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -291,10 +291,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpwyUapr/duckhts_liftover_src_12c9025021340a.fa.fai
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_liftover_src_12d22f44d92adb.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpwyUapr/duckhts_liftover_dst_12c90277e90419.fa.fai
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_liftover_dst_12d22f1ae7da4b.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -329,6 +329,41 @@ lifted[, c(
 unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```
 
+### Munge score-style rows
+
+``` r
+munge_fasta <- tempfile("duckhts_munge_", fileext = ".fa")
+writeLines(c(
+  ">chrF",
+  "ACGTACGTAA"
+), munge_fasta)
+rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
+#>   success                                          index_path
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_munge_12d22f57b67171.fa.fai
+
+munge_out <- rduckhts_munge(
+  con,
+  query = paste(
+    "SELECT * FROM (VALUES",
+    "('rs1', 2, 'chrF', 'A', 'C', 0.01, 1.10, 0.20, 0.98, 0.10, 0.01, 1000),",
+    "('rs2', 2, 'chrF', 'C', 'A', 0.02, 0.90, -0.20, 0.98, 0.90, 0.01, 1000)",
+    ") AS t(SNP, BP, CHR, A1, A2, P, OR_VALUE, BETA, INFO, FRQ, SE, N)"
+  ),
+  fasta_ref = munge_fasta,
+  column_map = c(
+    SNP = "SNP", BP = "BP", CHR = "CHR", A1 = "A1", A2 = "A2",
+    P = "P", OR = "OR_VALUE", BETA = "BETA", INFO = "INFO", FRQ = "FRQ", SE = "SE", N = "N"
+  )
+)
+
+munge_out[, c("chrom", "pos", "id", "ref", "alt", "swapped", "filter", "af", "es", "ns")]
+#>   chrom pos  id ref alt swapped filter  af  es   ns
+#> 1  chrF   2 rs2   C   A    TRUE   <NA> 0.1 0.2 1000
+#> 2  chrF   2 rs1   C   A   FALSE   <NA> 0.1 0.2 1000
+
+unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
+```
+
 ### Compression + tabix round-trips
 
 ``` r
@@ -339,12 +374,12 @@ writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
 #>   success                                           output_path bytes_in
-#> 1    TRUE /tmp/RtmpwyUapr/duckhts_targets_12c9026f651882.bed.gz       25
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_targets_12d22f5ce76138.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpwyUapr/duckhts_targets_12c9026f651882.bed.gz.tbi
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_targets_12d22f5ce76138.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
@@ -411,7 +446,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpwyUapr/duckhts_readme_12c9021aa967b9.fai
+#> 1    TRUE /tmp/Rtmpy9ngQ9/duckhts_readme_12d22f5b769e29.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

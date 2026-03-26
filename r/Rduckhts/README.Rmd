@@ -195,10 +195,13 @@ munge_out <- rduckhts_munge(
     "SELECT * FROM (VALUES",
     "('rs1', 2, 'chrF', 'A', 'C', 0.01, 1.10, 0.20, 0.98, 0.10, 0.01, 1000),",
     "('rs2', 2, 'chrF', 'C', 'A', 0.02, 0.90, -0.20, 0.98, 0.90, 0.01, 1000)",
-    ") AS t(SNP, BP, CHR, A1, A2, P, OR, BETA, INFO, FRQ, SE, N)"
+    ") AS t(SNP, BP, CHR, A1, A2, P, OR_VALUE, BETA, INFO, FRQ, SE, N)"
   ),
   fasta_ref = munge_fasta,
-  preset = "PLINK"
+  column_map = c(
+    SNP = "SNP", BP = "BP", CHR = "CHR", A1 = "A1", A2 = "A2",
+    P = "P", OR = "OR_VALUE", BETA = "BETA", INFO = "INFO", FRQ = "FRQ", SE = "SE", N = "N"
+  )
 )
 
 munge_out[, c("chrom", "pos", "id", "ref", "alt", "swapped", "filter", "af", "es", "ns")]
