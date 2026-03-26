@@ -25,6 +25,54 @@ def escape_md(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
+def load_root_description(path: Path) -> dict[str, object]:
+    if not path.exists():
+        die(f"Extension metadata not found: {path}")
+
+    metadata: dict[str, object] = {}
+    current_list_key: str | None = None
+    current_list: list[str] | None = None
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if raw_line.startswith((" ", "\t")):
+            if current_list_key is None or current_list is None:
+                die(f"Unsupported indentation in {path}: {raw_line!r}")
+            item = stripped
+            if not item.startswith("- "):
+                die(f"Unsupported list item syntax in {path}: {raw_line!r}")
+            current_list.append(item[2:].strip())
+            continue
+
+        current_list_key = None
+        current_list = None
+        key, sep, value = raw_line.partition(":")
+        if not sep:
+            die(f"Invalid metadata line in {path}: {raw_line!r}")
+
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            die(f"Invalid metadata key in {path}: {raw_line!r}")
+
+        if value:
+            metadata[key] = value
+            continue
+
+        metadata[key] = []
+        current_list_key = key
+        current_list = metadata[key]
+
+    version = metadata.get("version")
+    if not isinstance(version, str) or not version:
+        die(f"{path} is missing a non-empty 'version' field")
+
+    return metadata
+
+
 def load_manifest(path: Path) -> OrderedDict[str, object]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=OrderedDict)
@@ -197,7 +245,10 @@ def resolve_repo_ref(repo_root: Path, repo: dict[str, object]) -> str:
 
 
 def render_description_yaml(
-    repo_root: Path, manifest: OrderedDict[str, object], functions: list[dict[str, object]]
+    repo_root: Path,
+    manifest: OrderedDict[str, object],
+    functions: list[dict[str, object]],
+    root_description: dict[str, object],
 ) -> str:
     community_extension = manifest["community_extension"]
     extension = community_extension["extension"]
@@ -208,7 +259,10 @@ def render_description_yaml(
 
     lines: list[str] = []
     lines.append("extension:")
-    for field in ("name", "description", "language", "build", "license"):
+    lines.append(f"  name: {quote_yaml_scalar(str(extension['name']))}")
+    lines.append(f"  description: {quote_yaml_scalar(str(extension['description']))}")
+    lines.append(f"  version: {quote_yaml_scalar(str(root_description['version']))}")
+    for field in ("language", "build", "license"):
         lines.append(f"  {field}: {quote_yaml_scalar(str(extension[field]))}")
     optional_fields = ("requires_toolchains", "excluded_platforms")
     for field in optional_fields:
@@ -241,8 +295,10 @@ def main(argv: list[str]) -> int:
     manifest_path = repo_root / "functions.yaml"
     if not manifest_path.exists():
         die(f"Manifest not found: {manifest_path}")
+    root_description_path = repo_root / "description.yml"
 
     manifest = load_manifest(manifest_path)
+    root_description = load_root_description(root_description_path)
     functions = manifest["functions"]
     catalog_dir = repo_root / "r" / "Rduckhts" / "inst" / "function_catalog"
     catalog_dir.mkdir(parents=True, exist_ok=True)
@@ -253,7 +309,7 @@ def main(argv: list[str]) -> int:
     (catalog_dir / "functions.md").write_text(render_markdown(functions) + "\n", encoding="utf-8")
     write_tsv(catalog_dir / "functions.tsv", functions)
     description_path.write_text(
-        render_description_yaml(repo_root, manifest, functions),
+        render_description_yaml(repo_root, manifest, functions, root_description),
         encoding="utf-8",
     )
     print(f"Rendered {len(functions)} function entries into {catalog_dir}")

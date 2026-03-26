@@ -1594,3 +1594,64 @@ rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) 
   query <- sprintf("SELECT * FROM read_hts_index_raw('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
 }
+
+#' Lift Over Variant Coordinates Against a Query
+#'
+#' Applies the DuckHTS `duckdb_liftover(...)` table macro to rows from a SQL query or
+#' table expression with chromosome and position columns, plus optional reference
+#' and alternate alleles.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param query SQL query or table expression to lift over
+#' @param chain_path Path to a UCSC chain file
+#' @param dst_fasta_ref Path to the destination FASTA reference
+#' @param chrom_col Source chromosome column name
+#' @param pos_col Source 1-based position column name
+#' @param ref_col Optional reference allele column name
+#' @param alt_col Optional alternate allele column name
+#' @param src_fasta_ref Optional source FASTA reference
+#' @param max_snp_gap Maximum chain block merge gap
+#' @param max_indel_inc Maximum indel anchor expansion
+#'
+#' @return A data frame with source columns, lifted coordinates/alleles, and warnings.
+#'
+#' @export
+rduckhts_liftover <- function(
+  con,
+  query,
+  chain_path,
+  dst_fasta_ref,
+  chrom_col = "chrom",
+  pos_col = "pos",
+  ref_col = NULL,
+  alt_col = NULL,
+  src_fasta_ref = NULL,
+  max_snp_gap = 1,
+  max_indel_inc = 250
+) {
+  table_expr <- query
+  if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
+    table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
+  }
+  table_sql <- gsub("'", "''", table_expr, fixed = TRUE)
+  params <- list(
+    sprintf("'%s'", table_sql),
+    sprintf("'%s'", chrom_col),
+    sprintf("'%s'", pos_col)
+  )
+  if (!is.null(ref_col)) params <- c(params, sprintf("ref_col := '%s'", ref_col))
+  if (!is.null(alt_col)) params <- c(params, sprintf("alt_col := '%s'", alt_col))
+  params <- c(
+    params,
+    sprintf("chain_path := '%s'", chain_path),
+    sprintf("dst_fasta_ref := '%s'", dst_fasta_ref)
+  )
+  if (!is.null(src_fasta_ref)) params <- c(params, sprintf("src_fasta_ref := '%s'", src_fasta_ref))
+  params <- c(
+    params,
+    sprintf("max_snp_gap := %d", max_snp_gap),
+    sprintf("max_indel_inc := %d", max_indel_inc)
+  )
+  sql <- sprintf("SELECT * FROM duckdb_liftover(%s)", paste(params, collapse = ", "))
+  DBI::dbGetQuery(con, sql)
+}

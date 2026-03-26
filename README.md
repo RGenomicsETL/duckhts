@@ -78,6 +78,13 @@ This section is generated from `functions.yaml`.
 | `bcf_index`   | table | table   | `rduckhts_bcf_index`   | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.       |
 | `tabix_index` | table | table   | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
 
+### Variants
+
+| Function            | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                    |
+|---------------------|-------------|---------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bcftools_liftover` | scalar      | STRUCT  |                     | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation. |
+| `duckdb_liftover`   | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.                                                                                                                                                       |
+
 ### Sequence UDFs
 
 | Function          | Kind   | Returns      | R helper | Description                                                                                           |
@@ -226,6 +233,76 @@ dbGetQuery(con, "
 #>          chrom start end seq_len pct_gc
 #> 1 CHROMOSOME_I     0  10      10    0.6
 #> 2 CHROMOSOME_I    10  20      10    0.5
+```
+
+### Liftover score-style rows
+
+``` r
+lift_src <- tempfile("duckhts_liftover_src_", fileext = ".fa")
+lift_dst <- tempfile("duckhts_liftover_dst_", fileext = ".fa")
+lift_chain <- tempfile("duckhts_liftover_", fileext = ".chain")
+
+writeLines(c(
+  ">chrF",
+  "ACGTACGTAA",
+  ">chrR",
+  "AACCGGTTAA"
+), lift_src)
+writeLines(c(
+  ">chrLiftF",
+  "ACGTACGTAA",
+  ">chrLiftR",
+  "TTAACCGGTT"
+), lift_dst)
+writeLines(c(
+  "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
+  "10",
+  "",
+  "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
+  "10"
+), lift_chain)
+
+dbGetQuery(con, sprintf(
+  "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
+  lift_src, lift_src
+))
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpWPgMQf/duckhts_liftover_src_1054db1fe1e730.fa.fai
+dbGetQuery(con, sprintf(
+  "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
+  lift_dst, lift_dst
+))
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpWPgMQf/duckhts_liftover_dst_1054db6cb183e6.fa.fai
+
+dbGetQuery(con, sprintf("
+  SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
+         mapped, reverse_complemented, reject_reason, note
+  FROM duckdb_liftover(
+    '(VALUES
+       (''chrF'', 2, ''C'', ''T''),
+       (''chrR'', 2, ''A'', ''G''),
+       (''chrF'', 11, ''A'', ''T'')
+     ) AS t(chrom, pos, ref, alt)',
+    'chrom',
+    'pos',
+    ref_col := 'ref',
+    alt_col := 'alt',
+    chain_path := '%s',
+    dst_fasta_ref := '%s',
+    src_fasta_ref := '%s'
+  )
+", lift_chain, lift_dst, lift_src))
+#>   src_chrom src_pos dest_chrom dest_pos dest_ref dest_alt mapped
+#> 1      chrF       2   chrLiftF        2        C        T   TRUE
+#> 2      chrF      11       <NA>       NA     <NA>     <NA>  FALSE
+#> 3      chrR       2   chrLiftR        9        T        C   TRUE
+#>   reverse_complemented   reject_reason note
+#> 1                FALSE            <NA> <NA>
+#> 2                FALSE UnmappedAnchors <NA>
+#> 3                 TRUE            <NA> <NA>
+
+unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```
 
 ### Sequence utilities

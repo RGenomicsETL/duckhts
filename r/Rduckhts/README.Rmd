@@ -124,6 +124,61 @@ rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20"
 unlink(fai_path)
 ```
 
+### Liftover score-style rows
+
+```{r}
+lift_src <- tempfile("duckhts_liftover_src_", fileext = ".fa")
+lift_dst <- tempfile("duckhts_liftover_dst_", fileext = ".fa")
+lift_chain <- tempfile("duckhts_liftover_", fileext = ".chain")
+
+writeLines(c(
+  ">chrF",
+  "ACGTACGTAA",
+  ">chrR",
+  "AACCGGTTAA"
+), lift_src)
+writeLines(c(
+  ">chrLiftF",
+  "ACGTACGTAA",
+  ">chrLiftR",
+  "TTAACCGGTT"
+), lift_dst)
+writeLines(c(
+  "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
+  "10",
+  "",
+  "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
+  "10"
+), lift_chain)
+
+rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
+rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
+
+lifted <- rduckhts_liftover(
+  con,
+  query = paste(
+    "SELECT * FROM (VALUES",
+    "('chrF', 2, 'C', 'T'),",
+    "('chrR', 2, 'A', 'G'),",
+    "('chrF', 11, 'A', 'T')",
+    ") AS t(chrom, pos, ref, alt)"
+  ),
+  chain_path = lift_chain,
+  dst_fasta_ref = lift_dst,
+  ref_col = "ref",
+  alt_col = "alt",
+  src_fasta_ref = lift_src
+)
+
+lifted[, c(
+  "src_chrom", "src_pos", "dest_chrom", "dest_pos",
+  "dest_ref", "dest_alt", "mapped", "reverse_complemented",
+  "reject_reason", "note"
+)]
+
+unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
+```
+
 ### Compression + tabix round-trips
 
 ```{r}

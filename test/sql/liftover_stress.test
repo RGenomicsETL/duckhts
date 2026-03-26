@@ -1,0 +1,53 @@
+# name: test/sql/liftover_stress.test
+# description: Stress test liftover on large generated inputs
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_src.fa.fai'
+);
+----
+1
+
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa.fai'
+);
+----
+1
+
+statement ok
+CREATE TEMP TABLE liftover_stress_input AS
+SELECT
+  CASE WHEN i % 2 = 0 THEN 'chrF' ELSE 'chrR' END AS chrom,
+  2::BIGINT AS pos,
+  CASE WHEN i % 2 = 0 THEN 'C' ELSE 'A' END AS ref,
+  CASE WHEN i % 2 = 0 THEN 'T' ELSE 'G' END AS alt
+FROM range(1000000) t(i)
+
+query III
+SELECT
+  count(*),
+  sum(CASE WHEN mapped THEN 1 ELSE 0 END),
+  sum(CASE WHEN reverse_complemented THEN 1 ELSE 0 END)
+FROM duckdb_liftover(
+  'liftover_stress_input',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+1000000	1000000	500000

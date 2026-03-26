@@ -61,3 +61,5 @@ rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
 bench:
 	Rscript -e "rmarkdown::render('Benchmark.Rmd', output_format = 'github_document')"
+bench-lift:
+	Rscript -e "rmarkdown::render('benchmark_liftover.Rmd', output_format = 'github_document')"

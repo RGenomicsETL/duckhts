@@ -1,6 +1,11 @@
 
 # Rduckhts 0.1.3-0.0.2.9001
 
+- harden bundled liftover diagnostics: `rduckhts_liftover()` now surfaces explicit SQL errors for invalid `chrom`/`pos` rows through `duckdb_liftover(...)`, direct `bcftools_liftover(...)` calls also error on invalid required inputs, and the package tests cover both wrapper-level and scalar invalid-row paths
+- align bundled liftover outputs with `bcftools +liftover` semantics by replacing the old `warning` field with `reject_reason` for rejected rows and `note` for emitted rows that carry extra annotations
+- add README liftover examples and broaden `rduckhts_liftover()` tinytest coverage for unmapped rows plus chain/FASTA and parameter validation failures
+- expose the bundled `liftover(...)` table macro for score-style variant rows via a new `rduckhts_liftover()` helper that runs the macro against an input SQL query/table expression and returns lifted coordinates, alleles, reject reasons, and note annotations
+- Keep the generated community extension metadata in sync with the bundled extension version by sourcing the emitted top-level `version` field from the repo-level `description.yml`.
 - Bundle the `duckhts` `0.1.3.9001` extension update.
 - Add `quality_representation` to `rduckhts_bam()` and `rduckhts_fastq()` so qualities can be returned as raw `UTINYINT[]` Phred values.
 - Add `input_quality_encoding` to `rduckhts_fastq()`, defaulting to modern `phred33` while allowing explicit legacy FASTQ decoding; expose `rduckhts_detect_quality_encoding()` for heuristic FASTQ encoding inspection.
