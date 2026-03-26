@@ -55,7 +55,8 @@ read_munge_column_map_file <- function(path) {
     stop("column_map_file must be a two-column TSV with source and canonical names", call. = FALSE)
   }
   out <- setNames(tbl[[1]], toupper(tbl[[2]]))
-  out[nzchar(names(out))]
+  out <- out[nzchar(names(out))]
+  out[!duplicated(names(out))]
 }
 
 #' Setup HTSlib Environment
@@ -1742,7 +1743,7 @@ rduckhts_munge <- function(
     }
     column_map_file <- NULL
   }
-  params <- list(sql_quote_string(gsub("'", "''", table_expr, fixed = TRUE)))
+  params <- list(sql_quote_string(table_expr))
   if (!is.null(preset)) params <- c(params, sprintf("preset := '%s'", preset))
   if (!is.null(column_map)) params <- c(params, sprintf("column_map := %s", sql_map_literal(column_map)))
   if (!is.null(column_map_file)) params <- c(params, sprintf("column_map_file := '%s'", column_map_file))

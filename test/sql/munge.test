@@ -119,3 +119,18 @@ FROM (
 ) s;
 ----
 2.0	0.0
+
+query IT
+SELECT CASE WHEN m.swapped THEN 1 ELSE 0 END,
+       m.ed
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'C', 'A', 'rs7',
+    NULL, 2.0, NULL, 0.25,
+    1000, NULL, NULL, NULL, 0.1, NULL, NULL, 200.0, NULL, NULL, NULL, NULL, NULL,
+    '+-?0',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+1	-+?0

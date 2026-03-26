@@ -198,6 +198,12 @@ static faidx_t *get_munge_fai(const char *fasta_path, char **err) {
         return NULL;
     }
     entry->fasta_path = dup_cstr(fasta_path);
+    if (!entry->fasta_path) {
+        fai_destroy(loaded);
+        free(entry);
+        *err = dup_cstr("bcftools_munge_row: out of memory");
+        return NULL;
+    }
     entry->fai = loaded;
 
     pthread_mutex_lock(&g_munge_cache_mutex);
@@ -220,6 +226,15 @@ static double safe_log(double x) {
 static void assign_double_or_null(duckdb_vector vector, idx_t row, double value) {
     if (isnan(value)) set_null_at(vector, row);
     else ((double *)duckdb_vector_get_data(vector))[row] = value;
+}
+
+static void flip_direction_string(char *s) {
+    if (!s) return;
+    while (*s) {
+        if (*s == '+') *s = '-';
+        else if (*s == '-') *s = '+';
+        s++;
+    }
 }
 
 static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
@@ -273,6 +288,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         char *norm_ref = NULL;
         char *ref_fetch = NULL;
         char *chrom_cstr = NULL;
+        char *dire_copy = NULL;
         faidx_t *fai = NULL;
         double ns = NAN, ez = NAN, si = NAN, nc = NAN, es = NAN, se = NAN, lp = NAN, af = NAN, ac = NAN, ne = NAN, i2 = NAN, cq = NAN;
         bool swapped = false;
@@ -379,10 +395,24 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         );
         free(chrom_cstr);
         if (!ref_fetch) {
-            set_munge_error(info, "bcftools_munge_row: failed to fetch reference sequence");
+            char msg[1024];
+            snprintf(msg, sizeof(msg), "bcftools_munge_row: failed to fetch reference sequence at %.*s:%d",
+                     (int)chrom_len, chrom, (int)pos);
+            set_munge_error(info, msg);
             free(norm_alt);
             free(norm_ref);
             return;
+        }
+
+        if (dire && dire_len > 0) {
+            dire_copy = dup_span(dire, dire_len);
+            if (!dire_copy) {
+                set_munge_error(info, "bcftools_munge_row: out of memory");
+                free(norm_alt);
+                free(norm_ref);
+                free(ref_fetch);
+                return;
+            }
         }
 
         {
@@ -398,6 +428,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
                 if (!isnan(es)) es = -es;
                 if (!isnan(af)) af = 1.0 - af;
                 if (!isnan(ac) && !isnan(ns)) ac = 2.0 * ns - ac;
+                if (dire_copy) flip_direction_string(dire_copy);
             } else if (ref_match && alt_match) {
                 duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_FILTER], row, iffy_tag, tag_len);
             } else if (!ref_match && !alt_match) {
@@ -426,12 +457,13 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         assign_double_or_null(child_vecs[MUNGE_OUT_NE], row, ne);
         assign_double_or_null(child_vecs[MUNGE_OUT_I2], row, i2);
         assign_double_or_null(child_vecs[MUNGE_OUT_CQ], row, cq);
-        if (dire && dire_len > 0) duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ED], row, dire, dire_len);
+        if (dire_copy) duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_ED], row, dire_copy);
         else set_null_at(child_vecs[MUNGE_OUT_ED], row);
 
         free(norm_alt);
         free(norm_ref);
         free(ref_fetch);
+        free(dire_copy);
     }
 }
 
