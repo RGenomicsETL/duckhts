@@ -351,6 +351,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         if (row_is_valid(ns_override_vec, row)) ns = get_double_at(ns_override_vec, row);
         else if (!isnan(nc) && row_is_valid(n_con_vec, row)) ns = nc + get_double_at(n_con_vec, row);
         if (row_is_valid(ne_override_vec, row)) ne = get_double_at(ne_override_vec, row);
+        if (isnan(ac) && !isnan(af) && !isnan(ns)) ac = 2.0 * ns * af;
 
         fasta_path = dup_span(fasta_ref, fasta_len);
         fai = get_munge_fai(fasta_path, &err);

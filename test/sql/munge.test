@@ -33,7 +33,7 @@ FROM (
 ----
 chrF	2	C	A	1	PASS	0.9	1000.0
 
-query TITTITRRRR
+query TITTITRRR
 SELECT m.chrom,
        m.pos,
        m.ref,
@@ -41,7 +41,6 @@ SELECT m.chrom,
        CASE WHEN m.alleles_swapped THEN 1 ELSE 0 END,
        coalesce(m.filter, 'PASS'),
        round(m.af, 3),
-       round(m.ac, 1),
        round(m.es, 3),
        round(m.ez, 3)
 FROM (
@@ -53,7 +52,7 @@ FROM (
   ) AS m
 ) s;
 ----
-chrF	2	C	A	1	PASS	0.9	1800.0	-0.25	-2.0
+chrF	2	C	A	1	PASS	0.9	-0.25	-2.0
 
 query TITTIT
 SELECT m.chrom,

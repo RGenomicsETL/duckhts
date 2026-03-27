@@ -264,6 +264,9 @@ static char *fetch_sequence_flexible(faidx_t *fai, const char *chrom, hts_pos_t 
     aliases[idx] = NULL;
 
     for (int i = 0; aliases[i]; i++) {
+        if (faidx_has_seq(fai, aliases[i]) <= 0) {
+            continue;
+        }
         ref = faidx_fetch_seq64(fai, aliases[i], start - 1, end - 1, &len);
         if (ref && len == end - start + 1) {
             seq_to_upper_ascii(ref);
