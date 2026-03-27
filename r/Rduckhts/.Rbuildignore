@@ -20,7 +20,8 @@
 ^duckdb_capi/
 ^DESCRIPTION\.yml$
 ^test_installation\.R$
-
+^3202_samples_cohort_gg_chr22\.vcf\.gz\.tbi$
+^Brain_Cerebellar_Hemisphere\.tsv\.gz\.tbi$
 # Build artifacts to ignore
 ^inst/duckhts_extension/.*\.o$
 ^inst/duckhts_extension/.*\.so$

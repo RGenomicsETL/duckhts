@@ -54,7 +54,7 @@ read_munge_column_map_file <- function(path) {
   if (ncol(tbl) < 2) {
     stop("column_map_file must be a two-column TSV with source and canonical names", call. = FALSE)
   }
-  out <- setNames(tbl[[1]], toupper(tbl[[2]]))
+  out <- structure(tbl[[1]], names = toupper(tbl[[2]]))
   out[nzchar(names(out))]
 }
 
@@ -91,7 +91,7 @@ read_munge_preset_map <- function(con, preset) {
   if (!is.data.frame(m) || !all(c("key", "value") %in% names(m))) {
     stop("duckdb_munge: failed to read preset map", call. = FALSE)
   }
-  setNames(as.character(m$value), toupper(as.character(m$key)))
+  structure(as.character(m$value), names = toupper(as.character(m$key)))
 }
 
 #' Setup HTSlib Environment
