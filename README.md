@@ -269,13 +269,13 @@ dbGetQuery(con, sprintf(
   lift_src, lift_src
 ))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmpv8DopO/duckhts_liftover_src_15be0252cbbd0f.fa.fai
+#> 1    TRUE /tmp/Rtmp55U9zG/duckhts_liftover_src_15ed251bb84512.fa.fai
 dbGetQuery(con, sprintf(
   "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
   lift_dst, lift_dst
 ))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmpv8DopO/duckhts_liftover_dst_15be024c2c7ff3.fa.fai
+#> 1    TRUE /tmp/Rtmp55U9zG/duckhts_liftover_dst_15ed2512753b0c.fa.fai
 
 dbGetQuery(con, sprintf("
   SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
