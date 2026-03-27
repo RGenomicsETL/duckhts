@@ -123,6 +123,11 @@ expect_identical(
   c("con", "query", "chain_path", "dst_fasta_ref", "chrom_col", "pos_col",
     "ref_col", "alt_col", "src_fasta_ref", "max_snp_gap", "max_indel_inc")
 )
+expect_identical(
+  names(formals(rduckhts_munge)),
+  c("con", "query", "fasta_ref", "preset", "column_map", "column_map_file",
+    "iffy_tag", "mismatch_tag", "ns", "nc", "ne")
+)
 
 # Test that DBI is available
 expect_true(requireNamespace("DBI", quietly = TRUE))

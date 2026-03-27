@@ -2,6 +2,9 @@
 
 ## duckhts 0.1.3.9001 (2026-03-13)
 
+- slim munge output schema at the extension level by removing legacy `si`, `i2`, `cq`, and `ed` fields, and clarify orientation semantics by renaming `swapped` to `alleles_swapped` in `bcftools_munge_row(...)` / `duckdb_munge(...)`
+- add `bcftools_munge_row(...)` and `duckdb_munge(...)` entries to `functions.yaml` so munge APIs are documented in the generated function catalog and community extension descriptor
+- add `benchmark_munge.Rmd` and `make bench-munge` to benchmark DuckHTS munge against `bcftools +munge` with normalized output-group parity checks
 - harden liftover error handling and diagnostics: `duckdb_liftover(...)` and `bcftools_liftover(...)` now raise explicit SQL errors for invalid required inputs, liftover load failures surface the underlying chain/FASTA cause, macro registration no longer fails silently, and new SQL error-stress tests cover 1,000,000-row invalid-input paths
 - align liftover result semantics more closely with `bcftools +liftover` by splitting the old `warning` field into `reject_reason` for rejected rows and `note` for emitted rows with extra annotations, using upstream-style reject names such as `MissingContig`, `UnmappedAnchors`, `MismatchAnchors`, and `MissingFasta`
 - add README liftover examples and expand impossible-liftover coverage so unmapped rows and invalid-input error paths are exercised in both SQL and package-level tests

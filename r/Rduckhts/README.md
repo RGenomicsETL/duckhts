@@ -139,10 +139,12 @@ This section is generated from `functions.yaml`.
 
 ### Variants
 
-| Function            | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                    |
-|---------------------|-------------|---------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bcftools_liftover` | scalar      | STRUCT  |                     | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation. |
-| `duckdb_liftover`   | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.                                                                                                                                                       |
+| Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                    |
+|----------------------|-------------|---------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bcftools_liftover`  | scalar      | STRUCT  |                     | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation. |
+| `duckdb_liftover`    | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.                                                                                                                                                       |
+| `bcftools_munge_row` | scalar      | STRUCT  |                     | Normalize one score-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.                       |
+| `duckdb_munge`       | table_macro | table   | `rduckhts_munge`    | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics.                                                                                                                                      |
 
 ### Sequence UDFs
 
@@ -228,8 +230,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                        index_path
-#> 1    TRUE /tmp/Rtmp9cnyFz/duckhts_readme_104f9b5969652c.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_readme_15f5fbccbf845.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -289,10 +291,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmp9cnyFz/duckhts_liftover_src_104f9b420f0a03.fa.fai
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_liftover_src_15f5fb52ad0e6e.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmp9cnyFz/duckhts_liftover_dst_104f9b111b520d.fa.fai
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_liftover_dst_15f5fb3437f7cb.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -327,6 +329,41 @@ lifted[, c(
 unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```
 
+### Munge score-style rows
+
+``` r
+munge_fasta <- tempfile("duckhts_munge_", fileext = ".fa")
+writeLines(c(
+  ">chrF",
+  "ACGTACGTAA"
+), munge_fasta)
+rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
+#>   success                                         index_path
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_munge_15f5fb8b213ee.fa.fai
+
+munge_out <- rduckhts_munge(
+  con,
+  query = paste(
+    "SELECT * FROM (VALUES",
+    "('rs1', 2, 'chrF', 'A', 'C', 0.01, 1.10, 0.20, 0.98, 0.10, 0.01, 1000),",
+    "('rs2', 2, 'chrF', 'C', 'A', 0.02, 0.90, -0.20, 0.98, 0.90, 0.01, 1000)",
+    ") AS t(SNP, BP, CHR, A1, A2, P, OR_VALUE, BETA, INFO, FRQ, SE, N)"
+  ),
+  fasta_ref = munge_fasta,
+  column_map = c(
+    SNP = "SNP", BP = "BP", CHR = "CHR", A1 = "A1", A2 = "A2",
+    P = "P", OR = "OR_VALUE", BETA = "BETA", INFO = "INFO", FRQ = "FRQ", SE = "SE", N = "N"
+  )
+)
+
+munge_out[, c("chrom", "pos", "id", "ref", "alt", "alleles_swapped", "filter", "af", "es", "ns")]
+#>   chrom pos  id ref alt alleles_swapped filter  af  es   ns
+#> 1  chrF   2 rs1   C   A           FALSE   <NA> 0.1 0.2 1000
+#> 2  chrF   2 rs2   C   A            TRUE   <NA> 0.1 0.2 1000
+
+unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
+```
+
 ### Compression + tabix round-trips
 
 ``` r
@@ -337,12 +374,12 @@ writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
 #>   success                                           output_path bytes_in
-#> 1    TRUE /tmp/Rtmp9cnyFz/duckhts_targets_104f9b6c404f6c.bed.gz       25
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_targets_15f5fb1e1558de.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
 #>   success                                                index_path
-#> 1    TRUE /tmp/Rtmp9cnyFz/duckhts_targets_104f9b6c404f6c.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_targets_15f5fb1e1558de.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
@@ -409,7 +446,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/Rtmp9cnyFz/duckhts_readme_104f9b1462615f.fai
+#> 1    TRUE /tmp/RtmpAylB6X/duckhts_readme_15f5fb6b4ec7d2.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

@@ -313,6 +313,31 @@
       ]
     },
     {
+      "name": "bcftools_munge_row",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "bcftools_munge_row(chrom, pos, a1, a2, id, p, z, or, beta, n, n_cas, n_con, info, frq, se, lp, ac, neff, neffdiv2, het_i2, het_p, het_lp, dire, fasta_ref, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Normalize one score-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.",
+      "examples": [
+        "SELECT (bcftools_munge_row('chr1', 12345, 'A', 'G', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL, 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'ref.fa')).ref;"
+      ]
+    },
+    {
+      "name": "duckdb_munge",
+      "kind": "table_macro",
+      "category": "Variants",
+      "signature": "duckdb_munge(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_munge",
+      "description": "DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics.",
+      "examples": [
+        "SELECT * FROM duckdb_munge('gwas_table', preset := 'PLINK', fasta_ref := 'ref.fa');",
+        "SELECT * FROM duckdb_munge('(SELECT * FROM gwas_table) AS s', column_map := map(['CHR','BP','A1','A2','SNP'], ['chrom','pos','ea','nea','id']), fasta_ref := 'ref.fa');"
+      ]
+    },
+    {
       "name": "seq_revcomp",
       "kind": "scalar",
       "category": "Sequence UDFs",
