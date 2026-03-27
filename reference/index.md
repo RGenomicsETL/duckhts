@@ -60,6 +60,8 @@
   : Lift Over Variant Coordinates Against a Query
 - [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
   : Load DuckHTS Extension
+- [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_munge.md)
+  : Munge Summary Statistics Rows
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)
   : Create Tabix-Indexed File Table
 - [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.md)

@@ -1,0 +1,69 @@
+# Munge Summary Statistics Rows
+
+Applies the DuckHTS \`duckdb_munge(...)\` table macro to rows from a SQL
+query or table expression, using either an upstream-style preset, a
+named column map, or a two-column mapping file. When no mapping mode is
+provided, the bundled \`colheaders.tsv\` alias file is used by default.
+
+## Usage
+
+``` r
+rduckhts_munge(
+  con,
+  query,
+  fasta_ref,
+  preset = NULL,
+  column_map = NULL,
+  column_map_file = NULL,
+  iffy_tag = "IFFY",
+  mismatch_tag = "REF_MISMATCH",
+  ns = NULL,
+  nc = NULL,
+  ne = NULL
+)
+```
+
+## Arguments
+
+- con:
+
+  A DuckDB connection with DuckHTS loaded
+
+- query:
+
+  SQL query or table expression to normalize
+
+- fasta_ref:
+
+  Path to the reference FASTA
+
+- preset:
+
+  Optional preset such as \`"PLINK"\`, \`"PLINK2"\`, \`"REGENIE"\`,
+  \`"SAIGE"\`, \`"BOLT"\`, \`"METAL"\`, \`"PGS"\`, or \`"SSF"\`
+
+- column_map:
+
+  Optional named character vector mapping canonical munge names such as
+  \`"CHR"\`, \`"BP"\`, \`"A1"\`, \`"A2"\` to source column names
+
+- column_map_file:
+
+  Optional path to a two-column TSV mapping file in the upstream
+  \`source\<TAB\>canonical\` format
+
+- iffy_tag:
+
+  FILTER tag for ambiguous reference resolution
+
+- mismatch_tag:
+
+  FILTER tag for reference mismatches
+
+- ns, nc, ne:
+
+  Optional global overrides for sample counts
+
+## Value
+
+A data frame with normalized GWAS-VCF-style variant/effect columns.

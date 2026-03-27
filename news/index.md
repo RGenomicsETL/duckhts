@@ -2,6 +2,13 @@
 
 ## Rduckhts 0.1.3-0.0.2.9001
 
+- align bundled munge outputs with the extension-level schema cleanup by
+  dropping legacy `si`/`i2`/`cq`/`ed` fields and renaming `swapped` to
+  `alleles_swapped` with explicit allele-orientation semantics
+- include munge APIs (`duckdb_munge` and `bcftools_munge_row`) in the
+  generated bundled function catalog metadata and add a dedicated
+  `benchmark_munge.Rmd` workflow (`make bench-munge`) for DuckHTS vs
+  `bcftools +munge` benchmarking
 - harden bundled liftover diagnostics:
   [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
   now surfaces explicit SQL errors for invalid `chrom`/`pos` rows
