@@ -293,7 +293,7 @@
       "category": "Variants",
       "signature": "bcftools_liftover(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)",
       "returns": "STRUCT",
-      "r_wrapper": "",
+      "r_wrapper": "rduckhts_score",
       "description": "Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation.",
       "examples": [
         "SELECT (bcftools_liftover(chrom, pos, ref, alt, 'hg19ToHg38.over.chain.gz', 'hg38.fa', 'hg19.fa', 1, 250)).dest_pos FROM variants;"
@@ -310,6 +310,18 @@
       "examples": [
         "SELECT * FROM duckdb_liftover('variants', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', chain_path := 'hg19ToHg38.over.chain.gz', dst_fasta_ref := 'hg38.fa');",
         "SELECT * FROM duckdb_liftover('(SELECT chrom, pos, ref, alt FROM variants) AS v', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', chain_path := 'hg19ToHg38.over.chain.gz', dst_fasta_ref := 'hg38.fa');"
+      ]
+    },
+    {
+      "name": "bcftools_score",
+      "kind": "table",
+      "category": "Variants",
+      "signature": "bcftools_score(bcf_path, summary_path, use := NULL, columns := 'PLINK', columns_file := NULL, q_score_thr := NULL, use_variant_id := FALSE, counts := FALSE)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics.",
+      "examples": [
+        "SELECT * FROM bcftools_score('cohort.bcf', 'gwas.tsv.gz', columns := 'PLINK') LIMIT 5;"
       ]
     },
     {

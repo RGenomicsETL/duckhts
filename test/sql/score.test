@@ -1,0 +1,36 @@
+# name: test/sql/score.test
+# description: Test bcftools_score table function basics
+# group: [duckhts]
+
+require duckhts
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+query TTTT
+SELECT SAMPLE,
+       round("score_summary_p0.01", 3),
+       round("score_summary_p0.01_CNT", 0),
+       round("score_summary_p0.2_CNT", 0)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  q_score_thr := '0.01,0.2',
+  counts := true
+)
+ORDER BY SAMPLE
+----
+S1	0.0	1	2
+S2	0.5	1	2

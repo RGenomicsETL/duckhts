@@ -1809,3 +1809,62 @@ rduckhts_munge <- function(
   sql <- sprintf("SELECT * FROM duckdb_munge(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }
+
+#' Compute Polygenic Scores
+#'
+#' Calls the DuckHTS `bcftools_score(...)` table function to compute sample-level
+#' polygenic scores from one genotype VCF/BCF file and one summary-statistics file.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param bcf_path Path to genotype VCF/BCF file
+#' @param summary_path Path to summary-statistics file
+#' @param use Optional dosage source (`"GT"`, `"DS"`, `"HDS"`, `"AP"`, `"GP"`, `"AS"`)
+#' @param columns Optional summary preset (`"PLINK"`, `"PLINK2"`, `"REGENIE"`, `"SAIGE"`,
+#'   `"BOLT"`, `"METAL"`, `"PGS"`, `"SSF"`, `"GWAS-SSF"`)
+#' @param columns_file Optional two-column summary header mapping file
+#' @param q_score_thr Optional comma-separated p-value thresholds (e.g. `"1e-8,1e-6,1e-4"`)
+#' @param use_variant_id Logical; if TRUE, match variants by ID instead of CHR+BP
+#' @param counts Logical; if TRUE, include per-threshold matched-variant counts
+#'
+#' @return A data frame with one row per sample and score/count columns.
+#'
+#' @export
+rduckhts_score <- function(
+  con,
+  bcf_path,
+  summary_path,
+  use = NULL,
+  columns = "PLINK",
+  columns_file = NULL,
+  q_score_thr = NULL,
+  use_variant_id = FALSE,
+  counts = FALSE
+) {
+  if (!is.null(use)) {
+    use <- toupper(use)
+    if (!(use %in% c("GT", "DS", "HDS", "AP", "GP", "AS"))) {
+      stop("use must be one of GT, DS, HDS, AP, GP, AS", call. = FALSE)
+    }
+  }
+  if (!is.null(columns)) {
+    columns <- toupper(columns)
+    if (!(columns %in% c("PLINK", "PLINK2", "REGENIE", "SAIGE", "BOLT", "METAL", "PGS", "SSF", "GWAS-SSF"))) {
+      stop("columns must be one of PLINK, PLINK2, REGENIE, SAIGE, BOLT, METAL, PGS, SSF, GWAS-SSF", call. = FALSE)
+    }
+  }
+  params <- list(
+    sql_quote_string(bcf_path),
+    sql_quote_string(summary_path)
+  )
+  if (!is.null(use)) params <- c(params, sprintf("use := '%s'", use))
+  if (!is.null(columns)) params <- c(params, sprintf("columns := '%s'", columns))
+  if (!is.null(columns_file)) params <- c(params, sprintf("columns_file := '%s'", columns_file))
+  if (!is.null(q_score_thr)) params <- c(params, sprintf("q_score_thr := '%s'", q_score_thr))
+  params <- c(
+    params,
+    sprintf("use_variant_id := %s", if (isTRUE(use_variant_id)) "true" else "false"),
+    sprintf("counts := %s", if (isTRUE(counts)) "true" else "false")
+  )
+  sql <- sprintf("SELECT * FROM bcftools_score(%s)", paste(params, collapse = ", "))
+  DBI::dbGetQuery(con, sql)
+}

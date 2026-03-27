@@ -85,6 +85,7 @@ set(EXTENSION_SOURCES
         src/hts_meta_reader.c
         src/quality_encoding.c
         src/quality_encoding_reader.c
+        src/score_udf.c
 )
 
 if (DUCKDB_WASM_EXTENSION)

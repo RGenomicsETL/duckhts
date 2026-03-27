@@ -1,0 +1,149 @@
+# name: test/sql/liftover_errors.test
+# description: Test liftover error propagation and validation
+# group: [duckhts]
+
+require duckhts
+
+statement error
+SELECT bcftools_liftover(
+  'chrF', 2, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/does_not_exist.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, 250
+);
+----
+Invalid Input Error: bcftools_liftover: failed to load chain or FASTA context
+
+statement error
+SELECT (bcftools_liftover(
+  NULL, 2, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, 250
+)).src_pos;
+----
+Invalid Input Error: bcftools_liftover: chrom must be non-null
+
+statement error
+SELECT (bcftools_liftover(
+  '', 2, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, 250
+)).src_pos;
+----
+Invalid Input Error: bcftools_liftover: chrom must be non-empty
+
+statement error
+SELECT (bcftools_liftover(
+  'chrF', NULL, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, 250
+)).src_pos;
+----
+Invalid Input Error: bcftools_liftover: pos must be non-null
+
+statement error
+SELECT (bcftools_liftover(
+  'chrF', 0, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, 250
+)).src_pos;
+----
+Invalid Input Error: bcftools_liftover: pos must be >= 1
+
+statement error
+SELECT * FROM duckdb_liftover(
+  '(VALUES ('''' , 2, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+Invalid Input Error: bcftools_liftover: chrom must be non-empty
+
+statement error
+SELECT * FROM duckdb_liftover(
+  '(VALUES (NULL, 2, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+Invalid Input Error: bcftools_liftover: chrom must be non-null
+
+statement error
+SELECT * FROM duckdb_liftover(
+  '(VALUES (''chrF'', NULL, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+Invalid Input Error: bcftools_liftover: pos must be non-null
+
+statement error
+SELECT * FROM duckdb_liftover(
+  '(VALUES (''chrF'', 0, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+Invalid Input Error: bcftools_liftover: pos must be >= 1
+
+statement error
+SELECT bcftools_liftover(
+  'chrF', 2, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/does_not_exist.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, 250
+);
+----
+Invalid Input Error: bcftools_liftover: failed to load chain or FASTA context: bcftools_liftover: failed to load destination FASTA index: /root/duckhts/test/data/does_not_exist.fa
+
+statement error
+SELECT (bcftools_liftover(
+  'chrF', 2, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  -1, 250
+)).src_pos;
+----
+Invalid Input Error: bcftools_liftover: max_snp_gap must be >= 0
+
+statement error
+SELECT (bcftools_liftover(
+  'chrF', 2, 'C', 'T',
+  '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  1, -1
+)).src_pos;
+----
+Invalid Input Error: bcftools_liftover: max_indel_inc must be >= 0

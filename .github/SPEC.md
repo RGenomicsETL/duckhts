@@ -69,6 +69,35 @@ The longer-term direction is **DuckHtsLake**, enabling round-trip conversions an
 - FASTA: `ID`, `DESCRIPTION`, `SEQUENCE`
 - FASTQ: `ID`, `DESCRIPTION`, `SEQUENCE`, `QUALITY`
 
+## `bcftools_score` Exact-Port Contract
+
+DuckHTS will add a scoring surface that is intentionally aligned to upstream `bcftools +score` behavior under `.sync/score/score.c`.
+
+### Parity Scope
+- Preserve upstream option semantics and defaults, including `--use` tag handling (`GT`, `DS`, `HDS`, `AP`, `GP`, `AS`) and autodetection order.
+- Preserve summary statistics ingest semantics for both:
+  - VCF summary files with `FORMAT/ES` (and `FORMAT/LP` when thresholds are requested), and
+  - TSV summaries with preset or custom header mappings.
+- Preserve variant matching behavior (`variant_id` matching vs `chrom+pos` matching).
+- Preserve missing-value handling and per-sample accumulation behavior (`score += ES * dosage(effect_allele)` for non-missing samples only).
+- Preserve q-threshold behavior by comparing against `LP` (`-log10(p)` space) exactly as upstream.
+- Preserve optional count outputs equivalent to `--counts`.
+
+### DuckDB Surface
+- Implement `bcftools_score(...)` as a DuckDB table function (matrix output in table form).
+- Keep arguments 1:1 with upstream plugin semantics where possible (SQL-safe names for options).
+- Keep table output deterministic and directly exportable via DuckDB `COPY`.
+
+### Output Contract
+- One row per target sample.
+- One score column per PRS source (and per q-threshold when requested).
+- Optional `*_CNT` columns when count mode is enabled.
+
+### Conformance Requirements
+- Golden parity tests must compare DuckHTS output to native `bcftools +score` on the same fixtures.
+- Include fixtures for edge cases: multiallelic variants, missing dosage values, missing/ambiguous effect alleles, duplicate IDs, and q-thresholded runs.
+- Numeric checks should use strict tolerances appropriate for float accumulation while ensuring rank/order and aggregate parity.
+
 ## Vendoring Layout (Proposed)
 ```
 third_party/

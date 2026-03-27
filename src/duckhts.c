@@ -44,6 +44,8 @@ extern void register_read_hts_header_function(duckdb_connection connection);
 extern void register_read_hts_index_function(duckdb_connection connection);
 /* quality_encoding_reader.c */
 extern void register_detect_quality_encoding_function(duckdb_connection connection);
+/* score_udf.c */
+extern void register_bcftools_score_function(duckdb_connection connection);
 
 static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
     duckdb_result result;
@@ -87,6 +89,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_hts_header_function(connection);
     register_read_hts_index_function(connection);
     register_detect_quality_encoding_function(connection);
+    register_bcftools_score_function(connection);
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
@@ -102,7 +105,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WHEN upper(preset) = 'BOLT' THEN map(['SNP','BP','CHR','A1','A2','P','BETA','FRQ','SE'], ['SNP','BP','CHR','ALLELE1','ALLELE0','P_BOLT_LMM','BETA','A1FREQ','SE']) "
         "WHEN upper(preset) = 'METAL' THEN map(['SNP','BP','CHR','A1','A2','P','Z','BETA','N','FRQ','SE','LP','NEFF','HET_I2','HET_P','HET_LP','DIRE'], ['MarkerName','Position','Chromosome','Allele1','Allele2','P-value','Zscore','Effect','N','Freq1','StdErr','log(P)','Weight','HetISq','HetPVal','logHetP','Direction']) "
         "WHEN upper(preset) = 'PGS' THEN map(['CHR','BP','SNP','A1','A2','OR','BETA','FRQ'], ['chr_name','chr_position','rsID','effect_allele','other_allele','OR','effect_weight','allelefrequency_effect']) "
-        "WHEN upper(preset) = 'SSF' THEN map(['CHR','BP','SNP','A1','A2','P','OR','BETA','N','INFO','FRQ','SE'], ['chromosome','base_pair_location','variant_id','effect_allele','other_allele','p_value','odds_ratio','beta','n','info','effect_allele_frequency','standard_error']) "
+        "WHEN upper(preset) = 'SSF' OR upper(preset) = 'GWAS-SSF' THEN map(['CHR','BP','SNP','A1','A2','P','OR','BETA','N','INFO','FRQ','SE'], ['chromosome','base_pair_location','variant_id','effect_allele','other_allele','p_value','odds_ratio','beta','n','info','effect_allele_frequency','standard_error']) "
         "ELSE error('duckdb_munge: unknown preset') END")) {
         return false;
     }

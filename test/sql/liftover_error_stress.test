@@ -1,0 +1,35 @@
+# name: test/sql/liftover_error_stress.test
+# description: Stress invalid liftover inputs at large row counts
+# group: [duckhts]
+
+require duckhts
+
+statement error
+SELECT sum(dest_pos)
+FROM duckdb_liftover(
+  '(SELECT ''chrF'' AS chrom, 0 AS pos, ''C'' AS ref, ''T'' AS alt FROM range(1000000)) AS t',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+Invalid Input Error: bcftools_liftover: pos must be >= 1
+
+statement error
+SELECT sum(dest_pos)
+FROM duckdb_liftover(
+  '(SELECT NULL::VARCHAR AS chrom, 2 AS pos, ''C'' AS ref, ''T'' AS alt FROM range(1000000)) AS t',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa'
+);
+----
+Invalid Input Error: bcftools_liftover: chrom must be non-null
