@@ -318,7 +318,7 @@
       "category": "Variants",
       "signature": "bcftools_score(bcf_path, summary_path, use := NULL, columns := 'PLINK', columns_file := NULL, q_score_thr := NULL, use_variant_id := FALSE, counts := FALSE)",
       "returns": "table",
-      "r_wrapper": "",
+      "r_wrapper": "rduckhts_score",
       "description": "Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics.",
       "examples": [
         "SELECT * FROM bcftools_score('cohort.bcf', 'gwas.tsv.gz', columns := 'PLINK') LIMIT 5;"

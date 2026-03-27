@@ -1,6 +1,9 @@
 
-# Rduckhts 0.1.3-0.0.2.9001
+# Rduckhts 0.1.3-0.0.2.9002
 
+- harden `rduckhts_score()` upstream parity: port flexible chromosome name resolution (chr prefix strip/prepend, 23→X, 24→Y, 26/MT→chrM aliases), numerically stable `-log10(p)` parsing for very small p-values, and NA/`.` missing value handling in summary stats fields (BETA, OR, P, LP)
+- add comprehensive `rduckhts_score()` test coverage: DS/HDS/AP/GP dosage modes with real FORMAT values, OR-to-beta conversion, PLINK2 preset with LOG10_P, custom columns_file mapping, allele mismatch (zero-match), missing genotype (`./. `) handling, NA in summary stats, chr-prefix flexible matching, auto-detection priority, and small p-value threshold precision
+- strengthen `rduckhts_score()` parity coverage for variant matching by adding rsID-based fixture/tests (`use_variant_id = TRUE`), explicit CHR/BP mismatch behavior checks, and an error assertion when marker IDs are required but missing
 - align bundled munge outputs with the extension-level schema cleanup by dropping legacy `si`/`i2`/`cq`/`ed` fields and renaming `swapped` to `alleles_swapped` with explicit allele-orientation semantics
 - include munge APIs (`duckdb_munge` and `bcftools_munge_row`) in the generated bundled function catalog metadata and add a dedicated `benchmark_munge.Rmd` workflow (`make bench-munge`) for DuckHTS vs `bcftools +munge` benchmarking
 - harden bundled liftover diagnostics: `rduckhts_liftover()` now surfaces explicit SQL errors for invalid `chrom`/`pos` rows through `duckdb_liftover(...)`, direct `bcftools_liftover(...)` calls also error on invalid required inputs, and the package tests cover both wrapper-level and scalar invalid-row paths

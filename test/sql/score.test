@@ -1,9 +1,10 @@
 # name: test/sql/score.test
-# description: Test bcftools_score table function basics
+# description: Test bcftools_score table function - comprehensive parity tests
 # group: [duckhts]
 
 require duckhts
 
+# --- Basic GT scoring (chr:pos matching, PLINK preset) ---
 query TT
 SELECT SAMPLE, round(score_summary, 3)
 FROM bcftools_score(
@@ -17,6 +18,7 @@ ORDER BY SAMPLE
 S1	1.8
 S2	0.1
 
+# --- q_score_thr with counts ---
 query TTTT
 SELECT SAMPLE,
        round("score_summary_p0.01", 3),
@@ -34,3 +36,251 @@ ORDER BY SAMPLE
 ----
 S1	0.0	1	2
 S2	0.5	1	2
+
+# --- rsID matching (use_variant_id) ---
+query TT
+SELECT SAMPLE, round(score_summary_rsid, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_rsid.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  use_variant_id := true
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- rsID summary without use_variant_id (falls back to chr:pos, no match) ---
+query TT
+SELECT SAMPLE, round(score_summary_rsid, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_rsid.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	0.0
+S2	0.0
+
+# --- Error: use_variant_id with no SNP column ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_no_snp.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  use_variant_id := true
+)
+----
+Invalid Input Error: bcftools_score: summary must include marker name column when use_variant_id=true
+
+# --- Flexible chromosome name matching (chr prefix) ---
+# VCF has chr1, summary has bare "1" — should match via flexible resolution
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_chrprefix.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- OR-to-beta conversion ---
+query TT
+SELECT SAMPLE, round(score_summary_or, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_or.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- PLINK2 preset with LOG10_P ---
+query TT
+SELECT SAMPLE, round(score_summary_plink2, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_plink2.tsv',
+  use := 'GT',
+  columns := 'PLINK2'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- NA/missing value handling (rs2 BETA=NA, should be skipped) ---
+# Only rs1 (beta=0.5) and rs3 (beta=1.0) contribute
+# S1: 0*0.5 + 2*1.0 = 2.0; S2: 1*0.5 + 0*1.0 = 0.5
+query TT
+SELECT SAMPLE, round(score_summary_na, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_na.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	2.0
+S2	0.5
+
+# --- Missing genotype (S1 has ./. at rs1) ---
+# S1: skip rs1, 1*(-0.2) + 2*1.0 = 1.8; S2: 1*0.5 + 2*(-0.2) + 0 = 0.1
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_missing_gt.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- Allele mismatch (A1 not in VCF alleles — all markers skipped) ---
+query TT
+SELECT SAMPLE, round(score_summary_mismatch, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_mismatch.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	0.0
+S2	0.0
+
+# --- Custom columns_file mapping ---
+query TT
+SELECT SAMPLE, round(score_summary_custom, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_custom.tsv',
+  use := 'GT',
+  columns_file := '__WORKING_DIRECTORY__/test/data/score_columns.tsv'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- DS dosage mode ---
+# S1: 0.1*0.5 + 0.8*(-0.2) + 1.8*1.0 = 1.69
+# S2: 1.0*0.5 + 1.9*(-0.2) + 0.2*1.0 = 0.32
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_dosage.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'DS',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.69
+S2	0.32
+
+# --- HDS dosage mode ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_dosage.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'HDS',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.69
+S2	0.32
+
+# --- AP dosage mode ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_dosage.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'AP',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.69
+S2	0.32
+
+# --- GP dosage mode ---
+# S1: (0.1+0)*0.5 + (0.6+0.4)*(-0.2) + (0.2+1.6)*1.0 = 0.05-0.2+1.8 = 1.65
+# S2: (1.0+0)*0.5 + (0.1+1.8)*(-0.2) + (0.2+0)*1.0 = 0.5-0.38+0.2 = 0.32
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_dosage.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GP',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.65
+S2	0.32
+
+# --- GT auto-detection on GT-only VCF ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- DS auto-detection on dosage VCF (DS highest priority among available) ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_dosage.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.69
+S2	0.32
+
+# --- Small p-value precision (stable -log10 parsing) ---
+# With improved parsing: -log10(5e-300)=299.301, -log10(1e-100)=100
+# q_score_thr 1e-200 => lp threshold = 200. Only rs1 (lp=299.3) passes.
+# S1: 0*0.5 = 0.0; S2: 1*0.5 = 0.5
+query TT
+SELECT SAMPLE, round("score_summary_smallp_p1e-200", 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_smallp.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  q_score_thr := '1e-200'
+)
+ORDER BY SAMPLE
+----
+S1	0.0
+S2	0.5

@@ -138,6 +138,99 @@ static int score_is_missing(float f) {
     return isnan(f) || bcf_float_is_missing(f) || bcf_float_is_vector_end(f);
 }
 
+/* Port of bcf_hdr_name2id_flexible() from bcftools +score (score.h).
+ * Handles chr prefix strip/prepend, numeric sex chromosomes (23->X, 24->Y,
+ * 26/MT/chrM), XY/XX/PAR1/PAR2 aliases. */
+static int score_hdr_name2id_flexible(const bcf_hdr_t *hdr, const char *chr) {
+    int rid;
+    char buf[8];
+    if (!chr || chr[0] == '\0') return -1;
+    rid = bcf_hdr_name2id(hdr, chr);
+    if (rid >= 0) return rid;
+    /* strip chr prefix */
+    if (strncmp(chr, "chr", 3) == 0) {
+        rid = bcf_hdr_name2id(hdr, chr + 3);
+        if (rid >= 0) return rid;
+    }
+    /* prepend chr prefix (up to 2-char contig name) */
+    if (strlen(chr) <= 2) {
+        buf[0] = 'c'; buf[1] = 'h'; buf[2] = 'r';
+        buf[3] = chr[0]; buf[4] = chr[1]; buf[5] = '\0';
+        rid = bcf_hdr_name2id(hdr, buf);
+        if (rid >= 0) return rid;
+    }
+    /* numeric sex/mito aliases */
+    if (strcmp(chr, "23") == 0 || strcmp(chr, "25") == 0 || strcmp(chr, "XY") == 0
+        || strcmp(chr, "XX") == 0 || strcmp(chr, "PAR1") == 0 || strcmp(chr, "PAR2") == 0) {
+        rid = bcf_hdr_name2id(hdr, "X");
+        if (rid >= 0) return rid;
+        rid = bcf_hdr_name2id(hdr, "chrX");
+    } else if (strcmp(chr, "24") == 0) {
+        rid = bcf_hdr_name2id(hdr, "Y");
+        if (rid >= 0) return rid;
+        rid = bcf_hdr_name2id(hdr, "chrY");
+    } else if (strcmp(chr, "26") == 0 || strcmp(chr, "MT") == 0 || strcmp(chr, "chrM") == 0) {
+        rid = bcf_hdr_name2id(hdr, "MT");
+        if (rid >= 0) return rid;
+        rid = bcf_hdr_name2id(hdr, "chrM");
+    }
+    return rid;
+}
+
+/* Parse a float from a field, treating "." and "NA" as NAN (matches upstream
+ * tsv_read_float semantics from score.h). Returns 0 on success, -1 on error. */
+static int score_parse_float(const char *s, float *out) {
+    char *end = NULL;
+    if (!s || *s == '\0') return -1;
+    if (*s == '.' && (s[1] == '\0' || s[1] == '\t' || s[1] == '\n')) { *out = NAN; return 0; }
+    if (s[0] == 'N' && s[1] == 'A' && (s[2] == '\0' || s[2] == '\t' || s[2] == '\n')) { *out = NAN; return 0; }
+    *out = strtof(s, &end);
+    if (end == s || *end != '\0') return -1;
+    return 0;
+}
+
+/* Parse a p-value and compute -log10(p) with improved numerical stability.
+ * Port of tsv_read_float_and_minus_log10() from bcftools +score (score.h).
+ * For scientific notation, splits at e/E to compute -log10(mantissa) - exponent,
+ * avoiding underflow with extremely small p-values (e.g. 5e-324). */
+static int score_parse_pvalue_lp(const char *s, float *out) {
+    const char *eptr;
+    char buf[64];
+    char *end = NULL;
+    float mantissa, exponent;
+    size_t mlen;
+
+    if (!s || *s == '\0') return -1;
+    if (*s == '.' && (s[1] == '\0' || s[1] == '\t' || s[1] == '\n')) { *out = NAN; return 0; }
+    if (s[0] == 'N' && s[1] == 'A' && (s[2] == '\0' || s[2] == '\t' || s[2] == '\n')) { *out = NAN; return 0; }
+
+    /* find 'e' or 'E' */
+    for (eptr = s; *eptr && *eptr != 'e' && *eptr != 'E'; eptr++) ;
+
+    if (*eptr == '\0') {
+        /* no exponent — simple parse */
+        float pv = strtof(s, &end);
+        if (end == s || *end != '\0' || pv <= 0.0f) return -1;
+        *out = -log10f(pv);
+        return 0;
+    }
+
+    /* parse mantissa */
+    mlen = (size_t)(eptr - s);
+    if (mlen >= sizeof(buf)) return -1;
+    memcpy(buf, s, mlen);
+    buf[mlen] = '\0';
+    mantissa = strtof(buf, &end);
+    if (end == buf) return -1;
+    /* parse exponent */
+    exponent = strtof(eptr + 1, &end);
+    if (*end != '\0') return -1;
+    /* -log10(mantissa * 10^exponent) = -log10(mantissa) - exponent */
+    if (mantissa <= 0.0f) return -1;
+    *out = -log10f(mantissa) - exponent;
+    return 0;
+}
+
 static char *score_dup(const char *s) {
     size_t n;
     char *out;
@@ -457,6 +550,20 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
+    if (bind->use_variant_id && !summary->snp_ok) {
+        snprintf(err, err_sz, "bcftools_score: summary must include marker name column when use_variant_id=true");
+        score_destroy_summary(summary);
+        fclose(fp);
+        if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
+        return NULL;
+    }
+    if (summary->use_snp && !summary->snp_ok) {
+        snprintf(err, err_sz, "bcftools_score: summary must include marker name column when matching by variant ID");
+        score_destroy_summary(summary);
+        fclose(fp);
+        if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
+        return NULL;
+    }
 
     if (summary->use_snp) {
         summary->id2idx = khash_str2int_init();
@@ -489,26 +596,20 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         }
 
         if (idx_beta >= 0 && idx_beta < n_fields) {
-            char *end = NULL;
-            es = strtof(fields[idx_beta], &end);
-            if (end == fields[idx_beta] || *end != '\0') es = NAN;
+            if (score_parse_float(fields[idx_beta], &es) != 0) es = NAN;
         }
         if (isnan(es) && idx_or >= 0 && idx_or < n_fields) {
-            char *end = NULL;
-            float orv = strtof(fields[idx_or], &end);
-            if (!(end == fields[idx_or] || *end != '\0' || orv <= 0.0f)) es = logf(orv);
+            float orv = NAN;
+            if (score_parse_float(fields[idx_or], &orv) == 0 && !isnan(orv) && orv > 0.0f)
+                es = logf(orv);
         }
         if (isnan(es)) continue;
 
         if (idx_lp >= 0 && idx_lp < n_fields) {
-            char *end = NULL;
-            lp = strtof(fields[idx_lp], &end);
-            if (end == fields[idx_lp] || *end != '\0') lp = NAN;
+            if (score_parse_float(fields[idx_lp], &lp) != 0) lp = NAN;
         }
         if (isnan(lp) && idx_p >= 0 && idx_p < n_fields) {
-            char *end = NULL;
-            float pv = strtof(fields[idx_p], &end);
-            if (!(end == fields[idx_p] || *end != '\0' || pv <= 0.0f)) lp = -log10f(pv);
+            if (score_parse_pvalue_lp(fields[idx_p], &lp) != 0) lp = NAN;
         }
 
         marker.es = es;
@@ -543,7 +644,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             int ret;
             uint64_t key;
             if (idx_chr < 0 || idx_chr >= n_fields || idx_bp < 0 || idx_bp >= n_fields) continue;
-            rid = bcf_hdr_name2id(bcf_hdr, fields[idx_chr]);
+            rid = score_hdr_name2id_flexible(bcf_hdr, fields[idx_chr]);
             if (rid < 0) continue;
             pos = strtoll(fields[idx_bp], &end, 10) - 1;
             if (end == fields[idx_bp] || *end != '\0' || pos < 0) continue;

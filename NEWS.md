@@ -1,7 +1,10 @@
 # DuckHTS Extension News
 
-## duckhts 0.1.3.9001 (2026-03-13)
+## duckhts 0.1.3.9002 (2026-03-27)
 
+- harden `bcftools_score(...)` upstream parity: port `bcf_hdr_name2id_flexible()` for flexible chromosome name resolution (chr prefix strip/prepend, 23→X, 24→Y, 26/MT→chrM aliases), port numerically stable `-log10(p)` parsing for very small p-values via mantissa/exponent splitting, and handle `NA`/`.` as missing values in summary stats fields (BETA, OR, P, LP)
+- add comprehensive `bcftools_score(...)` test coverage: DS/HDS/AP/GP dosage modes with real FORMAT values, OR-to-beta conversion, PLINK2 preset with LOG10_P, custom columns_file mapping, allele mismatch (zero-match), missing genotype (`./. `) handling, NA in summary stats, chr-prefix flexible matching, auto-detection priority, and small p-value threshold precision
+- tighten `bcftools_score(...)` TSV matching parity: enforce marker-ID column requirements for `use_variant_id := true`, keep SNP-ID fallback behavior explicit when CHR/BP are unavailable, and add SQL coverage for rsID-vs-CHR/BP matching paths
 - slim munge output schema at the extension level by removing legacy `si`, `i2`, `cq`, and `ed` fields, and clarify orientation semantics by renaming `swapped` to `alleles_swapped` in `bcftools_munge_row(...)` / `duckdb_munge(...)`
 - add `bcftools_munge_row(...)` and `duckdb_munge(...)` entries to `functions.yaml` so munge APIs are documented in the generated function catalog and community extension descriptor
 - add `benchmark_munge.Rmd` and `make bench-munge` to benchmark DuckHTS munge against `bcftools +munge` with normalized output-group parity checks
