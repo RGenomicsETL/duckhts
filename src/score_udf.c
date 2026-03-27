@@ -119,7 +119,7 @@ static score_mapping_t score_bolt_mapping[] = {
 
 static score_mapping_t score_metal_mapping[] = {
     {"MarkerName", SCORE_HDR_SNP}, {"Position", SCORE_HDR_BP}, {"Chromosome", SCORE_HDR_CHR}, {"Allele1", SCORE_HDR_A1},
-    {"P-value", SCORE_HDR_P}, {"Effect", SCORE_HDR_BETA}, {"log(P)", SCORE_HDR_LP}, {"Zscore", SCORE_HDR_P}
+    {"P-value", SCORE_HDR_P}, {"Effect", SCORE_HDR_BETA}, {"log(P)", SCORE_HDR_LP}
 };
 
 static score_mapping_t score_pgs_mapping[] = {
@@ -130,8 +130,7 @@ static score_mapping_t score_pgs_mapping[] = {
 static score_mapping_t score_ssf_mapping[] = {
     {"variant_id", SCORE_HDR_SNP}, {"rsid", SCORE_HDR_SNP}, {"rs_id", SCORE_HDR_SNP},
     {"base_pair_location", SCORE_HDR_BP}, {"chromosome", SCORE_HDR_CHR}, {"effect_allele", SCORE_HDR_A1},
-    {"p_value", SCORE_HDR_P}, {"odds_ratio", SCORE_HDR_OR}, {"hazard_ratio", SCORE_HDR_OR}, {"beta", SCORE_HDR_BETA},
-    {"standard_error", SCORE_HDR_P}
+    {"p_value", SCORE_HDR_P}, {"odds_ratio", SCORE_HDR_OR}, {"hazard_ratio", SCORE_HDR_OR}, {"beta", SCORE_HDR_BETA}
 };
 
 static int score_is_missing(float f) {
@@ -353,7 +352,21 @@ static int score_parse_q_thresholds(const char *s, double **out_arr, int *out_n)
     tok = strtok(tmp, ",");
     while (tok) {
         char *end = NULL;
-        double p = strtod(tok, &end);
+        /* Upstream uses strtof() for threshold parsing (score.c:453).
+         * The float→double promotion before -log10() reproduces the exact
+         * same boundary-precision behavior as upstream bcftools +score.
+         * For very small p-values (< ~1e-38) that underflow to 0 in float,
+         * fall back to strtod to avoid silent breakage (upstream would
+         * produce +inf threshold, excluding all markers). */
+        float pf = strtof(tok, &end);
+        double p;
+        if (pf == 0.0f && end != tok) {
+            /* strtof succeeded but returned 0 — could be underflow.
+             * Re-parse with strtod to handle very small p-values. */
+            p = strtod(tok, &end);
+        } else {
+            p = (double)pf;
+        }
         while (*end && isspace((unsigned char)*end)) end++;
         if (end == tok || *end != '\0' || p <= 0.0 || p > 1.0) {
             duckdb_free(tmp);
@@ -603,7 +616,10 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             if (score_parse_float(fields[idx_or], &orv) == 0 && !isnan(orv) && orv > 0.0f)
                 es = logf(orv);
         }
-        if (isnan(es)) continue;
+        if (isnan(es)) {
+            free(marker.a1);
+            continue;
+        }
 
         if (idx_lp >= 0 && idx_lp < n_fields) {
             if (score_parse_float(fields[idx_lp], &lp) != 0) lp = NAN;
@@ -815,8 +831,14 @@ static void score_bind(duckdb_bind_info info) {
             }
             duckdb_bind_add_result_column(info, name, dbl_type);
             if (bind->counts) {
-                char cnt_name[256 + 4];
-                snprintf(cnt_name, sizeof(cnt_name), "%.255s_CNT", name);
+                /* Upstream builds CNT name as "<prs>_CNT" then appends "_p<thr>" */
+                char cnt_name[256];
+                if (bind->q_thr_lp && bind->n_q_thr > 0) {
+                    double p = pow(10.0, -bind->q_thr_lp[j]);
+                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", bind->prs_name, p);
+                } else {
+                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", bind->prs_name);
+                }
                 duckdb_bind_add_result_column(info, cnt_name, bigint_type);
             }
         }
@@ -919,8 +941,14 @@ static void score_init(duckdb_init_info info) {
             init->metric_is_count[metric_idx] = 0;
             metric_idx++;
             if (bind->counts) {
+                /* Upstream builds CNT name as "<prs>_CNT" then appends "_p<thr>" */
                 char cnt_name[256];
-                snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", name);
+                if (bind->q_thr_lp && bind->n_q_thr > 0) {
+                    double p = pow(10.0, -bind->q_thr_lp[j]);
+                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", bind->prs_name, p);
+                } else {
+                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", bind->prs_name);
+                }
                 init->metric_names[metric_idx] = score_dup(cnt_name);
                 init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
                 memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
@@ -972,13 +1000,19 @@ static void score_init(duckdb_init_info info) {
             if (number < 2) continue;
             for (k = 0; k < n_samples; k++) {
                 int32_t *ptr = int32_arr + number * k;
-                if (bcf_gt_is_missing(ptr[0]) || bcf_gt_is_missing(ptr[1])) {
+                if (bcf_gt_is_missing(ptr[0])) {
                     missing[k] = 1;
                 } else {
                     int a0 = bcf_gt_allele(ptr[0]);
-                    int a1 = bcf_gt_allele(ptr[1]);
                     if (a0 >= 0 && a0 < rec->n_allele) aps[a0 * n_samples + k] += 1.0f;
-                    if (a1 >= 0 && a1 < rec->n_allele) aps[a1 * n_samples + k] += 1.0f;
+                    if (ptr[1] == bcf_int32_vector_end) {
+                        /* haploid (e.g. chrX male) — one allele only */
+                    } else if (bcf_gt_is_missing(ptr[1])) {
+                        missing[k] = 1;
+                    } else {
+                        int a1 = bcf_gt_allele(ptr[1]);
+                        if (a1 >= 0 && a1 < rec->n_allele) aps[a1 * n_samples + k] += 1.0f;
+                    }
                 }
             }
             break;
@@ -1115,7 +1149,7 @@ static void score_init(duckdb_init_info info) {
             lp = marker->lp;
             for (j = 0; j < bind->n_q_thr; j++) {
                 int out_idx = j * (bind->counts ? 2 : 1);
-                if (bind->q_thr_lp && !isnan(lp) && lp < (float)bind->q_thr_lp[j]) continue;
+                if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
                 for (k = 0; k < n_samples; k++) {
                     if (missing[k]) continue;
                     init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];

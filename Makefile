@@ -64,5 +64,8 @@ bench:
 bench-lift:
 	Rscript -e "rmarkdown::render('benchmark_liftover.Rmd', output_format = 'github_document')"
 
+bench-score:
+	Rscript -e "rmarkdown::render('benchmark_score.Rmd', output_format = 'github_document')"
+
 bench-munge:
 	Rscript -e "rmarkdown::render('benchmark_munge.Rmd', output_format = 'github_document')"

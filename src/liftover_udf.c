@@ -921,7 +921,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
 
         if (!has_source_contig(bind, chrom)) {
             tag_append(reject_reason, sizeof(reject_reason), "MissingContig");
-        } else if (src_ref_copy && strlen(src_ref_copy) > 1) {
+        } else if (src_ref_copy && ((strlen(src_ref_copy) > 1) || (src_alt_copy && strlen(src_alt_copy) > 1))) {
             int npad = 0;
             int ret = liftover_indel(bind, chrom, src_pos_data[row],
                                      src_pos_data[row] + (hts_pos_t)strlen(src_ref_copy) - 1,
@@ -974,10 +974,12 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         dest_pos_data[row] = dst_pos5;
 
         if (src_ref_copy) {
-            lift_ref = is_reverse ? reverse_complement_copy(src_ref_copy) : dup_cstr(src_ref_copy);
+            int symbolic_ref = (strchr(src_ref_copy, '<') || strchr(src_ref_copy, '*'));
+            lift_ref = (is_reverse && !symbolic_ref) ? reverse_complement_copy(src_ref_copy) : dup_cstr(src_ref_copy);
         }
         if (src_alt_copy) {
-            lift_alt = is_reverse ? reverse_complement_copy(src_alt_copy) : dup_cstr(src_alt_copy);
+            int symbolic_alt = (strchr(src_alt_copy, '<') || strchr(src_alt_copy, '*') || strchr(src_alt_copy, ','));
+            lift_alt = (is_reverse && !symbolic_alt) ? reverse_complement_copy(src_alt_copy) : dup_cstr(src_alt_copy);
         }
 
         if (dst_chr && bind->dst_fai) {

@@ -54,12 +54,19 @@ SELECT (bcftools_munge_row(
 ----
 Invalid Input Error: bcftools_munge_row: failed to load FASTA index:
 
-statement error
+# Missing contig now emits a row with filter=MissingContig instead of erroring
+query TT
 SELECT (bcftools_munge_row(
   'chrMissing', 2, 'A', 'C', 'rs1',
   NULL, NULL, NULL, NULL,
   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
-)).chrom;
+)).chrom,
+(bcftools_munge_row(
+  'chrMissing', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).filter;
 ----
-Invalid Input Error: bcftools_munge_row: failed to fetch reference sequence at chrMissing:2
+chrMissing	MissingContig

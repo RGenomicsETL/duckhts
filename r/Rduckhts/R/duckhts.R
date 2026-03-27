@@ -1806,7 +1806,10 @@ rduckhts_munge <- function(
   if (!is.null(ns)) params <- c(params, sprintf("ns := %s", format(ns, scientific = FALSE, trim = TRUE)))
   if (!is.null(nc)) params <- c(params, sprintf("nc := %s", format(nc, scientific = FALSE, trim = TRUE)))
   if (!is.null(ne)) params <- c(params, sprintf("ne := %s", format(ne, scientific = FALSE, trim = TRUE)))
-  sql <- sprintf("SELECT * FROM duckdb_munge(%s)", paste(params, collapse = ", "))
+  metal_keys <- c("INFO", "HET_I2", "HET_P", "HET_LP", "DIRE")
+  has_metal <- !is.null(column_map) && any(metal_keys %in% names(column_map))
+  macro_name <- if (has_metal) "duckdb_munge_metal" else "duckdb_munge"
+  sql <- sprintf("SELECT * FROM %s(%s)", macro_name, paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }
 

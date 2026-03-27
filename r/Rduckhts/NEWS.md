@@ -1,6 +1,11 @@
 
 # Rduckhts 0.1.3-0.0.2.9002
 
+- fix `rduckhts_score()` CNT column naming to match upstream: when `q_score_thr` and `counts` are both active, count columns are now named `<prs>_CNT_p<thr>` (upstream pattern) instead of `<prs>_p<thr>_CNT` (**breaking** column name change for q_score_thr + counts queries)
+- fix `rduckhts_score()` threshold boundary precision to match upstream: parse `q_score_thr` values with `strtof`→double promotion before `-log10`, reproducing the exact float→double comparison asymmetry in upstream `bcftools +score`; markers at exact P-value boundaries may now be excluded where they were previously included
+- fix `rduckhts_score()` wrong-result bugs: remove incorrect METAL `Zscore → P` and SSF `standard_error → P` column mappings, add haploid GT support for chrX male samples, and fix memory leak on skipped markers
+- fix `rduckhts_liftover()` wrong-result bugs: skip reverse complement for symbolic alleles and detect insertions as indels in the liftover path
+- fix `rduckhts_munge()` wrong-result bugs: emit `filter = 'MissingContig'` instead of aborting when FASTA ref fetch fails for unknown contigs, and propagate NAN correctly on AC swap with missing NS
 - harden `rduckhts_score()` upstream parity: port flexible chromosome name resolution (chr prefix strip/prepend, 23→X, 24→Y, 26/MT→chrM aliases), numerically stable `-log10(p)` parsing for very small p-values, and NA/`.` missing value handling in summary stats fields (BETA, OR, P, LP)
 - add comprehensive `rduckhts_score()` test coverage: DS/HDS/AP/GP dosage modes with real FORMAT values, OR-to-beta conversion, PLINK2 preset with LOG10_P, custom columns_file mapping, allele mismatch (zero-match), missing genotype (`./. `) handling, NA in summary stats, chr-prefix flexible matching, auto-detection priority, and small p-value threshold precision
 - strengthen `rduckhts_score()` parity coverage for variant matching by adding rsID-based fixture/tests (`use_variant_id = TRUE`), explicit CHR/BP mismatch behavior checks, and an error assertion when marker IDs are required but missing

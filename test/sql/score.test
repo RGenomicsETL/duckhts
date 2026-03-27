@@ -19,11 +19,14 @@ S1	1.8
 S2	0.1
 
 # --- q_score_thr with counts ---
+# Column naming follows upstream: <prs>_CNT_p<thr> (not <prs>_p<thr>_CNT)
+# Boundary precision: strtof→double promotion means exact-boundary P values
+# are excluded (upstream parity: float LP < double threshold)
 query TTTT
 SELECT SAMPLE,
        round("score_summary_p0.01", 3),
-       round("score_summary_p0.01_CNT", 0),
-       round("score_summary_p0.2_CNT", 0)
+       round("score_summary_CNT_p0.01", 0),
+       round("score_summary_CNT_p0.2", 0)
 FROM bcftools_score(
   '__WORKING_DIRECTORY__/test/data/score_input.vcf',
   '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
@@ -34,8 +37,8 @@ FROM bcftools_score(
 )
 ORDER BY SAMPLE
 ----
-S1	0.0	1	2
-S2	0.5	1	2
+S1	0.0	0	2
+S2	0.0	0	2
 
 # --- rsID matching (use_variant_id) ---
 query TT

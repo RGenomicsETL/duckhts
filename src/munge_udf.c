@@ -39,12 +39,17 @@ enum {
     MUNGE_OUT_AF,
     MUNGE_OUT_AC,
     MUNGE_OUT_NE,
+    MUNGE_OUT_SI,
+    MUNGE_OUT_I2,
+    MUNGE_OUT_CQ,
+    MUNGE_OUT_ED,
     MUNGE_OUT_COUNT
 };
 
 static const char *MUNGE_FIELD_NAMES[MUNGE_OUT_COUNT] = {
     "chrom", "pos", "id", "ref", "alt", "alleles_swapped", "filter",
-    "ns", "ez", "nc", "es", "se", "lp", "af", "ac", "ne"
+    "ns", "ez", "nc", "es", "se", "lp", "af", "ac", "ne",
+    "si", "i2", "cq", "ed"
 };
 
 static inline int row_is_valid(duckdb_vector vector, idx_t row) {
@@ -279,6 +284,10 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         char *chrom_cstr = NULL;
         faidx_t *fai = NULL;
         double ns = NAN, ez = NAN, nc = NAN, es = NAN, se = NAN, lp = NAN, af = NAN, ac = NAN, ne = NAN;
+        double si = NAN, i2 = NAN, cq = NAN;
+        const char *ed = NULL;
+        idx_t ed_len = 0;
+        char *ed_flipped = NULL;
         bool swapped = false;
         int32_t pos;
 
@@ -347,6 +356,11 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         else if (row_is_valid(or_vec, row)) es = safe_log(get_double_at(or_vec, row));
         if (row_is_valid(lp_vec, row)) lp = get_double_at(lp_vec, row);
         else if (row_is_valid(p_vec, row)) lp = safe_minus_log10(get_double_at(p_vec, row));
+        if (row_is_valid(info_vec, row)) si = get_double_at(info_vec, row);
+        if (row_is_valid(het_i2_vec, row)) i2 = get_double_at(het_i2_vec, row);
+        if (row_is_valid(het_lp_vec, row)) cq = get_double_at(het_lp_vec, row);
+        else if (row_is_valid(het_p_vec, row)) cq = safe_minus_log10(get_double_at(het_p_vec, row));
+        if (row_is_valid(dire_vec, row)) ed = get_string_at(dire_vec, row, &ed_len);
         if (row_is_valid(nc_override_vec, row)) nc = get_double_at(nc_override_vec, row);
         if (row_is_valid(ns_override_vec, row)) ns = get_double_at(ns_override_vec, row);
         else if (!isnan(nc) && row_is_valid(n_con_vec, row)) ns = nc + get_double_at(n_con_vec, row);
@@ -379,13 +393,34 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         );
         free(chrom_cstr);
         if (!ref_fetch) {
-            char msg[1024];
-            snprintf(msg, sizeof(msg), "bcftools_munge_row: failed to fetch reference sequence at %.*s:%d",
-                     (int)chrom_len, chrom, (int)pos);
-            set_munge_error(info, msg);
+            /* Upstream hard-errors here, but in SQL context we emit the row
+               with a FILTER tag so the query doesn't abort on scaffolds or
+               contigs missing from the FASTA. */
+            duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_CHROM], row, chrom, chrom_len);
+            ((int64_t *)duckdb_vector_get_data(child_vecs[MUNGE_OUT_POS]))[row] = pos;
+            if (id && id_len > 0) duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ID], row, id, id_len);
+            else set_null_at(child_vecs[MUNGE_OUT_ID], row);
+            duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_REF], row, norm_ref);
+            duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_ALT], row, norm_alt);
+            ((bool *)duckdb_vector_get_data(child_vecs[MUNGE_OUT_ALLELES_SWAPPED]))[row] = false;
+            duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_FILTER], row, "MissingContig");
+            assign_double_or_null(child_vecs[MUNGE_OUT_NS], row, ns);
+            assign_double_or_null(child_vecs[MUNGE_OUT_EZ], row, ez);
+            assign_double_or_null(child_vecs[MUNGE_OUT_NC], row, nc);
+            assign_double_or_null(child_vecs[MUNGE_OUT_ES], row, es);
+            assign_double_or_null(child_vecs[MUNGE_OUT_SE], row, se);
+            assign_double_or_null(child_vecs[MUNGE_OUT_LP], row, lp);
+            assign_double_or_null(child_vecs[MUNGE_OUT_AF], row, af);
+            assign_double_or_null(child_vecs[MUNGE_OUT_AC], row, ac);
+            assign_double_or_null(child_vecs[MUNGE_OUT_NE], row, ne);
+            assign_double_or_null(child_vecs[MUNGE_OUT_SI], row, si);
+            assign_double_or_null(child_vecs[MUNGE_OUT_I2], row, i2);
+            assign_double_or_null(child_vecs[MUNGE_OUT_CQ], row, cq);
+            if (ed && ed_len > 0) duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ED], row, ed, ed_len);
+            else set_null_at(child_vecs[MUNGE_OUT_ED], row);
             free(norm_alt);
             free(norm_ref);
-            return;
+            continue;
         }
 
         {
@@ -401,6 +436,17 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
                 if (!isnan(es)) es = -es;
                 if (!isnan(af)) af = 1.0 - af;
                 if (!isnan(ac) && !isnan(ns)) ac = 2.0 * ns - ac;
+                else if (!isnan(ac)) ac = NAN;
+                /* upstream munge.c:617-624 — flip ED direction on swap */
+                if (ed && ed_len > 0) {
+                    ed_flipped = dup_span(ed, ed_len);
+                    if (ed_flipped) {
+                        for (idx_t k = 0; k < ed_len; k++) {
+                            if (ed_flipped[k] == '+') ed_flipped[k] = '-';
+                            else if (ed_flipped[k] == '-') ed_flipped[k] = '+';
+                        }
+                    }
+                }
             } else if (ref_match && alt_match) {
                 duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_FILTER], row, iffy_tag, tag_len);
             } else if (!ref_match && !alt_match) {
@@ -426,7 +472,18 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         assign_double_or_null(child_vecs[MUNGE_OUT_AF], row, af);
         assign_double_or_null(child_vecs[MUNGE_OUT_AC], row, ac);
         assign_double_or_null(child_vecs[MUNGE_OUT_NE], row, ne);
+        assign_double_or_null(child_vecs[MUNGE_OUT_SI], row, si);
+        assign_double_or_null(child_vecs[MUNGE_OUT_I2], row, i2);
+        assign_double_or_null(child_vecs[MUNGE_OUT_CQ], row, cq);
+        if (ed_flipped) {
+            duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ED], row, ed_flipped, ed_len);
+        } else if (ed && ed_len > 0) {
+            duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ED], row, ed, ed_len);
+        } else {
+            set_null_at(child_vecs[MUNGE_OUT_ED], row);
+        }
 
+        free(ed_flipped);
         free(norm_alt);
         free(norm_ref);
         free(ref_fetch);
@@ -464,7 +521,8 @@ void register_munge_functions(duckdb_connection connection) {
     fields[MUNGE_OUT_ALT] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     fields[MUNGE_OUT_ALLELES_SWAPPED] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     fields[MUNGE_OUT_FILTER] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    for (int i = MUNGE_OUT_NS; i <= MUNGE_OUT_NE; i++) fields[i] = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+    for (int i = MUNGE_OUT_NS; i <= MUNGE_OUT_CQ; i++) fields[i] = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+    fields[MUNGE_OUT_ED] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 
     struct_type = duckdb_create_struct_type(fields, MUNGE_FIELD_NAMES, MUNGE_OUT_COUNT);
     duckdb_scalar_function_set_return_type(fn, struct_type);

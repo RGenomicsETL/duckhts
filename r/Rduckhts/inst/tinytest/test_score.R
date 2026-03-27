@@ -47,13 +47,16 @@ test_score <- function() {
   expect_equal(round(out_gt$score_summary, 3), c(1.8, 0.1))
 
   # --- q_score_thr with counts ---
+  # Column naming follows upstream: <prs>_CNT_p<thr> (not <prs>_p<thr>_CNT)
+  # Boundary precision: strtof→double promotion means exact-boundary P values
+  # are excluded (upstream parity: float LP < double threshold)
   out_thr <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
                             q_score_thr = "0.01,0.2", counts = TRUE)
-  expect_true(all(c("score_summary_p0.01", "score_summary_p0.01_CNT",
-                     "score_summary_p0.2_CNT") %in% names(out_thr)))
-  expect_equal(round(out_thr$score_summary_p0.01, 3), c(0.0, 0.5))
-  expect_equal(out_thr$score_summary_p0.01_CNT, c(1, 1))
-  expect_equal(out_thr$score_summary_p0.2_CNT, c(2, 2))
+  expect_true(all(c("score_summary_p0.01", "score_summary_CNT_p0.01",
+                     "score_summary_CNT_p0.2") %in% names(out_thr)))
+  expect_equal(round(out_thr$score_summary_p0.01, 3), c(0.0, 0.0))
+  expect_equal(out_thr$score_summary_CNT_p0.01, c(0, 0))
+  expect_equal(out_thr$score_summary_CNT_p0.2, c(2, 2))
 
   # --- rsID matching ---
   out_rsid <- rduckhts_score(con, vcf, sumf_rsid, use = "GT", columns = "PLINK",
