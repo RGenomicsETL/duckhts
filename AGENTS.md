@@ -249,6 +249,14 @@ See [.github/PLAN.md](.github/PLAN.md) Phase 10 for full architecture, code sket
 5. **R Surface**: add and test R wrappers for every public function, and keep `functions.yaml`/generated catalogs synchronized
 6. **Later Analysis Layer**: defer candidate/active-site detection and `mpileup`-style richer site summarization until the coverage primitives are stable
 
+## Deferred Performance Checks (munge/liftover)
+- Move constant-argument context lookup out of per-row loops in `duckdb_munge` and `duckdb_liftover` when path/ref/chain args are scalar constants.
+- Audit global mutex/cache usage in `src/munge_udf.c` and `src/liftover_udf.c`; replace linked-list lookups with a hash map or thread-local fast path where safe.
+- Precompute source-contig membership in liftover bind/global state to avoid per-row linear scans over chain records.
+- Keep contig alias probing quiet: always gate FASTA fetch attempts with `faidx_has_seq(...)` before `faidx_fetch_seq64(...)`.
+- Add reproducible microbenchmarks (1-thread and N-thread) for munge and liftover on the EGFR fixture; track variants/min in CI or release notes when behavior changes.
+- When optimizing, verify parity and safety first: same mapped/unmapped counts, same allele-swap/ref-match outcomes, and no regression in SQL/R tests.
+
 ## Style
 - Keep changes minimal and focused.
 - Preserve existing code style and APIs unless the task explicitly requires changes.
