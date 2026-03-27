@@ -124,7 +124,7 @@ SELECT bcftools_liftover(
   1, 250
 );
 ----
-Invalid Input Error: bcftools_liftover: failed to load chain or FASTA context: bcftools_liftover: failed to load destination FASTA index: /root/duckhts/test/data/does_not_exist.fa
+Invalid Input Error: bcftools_liftover: failed to load chain or FASTA context: bcftools_liftover: failed to load destination FASTA index:
 
 statement error
 SELECT (bcftools_liftover(

@@ -52,7 +52,7 @@ SELECT (bcftools_munge_row(
   '__WORKING_DIRECTORY__/test/data/does_not_exist.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
 )).chrom;
 ----
-Invalid Input Error: bcftools_munge_row: failed to load FASTA index: /root/duckhts/test/data/does_not_exist.fa
+Invalid Input Error: bcftools_munge_row: failed to load FASTA index:
 
 statement error
 SELECT (bcftools_munge_row(

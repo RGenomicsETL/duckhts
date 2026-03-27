@@ -815,8 +815,8 @@ static void score_bind(duckdb_bind_info info) {
             }
             duckdb_bind_add_result_column(info, name, dbl_type);
             if (bind->counts) {
-                char cnt_name[256];
-                snprintf(cnt_name, sizeof(cnt_name), "%.*s_CNT", 248, name);
+                char cnt_name[256 + 4];
+                snprintf(cnt_name, sizeof(cnt_name), "%.255s_CNT", name);
                 duckdb_bind_add_result_column(info, cnt_name, bigint_type);
             }
         }
