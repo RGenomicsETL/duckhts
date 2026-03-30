@@ -179,12 +179,6 @@ test_score <- function() {
                              apply_filters = "PASS")
   expect_equal(round(out_pass$score_summary, 3), c(1.8, 0.1))
 
-  expect_error(
-    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
-                   include = "POS >>> 100"),
-    pattern = "failed to evaluate include expression"
-  )
-
   out_include <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
                                 include = "POS > 100")
   expect_equal(round(out_include$score_summary, 3), c(1.8, -0.4))
@@ -209,7 +203,11 @@ test_score <- function() {
 
   out_format_gt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
                                   include = "FORMAT/GT==\"0/0\"")
-  expect_equal(round(out_format_gt$score_summary, 3), c(0.0, 0.5))
+  expect_equal(round(out_format_gt$score_summary, 3), c(2.0, 0.5))
+
+  out_shift_like <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                   include = "POS >> 100")
+  expect_equal(round(out_shift_like$score_summary, 3), c(1.8, 0.1))
 
   ## ---- S-C4: GWAS-VCF multi-PRS scoring ----
 

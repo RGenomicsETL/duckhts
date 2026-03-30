@@ -11,11 +11,13 @@ DUCKDB_EXTENSION_EXTERN
 #include <string.h>
 
 #include <htslib/hts.h>
-#include <htslib/hts_expr.h>
 #include <htslib/khash_str2int.h>
 #include <htslib/kstring.h>
 #include <htslib/synced_bcf_reader.h>
 #include <htslib/vcf.h>
+
+#include "bcftools_shim.h"
+#include "filter.h"
 
 #ifndef duckdb_malloc
 #define duckdb_malloc malloc
@@ -113,16 +115,13 @@ typedef struct {
 
 typedef struct {
     bcf_srs_t *sr;
-    hts_filter_t *include_filt;
-    hts_filter_t *exclude_filt;
-    char *include_expr_eval;
-    char *exclude_expr_eval;
+    filter_t *include_filt;
+    filter_t *exclude_filt;
 } score_scan_source_t;
 
-typedef struct {
-    const bcf_hdr_t *hdr;
-    bcf1_t *rec;
-} score_expr_ctx_t;
+static char *score_to_filter_expr(const char *expr) {
+    return expr ? strdup(expr) : NULL;
+}
 
 static const char *score_col_headers[SCORE_HDR_SIZE] = {
     "SNP", "BP", "CHR", "A1", "A2", "P", "Z", "OR", "BETA", "N", "N_CAS", "N_CON",
@@ -1197,448 +1196,34 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     return out;
 }
 
-static int score_is_ident_start(char c) {
-    return isalpha((unsigned char)c) || c == '_';
-}
-
-static int score_is_ident_char(char c) {
-    return isalnum((unsigned char)c) || c == '_';
-}
-
-static int score_expr_append_char(char **buf, size_t *len, size_t *cap, char c) {
-    char *next;
-    if (*len + 2 > *cap) {
-        size_t new_cap = *cap ? (*cap * 2) : 256;
-        while (*len + 2 > new_cap) new_cap *= 2;
-        next = (char *)realloc(*buf, new_cap);
-        if (!next) return -1;
-        *buf = next;
-        *cap = new_cap;
-    }
-    (*buf)[(*len)++] = c;
-    (*buf)[*len] = '\0';
-    return 0;
-}
-
-static int score_expr_append_cstr(char **buf, size_t *len, size_t *cap, const char *s) {
-    while (*s) {
-        if (score_expr_append_char(buf, len, cap, *s++) != 0) return -1;
-    }
-    return 0;
-}
-
-/* Rewrite bcftools-like field prefixes into hts_expr identifiers.
- * INFO/DP      -> INFO_DP
- * FORMAT/DP    -> FORMAT_DP
- * FMT/DP       -> FORMAT_DP
- */
-static char *score_rewrite_filter_expr(const char *expr) {
-    size_t i = 0, len = 0, cap = 0;
-    char *out = NULL;
-    if (!expr) return NULL;
-    while (expr[i]) {
-        if (score_is_ident_start(expr[i])) {
-            size_t s = i;
-            while (score_is_ident_char(expr[i])) i++;
-            if ((i - s == 4 && strncmp(expr + s, "INFO", 4) == 0 && expr[i] == '/') ||
-                (i - s == 6 && strncmp(expr + s, "FORMAT", 6) == 0 && expr[i] == '/') ||
-                (i - s == 3 && strncmp(expr + s, "FMT", 3) == 0 && expr[i] == '/')) {
-                const char *prefix = (i - s == 4) ? "INFO_" : "FORMAT_";
-                i++; /* skip '/' */
-                if (score_expr_append_cstr(&out, &len, &cap, prefix) != 0) goto oom;
-                while (expr[i] && (isalnum((unsigned char)expr[i]) || expr[i] == '_')) {
-                    if (score_expr_append_char(&out, &len, &cap, expr[i]) != 0) goto oom;
-                    i++;
-                }
-                continue;
-            }
-            while (s < i) {
-                if (score_expr_append_char(&out, &len, &cap, expr[s]) != 0) goto oom;
-                s++;
-            }
-            continue;
-        }
-        if (score_expr_append_char(&out, &len, &cap, expr[i]) != 0) goto oom;
-        i++;
-    }
-    if (!out) return score_dup("");
-    return out;
-oom:
-    if (out) free(out);
-    return NULL;
-}
-
-static int score_validate_expr_tags(const char *expr, const bcf_hdr_t *hdr, char *err, size_t err_sz) {
-    size_t i = 0;
-    int in_sq = 0, in_dq = 0;
-    while (expr && expr[i]) {
-        char c = expr[i];
-        if (!in_dq && c == '\'') {
-            in_sq = !in_sq;
-            i++;
-            continue;
-        }
-        if (!in_sq && c == '"') {
-            in_dq = !in_dq;
-            i++;
-            continue;
-        }
-        if (!in_sq && !in_dq && score_is_ident_start(c)) {
-            size_t s = i;
-            while (score_is_ident_char(expr[i])) i++;
-            if (i > s + 5 && strncmp(expr + s, "INFO_", 5) == 0) {
-                char tag[128];
-                size_t n = i - (s + 5);
-                int id;
-                if (n >= sizeof(tag)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
-                    return -1;
-                }
-                memcpy(tag, expr + s + 5, n);
-                tag[n] = '\0';
-                id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag);
-                if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_INFO, id)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
-                    return -1;
-                }
-            } else if (i > s + 7 && strncmp(expr + s, "FORMAT_", 7) == 0) {
-                char tag[128];
-                size_t n = i - (s + 7);
-                int id;
-                if (n >= sizeof(tag)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
-                    return -1;
-                }
-                memcpy(tag, expr + s + 7, n);
-                tag[n] = '\0';
-                id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag);
-                if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_FMT, id)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
-                    return -1;
-                }
-            }
-            continue;
-        }
-        i++;
-    }
-    return 0;
-}
-
-static int score_vcf_sym_lookup(void *data, char *str, char **end, hts_expr_val_t *res) {
-    score_expr_ctx_t *ctx = (score_expr_ctx_t *)data;
-    bcf1_t *rec = ctx->rec;
-    const bcf_hdr_t *hdr = ctx->hdr;
-
-    if (strncmp(str, "N_ALT", 5) == 0) {
-        *end = str + 5;
-        res->is_str = 0;
-        res->is_true = 1;
-        res->d = rec->n_allele > 0 ? (double)(rec->n_allele - 1) : 0.0;
-        return 0;
-    }
-    if (strncmp(str, "TYPE", 4) == 0) {
-        int vt = bcf_get_variant_types(rec);
-        const char *type = "OTHER";
-        *end = str + 4;
-        if (vt & VCF_SNP) type = "SNP";
-        else if (vt & VCF_INDEL) type = "INDEL";
-        else if (vt & VCF_MNP) type = "MNP";
-        else if (vt & VCF_BND) type = "BND";
-        res->is_str = 1;
-        res->is_true = 1;
-        kputs(type, ks_clear(&res->s));
-        return 0;
-    }
-
-    if (strncmp(str, "POS", 3) == 0) {
-        *end = str + 3;
-        res->is_str = 0;
-        res->is_true = 0;
-        res->d = (double)((int64_t)rec->pos + 1);
-        return 0;
-    }
-    if (strncmp(str, "QUAL", 4) == 0) {
-        *end = str + 4;
-        if (score_is_missing(rec->qual)) {
-            hts_expr_val_undef(res);
-        } else {
-            res->is_str = 0;
-            res->is_true = 0;
-            res->d = rec->qual;
-        }
-        return 0;
-    }
-    if (strncmp(str, "CHROM", 5) == 0) {
-        const char *chrom = bcf_hdr_id2name(hdr, rec->rid);
-        *end = str + 5;
-        res->is_str = 1;
-        res->is_true = chrom && chrom[0] != '\0';
-        kputs(chrom ? chrom : "", ks_clear(&res->s));
-        return 0;
-    }
-    if (strncmp(str, "ID", 2) == 0) {
-        const char *id = rec->d.id;
-        *end = str + 2;
-        if (!id || id[0] == '\0' || (id[0] == '.' && id[1] == '\0')) {
-            hts_expr_val_undef(res);
-        } else {
-            res->is_str = 1;
-            res->is_true = 1;
-            kputs(id, ks_clear(&res->s));
-        }
-        return 0;
-    }
-    if (strncmp(str, "REF", 3) == 0) {
-        *end = str + 3;
-        res->is_str = 1;
-        res->is_true = 1;
-        kputs((rec->n_allele > 0 && rec->d.allele[0]) ? rec->d.allele[0] : "", ks_clear(&res->s));
-        return 0;
-    }
-    if (strncmp(str, "ALT", 3) == 0) {
-        int i;
-        *end = str + 3;
-        res->is_str = 1;
-        ks_clear(&res->s);
-        for (i = 1; i < rec->n_allele; i++) {
-            if (i > 1) kputc(',', &res->s);
-            kputs(rec->d.allele[i] ? rec->d.allele[i] : "", &res->s);
-        }
-        res->is_true = res->s.l > 0;
-        return 0;
-    }
-    if (strncmp(str, "FILTER", 6) == 0) {
-        int i;
-        *end = str + 6;
-        res->is_str = 1;
-        ks_clear(&res->s);
-        if (rec->d.n_flt == 0) {
-            kputs(".", &res->s);
-            res->is_true = 1;
-            return 0;
-        }
-        for (i = 0; i < rec->d.n_flt; i++) {
-            const char *flt = bcf_hdr_int2id(hdr, BCF_DT_ID, rec->d.flt[i]);
-            if (i > 0) kputc(';', &res->s);
-            kputs(flt ? flt : "", &res->s);
-        }
-        res->is_true = res->s.l > 0;
-        return 0;
-    }
-
-    if (strncmp(str, "INFO_", 5) == 0 || strncmp(str, "FORMAT_", 7) == 0 || isalpha((unsigned char)str[0]) || str[0] == '_') {
-        const char *tag = str;
-        char tag_buf[128];
-        int tag_len = 0;
-        int id;
-        int i = 0;
-        int has_prefix = 0;
-        int is_format = 0;
-
-        if (strncmp(str, "INFO_", 5) == 0) {
-            tag = str + 5;
-            has_prefix = 1;
-        } else if (strncmp(str, "FORMAT_", 7) == 0) {
-            tag = str + 7;
-            has_prefix = 1;
-            is_format = 1;
-        }
-
-        while (tag[i] && (isalnum((unsigned char)tag[i]) || tag[i] == '_' || tag[i] == '.')) {
-            if (tag_len + 1 >= (int)sizeof(tag_buf)) return -1;
-            tag_buf[tag_len++] = tag[i++];
-        }
-        if (tag_len == 0) return -1;
-        tag_buf[tag_len] = '\0';
-
-        if (has_prefix) *end = (char *)(tag + i);
-        else *end = (char *)(str + i);
-
-        id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag_buf);
-        if (!is_format) {
-            if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_INFO, id)) {
-                if (has_prefix) {
-                    hts_expr_val_undef(res);
-                    return 0;
-                }
-                return -1;
-            }
-
-            if (bcf_hdr_id2type((bcf_hdr_t *)hdr, BCF_HL_INFO, id) == BCF_HT_FLAG) {
-                bcf_info_t *info = bcf_get_info((bcf_hdr_t *)hdr, rec, tag_buf);
-                if (!info) {
-                    hts_expr_val_undef(res);
-                } else {
-                    res->is_str = 0;
-                    res->is_true = 1;
-                    res->d = 1.0;
-                }
-                return 0;
-            }
-
-            {
-                float *vals_f = NULL;
-                int nvals_f = 0;
-                int nret_f = bcf_get_info_float((bcf_hdr_t *)hdr, rec, tag_buf, &vals_f, &nvals_f);
-                if (nret_f > 0 && !score_is_missing(vals_f[0])) {
-                    res->is_str = 0;
-                    res->is_true = 1;
-                    res->d = vals_f[0];
-                    free(vals_f);
-                    return 0;
-                }
-                if (vals_f) free(vals_f);
-            }
-
-            {
-                int32_t *vals_i = NULL;
-                int nvals_i = 0;
-                int nret_i = bcf_get_info_int32((bcf_hdr_t *)hdr, rec, tag_buf, &vals_i, &nvals_i);
-                if (nret_i > 0 && vals_i[0] != bcf_int32_missing && vals_i[0] != bcf_int32_vector_end) {
-                    res->is_str = 0;
-                    res->is_true = 1;
-                    res->d = vals_i[0];
-                    free(vals_i);
-                    return 0;
-                }
-                if (vals_i) free(vals_i);
-            }
-
-            {
-                char *vals_s = NULL;
-                int nvals_s = 0;
-                int nret_s = bcf_get_info_string((bcf_hdr_t *)hdr, rec, tag_buf, &vals_s, &nvals_s);
-                if (nret_s > 0 && vals_s && !(vals_s[0] == '.' && vals_s[1] == '\0')) {
-                    res->is_str = 1;
-                    res->is_true = 1;
-                    kputs(vals_s, ks_clear(&res->s));
-                    free(vals_s);
-                    return 0;
-                }
-                if (vals_s) free(vals_s);
-            }
-
-            hts_expr_val_undef(res);
-            return 0;
-        } else {
-            if (strcmp(tag_buf, "GT") == 0) {
-                int32_t *gts = NULL;
-                int m_gts = 0;
-                int n_gts = bcf_get_genotypes((bcf_hdr_t *)hdr, rec, &gts, &m_gts);
-                if (n_gts > 0 && gts) {
-                    int ploidy = bcf_hdr_nsamples((bcf_hdr_t *)hdr) > 0 ? (n_gts / bcf_hdr_nsamples((bcf_hdr_t *)hdr)) : 0;
-                    if (ploidy >= 1) {
-                        int a0 = bcf_gt_allele(gts[0]);
-                        int missing0 = bcf_gt_is_missing(gts[0]);
-                        int phased = bcf_gt_is_phased(gts[0]);
-                        char gtbuf[32];
-                        if (ploidy >= 2) {
-                            int a1 = bcf_gt_allele(gts[1]);
-                            int missing1 = bcf_gt_is_missing(gts[1]);
-                            if (missing0 || missing1) snprintf(gtbuf, sizeof(gtbuf), "./.");
-                            else snprintf(gtbuf, sizeof(gtbuf), "%d%c%d", a0, phased ? '|' : '/', a1);
-                        } else {
-                            if (missing0) snprintf(gtbuf, sizeof(gtbuf), ".");
-                            else snprintf(gtbuf, sizeof(gtbuf), "%d", a0);
-                        }
-                        res->is_str = 1;
-                        res->is_true = 1;
-                        kputs(gtbuf, ks_clear(&res->s));
-                        free(gts);
-                        return 0;
-                    }
-                }
-                if (gts) free(gts);
-                hts_expr_val_undef(res);
-                return 0;
-            }
-
-            int32_t *vals_i = NULL;
-            int nvals_i = 0;
-            int nret_i = bcf_get_format_int32((bcf_hdr_t *)hdr, rec, tag_buf, &vals_i, &nvals_i);
-            if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_FMT, id)) {
-                hts_expr_val_undef(res);
-                return 0;
-            }
-            if (nret_i > 0 && vals_i) {
-                int j;
-                for (j = 0; j < nret_i; j++) {
-                    if (vals_i[j] != bcf_int32_missing && vals_i[j] != bcf_int32_vector_end) {
-                        res->is_str = 0;
-                        res->is_true = 1;
-                        res->d = vals_i[j];
-                        free(vals_i);
-                        return 0;
-                    }
-                }
-            }
-            if (vals_i) free(vals_i);
-
-            {
-                float *vals_f = NULL;
-                int nvals_f = 0;
-                int nret_f = bcf_get_format_float((bcf_hdr_t *)hdr, rec, tag_buf, &vals_f, &nvals_f);
-                if (nret_f > 0 && vals_f) {
-                    int j;
-                    for (j = 0; j < nret_f; j++) {
-                        if (!score_is_missing(vals_f[j])) {
-                            res->is_str = 0;
-                            res->is_true = 1;
-                            res->d = vals_f[j];
-                            free(vals_f);
-                            return 0;
-                        }
-                    }
-                }
-                if (vals_f) free(vals_f);
-            }
-
-            hts_expr_val_undef(res);
-            return 0;
-        }
-    }
-
-    return -1;
-}
-
-static int score_record_matches_exprs(const bcf_hdr_t *hdr, bcf1_t *rec, const score_scan_source_t *src, char *err, size_t err_sz) {
-    score_expr_ctx_t ctx;
-    hts_expr_val_t res = HTS_EXPR_VAL_INIT;
-
-    ctx.hdr = hdr;
-    ctx.rec = rec;
-
+static int score_record_matches_exprs(bcf1_t *rec, const score_scan_source_t *src) {
     if (src->include_filt) {
-        if (hts_filter_eval2(src->include_filt, &ctx, score_vcf_sym_lookup, &res) != 0) {
-            hts_expr_val_free(&res);
-            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
+        int keep;
+        if (duckhts_filter_try_begin() != 0) {
+            duckhts_filter_try_end();
             return -1;
         }
-        if (!res.is_true) {
-            hts_expr_val_free(&res);
-            return 0;
-        }
-        hts_expr_val_free(&res);
+        keep = filter_test(src->include_filt, rec, NULL);
+        duckhts_filter_try_end();
+        if (!keep) return 0;
     }
-
     if (src->exclude_filt) {
-        if (hts_filter_eval2(src->exclude_filt, &ctx, score_vcf_sym_lookup, &res) != 0) {
-            hts_expr_val_free(&res);
-            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
+        int drop;
+        if (duckhts_filter_try_begin() != 0) {
+            duckhts_filter_try_end();
             return -1;
         }
-        if (res.is_true) {
-            hts_expr_val_free(&res);
-            return 0;
-        }
-        hts_expr_val_free(&res);
+        drop = filter_test(src->exclude_filt, rec, NULL);
+        duckhts_filter_try_end();
+        if (drop) return 0;
     }
-
     return 1;
 }
 
 static int score_init_source(const score_bind_t *bind, score_scan_source_t *src, bcf_hdr_t **out_hdr, char *err, size_t err_sz) {
     bcf_hdr_t *hdr0;
+    const char **undef = NULL;
+    int nundef = 0;
     src->sr = bcf_sr_init();
     if (!src->sr) {
         snprintf(err, err_sz, "bcftools_score: failed to initialize synced reader");
@@ -1662,32 +1247,56 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
     }
 
     if (bind->include_expr && bind->include_expr[0]) {
-        src->include_expr_eval = score_rewrite_filter_expr(bind->include_expr);
-        if (!src->include_expr_eval) {
+        char *include_expr = score_to_filter_expr(bind->include_expr);
+        if (!include_expr) {
             snprintf(err, err_sz, "bcftools_score: out of memory");
             return -1;
         }
-        src->include_filt = hts_filter_init(src->include_expr_eval);
+        if (duckhts_filter_try_begin() != 0) {
+            duckhts_filter_try_end();
+            free(include_expr);
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
+            return -1;
+        }
+        src->include_filt = filter_parse(hdr0, include_expr);
+        duckhts_filter_try_end();
+        free(include_expr);
         if (!src->include_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
             return -1;
         }
-        if (score_validate_expr_tags(src->include_expr_eval, hdr0, err, err_sz) != 0) {
+        if (filter_status(src->include_filt) != FILTER_OK) {
+            undef = filter_list_undef_tags(src->include_filt, &nundef);
+            (void)undef;
+            (void)nundef;
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
             return -1;
         }
     }
     if (bind->exclude_expr && bind->exclude_expr[0]) {
-        src->exclude_expr_eval = score_rewrite_filter_expr(bind->exclude_expr);
-        if (!src->exclude_expr_eval) {
+        char *exclude_expr = score_to_filter_expr(bind->exclude_expr);
+        if (!exclude_expr) {
             snprintf(err, err_sz, "bcftools_score: out of memory");
             return -1;
         }
-        src->exclude_filt = hts_filter_init(src->exclude_expr_eval);
+        if (duckhts_filter_try_begin() != 0) {
+            duckhts_filter_try_end();
+            free(exclude_expr);
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
+            return -1;
+        }
+        src->exclude_filt = filter_parse(hdr0, exclude_expr);
+        duckhts_filter_try_end();
+        free(exclude_expr);
         if (!src->exclude_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
             return -1;
         }
-        if (score_validate_expr_tags(src->exclude_expr_eval, hdr0, err, err_sz) != 0) {
+        if (filter_status(src->exclude_filt) != FILTER_OK) {
+            undef = filter_list_undef_tags(src->exclude_filt, &nundef);
+            (void)undef;
+            (void)nundef;
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
             return -1;
         }
     }
@@ -1713,10 +1322,8 @@ static int score_source_next(score_scan_source_t *src, bcf1_t **out_rec) {
 
 static void score_source_destroy(score_scan_source_t *src) {
     if (!src) return;
-    if (src->include_filt) hts_filter_free(src->include_filt);
-    if (src->exclude_filt) hts_filter_free(src->exclude_filt);
-    if (src->include_expr_eval) free(src->include_expr_eval);
-    if (src->exclude_expr_eval) free(src->exclude_expr_eval);
+    if (src->include_filt) filter_destroy(src->include_filt);
+    if (src->exclude_filt) filter_destroy(src->exclude_filt);
     if (src->sr) {
         bcf_sr_destroy(src->sr);
         src->sr = NULL;
@@ -2234,7 +1841,7 @@ static void score_init(duckdb_init_info info) {
             if (!score_record_in_region_list(hdr, rec, bind->regions, bind->regions_overlap >= 0 ? bind->regions_overlap : 1)) continue;
             if (!score_record_in_region_list(hdr, rec, bind->targets, bind->targets_overlap >= 0 ? bind->targets_overlap : 0)) continue;
             {
-                int expr_keep = score_record_matches_exprs(hdr, rec, &src, err, sizeof(err));
+                int expr_keep = score_record_matches_exprs(rec, &src);
                 if (expr_keep < 0) {
                     if (idxs) duckdb_free(idxs);
                     if (int32_arr) free(int32_arr);
@@ -2250,7 +1857,7 @@ static void score_init(duckdb_init_info info) {
                         duckdb_free(summaries);
                     }
                     score_destroy_init(init);
-                    duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to evaluate filter expression");
+                    duckdb_init_set_error(info, "bcftools_score: failed to evaluate include/exclude expression");
                     return;
                 }
                 if (expr_keep == 0) continue;

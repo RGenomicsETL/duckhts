@@ -86,6 +86,8 @@ set(EXTENSION_SOURCES
         src/quality_encoding.c
         src/quality_encoding_reader.c
         src/score_udf.c
+        src/bcftools_filter.c
+        src/bcftools_shim.c
 )
 
 if (DUCKDB_WASM_EXTENSION)
