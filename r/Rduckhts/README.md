@@ -233,7 +233,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_readme_25b1de2b559e03.fai
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_readme_2613dc471e14c9.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -293,10 +293,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_liftover_src_25b1de45e99703.fa.fai
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_liftover_src_2613dc12648196.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_liftover_dst_25b1de1cd830ff.fa.fai
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_liftover_dst_2613dc16ee290d.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -341,7 +341,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                          index_path
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_munge_25b1de5dd9d496.fa.fai
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_munge_2613dc6f102dcc.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -376,12 +376,12 @@ writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
 #>   success                                           output_path bytes_in
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_targets_25b1de3dca78d9.bed.gz       25
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_targets_2613dc1e5907cb.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_targets_25b1de3dca78d9.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_targets_2613dc1e5907cb.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
@@ -448,7 +448,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmppSDetv/duckhts_readme_25b1de69a3d1f9.fai
+#> 1    TRUE /tmp/RtmpgnAgba/duckhts_readme_2613dc30872e2c.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
