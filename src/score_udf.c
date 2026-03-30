@@ -120,7 +120,30 @@ typedef struct {
 } score_scan_source_t;
 
 static char *score_to_filter_expr(const char *expr) {
-    return expr ? strdup(expr) : NULL;
+    size_t i;
+    size_t j;
+    size_t len;
+    char *out;
+    if (!expr) return NULL;
+    len = strlen(expr);
+    out = (char *)malloc(len + 1);
+    if (!out) return NULL;
+    for (i = 0, j = 0; i < len;) {
+        if (expr[i] == '>' || expr[i] == '<') {
+            char op = expr[i];
+            i++;
+            if (i < len && expr[i] == op) {
+                free(out);
+                return strdup("");
+            }
+            out[j++] = op;
+            if (i < len && expr[i] == '=') out[j++] = expr[i++];
+            continue;
+        }
+        out[j++] = expr[i++];
+    }
+    out[j] = '\0';
+    return out;
 }
 
 static const char *score_col_headers[SCORE_HDR_SIZE] = {
@@ -1244,6 +1267,13 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             snprintf(err, err_sz, "bcftools_score: out of memory");
             return -1;
         }
+        if (!include_expr[0]) {
+            free(include_expr);
+            include_expr = NULL;
+        }
+        if (!include_expr) {
+            src->include_filt = NULL;
+        } else {
         src->include_filt = filter_parse(hdr0, include_expr);
         free(include_expr);
         if (!src->include_filt) {
@@ -1261,6 +1291,7 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             }
             return -1;
         }
+        }
     }
     if (bind->exclude_expr && bind->exclude_expr[0]) {
         char *exclude_expr = score_to_filter_expr(bind->exclude_expr);
@@ -1268,6 +1299,13 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             snprintf(err, err_sz, "bcftools_score: out of memory");
             return -1;
         }
+        if (!exclude_expr[0]) {
+            free(exclude_expr);
+            exclude_expr = NULL;
+        }
+        if (!exclude_expr) {
+            src->exclude_filt = NULL;
+        } else {
         src->exclude_filt = filter_parse(hdr0, exclude_expr);
         free(exclude_expr);
         if (!src->exclude_filt) {
@@ -1284,6 +1322,7 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
                 snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
             }
             return -1;
+        }
         }
     }
 

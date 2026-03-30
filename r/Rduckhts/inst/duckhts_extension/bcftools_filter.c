@@ -163,6 +163,7 @@ static void duckhts_filter_store_error(filter_t *filter, const char *format, va_
     duckhts_filter_trim_last_error(filter->last_error);
 }
 
+static void duckhts_filter_raise_common(int with_errno, const char *format, va_list ap) HTS_NORETURN;
 static void duckhts_filter_raise_common(int with_errno, const char *format, va_list ap)
 {
     filter_t *filter = NULL;
