@@ -18,6 +18,32 @@ ORDER BY SAMPLE
 S1	1.8
 S2	0.1
 
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'INFO/ZZZ==1'
+)
+----
+failed to evaluate include expression
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'FORMAT/GT=="0/0"'
+)
+ORDER BY SAMPLE
+----
+S1	0.0
+S2	0.5
+
 # --- q_score_thr with counts ---
 # Column naming follows upstream: <prs>_CNT_p<thr> (not <prs>_p<thr>_CNT)
 # Boundary precision: strtof→double promotion means exact-boundary P values
@@ -287,3 +313,224 @@ ORDER BY SAMPLE
 ----
 S1	0.0
 S2	0.5
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'TYPE=="SNP" && N_ALT==1'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'FILTER=="PASS"'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- Sample subsetting: single sample ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  samples := 'S1'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+
+# --- Sample subsetting: missing sample errors ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  samples := 'S1,NOSAMPLE'
+)
+----
+sample #2 not found in the header
+
+# --- Sample subsetting: force_samples ignores missing ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  samples := 'S1,NOSAMPLE',
+  force_samples := true
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+
+# --- GWAS-VCF summary mode: auto-detected multi-PRS scoring ---
+query TTT
+SELECT SAMPLE, round(PRS_A, 3), round(PRS_B, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_gwas_summary.vcf',
+  use := 'GT'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	1.0
+S2	0.1	0.3
+
+# --- regions / targets / apply_filters controls ---
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  regions := '1:150-250'
+)
+ORDER BY SAMPLE
+----
+S1	-0.2
+S2	-0.4
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  regions_file := '__WORKING_DIRECTORY__/test/data/score_regions.txt'
+)
+ORDER BY SAMPLE
+----
+S1	-0.2
+S2	-0.4
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  targets := '1:150-250'
+)
+ORDER BY SAMPLE
+----
+S1	-0.2
+S2	-0.4
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  targets_file := '__WORKING_DIRECTORY__/test/data/score_targets.txt'
+)
+ORDER BY SAMPLE
+----
+S1	-0.2
+S2	-0.4
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  apply_filters := 'PASS'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'POS >>> 100'
+)
+----
+failed to evaluate include expression
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'POS > 100'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	-0.4
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  exclude := 'POS > 100'
+)
+ORDER BY SAMPLE
+----
+S1	0.0
+S2	0.5
+
+# --- GWAS-VCF with counts ---
+query TTTTT
+SELECT SAMPLE, round(PRS_A, 3), PRS_A_CNT, round(PRS_B, 3), PRS_B_CNT
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_gwas_summary.vcf',
+  use := 'GT',
+  counts := true
+)
+ORDER BY SAMPLE
+----
+S1	1.8	3	1.0	2
+S2	0.1	3	0.3	2
+
+# --- GWAS-VCF with sample subsetting ---
+query TTT
+SELECT SAMPLE, round(PRS_A, 3), round(PRS_B, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_gwas_summary.vcf',
+  use := 'GT',
+  samples := 'S1'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	1.0

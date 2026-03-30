@@ -1681,6 +1681,13 @@ rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) 
 #' @param src_fasta_ref Optional source FASTA reference
 #' @param max_snp_gap Maximum chain block merge gap
 #' @param max_indel_inc Maximum indel anchor expansion
+#' @param lift_mt If FALSE (default), mitochondrial variants with matching
+#'   source/destination contig lengths are passed through with only contig
+#'   rename. If TRUE, MT variants are lifted through the chain like any
+#'   other contig.
+#' @param end_pos_col Optional column name containing INFO/END positions
+#'   (1-based) to lift alongside the primary position. When provided, the
+#'   output includes a `dest_end` column with the lifted end position.
 #'
 #' @return A data frame with source columns, lifted coordinates/alleles, and warnings.
 #'
@@ -1696,7 +1703,9 @@ rduckhts_liftover <- function(
   alt_col = NULL,
   src_fasta_ref = NULL,
   max_snp_gap = 1,
-  max_indel_inc = 250
+  max_indel_inc = 250,
+  lift_mt = FALSE,
+  end_pos_col = NULL
 ) {
   table_expr <- query
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
@@ -1719,8 +1728,10 @@ rduckhts_liftover <- function(
   params <- c(
     params,
     sprintf("max_snp_gap := %d", max_snp_gap),
-    sprintf("max_indel_inc := %d", max_indel_inc)
+    sprintf("max_indel_inc := %d", max_indel_inc),
+    sprintf("lift_mt := %s", tolower(as.character(lift_mt)))
   )
+  if (!is.null(end_pos_col)) params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
   sql <- sprintf("SELECT * FROM duckdb_liftover(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }
@@ -1734,7 +1745,9 @@ rduckhts_liftover <- function(
 #'
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param query SQL query or table expression to normalize
-#' @param fasta_ref Path to the reference FASTA
+#' @param fasta_ref Path to the reference FASTA. When NULL (default), operates
+#'   in fai-only mode: alleles pass through as-is without reference matching
+#'   or allele swapping, matching upstream `--fai`-only behavior.
 #' @param preset Optional preset such as `"PLINK"`, `"PLINK2"`, `"REGENIE"`,
 #'   `"SAIGE"`, `"BOLT"`, `"METAL"`, `"PGS"`, or `"SSF"`
 #' @param column_map Optional named character vector mapping canonical munge names
@@ -1751,7 +1764,7 @@ rduckhts_liftover <- function(
 rduckhts_munge <- function(
   con,
   query,
-  fasta_ref,
+  fasta_ref = NULL,
   preset = NULL,
   column_map = NULL,
   column_map_file = NULL,
@@ -1797,9 +1810,11 @@ rduckhts_munge <- function(
   if (!is.null(preset)) params <- c(params, sprintf("preset := '%s'", preset))
   if (!is.null(column_map)) params <- c(params, sprintf("column_map := %s", sql_map_literal(column_map)))
   if (!is.null(column_map_file)) params <- c(params, sprintf("column_map_file := '%s'", column_map_file))
+  if (!is.null(fasta_ref)) {
+    params <- c(params, sprintf("fasta_ref := '%s'", fasta_ref))
+  }
   params <- c(
     params,
-    sprintf("fasta_ref := '%s'", fasta_ref),
     sprintf("iffy_tag := '%s'", iffy_tag),
     sprintf("mismatch_tag := '%s'", mismatch_tag)
   )
@@ -1828,6 +1843,17 @@ rduckhts_munge <- function(
 #' @param q_score_thr Optional comma-separated p-value thresholds (e.g. `"1e-8,1e-6,1e-4"`)
 #' @param use_variant_id Logical; if TRUE, match variants by ID instead of CHR+BP
 #' @param counts Logical; if TRUE, include per-threshold matched-variant counts
+#' @param samples Optional comma-separated list of sample names to subset (e.g. `"SAMP1,SAMP2"`)
+#' @param force_samples Logical; if TRUE, ignore missing samples instead of erroring
+#' @param regions Optional comma-separated region list (e.g. `"1:1000-2000,2:50-90"`)
+#' @param regions_file Optional path to a regions file
+#' @param regions_overlap Optional overlap mode for regions (`0`, `1`, or `2`)
+#' @param targets Optional comma-separated targets list
+#' @param targets_file Optional path to a targets file
+#' @param targets_overlap Optional overlap mode for targets (`0`, `1`, or `2`)
+#' @param apply_filters Optional comma-separated FILTER names to keep (e.g. `"PASS,."`)
+#' @param include Optional site expression (currently unsupported)
+#' @param exclude Optional site expression (currently unsupported)
 #'
 #' @return A data frame with one row per sample and score/count columns.
 #'
@@ -1841,7 +1867,18 @@ rduckhts_score <- function(
   columns_file = NULL,
   q_score_thr = NULL,
   use_variant_id = FALSE,
-  counts = FALSE
+  counts = FALSE,
+  samples = NULL,
+  force_samples = FALSE,
+  regions = NULL,
+  regions_file = NULL,
+  regions_overlap = NULL,
+  targets = NULL,
+  targets_file = NULL,
+  targets_overlap = NULL,
+  apply_filters = NULL,
+  include = NULL,
+  exclude = NULL
 ) {
   if (!is.null(use)) {
     use <- toupper(use)
@@ -1863,10 +1900,21 @@ rduckhts_score <- function(
   if (!is.null(columns)) params <- c(params, sprintf("columns := '%s'", columns))
   if (!is.null(columns_file)) params <- c(params, sprintf("columns_file := '%s'", columns_file))
   if (!is.null(q_score_thr)) params <- c(params, sprintf("q_score_thr := '%s'", q_score_thr))
+  if (!is.null(samples)) params <- c(params, sprintf("samples := '%s'", samples))
+  if (!is.null(regions)) params <- c(params, sprintf("regions := '%s'", regions))
+  if (!is.null(regions_file)) params <- c(params, sprintf("regions_file := '%s'", regions_file))
+  if (!is.null(regions_overlap)) params <- c(params, sprintf("regions_overlap := %d", as.integer(regions_overlap)))
+  if (!is.null(targets)) params <- c(params, sprintf("targets := '%s'", targets))
+  if (!is.null(targets_file)) params <- c(params, sprintf("targets_file := '%s'", targets_file))
+  if (!is.null(targets_overlap)) params <- c(params, sprintf("targets_overlap := %d", as.integer(targets_overlap)))
+  if (!is.null(apply_filters)) params <- c(params, sprintf("apply_filters := '%s'", apply_filters))
+  if (!is.null(include)) params <- c(params, sprintf("include := '%s'", include))
+  if (!is.null(exclude)) params <- c(params, sprintf("exclude := '%s'", exclude))
   params <- c(
     params,
     sprintf("use_variant_id := %s", if (isTRUE(use_variant_id)) "true" else "false"),
-    sprintf("counts := %s", if (isTRUE(counts)) "true" else "false")
+    sprintf("counts := %s", if (isTRUE(counts)) "true" else "false"),
+    sprintf("force_samples := %s", if (isTRUE(force_samples)) "true" else "false")
   )
   sql <- sprintf("SELECT * FROM bcftools_score(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)

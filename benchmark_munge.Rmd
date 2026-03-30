@@ -165,7 +165,8 @@ run_duckdb_output <- function(score_path, fasta_path) {
 
 bcftools_output_sql <- function(output_path) {
   paste0(
-    "SELECT CHROM AS chrom, POS AS pos, REF AS ref, ALT[1] AS alt, 'PASS' AS filter, ",
+    "SELECT CHROM AS chrom, POS AS pos, REF AS ref, ALT[1] AS alt, ",
+    "coalesce(FILTER, 'PASS') AS filter, ",
     "COUNT(*) AS bcftools_n ",
     "FROM read_bcf(", sql_string(output_path), ") ",
     "GROUP BY ALL ",

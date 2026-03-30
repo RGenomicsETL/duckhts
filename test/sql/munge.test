@@ -215,3 +215,34 @@ FROM (
 ) s;
 ----
 MissingContig	0.88	42.0	2.0	+-+
+
+# M-M9: fai-only mode — NULL fasta_ref skips ref matching, alleles pass through
+query TITTIT
+SELECT m.chrom,
+       m.pos,
+       m.ref,
+       m.alt,
+       CASE WHEN m.alleles_swapped THEN 1 ELSE 0 END,
+       CASE WHEN m.filter IS NULL THEN 'PASS' ELSE m.filter END
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'C', 'A', 'rs_fai1',
+    NULL, NULL, NULL, 0.25,
+    1000, NULL, NULL, NULL, 0.1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrF	2	A	C	0	PASS
+
+# M-M9: fai-only mode via duckdb_munge macro (no fasta_ref parameter)
+query TITTIT
+SELECT chrom, pos, ref, alt,
+       CASE WHEN alleles_swapped THEN 1 ELSE 0 END,
+       CASE WHEN filter IS NULL THEN 'PASS' ELSE filter END
+FROM duckdb_munge(
+  '(VALUES (''chrF'', 2, ''A'', ''C'', ''rs_fai2'', 0.01)) AS t("CHR", "BP", "A1", "A2", "SNP", "P")',
+  column_map := map(['CHR','BP','A1','A2','SNP','P'], ['CHR','BP','A1','A2','SNP','P'])
+);
+----
+chrF	2	C	A	0	PASS

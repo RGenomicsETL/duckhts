@@ -10,7 +10,11 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdlib.h>
 #include <string.h>
 
+#include <htslib/hts.h>
+#include <htslib/hts_expr.h>
 #include <htslib/khash_str2int.h>
+#include <htslib/kstring.h>
+#include <htslib/synced_bcf_reader.h>
 #include <htslib/vcf.h>
 
 #ifndef duckdb_malloc
@@ -35,6 +39,12 @@ DUCKDB_EXTENSION_EXTERN
 #define SCORE_HDR_BETA 8
 #define SCORE_HDR_LP 16
 #define SCORE_HDR_SIZE 24
+/* Sentinel for columns that upstream recognizes but does not extract data from
+ * (NULL setter in upstream score.c:141-164).  These entries ensure the header
+ * matcher recognizes the column name and silently consumes it, preventing
+ * misidentification of adjacent columns.  Falls through to default:break in
+ * the switch at header-match time (S-M5). */
+#define SCORE_HDR_UNUSED -1
 
 KHASH_MAP_INIT_INT64(score64, int)
 
@@ -51,9 +61,23 @@ typedef struct {
     char *summary_path;
     char *columns_preset;
     char *columns_file;
+    char *samples;
+    char *regions;
+    char *regions_file;
+    int regions_overlap;
+    char *targets;
+    char *targets_file;
+    int targets_overlap;
+    char *apply_filters;
+    char *include_expr;
+    char *exclude_expr;
+    int force_samples;
     double *q_thr_lp;
     int n_q_thr;
-    char *prs_name;
+    char *prs_name;       /* TSV mode: single PRS name from summary filename */
+    int gwas_vcf_mode;    /* 1 if summary is GWAS-VCF (FORMAT/ES+LP) */
+    int n_prs;            /* GWAS-VCF: number of PRS (= summary VCF samples) */
+    char **prs_names;     /* GWAS-VCF: PRS names (= summary VCF sample names) */
 } score_bind_t;
 
 typedef struct {
@@ -87,6 +111,19 @@ typedef struct {
     int m_markers;
 } score_summary_t;
 
+typedef struct {
+    bcf_srs_t *sr;
+    hts_filter_t *include_filt;
+    hts_filter_t *exclude_filt;
+    char *include_expr_eval;
+    char *exclude_expr_eval;
+} score_scan_source_t;
+
+typedef struct {
+    const bcf_hdr_t *hdr;
+    bcf1_t *rec;
+} score_expr_ctx_t;
+
 static const char *score_col_headers[SCORE_HDR_SIZE] = {
     "SNP", "BP", "CHR", "A1", "A2", "P", "Z", "OR", "BETA", "N", "N_CAS", "N_CON",
     "INFO", "FRQ", "A*", "SE", "LP", "AC", "NEFF", "NEFFDIV2", "HET_I2", "HET_P", "HET_LP", "DIRE"
@@ -94,47 +131,80 @@ static const char *score_col_headers[SCORE_HDR_SIZE] = {
 
 static score_mapping_t score_plink_mapping[] = {
     {"SNP", SCORE_HDR_SNP}, {"BP", SCORE_HDR_BP}, {"CHR", SCORE_HDR_CHR}, {"A1", SCORE_HDR_A1},
-    {"P", SCORE_HDR_P}, {"OR", SCORE_HDR_OR}, {"BETA", SCORE_HDR_BETA}
+    {"A2", SCORE_HDR_UNUSED}, {"P", SCORE_HDR_P}, {"OR", SCORE_HDR_OR}, {"BETA", SCORE_HDR_BETA},
+    {"INFO", SCORE_HDR_UNUSED}, {"F_U", SCORE_HDR_UNUSED}, {"FRQ", SCORE_HDR_UNUSED}, {"SE", SCORE_HDR_UNUSED}
 };
 
 static score_mapping_t score_plink2_mapping[] = {
     {"ID", SCORE_HDR_SNP}, {"POS", SCORE_HDR_BP}, {"CHROM", SCORE_HDR_CHR}, {"A1", SCORE_HDR_A1},
-    {"P", SCORE_HDR_P}, {"OR", SCORE_HDR_OR}, {"BETA", SCORE_HDR_BETA}, {"LOG10_P", SCORE_HDR_LP}
+    {"AX", SCORE_HDR_UNUSED}, {"P", SCORE_HDR_P}, {"Z_STAT", SCORE_HDR_UNUSED}, {"OR", SCORE_HDR_OR},
+    {"BETA", SCORE_HDR_BETA}, {"MACH_R2", SCORE_HDR_UNUSED}, {"A1_FREQ", SCORE_HDR_UNUSED},
+    {"SE", SCORE_HDR_UNUSED}, {"LOG(OR)_SE", SCORE_HDR_UNUSED}, {"LOG10_P", SCORE_HDR_LP}
 };
 
 static score_mapping_t score_regenie_mapping[] = {
     {"ID", SCORE_HDR_SNP}, {"GENPOS", SCORE_HDR_BP}, {"CHROM", SCORE_HDR_CHR}, {"ALLELE1", SCORE_HDR_A1},
-    {"BETA", SCORE_HDR_BETA}, {"LOG10P", SCORE_HDR_LP}
+    {"BETA", SCORE_HDR_BETA}, {"N", SCORE_HDR_UNUSED}, {"N_CASES", SCORE_HDR_UNUSED},
+    {"N_CONTROLS", SCORE_HDR_UNUSED}, {"INFO", SCORE_HDR_UNUSED}, {"A1FREQ", SCORE_HDR_UNUSED},
+    {"ALLELE0", SCORE_HDR_UNUSED}, {"SE", SCORE_HDR_UNUSED}, {"LOG10P", SCORE_HDR_LP},
+    {"AC_ALLELE1", SCORE_HDR_UNUSED}
 };
 
 static score_mapping_t score_saige_mapping[] = {
     {"SNPID", SCORE_HDR_SNP}, {"markerID", SCORE_HDR_SNP}, {"POS", SCORE_HDR_BP}, {"CHR", SCORE_HDR_CHR},
-    {"Allele2", SCORE_HDR_A1}, {"p.value", SCORE_HDR_P}, {"BETA", SCORE_HDR_BETA}
+    {"Allele2", SCORE_HDR_A1}, {"Allele1", SCORE_HDR_UNUSED}, {"p.value", SCORE_HDR_P}, {"BETA", SCORE_HDR_BETA},
+    {"N", SCORE_HDR_UNUSED}, {"N_case", SCORE_HDR_UNUSED}, {"N_ctrl", SCORE_HDR_UNUSED},
+    {"imputationInfo", SCORE_HDR_UNUSED}, {"AF_Allele2", SCORE_HDR_UNUSED}, {"SE", SCORE_HDR_UNUSED},
+    {"AC_Allele2", SCORE_HDR_UNUSED}
 };
 
 static score_mapping_t score_bolt_mapping[] = {
     {"SNP", SCORE_HDR_SNP}, {"BP", SCORE_HDR_BP}, {"CHR", SCORE_HDR_CHR}, {"ALLELE1", SCORE_HDR_A1},
-    {"P_BOLT_LMM", SCORE_HDR_P}, {"P_BOLT_LMM_INF", SCORE_HDR_P}, {"P_LINREG", SCORE_HDR_P}, {"BETA", SCORE_HDR_BETA}
+    {"P_LINREG", SCORE_HDR_P}, {"P_BOLT_LMM_INF", SCORE_HDR_P}, {"P_BOLT_LMM", SCORE_HDR_P},
+    {"BETA", SCORE_HDR_BETA}, {"A1FREQ", SCORE_HDR_UNUSED}, {"ALLELE0", SCORE_HDR_UNUSED},
+    {"SE", SCORE_HDR_UNUSED}
 };
 
 static score_mapping_t score_metal_mapping[] = {
-    {"MarkerName", SCORE_HDR_SNP}, {"Position", SCORE_HDR_BP}, {"Chromosome", SCORE_HDR_CHR}, {"Allele1", SCORE_HDR_A1},
-    {"P-value", SCORE_HDR_P}, {"Effect", SCORE_HDR_BETA}, {"log(P)", SCORE_HDR_LP}
+    {"MarkerName", SCORE_HDR_SNP}, {"Position", SCORE_HDR_BP}, {"Chromosome", SCORE_HDR_CHR},
+    {"Allele1", SCORE_HDR_A1}, {"Allele2", SCORE_HDR_UNUSED}, {"P-value", SCORE_HDR_P},
+    {"Zscore", SCORE_HDR_UNUSED}, {"Effect", SCORE_HDR_BETA}, {"N", SCORE_HDR_UNUSED},
+    {"Freq1", SCORE_HDR_UNUSED}, {"StdErr", SCORE_HDR_UNUSED}, {"log(P)", SCORE_HDR_LP},
+    {"Weight", SCORE_HDR_UNUSED}, {"HetISq", SCORE_HDR_UNUSED}, {"HetPVal", SCORE_HDR_UNUSED},
+    {"logHetP", SCORE_HDR_UNUSED}, {"Direction", SCORE_HDR_UNUSED}
 };
 
 static score_mapping_t score_pgs_mapping[] = {
     {"rsID", SCORE_HDR_SNP}, {"chr_position", SCORE_HDR_BP}, {"chr_name", SCORE_HDR_CHR}, {"effect_allele", SCORE_HDR_A1},
-    {"OR", SCORE_HDR_OR}, {"HR", SCORE_HDR_OR}, {"effect_weight", SCORE_HDR_BETA}
+    {"other_allele", SCORE_HDR_UNUSED}, {"OR", SCORE_HDR_OR}, {"HR", SCORE_HDR_OR}, {"effect_weight", SCORE_HDR_BETA},
+    {"allelefrequency_effect", SCORE_HDR_UNUSED}
 };
 
 static score_mapping_t score_ssf_mapping[] = {
     {"variant_id", SCORE_HDR_SNP}, {"rsid", SCORE_HDR_SNP}, {"rs_id", SCORE_HDR_SNP},
     {"base_pair_location", SCORE_HDR_BP}, {"chromosome", SCORE_HDR_CHR}, {"effect_allele", SCORE_HDR_A1},
-    {"p_value", SCORE_HDR_P}, {"odds_ratio", SCORE_HDR_OR}, {"hazard_ratio", SCORE_HDR_OR}, {"beta", SCORE_HDR_BETA}
+    {"other_allele", SCORE_HDR_UNUSED}, {"p_value", SCORE_HDR_P}, {"odds_ratio", SCORE_HDR_OR},
+    {"hazard_ratio", SCORE_HDR_OR}, {"beta", SCORE_HDR_BETA}, {"n", SCORE_HDR_UNUSED},
+    {"info", SCORE_HDR_UNUSED}, {"effect_allele_frequency", SCORE_HDR_UNUSED},
+    {"standard_error", SCORE_HDR_UNUSED}
 };
 
 static int score_is_missing(float f) {
     return isnan(f) || bcf_float_is_missing(f) || bcf_float_is_vector_end(f);
+}
+
+/* Detect whether a summary file is GWAS-VCF format by checking htslib file type.
+ * Returns 1 if VCF/BCF, 0 otherwise. */
+static int score_is_vcf_summary(const char *path) {
+    htsFile *fp = hts_open(path, "r");
+    int is_vcf = 0;
+    if (!fp) return 0;
+    if (fp->format.category == sequence_data || fp->format.category == variant_data) {
+        enum htsExactFormat fmt = fp->format.format;
+        if (fmt == vcf || fmt == bcf) is_vcf = 1;
+    }
+    hts_close(fp);
+    return is_vcf;
 }
 
 /* Port of bcf_hdr_name2id_flexible() from bcftools +score (score.h).
@@ -401,13 +471,28 @@ static int score_parse_q_thresholds(const char *s, double **out_arr, int *out_n)
 
 static void score_destroy_bind(void *data) {
     score_bind_t *bind = (score_bind_t *)data;
+    int i;
     if (!bind) return;
     if (bind->bcf_path) duckdb_free(bind->bcf_path);
     if (bind->summary_path) duckdb_free(bind->summary_path);
     if (bind->columns_preset) duckdb_free(bind->columns_preset);
     if (bind->columns_file) duckdb_free(bind->columns_file);
+    if (bind->samples) duckdb_free(bind->samples);
+    if (bind->regions) duckdb_free(bind->regions);
+    if (bind->regions_file) duckdb_free(bind->regions_file);
+    if (bind->targets) duckdb_free(bind->targets);
+    if (bind->targets_file) duckdb_free(bind->targets_file);
+    if (bind->apply_filters) duckdb_free(bind->apply_filters);
+    if (bind->include_expr) duckdb_free(bind->include_expr);
+    if (bind->exclude_expr) duckdb_free(bind->exclude_expr);
     if (bind->q_thr_lp) duckdb_free(bind->q_thr_lp);
     if (bind->prs_name) duckdb_free(bind->prs_name);
+    if (bind->prs_names) {
+        for (i = 0; i < bind->n_prs; i++) {
+            if (bind->prs_names[i]) duckdb_free(bind->prs_names[i]);
+        }
+        duckdb_free(bind->prs_names);
+    }
     duckdb_free(bind);
 }
 
@@ -482,8 +567,8 @@ static int score_header_index(char **headers, int n_headers, const char *key) {
 }
 
 static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *bcf_hdr, char *err, size_t err_sz) {
-    FILE *fp = NULL;
-    char line[32768];
+    htsFile *fp = NULL;
+    kstring_t str = {0, 0, NULL};
     char *fields[512];
     char delimiter = '\t';
     score_mapping_t *mapping = NULL;
@@ -508,28 +593,31 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         }
     }
 
-    fp = fopen(bind->summary_path, "r");
+    /* Use hts_open for transparent .gz/.bgz decompression (S-C3).
+     * Upstream: score.c:196. */
+    fp = hts_open(bind->summary_path, "r");
     if (!fp) {
         snprintf(err, err_sz, "bcftools_score: cannot open summary '%s': %s", bind->summary_path, strerror(errno));
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
 
-    while (fgets(line, sizeof(line), fp)) {
-        if (line[0] == '#' && strncmp(line, "#CHR", 4) != 0 && strncmp(line, "#ID", 3) != 0) continue;
+    while (hts_getline(fp, '\n', &str) >= 0) {
+        if (str.s[0] == '#' && strncmp(str.s, "#CHR", 4) != 0 && strncmp(str.s, "#ID", 3) != 0) continue;
         break;
     }
-    if (line[0] == '\0') {
+    if (!str.s || str.l == 0) {
         snprintf(err, err_sz, "bcftools_score: empty summary file '%s'", bind->summary_path);
-        fclose(fp);
+        hts_close(fp);
+        free(str.s);
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
-    if (line[0] == '#') memmove(line, line + 1, strlen(line));
-    delimiter = score_detect_delimiter(line);
+    if (str.s[0] == '#') { memmove(str.s, str.s + 1, str.l - 1); str.l--; str.s[str.l] = '\0'; }
+    delimiter = score_detect_delimiter(str.s);
     {
         int i;
-        int n_fields = score_split_fields(line, delimiter, fields, 512);
+        int n_fields = score_split_fields(str.s, delimiter, fields, 512);
         for (i = 0; i < mapping_n; i++) {
             int idx = score_header_index(fields, n_fields, mapping[i].hdr_str);
             if (idx < 0) continue;
@@ -559,21 +647,24 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     if (!summary->a1_ok || !summary->beta_ok) {
         snprintf(err, err_sz, "bcftools_score: summary must include effect allele and effect size/OR columns");
         score_destroy_summary(summary);
-        fclose(fp);
+        hts_close(fp);
+        free(str.s);
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
     if (bind->use_variant_id && !summary->snp_ok) {
         snprintf(err, err_sz, "bcftools_score: summary must include marker name column when use_variant_id=true");
         score_destroy_summary(summary);
-        fclose(fp);
+        hts_close(fp);
+        free(str.s);
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
     if (summary->use_snp && !summary->snp_ok) {
         snprintf(err, err_sz, "bcftools_score: summary must include marker name column when matching by variant ID");
         score_destroy_summary(summary);
-        fclose(fp);
+        hts_close(fp);
+        free(str.s);
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
@@ -586,7 +677,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
 
     (void)unused_alleles;
 
-    while (fgets(line, sizeof(line), fp)) {
+    while (hts_getline(fp, '\n', &str) >= 0) {
         int n_fields;
         float es = NAN;
         float lp = NAN;
@@ -596,8 +687,8 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         int64_t pos = -1;
 
         marker.a1 = NULL;
-        if (line[0] == '#') continue;
-        n_fields = score_split_fields(line, delimiter, fields, 512);
+        if (str.s[0] == '#') continue;
+        n_fields = score_split_fields(str.s, delimiter, fields, 512);
         if (n_fields == 0) continue;
 
         if (idx_a1 < n_fields) {
@@ -676,9 +767,172 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         }
     }
 
-    fclose(fp);
+    hts_close(fp);
+    free(str.s);
     if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
     return summary;
+}
+
+/* Load GWAS-VCF summary: reads FORMAT/ES and FORMAT/LP per-sample from a VCF/BCF
+ * summary file and builds one score_summary_t per PRS (= GWAS-VCF sample).
+ * Port of upstream score.c:681-710 (synced reader VCF path), adapted to pre-load
+ * into the TSV-mode summary structure for scoring.
+ *
+ * Returns array of n_prs summaries on success, NULL on error. */
+static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
+                                                 bcf_hdr_t *geno_hdr,
+                                                 int n_prs,
+                                                 char *err, size_t err_sz) {
+    htsFile *sfp = NULL;
+    bcf_hdr_t *shdr = NULL;
+    bcf1_t *rec = NULL;
+    score_summary_t **summaries = NULL;
+    float *float_arr = NULL;
+    int m_float = 0;
+    int i, j;
+
+    sfp = hts_open(bind->summary_path, "r");
+    if (!sfp) {
+        snprintf(err, err_sz, "bcftools_score: cannot open GWAS-VCF summary '%s'", bind->summary_path);
+        return NULL;
+    }
+    shdr = bcf_hdr_read(sfp);
+    if (!shdr) {
+        snprintf(err, err_sz, "bcftools_score: cannot read GWAS-VCF header '%s'", bind->summary_path);
+        hts_close(sfp);
+        return NULL;
+    }
+
+    /* Validate FORMAT/ES exists */
+    {
+        int es_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "ES");
+        if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, es_id)) {
+            snprintf(err, err_sz, "bcftools_score: GWAS-VCF '%s' does not include the ES FORMAT field", bind->summary_path);
+            bcf_hdr_destroy(shdr);
+            hts_close(sfp);
+            return NULL;
+        }
+    }
+    /* Validate FORMAT/LP if q_score_thr is set */
+    if (bind->q_thr_lp) {
+        int lp_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "LP");
+        if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, lp_id)) {
+            snprintf(err, err_sz, "bcftools_score: GWAS-VCF '%s' does not include the LP FORMAT field", bind->summary_path);
+            bcf_hdr_destroy(shdr);
+            hts_close(sfp);
+            return NULL;
+        }
+    }
+
+    if (bcf_hdr_nsamples(shdr) != n_prs) {
+        snprintf(err, err_sz, "bcftools_score: GWAS-VCF sample count mismatch (expected %d, got %d)", n_prs, bcf_hdr_nsamples(shdr));
+        bcf_hdr_destroy(shdr);
+        hts_close(sfp);
+        return NULL;
+    }
+
+    /* Allocate per-PRS summaries */
+    summaries = (score_summary_t **)duckdb_malloc(sizeof(score_summary_t *) * (size_t)n_prs);
+    if (!summaries) {
+        snprintf(err, err_sz, "bcftools_score: out of memory");
+        bcf_hdr_destroy(shdr);
+        hts_close(sfp);
+        return NULL;
+    }
+    for (i = 0; i < n_prs; i++) {
+        summaries[i] = (score_summary_t *)duckdb_malloc(sizeof(score_summary_t));
+        if (!summaries[i]) {
+            for (j = 0; j < i; j++) score_destroy_summary(summaries[j]);
+            duckdb_free(summaries);
+            bcf_hdr_destroy(shdr);
+            hts_close(sfp);
+            snprintf(err, err_sz, "bcftools_score: out of memory");
+            return NULL;
+        }
+        memset(summaries[i], 0, sizeof(score_summary_t));
+        summaries[i]->use_snp = 0; /* match by chr:pos */
+        summaries[i]->chr_ok = 1;
+        summaries[i]->bp_ok = 1;
+        summaries[i]->a1_ok = 1;
+        summaries[i]->beta_ok = 1;
+        summaries[i]->p_ok = bind->q_thr_lp ? 1 : 0;
+        summaries[i]->rid_pos2idx = kh_init(score64);
+    }
+
+    rec = bcf_init1();
+    while (bcf_read(sfp, shdr, rec) == 0) {
+        int n_es, n_lp = 0;
+        int rid;
+        uint64_t key;
+        const char *chrom;
+
+        bcf_unpack(rec, BCF_UN_ALL);
+        if (rec->n_allele < 2) continue;
+
+        chrom = bcf_hdr_id2name(shdr, rec->rid);
+        rid = score_hdr_name2id_flexible(geno_hdr, chrom);
+        if (rid < 0) continue;
+
+        key = (((uint64_t)(uint32_t)rid) << 44) | (uint64_t)rec->pos;
+
+        /* Read FORMAT/ES */
+        n_es = bcf_get_format_float(shdr, rec, "ES", &float_arr, &m_float);
+        if (n_es < n_prs) continue;
+
+        /* Read FORMAT/LP if needed */
+        float *lp_arr = NULL;
+        int m_lp = 0;
+        if (bind->q_thr_lp) {
+            n_lp = bcf_get_format_float(shdr, rec, "LP", &lp_arr, &m_lp);
+            if (n_lp < n_prs) { free(lp_arr); continue; }
+        }
+
+        /* Add marker to each PRS summary */
+        for (i = 0; i < n_prs; i++) {
+            float es = float_arr[i];
+            float lp = (lp_arr && i < n_lp) ? lp_arr[i] : NAN;
+            score_marker_t marker;
+            khash_t(score64) *hash;
+            khiter_t it;
+            int ret;
+
+            if (score_is_missing(es)) continue;
+            if (bind->q_thr_lp && score_is_missing(lp)) continue;
+
+            /* Effect allele = ALT (allele index 1) — upstream convention */
+            marker.a1 = score_dup(rec->d.allele[1]);
+            if (!marker.a1) continue;
+            score_strtoupper(marker.a1);
+            marker.es = es;
+            marker.lp = lp;
+
+            /* Grow markers array if needed */
+            if (summaries[i]->n_markers == summaries[i]->m_markers) {
+                int new_m = summaries[i]->m_markers ? summaries[i]->m_markers * 2 : 1024;
+                score_marker_t *new_mk = (score_marker_t *)realloc(summaries[i]->markers,
+                                                                     sizeof(score_marker_t) * (size_t)new_m);
+                if (!new_mk) { duckdb_free(marker.a1); continue; }
+                summaries[i]->markers = new_mk;
+                summaries[i]->m_markers = new_m;
+            }
+
+            hash = (khash_t(score64) *)summaries[i]->rid_pos2idx;
+            it = kh_put(score64, hash, key, &ret);
+            if (ret > 0) {
+                kh_val(hash, it) = summaries[i]->n_markers;
+                summaries[i]->markers[summaries[i]->n_markers++] = marker;
+            } else {
+                duckdb_free(marker.a1);
+            }
+        }
+        if (lp_arr) free(lp_arr);
+    }
+
+    bcf_destroy1(rec);
+    free(float_arr);
+    bcf_hdr_destroy(shdr);
+    hts_close(sfp);
+    return summaries;
 }
 
 static int score_resolve_use_tag(score_bind_t *bind, bcf_hdr_t *hdr, char *err, size_t err_sz) {
@@ -702,11 +956,702 @@ static int score_resolve_use_tag(score_bind_t *bind, bcf_hdr_t *hdr, char *err, 
         snprintf(err, err_sz, "bcftools_score: no supported FORMAT tag found (GT/DS/HDS/AP1+AP2/GP/AS)");
         return -1;
     }
-    if (bind->use_tag == SCORE_USE_AS && !bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, as_id)) {
-        snprintf(err, err_sz, "bcftools_score: AS FORMAT not found");
+
+    /* Validate that the selected tag (whether auto-detected or explicitly
+     * requested via use := '...') actually exists in the VCF header.
+     * Port of upstream score.c:767-795. */
+    switch (bind->use_tag) {
+    case SCORE_USE_GT:
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, gt_id)) {
+            snprintf(err, err_sz, "bcftools_score: VCF does not include the GT FORMAT field");
+            return -1;
+        }
+        break;
+    case SCORE_USE_DS:
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, ds_id)) {
+            snprintf(err, err_sz, "bcftools_score: VCF does not include the DS FORMAT field");
+            return -1;
+        }
+        break;
+    case SCORE_USE_HDS:
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, hds_id)) {
+            snprintf(err, err_sz, "bcftools_score: VCF does not include the HDS FORMAT field");
+            return -1;
+        }
+        break;
+    case SCORE_USE_AP:
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, ap1_id) || !bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, ap2_id)) {
+            snprintf(err, err_sz, "bcftools_score: VCF does not include either the AP1 or the AP2 FORMAT fields");
+            return -1;
+        }
+        break;
+    case SCORE_USE_GP:
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, gp_id)) {
+            snprintf(err, err_sz, "bcftools_score: VCF does not include the GP FORMAT field");
+            return -1;
+        }
+        break;
+    case SCORE_USE_AS:
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, as_id)) {
+            snprintf(err, err_sz, "bcftools_score: VCF does not include the AS FORMAT field");
+            return -1;
+        }
+        break;
+    }
+    return 0;
+}
+
+static int score_record_passes_filter_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *apply_filters) {
+    char *tmp = NULL;
+    char *tok = NULL;
+    int pass = 0;
+    int i;
+
+    if (!apply_filters || apply_filters[0] == '\0') return 1;
+    tmp = score_dup(apply_filters);
+    if (!tmp) return 0;
+
+    if (rec->d.n_flt == 0) {
+        for (tok = strtok(tmp, ","); tok; tok = strtok(NULL, ",")) {
+            if (strcmp(tok, ".") == 0 || strcasecmp(tok, "PASS") == 0) {
+                pass = 1;
+                break;
+            }
+        }
+        duckdb_free(tmp);
+        return pass;
+    }
+
+    for (i = 0; i < rec->d.n_flt && !pass; i++) {
+        const char *flt = bcf_hdr_int2id(hdr, BCF_DT_ID, rec->d.flt[i]);
+        tok = strtok(tmp, ",");
+        while (tok) {
+            if (strcmp(tok, flt) == 0) {
+                pass = 1;
+                break;
+            }
+            tok = strtok(NULL, ",");
+        }
+        if (!pass) strcpy(tmp, apply_filters);
+    }
+
+    duckdb_free(tmp);
+    return pass;
+}
+
+static int score_parse_region_token(const char *tok, char *chrom, size_t chrom_sz, int64_t *beg, int64_t *end) {
+    const char *c = strchr(tok, ':');
+    const char *d = c ? strchr(c + 1, '-') : NULL;
+    if (!tok || !*tok) return -1;
+    if (!c) {
+        snprintf(chrom, chrom_sz, "%s", tok);
+        *beg = 1;
+        *end = INT64_MAX / 2;
+        return 0;
+    }
+    {
+        size_t n = (size_t)(c - tok);
+        if (n >= chrom_sz) return -1;
+        memcpy(chrom, tok, n);
+        chrom[n] = '\0';
+    }
+    if (!d) {
+        *beg = atoll(c + 1);
+        *end = *beg;
+        return 0;
+    }
+    *beg = atoll(c + 1);
+    *end = atoll(d + 1);
+    if (*beg < 1) *beg = 1;
+    if (*end < *beg) *end = *beg;
+    return 0;
+}
+
+static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *regions, int overlap_mode) {
+    char *tmp, *tok;
+    const char *rname;
+    int64_t rec_beg, rec_end;
+
+    if (!regions || !regions[0]) return 1;
+    rname = bcf_hdr_id2name(hdr, rec->rid);
+    rec_beg = (int64_t)rec->pos + 1;
+    rec_end = rec_beg + (int64_t)(rec->rlen > 0 ? rec->rlen - 1 : 0);
+
+    tmp = score_dup(regions);
+    if (!tmp) return 0;
+    tok = strtok(tmp, ",");
+    while (tok) {
+        char chr[256];
+        int64_t beg = 1, end = INT64_MAX / 2;
+        if (score_parse_region_token(tok, chr, sizeof(chr), &beg, &end) == 0 && strcmp(chr, rname) == 0) {
+            if (overlap_mode == 0) {
+                if (rec_beg >= beg && rec_beg <= end) {
+                    duckdb_free(tmp);
+                    return 1;
+                }
+            } else {
+                if (!(rec_end < beg || rec_beg > end)) {
+                    duckdb_free(tmp);
+                    return 1;
+                }
+            }
+        }
+        tok = strtok(NULL, ",");
+    }
+    duckdb_free(tmp);
+    return 0;
+}
+
+static int score_append_token(char **out, size_t *len, size_t *cap, const char *tok) {
+    size_t tok_len;
+    size_t need;
+    char *next;
+    if (!tok || !tok[0]) return 0;
+    tok_len = strlen(tok);
+    need = *len + tok_len + ((*len > 0) ? 1 : 0) + 1;
+    if (need > *cap) {
+        size_t new_cap = *cap ? *cap : 256;
+        while (new_cap < need) new_cap *= 2;
+        next = (char *)realloc(*out, new_cap);
+        if (!next) return -1;
+        *out = next;
+        *cap = new_cap;
+    }
+    if (*len > 0) {
+        (*out)[*len] = ',';
+        *len += 1;
+    }
+    memcpy(*out + *len, tok, tok_len);
+    *len += tok_len;
+    (*out)[*len] = '\0';
+    return 0;
+}
+
+static int score_parse_region_line(const char *line, char *token, size_t token_sz) {
+    char buf[2048];
+    char *fields[8];
+    int n_fields;
+    if (!line) return -1;
+    snprintf(buf, sizeof(buf), "%s", line);
+    n_fields = score_split_fields(buf, '\t', fields, 8);
+    if (n_fields <= 0) return -1;
+    if (n_fields == 1) {
+        snprintf(token, token_sz, "%s", fields[0]);
+        return 0;
+    }
+    {
+        const char *chr = fields[0];
+        int64_t beg = atoll(fields[1]);
+        int64_t end = (n_fields >= 3) ? atoll(fields[2]) : beg;
+        if (beg < 1) beg = 1;
+        if (end < beg) end = beg;
+        snprintf(token, token_sz, "%s:%lld-%lld", chr, (long long)beg, (long long)end);
+    }
+    return 0;
+}
+
+static char *score_regions_from_file(const char *path, char *err, size_t err_sz) {
+    htsFile *fp;
+    kstring_t str = {0, 0, NULL};
+    char *out = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    int have = 0;
+
+    if (!path || !path[0]) return NULL;
+    fp = hts_open(path, "r");
+    if (!fp) {
+        snprintf(err, err_sz, "bcftools_score: failed to open region/target file: %s", path);
+        return NULL;
+    }
+
+    while (hts_getline(fp, '\n', &str) >= 0) {
+        char token[512];
+        char *s = str.s;
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (!*s || *s == '#') continue;
+        if (score_parse_region_line(s, token, sizeof(token)) != 0) {
+            if (str.s) free(str.s);
+            hts_close(fp);
+            if (out) duckdb_free(out);
+            snprintf(err, err_sz, "bcftools_score: invalid region/target line in file: %s", path);
+            return NULL;
+        }
+        if (score_append_token(&out, &len, &cap, token) != 0) {
+            if (str.s) free(str.s);
+            hts_close(fp);
+            if (out) duckdb_free(out);
+            snprintf(err, err_sz, "bcftools_score: out of memory");
+            return NULL;
+        }
+        have = 1;
+    }
+
+    if (str.s) free(str.s);
+    hts_close(fp);
+
+    if (!have) {
+        if (out) duckdb_free(out);
+        return score_dup("");
+    }
+    return out;
+}
+
+static int score_is_ident_start(char c) {
+    return isalpha((unsigned char)c) || c == '_';
+}
+
+static int score_is_ident_char(char c) {
+    return isalnum((unsigned char)c) || c == '_';
+}
+
+static int score_expr_append_char(char **buf, size_t *len, size_t *cap, char c) {
+    char *next;
+    if (*len + 2 > *cap) {
+        size_t new_cap = *cap ? (*cap * 2) : 256;
+        while (*len + 2 > new_cap) new_cap *= 2;
+        next = (char *)realloc(*buf, new_cap);
+        if (!next) return -1;
+        *buf = next;
+        *cap = new_cap;
+    }
+    (*buf)[(*len)++] = c;
+    (*buf)[*len] = '\0';
+    return 0;
+}
+
+static int score_expr_append_cstr(char **buf, size_t *len, size_t *cap, const char *s) {
+    while (*s) {
+        if (score_expr_append_char(buf, len, cap, *s++) != 0) return -1;
+    }
+    return 0;
+}
+
+/* Rewrite bcftools-like field prefixes into hts_expr identifiers.
+ * INFO/DP      -> INFO_DP
+ * FORMAT/DP    -> FORMAT_DP
+ * FMT/DP       -> FORMAT_DP
+ */
+static char *score_rewrite_filter_expr(const char *expr) {
+    size_t i = 0, len = 0, cap = 0;
+    char *out = NULL;
+    if (!expr) return NULL;
+    while (expr[i]) {
+        if (score_is_ident_start(expr[i])) {
+            size_t s = i;
+            while (score_is_ident_char(expr[i])) i++;
+            if ((i - s == 4 && strncmp(expr + s, "INFO", 4) == 0 && expr[i] == '/') ||
+                (i - s == 6 && strncmp(expr + s, "FORMAT", 6) == 0 && expr[i] == '/') ||
+                (i - s == 3 && strncmp(expr + s, "FMT", 3) == 0 && expr[i] == '/')) {
+                const char *prefix = (i - s == 4) ? "INFO_" : "FORMAT_";
+                i++; /* skip '/' */
+                if (score_expr_append_cstr(&out, &len, &cap, prefix) != 0) goto oom;
+                while (expr[i] && (isalnum((unsigned char)expr[i]) || expr[i] == '_')) {
+                    if (score_expr_append_char(&out, &len, &cap, expr[i]) != 0) goto oom;
+                    i++;
+                }
+                continue;
+            }
+            while (s < i) {
+                if (score_expr_append_char(&out, &len, &cap, expr[s]) != 0) goto oom;
+                s++;
+            }
+            continue;
+        }
+        if (score_expr_append_char(&out, &len, &cap, expr[i]) != 0) goto oom;
+        i++;
+    }
+    if (!out) return score_dup("");
+    return out;
+oom:
+    if (out) free(out);
+    return NULL;
+}
+
+static int score_vcf_sym_lookup(void *data, char *str, char **end, hts_expr_val_t *res) {
+    score_expr_ctx_t *ctx = (score_expr_ctx_t *)data;
+    bcf1_t *rec = ctx->rec;
+    const bcf_hdr_t *hdr = ctx->hdr;
+
+    if (strncmp(str, "N_ALT", 5) == 0) {
+        *end = str + 5;
+        res->is_str = 0;
+        res->is_true = 1;
+        res->d = rec->n_allele > 0 ? (double)(rec->n_allele - 1) : 0.0;
+        return 0;
+    }
+    if (strncmp(str, "TYPE", 4) == 0) {
+        int vt = bcf_get_variant_types(rec);
+        const char *type = "OTHER";
+        *end = str + 4;
+        if (vt & VCF_SNP) type = "SNP";
+        else if (vt & VCF_INDEL) type = "INDEL";
+        else if (vt & VCF_MNP) type = "MNP";
+        else if (vt & VCF_BND) type = "BND";
+        res->is_str = 1;
+        res->is_true = 1;
+        kputs(type, ks_clear(&res->s));
+        return 0;
+    }
+
+    if (strncmp(str, "POS", 3) == 0) {
+        *end = str + 3;
+        res->is_str = 0;
+        res->is_true = 0;
+        res->d = (double)((int64_t)rec->pos + 1);
+        return 0;
+    }
+    if (strncmp(str, "QUAL", 4) == 0) {
+        *end = str + 4;
+        if (score_is_missing(rec->qual)) {
+            hts_expr_val_undef(res);
+        } else {
+            res->is_str = 0;
+            res->is_true = 0;
+            res->d = rec->qual;
+        }
+        return 0;
+    }
+    if (strncmp(str, "CHROM", 5) == 0) {
+        const char *chrom = bcf_hdr_id2name(hdr, rec->rid);
+        *end = str + 5;
+        res->is_str = 1;
+        res->is_true = chrom && chrom[0] != '\0';
+        kputs(chrom ? chrom : "", ks_clear(&res->s));
+        return 0;
+    }
+    if (strncmp(str, "ID", 2) == 0) {
+        const char *id = rec->d.id;
+        *end = str + 2;
+        if (!id || id[0] == '\0' || (id[0] == '.' && id[1] == '\0')) {
+            hts_expr_val_undef(res);
+        } else {
+            res->is_str = 1;
+            res->is_true = 1;
+            kputs(id, ks_clear(&res->s));
+        }
+        return 0;
+    }
+    if (strncmp(str, "REF", 3) == 0) {
+        *end = str + 3;
+        res->is_str = 1;
+        res->is_true = 1;
+        kputs((rec->n_allele > 0 && rec->d.allele[0]) ? rec->d.allele[0] : "", ks_clear(&res->s));
+        return 0;
+    }
+    if (strncmp(str, "ALT", 3) == 0) {
+        int i;
+        *end = str + 3;
+        res->is_str = 1;
+        ks_clear(&res->s);
+        for (i = 1; i < rec->n_allele; i++) {
+            if (i > 1) kputc(',', &res->s);
+            kputs(rec->d.allele[i] ? rec->d.allele[i] : "", &res->s);
+        }
+        res->is_true = res->s.l > 0;
+        return 0;
+    }
+    if (strncmp(str, "FILTER", 6) == 0) {
+        int i;
+        *end = str + 6;
+        res->is_str = 1;
+        ks_clear(&res->s);
+        if (rec->d.n_flt == 0) {
+            kputs(".", &res->s);
+            res->is_true = 1;
+            return 0;
+        }
+        for (i = 0; i < rec->d.n_flt; i++) {
+            const char *flt = bcf_hdr_int2id(hdr, BCF_DT_ID, rec->d.flt[i]);
+            if (i > 0) kputc(';', &res->s);
+            kputs(flt ? flt : "", &res->s);
+        }
+        res->is_true = res->s.l > 0;
+        return 0;
+    }
+
+    if (strncmp(str, "INFO_", 5) == 0 || strncmp(str, "FORMAT_", 7) == 0 || isalpha((unsigned char)str[0]) || str[0] == '_') {
+        const char *tag = str;
+        char tag_buf[128];
+        int tag_len = 0;
+        int id;
+        int i = 0;
+        int has_prefix = 0;
+        int is_format = 0;
+
+        if (strncmp(str, "INFO_", 5) == 0) {
+            tag = str + 5;
+            has_prefix = 1;
+        } else if (strncmp(str, "FORMAT_", 7) == 0) {
+            tag = str + 7;
+            has_prefix = 1;
+            is_format = 1;
+        }
+
+        while (tag[i] && (isalnum((unsigned char)tag[i]) || tag[i] == '_' || tag[i] == '.')) {
+            if (tag_len + 1 >= (int)sizeof(tag_buf)) return -1;
+            tag_buf[tag_len++] = tag[i++];
+        }
+        if (tag_len == 0) return -1;
+        tag_buf[tag_len] = '\0';
+
+        if (has_prefix) *end = (char *)(tag + i);
+        else *end = (char *)(str + i);
+
+        id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag_buf);
+        if (!is_format) {
+            if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_INFO, id)) {
+                if (has_prefix) {
+                    hts_expr_val_undef(res);
+                    return 0;
+                }
+                return -1;
+            }
+
+            if (bcf_hdr_id2type((bcf_hdr_t *)hdr, BCF_HL_INFO, id) == BCF_HT_FLAG) {
+                bcf_info_t *info = bcf_get_info((bcf_hdr_t *)hdr, rec, tag_buf);
+                if (!info) {
+                    hts_expr_val_undef(res);
+                } else {
+                    res->is_str = 0;
+                    res->is_true = 1;
+                    res->d = 1.0;
+                }
+                return 0;
+            }
+
+            {
+                float *vals_f = NULL;
+                int nvals_f = 0;
+                int nret_f = bcf_get_info_float((bcf_hdr_t *)hdr, rec, tag_buf, &vals_f, &nvals_f);
+                if (nret_f > 0 && !score_is_missing(vals_f[0])) {
+                    res->is_str = 0;
+                    res->is_true = 1;
+                    res->d = vals_f[0];
+                    free(vals_f);
+                    return 0;
+                }
+                if (vals_f) free(vals_f);
+            }
+
+            {
+                int32_t *vals_i = NULL;
+                int nvals_i = 0;
+                int nret_i = bcf_get_info_int32((bcf_hdr_t *)hdr, rec, tag_buf, &vals_i, &nvals_i);
+                if (nret_i > 0 && vals_i[0] != bcf_int32_missing && vals_i[0] != bcf_int32_vector_end) {
+                    res->is_str = 0;
+                    res->is_true = 1;
+                    res->d = vals_i[0];
+                    free(vals_i);
+                    return 0;
+                }
+                if (vals_i) free(vals_i);
+            }
+
+            {
+                char *vals_s = NULL;
+                int nvals_s = 0;
+                int nret_s = bcf_get_info_string((bcf_hdr_t *)hdr, rec, tag_buf, &vals_s, &nvals_s);
+                if (nret_s > 0 && vals_s && !(vals_s[0] == '.' && vals_s[1] == '\0')) {
+                    res->is_str = 1;
+                    res->is_true = 1;
+                    kputs(vals_s, ks_clear(&res->s));
+                    free(vals_s);
+                    return 0;
+                }
+                if (vals_s) free(vals_s);
+            }
+
+            hts_expr_val_undef(res);
+            return 0;
+        } else {
+            if (strcmp(tag_buf, "GT") == 0) {
+                int32_t *gts = NULL;
+                int m_gts = 0;
+                int n_gts = bcf_get_genotypes((bcf_hdr_t *)hdr, rec, &gts, &m_gts);
+                if (n_gts > 0 && gts) {
+                    int ploidy = bcf_hdr_nsamples((bcf_hdr_t *)hdr) > 0 ? (n_gts / bcf_hdr_nsamples((bcf_hdr_t *)hdr)) : 0;
+                    if (ploidy >= 1) {
+                        int a0 = bcf_gt_allele(gts[0]);
+                        int missing0 = bcf_gt_is_missing(gts[0]);
+                        int phased = bcf_gt_is_phased(gts[0]);
+                        char gtbuf[32];
+                        if (ploidy >= 2) {
+                            int a1 = bcf_gt_allele(gts[1]);
+                            int missing1 = bcf_gt_is_missing(gts[1]);
+                            if (missing0 || missing1) snprintf(gtbuf, sizeof(gtbuf), "./.");
+                            else snprintf(gtbuf, sizeof(gtbuf), "%d%c%d", a0, phased ? '|' : '/', a1);
+                        } else {
+                            if (missing0) snprintf(gtbuf, sizeof(gtbuf), ".");
+                            else snprintf(gtbuf, sizeof(gtbuf), "%d", a0);
+                        }
+                        res->is_str = 1;
+                        res->is_true = 1;
+                        kputs(gtbuf, ks_clear(&res->s));
+                        free(gts);
+                        return 0;
+                    }
+                }
+                if (gts) free(gts);
+                hts_expr_val_undef(res);
+                return 0;
+            }
+
+            int32_t *vals_i = NULL;
+            int nvals_i = 0;
+            int nret_i = bcf_get_format_int32((bcf_hdr_t *)hdr, rec, tag_buf, &vals_i, &nvals_i);
+            if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_FMT, id)) {
+                hts_expr_val_undef(res);
+                return 0;
+            }
+            if (nret_i > 0 && vals_i) {
+                int j;
+                for (j = 0; j < nret_i; j++) {
+                    if (vals_i[j] != bcf_int32_missing && vals_i[j] != bcf_int32_vector_end) {
+                        res->is_str = 0;
+                        res->is_true = 1;
+                        res->d = vals_i[j];
+                        free(vals_i);
+                        return 0;
+                    }
+                }
+            }
+            if (vals_i) free(vals_i);
+
+            {
+                float *vals_f = NULL;
+                int nvals_f = 0;
+                int nret_f = bcf_get_format_float((bcf_hdr_t *)hdr, rec, tag_buf, &vals_f, &nvals_f);
+                if (nret_f > 0 && vals_f) {
+                    int j;
+                    for (j = 0; j < nret_f; j++) {
+                        if (!score_is_missing(vals_f[j])) {
+                            res->is_str = 0;
+                            res->is_true = 1;
+                            res->d = vals_f[j];
+                            free(vals_f);
+                            return 0;
+                        }
+                    }
+                }
+                if (vals_f) free(vals_f);
+            }
+
+            hts_expr_val_undef(res);
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+static int score_record_matches_exprs(const bcf_hdr_t *hdr, bcf1_t *rec, const score_scan_source_t *src, char *err, size_t err_sz) {
+    score_expr_ctx_t ctx;
+    hts_expr_val_t res = HTS_EXPR_VAL_INIT;
+
+    ctx.hdr = hdr;
+    ctx.rec = rec;
+
+    if (src->include_filt) {
+        if (hts_filter_eval2(src->include_filt, &ctx, score_vcf_sym_lookup, &res) != 0) {
+            hts_expr_val_free(&res);
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
+            return -1;
+        }
+        if (!res.is_true) {
+            hts_expr_val_free(&res);
+            return 0;
+        }
+        hts_expr_val_free(&res);
+    }
+
+    if (src->exclude_filt) {
+        if (hts_filter_eval2(src->exclude_filt, &ctx, score_vcf_sym_lookup, &res) != 0) {
+            hts_expr_val_free(&res);
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
+            return -1;
+        }
+        if (res.is_true) {
+            hts_expr_val_free(&res);
+            return 0;
+        }
+        hts_expr_val_free(&res);
+    }
+
+    return 1;
+}
+
+static int score_init_source(const score_bind_t *bind, score_scan_source_t *src, bcf_hdr_t **out_hdr, char *err, size_t err_sz) {
+    src->sr = bcf_sr_init();
+    if (!src->sr) {
+        snprintf(err, err_sz, "bcftools_score: failed to initialize synced reader");
+        return -1;
+    }
+    bcf_sr_set_opt(src->sr, BCF_SR_ALLOW_NO_IDX);
+
+    if (bind->apply_filters && bind->apply_filters[0]) src->sr->apply_filters = bind->apply_filters;
+    if (bind->regions_overlap >= 0) bcf_sr_set_opt(src->sr, BCF_SR_REGIONS_OVERLAP, bind->regions_overlap);
+    if (bind->targets_overlap >= 0) bcf_sr_set_opt(src->sr, BCF_SR_TARGETS_OVERLAP, bind->targets_overlap);
+
+    if (!bcf_sr_add_reader(src->sr, bind->bcf_path)) {
+        snprintf(err, err_sz, "bcftools_score: failed to open BCF/VCF input: %s", bind->bcf_path);
+        return -1;
+    }
+
+    if (bind->include_expr && bind->include_expr[0]) {
+        src->include_expr_eval = score_rewrite_filter_expr(bind->include_expr);
+        if (!src->include_expr_eval) {
+            snprintf(err, err_sz, "bcftools_score: out of memory");
+            return -1;
+        }
+        src->include_filt = hts_filter_init(src->include_expr_eval);
+        if (!src->include_filt) {
+            snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+            return -1;
+        }
+    }
+    if (bind->exclude_expr && bind->exclude_expr[0]) {
+        src->exclude_expr_eval = score_rewrite_filter_expr(bind->exclude_expr);
+        if (!src->exclude_expr_eval) {
+            snprintf(err, err_sz, "bcftools_score: out of memory");
+            return -1;
+        }
+        src->exclude_filt = hts_filter_init(src->exclude_expr_eval);
+        if (!src->exclude_filt) {
+            snprintf(err, err_sz, "bcftools_score: failed to parse exclude expression");
+            return -1;
+        }
+    }
+
+    *out_hdr = bcf_sr_get_header(src->sr, 0);
+    if (!*out_hdr) {
+        snprintf(err, err_sz, "bcftools_score: failed to read BCF/VCF header");
         return -1;
     }
     return 0;
+}
+
+static int score_source_next(score_scan_source_t *src, bcf1_t **out_rec) {
+    while (bcf_sr_next_line(src->sr)) {
+        bcf1_t *line;
+        if (!bcf_sr_has_line(src->sr, 0)) continue;
+        line = bcf_sr_get_line(src->sr, 0);
+        *out_rec = line;
+        return 1;
+    }
+    return 0;
+}
+
+static void score_source_destroy(score_scan_source_t *src) {
+    if (!src) return;
+    if (src->include_filt) hts_filter_free(src->include_filt);
+    if (src->exclude_filt) hts_filter_free(src->exclude_filt);
+    if (src->include_expr_eval) free(src->include_expr_eval);
+    if (src->exclude_expr_eval) free(src->exclude_expr_eval);
+    if (src->sr) {
+        bcf_sr_destroy(src->sr);
+        src->sr = NULL;
+    }
 }
 
 static void score_bind(duckdb_bind_info info) {
@@ -718,6 +1663,15 @@ static void score_bind(duckdb_bind_info info) {
     duckdb_value variant_id_val;
     duckdb_value q_thr_val;
     duckdb_value counts_val;
+    duckdb_value regions_val;
+    duckdb_value regions_file_val;
+    duckdb_value regions_overlap_val;
+    duckdb_value targets_val;
+    duckdb_value targets_file_val;
+    duckdb_value targets_overlap_val;
+    duckdb_value apply_filters_val;
+    duckdb_value include_val;
+    duckdb_value exclude_val;
     duckdb_logical_type varchar_type;
     duckdb_logical_type bool_type;
     duckdb_logical_type dbl_type;
@@ -728,6 +1682,8 @@ static void score_bind(duckdb_bind_info info) {
     bind->bcf_path = duckdb_get_varchar(bcf_val);
     bind->summary_path = duckdb_get_varchar(summary_val);
     bind->n_q_thr = 1;
+    bind->regions_overlap = -1;
+    bind->targets_overlap = -1;
     bind->columns_preset = score_dup("PLINK");
 
     duckdb_destroy_value(&bcf_val);
@@ -800,18 +1756,209 @@ static void score_bind(duckdb_bind_info info) {
     if (counts_val) duckdb_destroy_value(&counts_val);
 
     {
-        const char *slash = strrchr(bind->summary_path, '/');
-        const char *base = slash ? slash + 1 : bind->summary_path;
-        const char *dot = strrchr(base, '.');
-        size_t len = dot && dot > base ? (size_t)(dot - base) : strlen(base);
+        duckdb_value samples_val = duckdb_bind_get_named_parameter(info, "samples");
+        if (samples_val && !duckdb_is_null_value(samples_val)) {
+            bind->samples = duckdb_get_varchar(samples_val);
+        }
+        if (samples_val) duckdb_destroy_value(&samples_val);
+    }
+    {
+        duckdb_value force_samples_val = duckdb_bind_get_named_parameter(info, "force_samples");
+        if (force_samples_val && !duckdb_is_null_value(force_samples_val)) {
+            bind->force_samples = duckdb_get_bool(force_samples_val) ? 1 : 0;
+        }
+        if (force_samples_val) duckdb_destroy_value(&force_samples_val);
+    }
+
+    regions_val = duckdb_bind_get_named_parameter(info, "regions");
+    if (regions_val && !duckdb_is_null_value(regions_val)) bind->regions = duckdb_get_varchar(regions_val);
+    if (regions_val) duckdb_destroy_value(&regions_val);
+
+    regions_file_val = duckdb_bind_get_named_parameter(info, "regions_file");
+    if (regions_file_val && !duckdb_is_null_value(regions_file_val)) bind->regions_file = duckdb_get_varchar(regions_file_val);
+    if (regions_file_val) duckdb_destroy_value(&regions_file_val);
+
+    regions_overlap_val = duckdb_bind_get_named_parameter(info, "regions_overlap");
+    if (regions_overlap_val && !duckdb_is_null_value(regions_overlap_val)) {
+        int64_t v = duckdb_get_int64(regions_overlap_val);
+        if (v < 0 || v > 2) {
+            duckdb_bind_set_error(info, "bcftools_score: regions_overlap must be 0, 1, or 2");
+            if (regions_overlap_val) duckdb_destroy_value(&regions_overlap_val);
+            score_destroy_bind(bind);
+            return;
+        }
+        bind->regions_overlap = (int)v;
+    }
+    if (regions_overlap_val) duckdb_destroy_value(&regions_overlap_val);
+
+    targets_val = duckdb_bind_get_named_parameter(info, "targets");
+    if (targets_val && !duckdb_is_null_value(targets_val)) bind->targets = duckdb_get_varchar(targets_val);
+    if (targets_val) duckdb_destroy_value(&targets_val);
+
+    targets_file_val = duckdb_bind_get_named_parameter(info, "targets_file");
+    if (targets_file_val && !duckdb_is_null_value(targets_file_val)) bind->targets_file = duckdb_get_varchar(targets_file_val);
+    if (targets_file_val) duckdb_destroy_value(&targets_file_val);
+
+    targets_overlap_val = duckdb_bind_get_named_parameter(info, "targets_overlap");
+    if (targets_overlap_val && !duckdb_is_null_value(targets_overlap_val)) {
+        int64_t v = duckdb_get_int64(targets_overlap_val);
+        if (v < 0 || v > 2) {
+            duckdb_bind_set_error(info, "bcftools_score: targets_overlap must be 0, 1, or 2");
+            if (targets_overlap_val) duckdb_destroy_value(&targets_overlap_val);
+            score_destroy_bind(bind);
+            return;
+        }
+        bind->targets_overlap = (int)v;
+    }
+    if (targets_overlap_val) duckdb_destroy_value(&targets_overlap_val);
+
+    apply_filters_val = duckdb_bind_get_named_parameter(info, "apply_filters");
+    if (apply_filters_val && !duckdb_is_null_value(apply_filters_val)) bind->apply_filters = duckdb_get_varchar(apply_filters_val);
+    if (apply_filters_val) duckdb_destroy_value(&apply_filters_val);
+
+    include_val = duckdb_bind_get_named_parameter(info, "include");
+    if (include_val && !duckdb_is_null_value(include_val)) bind->include_expr = duckdb_get_varchar(include_val);
+    if (include_val) duckdb_destroy_value(&include_val);
+
+    exclude_val = duckdb_bind_get_named_parameter(info, "exclude");
+    if (exclude_val && !duckdb_is_null_value(exclude_val)) bind->exclude_expr = duckdb_get_varchar(exclude_val);
+    if (exclude_val) duckdb_destroy_value(&exclude_val);
+
+    if (bind->include_expr && bind->exclude_expr) {
+        duckdb_bind_set_error(info, "bcftools_score: only one of include or exclude may be set");
+        score_destroy_bind(bind);
+        return;
+    }
+    if (bind->regions && bind->regions_file) {
+        duckdb_bind_set_error(info, "bcftools_score: only one of regions or regions_file may be set");
+        score_destroy_bind(bind);
+        return;
+    }
+    if (bind->targets && bind->targets_file) {
+        duckdb_bind_set_error(info, "bcftools_score: only one of targets or targets_file may be set");
+        score_destroy_bind(bind);
+        return;
+    }
+    if (bind->regions_file && bind->regions_file[0]) {
+        char err[512] = {0};
+        char *parsed = score_regions_from_file(bind->regions_file, err, sizeof(err));
+        if (!parsed) {
+            duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: failed to parse regions_file");
+            score_destroy_bind(bind);
+            return;
+        }
+        bind->regions = parsed;
+    }
+    if (bind->targets_file && bind->targets_file[0]) {
+        char err[512] = {0};
+        char *parsed = score_regions_from_file(bind->targets_file, err, sizeof(err));
+        if (!parsed) {
+            duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: failed to parse targets_file");
+            score_destroy_bind(bind);
+            return;
+        }
+        bind->targets = parsed;
+    }
+    /* Detect GWAS-VCF mode: if the summary file is VCF/BCF format and no
+     * columns/columns_file was explicitly provided (default PLINK doesn't count
+     * when VCF is detected), use GWAS-VCF mode per upstream score.c:681-710.
+     * In this mode, each sample in the GWAS-VCF is a separate PRS, and
+     * FORMAT/ES provides effect sizes, FORMAT/LP provides -log10(p). */
+    if (score_is_vcf_summary(bind->summary_path) && !bind->columns_file) {
+        htsFile *sfp = hts_open(bind->summary_path, "r");
+        if (!sfp) {
+            duckdb_bind_set_error(info, "bcftools_score: cannot open GWAS-VCF summary for header probe");
+            score_destroy_bind(bind);
+            return;
+        }
+        bcf_hdr_t *shdr = bcf_hdr_read(sfp);
+        if (!shdr) {
+            hts_close(sfp);
+            duckdb_bind_set_error(info, "bcftools_score: cannot read GWAS-VCF header");
+            score_destroy_bind(bind);
+            return;
+        }
+        {
+            int es_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "ES");
+            if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, es_id)) {
+                bcf_hdr_destroy(shdr);
+                hts_close(sfp);
+                duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary does not include the ES FORMAT field");
+                score_destroy_bind(bind);
+                return;
+            }
+        }
+        if (bind->q_thr_lp) {
+            int lp_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "LP");
+            if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, lp_id)) {
+                bcf_hdr_destroy(shdr);
+                hts_close(sfp);
+                duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary does not include the LP FORMAT field (required by q_score_thr)");
+                score_destroy_bind(bind);
+                return;
+            }
+        }
+        bind->gwas_vcf_mode = 1;
+        bind->n_prs = bcf_hdr_nsamples(shdr);
+        if (bind->n_prs == 0) {
+            bcf_hdr_destroy(shdr);
+            hts_close(sfp);
+            duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary has no samples");
+            score_destroy_bind(bind);
+            return;
+        }
+        bind->prs_names = (char **)duckdb_malloc(sizeof(char *) * (size_t)bind->n_prs);
+        if (!bind->prs_names) {
+            bcf_hdr_destroy(shdr);
+            hts_close(sfp);
+            duckdb_bind_set_error(info, "bcftools_score: out of memory");
+            score_destroy_bind(bind);
+            return;
+        }
+        {
+            int pi;
+            for (pi = 0; pi < bind->n_prs; pi++) {
+                bind->prs_names[pi] = score_dup(shdr->samples[pi]);
+            }
+        }
+        bcf_hdr_destroy(shdr);
+        hts_close(sfp);
+    } else {
+        /* TSV mode: single PRS name derived from summary filename.
+         * Port of upstream multi-extension stripping (score.c:729-737):
+         * Loop stripping known extensions {gz,txt,tsv,vcf,bcf} from the end,
+         * then take the basename. So "PGS000001.txt.gz" -> "PGS000001". */
+        char *tmp = duckdb_malloc(strlen(bind->summary_path) + 1);
+        if (!tmp) {
+            duckdb_bind_set_error(info, "bcftools_score: out of memory");
+            score_destroy_bind(bind);
+            return;
+        }
+        strcpy(tmp, bind->summary_path);
+        static const char *ext_str[] = {"gz", "txt", "tsv", "vcf", "bcf"};
+        static const int n_ext = (int)(sizeof(ext_str) / sizeof(ext_str[0]));
+        char *ptr;
+        int j = 0;
+        while (j < n_ext && (ptr = strrchr(tmp, '.'))) {
+            for (j = 0; j < n_ext; j++)
+                if (strcmp(ptr + 1, ext_str[j]) == 0) { *ptr = '\0'; break; }
+        }
+        const char *slash = strrchr(tmp, '/');
+        const char *base = slash ? slash + 1 : tmp;
+        size_t len = strlen(base);
         bind->prs_name = (char *)duckdb_malloc(len + 1);
         if (!bind->prs_name) {
+            duckdb_free(tmp);
             duckdb_bind_set_error(info, "bcftools_score: out of memory");
             score_destroy_bind(bind);
             return;
         }
         memcpy(bind->prs_name, base, len);
         bind->prs_name[len] = '\0';
+        duckdb_free(tmp);
+
+        bind->gwas_vcf_mode = 0;
+        bind->n_prs = 1;
     }
 
     varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -820,26 +1967,28 @@ static void score_bind(duckdb_bind_info info) {
     bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_bind_add_result_column(info, "SAMPLE", varchar_type);
     {
-        int j;
-        for (j = 0; j < bind->n_q_thr; j++) {
-            char name[256];
-            if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                double p = pow(10.0, -bind->q_thr_lp[j]);
-                snprintf(name, sizeof(name), "%s_p%.6g", bind->prs_name, p);
-            } else {
-                snprintf(name, sizeof(name), "%s", bind->prs_name);
-            }
-            duckdb_bind_add_result_column(info, name, dbl_type);
-            if (bind->counts) {
-                /* Upstream builds CNT name as "<prs>_CNT" then appends "_p<thr>" */
-                char cnt_name[256];
+        int pi, j;
+        for (pi = 0; pi < bind->n_prs; pi++) {
+            const char *pname = bind->gwas_vcf_mode ? bind->prs_names[pi] : bind->prs_name;
+            for (j = 0; j < bind->n_q_thr; j++) {
+                char name[256];
                 if (bind->q_thr_lp && bind->n_q_thr > 0) {
                     double p = pow(10.0, -bind->q_thr_lp[j]);
-                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", bind->prs_name, p);
+                    snprintf(name, sizeof(name), "%s_p%.6g", pname, p);
                 } else {
-                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", bind->prs_name);
+                    snprintf(name, sizeof(name), "%s", pname);
                 }
-                duckdb_bind_add_result_column(info, cnt_name, bigint_type);
+                duckdb_bind_add_result_column(info, name, dbl_type);
+                if (bind->counts) {
+                    char cnt_name[256];
+                    if (bind->q_thr_lp && bind->n_q_thr > 0) {
+                        double p = pow(10.0, -bind->q_thr_lp[j]);
+                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", pname, p);
+                    } else {
+                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", pname);
+                    }
+                    duckdb_bind_add_result_column(info, cnt_name, bigint_type);
+                }
             }
         }
     }
@@ -854,10 +2003,10 @@ static void score_bind(duckdb_bind_info info) {
 static void score_init(duckdb_init_info info) {
     score_bind_t *bind = (score_bind_t *)duckdb_init_get_bind_data(info);
     score_init_t *init = (score_init_t *)duckdb_malloc(sizeof(score_init_t));
-    htsFile *fp = NULL;
+    score_scan_source_t src = {0};
     bcf_hdr_t *hdr = NULL;
-    bcf1_t *rec = NULL;
-    score_summary_t *summary = NULL;
+    score_summary_t *summary = NULL;       /* TSV mode: single summary */
+    score_summary_t **summaries = NULL;    /* GWAS-VCF mode: per-PRS summaries */
     void *unused_alleles = NULL;
     float *aps = NULL;
     int m_aps = 0;
@@ -868,43 +2017,72 @@ static void score_init(duckdb_init_info info) {
     float *missing = NULL;
     int n_samples;
     int n_metrics;
+    int n_prs;
     int i;
     char err[512];
 
     memset(init, 0, sizeof(*init));
-    fp = hts_open(bind->bcf_path, "r");
-    if (!fp) {
-        duckdb_init_set_error(info, "bcftools_score: failed to open BCF/VCF input");
-        duckdb_free(init);
-        return;
-    }
-    hdr = bcf_hdr_read(fp);
-    if (!hdr) {
-        hts_close(fp);
-        duckdb_init_set_error(info, "bcftools_score: failed to read BCF/VCF header");
+    if (score_init_source(bind, &src, &hdr, err, sizeof(err)) != 0) {
+        score_source_destroy(&src);
+        duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to initialize input source");
         duckdb_free(init);
         return;
     }
 
+    /* Subset samples if requested (port of upstream score.c:652-667) */
+    if (bind->samples && bind->samples[0]) {
+        int ret = bcf_hdr_set_samples(hdr, bind->samples, 0);
+        if (ret < 0) {
+            score_source_destroy(&src);
+            duckdb_init_set_error(info, "bcftools_score: error parsing the sample list");
+            duckdb_free(init);
+            return;
+        } else if (ret > 0) {
+            if (!bind->force_samples) {
+                snprintf(err, sizeof(err), "bcftools_score: sample #%d not found in the header; use force_samples := true to ignore", ret);
+                score_source_destroy(&src);
+                duckdb_init_set_error(info, err);
+                duckdb_free(init);
+                return;
+            }
+        }
+        if (bcf_hdr_nsamples(hdr) == 0) {
+            score_source_destroy(&src);
+            duckdb_init_set_error(info, "bcftools_score: subsetting has removed all samples");
+            duckdb_free(init);
+            return;
+        }
+    }
+
     if (score_resolve_use_tag(bind, hdr, err, sizeof(err)) != 0) {
-        bcf_hdr_destroy(hdr);
-        hts_close(fp);
+        score_source_destroy(&src);
         duckdb_init_set_error(info, err);
         duckdb_free(init);
         return;
     }
 
-    summary = score_load_summary(bind, hdr, err, sizeof(err));
-    if (!summary) {
-        bcf_hdr_destroy(hdr);
-        hts_close(fp);
-        duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load summary file");
-        duckdb_free(init);
-        return;
+    /* Load summary data: TSV mode or GWAS-VCF mode */
+    n_prs = bind->n_prs;
+    if (bind->gwas_vcf_mode) {
+        summaries = score_load_summary_vcf(bind, hdr, n_prs, err, sizeof(err));
+        if (!summaries) {
+            score_source_destroy(&src);
+            duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load GWAS-VCF summary");
+            duckdb_free(init);
+            return;
+        }
+    } else {
+        summary = score_load_summary(bind, hdr, err, sizeof(err));
+        if (!summary) {
+            score_source_destroy(&src);
+            duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load summary file");
+            duckdb_free(init);
+            return;
+        }
     }
 
     n_samples = bcf_hdr_nsamples(hdr);
-    n_metrics = bind->n_q_thr * (bind->counts ? 2 : 1);
+    n_metrics = n_prs * bind->n_q_thr * (bind->counts ? 2 : 1);
     init->n_samples = n_samples;
     init->n_metrics = n_metrics;
     init->sample_names = (char **)duckdb_malloc(sizeof(char *) * (size_t)n_samples);
@@ -912,9 +2090,12 @@ static void score_init(duckdb_init_info info) {
     init->metric_values = (double **)duckdb_malloc(sizeof(double *) * (size_t)n_metrics);
     init->metric_is_count = (uint8_t *)duckdb_malloc((size_t)n_metrics);
     if (!init->sample_names || !init->metric_names || !init->metric_values || !init->metric_is_count) {
-        score_destroy_summary(summary);
-        bcf_hdr_destroy(hdr);
-        hts_close(fp);
+        if (summary) score_destroy_summary(summary);
+        if (summaries) {
+            for (i = 0; i < n_prs; i++) if (summaries[i]) score_destroy_summary(summaries[i]);
+            duckdb_free(summaries);
+        }
+        score_source_destroy(&src);
         score_destroy_init(init);
         duckdb_init_set_error(info, "bcftools_score: out of memory");
         return;
@@ -924,150 +2105,172 @@ static void score_init(duckdb_init_info info) {
         init->sample_names[i] = score_dup(hdr->samples[i]);
     }
     {
-        int j;
+        int pi, j;
         int metric_idx = 0;
         memset(init->metric_is_count, 0, (size_t)n_metrics);
-        for (j = 0; j < bind->n_q_thr; j++) {
-            char name[256];
-            if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                double p = pow(10.0, -bind->q_thr_lp[j]);
-                snprintf(name, sizeof(name), "%s_p%.6g", bind->prs_name, p);
-            } else {
-                snprintf(name, sizeof(name), "%s", bind->prs_name);
-            }
-            init->metric_names[metric_idx] = score_dup(name);
-            init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
-            memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
-            init->metric_is_count[metric_idx] = 0;
-            metric_idx++;
-            if (bind->counts) {
-                /* Upstream builds CNT name as "<prs>_CNT" then appends "_p<thr>" */
-                char cnt_name[256];
+        for (pi = 0; pi < n_prs; pi++) {
+            const char *pname = bind->gwas_vcf_mode ? bind->prs_names[pi] : bind->prs_name;
+            for (j = 0; j < bind->n_q_thr; j++) {
+                char name[256];
                 if (bind->q_thr_lp && bind->n_q_thr > 0) {
                     double p = pow(10.0, -bind->q_thr_lp[j]);
-                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", bind->prs_name, p);
+                    snprintf(name, sizeof(name), "%s_p%.6g", pname, p);
                 } else {
-                    snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", bind->prs_name);
+                    snprintf(name, sizeof(name), "%s", pname);
                 }
-                init->metric_names[metric_idx] = score_dup(cnt_name);
+                init->metric_names[metric_idx] = score_dup(name);
                 init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
                 memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
-                init->metric_is_count[metric_idx] = 1;
+                init->metric_is_count[metric_idx] = 0;
                 metric_idx++;
+                if (bind->counts) {
+                    char cnt_name[256];
+                    if (bind->q_thr_lp && bind->n_q_thr > 0) {
+                        double p = pow(10.0, -bind->q_thr_lp[j]);
+                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", pname, p);
+                    } else {
+                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", pname);
+                    }
+                    init->metric_names[metric_idx] = score_dup(cnt_name);
+                    init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
+                    memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
+                    init->metric_is_count[metric_idx] = 1;
+                    metric_idx++;
+                }
             }
         }
     }
 
     (void)unused_alleles;
     missing = (float *)duckdb_malloc(sizeof(float) * (size_t)n_samples);
-    rec = bcf_init();
 
-    while (bcf_read(fp, hdr, rec) == 0) {
-        int marker_idx = -1;
-        int idx_allele;
-        float es;
-        float lp;
-        int number;
-        int k;
-        bcf_unpack(rec, BCF_UN_ALL);
-        if (summary->use_snp) {
-            if (rec->d.id && rec->d.id[0] != '\0') {
-                khash_str2int_get(summary->id2idx, rec->d.id, &marker_idx);
-            }
-        } else {
-            khash_t(score64) *hash = (khash_t(score64) *)summary->rid_pos2idx;
-            uint64_t key = (((uint64_t)(uint32_t)rec->rid) << 44) | (uint64_t)rec->pos;
-            khiter_t it = kh_get(score64, hash, key);
-            if (it != kh_end(hash)) marker_idx = kh_val(hash, it);
+    /* For GWAS-VCF multi-PRS mode, we need per-PRS marker indices.
+     * For TSV single-PRS mode, n_prs == 1 and summaries is not used. */
+    {
+        int *idxs = NULL;
+        int metrics_per_prs = bind->n_q_thr * (bind->counts ? 2 : 1);
+
+        if (bind->gwas_vcf_mode) {
+            idxs = (int *)duckdb_malloc(sizeof(int) * (size_t)n_prs);
         }
-        if (marker_idx < 0 || marker_idx >= summary->n_markers) continue;
 
-        memset(missing, 0, sizeof(float) * (size_t)n_samples);
-        if (m_aps < rec->n_allele * n_samples) {
-            int new_m = rec->n_allele * n_samples;
-            float *new_aps = (float *)realloc(aps, sizeof(float) * (size_t)new_m);
-            if (!new_aps) continue;
-            aps = new_aps;
-            m_aps = new_m;
-        }
-        memset(aps, 0, sizeof(float) * (size_t)(rec->n_allele * n_samples));
+        bcf1_t *rec = NULL;
+        while (score_source_next(&src, &rec)) {
+            int number;
+            int k;
+            int skip_line = 1;
+            bcf_unpack(rec, BCF_UN_ALL);
 
-        switch (bind->use_tag) {
-        case SCORE_USE_GT:
-            number = bcf_get_genotypes(hdr, rec, &int32_arr, &m_int32);
-            if (number <= 0) continue;
-            number /= n_samples;
-            if (number < 2) continue;
-            for (k = 0; k < n_samples; k++) {
-                int32_t *ptr = int32_arr + number * k;
-                if (bcf_gt_is_missing(ptr[0])) {
-                    missing[k] = 1;
-                } else {
-                    int a0 = bcf_gt_allele(ptr[0]);
-                    if (a0 >= 0 && a0 < rec->n_allele) aps[a0 * n_samples + k] += 1.0f;
-                    if (ptr[1] == bcf_int32_vector_end) {
-                        /* haploid (e.g. chrX male) — one allele only */
-                    } else if (bcf_gt_is_missing(ptr[1])) {
-                        missing[k] = 1;
-                    } else {
-                        int a1 = bcf_gt_allele(ptr[1]);
-                        if (a1 >= 0 && a1 < rec->n_allele) aps[a1 * n_samples + k] += 1.0f;
+            if (!score_record_passes_filter_list(hdr, rec, bind->apply_filters)) continue;
+            if (!score_record_in_region_list(hdr, rec, bind->regions, bind->regions_overlap >= 0 ? bind->regions_overlap : 1)) continue;
+            if (!score_record_in_region_list(hdr, rec, bind->targets, bind->targets_overlap >= 0 ? bind->targets_overlap : 0)) continue;
+            {
+                int expr_keep = score_record_matches_exprs(hdr, rec, &src, err, sizeof(err));
+                if (expr_keep < 0) {
+                    if (idxs) duckdb_free(idxs);
+                    if (int32_arr) free(int32_arr);
+                    if (float_arr) free(float_arr);
+                    if (aps) duckdb_free(aps);
+                    if (missing) duckdb_free(missing);
+                    score_source_destroy(&src);
+                    if (summary) score_destroy_summary(summary);
+                    if (summaries) {
+                        for (i = 0; i < n_prs; i++) {
+                            if (summaries[i]) score_destroy_summary(summaries[i]);
+                        }
+                        duckdb_free(summaries);
                     }
+                    score_destroy_init(init);
+                    duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to evaluate filter expression");
+                    return;
                 }
+                if (expr_keep == 0) continue;
             }
-            break;
-        case SCORE_USE_DS:
-            number = bcf_get_format_float(hdr, rec, "DS", &float_arr, &m_float);
-            if (number <= 0) continue;
-            number /= n_samples;
-            if (number == 1 && rec->n_allele == 2) {
-                for (k = 0; k < n_samples; k++) {
-                    if (score_is_missing(float_arr[k])) missing[k] = 1;
-                    else {
-                        aps[k] += 2.0f - float_arr[k];
-                        aps[n_samples + k] += float_arr[k];
+            /* Phase 1: Look up marker index in each PRS summary.
+             * For TSV mode (n_prs==1), use single summary.
+             * For GWAS-VCF mode, check each PRS summary. */
+            if (bind->gwas_vcf_mode) {
+                int pi;
+                for (pi = 0; pi < n_prs; pi++) {
+                    idxs[pi] = -1;
+                    if (summaries[pi]->use_snp) {
+                        if (rec->d.id && rec->d.id[0] != '\0') {
+                            khash_str2int_get(summaries[pi]->id2idx, rec->d.id, &idxs[pi]);
+                        }
+                    } else {
+                        khash_t(score64) *hash = (khash_t(score64) *)summaries[pi]->rid_pos2idx;
+                        uint64_t key = (((uint64_t)(uint32_t)rec->rid) << 44) | (uint64_t)rec->pos;
+                        khiter_t it = kh_get(score64, hash, key);
+                        if (it != kh_end(hash)) idxs[pi] = kh_val(hash, it);
                     }
+                    if (idxs[pi] >= 0 && idxs[pi] < summaries[pi]->n_markers) skip_line = 0;
                 }
             } else {
+                int marker_idx = -1;
+                if (summary->use_snp) {
+                    if (rec->d.id && rec->d.id[0] != '\0') {
+                        khash_str2int_get(summary->id2idx, rec->d.id, &marker_idx);
+                    }
+                } else {
+                    khash_t(score64) *hash = (khash_t(score64) *)summary->rid_pos2idx;
+                    uint64_t key = (((uint64_t)(uint32_t)rec->rid) << 44) | (uint64_t)rec->pos;
+                    khiter_t it = kh_get(score64, hash, key);
+                    if (it != kh_end(hash)) marker_idx = kh_val(hash, it);
+                }
+                if (marker_idx >= 0 && marker_idx < summary->n_markers) {
+                    skip_line = 0;
+                    /* Store in idxs-like fashion: for TSV mode we use a local
+                     * variable below in the accumulation block. */
+                }
+                /* Stash marker_idx for TSV accumulation below */
+                if (idxs) idxs[0] = marker_idx; /* won't happen; idxs is NULL in TSV mode */
+            }
+            if (skip_line) continue;
+
+            /* Phase 2: Extract genotype/dosage into per-allele-per-sample array */
+            memset(missing, 0, sizeof(float) * (size_t)n_samples);
+            if (m_aps < rec->n_allele * n_samples) {
+                int new_m = rec->n_allele * n_samples;
+                float *new_aps = (float *)realloc(aps, sizeof(float) * (size_t)new_m);
+                if (!new_aps) continue;
+                aps = new_aps;
+                m_aps = new_m;
+            }
+            memset(aps, 0, sizeof(float) * (size_t)(rec->n_allele * n_samples));
+
+            switch (bind->use_tag) {
+            case SCORE_USE_GT:
+                number = bcf_get_genotypes(hdr, rec, &int32_arr, &m_int32);
+                if (number <= 0) continue;
+                number /= n_samples;
+                if (number < 2) continue;
                 for (k = 0; k < n_samples; k++) {
-                    int idx;
-                    float *ptr = float_arr + number * k;
-                    aps[k] += 2.0f;
-                    for (idx = 0; idx < number; idx++) {
-                        if (score_is_missing(ptr[idx])) missing[k] = 1;
-                        else {
-                            aps[k] -= ptr[idx];
-                            aps[(idx + 1) * n_samples + k] += ptr[idx];
+                    int32_t *ptr = int32_arr + number * k;
+                    if (bcf_gt_is_missing(ptr[0])) {
+                        missing[k] = 1;
+                    } else {
+                        int a0 = bcf_gt_allele(ptr[0]);
+                        if (a0 >= 0 && a0 < rec->n_allele) aps[a0 * n_samples + k] += 1.0f;
+                        if (ptr[1] == bcf_int32_vector_end) {
+                            /* haploid (e.g. chrX male) — one allele only */
+                        } else if (bcf_gt_is_missing(ptr[1])) {
+                            missing[k] = 1;
+                        } else {
+                            int a1 = bcf_gt_allele(ptr[1]);
+                            if (a1 >= 0 && a1 < rec->n_allele) aps[a1 * n_samples + k] += 1.0f;
                         }
                     }
                 }
-            }
-            break;
-        case SCORE_USE_HDS:
-            number = bcf_get_format_float(hdr, rec, "HDS", &float_arr, &m_float);
-            if (number <= 0) continue;
-            number /= n_samples;
-            if (number != 2 || rec->n_allele != 2) continue;
-            for (k = 0; k < n_samples; k++) {
-                if (score_is_missing(float_arr[2 * k]) || score_is_missing(float_arr[2 * k + 1])) missing[k] = 1;
-                else {
-                    aps[k] += 2.0f - float_arr[2 * k] - float_arr[2 * k + 1];
-                    aps[n_samples + k] += float_arr[2 * k] + float_arr[2 * k + 1];
-                }
-            }
-            break;
-        case SCORE_USE_AP: {
-            const char *ap_tags[2] = {"AP1", "AP2"};
-            int ap;
-            for (ap = 0; ap < 2; ap++) {
-                number = bcf_get_format_float(hdr, rec, ap_tags[ap], &float_arr, &m_float);
+                break;
+            case SCORE_USE_DS:
+                number = bcf_get_format_float(hdr, rec, "DS", &float_arr, &m_float);
                 if (number <= 0) continue;
                 number /= n_samples;
                 if (number == 1 && rec->n_allele == 2) {
                     for (k = 0; k < n_samples; k++) {
                         if (score_is_missing(float_arr[k])) missing[k] = 1;
                         else {
-                            aps[k] += 1.0f - float_arr[k];
+                            aps[k] += 2.0f - float_arr[k];
                             aps[n_samples + k] += float_arr[k];
                         }
                     }
@@ -1075,7 +2278,7 @@ static void score_init(duckdb_init_info info) {
                     for (k = 0; k < n_samples; k++) {
                         int idx;
                         float *ptr = float_arr + number * k;
-                        aps[k] += 1.0f;
+                        aps[k] += 2.0f;
                         for (idx = 0; idx < number; idx++) {
                             if (score_is_missing(ptr[idx])) missing[k] = 1;
                             else {
@@ -1085,88 +2288,189 @@ static void score_init(duckdb_init_info info) {
                         }
                     }
                 }
-            }
-            break;
-        }
-        case SCORE_USE_GP:
-            number = bcf_get_format_float(hdr, rec, "GP", &float_arr, &m_float);
-            if (number <= 0) continue;
-            number /= n_samples;
-            if (number == 3 && rec->n_allele == 2) {
+                break;
+            case SCORE_USE_HDS:
+                number = bcf_get_format_float(hdr, rec, "HDS", &float_arr, &m_float);
+                if (number <= 0) continue;
+                number /= n_samples;
+                if (number != 2 || rec->n_allele != 2) continue;
                 for (k = 0; k < n_samples; k++) {
-                    float *ptr = float_arr + number * k;
-                    if (score_is_missing(ptr[0]) || score_is_missing(ptr[1]) || score_is_missing(ptr[2])) missing[k] = 1;
+                    if (score_is_missing(float_arr[2 * k]) || score_is_missing(float_arr[2 * k + 1])) missing[k] = 1;
                     else {
-                        aps[k] += 2.0f * ptr[0] + ptr[1];
-                        aps[n_samples + k] += ptr[1] + 2.0f * ptr[2];
+                        aps[k] += 2.0f - float_arr[2 * k] - float_arr[2 * k + 1];
+                        aps[n_samples + k] += float_arr[2 * k] + float_arr[2 * k + 1];
+                    }
+                }
+                break;
+            case SCORE_USE_AP: {
+                const char *ap_tags[2] = {"AP1", "AP2"};
+                int ap;
+                for (ap = 0; ap < 2; ap++) {
+                    number = bcf_get_format_float(hdr, rec, ap_tags[ap], &float_arr, &m_float);
+                    if (number <= 0) continue;
+                    number /= n_samples;
+                    if (number == 1 && rec->n_allele == 2) {
+                        for (k = 0; k < n_samples; k++) {
+                            if (score_is_missing(float_arr[k])) missing[k] = 1;
+                            else {
+                                aps[k] += 1.0f - float_arr[k];
+                                aps[n_samples + k] += float_arr[k];
+                            }
+                        }
+                    } else {
+                        for (k = 0; k < n_samples; k++) {
+                            int idx;
+                            float *ptr = float_arr + number * k;
+                            aps[k] += 1.0f;
+                            for (idx = 0; idx < number; idx++) {
+                                if (score_is_missing(ptr[idx])) missing[k] = 1;
+                                else {
+                                    aps[k] -= ptr[idx];
+                                    aps[(idx + 1) * n_samples + k] += ptr[idx];
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            case SCORE_USE_GP:
+                number = bcf_get_format_float(hdr, rec, "GP", &float_arr, &m_float);
+                if (number <= 0) continue;
+                number /= n_samples;
+                if (number == 3 && rec->n_allele == 2) {
+                    for (k = 0; k < n_samples; k++) {
+                        float *ptr = float_arr + number * k;
+                        if (score_is_missing(ptr[0]) || score_is_missing(ptr[1]) || score_is_missing(ptr[2])) missing[k] = 1;
+                        else {
+                            aps[k] += 2.0f * ptr[0] + ptr[1];
+                            aps[n_samples + k] += ptr[1] + 2.0f * ptr[2];
+                        }
+                    }
+                } else {
+                    for (k = 0; k < n_samples; k++) {
+                        int a, b;
+                        float *ptr = float_arr + number * k;
+                        for (b = 0; b < rec->n_allele; b++) {
+                            for (a = 0; a <= b; a++) {
+                                int idx = b * (b + 1) / 2 + a;
+                                if (score_is_missing(ptr[idx])) missing[k] = 1;
+                                else {
+                                    aps[a * n_samples + k] += ptr[idx];
+                                    aps[b * n_samples + k] += ptr[idx];
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            case SCORE_USE_AS:
+                number = bcf_get_format_int32(hdr, rec, "AS", &int32_arr, &m_int32);
+                if (number <= 0) continue;
+                number /= n_samples;
+                if (number != 1 || rec->n_allele != 2) continue;
+                for (k = 0; k < n_samples; k++) {
+                    if (int32_arr[k] == 0 || int32_arr[k] == bcf_int32_missing) missing[k] = 1;
+                    else {
+                        aps[k] -= (float)int32_arr[k];
+                        aps[n_samples + k] += (float)int32_arr[k];
+                    }
+                }
+                break;
+            default:
+                continue;
+            }
+
+            /* Phase 3: Accumulate scores for each PRS.
+             * For GWAS-VCF mode, iterate over all n_prs summaries.
+             * For TSV mode, use the single summary (n_prs == 1). */
+            if (bind->gwas_vcf_mode) {
+                int pi;
+                for (pi = 0; pi < n_prs; pi++) {
+                    const score_marker_t *marker;
+                    const char *a1;
+                    float es, lp;
+                    int idx_allele, j;
+
+                    if (idxs[pi] < 0 || idxs[pi] >= summaries[pi]->n_markers) continue;
+                    marker = &summaries[pi]->markers[idxs[pi]];
+                    a1 = marker->a1;
+                    if (!a1) continue;
+
+                    for (idx_allele = 0; idx_allele < rec->n_allele; idx_allele++) {
+                        if (strcmp(a1, rec->d.allele[idx_allele]) == 0) break;
+                    }
+                    if (idx_allele == rec->n_allele) continue;
+
+                    es = marker->es;
+                    lp = marker->lp;
+                    for (j = 0; j < bind->n_q_thr; j++) {
+                        int out_idx = (pi * bind->n_q_thr + j) * (bind->counts ? 2 : 1);
+                        if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
+                        for (k = 0; k < n_samples; k++) {
+                            if (missing[k]) continue;
+                            init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];
+                            if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
+                        }
                     }
                 }
             } else {
-                for (k = 0; k < n_samples; k++) {
-                    int a, b;
-                    float *ptr = float_arr + number * k;
-                    for (b = 0; b < rec->n_allele; b++) {
-                        for (a = 0; a <= b; a++) {
-                            int idx = b * (b + 1) / 2 + a;
-                            if (score_is_missing(ptr[idx])) missing[k] = 1;
-                            else {
-                                aps[a * n_samples + k] += ptr[idx];
-                                aps[b * n_samples + k] += ptr[idx];
+                /* TSV single-PRS mode — re-lookup marker_idx (already validated above) */
+                int marker_idx = -1;
+                if (summary->use_snp) {
+                    if (rec->d.id && rec->d.id[0] != '\0') {
+                        khash_str2int_get(summary->id2idx, rec->d.id, &marker_idx);
+                    }
+                } else {
+                    khash_t(score64) *hash = (khash_t(score64) *)summary->rid_pos2idx;
+                    uint64_t key = (((uint64_t)(uint32_t)rec->rid) << 44) | (uint64_t)rec->pos;
+                    khiter_t it = kh_get(score64, hash, key);
+                    if (it != kh_end(hash)) marker_idx = kh_val(hash, it);
+                }
+                if (marker_idx >= 0 && marker_idx < summary->n_markers) {
+                    const score_marker_t *marker = &summary->markers[marker_idx];
+                    const char *a1 = marker->a1;
+                    int j;
+                    if (a1) {
+                        int idx_allele;
+                        float es, lp;
+                        for (idx_allele = 0; idx_allele < rec->n_allele; idx_allele++) {
+                            if (strcmp(a1, rec->d.allele[idx_allele]) == 0) break;
+                        }
+                        if (idx_allele < rec->n_allele) {
+                            es = marker->es;
+                            lp = marker->lp;
+                            for (j = 0; j < bind->n_q_thr; j++) {
+                                int out_idx = j * (bind->counts ? 2 : 1);
+                                if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
+                                for (k = 0; k < n_samples; k++) {
+                                    if (missing[k]) continue;
+                                    init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];
+                                    if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
+                                }
                             }
                         }
                     }
                 }
             }
-            break;
-        case SCORE_USE_AS:
-            number = bcf_get_format_int32(hdr, rec, "AS", &int32_arr, &m_int32);
-            if (number <= 0) continue;
-            number /= n_samples;
-            if (number != 1 || rec->n_allele != 2) continue;
-            for (k = 0; k < n_samples; k++) {
-                if (int32_arr[k] == 0 || int32_arr[k] == bcf_int32_missing) missing[k] = 1;
-                else {
-                    aps[k] -= (float)int32_arr[k];
-                    aps[n_samples + k] += (float)int32_arr[k];
-                }
-            }
-            break;
-        default:
-            continue;
         }
 
-        {
-            const score_marker_t *marker = &summary->markers[marker_idx];
-            const char *a1 = marker->a1;
-            int j;
-            if (!a1) continue;
-            for (idx_allele = 0; idx_allele < rec->n_allele; idx_allele++) {
-                if (strcmp(a1, rec->d.allele[idx_allele]) == 0) break;
-            }
-            if (idx_allele == rec->n_allele) continue;
-
-            es = marker->es;
-            lp = marker->lp;
-            for (j = 0; j < bind->n_q_thr; j++) {
-                int out_idx = j * (bind->counts ? 2 : 1);
-                if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
-                for (k = 0; k < n_samples; k++) {
-                    if (missing[k]) continue;
-                    init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];
-                    if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
-                }
-            }
-        }
+        if (idxs) duckdb_free(idxs);
     }
 
     if (int32_arr) free(int32_arr);
     if (float_arr) free(float_arr);
     if (aps) duckdb_free(aps);
     if (missing) duckdb_free(missing);
-    if (rec) bcf_destroy(rec);
+    score_source_destroy(&src);
     if (summary) score_destroy_summary(summary);
-    if (hdr) bcf_hdr_destroy(hdr);
-    if (fp) hts_close(fp);
+    if (summaries) {
+        for (i = 0; i < n_prs; i++) {
+            if (summaries[i]) score_destroy_summary(summaries[i]);
+        }
+        duckdb_free(summaries);
+    }
+    hdr = NULL;
 
     duckdb_init_set_init_data(info, init, score_destroy_init);
 }
@@ -1216,6 +2520,7 @@ void register_bcftools_score_function(duckdb_connection connection) {
     duckdb_table_function tf = duckdb_create_table_function();
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
 
     duckdb_table_function_set_name(tf, "bcftools_score");
     duckdb_table_function_add_parameter(tf, varchar_type);
@@ -1226,9 +2531,21 @@ void register_bcftools_score_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "q_score_thr", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "use_variant_id", bool_type);
     duckdb_table_function_add_named_parameter(tf, "counts", bool_type);
+    duckdb_table_function_add_named_parameter(tf, "samples", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "force_samples", bool_type);
+    duckdb_table_function_add_named_parameter(tf, "regions", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "regions_file", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "regions_overlap", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "targets", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "targets_file", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "targets_overlap", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "apply_filters", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "include", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "exclude", varchar_type);
 
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_logical_type(&bigint_type);
 
     duckdb_table_function_set_bind(tf, score_bind);
     duckdb_table_function_set_init(tf, score_init);

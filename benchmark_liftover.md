@@ -20,10 +20,10 @@ Override stress size with `LIFTOVER_BENCH_ROWS` and repeats with
 ## Synthetic Stress Case
 
     #>     engine runs median_sec min_sec max_sec output_rows
-    #> 1  duckhts    3      0.052   0.051   0.060       1e+06
-    #> 2 bcftools    3    112.988 112.670 113.926       1e+06
+    #> 1  duckhts    2      0.033    0.03   0.036       5e+05
+    #> 2 bcftools    2     30.694   29.70  31.688       5e+05
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
-    #> 1     1e+06         1e+06                0                    0
+    #> 1     5e+05         5e+05                0                    0
     #>   mismatched_count_groups outputs_match
     #> 1                       0          TRUE

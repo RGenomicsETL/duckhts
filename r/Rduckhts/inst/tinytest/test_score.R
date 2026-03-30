@@ -24,6 +24,8 @@ test_score <- function() {
   sumf_custom <- file.path(extdata, "score_summary_custom.tsv")
   cols_file <- file.path(extdata, "score_columns.tsv")
   sumf_smallp <- file.path(extdata, "score_summary_smallp.tsv")
+  regions_file <- file.path(extdata, "score_regions.txt")
+  targets_file <- file.path(extdata, "score_targets.txt")
 
   expect_true(file.exists(vcf))
   expect_true(file.exists(vcf_dosage))
@@ -39,6 +41,8 @@ test_score <- function() {
   expect_true(file.exists(sumf_custom))
   expect_true(file.exists(cols_file))
   expect_true(file.exists(sumf_smallp))
+  expect_true(file.exists(regions_file))
+  expect_true(file.exists(targets_file))
 
   # --- Basic GT scoring ---
   out_gt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK")
@@ -132,6 +136,113 @@ test_score <- function() {
   thr_col <- grep("p1e-200$", names(out_sp), value = TRUE)
   expect_true(length(thr_col) > 0)
   expect_equal(round(out_sp[[thr_col[1]]], 3), c(0.0, 0.5))
+
+  # --- Sample subsetting: single sample ---
+  out_sub <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                            samples = "S1")
+  expect_equal(nrow(out_sub), 1L)
+  expect_equal(out_sub$SAMPLE, "S1")
+  expect_equal(round(out_sub$score_summary, 3), 1.8)
+
+  # --- Sample subsetting: missing sample errors ---
+  expect_error(
+    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                   samples = "S1,NOSAMPLE"),
+    pattern = "sample"
+  )
+
+  # --- Sample subsetting: force_samples ignores missing ---
+  out_force <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                              samples = "S1,NOSAMPLE", force_samples = TRUE)
+  expect_equal(nrow(out_force), 1L)
+  expect_equal(out_force$SAMPLE, "S1")
+  expect_equal(round(out_force$score_summary, 3), 1.8)
+
+  # --- Region/target/filter controls ---
+  out_regions <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                regions = "1:150-250")
+  expect_equal(round(out_regions$score_summary, 3), c(-0.2, -0.4))
+
+  out_targets <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                targets = "1:150-250")
+  expect_equal(round(out_targets$score_summary, 3), c(-0.2, -0.4))
+
+  out_regions_file <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                     regions_file = regions_file)
+  expect_equal(round(out_regions_file$score_summary, 3), c(-0.2, -0.4))
+
+  out_targets_file <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                     targets_file = targets_file)
+  expect_equal(round(out_targets_file$score_summary, 3), c(-0.2, -0.4))
+
+  out_pass <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                             apply_filters = "PASS")
+  expect_equal(round(out_pass$score_summary, 3), c(1.8, 0.1))
+
+  expect_error(
+    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                   include = "POS >>> 100"),
+    pattern = "failed to evaluate include expression"
+  )
+
+  out_include <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                include = "POS > 100")
+  expect_equal(round(out_include$score_summary, 3), c(1.8, -0.4))
+
+  out_exclude <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                exclude = "POS > 100")
+  expect_equal(round(out_exclude$score_summary, 3), c(0.0, 0.5))
+
+  out_type <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                             include = "TYPE==\"SNP\" && N_ALT==1")
+  expect_equal(round(out_type$score_summary, 3), c(1.8, 0.1))
+
+  out_filter_expr <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                    include = "FILTER==\"PASS\"")
+  expect_equal(round(out_filter_expr$score_summary, 3), c(1.8, 0.1))
+
+  expect_error(
+    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                   include = "INFO/ZZZ==1"),
+    pattern = "failed to evaluate include expression"
+  )
+
+  out_format_gt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                                  include = "FORMAT/GT==\"0/0\"")
+  expect_equal(round(out_format_gt$score_summary, 3), c(0.0, 0.5))
+
+  ## ---- S-C4: GWAS-VCF multi-PRS scoring ----
+
+  sumf_gwas <- file.path(extdata, "score_gwas_summary.vcf")
+  expect_true(file.exists(sumf_gwas))
+
+  # Basic GWAS-VCF: auto-detected multi-PRS (PRS_A, PRS_B columns in output)
+  out_gwas <- rduckhts_score(con, vcf, sumf_gwas, use = "GT")
+  expect_true(all(c("SAMPLE", "PRS_A", "PRS_B") %in% names(out_gwas)))
+  expect_equal(nrow(out_gwas), 2L)
+  gwas_s1 <- out_gwas[out_gwas$SAMPLE == "S1", , drop = FALSE]
+  gwas_s2 <- out_gwas[out_gwas$SAMPLE == "S2", , drop = FALSE]
+  expect_equal(round(gwas_s1$PRS_A[1], 3), 1.8)
+  expect_equal(round(gwas_s1$PRS_B[1], 3), 1.0)
+  expect_equal(round(gwas_s2$PRS_A[1], 3), 0.1)
+  expect_equal(round(gwas_s2$PRS_B[1], 3), 0.3)
+
+  # GWAS-VCF with counts: adds PRS_A_CNT, PRS_B_CNT columns
+  out_gwas_cnt <- rduckhts_score(con, vcf, sumf_gwas, use = "GT", counts = TRUE)
+  expect_true(all(c("PRS_A", "PRS_A_CNT", "PRS_B", "PRS_B_CNT") %in% names(out_gwas_cnt)))
+  gwas_cnt_s1 <- out_gwas_cnt[out_gwas_cnt$SAMPLE == "S1", , drop = FALSE]
+  gwas_cnt_s2 <- out_gwas_cnt[out_gwas_cnt$SAMPLE == "S2", , drop = FALSE]
+  expect_equal(gwas_cnt_s1$PRS_A_CNT[1], 3)
+  expect_equal(gwas_cnt_s1$PRS_B_CNT[1], 2)
+  expect_equal(gwas_cnt_s2$PRS_A_CNT[1], 3)
+  expect_equal(gwas_cnt_s2$PRS_B_CNT[1], 2)
+
+  # GWAS-VCF with sample subsetting
+  out_gwas_sub <- rduckhts_score(con, vcf, sumf_gwas, use = "GT", samples = "S1")
+  expect_equal(nrow(out_gwas_sub), 1L)
+  expect_equal(out_gwas_sub$SAMPLE, "S1")
+  expect_equal(round(out_gwas_sub$PRS_A[1], 3), 1.8)
+  expect_equal(round(out_gwas_sub$PRS_B[1], 3), 1.0)
 }
 
 test_score()

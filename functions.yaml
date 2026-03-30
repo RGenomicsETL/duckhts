@@ -316,10 +316,10 @@
       "name": "bcftools_score",
       "kind": "table",
       "category": "Variants",
-      "signature": "bcftools_score(bcf_path, summary_path, use := NULL, columns := 'PLINK', columns_file := NULL, q_score_thr := NULL, use_variant_id := FALSE, counts := FALSE)",
+      "signature": "bcftools_score(bcf_path, summary_path, use := NULL, columns := 'PLINK', columns_file := NULL, q_score_thr := NULL, use_variant_id := FALSE, counts := FALSE, samples := NULL, force_samples := FALSE, regions := NULL, regions_file := NULL, regions_overlap := 1, targets := NULL, targets_file := NULL, targets_overlap := 0, apply_filters := NULL, include := NULL, exclude := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_score",
-      "description": "Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics.",
+      "description": "Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls.",
       "examples": [
         "SELECT * FROM bcftools_score('cohort.bcf', 'gwas.tsv.gz', columns := 'PLINK') LIMIT 5;"
       ]
@@ -343,10 +343,23 @@
       "signature": "duckdb_munge(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_munge",
-      "description": "DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics.",
+      "description": "DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.",
       "examples": [
         "SELECT * FROM duckdb_munge('gwas_table', preset := 'PLINK', fasta_ref := 'ref.fa');",
         "SELECT * FROM duckdb_munge('(SELECT * FROM gwas_table) AS s', column_map := map(['CHR','BP','A1','A2','SNP'], ['chrom','pos','ea','nea','id']), fasta_ref := 'ref.fa');"
+      ]
+    },
+    {
+      "name": "duckdb_munge_metal",
+      "kind": "table_macro",
+      "category": "Variants",
+      "signature": "duckdb_munge_metal(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_munge",
+      "description": "Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran's I² heterogeneity, from HET_I2), cq (Cochran's Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map.",
+      "examples": [
+        "SELECT * FROM duckdb_munge_metal('metal_results', preset := 'METAL', fasta_ref := 'ref.fa');",
+        "SELECT * FROM duckdb_munge_metal('meta', column_map := map(['CHR','BP','A1','A2','SNP','HET_I2','DIRE'], ['chr','pos','ea','nea','snp','HetISq','Direction']), fasta_ref := 'ref.fa');"
       ]
     },
     {

@@ -10,7 +10,7 @@ SELECT bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/does_not_exist.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, 250
+   1, 250, false, NULL::BIGINT
 );
 ----
 Invalid Input Error: bcftools_liftover: failed to load chain or FASTA context
@@ -21,7 +21,7 @@ SELECT (bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, 250
+  1, 250, false, NULL::BIGINT
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: chrom must be non-null
@@ -32,7 +32,7 @@ SELECT (bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, 250
+  1, 250, false, NULL::BIGINT
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: chrom must be non-empty
@@ -43,7 +43,7 @@ SELECT (bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, 250
+  1, 250, false, NULL::BIGINT
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: pos must be non-null
@@ -54,7 +54,7 @@ SELECT (bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, 250
+  1, 250, false, NULL::BIGINT
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: pos must be >= 1
@@ -119,9 +119,9 @@ statement error
 SELECT bcftools_liftover(
   'chrF', 2, 'C', 'T',
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
-  '__WORKING_DIRECTORY__/test/data/does_not_exist.fa',
-  '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, 250
+   '__WORKING_DIRECTORY__/test/data/does_not_exist.fa',
+   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+   1, 250, false, NULL::BIGINT
 );
 ----
 Invalid Input Error: bcftools_liftover: failed to load chain or FASTA context: bcftools_liftover: failed to load destination FASTA index:
@@ -132,7 +132,7 @@ SELECT (bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  -1, 250
+  -1, 250, false, NULL::BIGINT
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: max_snp_gap must be >= 0
@@ -143,7 +143,7 @@ SELECT (bcftools_liftover(
   '__WORKING_DIRECTORY__/test/data/liftover.chain',
   '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
   '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-  1, -1
+  1, -1, false, NULL::BIGINT
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: max_indel_inc must be >= 0

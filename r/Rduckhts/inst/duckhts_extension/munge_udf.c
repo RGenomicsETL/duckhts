@@ -303,15 +303,12 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             set_munge_error(info, "bcftools_munge_row: a1 and a2 must be non-null");
             return;
         }
-        if (!row_is_valid(fasta_ref_vec, row)) {
-            set_munge_error(info, "bcftools_munge_row: fasta_ref must be non-null");
-            return;
-        }
 
         chrom = get_string_at(chrom_vec, row, &chrom_len);
         a1 = get_string_at(a1_vec, row, &a1_len);
         a2 = get_string_at(a2_vec, row, &a2_len);
-        fasta_ref = get_string_at(fasta_ref_vec, row, &fasta_len);
+        if (row_is_valid(fasta_ref_vec, row)) fasta_ref = get_string_at(fasta_ref_vec, row, &fasta_len);
+        else { fasta_ref = NULL; fasta_len = 0; }
         if (row_is_valid(id_vec, row)) id = get_string_at(id_vec, row, &id_len);
         if (row_is_valid(iffy_tag_vec, row)) iffy_tag = get_string_at(iffy_tag_vec, row, &tag_len);
         if (row_is_valid(mismatch_tag_vec, row)) mismatch_tag = get_string_at(mismatch_tag_vec, row, &mismatch_len);
@@ -322,10 +319,6 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         }
         if (!a1 || a1_len == 0 || !a2 || a2_len == 0) {
             set_munge_error(info, "bcftools_munge_row: a1 and a2 must be non-empty");
-            return;
-        }
-        if (!fasta_ref || fasta_len == 0) {
-            set_munge_error(info, "bcftools_munge_row: fasta_ref must be non-empty");
             return;
         }
 
@@ -366,6 +359,37 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         else if (!isnan(nc) && row_is_valid(n_con_vec, row)) ns = nc + get_double_at(n_con_vec, row);
         if (row_is_valid(ne_override_vec, row)) ne = get_double_at(ne_override_vec, row);
         if (isnan(ac) && !isnan(af) && !isnan(ns)) ac = 2.0 * ns * af;
+
+        /* M-M9: fai-only mode — when fasta_ref is NULL/empty, skip ref-matching
+         * entirely (upstream munge.c:590 gates swap logic on ref_fname). Output
+         * alleles as-is: A2→REF, A1→ALT, no swap, no FILTER tag. */
+        if (!fasta_ref || fasta_len == 0) {
+            duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_CHROM], row, chrom, chrom_len);
+            ((int64_t *)duckdb_vector_get_data(child_vecs[MUNGE_OUT_POS]))[row] = pos;
+            if (id && id_len > 0) duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ID], row, id, id_len);
+            else set_null_at(child_vecs[MUNGE_OUT_ID], row);
+            duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_REF], row, norm_ref);
+            duckdb_vector_assign_string_element(child_vecs[MUNGE_OUT_ALT], row, norm_alt);
+            ((bool *)duckdb_vector_get_data(child_vecs[MUNGE_OUT_ALLELES_SWAPPED]))[row] = false;
+            set_null_at(child_vecs[MUNGE_OUT_FILTER], row);
+            assign_double_or_null(child_vecs[MUNGE_OUT_NS], row, ns);
+            assign_double_or_null(child_vecs[MUNGE_OUT_EZ], row, ez);
+            assign_double_or_null(child_vecs[MUNGE_OUT_NC], row, nc);
+            assign_double_or_null(child_vecs[MUNGE_OUT_ES], row, es);
+            assign_double_or_null(child_vecs[MUNGE_OUT_SE], row, se);
+            assign_double_or_null(child_vecs[MUNGE_OUT_LP], row, lp);
+            assign_double_or_null(child_vecs[MUNGE_OUT_AF], row, af);
+            assign_double_or_null(child_vecs[MUNGE_OUT_AC], row, ac);
+            assign_double_or_null(child_vecs[MUNGE_OUT_NE], row, ne);
+            assign_double_or_null(child_vecs[MUNGE_OUT_SI], row, si);
+            assign_double_or_null(child_vecs[MUNGE_OUT_I2], row, i2);
+            assign_double_or_null(child_vecs[MUNGE_OUT_CQ], row, cq);
+            if (ed && ed_len > 0) duckdb_vector_assign_string_element_len(child_vecs[MUNGE_OUT_ED], row, ed, ed_len);
+            else set_null_at(child_vecs[MUNGE_OUT_ED], row);
+            free(norm_alt);
+            free(norm_ref);
+            continue;
+        }
 
         fasta_path = dup_span(fasta_ref, fasta_len);
         fai = get_munge_fai(fasta_path, &err);

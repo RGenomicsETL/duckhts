@@ -35,7 +35,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250
+    1, 250, false, NULL::BIGINT
   ) AS lo
 ) s;
 ----
@@ -72,7 +72,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     NULL,
-    1, 250
+    1, 250, false, NULL::BIGINT
   ) AS lo
 ) s;
 ----
@@ -89,12 +89,189 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     NULL,
-    1, 250
+    1, 250, false, NULL::BIGINT
   ) AS lo
 ) s;
 ----
 0	MissingContig	-1	NULL
 
+# MT passthrough: build FASTA indexes for MT test data
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa.fai'
+);
+----
+1
+
+query I
+SELECT CASE WHEN success THEN 1 ELSE 0 END
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa.fai'
+);
+----
+1
+
+# MT passthrough with lift_mt=false (default): matching sizes → rename only
+query TITTIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       CASE WHEN lo.reverse_complemented THEN 1 ELSE 0 END,
+       lo.swap,
+       coalesce(lo.reject_reason, 'OK'),
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'MT', 5, 'G', 'A',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
+    1, 250, false, NULL::BIGINT
+  ) AS lo
+) s;
+----
+chrM	5	G	A	1	0	0	OK	MitochondriaPassthrough
+
+# MT with lift_mt=true: forced chain liftover (no passthrough)
+query TITTIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       CASE WHEN lo.reverse_complemented THEN 1 ELSE 0 END,
+       lo.swap,
+       coalesce(lo.reject_reason, 'OK'),
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'MT', 5, 'G', 'A',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
+    1, 250, true, NULL::BIGINT
+  ) AS lo
+) s;
+----
+chrM	5	G	A	1	0	0	OK	OK
+
+# chrM alias also triggers passthrough
+query TITT
+SELECT lo.dest_chrom, lo.dest_pos,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrM', 5, 'G', 'A',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
+    1, 250, false, NULL::BIGINT
+  ) AS lo
+) s;
+----
+chrM	5	1	MitochondriaPassthrough
+
+# MT passthrough via duckdb_liftover macro with lift_mt parameter
+query TITT
+SELECT dest_chrom, dest_pos,
+       CASE WHEN mapped THEN 1 ELSE 0 END,
+       coalesce(note, 'OK')
+FROM duckdb_liftover(
+  '(VALUES (''MT'', 5, ''G'', ''A'')) AS t(chrom, pos, ref, alt)',
+  'chrom', 'pos',
+  ref_col := 'ref', alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
+  lift_mt := false
+);
+----
+chrM	5	1	MitochondriaPassthrough
+
+# L-M2: INFO/END liftover — forward chain, end_pos provided
+query TIITI
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_end,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, 'C', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, 5
+  ) AS lo
+) s;
+----
+chrLiftF	2	5	1	OK
+
+# L-M2: INFO/END liftover — no end_pos (NULL), dest_end should be NULL
+query TII
+SELECT lo.dest_chrom, lo.dest_pos,
+       CASE WHEN lo.dest_end IS NULL THEN -1 ELSE lo.dest_end END
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, 'C', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT
+  ) AS lo
+) s;
+----
+chrLiftF	2	-1
+
+# L-M2: INFO/END liftover — MT passthrough preserves end_pos
+query TIIT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_end,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'MT', 5, 'G', 'A',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
+    1, 250, false, 8
+  ) AS lo
+) s;
+----
+chrM	5	8	MitochondriaPassthrough
+
+# L-M2: INFO/END liftover via duckdb_liftover macro with end_pos_col
+query TIIT
+SELECT dest_chrom, dest_pos, dest_end,
+       coalesce(note, 'OK')
+FROM duckdb_liftover(
+  '(VALUES (''chrF'', 2, ''C'', ''T'', 5)) AS t(chrom, pos, ref, alt, end_pos)',
+  'chrom', 'pos',
+  ref_col := 'ref', alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  end_pos_col := 'end_pos'
+);
+----
+chrLiftF	2	5	OK
+
+query ITIT
+SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.reject_reason, 'NULL'),
+       CASE WHEN lo.dest_pos IS NULL THEN -1 ELSE lo.dest_pos END,
+       coalesce(lo.note, 'NULL')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 20, 'A', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT
+  ) AS lo
+) s;
+----
+0	UnmappedAnchors	-1	NULL
+
+# Tier 3: Difficult SNP at edge of chain rescued by indel retry path
+# (position 11 is 1bp beyond the 10bp chain, extension pulls it into range)
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
        coalesce(lo.reject_reason, 'NULL'),
@@ -106,11 +283,11 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250
+    1, 250, false, NULL::BIGINT
   ) AS lo
 ) s;
 ----
-0	UnmappedAnchors	-1	NULL
+1	NULL	10	Padded
 
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
@@ -123,8 +300,41 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250
+    1, 250, false, NULL::BIGINT
   ) AS lo
 ) s;
 ----
 0	MissingContig	-1	NULL
+
+# Multi-allelic ALT semantics: preserve all alleles through reference rewrite and strand flip
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, 'A', 'T,G',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT
+  ) AS lo
+) s;
+----
+chrLiftF	2	C	A,T,G	-1	OK
+
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrR', 2, 'A', 'G,T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT
+  ) AS lo
+) s;
+----
+chrLiftR	9	T	C,A	0	OK
