@@ -773,47 +773,6 @@ static void liftover_bind_destroy(void *ptr) {
     free(bind);
 }
 
-static liftover_bind_t *liftover_bind_copy_data(const liftover_bind_t *src) {
-    liftover_bind_t *bind;
-    htsFile *chain_fp = NULL;
-    char *errbuf = NULL;
-    if (!src) return NULL;
-    bind = (liftover_bind_t *)calloc(1, sizeof(*bind));
-    if (!bind) return NULL;
-    bind->chain_path = dup_cstr(src->chain_path);
-    bind->dst_fasta_ref = dup_cstr(src->dst_fasta_ref);
-    bind->src_fasta_ref = dup_cstr(src->src_fasta_ref);
-    bind->max_snp_gap = src->max_snp_gap;
-    bind->max_indel_inc = src->max_indel_inc;
-
-    chain_fp = hts_open(bind->chain_path, "r");
-    if (!chain_fp) {
-        liftover_bind_destroy(bind);
-        return NULL;
-    }
-    bind->n_chains = read_chains(chain_fp, bind->max_snp_gap, &bind->chains, &bind->blocks, &errbuf);
-    hts_close(chain_fp);
-    if (bind->n_chains < 0) {
-        free(errbuf);
-        liftover_bind_destroy(bind);
-        return NULL;
-    }
-    bind->idx = regidx_init_chains(bind->chains, bind->n_chains, bind->blocks);
-    bind->dst_fai = fai_load(bind->dst_fasta_ref);
-    if (!bind->dst_fai) {
-        liftover_bind_destroy(bind);
-        return NULL;
-    }
-    if (bind->src_fasta_ref) {
-        bind->src_fai = fai_load(bind->src_fasta_ref);
-        if (!bind->src_fai) {
-            liftover_bind_destroy(bind);
-            return NULL;
-        }
-    }
-    return bind;
-}
-
 static int liftover_bp(liftover_bind_t *bind, const char *t_chr, hts_pos_t t_pos,
                        const char **q_chr, hts_pos_t *q_pos, int *q_strand, int *multi_match) {
     int block_ind = -1;
@@ -1157,7 +1116,7 @@ static void scalar_extend_alleles(scalar_realign_t *ra, char **alleles, int n_al
 }
 
 /* Scalar update_alleles: copies result from ra->als[0..1] into output strings.
- * Returns new (pos, ref, alt) via out params. Caller must free *out_ref/*out_alt.
+ * Returns new (pos, ref, alt) via out params. Caller must free output alleles.
  * Returns the 0-based position (ra->pos). */
 static hts_pos_t scalar_update_alleles(scalar_realign_t *ra, char ***out_alleles, int *out_n_allele) {
     char **alleles = (char **)calloc((size_t)ra->n_allele, sizeof(char *));
@@ -2022,7 +1981,6 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
                 }
                 if (pad_seq) {
                     /* Reverse complement pad and negate npad (exact upstream behavior) */
-                    size_t pad_len = strlen(pad_seq);
                     char *rc = reverse_complement_copy(pad_seq);
                     free(pad_seq);
                     pad_seq = rc;

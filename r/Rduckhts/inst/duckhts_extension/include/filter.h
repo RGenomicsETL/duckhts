@@ -100,6 +100,7 @@ filter_t *filter_parse(bcf_hdr_t *hdr, const char *str);
   *  Check if filter_parse() was successful
   */
 int filter_status(filter_t *filter);
+const char *filter_last_error(filter_t *filter);
 const char **filter_list_undef_tags(filter_t *filter, int *nundef);
 const char **filter_list_used_tags(filter_t *filter, int *nused);
 

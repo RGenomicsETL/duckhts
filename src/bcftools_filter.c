@@ -28,6 +28,7 @@ THE SOFTWARE.  */
 #include <assert.h>
 #include <errno.h>
 #include <math.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -47,9 +48,6 @@ THE SOFTWARE.  */
 #include "bcftools_filter_config.h"
 #include "filter.h"
 #include "bcftools_shim.h"
-
-#define error duckhts_bcftools_error
-#define error_errno duckhts_bcftools_error_errno
 
 #if ENABLE_PERL_FILTERS
 // Work around clang warning problems
@@ -129,7 +127,124 @@ struct _filter_t
     int status, exit_on_error;
     int n_ext;      // number of external values to fill via filter_test_ext()
     int *ext;       // types of external values to fill via filter_test_ext()
+    char last_error[1024];
 };
+
+#if defined(_MSC_VER)
+#define DUCKHTS_FILTER_THREAD_LOCAL __declspec(thread)
+#elif defined(__GNUC__) || defined(__clang__)
+#define DUCKHTS_FILTER_THREAD_LOCAL __thread
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define DUCKHTS_FILTER_THREAD_LOCAL _Thread_local
+#else
+#define DUCKHTS_FILTER_THREAD_LOCAL
+#endif
+
+typedef struct {
+    jmp_buf env_stack[16];
+    filter_t *filter_stack[16];
+    int depth;
+} duckhts_filter_recovery_t;
+
+static DUCKHTS_FILTER_THREAD_LOCAL duckhts_filter_recovery_t g_filter_recovery = {0};
+
+static void duckhts_filter_trim_last_error(char *msg)
+{
+    size_t n;
+    if ( !msg ) return;
+    n = strlen(msg);
+    while ( n > 0 && (msg[n-1] == '\n' || msg[n-1] == '\r') ) msg[--n] = '\0';
+}
+
+static void duckhts_filter_store_error(filter_t *filter, const char *format, va_list ap)
+{
+    if ( !filter ) return;
+    vsnprintf(filter->last_error, sizeof(filter->last_error), format, ap);
+    duckhts_filter_trim_last_error(filter->last_error);
+}
+
+static void duckhts_filter_raise_common(int with_errno, const char *format, va_list ap)
+{
+    filter_t *filter = NULL;
+    char fallback[1024] = {0};
+    char *msg = fallback;
+    size_t n;
+    size_t msg_sz = sizeof(fallback);
+
+    if ( g_filter_recovery.depth > 0 ) filter = g_filter_recovery.filter_stack[g_filter_recovery.depth - 1];
+
+    if ( filter )
+    {
+        filter->last_error[0] = '\0';
+        duckhts_filter_store_error(filter, format, ap);
+        msg = filter->last_error;
+        msg_sz = sizeof(filter->last_error);
+    }
+    else
+    {
+        vsnprintf(fallback, sizeof(fallback), format, ap);
+        duckhts_filter_trim_last_error(fallback);
+    }
+
+    if ( with_errno && errno != 0 )
+    {
+        n = strlen(msg);
+        if ( n + 3 < msg_sz )
+        {
+            snprintf(msg + n, msg_sz - n, ": %s", strerror(errno));
+            duckhts_filter_trim_last_error(msg);
+        }
+    }
+
+    if ( filter && !filter->exit_on_error && g_filter_recovery.depth > 0 )
+        longjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1], 1);
+
+    fputs(msg, stderr);
+    fputc('\n', stderr);
+    abort();
+}
+
+static void duckhts_filter_raise(const char *format, ...) HTS_NORETURN HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
+static void duckhts_filter_raise(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    duckhts_filter_raise_common(0, format, ap);
+    va_end(ap);
+}
+
+static void duckhts_filter_raise_errno(const char *format, ...) HTS_NORETURN HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
+static void duckhts_filter_raise_errno(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    duckhts_filter_raise_common(1, format, ap);
+    va_end(ap);
+}
+
+static int duckhts_filter_recovery_begin(filter_t *filter)
+{
+    if ( filter ) filter->last_error[0] = '\0';
+    if ( g_filter_recovery.depth >= (int)(sizeof(g_filter_recovery.env_stack) / sizeof(g_filter_recovery.env_stack[0])) )
+    {
+        if ( filter )
+            snprintf(filter->last_error, sizeof(filter->last_error), "bcftools filter recovery depth exceeded");
+        return 1;
+    }
+    g_filter_recovery.filter_stack[g_filter_recovery.depth] = filter;
+    g_filter_recovery.depth++;
+    return setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]);
+}
+
+static void duckhts_filter_recovery_end(void)
+{
+    if ( g_filter_recovery.depth <= 0 ) return;
+    g_filter_recovery.filter_stack[g_filter_recovery.depth - 1] = NULL;
+    g_filter_recovery.depth--;
+}
+
+#define error duckhts_filter_raise
+#define error_errno duckhts_filter_raise_errno
 
 
 #define TOK_VAL     0
@@ -3746,10 +3861,19 @@ err:
 static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error)
 {
     filter_t *filter = (filter_t *) calloc(1,sizeof(filter_t));
+    if ( !filter ) return NULL;
     filter->str = strdup(str);
     filter->hdr = hdr;
     filter->max_unpack |= BCF_UN_STR;
     filter->exit_on_error = exit_on_error;
+    if ( duckhts_filter_recovery_begin(filter) != 0 )
+    {
+        duckhts_filter_recovery_end();
+        filter->status |= FILTER_ERR_OTHER;
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Could not parse the expression: %s", str);
+        return filter;
+    }
 
     int nops = 0, mops = 0;    // operators stack
     int nout = 0, mout = 0;    // filter tokens, RPN
@@ -3943,6 +4067,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         if ( mops ) free(ops);
         filter->filters   = out;
         filter->nfilters  = nout;
+        duckhts_filter_recovery_end();
         return filter;
     }
 
@@ -4160,6 +4285,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     filter->filters   = out;
     filter->nfilters  = nout;
     filter->flt_stack = (token_t **)malloc(sizeof(token_t*)*nout);
+    duckhts_filter_recovery_end();
     return filter;
 }
 filter_t *filter_parse(bcf_hdr_t *hdr, const char *str)
@@ -4240,7 +4366,20 @@ int filter_test_ext(filter_t *filter, bcf1_t *rec, const uint8_t **samples, cons
 
 int filter_test(filter_t *filter, bcf1_t *line, const uint8_t **samples)
 {
-    if ( filter->status != FILTER_OK ) error("Error: the caller did not check the filter status\n");
+    if ( filter->status != FILTER_OK )
+    {
+        if ( filter->exit_on_error ) error("Error: the caller did not check the filter status\n");
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Error: the caller did not check the filter status");
+        return -1;
+    }
+    if ( duckhts_filter_recovery_begin(filter) != 0 )
+    {
+        duckhts_filter_recovery_end();
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Error occurred while processing the filter \"%s\"", filter->str);
+        return -1;
+    }
     bcf_unpack(line, filter->max_unpack);
 
     int i, nstack = 0;
@@ -4367,6 +4506,7 @@ int filter_test(filter_t *filter, bcf1_t *line, const uint8_t **samples)
                 filter->flt_stack[0]->pass_samples[i] = filter->flt_stack[0]->pass_site;
         }
     }
+    duckhts_filter_recovery_end();
     return filter->flt_stack[0]->pass_site;
 }
 
@@ -4405,4 +4545,9 @@ void filter_set_samples(filter_t *filter, const uint8_t *samples)
 int filter_status(filter_t *filter)
 {
     return filter->status;
+}
+
+const char *filter_last_error(filter_t *filter)
+{
+    return filter ? filter->last_error : NULL;
 }

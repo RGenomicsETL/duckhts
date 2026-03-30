@@ -1199,22 +1199,14 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
 static int score_record_matches_exprs(bcf1_t *rec, const score_scan_source_t *src) {
     if (src->include_filt) {
         int keep;
-        if (duckhts_filter_try_begin() != 0) {
-            duckhts_filter_try_end();
-            return -1;
-        }
         keep = filter_test(src->include_filt, rec, NULL);
-        duckhts_filter_try_end();
+        if (keep < 0) return -1;
         if (!keep) return 0;
     }
     if (src->exclude_filt) {
         int drop;
-        if (duckhts_filter_try_begin() != 0) {
-            duckhts_filter_try_end();
-            return -1;
-        }
         drop = filter_test(src->exclude_filt, rec, NULL);
-        duckhts_filter_try_end();
+        if (drop < 0) return -1;
         if (drop) return 0;
     }
     return 1;
@@ -1252,14 +1244,7 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             snprintf(err, err_sz, "bcftools_score: out of memory");
             return -1;
         }
-        if (duckhts_filter_try_begin() != 0) {
-            duckhts_filter_try_end();
-            free(include_expr);
-            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
-            return -1;
-        }
         src->include_filt = filter_parse(hdr0, include_expr);
-        duckhts_filter_try_end();
         free(include_expr);
         if (!src->include_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
@@ -1269,7 +1254,11 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             undef = filter_list_undef_tags(src->include_filt, &nundef);
             (void)undef;
             (void)nundef;
-            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
+            if (filter_last_error(src->include_filt) && filter_last_error(src->include_filt)[0]) {
+                snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression: %s", filter_last_error(src->include_filt));
+            } else {
+                snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
+            }
             return -1;
         }
     }
@@ -1279,14 +1268,7 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             snprintf(err, err_sz, "bcftools_score: out of memory");
             return -1;
         }
-        if (duckhts_filter_try_begin() != 0) {
-            duckhts_filter_try_end();
-            free(exclude_expr);
-            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
-            return -1;
-        }
         src->exclude_filt = filter_parse(hdr0, exclude_expr);
-        duckhts_filter_try_end();
         free(exclude_expr);
         if (!src->exclude_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
@@ -1296,7 +1278,11 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
             undef = filter_list_undef_tags(src->exclude_filt, &nundef);
             (void)undef;
             (void)nundef;
-            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
+            if (filter_last_error(src->exclude_filt) && filter_last_error(src->exclude_filt)[0]) {
+                snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression: %s", filter_last_error(src->exclude_filt));
+            } else {
+                snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
+            }
             return -1;
         }
     }
@@ -1824,8 +1810,6 @@ static void score_init(duckdb_init_info info) {
      * For TSV single-PRS mode, n_prs == 1 and summaries is not used. */
     {
         int *idxs = NULL;
-        int metrics_per_prs = bind->n_q_thr * (bind->counts ? 2 : 1);
-
         if (bind->gwas_vcf_mode) {
             idxs = (int *)duckdb_malloc(sizeof(int) * (size_t)n_prs);
         }
