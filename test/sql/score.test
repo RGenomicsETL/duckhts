@@ -28,7 +28,7 @@ FROM bcftools_score(
   include := 'INFO/ZZZ==1'
 )
 ----
-failed to parse include expression
+failed to evaluate include expression
 
 query TT
 SELECT SAMPLE, round(score_summary, 3)

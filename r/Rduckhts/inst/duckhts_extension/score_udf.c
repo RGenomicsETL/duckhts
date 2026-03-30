@@ -1291,14 +1291,14 @@ static int score_validate_expr_tags(const char *expr, const bcf_hdr_t *hdr, char
                 size_t n = i - (s + 5);
                 int id;
                 if (n >= sizeof(tag)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
                     return -1;
                 }
                 memcpy(tag, expr + s + 5, n);
                 tag[n] = '\0';
                 id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag);
                 if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_INFO, id)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
                     return -1;
                 }
             } else if (i > s + 7 && strncmp(expr + s, "FORMAT_", 7) == 0) {
@@ -1306,14 +1306,14 @@ static int score_validate_expr_tags(const char *expr, const bcf_hdr_t *hdr, char
                 size_t n = i - (s + 7);
                 int id;
                 if (n >= sizeof(tag)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
                     return -1;
                 }
                 memcpy(tag, expr + s + 7, n);
                 tag[n] = '\0';
                 id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag);
                 if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_FMT, id)) {
-                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
                     return -1;
                 }
             }
@@ -1669,7 +1669,7 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         }
         src->include_filt = hts_filter_init(src->include_expr_eval);
         if (!src->include_filt) {
-            snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
             return -1;
         }
         if (score_validate_expr_tags(src->include_expr_eval, hdr0, err, err_sz) != 0) {
@@ -1684,7 +1684,7 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         }
         src->exclude_filt = hts_filter_init(src->exclude_expr_eval);
         if (!src->exclude_filt) {
-            snprintf(err, err_sz, "bcftools_score: failed to parse exclude expression");
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");
             return -1;
         }
         if (score_validate_expr_tags(src->exclude_expr_eval, hdr0, err, err_sz) != 0) {
