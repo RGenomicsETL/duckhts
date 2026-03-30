@@ -133,6 +133,13 @@ Notes:
   - Region queries + record counts
 - Provide a test driver script that can run in CI with no network access.
 - Prefer staging datasets from vendored htslib/bcftools/samtools test trees.
+- Standardize bcftools-port regression checks around `scripts/run_bcftools_conformance.sh` and scenario scripts under `scripts/conformance/scenarios/`.
+- Each conformance scenario should write:
+  - raw engine outputs and stderr captures
+  - normalized comparison tables
+  - `report/summary.tsv` with case-level status and reason buckets
+  - `report/*.details.tsv` for row-level mismatches
+- Keep reason buckets explicit and conservative. Prefer stable labels like `float_precision`, `preset_alias_gap`, `error_handling_divergence`, and `surface_difference`; otherwise mark the mismatch `unclassified`.
 
 ## Build Strategy
 - htslib is the only required build dependency for the extension.

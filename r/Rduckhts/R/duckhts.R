@@ -1707,6 +1707,13 @@ rduckhts_liftover <- function(
   lift_mt = FALSE,
   end_pos_col = NULL
 ) {
+  if (!is.numeric(max_snp_gap) || length(max_snp_gap) != 1 || is.na(max_snp_gap) || max_snp_gap < 0) {
+    stop("max_snp_gap must be >= 0", call. = FALSE)
+  }
+  if (!is.numeric(max_indel_inc) || length(max_indel_inc) != 1 || is.na(max_indel_inc) || max_indel_inc < 0) {
+    stop("max_indel_inc must be >= 0", call. = FALSE)
+  }
+
   table_expr <- query
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
     table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
@@ -1727,8 +1734,8 @@ rduckhts_liftover <- function(
   if (!is.null(src_fasta_ref)) params <- c(params, sprintf("src_fasta_ref := '%s'", src_fasta_ref))
   params <- c(
     params,
-    sprintf("max_snp_gap := %d", max_snp_gap),
-    sprintf("max_indel_inc := %d", max_indel_inc),
+    sprintf("max_snp_gap := %d", as.integer(max_snp_gap)),
+    sprintf("max_indel_inc := %d", as.integer(max_indel_inc)),
     sprintf("lift_mt := %s", tolower(as.character(lift_mt)))
   )
   if (!is.null(end_pos_col)) params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
