@@ -214,15 +214,6 @@ static void duckhts_filter_raise(const char *format, ...)
     va_end(ap);
 }
 
-static void duckhts_filter_raise_errno(const char *format, ...) HTS_NORETURN HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
-static void duckhts_filter_raise_errno(const char *format, ...)
-{
-    va_list ap;
-    va_start(ap, format);
-    duckhts_filter_raise_common(1, format, ap);
-    va_end(ap);
-}
-
 static int duckhts_filter_recovery_begin(filter_t *filter)
 {
     if ( filter ) filter->last_error[0] = '\0';
@@ -245,7 +236,6 @@ static void duckhts_filter_recovery_end(void)
 }
 
 #define error duckhts_filter_raise
-#define error_errno duckhts_filter_raise_errno
 
 
 #define TOK_VAL     0
