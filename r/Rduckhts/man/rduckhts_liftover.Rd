@@ -15,7 +15,9 @@ rduckhts_liftover(
   alt_col = NULL,
   src_fasta_ref = NULL,
   max_snp_gap = 1,
-  max_indel_inc = 250
+  max_indel_inc = 250,
+  lift_mt = FALSE,
+  end_pos_col = NULL
 )
 }
 \arguments{
@@ -40,6 +42,15 @@ rduckhts_liftover(
 \item{max_snp_gap}{Maximum chain block merge gap}
 
 \item{max_indel_inc}{Maximum indel anchor expansion}
+
+\item{lift_mt}{If FALSE (default), mitochondrial variants with matching
+source/destination contig lengths are passed through with only contig
+rename. If TRUE, MT variants are lifted through the chain like any
+other contig.}
+
+\item{end_pos_col}{Optional column name containing INFO/END positions
+(1-based) to lift alongside the primary position. When provided, the
+output includes a `dest_end` column with the lifted end position.}
 }
 \value{
 A data frame with source columns, lifted coordinates/alleles, and warnings.

@@ -6,20 +6,6 @@ test_liftover <- function() {
   con <- dbConnect(drv)
   on.exit(dbDisconnect(con, shutdown = TRUE))
 
-  expect_error_message <- function(expr, pattern) {
-    msg <- NULL
-    tryCatch(
-      force(expr),
-      error = function(e) {
-        msg <<- conditionMessage(e)
-      }
-    )
-    if (is.null(msg)) {
-      stop(sprintf("Expected error containing '%s' but expression succeeded", pattern), call. = FALSE)
-    }
-    expect_true(grepl(pattern, msg, fixed = TRUE))
-  }
-
   expect_silent(rduckhts_load(con))
 
   tmp_dir <- tempfile("duckhts_liftover_")
@@ -249,31 +235,35 @@ test_liftover <- function() {
     "pos must be non-null"
   )
 
-  expect_error_message(
-    rduckhts_liftover(
-      con,
-      query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
-      chain_path = chain_path,
-      dst_fasta_ref = dst_fa,
-      ref_col = "ref",
-      alt_col = "alt",
-      src_fasta_ref = src_fa,
-      max_snp_gap = -1
-    ),
+  expect_error(
+    {
+      rduckhts_liftover(
+        con,
+        query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+        chain_path = chain_path,
+        dst_fasta_ref = dst_fa,
+        ref_col = "ref",
+        alt_col = "alt",
+        src_fasta_ref = src_fa,
+        max_snp_gap = -1
+      )
+    },
     "max_snp_gap must be >= 0"
   )
 
-  expect_error_message(
-    rduckhts_liftover(
-      con,
-      query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
-      chain_path = chain_path,
-      dst_fasta_ref = dst_fa,
-      ref_col = "ref",
-      alt_col = "alt",
-      src_fasta_ref = src_fa,
-      max_indel_inc = -1
-    ),
+  expect_error(
+    {
+      rduckhts_liftover(
+        con,
+        query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+        chain_path = chain_path,
+        dst_fasta_ref = dst_fa,
+        ref_col = "ref",
+        alt_col = "alt",
+        src_fasta_ref = src_fa,
+        max_indel_inc = -1
+      )
+    },
     "max_indel_inc must be >= 0"
   )
 
