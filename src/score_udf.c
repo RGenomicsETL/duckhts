@@ -1268,6 +1268,62 @@ oom:
     return NULL;
 }
 
+static int score_validate_expr_tags(const char *expr, const bcf_hdr_t *hdr, char *err, size_t err_sz) {
+    size_t i = 0;
+    int in_sq = 0, in_dq = 0;
+    while (expr && expr[i]) {
+        char c = expr[i];
+        if (!in_dq && c == '\'') {
+            in_sq = !in_sq;
+            i++;
+            continue;
+        }
+        if (!in_sq && c == '"') {
+            in_dq = !in_dq;
+            i++;
+            continue;
+        }
+        if (!in_sq && !in_dq && score_is_ident_start(c)) {
+            size_t s = i;
+            while (score_is_ident_char(expr[i])) i++;
+            if (i > s + 5 && strncmp(expr + s, "INFO_", 5) == 0) {
+                char tag[128];
+                size_t n = i - (s + 5);
+                int id;
+                if (n >= sizeof(tag)) {
+                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    return -1;
+                }
+                memcpy(tag, expr + s + 5, n);
+                tag[n] = '\0';
+                id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag);
+                if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_INFO, id)) {
+                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    return -1;
+                }
+            } else if (i > s + 7 && strncmp(expr + s, "FORMAT_", 7) == 0) {
+                char tag[128];
+                size_t n = i - (s + 7);
+                int id;
+                if (n >= sizeof(tag)) {
+                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    return -1;
+                }
+                memcpy(tag, expr + s + 7, n);
+                tag[n] = '\0';
+                id = bcf_hdr_id2int((bcf_hdr_t *)hdr, BCF_DT_ID, tag);
+                if (id < 0 || !bcf_hdr_idinfo_exists((bcf_hdr_t *)hdr, BCF_HL_FMT, id)) {
+                    snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+                    return -1;
+                }
+            }
+            continue;
+        }
+        i++;
+    }
+    return 0;
+}
+
 static int score_vcf_sym_lookup(void *data, char *str, char **end, hts_expr_val_t *res) {
     score_expr_ctx_t *ctx = (score_expr_ctx_t *)data;
     bcf1_t *rec = ctx->rec;
@@ -1582,6 +1638,7 @@ static int score_record_matches_exprs(const bcf_hdr_t *hdr, bcf1_t *rec, const s
 }
 
 static int score_init_source(const score_bind_t *bind, score_scan_source_t *src, bcf_hdr_t **out_hdr, char *err, size_t err_sz) {
+    bcf_hdr_t *hdr0;
     src->sr = bcf_sr_init();
     if (!src->sr) {
         snprintf(err, err_sz, "bcftools_score: failed to initialize synced reader");
@@ -1598,6 +1655,12 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         return -1;
     }
 
+    hdr0 = bcf_sr_get_header(src->sr, 0);
+    if (!hdr0) {
+        snprintf(err, err_sz, "bcftools_score: failed to read BCF/VCF header");
+        return -1;
+    }
+
     if (bind->include_expr && bind->include_expr[0]) {
         src->include_expr_eval = score_rewrite_filter_expr(bind->include_expr);
         if (!src->include_expr_eval) {
@@ -1607,6 +1670,9 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         src->include_filt = hts_filter_init(src->include_expr_eval);
         if (!src->include_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to parse include expression");
+            return -1;
+        }
+        if (score_validate_expr_tags(src->include_expr_eval, hdr0, err, err_sz) != 0) {
             return -1;
         }
     }
@@ -1619,6 +1685,9 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         src->exclude_filt = hts_filter_init(src->exclude_expr_eval);
         if (!src->exclude_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to parse exclude expression");
+            return -1;
+        }
+        if (score_validate_expr_tags(src->exclude_expr_eval, hdr0, err, err_sz) != 0) {
             return -1;
         }
     }

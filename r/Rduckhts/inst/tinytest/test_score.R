@@ -182,7 +182,7 @@ test_score <- function() {
   expect_error(
     rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
                    include = "POS >>> 100"),
-    pattern = "failed to evaluate include expression"
+    pattern = "failed to parse include expression"
   )
 
   out_include <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
@@ -204,7 +204,7 @@ test_score <- function() {
   expect_error(
     rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
                    include = "INFO/ZZZ==1"),
-    pattern = "failed to evaluate include expression"
+    pattern = "failed to parse include expression"
   )
 
   out_format_gt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",

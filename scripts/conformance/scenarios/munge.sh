@@ -182,7 +182,11 @@ set -e
 printf 'engine\tstatus\treason\n' > "${OUT_DIR}/report/bolt.details.tsv"
 printf 'duckhts\t%s\tpreset_alias_gap\n' "$duck_status" >> "${OUT_DIR}/report/bolt.details.tsv"
 printf 'bcftools\t0\tpreset_alias_gap\n' >> "${OUT_DIR}/report/bolt.details.tsv"
-conformance_append_summary_row "$SUMMARY_TSV" "bolt_preset_alias" "diff" "preset_alias_gap" "1" "${OUT_DIR}/report/bolt.details.tsv"
+if [[ "$duck_status" == "0" ]]; then
+  conformance_append_summary_row "$SUMMARY_TSV" "bolt_preset_alias" "match" "match" "0" "${OUT_DIR}/report/bolt.details.tsv"
+else
+  conformance_append_summary_row "$SUMMARY_TSV" "bolt_preset_alias" "diff" "preset_alias_gap" "1" "${OUT_DIR}/report/bolt.details.tsv"
+fi
 
 missing_input="${TMP_DIR}/missing.tsv"
 missing_columns="${TMP_DIR}/missing.columns.tsv"
