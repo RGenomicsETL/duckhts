@@ -7,7 +7,7 @@
 rduckhts_munge(
   con,
   query,
-  fasta_ref,
+  fasta_ref = NULL,
   preset = NULL,
   column_map = NULL,
   column_map_file = NULL,
@@ -23,7 +23,9 @@ rduckhts_munge(
 
 \item{query}{SQL query or table expression to normalize}
 
-\item{fasta_ref}{Path to the reference FASTA}
+\item{fasta_ref}{Path to the reference FASTA. When NULL (default), operates
+in fai-only mode: alleles pass through as-is without reference matching
+or allele swapping, matching upstream `--fai`-only behavior.}
 
 \item{preset}{Optional preset such as `"PLINK"`, `"PLINK2"`, `"REGENIE"`,
 `"SAIGE"`, `"BOLT"`, `"METAL"`, `"PGS"`, or `"SSF"`}

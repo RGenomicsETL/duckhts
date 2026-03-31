@@ -121,7 +121,8 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_liftover)),
   c("con", "query", "chain_path", "dst_fasta_ref", "chrom_col", "pos_col",
-    "ref_col", "alt_col", "src_fasta_ref", "max_snp_gap", "max_indel_inc")
+    "ref_col", "alt_col", "src_fasta_ref", "max_snp_gap", "max_indel_inc",
+    "lift_mt", "end_pos_col", "no_left_align")
 )
 expect_identical(
   names(formals(rduckhts_munge)),

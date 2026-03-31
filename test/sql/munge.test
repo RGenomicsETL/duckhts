@@ -118,3 +118,131 @@ FROM (
 ) s;
 ----
 2.0	0.0
+
+# Test SI (imputation info), I2 (Cochran's I²), CQ (Cochran's Q -log10 p), ED (effect direction)
+# No swap: A1=A (alt), A2=C (ref), ref_fetch=C matches A2 → no swap
+query RRRT
+SELECT round(m.si, 3),
+       round(m.i2, 1),
+       round(m.cq, 3),
+       m.ed
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs7',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, 0.95, NULL, NULL, NULL, NULL, NULL, NULL, 75.0, NULL, 3.5, '++-',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+0.95	75.0	3.5	++-
+
+# Test ED direction flip on allele swap
+# A1=C, A2=A, ref_fetch=C matches A1 (alt_match) → swap
+query IT
+SELECT CASE WHEN m.alleles_swapped THEN 1 ELSE 0 END,
+       m.ed
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'C', 'A', 'rs8',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '++-?',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+1	--+?
+
+# Test CQ computed from HET_P via -log10 (param 20 = het_p, param 21 = het_lp = NULL)
+query R
+SELECT round(m.cq, 3)
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs9',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0.001, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+3.0
+
+# Test HET_LP takes precedence over HET_P when both are provided
+query R
+SELECT round(m.cq, 3)
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs10',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0.001, 7.5, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+7.5
+
+# Test SI/I2/CQ/ED all NULL when inputs are NULL
+query IIII
+SELECT CASE WHEN m.si IS NULL THEN 1 ELSE 0 END,
+       CASE WHEN m.i2 IS NULL THEN 1 ELSE 0 END,
+       CASE WHEN m.cq IS NULL THEN 1 ELSE 0 END,
+       CASE WHEN m.ed IS NULL THEN 1 ELSE 0 END
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'A', 'C', 'rs11',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+1	1	1	1
+
+# Test SI/I2/CQ/ED on MissingContig path (contig not in FASTA)
+query TRRRT
+SELECT coalesce(m.filter, 'PASS'),
+       round(m.si, 2),
+       round(m.i2, 1),
+       round(m.cq, 2),
+       m.ed
+FROM (
+  SELECT bcftools_munge_row(
+    'chrNONE', 100, 'A', 'C', 'rs12',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, 0.88, NULL, NULL, NULL, NULL, NULL, NULL, 42.0, NULL, 2.0, '+-+',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+MissingContig	0.88	42.0	2.0	+-+
+
+# M-M9: fai-only mode — NULL fasta_ref skips ref matching, alleles pass through
+query TITTIT
+SELECT m.chrom,
+       m.pos,
+       m.ref,
+       m.alt,
+       CASE WHEN m.alleles_swapped THEN 1 ELSE 0 END,
+       CASE WHEN m.filter IS NULL THEN 'PASS' ELSE m.filter END
+FROM (
+  SELECT bcftools_munge_row(
+    'chrF', 2, 'C', 'A', 'rs_fai1',
+    NULL, NULL, NULL, 0.25,
+    1000, NULL, NULL, NULL, 0.1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrF	2	A	C	0	PASS
+
+# M-M9: fai-only mode via duckdb_munge macro (no fasta_ref parameter)
+query TITTIT
+SELECT chrom, pos, ref, alt,
+       CASE WHEN alleles_swapped THEN 1 ELSE 0 END,
+       CASE WHEN filter IS NULL THEN 'PASS' ELSE filter END
+FROM duckdb_munge(
+  '(VALUES (''chrF'', 2, ''A'', ''C'', ''rs_fai2'', 0.01)) AS t("CHR", "BP", "A1", "A2", "SNP", "P")',
+  column_map := map(['CHR','BP','A1','A2','SNP','P'], ['CHR','BP','A1','A2','SNP','P'])
+);
+----
+chrF	2	C	A	0	PASS

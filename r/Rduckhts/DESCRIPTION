@@ -6,6 +6,7 @@ Authors@R: c(
     email = "sounkoutoure@gmail.com",
     role = c("aut", "cre")),
     person(given = "James K Bonfield, John Marshall,Petr Danecek ,Heng Li , Valeriu Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies", role = "ctb", comment = "Htslib Authors"),
+    person(given = "Giulio", family = "Genovese", email = "giulio.genovese@gmail.com", role = "cph", comment = "Author of BCFTools munge,score,liftover plugins"),
     person(given = "DuckDB C Extension API Authors", role = "ctb")
     )
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughput

@@ -18,6 +18,7 @@ directly from R using SQL queries via DuckDB.
 Useful links:
 \itemize{
   \item \url{https://github.com/RGenomicsETL/duckhts}
+  \item \url{https://rgenomicsetl.r-universe.dev/Rduckhts}
   \item Report bugs at \url{https://github.com/RGenomicsETL/duckhts/issues}
 }
 

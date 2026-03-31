@@ -101,6 +101,48 @@ dbGetQuery(con, "
 
 ```
 
+### Polygenic risk scoring
+
+`bcftools_score` computes per-sample polygenic risk scores (PRS) from a VCF/BCF and a GWAS summary statistics file, mirroring the `bcftools +score` plugin API.
+
+```{r eval=TRUE}
+# Hard-call (GT) PRS — PLINK summary format
+# S1: 0×0.5  + 1×(−0.2) + 2×1.0 = 1.8
+# S2: 1×0.5  + 2×(−0.2) + 0×1.0 = 0.1
+dbGetQuery(con, "
+  SELECT SAMPLE, round(score_summary, 3) AS prs
+  FROM bcftools_score(
+    'test/data/score_input.vcf',
+    'test/data/score_summary.tsv',
+    use := 'GT',
+    columns := 'PLINK'
+  )
+")
+
+# Dosage-based PRS (DS field) — fractional allele dosages from imputed data
+# S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
+# S2: 1.0×0.5 + 1.9×(−0.2) + 0.2×1.0 = 0.32
+dbGetQuery(con, "
+  SELECT SAMPLE, round(score_summary, 3) AS prs_ds
+  FROM bcftools_score(
+    'test/data/score_dosage.vcf',
+    'test/data/score_summary.tsv',
+    use := 'DS',
+    columns := 'PLINK'
+  )
+")
+
+# GWAS-VCF multi-PRS: each FORMAT sample column becomes a separate PRS track
+dbGetQuery(con, "
+  SELECT SAMPLE, round(PRS_A, 3) AS prs_a, round(PRS_B, 3) AS prs_b
+  FROM bcftools_score(
+    'test/data/score_input.vcf',
+    'test/data/score_gwas_summary.vcf',
+    use := 'GT'
+  )
+")
+```
+
 ### Liftover score-style rows
 
 ```{r eval=TRUE}

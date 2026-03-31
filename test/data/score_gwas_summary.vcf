@@ -1,0 +1,8 @@
+##fileformat=VCFv4.2
+##contig=<ID=1,length=1000000>
+##FORMAT=<ID=ES,Number=1,Type=Float,Description="Effect size">
+##FORMAT=<ID=LP,Number=1,Type=Float,Description="-log10 p-value">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	PRS_A	PRS_B
+1	100	rs1	A	T	.	PASS	.	ES:LP	0.5:2	0.3:1.5
+1	200	rs2	G	C	.	PASS	.	ES:LP	-0.2:0.69897	.:0.69897
+1	300	rs3	C	A	.	PASS	.	ES:LP	1.0:0.39794	0.5:0.39794

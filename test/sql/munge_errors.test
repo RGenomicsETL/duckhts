@@ -1,0 +1,72 @@
+# name: test/sql/munge_errors.test
+# description: Test munge error propagation and validation
+# group: [duckhts]
+
+require duckhts
+
+statement error
+SELECT (bcftools_munge_row(
+  NULL, 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+Invalid Input Error: bcftools_munge_row: chrom must be non-null
+
+statement error
+SELECT (bcftools_munge_row(
+  '', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+Invalid Input Error: bcftools_munge_row: chrom must be non-empty
+
+statement error
+SELECT (bcftools_munge_row(
+  'chrF', 0, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).pos;
+----
+Invalid Input Error: bcftools_munge_row: pos must be >= 1
+
+statement error
+SELECT (bcftools_munge_row(
+  'chrF', 2, NULL, 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+Invalid Input Error: bcftools_munge_row: a1 and a2 must be non-null
+
+statement error
+SELECT (bcftools_munge_row(
+  'chrF', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/does_not_exist.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+Invalid Input Error: bcftools_munge_row: failed to load FASTA index:
+
+# Missing contig now emits a row with filter=MissingContig instead of erroring
+query TT
+SELECT (bcftools_munge_row(
+  'chrMissing', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom,
+(bcftools_munge_row(
+  'chrMissing', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).filter;
+----
+chrMissing	MissingContig
