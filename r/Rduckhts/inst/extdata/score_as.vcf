@@ -1,0 +1,7 @@
+##fileformat=VCFv4.2
+##contig=<ID=1,length=1000000>
+##FORMAT=<ID=AS,Number=1,Type=Integer,Description="ALT allele support count">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+1	100	rs1	A	T	.	PASS	.	AS	2	1
+1	200	rs2	G	C	.	PASS	.	AS	1	2
+1	300	rs3	C	A	.	PASS	.	AS	2	1
