@@ -640,8 +640,8 @@ rduckhts_bcf <- function(
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
 #' @param index_path Optional explicit path to index file (.bai/.csi/.crai)
 #' @param reference Optional reference file path for CRAM files
-#' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns
-#' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags
+#' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns. Default FALSE.
+#' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags. Default FALSE.
 #' @param sequence_encoding Character. Sequence encoding for the SEQ column:
 #'   \code{"string"} (default) returns decoded bases as \code{VARCHAR};
 #'   \code{"nt16"} returns raw htslib nt16 4-bit codes as \code{UTINYINT[]}.
@@ -1859,10 +1859,10 @@ rduckhts_munge <- function(
 #' @param force_samples Logical; if TRUE, ignore missing samples instead of erroring
 #' @param regions Optional comma-separated region list (e.g. `"1:1000-2000,2:50-90"`)
 #' @param regions_file Optional path to a regions file
-#' @param regions_overlap Optional overlap mode for regions (`0`, `1`, or `2`)
+#' @param regions_overlap Overlap mode for regions (`0`, `1`, or `2`). Default 1 (trim to region).
 #' @param targets Optional comma-separated targets list
 #' @param targets_file Optional path to a targets file
-#' @param targets_overlap Optional overlap mode for targets (`0`, `1`, or `2`)
+#' @param targets_overlap Overlap mode for targets (`0`, `1`, or `2`). Default 0 (record must start in region).
 #' @param apply_filters Optional comma-separated FILTER names to keep (e.g. `"PASS,."`)
 #' @param include Optional site expression (currently unsupported)
 #' @param exclude Optional site expression (currently unsupported)

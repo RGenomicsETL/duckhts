@@ -55,13 +55,13 @@ rduckhts_score(
 
 \item{regions_file}{Optional path to a regions file}
 
-\item{regions_overlap}{Optional overlap mode for regions (`0`, `1`, or `2`)}
+\item{regions_overlap}{Overlap mode for regions (`0`, `1`, or `2`). Default 1 (trim to region).}
 
 \item{targets}{Optional comma-separated targets list}
 
 \item{targets_file}{Optional path to a targets file}
 
-\item{targets_overlap}{Optional overlap mode for targets (`0`, `1`, or `2`)}
+\item{targets_overlap}{Overlap mode for targets (`0`, `1`, or `2`). Default 0 (record must start in region).}
 
 \item{apply_filters}{Optional comma-separated FILTER names to keep (e.g. `"PASS,."`)}
 
