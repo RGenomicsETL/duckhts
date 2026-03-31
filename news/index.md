@@ -1,6 +1,17 @@
 # Changelog
 
-## Rduckhts 0.1.3-0.0.2.9002
+## Rduckhts 1.1.4-0.0.1
+
+- expand
+  [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
+  test coverage: add FORMAT/AS integer dosage fixture, missing DS value
+  fixture, and seven GWAS summary preset fixtures (REGENIE, SAIGE, BOLT,
+  METAL, PGS, SSF/GWAS-SSF); add R tinytest cases for TSV counts without
+  threshold, GWAS-VCF with `q_score_thr`, and mutual-exclusion error
+  assertions (`include`+`exclude`, `regions`+`regions_file`,
+  `targets`+`targets_file`)
+
+- Bundle duckhts 1.1.4 extension.
 
 - add `no_left_align` parameter to
   [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)

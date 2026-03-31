@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.3-0.0.2.9002</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.4-0.0.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,8 +33,10 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.1.3-0.0.2.9002" id="rduckhts-013-0029002">Rduckhts 0.1.3-0.0.2.9002<a class="anchor" aria-label="anchor" href="#rduckhts-013-0029002"></a></h2>
-<ul><li><p>add <code>no_left_align</code> parameter to <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code> (default <code>FALSE</code>): when <code>TRUE</code>, skips post-liftover left-alignment of indels, mirroring <code>bcftools +liftover --no-left-align</code></p></li>
+<h2 class="pkg-version" data-toc-text="1.1.4-0.0.1" id="rduckhts-114-001">Rduckhts 1.1.4-0.0.1<a class="anchor" aria-label="anchor" href="#rduckhts-114-001"></a></h2>
+<ul><li><p>expand <code><a href="../reference/rduckhts_score.html">rduckhts_score()</a></code> test coverage: add FORMAT/AS integer dosage fixture, missing DS value fixture, and seven GWAS summary preset fixtures (REGENIE, SAIGE, BOLT, METAL, PGS, SSF/GWAS-SSF); add R tinytest cases for TSV counts without threshold, GWAS-VCF with <code>q_score_thr</code>, and mutual-exclusion error assertions (<code>include</code>+<code>exclude</code>, <code>regions</code>+<code>regions_file</code>, <code>targets</code>+<code>targets_file</code>)</p></li>
+<li><p>Bundle duckhts 1.1.4 extension.</p></li>
+<li><p>add <code>no_left_align</code> parameter to <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code> (default <code>FALSE</code>): when <code>TRUE</code>, skips post-liftover left-alignment of indels, mirroring <code>bcftools +liftover --no-left-align</code></p></li>
 <li><p>harden <code><a href="../reference/rduckhts_score.html">rduckhts_score()</a></code> filter-expression failures for installed-package CI runs on Linux/Windows: invalid <code>include</code>/<code>exclude</code> expressions now surface as normal package errors from the bundled score engine instead of relying on a cross-frame bcftools shim jump path</p></li>
 <li><p>extend <code><a href="../reference/rduckhts_score.html">rduckhts_score()</a></code> with bcftools-style filtering arguments (<code>regions</code>, <code>regions_file</code>, <code>regions_overlap</code>, <code>targets</code>, <code>targets_file</code>, <code>targets_overlap</code>, <code>apply_filters</code>, <code>include</code>, <code>exclude</code>) and package-level tests for region/target/FILTER behavior; <code>include</code>/<code>exclude</code> expressions are now evaluated against core VCF fields (<code>POS</code>, <code>QUAL</code>, <code>CHROM</code>, <code>ID</code>, <code>REF</code>, <code>ALT</code>, <code>FILTER</code>)</p></li>
 <li><p>improve <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code> multiallelic semantic parity with upstream <code>bcftools +liftover</code>: preserve all ALT alleles through reference-introduction/swaps, apply dynamic-allele indel normalization/left-alignment, treat <code>ALT='.'</code> as no alternate alleles, and add tinytest coverage for forward/reverse multiallelic liftover outputs</p></li>
