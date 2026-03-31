@@ -112,6 +112,10 @@ static inline int64_t get_int64_at(duckdb_vector vector, idx_t row) {
     return ((int64_t *)duckdb_vector_get_data(vector))[row];
 }
 
+static inline int32_t get_int32_at(duckdb_vector vector, idx_t row) {
+    return ((int32_t *)duckdb_vector_get_data(vector))[row];
+}
+
 static char *dup_cstr(const char *s) {
     if (!s) return NULL;
     size_t n = strlen(s);
@@ -1741,8 +1745,8 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         chain_path = get_string_at(chain_vec, row, &chain_len);
         dst_fasta_ref = get_string_at(dst_fasta_vec, row, &dst_fasta_len);
         if (row_is_valid(src_fasta_vec, row)) src_fasta_ref = get_string_at(src_fasta_vec, row, &src_fasta_len);
-        if (row_is_valid(max_snp_gap_vec, row)) max_snp_gap = (int32_t)get_int64_at(max_snp_gap_vec, row);
-        if (row_is_valid(max_indel_inc_vec, row)) max_indel_inc = (int32_t)get_int64_at(max_indel_inc_vec, row);
+        if (row_is_valid(max_snp_gap_vec, row)) max_snp_gap = get_int32_at(max_snp_gap_vec, row);
+        if (row_is_valid(max_indel_inc_vec, row)) max_indel_inc = get_int32_at(max_indel_inc_vec, row);
         if (row_is_valid(lift_mt_vec, row)) lift_mt = ((bool *)duckdb_vector_get_data(lift_mt_vec))[row] ? 1 : 0;
         if (row_is_valid(end_pos_vec, row)) {
             end_pos = ((int64_t *)duckdb_vector_get_data(end_pos_vec))[row];
