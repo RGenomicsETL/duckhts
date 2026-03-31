@@ -209,6 +209,33 @@ munge_out[, c("chrom", "pos", "id", "ref", "alt", "alleles_swapped", "filter", "
 unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
 ```
 
+### Polygenic risk scoring
+
+`rduckhts_score()` computes per-sample polygenic risk scores (PRS) from a genotype VCF/BCF and a GWAS summary statistics file, wrapping `bcftools_score`.
+
+```{r}
+vcf_path    <- system.file("extdata", "score_input.vcf",        package = "Rduckhts")
+dosage_path <- system.file("extdata", "score_dosage.vcf",       package = "Rduckhts")
+sumf_path   <- system.file("extdata", "score_summary.tsv",      package = "Rduckhts")
+gwas_path   <- system.file("extdata", "score_gwas_summary.vcf", package = "Rduckhts")
+
+# Hard-call (GT) PRS with PLINK-format summary statistics
+# S1: 0×0.5 + 1×(−0.2) + 2×1.0 = 1.8
+# S2: 1×0.5 + 2×(−0.2) + 0×1.0 = 0.1
+gt_prs <- rduckhts_score(con, vcf_path, sumf_path, use = "GT", columns = "PLINK")
+gt_prs[, c("SAMPLE", "score_summary")]
+
+# Dosage-based PRS (DS field) for imputed genotypes
+# S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
+# S2: 1.0×0.5 + 1.9×(−0.2) + 0.2×1.0 = 0.32
+ds_prs <- rduckhts_score(con, dosage_path, sumf_path, use = "DS", columns = "PLINK")
+ds_prs[, c("SAMPLE", "score_summary")]
+
+# GWAS-VCF multi-PRS: each FORMAT/ES sample column becomes a separate PRS track
+gwas_prs <- rduckhts_score(con, vcf_path, gwas_path, use = "GT")
+gwas_prs[, c("SAMPLE", "PRS_A", "PRS_B")]
+```
+
 ### Compression + tabix round-trips
 
 ```{r}

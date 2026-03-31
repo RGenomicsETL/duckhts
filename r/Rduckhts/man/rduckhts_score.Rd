@@ -18,10 +18,10 @@ rduckhts_score(
   force_samples = FALSE,
   regions = NULL,
   regions_file = NULL,
-  regions_overlap = NULL,
+  regions_overlap = 1,
   targets = NULL,
   targets_file = NULL,
-  targets_overlap = NULL,
+  targets_overlap = 0,
   apply_filters = NULL,
   include = NULL,
   exclude = NULL

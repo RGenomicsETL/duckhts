@@ -11,8 +11,8 @@ rduckhts_bam(
   region = NULL,
   index_path = NULL,
   reference = NULL,
-  standard_tags = NULL,
-  auxiliary_tags = NULL,
+  standard_tags = FALSE,
+  auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
   overwrite = FALSE

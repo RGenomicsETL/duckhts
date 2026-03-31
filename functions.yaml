@@ -174,7 +174,7 @@
       "signature": "fasta_index(path, index_path := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_fasta_index",
-      "description": "Build a FASTA index and return the index path used by the operation.",
+      "description": "Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).",
       "examples": [
         "SELECT * FROM fasta_index('ce.fa');"
       ]
@@ -331,7 +331,7 @@
       "signature": "bcftools_munge_row(chrom, pos, a1, a2, id, p, z, or, beta, n, n_cas, n_con, info, frq, se, lp, ac, neff, neffdiv2, het_i2, het_p, het_lp, dire, fasta_ref, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)",
       "returns": "STRUCT",
       "r_wrapper": "",
-      "description": "Normalize one score-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.",
+      "description": "Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.",
       "examples": [
         "SELECT (bcftools_munge_row('chr1', 12345, 'A', 'G', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL, 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'ref.fa')).ref;"
       ]

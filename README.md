@@ -82,8 +82,8 @@ This section is generated from `functions.yaml`.
 
 | Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 |----------------------|-------------|---------|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bcftools_liftover`  | scalar      | STRUCT  | `rduckhts_score`    | Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation.                                                                                                                                             |
-| `duckdb_liftover`    | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.                                                                                                                                                                                                                                                                                                   |
+| `bcftools_liftover`  | scalar      | STRUCT  | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors –no-left-align in bcftools +liftover).                                           |
+| `duckdb_liftover`    | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors –no-left-align in bcftools +liftover.                                                                                                                                                                                                                         |
 | `bcftools_score`     | table       | table   | `rduckhts_score`    | Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls.                                                                                                                                                                                                                                                                       |
 | `bcftools_munge_row` | scalar      | STRUCT  |                     | Normalize one score-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.                                                                                                                                                                   |
 | `duckdb_munge`       | table_macro | table   | `rduckhts_munge`    | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.                                                                             |
@@ -239,6 +239,59 @@ dbGetQuery(con, "
 #> 2 CHROMOSOME_I    10  20      10    0.5
 ```
 
+### Polygenic risk scoring
+
+`bcftools_score` computes per-sample polygenic risk scores (PRS) from a
+VCF/BCF and a GWAS summary statistics file, mirroring the
+`bcftools +score` plugin API.
+
+``` r
+# Hard-call (GT) PRS — PLINK summary format
+# S1: 0×0.5  + 1×(−0.2) + 2×1.0 = 1.8
+# S2: 1×0.5  + 2×(−0.2) + 0×1.0 = 0.1
+dbGetQuery(con, "
+  SELECT SAMPLE, round(score_summary, 3) AS prs
+  FROM bcftools_score(
+    'test/data/score_input.vcf',
+    'test/data/score_summary.tsv',
+    use := 'GT',
+    columns := 'PLINK'
+  )
+")
+#>   SAMPLE prs
+#> 1     S1 1.8
+#> 2     S2 0.1
+
+# Dosage-based PRS (DS field) — fractional allele dosages from imputed data
+# S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
+# S2: 1.0×0.5 + 1.9×(−0.2) + 0.2×1.0 = 0.32
+dbGetQuery(con, "
+  SELECT SAMPLE, round(score_summary, 3) AS prs_ds
+  FROM bcftools_score(
+    'test/data/score_dosage.vcf',
+    'test/data/score_summary.tsv',
+    use := 'DS',
+    columns := 'PLINK'
+  )
+")
+#>   SAMPLE prs_ds
+#> 1     S1   1.69
+#> 2     S2   0.32
+
+# GWAS-VCF multi-PRS: each FORMAT sample column becomes a separate PRS track
+dbGetQuery(con, "
+  SELECT SAMPLE, round(PRS_A, 3) AS prs_a, round(PRS_B, 3) AS prs_b
+  FROM bcftools_score(
+    'test/data/score_input.vcf',
+    'test/data/score_gwas_summary.vcf',
+    use := 'GT'
+  )
+")
+#>   SAMPLE prs_a prs_b
+#> 1     S1   1.8   1.0
+#> 2     S2   0.1   0.3
+```
+
 ### Liftover score-style rows
 
 ``` r
@@ -271,13 +324,13 @@ dbGetQuery(con, sprintf(
   lift_src, lift_src
 ))
 #>   success                                                index_path
-#> 1    TRUE /tmp/Rtmpgy4irW/duckhts_liftover_src_26bfc3c8e95d8.fa.fai
+#> 1    TRUE /tmp/RtmpR2QPjS/duckhts_liftover_src_28769236b0068.fa.fai
 dbGetQuery(con, sprintf(
   "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
   lift_dst, lift_dst
 ))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmpgy4irW/duckhts_liftover_dst_26bfc3500e1548.fa.fai
+#> 1    TRUE /tmp/RtmpR2QPjS/duckhts_liftover_dst_28769268ee9247.fa.fai
 
 dbGetQuery(con, sprintf("
   SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
