@@ -536,3 +536,218 @@ FROM bcftools_score(
 ORDER BY SAMPLE
 ----
 S1	1.8	1.0
+
+# --- FORMAT/AS integer dosage tag ---
+# score_as.vcf: S1 GT/AS=(2,1,2), S2 GT/AS=(1,2,1) across rs1/rs2/rs3
+# S1: 2*0.5 + 1*(-0.2) + 2*1.0 = 2.8
+# S2: 1*0.5 + 2*(-0.2) + 1*1.0 = 1.1
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_as.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'AS',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	2.8
+S2	1.1
+
+# --- Missing DS value (. treated as missing, variant skipped) ---
+# score_missing_ds.vcf: S1 has DS=missing at rs2 → skips rs2 for S1
+# S1: 0.1*0.5 + skip + 1.8*1.0 = 1.85; S2: normal DS = 0.32
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_missing_ds.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'DS',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.85
+S2	0.32
+
+# --- REGENIE preset ---
+query TT
+SELECT SAMPLE, round(score_summary_regenie, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_regenie.tsv',
+  columns := 'REGENIE'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- SAIGE preset ---
+query TT
+SELECT SAMPLE, round(score_summary_saige, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_saige.tsv',
+  columns := 'SAIGE'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- BOLT preset ---
+query TT
+SELECT SAMPLE, round(score_summary_bolt, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_bolt.tsv',
+  columns := 'BOLT'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- METAL preset ---
+query TT
+SELECT SAMPLE, round(score_summary_metal, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_metal.tsv',
+  columns := 'METAL'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- PGS catalog preset ---
+query TT
+SELECT SAMPLE, round(score_summary_pgs, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_pgs.tsv',
+  columns := 'PGS'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- SSF / GWAS-SSF preset (same file, two aliases) ---
+query TT
+SELECT SAMPLE, round(score_summary_ssf, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_ssf.tsv',
+  columns := 'SSF'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+query TT
+SELECT SAMPLE, round(score_summary_ssf, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_ssf.tsv',
+  columns := 'GWAS-SSF'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- LOG10_P under PLINK preset ---
+query TT
+SELECT SAMPLE, round(score_summary_log10p, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary_log10p.tsv',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8
+S2	0.1
+
+# --- TSV counts without threshold ---
+# counts=true adds <col>_CNT column; all 3 variants counted for each sample
+query TTT
+SELECT SAMPLE, round(score_summary, 3), score_summary_CNT
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  counts := true
+)
+ORDER BY SAMPLE
+----
+S1	1.8	3
+S2	0.1	3
+
+# --- GWAS-VCF + q_score_thr: only variants with LP >= -log10(thr) scored ---
+# q_score_thr=0.1 → LP threshold = 1.0; rs1 qualifies (PRS_A lp=2.0, PRS_B lp=1.5)
+# GT scores: S1 has 0/0 at rs1 → 0*beta; S2 has 0/1 at rs1 → 1*beta
+query TTTTT
+SELECT SAMPLE,
+       round("PRS_A_p0.1", 3),
+       "PRS_A_CNT_p0.1",
+       round("PRS_B_p0.1", 3),
+       "PRS_B_CNT_p0.1"
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_gwas_summary.vcf',
+  use := 'GT',
+  q_score_thr := '0.1',
+  counts := true
+)
+ORDER BY SAMPLE
+----
+S1	0.0	1	0.0	1
+S2	0.5	1	0.3	1
+
+# --- Error: include and exclude cannot be used together ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'POS > 100',
+  exclude := 'POS > 200'
+)
+----
+only one of include or exclude may be set
+
+# --- Error: regions and regions_file cannot be used together ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  regions := '1:100-200',
+  regions_file := '__WORKING_DIRECTORY__/test/data/score_regions.txt'
+)
+----
+only one of regions or regions_file may be set
+
+# --- Error: targets and targets_file cannot be used together ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  targets := '1:100-200',
+  targets_file := '__WORKING_DIRECTORY__/test/data/score_targets.txt'
+)
+----
+only one of targets or targets_file may be set

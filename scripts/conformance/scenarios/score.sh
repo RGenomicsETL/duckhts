@@ -31,7 +31,7 @@ run_score_case() {
     env \
       DUCKHTS_EXT="${DUCKHTS_EXT}" \
       BCFTOOLS_BIN="${BCFTOOLS_BIN}" \
-      BCFTOOLS_PLUGINS="${BCFTOOLS_PLUGINS}" \
+      SCORE_PLUGIN_DIR="${SCORE_PLUGIN_DIR:-}" \
       USE_TAG="${use_tag}" \
       COLUMNS_PRESET="${columns_preset}" \
       Q_SCORE_THR="${q_score_thr}" \
@@ -65,6 +65,11 @@ SQL
   conformance_append_summary_row "$SUMMARY_TSV" "$case_name" "diff" "$reason" "$mismatch_count" "${detail_tsv}"
 }
 
-run_score_case "basic_gt" "test/data/score_input.vcf" "test/data/score_summary.tsv" "GT" "PLINK" "" "0" "0"
-run_score_case "qthr_counts" "test/data/score_input.vcf" "test/data/score_summary.tsv" "GT" "PLINK" "0.01,0.2" "1" "0"
-run_score_case "gp_dosage" "test/data/score_dosage.vcf" "test/data/score_summary.tsv" "GP" "PLINK" "" "0" "0"
+run_score_case "basic_gt"      "test/data/score_input.vcf"   "test/data/score_summary.tsv"       "GT"  "PLINK"  ""        "0" "0"
+run_score_case "qthr_counts"  "test/data/score_input.vcf"   "test/data/score_summary.tsv"       "GT"  "PLINK"  "0.01,0.2" "1" "0"
+run_score_case "gp_dosage"    "test/data/score_dosage.vcf"  "test/data/score_summary.tsv"       "GP"  "PLINK"  ""        "0" "0"
+run_score_case "ds_dosage"    "test/data/score_dosage.vcf"  "test/data/score_summary.tsv"       "DS"  "PLINK"  ""        "0" "0"
+run_score_case "hds_dosage"   "test/data/score_dosage.vcf"  "test/data/score_summary.tsv"       "HDS" "PLINK"  ""        "0" "0"
+run_score_case "ap_dosage"    "test/data/score_dosage.vcf"  "test/data/score_summary.tsv"       "AP"  "PLINK"  ""        "0" "0"
+run_score_case "plink2_preset" "test/data/score_input.vcf"  "test/data/score_summary_plink2.tsv" "GT" "PLINK2" ""        "0" "0"
+run_score_case "use_variant_id" "test/data/score_input.vcf" "test/data/score_summary_rsid.tsv"  "GT"  "PLINK"  ""        "0" "1"

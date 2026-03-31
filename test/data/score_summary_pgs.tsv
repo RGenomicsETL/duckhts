@@ -1,0 +1,4 @@
+rsID	chr_name	chr_position	effect_allele	other_allele	effect_weight
+rs1	1	100	T	A	0.5
+rs2	1	200	C	G	-0.2
+rs3	1	300	A	C	1.0

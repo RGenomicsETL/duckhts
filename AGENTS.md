@@ -26,6 +26,7 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - New specs go in [./.github/SPEC.md](SPEC.md).
 - The implementation plan is tracked in [./.github/PLAN.md](PLAN.md).
 - Do not hand-edit the generated `community-extensions/extensions/duckhts/description.yml`; update `functions.yaml` and re-render it instead.
+- **`community-extensions/` is a local sync copy only, not part of this repository**: `community-extensions/extensions/duckhts/description.yml` mirrors the file submitted to the separate DuckDB community-extensions repo. It lives here purely so `render_function_catalog.py` can regenerate it in place. Do **not** commit `community-extensions/` to this repo; after regenerating, copy the updated `description.yml` manually to the community-extensions repo and submit it there.
 - Never consider a feature complete until both changelogs have been updated.
 
 ## Agent Working Instructions

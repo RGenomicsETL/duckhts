@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
-## duckhts 0.1.3.9002 (2026-03-27)
+## duckhts 1.1.4 (2026-03-31)
+
+- expand `bcftools_score(...)` test coverage: add FORMAT/AS integer dosage fixture, missing DS value fixture, and seven GWAS summary preset fixtures (REGENIE, SAIGE, BOLT, METAL, PGS, SSF/GWAS-SSF); add SQL test cases for TSV counts without threshold, GWAS-VCF with `q_score_thr`, mutual-exclusion error checks (`include`+`exclude`, `regions`+`regions_file`, `targets`+`targets_file`); expand conformance scenarios from 3 to 8 cases (DS, HDS, AP dosage modes, PLINK2 preset, `use_variant_id`)
+
+- fix `scripts/conformance/scenarios/score.sh` unbound variable crash: replace bare `BCFTOOLS_PLUGINS` self-reference with `SCORE_PLUGIN_DIR="${SCORE_PLUGIN_DIR:-}"` so the script runs correctly under `set -u`
 
 - add `no_left_align` BOOLEAN parameter to `bcftools_liftover(...)` and `duckdb_liftover(...)`: when `true`, skips post-liftover left-alignment (Step 8), mirroring `bcftools +liftover --no-left-align`; default is `false`, preserving existing behavior
 

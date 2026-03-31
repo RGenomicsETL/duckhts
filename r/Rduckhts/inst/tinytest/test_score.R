@@ -241,6 +241,108 @@ test_score <- function() {
   expect_equal(out_gwas_sub$SAMPLE, "S1")
   expect_equal(round(out_gwas_sub$PRS_A[1], 3), 1.8)
   expect_equal(round(out_gwas_sub$PRS_B[1], 3), 1.0)
+
+  ## ---- FORMAT/AS integer dosage tag ----
+  vcf_as <- file.path(extdata, "score_as.vcf")
+  expect_true(file.exists(vcf_as))
+  # S1: 2*0.5 + 1*(-0.2) + 2*1.0 = 2.8; S2: 1*0.5 + 2*(-0.2) + 1*1.0 = 1.1
+  out_as <- rduckhts_score(con, vcf_as, sumf, use = "AS", columns = "PLINK")
+  expect_true("score_summary" %in% names(out_as))
+  expect_equal(out_as$SAMPLE, c("S1", "S2"))
+  expect_equal(round(out_as$score_summary, 3), c(2.8, 1.1))
+
+  ## ---- Missing DS value (. skipped per variant) ----
+  vcf_missing_ds <- file.path(extdata, "score_missing_ds.vcf")
+  expect_true(file.exists(vcf_missing_ds))
+  # S1: rs2 DS=missing → skip; 0.1*0.5 + 1.8*1.0 = 1.85; S2: 0.32
+  out_mds <- rduckhts_score(con, vcf_missing_ds, sumf, use = "DS", columns = "PLINK")
+  expect_equal(round(out_mds$score_summary, 3), c(1.85, 0.32))
+
+  ## ---- REGENIE preset ----
+  sumf_regenie <- file.path(extdata, "score_summary_regenie.tsv")
+  expect_true(file.exists(sumf_regenie))
+  out_regenie <- rduckhts_score(con, vcf, sumf_regenie, columns = "REGENIE")
+  expect_equal(round(out_regenie$score_summary_regenie, 3), c(1.8, 0.1))
+
+  ## ---- SAIGE preset ----
+  sumf_saige <- file.path(extdata, "score_summary_saige.tsv")
+  expect_true(file.exists(sumf_saige))
+  out_saige <- rduckhts_score(con, vcf, sumf_saige, columns = "SAIGE")
+  expect_equal(round(out_saige$score_summary_saige, 3), c(1.8, 0.1))
+
+  ## ---- BOLT preset ----
+  sumf_bolt <- file.path(extdata, "score_summary_bolt.tsv")
+  expect_true(file.exists(sumf_bolt))
+  out_bolt <- rduckhts_score(con, vcf, sumf_bolt, columns = "BOLT")
+  expect_equal(round(out_bolt$score_summary_bolt, 3), c(1.8, 0.1))
+
+  ## ---- METAL preset ----
+  sumf_metal <- file.path(extdata, "score_summary_metal.tsv")
+  expect_true(file.exists(sumf_metal))
+  out_metal <- rduckhts_score(con, vcf, sumf_metal, columns = "METAL")
+  expect_equal(round(out_metal$score_summary_metal, 3), c(1.8, 0.1))
+
+  ## ---- PGS catalog preset ----
+  sumf_pgs <- file.path(extdata, "score_summary_pgs.tsv")
+  expect_true(file.exists(sumf_pgs))
+  out_pgs <- rduckhts_score(con, vcf, sumf_pgs, columns = "PGS")
+  expect_equal(round(out_pgs$score_summary_pgs, 3), c(1.8, 0.1))
+
+  ## ---- SSF / GWAS-SSF preset (same file, two aliases) ----
+  sumf_ssf <- file.path(extdata, "score_summary_ssf.tsv")
+  expect_true(file.exists(sumf_ssf))
+  out_ssf <- rduckhts_score(con, vcf, sumf_ssf, columns = "SSF")
+  expect_equal(round(out_ssf$score_summary_ssf, 3), c(1.8, 0.1))
+  out_gwas_ssf <- rduckhts_score(con, vcf, sumf_ssf, columns = "GWAS-SSF")
+  expect_equal(round(out_gwas_ssf$score_summary_ssf, 3), c(1.8, 0.1))
+
+  ## ---- LOG10_P under PLINK preset ----
+  sumf_log10p <- file.path(extdata, "score_summary_log10p.tsv")
+  expect_true(file.exists(sumf_log10p))
+  out_log10p <- rduckhts_score(con, vcf, sumf_log10p, columns = "PLINK")
+  expect_equal(round(out_log10p$score_summary_log10p, 3), c(1.8, 0.1))
+
+  ## ---- TSV counts without threshold ----
+  out_cnt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK", counts = TRUE)
+  expect_true(all(c("score_summary", "score_summary_CNT") %in% names(out_cnt)))
+  expect_equal(round(out_cnt$score_summary, 3), c(1.8, 0.1))
+  expect_equal(out_cnt$score_summary_CNT, c(3L, 3L))
+
+  ## ---- GWAS-VCF + q_score_thr: only LP >= threshold variants scored ----
+  # q_score_thr=0.1 → LP threshold 1.0; only rs1 qualifies
+  out_gwas_thr <- rduckhts_score(con, vcf, sumf_gwas, use = "GT",
+                                 q_score_thr = "0.1", counts = TRUE)
+  expect_true(all(c("PRS_A_p0.1", "PRS_A_CNT_p0.1",
+                    "PRS_B_p0.1", "PRS_B_CNT_p0.1") %in% names(out_gwas_thr)))
+  thr_s1 <- out_gwas_thr[out_gwas_thr$SAMPLE == "S1", , drop = FALSE]
+  thr_s2 <- out_gwas_thr[out_gwas_thr$SAMPLE == "S2", , drop = FALSE]
+  expect_equal(round(thr_s1[["PRS_A_p0.1"]][1], 3), 0.0)
+  expect_equal(round(thr_s1[["PRS_B_p0.1"]][1], 3), 0.0)
+  expect_equal(thr_s1[["PRS_A_CNT_p0.1"]][1], 1L)
+  expect_equal(round(thr_s2[["PRS_A_p0.1"]][1], 3), 0.5)
+  expect_equal(round(thr_s2[["PRS_B_p0.1"]][1], 3), 0.3)
+  expect_equal(thr_s2[["PRS_B_CNT_p0.1"]][1], 1L)
+
+  ## ---- Error: include + exclude together ----
+  expect_error(
+    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                   include = "POS > 100", exclude = "POS > 200"),
+    pattern = "only one of include or exclude"
+  )
+
+  ## ---- Error: regions + regions_file together ----
+  expect_error(
+    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                   regions = "1:100-200", regions_file = regions_file),
+    pattern = "only one of regions or regions_file"
+  )
+
+  ## ---- Error: targets + targets_file together ----
+  expect_error(
+    rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK",
+                   targets = "1:100-200", targets_file = targets_file),
+    pattern = "only one of targets or targets_file"
+  )
 }
 
 test_score()
