@@ -293,8 +293,8 @@
       "category": "Variants",
       "signature": "bcftools_liftover(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, lift_mt, end_pos, no_left_align)",
       "returns": "STRUCT",
-      "r_wrapper": "rduckhts_score",
-      "description": "Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation. Set no_left_align := true to skip left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover).",
+      "r_wrapper": "rduckhts_liftover",
+      "description": "Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover).",
       "examples": [
         "SELECT (bcftools_liftover(chrom, pos, ref, alt, 'hg19ToHg38.over.chain.gz', 'hg38.fa', 'hg19.fa', 1, 250, false, NULL::BIGINT, false)).dest_pos FROM variants;"
       ]
