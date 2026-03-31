@@ -13,6 +13,7 @@ require_cmd() {
 }
 
 require_cmd curl
+require_cmd patch
 require_cmd sha256sum
 require_cmd tar
 
@@ -55,4 +56,20 @@ capture_licenses() {
       cp "$src/$f" "$out/"
     fi
   done
+}
+
+apply_patches() {
+  local target_dir="$1"
+  local patch_group="$2"
+  local patch_dir="$TP_DIR/patches/$patch_group"
+  local patch_file
+
+  if [[ ! -d "$patch_dir" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r patch_file; do
+    echo "Applying patch $patch_file"
+    patch -d "$target_dir" -p1 < "$patch_file"
+  done < <(find "$patch_dir" -maxdepth 1 -type f -name '*.patch' | sort)
 }

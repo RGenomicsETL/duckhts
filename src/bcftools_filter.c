@@ -853,7 +853,7 @@ static void filters_cmp_id(token_t *atok, token_t *btok, token_t *rtok, bcf1_t *
             {
                 if ( rtok->tok_type!=TOK_LIKE && rtok->tok_type!=TOK_NLIKE )
                     error("Only the following operators are supported for querying ID: ==, !=, ~, !~; the operator type %d is not supported (%p %p)\n",
-                            rtok->tok_type,atok->regex,btok->regex);
+                            rtok->tok_type, (void *)atok->regex, (void *)btok->regex);
 
                 regex_t *regex = atok->regex ? atok->regex : (btok->regex ? btok->regex : NULL);
                 if ( !regex ) error("fixme: regex initialization failed\n");
@@ -3647,7 +3647,7 @@ static void filter_debug_print(token_t *toks, token_t **tok_ptrs, int ntoks)
         }
         else
             fprintf(stderr,"%c", TOKEN_STRING[tok->tok_type]);
-        if ( tok->setter ) fprintf(stderr,"\t[setter %p]", tok->setter);
+        if ( tok->setter ) fprintf(stderr,"\t[setter set]");
         fprintf(stderr,"\n");
     }
 }

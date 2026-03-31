@@ -25,6 +25,8 @@ if [[ -d "$TP_DIR/bcftools/htslib" ]]; then
   rm -rf "$TP_DIR/bcftools/htslib"
 fi
 
+apply_patches "$TP_DIR/bcftools" "bcftools"
+
 capture_licenses "$TP_DIR/bcftools" "bcftools"
 
 echo "Vendored bcftools ${VERSION} into $TP_DIR/bcftools"
