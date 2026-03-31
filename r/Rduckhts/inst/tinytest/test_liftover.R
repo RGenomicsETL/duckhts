@@ -172,7 +172,7 @@ test_liftover <- function() {
       sprintf(
         paste(
           "SELECT (bcftools_liftover(",
-          "NULL, 2, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT",
+          "NULL, 2, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT, false",
           ")).src_pos"
         ),
         chain_path, dst_fa, src_fa
@@ -187,7 +187,7 @@ test_liftover <- function() {
       sprintf(
         paste(
           "SELECT (bcftools_liftover(",
-          "'chrF', 0, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT",
+          "'chrF', 0, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT, false",
           ")).src_pos"
         ),
         chain_path, dst_fa, src_fa
@@ -423,6 +423,26 @@ test_liftover <- function() {
   expect_true(end_mt$mapped[1])
   expect_equal(end_mt$dest_end[1], 8)
   expect_equal(end_mt$note[1], "MitochondriaPassthrough")
+
+  ## ---- no_left_align parameter ----
+  # For a SNP, no_left_align=TRUE produces identical results to FALSE
+  # (left-alignment step only applies to indels)
+  out_nla <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrF', 2, 'C', 'T')) AS t(chrom, pos, ref, alt)",
+    chain_path = chain_path,
+    dst_fasta_ref = dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = src_fa,
+    no_left_align = TRUE
+  )
+  expect_equal(nrow(out_nla), 1)
+  expect_true(out_nla$mapped[1])
+  expect_equal(out_nla$dest_chrom[1], "chrLiftF")
+  expect_equal(out_nla$dest_pos[1], 2)
+  expect_equal(out_nla$dest_ref[1], "C")
+  expect_equal(out_nla$dest_alt[1], "T")
 }
 
 test_liftover()

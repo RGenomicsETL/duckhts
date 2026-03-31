@@ -1,6 +1,7 @@
 
 # Rduckhts 0.1.3-0.0.2.9002
 
+- add `no_left_align` parameter to `rduckhts_liftover()` (default `FALSE`): when `TRUE`, skips post-liftover left-alignment of indels, mirroring `bcftools +liftover --no-left-align`
 - harden `rduckhts_score()` filter-expression failures for installed-package CI runs on Linux/Windows: invalid `include`/`exclude` expressions now surface as normal package errors from the bundled score engine instead of relying on a cross-frame bcftools shim jump path
 - extend `rduckhts_score()` with bcftools-style filtering arguments (`regions`, `regions_file`, `regions_overlap`, `targets`, `targets_file`, `targets_overlap`, `apply_filters`, `include`, `exclude`) and package-level tests for region/target/FILTER behavior; `include`/`exclude` expressions are now evaluated against core VCF fields (`POS`, `QUAL`, `CHROM`, `ID`, `REF`, `ALT`, `FILTER`)
 - improve `rduckhts_liftover()` multiallelic semantic parity with upstream `bcftools +liftover`: preserve all ALT alleles through reference-introduction/swaps, apply dynamic-allele indel normalization/left-alignment, treat `ALT='.'` as no alternate alleles, and add tinytest coverage for forward/reverse multiallelic liftover outputs

@@ -1681,13 +1681,16 @@ rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) 
 #' @param src_fasta_ref Optional source FASTA reference
 #' @param max_snp_gap Maximum chain block merge gap
 #' @param max_indel_inc Maximum indel anchor expansion
-#' @param lift_mt If FALSE (default), mitochondrial variants with matching
+ #' @param lift_mt If FALSE (default), mitochondrial variants with matching
 #'   source/destination contig lengths are passed through with only contig
 #'   rename. If TRUE, MT variants are lifted through the chain like any
 #'   other contig.
 #' @param end_pos_col Optional column name containing INFO/END positions
 #'   (1-based) to lift alongside the primary position. When provided, the
 #'   output includes a `dest_end` column with the lifted end position.
+#' @param no_left_align If FALSE (default), lifted indels are left-aligned
+#'   against the destination reference. Set TRUE to skip left-alignment,
+#'   mirroring \code{--no-left-align} in \code{bcftools +liftover}.
 #'
 #' @return A data frame with source columns, lifted coordinates/alleles, and warnings.
 #'
@@ -1705,7 +1708,8 @@ rduckhts_liftover <- function(
   max_snp_gap = 1,
   max_indel_inc = 250,
   lift_mt = FALSE,
-  end_pos_col = NULL
+  end_pos_col = NULL,
+  no_left_align = FALSE
 ) {
   if (!is.numeric(max_snp_gap) || length(max_snp_gap) != 1 || is.na(max_snp_gap) || max_snp_gap < 0) {
     stop("max_snp_gap must be >= 0", call. = FALSE)
@@ -1739,6 +1743,7 @@ rduckhts_liftover <- function(
     sprintf("lift_mt := %s", tolower(as.character(lift_mt)))
   )
   if (!is.null(end_pos_col)) params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
+  params <- c(params, sprintf("no_left_align := %s", tolower(as.character(no_left_align))))
   sql <- sprintf("SELECT * FROM duckdb_liftover(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }

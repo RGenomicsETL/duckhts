@@ -2,6 +2,8 @@
 
 ## duckhts 0.1.3.9002 (2026-03-27)
 
+- add `no_left_align` BOOLEAN parameter to `bcftools_liftover(...)` and `duckdb_liftover(...)`: when `true`, skips post-liftover left-alignment (Step 8), mirroring `bcftools +liftover --no-left-align`; default is `false`, preserving existing behavior
+
 - make `bcftools_score(...)` filter-expression error handling safer in embedded DuckDB/R contexts: `bcftools_filter.c` now traps parse/eval failures internally and returns structured status/error strings instead of unwinding across extension frames with an external shim `setjmp`/`longjmp` path; this targets CI-only Linux/Windows score test crashes
 - expand `bcftools_score(...)` API with explicit bcftools-style filtering controls: `regions`, `regions_file`, `regions_overlap`, `targets`, `targets_file`, `targets_overlap`, `apply_filters`, plus `include`/`exclude` expression filtering over core VCF fields (`POS`, `QUAL`, `CHROM`, `ID`, `REF`, `ALT`, `FILTER`)
 - improve `bcftools_liftover(...)` multiallelic semantic parity with upstream: run the full indel/reference/left-alignment pipeline over dynamic allele arrays (not only biallelic scalar slots), preserve all ALT alleles when a new reference is introduced (`swap=-1`), normalize duplicate/ref-equal ALT alleles from output, and treat `ALT='.'` as no alternate alleles; add SQL coverage for multiallelic forward/reverse cases

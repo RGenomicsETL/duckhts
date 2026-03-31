@@ -1676,6 +1676,8 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
     duckdb_vector max_indel_inc_vec = duckdb_data_chunk_get_vector(input, 8);
     duckdb_vector lift_mt_vec = duckdb_data_chunk_get_vector(input, 9);
     duckdb_vector end_pos_vec = duckdb_data_chunk_get_vector(input, 10);
+    idx_t n_input_cols = duckdb_data_chunk_get_column_count(input);
+    duckdb_vector no_left_align_vec = (n_input_cols > 11) ? duckdb_data_chunk_get_vector(input, 11) : NULL;
     duckdb_vector child_vecs[OUT_COUNT];
     int64_t *src_pos_data;
     int64_t *dest_pos_data;
@@ -1719,6 +1721,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         int32_t max_snp_gap = 1;
         int32_t max_indel_inc = 250;
         int lift_mt = 0;
+        int no_left_align = 0;
         int has_end_pos = 0;
         int64_t end_pos = 0;
         hts_pos_t dest_end = -1;
@@ -1748,6 +1751,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         if (row_is_valid(max_snp_gap_vec, row)) max_snp_gap = get_int32_at(max_snp_gap_vec, row);
         if (row_is_valid(max_indel_inc_vec, row)) max_indel_inc = get_int32_at(max_indel_inc_vec, row);
         if (row_is_valid(lift_mt_vec, row)) lift_mt = ((bool *)duckdb_vector_get_data(lift_mt_vec))[row] ? 1 : 0;
+        if (no_left_align_vec && row_is_valid(no_left_align_vec, row)) no_left_align = ((bool *)duckdb_vector_get_data(no_left_align_vec))[row] ? 1 : 0;
         if (row_is_valid(end_pos_vec, row)) {
             end_pos = ((int64_t *)duckdb_vector_get_data(end_pos_vec))[row];
             has_end_pos = 1;
@@ -2020,6 +2024,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             /* Step 8: Left-align indels if needed */
             if (mapped && (!is_snp || is_difficult_snp) && !is_symbolic
                 && work_alleles && work_n_allele > 0
+                && !no_left_align
                 && !scalar_is_left_aligned(work_alleles, work_n_allele)
                 && bind->dst_fai) {
                 scalar_realign_t ra = {0};
@@ -2129,27 +2134,43 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
     }
 }
 
-void register_liftover_functions(duckdb_connection connection) {
+/* Build a scalar function object for one bcftools_liftover overload.
+   include_no_left_align=0 → 11-param legacy signature (no_left_align absent,
+   defaults to false at runtime); =1 → 12-param signature with explicit no_left_align. */
+static duckdb_scalar_function build_liftover_overload(duckdb_logical_type varchar_type,
+                                                       duckdb_logical_type bigint_type,
+                                                       duckdb_logical_type int_type,
+                                                       duckdb_logical_type bool_type,
+                                                       duckdb_logical_type struct_type,
+                                                       int include_no_left_align) {
     duckdb_scalar_function fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_add_parameter(fn, varchar_type);   /* chrom */
+    duckdb_scalar_function_add_parameter(fn, bigint_type);    /* pos */
+    duckdb_scalar_function_add_parameter(fn, varchar_type);   /* ref */
+    duckdb_scalar_function_add_parameter(fn, varchar_type);   /* alt */
+    duckdb_scalar_function_add_parameter(fn, varchar_type);   /* chain_path */
+    duckdb_scalar_function_add_parameter(fn, varchar_type);   /* dst_fasta_ref */
+    duckdb_scalar_function_add_parameter(fn, varchar_type);   /* src_fasta_ref */
+    duckdb_scalar_function_add_parameter(fn, int_type);       /* max_snp_gap */
+    duckdb_scalar_function_add_parameter(fn, int_type);       /* max_indel_inc */
+    duckdb_scalar_function_add_parameter(fn, bool_type);      /* lift_mt */
+    duckdb_scalar_function_add_parameter(fn, bigint_type);    /* end_pos */
+    if (include_no_left_align)
+        duckdb_scalar_function_add_parameter(fn, bool_type);  /* no_left_align */
+    duckdb_scalar_function_set_return_type(fn, struct_type);
+    duckdb_scalar_function_set_special_handling(fn);
+    duckdb_scalar_function_set_function(fn, bcftools_liftover_scalar);
+    return fn;
+}
+
+void register_liftover_functions(duckdb_connection connection) {
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type int_type = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type fields[OUT_COUNT];
     duckdb_logical_type struct_type;
-
-    duckdb_scalar_function_set_name(fn, "bcftools_liftover");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, int_type);
-    duckdb_scalar_function_add_parameter(fn, int_type);
-    duckdb_scalar_function_add_parameter(fn, bool_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
+    duckdb_scalar_function fn12;
 
     fields[OUT_SRC_CHROM] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     fields[OUT_SRC_POS] = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -2167,12 +2188,13 @@ void register_liftover_functions(duckdb_connection connection) {
     fields[OUT_NOTE] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     struct_type = duckdb_create_struct_type(fields, LIFTOVER_FIELD_NAMES, OUT_COUNT);
 
-    duckdb_scalar_function_set_return_type(fn, struct_type);
-    duckdb_scalar_function_set_special_handling(fn);
-    duckdb_scalar_function_set_function(fn, bcftools_liftover_scalar);
-    duckdb_register_scalar_function(connection, fn);
+    /* Register only the 12-param overload; no_left_align defaults to false in
+       the duckdb_liftover SQL macro wrapper for callers that don't need it. */
+    fn12 = build_liftover_overload(varchar_type, bigint_type, int_type, bool_type, struct_type, 1);
+    duckdb_scalar_function_set_name(fn12, "bcftools_liftover");
+    duckdb_register_scalar_function(connection, fn12);
 
-    duckdb_destroy_scalar_function(&fn);
+    duckdb_destroy_scalar_function(&fn12);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bigint_type);
     duckdb_destroy_logical_type(&int_type);

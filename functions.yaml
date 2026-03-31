@@ -291,22 +291,22 @@
       "name": "bcftools_liftover",
       "kind": "scalar",
       "category": "Variants",
-      "signature": "bcftools_liftover(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc)",
+      "signature": "bcftools_liftover(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, lift_mt, end_pos, no_left_align)",
       "returns": "STRUCT",
       "r_wrapper": "rduckhts_score",
-      "description": "Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation.",
+      "description": "Score-row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with source fields, lifted coordinates/alleles, reverse-complement state, swap flag, reject_reason for rejected rows, and note annotations for emitted rows that need extra interpretation. Set no_left_align := true to skip left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover).",
       "examples": [
-        "SELECT (bcftools_liftover(chrom, pos, ref, alt, 'hg19ToHg38.over.chain.gz', 'hg38.fa', 'hg19.fa', 1, 250)).dest_pos FROM variants;"
+        "SELECT (bcftools_liftover(chrom, pos, ref, alt, 'hg19ToHg38.over.chain.gz', 'hg38.fa', 'hg19.fa', 1, 250, false, NULL::BIGINT, false)).dest_pos FROM variants;"
       ]
     },
     {
       "name": "duckdb_liftover",
       "kind": "table_macro",
       "category": "Variants",
-      "signature": "duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250)",
+      "signature": "duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250, lift_mt := false, end_pos_col := NULL, no_left_align := false)",
       "returns": "table",
       "r_wrapper": "rduckhts_liftover",
-      "description": "DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table.",
+      "description": "DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors --no-left-align in bcftools +liftover.",
       "examples": [
         "SELECT * FROM duckdb_liftover('variants', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', chain_path := 'hg19ToHg38.over.chain.gz', dst_fasta_ref := 'hg38.fa');",
         "SELECT * FROM duckdb_liftover('(SELECT chrom, pos, ref, alt FROM variants) AS v', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', chain_path := 'hg19ToHg38.over.chain.gz', dst_fasta_ref := 'hg38.fa');"

@@ -17,7 +17,8 @@ rduckhts_liftover(
   max_snp_gap = 1,
   max_indel_inc = 250,
   lift_mt = FALSE,
-  end_pos_col = NULL
+  end_pos_col = NULL,
+  no_left_align = FALSE
 )
 }
 \arguments{
@@ -51,6 +52,10 @@ other contig.}
 \item{end_pos_col}{Optional column name containing INFO/END positions
 (1-based) to lift alongside the primary position. When provided, the
 output includes a `dest_end` column with the lifted end position.}
+
+\item{no_left_align}{If FALSE (default), lifted indels are left-aligned
+against the destination reference. Set TRUE to skip left-alignment,
+mirroring \code{--no-left-align} in \code{bcftools +liftover}.}
 }
 \value{
 A data frame with source columns, lifted coordinates/alleles, and warnings.

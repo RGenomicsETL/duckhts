@@ -35,7 +35,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -72,7 +72,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     NULL,
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -89,7 +89,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     NULL,
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -128,7 +128,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -148,7 +148,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
-    1, 250, true, NULL::BIGINT
+    1, 250, true, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -165,7 +165,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -199,7 +199,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, 5
+    1, 250, false, 5, false
   ) AS lo
 ) s;
 ----
@@ -215,7 +215,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -231,7 +231,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover_mt.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_mt_src.fa',
-    1, 250, false, 8
+    1, 250, false, 8, false
   ) AS lo
 ) s;
 ----
@@ -264,7 +264,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -283,7 +283,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -300,7 +300,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -317,7 +317,7 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
@@ -333,8 +333,50 @@ FROM (
     '__WORKING_DIRECTORY__/test/data/liftover.chain',
     '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
     '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
-    1, 250, false, NULL::BIGINT
+    1, 250, false, NULL::BIGINT, false
   ) AS lo
 ) s;
 ----
 chrLiftR	9	T	C,A	0	OK
+
+# no_left_align parameter: SNP result is identical with no_left_align=true (step 8 is indel-only)
+query TITTIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       CASE WHEN lo.reverse_complemented THEN 1 ELSE 0 END,
+       lo.swap,
+       coalesce(lo.reject_reason, 'OK'),
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, 'C', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT, true
+  ) AS lo
+) s;
+----
+chrLiftF	2	C	T	1	0	0	OK	OK
+
+# no_left_align via duckdb_liftover macro
+query TITTIIITT
+SELECT dest_chrom, dest_pos, dest_ref, dest_alt,
+       CASE WHEN mapped THEN 1 ELSE 0 END,
+       CASE WHEN reverse_complemented THEN 1 ELSE 0 END,
+       swap,
+       coalesce(reject_reason, 'OK'),
+       coalesce(note, 'OK')
+FROM duckdb_liftover(
+  '(VALUES (''chrF'', 2, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := '__WORKING_DIRECTORY__/test/data/liftover.chain',
+  dst_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+  src_fasta_ref := '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+  no_left_align := true
+);
+----
+chrLiftF	2	C	T	1	0	0	OK	OK

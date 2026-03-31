@@ -267,7 +267,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
         "chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250, "
-        "lift_mt := false, end_pos_col := NULL) AS TABLE "
+        "lift_mt := false, end_pos_col := NULL, no_left_align := false) AS TABLE "
         "SELECT lo.* "
         "FROM query('SELECT ' || chrom_col || ' AS __duckhts_chrom, ' || pos_col || ' AS __duckhts_pos, ' || "
         "coalesce(ref_col, 'NULL') || ' AS __duckhts_ref, ' || coalesce(alt_col, 'NULL') || ' AS __duckhts_alt, ' || "
@@ -278,7 +278,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WHEN src.__duckhts_pos IS NULL THEN error('bcftools_liftover: pos must be non-null') "
         "WHEN src.__duckhts_pos < 1 THEN error('bcftools_liftover: pos must be >= 1') "
         "ELSE bcftools_liftover(src.__duckhts_chrom, src.__duckhts_pos, src.__duckhts_ref, src.__duckhts_alt, "
-        "chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, lift_mt, src.__duckhts_end_pos) "
+        "chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, lift_mt, src.__duckhts_end_pos, no_left_align) "
         "END AS lo) q")) {
         return false;
     }
