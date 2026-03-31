@@ -16,6 +16,8 @@ Useful links:
 
 - <https://github.com/RGenomicsETL/duckhts>
 
+- <https://rgenomicsetl.r-universe.dev/Rduckhts>
+
 - Report bugs at <https://github.com/RGenomicsETL/duckhts/issues>
 
 ## Author

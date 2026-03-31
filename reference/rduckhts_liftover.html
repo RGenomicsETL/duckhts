@@ -56,7 +56,10 @@ and alternate alleles.</p>
 <span>  alt_col <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  src_fasta_ref <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  max_snp_gap <span class="op">=</span> <span class="fl">1</span>,</span>
-<span>  max_indel_inc <span class="op">=</span> <span class="fl">250</span></span>
+<span>  max_indel_inc <span class="op">=</span> <span class="fl">250</span>,</span>
+<span>  lift_mt <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  end_pos_col <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  no_left_align <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -106,6 +109,25 @@ and alternate alleles.</p>
 
 <dt id="arg-max-indel-inc">max_indel_inc<a class="anchor" aria-label="anchor" href="#arg-max-indel-inc"></a></dt>
 <dd><p>Maximum indel anchor expansion</p></dd>
+
+
+<dt id="arg-lift-mt">lift_mt<a class="anchor" aria-label="anchor" href="#arg-lift-mt"></a></dt>
+<dd><p>If FALSE (default), mitochondrial variants with matching
+source/destination contig lengths are passed through with only contig
+rename. If TRUE, MT variants are lifted through the chain like any
+other contig.</p></dd>
+
+
+<dt id="arg-end-pos-col">end_pos_col<a class="anchor" aria-label="anchor" href="#arg-end-pos-col"></a></dt>
+<dd><p>Optional column name containing INFO/END positions
+(1-based) to lift alongside the primary position. When provided, the
+output includes a `dest_end` column with the lifted end position.</p></dd>
+
+
+<dt id="arg-no-left-align">no_left_align<a class="anchor" aria-label="anchor" href="#arg-no-left-align"></a></dt>
+<dd><p>If FALSE (default), lifted indels are left-aligned
+against the destination reference. Set TRUE to skip left-alignment,
+mirroring <code>--no-left-align</code> in <code>bcftools +liftover</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">

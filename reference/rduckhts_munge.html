@@ -51,7 +51,7 @@ or a two-column mapping file. When no mapping mode is provided, the bundled
     <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">rduckhts_munge</span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
 <span>  <span class="va">query</span>,</span>
-<span>  <span class="va">fasta_ref</span>,</span>
+<span>  fasta_ref <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  preset <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  column_map <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  column_map_file <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -76,7 +76,9 @@ or a two-column mapping file. When no mapping mode is provided, the bundled
 
 
 <dt id="arg-fasta-ref">fasta_ref<a class="anchor" aria-label="anchor" href="#arg-fasta-ref"></a></dt>
-<dd><p>Path to the reference FASTA</p></dd>
+<dd><p>Path to the reference FASTA. When NULL (default), operates
+in fai-only mode: alleles pass through as-is without reference matching
+or allele swapping, matching upstream `–fai`-only behavior.</p></dd>
 
 
 <dt id="arg-preset">preset<a class="anchor" aria-label="anchor" href="#arg-preset"></a></dt>

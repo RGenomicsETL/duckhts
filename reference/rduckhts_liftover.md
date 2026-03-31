@@ -18,7 +18,10 @@ rduckhts_liftover(
   alt_col = NULL,
   src_fasta_ref = NULL,
   max_snp_gap = 1,
-  max_indel_inc = 250
+  max_indel_inc = 250,
+  lift_mt = FALSE,
+  end_pos_col = NULL,
+  no_left_align = FALSE
 )
 ```
 
@@ -67,6 +70,25 @@ rduckhts_liftover(
 - max_indel_inc:
 
   Maximum indel anchor expansion
+
+- lift_mt:
+
+  If FALSE (default), mitochondrial variants with matching
+  source/destination contig lengths are passed through with only contig
+  rename. If TRUE, MT variants are lifted through the chain like any
+  other contig.
+
+- end_pos_col:
+
+  Optional column name containing INFO/END positions (1-based) to lift
+  alongside the primary position. When provided, the output includes a
+  \`dest_end\` column with the lifted end position.
+
+- no_left_align:
+
+  If FALSE (default), lifted indels are left-aligned against the
+  destination reference. Set TRUE to skip left-alignment, mirroring
+  `--no-left-align` in `bcftools +liftover`.
 
 ## Value
 

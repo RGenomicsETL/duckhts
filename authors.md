@@ -8,6 +8,9 @@
   Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies**. Contributor.  
   Htslib Authors
 
+- **Giulio Genovese**. Copyright holder.  
+  Author of BCFTools munge,score,liftover plugins
+
 - **DuckDB C Extension API Authors**. Contributor.
 
 ## Citation

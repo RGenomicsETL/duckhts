@@ -13,8 +13,8 @@ rduckhts_bam(
   region = NULL,
   index_path = NULL,
   reference = NULL,
-  standard_tags = NULL,
-  auxiliary_tags = NULL,
+  standard_tags = FALSE,
+  auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
   overwrite = FALSE
@@ -49,11 +49,13 @@ rduckhts_bam(
 
 - standard_tags:
 
-  Logical. If TRUE, include typed standard SAMtags columns
+  Logical. If TRUE, include typed standard SAMtags columns. Default
+  FALSE.
 
 - auxiliary_tags:
 
-  Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags
+  Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags.
+  Default FALSE.
 
 - sequence_encoding:
 
