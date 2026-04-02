@@ -257,9 +257,7 @@ list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
 
 # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
-# even when the outer CMake build uses Ninja. Avoid a bare `-j` here:
-# `gmake -j lib-static` means unlimited parallel jobs, which has been flaky
-# on CI (notably arm64) and can crash the htslib sub-build nondeterministically.
+# even when the outer CMake build uses Ninja.
 find_program(MAKE_COMMAND NAMES gmake make REQUIRED)
 find_program(SH_COMMAND NAMES sh bash REQUIRED)
 
@@ -296,7 +294,7 @@ ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"
     BUILD_IN_SOURCE   TRUE
     CONFIGURE_COMMAND ${HTSLIB_CONFIGURE_COMMAND}
-    BUILD_COMMAND     ${MAKE_COMMAND} lib-static ${HTSLIB_MAKE_ARGS}
+    BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
     BUILD_ALWAYS      TRUE
     INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
     BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
