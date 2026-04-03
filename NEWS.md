@@ -2,6 +2,9 @@
 
 ## duckhts 1.1.5 (2026-04-02)
 
+- switch the top-level extension `README.Rmd` examples from `R`/`DBI` wrapper execution to a custom knitr `sql` engine that runs `duckdb -unsigned` directly, matching the built extension workflow used in `DuckTinyCC`; point the liftover example at bundled fixtures instead of generating temporary FASTA/chain files in `R`
+- fix Windows GNU CI path selection in vendored `htslib` CMake builds: pass the explicit DuckDB platform (`windows_amd64_mingw` vs `windows_amd64_rtools`) into CMake and treat the two MinGW/Rtools paths differently during `htslib ./configure`; keep `windows_amd64_mingw` close to `configure.win` with a small configure-time `LIBS` set, but restore the fuller static-libcurl dependency closure for `windows_amd64_rtools`, which still needs it during `htslib` feature probes; keep `CURL_STATICLIB` on the actual MinGW build objects rather than on `./configure` test programs
+
 - fix Windows `windows_amd64_rtools` CMake toolchain selection: the top-level `Makefile` now asks `R CMD config` for `CC`/`AR`/`RANLIB` and passes those into the initial CMake configure, preventing mixed `C:/mingw64` compiler vs `Rtools` library setups during vendored `htslib` builds; simplify the MinGW `htslib` `ExternalProject` path back to separate configure/build steps instead of inlining `./configure && make` into one shell command; define `CURL_STATICLIB` for MinGW static-libcurl builds so vendored `htslib` and the extension link against Rtools static `libcurl.a` without `__imp_curl_*` import-symbol failures
 
 - fix `read_bcf(...)` fixed-count INFO/FORMAT arrays: `Number=2`, `Number=4`, and other exact-cardinality fields now map to DuckDB list types instead of being truncated to the first element as scalar values

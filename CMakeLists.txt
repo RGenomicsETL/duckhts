@@ -112,10 +112,6 @@ target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 # Include DuckDB C API headers
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 
-if(WIN32 AND MINGW AND CURL_FOUND)
-    target_compile_definitions(${EXTENSION_NAME} PRIVATE CURL_STATICLIB)
-endif()
-
 # ---- htslib ----
 # Build vendored htslib using its own configure + make.  CMake drives the
 # process via ExternalProject_Add so it runs once, in-tree, producing a
@@ -206,10 +202,6 @@ if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     endif()
 endif()
 
-if(WIN32 AND MINGW AND CURL_FOUND)
-    set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -DCURL_STATICLIB")
-endif()
-
 # Strip leading whitespace that may appear when no arch flags were prepended
 string(STRIP "${HTSLIB_EXTRA_CFLAGS}" HTSLIB_EXTRA_CFLAGS)
 string(STRIP "${HTSLIB_EXTRA_LDFLAGS}" HTSLIB_EXTRA_LDFLAGS)
@@ -252,48 +244,6 @@ if(APPLE)
             "-framework Security"
         )
     endif()
-elseif(WIN32 AND MINGW)
-    # MinGW static link checks often need winsock but not libdl.
-    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-lws2_32")
-    if(PC_LIBCURL_FOUND)
-        string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
-        separate_arguments(PC_LIBCURL_LDFLAGS_LIST NATIVE_COMMAND "${PC_LIBCURL_LDFLAGS_STRIPPED}")
-        list(APPEND HTSLIB_EXTRA_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
-    elseif(CURL_FOUND)
-        # Mirror the fallback MinGW curl dependency chain used at final link
-        # time so htslib's configure-time AC_CHECK_LIB(curl, ...) succeeds.
-        list(APPEND HTSLIB_EXTRA_LIBS
-            "-lcurl"
-            "-lbcrypt"
-            "-lcrypt32"
-            "-lwsock32"
-            "-lwldap32"
-        )
-        if(MINGW_LIBPSL_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBPSL_LIBRARY})
-        endif()
-        if(MINGW_LIBIDN2_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBIDN2_LIBRARY})
-        endif()
-        if(MINGW_LIBUNISTRING_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBUNISTRING_LIBRARY})
-        endif()
-        if(MINGW_LIBICONV_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBICONV_LIBRARY})
-        endif()
-        if(MINGW_LIBSSH2_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBSSH2_LIBRARY})
-        endif()
-        if(MINGW_LIBGCRYPT_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBGCRYPT_LIBRARY})
-        endif()
-        if(MINGW_LIBGPG_ERROR_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBGPG_ERROR_LIBRARY})
-        endif()
-        if(MINGW_LIBZSTD_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBZSTD_LIBRARY})
-        endif()
-    endif()
 else()
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
     list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
@@ -303,6 +253,7 @@ if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
 endif()
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
 list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
+
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
 
 # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
@@ -322,37 +273,22 @@ if(NOT LIBDEFLATE_FOUND)
 endif()
 if(WIN32 AND MINGW)
     # MinGW/Rtools builds should not rely on htslib's checked-in config.mk.
-    # Keep plugins off for now. Mirror configure.win and do not force S3/GCS
-    # in this path until the static MinGW build is proven end-to-end.
+    # Keep plugins off for now, but allow libcurl when the outer link can
+    # provide the full dependency chain.
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-plugins)
-endif()
-
-if(CURL_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-libcurl)
-    if(WIN32 AND MINGW)
-        list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
-    elseif(OPENSSL_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-s3 --enable-gcs)
-    else()
-        list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
-    endif()
-else()
-    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl --disable-s3 --disable-gcs)
+elseif(NOT CURL_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl)
 endif()
 
 set(HTSLIB_CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
     "CC=${CMAKE_C_COMPILER}"
-    "AR=${CMAKE_AR}"
-    "RANLIB=${CMAKE_RANLIB}"
     "CPPFLAGS="
     "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
     "LIBS=${HTSLIB_EXTRA_LIBS_STR}"
-    ${SH_COMMAND}
-    ./configure
+    ${SH_COMMAND} ./configure ${HTSLIB_CONFIGURE_FLAGS}
 )
-list(APPEND HTSLIB_CONFIGURE_COMMAND ${HTSLIB_CONFIGURE_FLAGS})
 
 ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"

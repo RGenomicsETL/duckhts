@@ -1,6 +1,8 @@
 
 # Rduckhts 1.1.5-0.0.1
 
+- Keep the top-level extension `README.Rmd` examples aligned with direct extension usage: the extension README now renders its example queries through a custom DuckDB SQL knitr engine instead of `R`/`DBI`, and its liftover example uses bundled fixtures rather than temporary `R`-generated FASTA/chain files.
+- Fix bundled Windows GNU CMake builds: the vendored `htslib` configure step now distinguishes `windows_amd64_mingw` from `windows_amd64_rtools`; the MinGW path keeps the smaller `configure.win`-style library set, while the Rtools path restores the fuller static `libcurl` dependency closure required by its `htslib` feature probes. `CURL_STATICLIB` remains on the built objects rather than on `./configure` test probes.
 - Fix bundled Windows `windows_amd64_rtools` CMake builds: the upstream extension `Makefile` now pins `CC`/`AR`/`RANLIB` from `R CMD config`, avoiding mixed non-Rtools compiler and Rtools library selection when vendored `htslib` is configured; the vendored `htslib` CMake path also returns to separate configure/build steps on MinGW for simpler diagnostics and behavior, and MinGW static-libcurl builds now define `CURL_STATICLIB` to match Rtools `libcurl.a`.
 - Fix bundled `read_bcf(...)` / `rduckhts_bcf()` mapping of fixed-count INFO/FORMAT arrays: exact-cardinality fields such as `Number=2` and `Number=4` now materialize as DuckDB array/list columns instead of silently dropping all but the first value.
 - Fix bundled `read_bcf(...)` / `rduckhts_bcf()` handling of string FORMAT lists such as DRAGEN `FORMAT/LAA`: `Number != 1` string FORMAT fields now materialize as `VARCHAR[]` instead of triggering DuckDB internal assertion failures.
