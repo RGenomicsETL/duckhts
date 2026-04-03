@@ -1,0 +1,122 @@
+name: Rtools Build Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  rtools-debug:
+    name: windows_amd64_rtools diagnostics
+    runs-on: windows-latest
+
+    env:
+      DUCKDB_PLATFORM: windows_amd64_rtools
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up R 4.2 / Rtools42
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.2.3'
+          rtools-version: '42'
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uname -a
+          which bash
+          which make || true
+          which gmake || true
+          which cmake
+          which gcc || true
+          which R
+          R --version
+          git submodule status
+
+      - name: Clean prior build state
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make clean_build clean_cmake || true
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make configure
+
+      - name: Build release
+        id: build_release
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          make release 2>&1 | tee rtools-build.log
+
+      - name: Dump CMake and htslib diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "build_release outcome: ${{ steps.build_release.outcome }}"
+          echo "build_release conclusion: ${{ steps.build_release.conclusion }}"
+
+          echo "::group::cmake_build tree"
+          find cmake_build -maxdepth 5 -type f | sort || true
+          echo "::endgroup::"
+
+          echo "::group::htslib stamp dir"
+          ls -lah cmake_build/release/htslib_build-prefix/src/htslib_build-stamp || true
+          echo "::endgroup::"
+
+          shopt -s nullglob
+
+          for f in \
+            rtools-build.log \
+            cmake_build/release/CMakeCache.txt \
+            cmake_build/release/CMakeFiles/CMakeOutput.log \
+            cmake_build/release/CMakeFiles/CMakeError.log \
+            cmake_build/release/htslib_build-prefix/src/htslib_build-stamp/* \
+            third_party/htslib/config.log \
+            third_party/htslib/config.mk; do
+            if [ -f "$f" ]; then
+              echo "::group::$f"
+              sed -n '1,400p' "$f" || cat "$f"
+              echo "::endgroup::"
+            fi
+          done
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtools-diagnostics
+          if-no-files-found: warn
+          path: |
+            rtools-build.log
+            cmake_build/release/CMakeCache.txt
+            cmake_build/release/CMakeFiles/CMakeOutput.log
+            cmake_build/release/CMakeFiles/CMakeError.log
+            cmake_build/release/htslib_build-prefix/src/htslib_build-stamp/
+            third_party/htslib/config.log
+            third_party/htslib/config.mk
+
+      - name: Fail if build failed
+        if: steps.build_release.outcome != 'success'
+        shell: bash
+        run: |
+          echo "Rtools release build failed; see grouped logs and uploaded artifact."
+          exit 1
