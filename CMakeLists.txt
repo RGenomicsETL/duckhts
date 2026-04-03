@@ -244,6 +244,14 @@ if(APPLE)
             "-framework Security"
         )
     endif()
+elseif(WIN32 AND MINGW)
+    # MinGW static link checks often need winsock but not libdl.
+    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-lws2_32")
+    if(PC_LIBCURL_FOUND)
+        string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
+        separate_arguments(PC_LIBCURL_LDFLAGS_LIST NATIVE_COMMAND "${PC_LIBCURL_LDFLAGS_STRIPPED}")
+        list(APPEND HTSLIB_EXTRA_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
+    endif()
 else()
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
     list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
@@ -272,14 +280,16 @@ if(NOT LIBDEFLATE_FOUND)
 endif()
 if(WIN32 AND MINGW)
     # MinGW/Rtools builds should not rely on htslib's checked-in config.mk.
-    # Keep plugins off for now, but allow libcurl when the outer link can
-    # provide the full dependency chain.
+    # Keep plugins off for now. Mirror configure.win and do not force S3/GCS
+    # in this path until the static MinGW build is proven end-to-end.
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-plugins)
 endif()
 
 if(CURL_FOUND)
     list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-libcurl)
-    if(OPENSSL_FOUND)
+    if(WIN32 AND MINGW)
+        list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
+    elseif(OPENSSL_FOUND)
         list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-s3 --enable-gcs)
     else()
         list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
