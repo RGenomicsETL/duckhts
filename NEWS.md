@@ -2,6 +2,8 @@
 
 ## duckhts 1.1.5 (2026-04-02)
 
+- fix Windows `windows_amd64_rtools` CMake toolchain selection: the top-level `Makefile` now asks `R CMD config` for `CC`/`AR`/`RANLIB` and passes those into the initial CMake configure, preventing mixed `C:/mingw64` compiler vs `Rtools` library setups during vendored `htslib` builds
+
 - fix `read_bcf(...)` fixed-count INFO/FORMAT arrays: `Number=2`, `Number=4`, and other exact-cardinality fields now map to DuckDB list types instead of being truncated to the first element as scalar values
 - fix `read_bcf(...)` string FORMAT lists such as DRAGEN `FORMAT/LAA`: non-`GT` string FORMAT fields with `Number != 1` now populate `VARCHAR[]` columns instead of incorrectly writing scalar `VARCHAR` values into list vectors, which caused DuckDB internal assertion failures on queries such as `SELECT *` against DRAGEN multi-sample gVCFs
 

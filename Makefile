@@ -30,6 +30,20 @@ override GEN=
 override VCPKG_TOOLCHAIN_PATH=
 override VCPKG_TARGET_TRIPLET=
 override VCPKG_HOST_TRIPLET=
+ifeq ($(OS),Windows_NT)
+RTOOLS_CC := $(strip $(word 1,$(shell R CMD config CC 2>/dev/null || true)))
+RTOOLS_AR := $(strip $(word 1,$(shell R CMD config AR 2>/dev/null || true)))
+RTOOLS_RANLIB := $(strip $(word 1,$(shell R CMD config RANLIB 2>/dev/null || true)))
+ifneq ($(RTOOLS_CC),)
+override CMAKE_EXTRA_BUILD_FLAGS += -DCMAKE_C_COMPILER='$(RTOOLS_CC)'
+endif
+ifneq ($(RTOOLS_AR),)
+override CMAKE_EXTRA_BUILD_FLAGS += -DCMAKE_AR='$(RTOOLS_AR)'
+endif
+ifneq ($(RTOOLS_RANLIB),)
+override CMAKE_EXTRA_BUILD_FLAGS += -DCMAKE_RANLIB='$(RTOOLS_RANLIB)'
+endif
+endif
 endif
 
 all: configure release
