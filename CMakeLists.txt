@@ -230,22 +230,39 @@ endif()
 # checks like `gcc test.c -lcurl` fail because libcurl.a itself needs
 # -lssl -lcrypto -lz -lpthread etc.  Autotools' LIBS variable is
 # appended to every link check, so we collect all transitive deps here.
+set(HTSLIB_CONFIGURE_LIBS "")
 set(HTSLIB_EXTRA_LIBS "")
+
 if(OPENSSL_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-lssl" "-lcrypto")
     list(APPEND HTSLIB_EXTRA_LIBS "-lssl" "-lcrypto")
 endif()
+
+list(APPEND HTSLIB_CONFIGURE_LIBS "-lz")
 list(APPEND HTSLIB_EXTRA_LIBS "-lz")
+
 if(LIBLZMA_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-llzma")
     list(APPEND HTSLIB_EXTRA_LIBS "-llzma")
 endif()
 if(BZIP2_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-lbz2")
     list(APPEND HTSLIB_EXTRA_LIBS "-lbz2")
+endif()
+if(LIBDEFLATE_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-ldeflate")
 endif()
 if(APPLE)
     # macOS: pthreads are in libSystem (no -lpthread), and curl with
     # SecureTransport needs macOS frameworks for TLS.
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread")
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
     if(CURL_FOUND)
+        list(APPEND HTSLIB_CONFIGURE_LIBS
+            "-framework CoreFoundation"
+            "-framework SystemConfiguration"
+            "-framework Security"
+        )
         list(APPEND HTSLIB_EXTRA_LIBS
             "-framework CoreFoundation"
             "-framework SystemConfiguration"
@@ -253,8 +270,16 @@ if(APPLE)
         )
     endif()
 elseif(WIN32 AND MINGW)
-    # MinGW static link checks often need winsock but not libdl.
+    # Keep htslib configure checks close to configure.win: small, boring,
+    # and independent from the full static libcurl dependency closure.
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread" "-lws2_32")
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-lws2_32")
+    if(CURL_FOUND)
+        list(APPEND HTSLIB_CONFIGURE_LIBS "-lcurl")
+    endif()
+    if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
+        list(APPEND HTSLIB_CONFIGURE_LIBS "-lgnurx")
+    endif()
     if(PC_LIBCURL_FOUND)
         string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
         separate_arguments(PC_LIBCURL_LDFLAGS_LIST NATIVE_COMMAND "${PC_LIBCURL_LDFLAGS_STRIPPED}")
@@ -295,12 +320,13 @@ elseif(WIN32 AND MINGW)
         endif()
     endif()
 else()
-    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
-    list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
+    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread" "-ldl")
+    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-ldl")
 endif()
 if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
     list(APPEND HTSLIB_EXTRA_LIBS "-lgnurx")
 endif()
+list(JOIN HTSLIB_CONFIGURE_LIBS " " HTSLIB_CONFIGURE_LIBS_STR)
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
 list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
@@ -348,7 +374,7 @@ set(HTSLIB_CONFIGURE_COMMAND
     "CPPFLAGS="
     "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
-    "LIBS=${HTSLIB_EXTRA_LIBS_STR}"
+    "LIBS=${HTSLIB_CONFIGURE_LIBS_STR}"
     ${SH_COMMAND}
     ./configure
 )

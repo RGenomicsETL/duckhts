@@ -2,6 +2,8 @@
 
 ## duckhts 1.1.5 (2026-04-02)
 
+- fix Windows `windows_amd64_mingw` vendored `htslib` configure on DuckDB CI: keep the MinGW `./configure` `LIBS` set close to `configure.win` (`zlib`, optional `bz2`/`lzma`/`libdeflate`/`curl`/`OpenSSL`, `gnurx`, `pthread`, `ws2_32`) instead of injecting the full static-libcurl dependency closure at configure time; reserve the larger curl transitive link set for the final extension link
+
 - fix Windows `windows_amd64_rtools` CMake toolchain selection: the top-level `Makefile` now asks `R CMD config` for `CC`/`AR`/`RANLIB` and passes those into the initial CMake configure, preventing mixed `C:/mingw64` compiler vs `Rtools` library setups during vendored `htslib` builds; simplify the MinGW `htslib` `ExternalProject` path back to separate configure/build steps instead of inlining `./configure && make` into one shell command; define `CURL_STATICLIB` for MinGW static-libcurl builds so vendored `htslib` and the extension link against Rtools static `libcurl.a` without `__imp_curl_*` import-symbol failures
 
 - fix `read_bcf(...)` fixed-count INFO/FORMAT arrays: `Number=2`, `Number=4`, and other exact-cardinality fields now map to DuckDB list types instead of being truncated to the first element as scalar values
