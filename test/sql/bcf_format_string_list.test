@@ -24,3 +24,31 @@ FROM read_bcf('__WORKING_DIRECTORY__/test/data/format_string_list.vcf')
 WHERE POS = 263;
 ----
 NULL	1
+
+query T
+SELECT typeof(INFO_SB)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf')
+LIMIT 1;
+----
+INTEGER[]
+
+query T
+SELECT INFO_SB::VARCHAR
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf')
+WHERE POS = 100;
+----
+[10, 20, 30, 40]
+
+query T
+SELECT typeof(FORMAT_HQ_S1)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf')
+LIMIT 1;
+----
+INTEGER[]
+
+query T
+SELECT FORMAT_HQ_S1::VARCHAR
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf')
+WHERE POS = 100;
+----
+[5, 9]

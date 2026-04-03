@@ -2,6 +2,7 @@
 
 ## duckhts 1.1.5 (2026-04-02)
 
+- fix `read_bcf(...)` fixed-count INFO/FORMAT arrays: `Number=2`, `Number=4`, and other exact-cardinality fields now map to DuckDB list types instead of being truncated to the first element as scalar values
 - fix `read_bcf(...)` string FORMAT lists such as DRAGEN `FORMAT/LAA`: non-`GT` string FORMAT fields with `Number != 1` now populate `VARCHAR[]` columns instead of incorrectly writing scalar `VARCHAR` values into list vectors, which caused DuckDB internal assertion failures on queries such as `SELECT *` against DRAGEN multi-sample gVCFs
 
 - fix `bcftools_munge_row(...)` / `duckdb_munge(...)` multithreaded FASTA fetch races: stop sharing one cached `faidx_t` across DuckDB worker threads, keep FASTA index handles thread-local, and synchronize FASTA fetches in `munge`, eliminating intermittent `fai_retrieve` errors and aborts seen with `fasta_ref` under `PRAGMA threads > 1`

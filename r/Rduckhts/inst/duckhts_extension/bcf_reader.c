@@ -81,6 +81,7 @@ typedef struct {
     int header_type;         // BCF_HT_* from header (used for reading data)
     int schema_type;         // BCF_HT_* for schema (may be corrected)
     int vl_type;             // BCF_VL_* (corrected per VCF spec)
+    int fixed_count;         // Exact fixed cardinality for Number=N fields, else <= 1
     int is_list;             // Whether this is a list type
     int duckdb_col_idx;      // Column index in DuckDB result
 } field_meta_t;
@@ -383,6 +384,9 @@ static int bcf_projection_needs_vep(const bcf_bind_data_t* bind, const idx_t* co
     return 0;
 }
 
+static inline void set_validity_bit(uint64_t* validity, idx_t row, int is_valid);
+static void process_comma_separated_list(duckdb_vector vec, idx_t row, const char* value);
+
 // =============================================================================
 // DuckDB Type Creation Helpers
 // =============================================================================
@@ -444,6 +448,121 @@ static duckdb_logical_type create_vep_field_type(vep_field_type_t vep_type, int 
     }
     
     return element_type;
+}
+
+static void set_field_null(duckdb_vector vec, idx_t row, int is_list) {
+    duckdb_vector_ensure_validity_writable(vec);
+    uint64_t* validity = duckdb_vector_get_validity(vec);
+    set_validity_bit(validity, row, 0);
+
+    if (is_list) {
+        duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
+        duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
+        list_data[row] = entry;
+    }
+}
+
+static void assign_int32_field(duckdb_vector vec, idx_t row, const int32_t* values, int n_values, int is_list) {
+    if (!values || n_values <= 0) {
+        set_field_null(vec, row, is_list);
+        return;
+    }
+
+    if (!is_list) {
+        if (values[0] != bcf_int32_missing && values[0] != bcf_int32_vector_end) {
+            int32_t* data = (int32_t*)duckdb_vector_get_data(vec);
+            data[row] = values[0];
+        } else {
+            set_field_null(vec, row, 0);
+        }
+        return;
+    }
+
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = 0;
+
+    for (int i = 0; i < n_values; i++) {
+        if (values[i] != bcf_int32_missing && values[i] != bcf_int32_vector_end) {
+            entry.length++;
+        }
+    }
+
+    if (entry.length > 0) {
+        duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+        duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+
+        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
+        int32_t* child_data = (int32_t*)duckdb_vector_get_data(child_vec);
+        int write_idx = 0;
+        for (int i = 0; i < n_values; i++) {
+            if (values[i] != bcf_int32_missing && values[i] != bcf_int32_vector_end) {
+                child_data[entry.offset + write_idx] = values[i];
+                write_idx++;
+            }
+        }
+    }
+
+    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+}
+
+static void assign_float_field(duckdb_vector vec, idx_t row, const float* values, int n_values, int is_list) {
+    if (!values || n_values <= 0) {
+        set_field_null(vec, row, is_list);
+        return;
+    }
+
+    if (!is_list) {
+        if (!bcf_float_is_missing(values[0]) && !bcf_float_is_vector_end(values[0])) {
+            float* data = (float*)duckdb_vector_get_data(vec);
+            data[row] = values[0];
+        } else {
+            set_field_null(vec, row, 0);
+        }
+        return;
+    }
+
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = 0;
+
+    for (int i = 0; i < n_values; i++) {
+        if (!bcf_float_is_missing(values[i]) && !bcf_float_is_vector_end(values[i])) {
+            entry.length++;
+        }
+    }
+
+    if (entry.length > 0) {
+        duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+        duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+
+        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
+        float* child_data = (float*)duckdb_vector_get_data(child_vec);
+        int write_idx = 0;
+        for (int i = 0; i < n_values; i++) {
+            if (!bcf_float_is_missing(values[i]) && !bcf_float_is_vector_end(values[i])) {
+                child_data[entry.offset + write_idx] = values[i];
+                write_idx++;
+            }
+        }
+    }
+
+    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+}
+
+static void assign_string_field(duckdb_vector vec, idx_t row, const char* value, int is_list) {
+    if (!value || strcmp(value, ".") == 0) {
+        set_field_null(vec, row, is_list);
+        return;
+    }
+
+    if (is_list) {
+        process_comma_separated_list(vec, row, value);
+    } else {
+        duckdb_vector_assign_string_element(vec, row, value);
+    }
 }
 
 // =============================================================================
@@ -651,11 +770,14 @@ static void bcf_read_bind(duckdb_bind_info info) {
                 const char* field_name = hdr->id[BCF_DT_ID][i].key;
                 int header_type = bcf_hdr_id2type(hdr, BCF_HL_INFO, i);
                 int header_vl_type = bcf_hdr_id2length(hdr, BCF_HL_INFO, i);
+                int header_count = bcf_hdr_id2number(hdr, BCF_HL_INFO, i);
                 
                 // Validate against VCF spec (emits warnings)
                 int corrected_type;
+                int corrected_count;
                 int corrected_vl_type = vcf_validate_info_field(field_name, header_vl_type, 
-                                                                 header_type, &corrected_type);
+                                                                 header_count, header_type,
+                                                                 &corrected_type, &corrected_count);
                 
                 field_meta_t* field = &bind->info_fields[info_idx];
                 field->name = strdup_duckdb(field_name);
@@ -663,7 +785,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
                 field->header_type = header_type;
                 field->schema_type = header_type;  // Use header type for data
                 field->vl_type = corrected_vl_type;
-                field->is_list = vcf_is_list_type(corrected_vl_type);
+                field->fixed_count = corrected_vl_type == BCF_VL_FIXED ? corrected_count : 1;
+                field->is_list = vcf_is_list_type(corrected_vl_type, field->fixed_count);
                 field->duckdb_col_idx = col_idx;
                 
                 // Create column name: INFO_<fieldname>
@@ -706,6 +829,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
             bind->format_fields[0].header_type = BCF_HT_STR;
             bind->format_fields[0].schema_type = BCF_HT_STR;
             bind->format_fields[0].vl_type = BCF_VL_FIXED;
+            bind->format_fields[0].fixed_count = 1;
             bind->format_fields[0].is_list = 0;
         } else {
             bind->format_fields = (field_meta_t*)duckdb_malloc(bind->n_format_fields * sizeof(field_meta_t));
@@ -718,11 +842,14 @@ static void bcf_read_bind(duckdb_bind_info info) {
                     const char* field_name = hdr->id[BCF_DT_ID][i].key;
                     int header_type = bcf_hdr_id2type(hdr, BCF_HL_FMT, i);
                     int header_vl_type = bcf_hdr_id2length(hdr, BCF_HL_FMT, i);
+                    int header_count = bcf_hdr_id2number(hdr, BCF_HL_FMT, i);
                     
                     // Validate against VCF spec (emits warnings, only once)
                     int corrected_type;
+                    int corrected_count;
                     int corrected_vl_type = vcf_validate_format_field(field_name, header_vl_type,
-                                                                       header_type, &corrected_type);
+                                                                       header_count, header_type,
+                                                                       &corrected_type, &corrected_count);
                     
                     field_meta_t* field = &bind->format_fields[fmt_idx];
                     field->name = strdup_duckdb(field_name);
@@ -730,7 +857,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
                     field->header_type = header_type;
                     field->schema_type = header_type;
                     field->vl_type = corrected_vl_type;
-                    field->is_list = vcf_is_list_type(corrected_vl_type);
+                    field->fixed_count = corrected_vl_type == BCF_VL_FIXED ? corrected_count : 1;
+                    field->is_list = vcf_is_list_type(corrected_vl_type, field->fixed_count);
                     
                     fmt_idx++;
                 }
@@ -1593,64 +1721,8 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     }
                     values = info_i32[field_idx];
                     ret_info = info_ret[field_idx];
-                    
-                    if (ret_info > 0 && values) {
-                        if (field->is_list) {
-                            // List of integers
-                            duckdb_list_entry entry;
-                            entry.offset = duckdb_list_vector_get_size(vec);
-                            entry.length = 0;
-                            
-                            duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                            
-                            // First count valid values
-                            for (int v = 0; v < ret_info; v++) {
-                                if (values[v] != bcf_int32_missing && values[v] != bcf_int32_vector_end) {
-                                    entry.length++;
-                                }
-                            }
-                            
-                            // Reserve and set size
-                            if (entry.length > 0) {
-                                duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-                                duckdb_list_vector_set_size(vec, entry.offset + entry.length);
-                                
-                                // Now fill in the values
-                                int32_t* child_data = (int32_t*)duckdb_vector_get_data(child_vec);
-                                int write_idx = 0;
-                                for (int v = 0; v < ret_info; v++) {
-                                    if (values[v] != bcf_int32_missing && values[v] != bcf_int32_vector_end) {
-                                        child_data[entry.offset + write_idx] = values[v];
-                                        write_idx++;
-                                    }
-                                }
-                            }
-                            
-                            duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
-                        } else {
-                            // Scalar integer
-                            int32_t* data = (int32_t*)duckdb_vector_get_data(vec);
-                            if (values[0] != bcf_int32_missing) {
-                                data[row_count] = values[0];
-                            } else {
-                                duckdb_vector_ensure_validity_writable(vec);
-                                uint64_t* validity = duckdb_vector_get_validity(vec);
-                                set_validity_bit(validity, row_count, 0);
-                            }
-                        }
-                    } else {
-                        // No data - NULL
-                        duckdb_vector_ensure_validity_writable(vec);
-                        uint64_t* validity = duckdb_vector_get_validity(vec);
-                        set_validity_bit(validity, row_count, 0);
-                        
-                        if (field->is_list) {
-                            duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                            duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
-                        }
-                    }
+
+                    assign_int32_field(vec, row_count, values, ret_info, field->is_list);
                 }
                 else if (field->header_type == BCF_HT_REAL) {
                     float* values = NULL;
@@ -1663,63 +1735,8 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     }
                     values = info_f32[field_idx];
                     ret_info = info_ret[field_idx];
-                    
-                    if (ret_info > 0 && values) {
-                        if (field->is_list) {
-                            // List of floats
-                            duckdb_list_entry entry;
-                            entry.offset = duckdb_list_vector_get_size(vec);
-                            entry.length = 0;
-                            
-                            duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                            
-                            // First count valid values
-                            for (int v = 0; v < ret_info; v++) {
-                                if (!bcf_float_is_missing(values[v]) && !bcf_float_is_vector_end(values[v])) {
-                                    entry.length++;
-                                }
-                            }
-                            
-                            // Reserve and set size
-                            if (entry.length > 0) {
-                                duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-                                duckdb_list_vector_set_size(vec, entry.offset + entry.length);
-                                
-                                // Now fill in the values
-                                float* child_data = (float*)duckdb_vector_get_data(child_vec);
-                                int write_idx = 0;
-                                for (int v = 0; v < ret_info; v++) {
-                                    if (!bcf_float_is_missing(values[v]) && !bcf_float_is_vector_end(values[v])) {
-                                        child_data[entry.offset + write_idx] = values[v];
-                                        write_idx++;
-                                    }
-                                }
-                            }
-                            
-                            duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
-                        } else {
-                            // Scalar float
-                            float* data = (float*)duckdb_vector_get_data(vec);
-                            if (!bcf_float_is_missing(values[0])) {
-                                data[row_count] = values[0];
-                            } else {
-                                duckdb_vector_ensure_validity_writable(vec);
-                                uint64_t* validity = duckdb_vector_get_validity(vec);
-                                set_validity_bit(validity, row_count, 0);
-                            }
-                        }
-                    } else {
-                        duckdb_vector_ensure_validity_writable(vec);
-                        uint64_t* validity = duckdb_vector_get_validity(vec);
-                        set_validity_bit(validity, row_count, 0);
-                        
-                        if (field->is_list) {
-                            duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                            duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
-                        }
-                    }
+
+                    assign_float_field(vec, row_count, values, ret_info, field->is_list);
                 }
                 else {
                     // String type
@@ -1733,25 +1750,8 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     }
                     value = info_str[field_idx];
                     ret_info = info_ret[field_idx];
-                    
-                    if (ret_info > 0 && value && strcmp(value, ".") != 0) {
-                        if (field->is_list) {
-                            // Use optimized single-pass comma-separated list processing
-                            process_comma_separated_list(vec, row_count, value);
-                        } else {
-                            duckdb_vector_assign_string_element(vec, row_count, value);
-                        }
-                    } else {
-                        duckdb_vector_ensure_validity_writable(vec);
-                        uint64_t* validity = duckdb_vector_get_validity(vec);
-                        set_validity_bit(validity, row_count, 0);
-                        
-                        if (field->is_list) {
-                            duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                            duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
-                        }
-                    }
+
+                    assign_string_field(vec, row_count, ret_info > 0 ? value : NULL, field->is_list);
                 }
             }
             else if (tidy_mode && col_id == (idx_t)bind->sample_id_col_idx) {
@@ -1793,61 +1793,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (ret_fmt > 0 && values) {
                             int vals_per_sample = ret_fmt / bind->n_samples;
                             int32_t* sample_vals = values + sample_idx * vals_per_sample;
-                            
-                            if (field->is_list) {
-                                duckdb_list_entry entry;
-                                entry.offset = duckdb_list_vector_get_size(vec);
-                                entry.length = 0;
-                                
-                                duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                                
-                                // First count valid values
-                                for (int v = 0; v < vals_per_sample; v++) {
-                                    if (sample_vals[v] != bcf_int32_missing && 
-                                        sample_vals[v] != bcf_int32_vector_end) {
-                                        entry.length++;
-                                    }
-                                }
-                                
-                                // Reserve and set size
-                                if (entry.length > 0) {
-                                    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-                                    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
-                                    
-                                    // Now fill in the values
-                                    int32_t* child_data = (int32_t*)duckdb_vector_get_data(child_vec);
-                                    int write_idx = 0;
-                                    for (int v = 0; v < vals_per_sample; v++) {
-                                        if (sample_vals[v] != bcf_int32_missing && 
-                                            sample_vals[v] != bcf_int32_vector_end) {
-                                            child_data[entry.offset + write_idx] = sample_vals[v];
-                                            write_idx++;
-                                        }
-                                    }
-                                }
-                                
-                                duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                                list_data[row_count] = entry;
-                            } else {
-                                int32_t* data = (int32_t*)duckdb_vector_get_data(vec);
-                                if (sample_vals[0] != bcf_int32_missing) {
-                                    data[row_count] = sample_vals[0];
-                                } else {
-                                    duckdb_vector_ensure_validity_writable(vec);
-                                    uint64_t* validity = duckdb_vector_get_validity(vec);
-                                    set_validity_bit(validity, row_count, 0);
-                                }
-                            }
+                            assign_int32_field(vec, row_count, sample_vals, vals_per_sample, field->is_list);
                         } else {
-                            duckdb_vector_ensure_validity_writable(vec);
-                            uint64_t* validity = duckdb_vector_get_validity(vec);
-                            set_validity_bit(validity, row_count, 0);
-                            
-                            if (field->is_list) {
-                                duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                                duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                                list_data[row_count] = entry;
-                            }
+                            set_field_null(vec, row_count, field->is_list);
                         }
                     }
                     else if (field->header_type == BCF_HT_REAL) {
@@ -1865,61 +1813,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (ret_fmt > 0 && values) {
                             int vals_per_sample = ret_fmt / bind->n_samples;
                             float* sample_vals = values + sample_idx * vals_per_sample;
-                            
-                            if (field->is_list) {
-                                duckdb_list_entry entry;
-                                entry.offset = duckdb_list_vector_get_size(vec);
-                                entry.length = 0;
-                                
-                                duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                                
-                                // First count valid values
-                                for (int v = 0; v < vals_per_sample; v++) {
-                                    if (!bcf_float_is_missing(sample_vals[v]) && 
-                                        !bcf_float_is_vector_end(sample_vals[v])) {
-                                        entry.length++;
-                                    }
-                                }
-                                
-                                // Reserve and set size
-                                if (entry.length > 0) {
-                                    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-                                    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
-                                    
-                                    // Now fill in the values
-                                    float* child_data = (float*)duckdb_vector_get_data(child_vec);
-                                    int write_idx = 0;
-                                    for (int v = 0; v < vals_per_sample; v++) {
-                                        if (!bcf_float_is_missing(sample_vals[v]) && 
-                                            !bcf_float_is_vector_end(sample_vals[v])) {
-                                            child_data[entry.offset + write_idx] = sample_vals[v];
-                                            write_idx++;
-                                        }
-                                    }
-                                }
-                                
-                                duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                                list_data[row_count] = entry;
-                            } else {
-                                float* data = (float*)duckdb_vector_get_data(vec);
-                                if (!bcf_float_is_missing(sample_vals[0])) {
-                                    data[row_count] = sample_vals[0];
-                                } else {
-                                    duckdb_vector_ensure_validity_writable(vec);
-                                    uint64_t* validity = duckdb_vector_get_validity(vec);
-                                    set_validity_bit(validity, row_count, 0);
-                                }
-                            }
+                            assign_float_field(vec, row_count, sample_vals, vals_per_sample, field->is_list);
                         } else {
-                            duckdb_vector_ensure_validity_writable(vec);
-                            uint64_t* validity = duckdb_vector_get_validity(vec);
-                            set_validity_bit(validity, row_count, 0);
-                            
-                            if (field->is_list) {
-                                duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                                duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                                list_data[row_count] = entry;
-                            }
+                            set_field_null(vec, row_count, field->is_list);
                         }
                     }
                     else {
@@ -1990,24 +1886,13 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             values = fmt_str[field_idx];
                             ret_fmt = fmt_ret[field_idx];
-                            
-                            if (ret_fmt > 0 && values && values[sample_idx]) {
-                                if (field->is_list) {
-                                    process_comma_separated_list(vec, row_count, values[sample_idx]);
-                                } else {
-                                    duckdb_vector_assign_string_element(vec, row_count, values[sample_idx]);
-                                }
-                            } else {
-                                duckdb_vector_ensure_validity_writable(vec);
-                                uint64_t* validity = duckdb_vector_get_validity(vec);
-                                set_validity_bit(validity, row_count, 0);
 
-                                if (field->is_list) {
-                                    duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                                    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-                                    list_data[row_count] = entry;
-                                }
-                            }
+                            assign_string_field(
+                                vec,
+                                row_count,
+                                (ret_fmt > 0 && values) ? values[sample_idx] : NULL,
+                                field->is_list
+                            );
                             
                         }
                     }
