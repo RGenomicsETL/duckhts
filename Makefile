@@ -24,12 +24,14 @@ override GEN=
 override VCPKG_TOOLCHAIN_PATH=
 override VCPKG_TARGET_TRIPLET=
 override VCPKG_HOST_TRIPLET=
+override CMAKE_EXTRA_BUILD_FLAGS += -DDUCKHTS_WINDOWS_PLATFORM='$(DUCKDB_PLATFORM)'
 endif
 ifeq ($(DUCKDB_PLATFORM),windows_amd64_rtools)
 override GEN=
 override VCPKG_TOOLCHAIN_PATH=
 override VCPKG_TARGET_TRIPLET=
 override VCPKG_HOST_TRIPLET=
+override CMAKE_EXTRA_BUILD_FLAGS += -DDUCKHTS_WINDOWS_PLATFORM='$(DUCKDB_PLATFORM)'
 ifeq ($(OS),Windows_NT)
 RTOOLS_CC := $(strip $(word 1,$(shell R CMD config CC 2>/dev/null || true)))
 RTOOLS_AR := $(strip $(word 1,$(shell R CMD config AR 2>/dev/null || true)))
