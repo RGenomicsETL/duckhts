@@ -1,0 +1,26 @@
+# name: test/sql/bcf_format_string_list.test
+# description: read_bcf handles string FORMAT lists such as DRAGEN FORMAT/LAA
+# group: [duckhts]
+
+require duckhts
+
+query T
+SELECT typeof(FORMAT_LAA_SAMPLE1)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/format_string_list.vcf')
+LIMIT 1;
+----
+VARCHAR[]
+
+query TT
+SELECT list_extract(FORMAT_LAA_SAMPLE1, 1), list_extract(FORMAT_LAA_SAMPLE1, 2)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/format_string_list.vcf')
+WHERE POS = 73;
+----
+1	2
+
+query TI
+SELECT FORMAT_LAA_SAMPLE1::VARCHAR, FORMAT_LAA_SAMPLE1 IS NULL
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/format_string_list.vcf')
+WHERE POS = 263;
+----
+NULL	1
