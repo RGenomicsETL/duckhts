@@ -300,12 +300,9 @@ elseif(WIN32 AND MINGW)
         string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
         separate_arguments(PC_LIBCURL_LDFLAGS_LIST NATIVE_COMMAND "${PC_LIBCURL_LDFLAGS_STRIPPED}")
         list(APPEND HTSLIB_EXTRA_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
-        if(DUCKHTS_WINDOWS_PLATFORM STREQUAL "windows_amd64_rtools")
-            # Rtools45 still needs the full static libcurl closure during
-            # htslib's configure-time probes; the smaller configure.win-style
-            # LIBS set is sufficient for the older windows_amd64_mingw path.
-            list(APPEND HTSLIB_CONFIGURE_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
-        endif()
+        # MinGW static libcurl may require full transitive deps during
+        # htslib's configure-time AC_CHECK_LIB(curl, ...) probes.
+        list(APPEND HTSLIB_CONFIGURE_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
     elseif(CURL_FOUND)
         # Mirror the fallback MinGW curl dependency chain used at final link
         # time so htslib's configure-time AC_CHECK_LIB(curl, ...) succeeds.
@@ -340,37 +337,35 @@ elseif(WIN32 AND MINGW)
         if(MINGW_LIBZSTD_LIBRARY)
             list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBZSTD_LIBRARY})
         endif()
-        if(DUCKHTS_WINDOWS_PLATFORM STREQUAL "windows_amd64_rtools")
-            list(APPEND HTSLIB_CONFIGURE_LIBS
-                "-lbcrypt"
-                "-lcrypt32"
-                "-lwsock32"
-                "-lwldap32"
-            )
-            if(MINGW_LIBPSL_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBPSL_LIBRARY})
-            endif()
-            if(MINGW_LIBIDN2_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBIDN2_LIBRARY})
-            endif()
-            if(MINGW_LIBUNISTRING_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBUNISTRING_LIBRARY})
-            endif()
-            if(MINGW_LIBICONV_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBICONV_LIBRARY})
-            endif()
-            if(MINGW_LIBSSH2_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBSSH2_LIBRARY})
-            endif()
-            if(MINGW_LIBGCRYPT_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBGCRYPT_LIBRARY})
-            endif()
-            if(MINGW_LIBGPG_ERROR_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBGPG_ERROR_LIBRARY})
-            endif()
-            if(MINGW_LIBZSTD_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBZSTD_LIBRARY})
-            endif()
+        list(APPEND HTSLIB_CONFIGURE_LIBS
+            "-lbcrypt"
+            "-lcrypt32"
+            "-lwsock32"
+            "-lwldap32"
+        )
+        if(MINGW_LIBPSL_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBPSL_LIBRARY})
+        endif()
+        if(MINGW_LIBIDN2_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBIDN2_LIBRARY})
+        endif()
+        if(MINGW_LIBUNISTRING_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBUNISTRING_LIBRARY})
+        endif()
+        if(MINGW_LIBICONV_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBICONV_LIBRARY})
+        endif()
+        if(MINGW_LIBSSH2_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBSSH2_LIBRARY})
+        endif()
+        if(MINGW_LIBGCRYPT_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBGCRYPT_LIBRARY})
+        endif()
+        if(MINGW_LIBGPG_ERROR_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBGPG_ERROR_LIBRARY})
+        endif()
+        if(MINGW_LIBZSTD_LIBRARY)
+            list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBZSTD_LIBRARY})
         endif()
     endif()
 else()
