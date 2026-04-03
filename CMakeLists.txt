@@ -223,7 +223,6 @@ endif()
 # -lssl -lcrypto -lz -lpthread etc.  Autotools' LIBS variable is
 # appended to every link check, so we collect all transitive deps here.
 set(HTSLIB_EXTRA_LIBS "")
-set(HTSLIB_CONFIGURE_LIBS "")
 if(OPENSSL_FOUND)
     list(APPEND HTSLIB_EXTRA_LIBS "-lssl" "-lcrypto")
 endif()
@@ -248,26 +247,6 @@ if(APPLE)
 elseif(WIN32 AND MINGW)
     # MinGW static link checks often need winsock but not libdl.
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-lws2_32")
-    # Keep htslib's configure-time link checks close to configure.win:
-    # use a small, generic LIBS set here and reserve the full static
-    # dependency closure for the final extension link step.
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lz")
-    if(BZIP2_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-lbz2")
-    endif()
-    if(LIBLZMA_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-llzma")
-    endif()
-    if(LIBDEFLATE_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-ldeflate")
-    endif()
-    if(CURL_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-lcurl")
-    endif()
-    if(OPENSSL_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-lssl" "-lcrypto")
-    endif()
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread" "-lws2_32")
     if(PC_LIBCURL_FOUND)
         string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
         separate_arguments(PC_LIBCURL_LDFLAGS_LIST NATIVE_COMMAND "${PC_LIBCURL_LDFLAGS_STRIPPED}")
@@ -313,14 +292,9 @@ else()
 endif()
 if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
     list(APPEND HTSLIB_EXTRA_LIBS "-lgnurx")
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lgnurx")
-endif()
-if(NOT WIN32 OR NOT MINGW)
-    list(APPEND HTSLIB_CONFIGURE_LIBS ${HTSLIB_EXTRA_LIBS})
 endif()
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
-list(JOIN HTSLIB_CONFIGURE_LIBS " " HTSLIB_CONFIGURE_LIBS_STR)
-list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_CONFIGURE_LIBS_STR}")
+list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
 
 # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
@@ -360,7 +334,7 @@ endif()
 
 list(JOIN HTSLIB_CONFIGURE_FLAGS " " HTSLIB_CONFIGURE_FLAGS_STR)
 
-set(HTSLIB_BUILD_COMMAND
+set(HTSLIB_CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
     "CC=${CMAKE_C_COMPILER}"
     "AR=${CMAKE_AR}"
@@ -368,19 +342,19 @@ set(HTSLIB_BUILD_COMMAND
     "CPPFLAGS="
     "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
-    "LIBS=${HTSLIB_CONFIGURE_LIBS_STR}"
-    ${SH_COMMAND} -c "./configure ${HTSLIB_CONFIGURE_FLAGS_STR} && ${MAKE_COMMAND} clean lib-static"
+    "LIBS=${HTSLIB_EXTRA_LIBS_STR}"
+    ${SH_COMMAND} ./configure ${HTSLIB_CONFIGURE_FLAGS_STR}
 )
 
 ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"
     BUILD_IN_SOURCE   TRUE
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND     ${HTSLIB_BUILD_COMMAND}
+    CONFIGURE_COMMAND ${HTSLIB_CONFIGURE_COMMAND}
+    BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
     BUILD_ALWAYS      TRUE
     INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
     BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
-    LOG_CONFIGURE     FALSE
+    LOG_CONFIGURE     TRUE
     LOG_BUILD         TRUE
 )
 
