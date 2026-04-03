@@ -2,6 +2,18 @@
 
 ## Rduckhts 1.1.5-0.0.1
 
+- Keep the top-level extension `README.Rmd` examples aligned with direct
+  extension usage: the extension README now renders its example queries
+  through a custom DuckDB SQL knitr engine instead of `R`/`DBI`, and its
+  liftover example uses bundled fixtures rather than temporary
+  `R`-generated FASTA/chain files.
+- Fix bundled Windows GNU CMake builds: the vendored `htslib` configure
+  step now distinguishes `windows_amd64_mingw` from
+  `windows_amd64_rtools`; the MinGW path keeps the smaller
+  `configure.win`-style library set, while the Rtools path restores the
+  fuller static `libcurl` dependency closure required by its `htslib`
+  feature probes. `CURL_STATICLIB` remains on the built objects rather
+  than on `./configure` test probes.
 - Fix bundled Windows `windows_amd64_rtools` CMake builds: the upstream
   extension `Makefile` now pins `CC`/`AR`/`RANLIB` from `R CMD config`,
   avoiding mixed non-Rtools compiler and Rtools library selection when
