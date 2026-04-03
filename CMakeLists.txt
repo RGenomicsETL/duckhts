@@ -218,10 +218,7 @@ if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
 endif()
 
 if(WIN32 AND MINGW AND CURL_FOUND)
-    # Older Rtools/MinGW curl probes are more fragile during ./configure than
-    # the actual htslib/extension build. Keep static-libcurl defines on the
-    # compiled objects, but leave configure-time feature probes closer to the
-    # package configure.win path.
+    set(HTSLIB_CONFIGURE_CFLAGS "${HTSLIB_CONFIGURE_CFLAGS} -DCURL_STATICLIB")
     set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -DCURL_STATICLIB")
 endif()
 
