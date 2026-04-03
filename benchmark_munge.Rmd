@@ -41,6 +41,7 @@ score_plugin_zip <- Sys.getenv(
 )
 bench_rows <- as.integer(Sys.getenv("MUNGE_BENCH_ROWS", unset = "1000000"))
 bench_runs <- as.integer(Sys.getenv("MUNGE_BENCH_RUNS", unset = "3"))
+bench_threads <- as.integer(strsplit(Sys.getenv("MUNGE_BENCH_THREADS", unset = "1,4"), ",", fixed = TRUE)[[1]])
 ```
 
 ```{r helpers, include = FALSE}
@@ -131,11 +132,11 @@ duckdb_munge_sql <- function(score_path, fasta_path) {
   )
 }
 
-run_duckdb_bench <- function(score_path, fasta_path, n = 3L) {
+run_duckdb_bench <- function(score_path, fasta_path, n = 3L, threads = 1L) {
   sql <- duckdb_munge_sql(score_path, fasta_path)
   times <- numeric(n)
   rows <- NA_integer_
-  DBI::dbExecute(con, "PRAGMA threads=1")
+  DBI::dbExecute(con, sprintf("PRAGMA threads=%d", threads))
   on.exit(DBI::dbExecute(con, "PRAGMA threads=4"), add = TRUE)
 
   for (i in seq_len(n)) {
@@ -148,6 +149,7 @@ run_duckdb_bench <- function(score_path, fasta_path, n = 3L) {
 
   data.frame(
     engine = "duckhts",
+    threads = threads,
     runs = n,
     median_sec = stats::median(times),
     min_sec = min(times),
@@ -227,7 +229,13 @@ compare_outputs <- function(duck_out, bcf_out) {
 }
 
 run_benchmark_case <- function(score_path, fasta_path, n = 3L) {
-  duck <- run_duckdb_bench(score_path, fasta_path, n = n)
+  duck <- do.call(
+    rbind,
+    lapply(
+      bench_threads,
+      function(thread_count) run_duckdb_bench(score_path, fasta_path, n = n, threads = thread_count)
+    )
+  )
   duck_out <- run_duckdb_output(score_path, fasta_path)
 
   bcftools_times <- numeric(n)
@@ -249,6 +257,7 @@ run_benchmark_case <- function(score_path, fasta_path, n = 3L) {
       duck,
       data.frame(
         engine = "bcftools",
+        threads = NA_integer_,
         runs = n,
         median_sec = stats::median(bcftools_times),
         min_sec = min(bcftools_times),
@@ -278,4 +287,16 @@ bench_case$bench
 
 ```{r synthetic-compare, echo = FALSE}
 bench_case$compare
+```
+
+```{r synthetic-speedup, echo = FALSE}
+duck_rows <- subset(bench_case$bench, engine == "duckhts" & !is.na(threads))
+if (all(c(1L, 4L) %in% duck_rows$threads)) {
+  one_thread <- duck_rows$median_sec[duck_rows$threads == 1L][1]
+  four_threads <- duck_rows$median_sec[duck_rows$threads == 4L][1]
+  data.frame(
+    speedup_4_vs_1 = one_thread / four_threads,
+    stringsAsFactors = FALSE
+  )
+}
 ```

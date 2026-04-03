@@ -19,8 +19,38 @@ typedef struct munge_cache_entry {
     struct munge_cache_entry *next;
 } munge_cache_entry_t;
 
-static munge_cache_entry_t *g_munge_cache_head = NULL;
-static pthread_mutex_t g_munge_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+/*
+ * faidx_t owns a mutable BGZF cursor, so a single handle cannot be shared
+ * across concurrent DuckDB worker threads. Keep one cache per thread instead.
+ */
+static pthread_key_t g_munge_cache_key;
+static pthread_once_t g_munge_cache_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t g_munge_fai_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void destroy_munge_cache(void *ptr) {
+    munge_cache_entry_t *entry = (munge_cache_entry_t *)ptr;
+    while (entry) {
+        munge_cache_entry_t *next = entry->next;
+        free(entry->fasta_path);
+        if (entry->fai) fai_destroy(entry->fai);
+        free(entry);
+        entry = next;
+    }
+}
+
+static void init_munge_cache_key(void) {
+    pthread_key_create(&g_munge_cache_key, destroy_munge_cache);
+}
+
+static munge_cache_entry_t *get_munge_cache_head(void) {
+    pthread_once(&g_munge_cache_key_once, init_munge_cache_key);
+    return (munge_cache_entry_t *)pthread_getspecific(g_munge_cache_key);
+}
+
+static void set_munge_cache_head(munge_cache_entry_t *head) {
+    pthread_once(&g_munge_cache_key_once, init_munge_cache_key);
+    pthread_setspecific(g_munge_cache_key, head);
+}
 
 enum {
     MUNGE_OUT_CHROM = 0,
@@ -176,17 +206,15 @@ static char *normalize_allele(const char *s, size_t n) {
 }
 
 static faidx_t *get_munge_fai(const char *fasta_path, char **err) {
+    munge_cache_entry_t *head = get_munge_cache_head();
     munge_cache_entry_t *entry;
     faidx_t *loaded;
     char msg[1024];
-    pthread_mutex_lock(&g_munge_cache_mutex);
-    for (entry = g_munge_cache_head; entry; entry = entry->next) {
+    for (entry = head; entry; entry = entry->next) {
         if (strcmp(entry->fasta_path, fasta_path) == 0) {
-            pthread_mutex_unlock(&g_munge_cache_mutex);
             return entry->fai;
         }
     }
-    pthread_mutex_unlock(&g_munge_cache_mutex);
 
     loaded = fai_load3(fasta_path, NULL, NULL, FAI_CREATE);
     if (!loaded) {
@@ -210,10 +238,8 @@ static faidx_t *get_munge_fai(const char *fasta_path, char **err) {
     }
     entry->fai = loaded;
 
-    pthread_mutex_lock(&g_munge_cache_mutex);
-    entry->next = g_munge_cache_head;
-    g_munge_cache_head = entry;
-    pthread_mutex_unlock(&g_munge_cache_mutex);
+    entry->next = head;
+    set_munge_cache_head(entry);
     return loaded;
 }
 
@@ -264,6 +290,9 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
     duckdb_vector ne_override_vec = duckdb_data_chunk_get_vector(input, 28);
     duckdb_vector child_vecs[MUNGE_OUT_COUNT];
     idx_t row_count = duckdb_data_chunk_get_size(input);
+    char *cached_fasta_path = NULL;
+    idx_t cached_fasta_len = 0;
+    faidx_t *cached_fai = NULL;
 
     for (int i = 0; i < MUNGE_OUT_COUNT; i++) child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
 
@@ -293,14 +322,17 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
 
         if (!row_is_valid(chrom_vec, row)) {
             set_munge_error(info, "bcftools_munge_row: chrom must be non-null");
+            free(cached_fasta_path);
             return;
         }
         if (!row_is_valid(pos_vec, row)) {
             set_munge_error(info, "bcftools_munge_row: pos must be non-null");
+            free(cached_fasta_path);
             return;
         }
         if (!row_is_valid(a1_vec, row) || !row_is_valid(a2_vec, row)) {
             set_munge_error(info, "bcftools_munge_row: a1 and a2 must be non-null");
+            free(cached_fasta_path);
             return;
         }
 
@@ -315,16 +347,19 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
 
         if (!chrom || chrom_len == 0) {
             set_munge_error(info, "bcftools_munge_row: chrom must be non-empty");
+            free(cached_fasta_path);
             return;
         }
         if (!a1 || a1_len == 0 || !a2 || a2_len == 0) {
             set_munge_error(info, "bcftools_munge_row: a1 and a2 must be non-empty");
+            free(cached_fasta_path);
             return;
         }
 
         pos = (int32_t)get_int64_at(pos_vec, row);
         if (pos < 1) {
             set_munge_error(info, "bcftools_munge_row: pos must be >= 1");
+            free(cached_fasta_path);
             return;
         }
 
@@ -334,6 +369,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             free(norm_alt);
             free(norm_ref);
             set_munge_error(info, "bcftools_munge_row: failed to normalize alleles");
+            free(cached_fasta_path);
             return;
         }
 
@@ -391,14 +427,34 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             continue;
         }
 
-        fasta_path = dup_span(fasta_ref, fasta_len);
-        fai = get_munge_fai(fasta_path, &err);
-        free(fasta_path);
+        if (cached_fai && cached_fasta_path && cached_fasta_len == fasta_len &&
+            memcmp(cached_fasta_path, fasta_ref, (size_t)fasta_len) == 0) {
+            fai = cached_fai;
+        } else {
+            fasta_path = dup_span(fasta_ref, fasta_len);
+            if (!fasta_path) {
+                set_munge_error(info, "bcftools_munge_row: out of memory");
+                free(norm_alt);
+                free(norm_ref);
+                free(cached_fasta_path);
+                return;
+            }
+            fai = get_munge_fai(fasta_path, &err);
+            if (fai) {
+                free(cached_fasta_path);
+                cached_fasta_path = fasta_path;
+                cached_fasta_len = fasta_len;
+                cached_fai = fai;
+                fasta_path = NULL;
+            }
+            free(fasta_path);
+        }
         if (!fai) {
             set_munge_error(info, err ? err : "bcftools_munge_row: failed to load FASTA");
             free(err);
             free(norm_alt);
             free(norm_ref);
+            free(cached_fasta_path);
             return;
         }
 
@@ -407,14 +463,17 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             set_munge_error(info, "bcftools_munge_row: out of memory");
             free(norm_alt);
             free(norm_ref);
+            free(cached_fasta_path);
             return;
         }
+        pthread_mutex_lock(&g_munge_fai_fetch_mutex);
         ref_fetch = fetch_sequence_flexible(
             fai,
             chrom_cstr,
             pos,
             pos + (hts_pos_t)((strlen(norm_ref) > strlen(norm_alt) ? strlen(norm_ref) : strlen(norm_alt))) - 1
         );
+        pthread_mutex_unlock(&g_munge_fai_fetch_mutex);
         free(chrom_cstr);
         if (!ref_fetch) {
             /* Upstream hard-errors here, but in SQL context we emit the row
@@ -512,6 +571,8 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         free(norm_ref);
         free(ref_fetch);
     }
+
+    free(cached_fasta_path);
 }
 
 void register_munge_functions(duckdb_connection connection) {

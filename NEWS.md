@@ -1,6 +1,8 @@
 # DuckHTS Extension News
 
-## duckhts 1.1.4 (2026-03-31)
+## duckhts 1.1.5 (2026-04-02)
+
+- fix `bcftools_munge_row(...)` / `duckdb_munge(...)` multithreaded FASTA fetch races: stop sharing one cached `faidx_t` across DuckDB worker threads, keep FASTA index handles thread-local, and synchronize FASTA fetches in `munge`, eliminating intermittent `fai_retrieve` errors and aborts seen with `fasta_ref` under `PRAGMA threads > 1`
 
 - expand `bcftools_score(...)` test coverage: add FORMAT/AS integer dosage fixture, missing DS value fixture, and seven GWAS summary preset fixtures (REGENIE, SAIGE, BOLT, METAL, PGS, SSF/GWAS-SSF); add SQL test cases for TSV counts without threshold, GWAS-VCF with `q_score_thr`, mutual-exclusion error checks (`include`+`exclude`, `regions`+`regions_file`, `targets`+`targets_file`); expand conformance scenarios from 3 to 8 cases (DS, HDS, AP dosage modes, PLINK2 preset, `use_variant_id`)
 
