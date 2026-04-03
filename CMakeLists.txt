@@ -10,14 +10,6 @@ endif()
 
 add_definitions(-DDUCKDB_EXTENSION_NAME=${EXTENSION_NAME})
 
-if(NOT DEFINED DUCKHTS_WINDOWS_PLATFORM OR "${DUCKHTS_WINDOWS_PLATFORM}" STREQUAL "")
-    if(DEFINED ENV{DUCKDB_PLATFORM} AND NOT "$ENV{DUCKDB_PLATFORM}" STREQUAL "")
-        set(DUCKHTS_WINDOWS_PLATFORM "$ENV{DUCKDB_PLATFORM}")
-    else()
-        set(DUCKHTS_WINDOWS_PLATFORM "")
-    endif()
-endif()
-
 # ------------------------------------------------------------------
 # macOS target architecture (must be set before project()).
 #
@@ -120,10 +112,6 @@ target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 # Include DuckDB C API headers
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 
-if(WIN32 AND MINGW AND CURL_FOUND)
-    target_compile_definitions(${EXTENSION_NAME} PRIVATE CURL_STATICLIB)
-endif()
-
 # ---- htslib ----
 # Build vendored htslib using its own configure + make.  CMake drives the
 # process via ExternalProject_Add so it runs once, in-tree, producing a
@@ -193,7 +181,6 @@ endif()
 # and we pass CPPFLAGS/LDFLAGS/LIBS directly to make. On plain system builds
 # these are empty and harmless.
 # ------------------------------------------------------------------
-set(HTSLIB_CONFIGURE_CFLAGS "")
 set(HTSLIB_EXTRA_CFLAGS "")
 set(HTSLIB_EXTRA_LDFLAGS "")
 
@@ -201,7 +188,6 @@ set(HTSLIB_EXTRA_LDFLAGS "")
 # macOS cross-compilation support (htslib build flags).
 # ------------------------------------------------------------------
 if(APPLE AND DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
-    set(HTSLIB_CONFIGURE_CFLAGS "-arch ${OSX_BUILD_ARCH}")
     set(HTSLIB_EXTRA_CFLAGS "-arch ${OSX_BUILD_ARCH}")
     set(HTSLIB_EXTRA_LDFLAGS "-arch ${OSX_BUILD_ARCH}")
     message(STATUS "macOS htslib arch: ${OSX_BUILD_ARCH}")
@@ -210,20 +196,13 @@ endif()
 if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     set(_vcpkg_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
     if(EXISTS "${_vcpkg_prefix}")
-        set(HTSLIB_CONFIGURE_CFLAGS "${HTSLIB_CONFIGURE_CFLAGS} -I${_vcpkg_prefix}/include")
         set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -I${_vcpkg_prefix}/include")
         set(HTSLIB_EXTRA_LDFLAGS "${HTSLIB_EXTRA_LDFLAGS} -L${_vcpkg_prefix}/lib")
         message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
     endif()
 endif()
 
-if(WIN32 AND MINGW AND CURL_FOUND)
-    set(HTSLIB_CONFIGURE_CFLAGS "${HTSLIB_CONFIGURE_CFLAGS} -DCURL_STATICLIB")
-    set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -DCURL_STATICLIB")
-endif()
-
 # Strip leading whitespace that may appear when no arch flags were prepended
-string(STRIP "${HTSLIB_CONFIGURE_CFLAGS}" HTSLIB_CONFIGURE_CFLAGS)
 string(STRIP "${HTSLIB_EXTRA_CFLAGS}" HTSLIB_EXTRA_CFLAGS)
 string(STRIP "${HTSLIB_EXTRA_LDFLAGS}" HTSLIB_EXTRA_LDFLAGS)
 
@@ -243,142 +222,38 @@ endif()
 # checks like `gcc test.c -lcurl` fail because libcurl.a itself needs
 # -lssl -lcrypto -lz -lpthread etc.  Autotools' LIBS variable is
 # appended to every link check, so we collect all transitive deps here.
-set(HTSLIB_CONFIGURE_LIBS "")
 set(HTSLIB_EXTRA_LIBS "")
-
 if(OPENSSL_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lssl" "-lcrypto")
     list(APPEND HTSLIB_EXTRA_LIBS "-lssl" "-lcrypto")
 endif()
-
-list(APPEND HTSLIB_CONFIGURE_LIBS "-lz")
 list(APPEND HTSLIB_EXTRA_LIBS "-lz")
-
 if(LIBLZMA_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-llzma")
     list(APPEND HTSLIB_EXTRA_LIBS "-llzma")
 endif()
 if(BZIP2_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lbz2")
     list(APPEND HTSLIB_EXTRA_LIBS "-lbz2")
-endif()
-if(LIBDEFLATE_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-ldeflate")
 endif()
 if(APPLE)
     # macOS: pthreads are in libSystem (no -lpthread), and curl with
     # SecureTransport needs macOS frameworks for TLS.
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread")
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
     if(CURL_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS
-            "-framework CoreFoundation"
-            "-framework SystemConfiguration"
-            "-framework Security"
-        )
         list(APPEND HTSLIB_EXTRA_LIBS
             "-framework CoreFoundation"
             "-framework SystemConfiguration"
             "-framework Security"
         )
-    endif()
-elseif(WIN32 AND MINGW)
-    # Keep htslib configure checks close to configure.win: small, boring,
-    # and independent from the full static libcurl dependency closure.
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread" "-lws2_32")
-    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-lws2_32")
-    if(CURL_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-lcurl")
-    endif()
-    if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
-        list(APPEND HTSLIB_CONFIGURE_LIBS "-lgnurx")
-    endif()
-    if(PC_LIBCURL_FOUND)
-        string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
-        separate_arguments(PC_LIBCURL_LDFLAGS_LIST NATIVE_COMMAND "${PC_LIBCURL_LDFLAGS_STRIPPED}")
-        list(APPEND HTSLIB_EXTRA_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
-        # MinGW static libcurl may require full transitive deps during
-        # htslib's configure-time AC_CHECK_LIB(curl, ...) probes.
-        if("${DUCKHTS_WINDOWS_PLATFORM}" STREQUAL "windows_amd64_rtools")
-            list(APPEND HTSLIB_CONFIGURE_LIBS ${PC_LIBCURL_LDFLAGS_LIST})
-        endif()
-    elseif(CURL_FOUND)
-        # Mirror the fallback MinGW curl dependency chain used at final link
-        # time so htslib's configure-time AC_CHECK_LIB(curl, ...) succeeds.
-        list(APPEND HTSLIB_EXTRA_LIBS
-            "-lcurl"
-            "-lbcrypt"
-            "-lcrypt32"
-            "-lwsock32"
-            "-lwldap32"
-        )
-        if(MINGW_LIBPSL_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBPSL_LIBRARY})
-        endif()
-        if(MINGW_LIBIDN2_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBIDN2_LIBRARY})
-        endif()
-        if(MINGW_LIBUNISTRING_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBUNISTRING_LIBRARY})
-        endif()
-        if(MINGW_LIBICONV_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBICONV_LIBRARY})
-        endif()
-        if(MINGW_LIBSSH2_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBSSH2_LIBRARY})
-        endif()
-        if(MINGW_LIBGCRYPT_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBGCRYPT_LIBRARY})
-        endif()
-        if(MINGW_LIBGPG_ERROR_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBGPG_ERROR_LIBRARY})
-        endif()
-        if(MINGW_LIBZSTD_LIBRARY)
-            list(APPEND HTSLIB_EXTRA_LIBS ${MINGW_LIBZSTD_LIBRARY})
-        endif()
-        if("${DUCKHTS_WINDOWS_PLATFORM}" STREQUAL "windows_amd64_rtools")
-            list(APPEND HTSLIB_CONFIGURE_LIBS
-                "-lbcrypt"
-                "-lcrypt32"
-                "-lwsock32"
-                "-lwldap32"
-            )
-            if(MINGW_LIBPSL_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBPSL_LIBRARY})
-            endif()
-            if(MINGW_LIBIDN2_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBIDN2_LIBRARY})
-            endif()
-            if(MINGW_LIBUNISTRING_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBUNISTRING_LIBRARY})
-            endif()
-            if(MINGW_LIBICONV_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBICONV_LIBRARY})
-            endif()
-            if(MINGW_LIBSSH2_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBSSH2_LIBRARY})
-            endif()
-            if(MINGW_LIBGCRYPT_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBGCRYPT_LIBRARY})
-            endif()
-            if(MINGW_LIBGPG_ERROR_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBGPG_ERROR_LIBRARY})
-            endif()
-            if(MINGW_LIBZSTD_LIBRARY)
-                list(APPEND HTSLIB_CONFIGURE_LIBS ${MINGW_LIBZSTD_LIBRARY})
-            endif()
-        endif()
     endif()
 else()
-    list(APPEND HTSLIB_CONFIGURE_LIBS "-lpthread" "-ldl")
-    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread" "-ldl")
+    list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
+    list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
 endif()
 if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
     list(APPEND HTSLIB_EXTRA_LIBS "-lgnurx")
 endif()
-list(JOIN HTSLIB_CONFIGURE_LIBS " " HTSLIB_CONFIGURE_LIBS_STR)
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
 list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
+
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
 
 # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
@@ -398,37 +273,22 @@ if(NOT LIBDEFLATE_FOUND)
 endif()
 if(WIN32 AND MINGW)
     # MinGW/Rtools builds should not rely on htslib's checked-in config.mk.
-    # Keep plugins off for now. Mirror configure.win and do not force S3/GCS
-    # in this path until the static MinGW build is proven end-to-end.
+    # Keep plugins off for now, but allow libcurl when the outer link can
+    # provide the full dependency chain.
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-plugins)
-endif()
-
-if(CURL_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-libcurl)
-    if(WIN32 AND MINGW)
-        list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
-    elseif(OPENSSL_FOUND)
-        list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-s3 --enable-gcs)
-    else()
-        list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
-    endif()
-else()
-    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl --disable-s3 --disable-gcs)
+elseif(NOT CURL_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl)
 endif()
 
 set(HTSLIB_CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
     "CC=${CMAKE_C_COMPILER}"
-    "AR=${CMAKE_AR}"
-    "RANLIB=${CMAKE_RANLIB}"
     "CPPFLAGS="
-    "CFLAGS=-O2 -fPIC ${HTSLIB_CONFIGURE_CFLAGS}"
+    "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
-    "LIBS=${HTSLIB_CONFIGURE_LIBS_STR}"
-    ${SH_COMMAND}
-    ./configure
+    "LIBS=${HTSLIB_EXTRA_LIBS_STR}"
+    ${SH_COMMAND} ./configure ${HTSLIB_CONFIGURE_FLAGS}
 )
-list(APPEND HTSLIB_CONFIGURE_COMMAND ${HTSLIB_CONFIGURE_FLAGS})
 
 ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"
