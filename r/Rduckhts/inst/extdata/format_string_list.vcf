@@ -1,0 +1,11 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##duckhts_fixture_section=mapping_string_lists
+##contig=<ID=chrM>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=LAA,Number=.,Type=String,Description="Local alt allele mapping">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	SAMPLE1
+chrM	73	.	A	C,G	.	PASS	.	GT:LAA	1/2:1,2
+chrM	150	.	T	C	.	PASS	.	GT:LAA	0/1:1
+chrM	263	.	A	G	.	PASS	.	GT:LAA	0/0:.

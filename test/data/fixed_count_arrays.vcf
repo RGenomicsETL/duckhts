@@ -1,0 +1,11 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##duckhts_fixture_section=mapping_fixed_counts
+##contig=<ID=chr1>
+##INFO=<ID=SB,Number=4,Type=Integer,Description="Strand counts">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=HQ,Number=2,Type=Integer,Description="Haplotype qualities">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chr1	100	.	A	C	.	PASS	SB=10,20,30,40	GT:HQ	0/1:5,9	1/1:7,11
+chr1	200	.	G	T	.	PASS	.	GT:HQ	0/0:.,.	./.:.

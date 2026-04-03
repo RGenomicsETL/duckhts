@@ -103,6 +103,8 @@ Build a DuckDB 1.4+ extension that **reads** HTS file formats using htslib, with
 - Current tests cover: VCF/BCF, BAM/CRAM, FASTA/FASTQ, GTF/GFF, tabix readers
 - Tests use DuckDB `.test` format with type codes: `I` (integer), `T` (text), `R` (real), `B` (boolean)
 - Use `__WORKING_DIRECTORY__` placeholder for test data paths
+- **Prominent fixture rule for VCF/BCF cases**: prefer generating compact spec/mapping fixtures with [`test/scripts/vcfpp.R`](test/scripts/vcfpp.R) via `vcfppR`, not by hand-editing ad hoc VCF text blobs. Keep the script organized by explicit sections, emit the paired copies under `test/data/` and `r/Rduckhts/inst/extdata/`, and record the generated cases in `vcfpp_manifest.tsv`.
+- When adding or changing VCF/BCF compliance fixtures, rerun `Rscript test/scripts/vcfpp.R` (or `test/scripts/prepare_test_data.sh` if you also need the htslib-derived fixtures) before running SQL/R tests.
 - Plan tests at two levels for every public feature:
   - **Extension-level SQL conformance** in `test/sql/` for schemas, semantics, region/index behavior, and SQL-vs-native parity
   - **R package-level tests** in `r/Rduckhts/inst/tinytest/` for wrapper signatures, argument validation, bundled-extdata access, packaged extension loading, and end-to-end DBI workflows

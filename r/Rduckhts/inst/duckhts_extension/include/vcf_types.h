@@ -107,10 +107,12 @@ static inline const vcf_field_spec_t* vcf_lookup_info_spec(const char* name) {
  * Validation
  * ================================================================ */
 
-static inline int vcf_check_number(const vcf_field_spec_t* spec, int header_vl_type) {
+static inline int vcf_check_number(const vcf_field_spec_t* spec, int header_vl_type, int header_count) {
     if (!spec) return 0;
-    if (spec->vl_type == BCF_VL_FIXED)
-        return (header_vl_type != BCF_VL_FIXED);
+    if (spec->vl_type == BCF_VL_FIXED) {
+        if (header_vl_type != BCF_VL_FIXED) return 1;
+        return header_count != spec->count;
+    }
     return (header_vl_type != spec->vl_type && header_vl_type != BCF_VL_VAR) ? 1 : 0;
 }
 
@@ -142,20 +144,24 @@ static inline void vcf_emit_warning(const char* msg) {
 
 static inline int vcf_validate_format_field(const char* field_name,
                                             int header_vl_type,
+                                            int header_count,
                                             int header_type,
-                                            int* corrected_type) {
+                                            int* corrected_type,
+                                            int* corrected_count) {
     const vcf_field_spec_t* spec = vcf_lookup_format_spec(field_name);
     int corrected_vl_type = header_vl_type;
     *corrected_type = header_type;
+    *corrected_count = header_count;
 
     if (spec) {
-        if (vcf_check_number(spec, header_vl_type)) {
+        if (vcf_check_number(spec, header_vl_type, header_count)) {
             char msg[256];
             snprintf(msg, sizeof(msg),
                      "FORMAT/%s should be Number=%s per VCF spec; correcting schema",
                      field_name, spec->number_str);
             vcf_emit_warning(msg);
             corrected_vl_type = spec->vl_type;
+            *corrected_count = spec->count;
         }
         if (vcf_check_type(spec, header_type)) {
             char msg[256];
@@ -170,20 +176,24 @@ static inline int vcf_validate_format_field(const char* field_name,
 
 static inline int vcf_validate_info_field(const char* field_name,
                                           int header_vl_type,
+                                          int header_count,
                                           int header_type,
-                                          int* corrected_type) {
+                                          int* corrected_type,
+                                          int* corrected_count) {
     const vcf_field_spec_t* spec = vcf_lookup_info_spec(field_name);
     int corrected_vl_type = header_vl_type;
     *corrected_type = header_type;
+    *corrected_count = header_count;
 
     if (spec) {
-        if (vcf_check_number(spec, header_vl_type)) {
+        if (vcf_check_number(spec, header_vl_type, header_count)) {
             char msg[256];
             snprintf(msg, sizeof(msg),
                      "INFO/%s should be Number=%s per VCF spec; correcting schema",
                      field_name, spec->number_str);
             vcf_emit_warning(msg);
             corrected_vl_type = spec->vl_type;
+            *corrected_count = spec->count;
         }
         if (vcf_check_type(spec, header_type)) {
             char msg[256];
@@ -200,8 +210,8 @@ static inline int vcf_validate_info_field(const char* field_name,
  * Type Mapping Utilities
  * ================================================================ */
 
-static inline int vcf_is_list_type(int vl_type) {
-    return (vl_type != BCF_VL_FIXED);
+static inline int vcf_is_list_type(int vl_type, int fixed_count) {
+    return (vl_type != BCF_VL_FIXED) || fixed_count > 1;
 }
 
 static inline int vcf_get_expected_count(int vl_type, int n_allele, int ploidy) {

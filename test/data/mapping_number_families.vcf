@@ -1,0 +1,24 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##duckhts_fixture_section=mapping_number_families
+##contig=<ID=chr1>
+##INFO=<ID=IINT,Number=1,Type=Integer,Description="Scalar integer INFO">
+##INFO=<ID=IFLT,Number=1,Type=Float,Description="Scalar float INFO">
+##INFO=<ID=ISTR,Number=1,Type=String,Description="Scalar string INFO">
+##INFO=<ID=FLAG,Number=0,Type=Flag,Description="Flag INFO">
+##INFO=<ID=AINT,Number=A,Type=Integer,Description="Per-alt integer INFO">
+##INFO=<ID=AFLT,Number=A,Type=Float,Description="Per-alt float INFO">
+##INFO=<ID=RINT,Number=R,Type=Integer,Description="Per-allele integer INFO">
+##INFO=<ID=GFLOAT,Number=G,Type=Float,Description="Per-genotype float INFO">
+##INFO=<ID=VSTR,Number=.,Type=String,Description="Variable-length string INFO">
+##INFO=<ID=VINT,Number=.,Type=Integer,Description="Variable-length integer INFO">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">
+##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Phred-scaled genotype likelihoods">
+##FORMAT=<ID=FT,Number=1,Type=String,Description="Sample filter">
+##FORMAT=<ID=LAA,Number=.,Type=String,Description="Variable-length string FORMAT">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chr1	100	rsA	A	C	50	PASS	IINT=7;IFLT=1.5;ISTR=alpha;FLAG;AINT=2;AFLT=0.5;RINT=12,3;GFLOAT=0,10,20;VSTR=x,y;VINT=5,8	GT:DP:AD:PL:FT:LAA	0/1:12:9,3:0,10,20:PASS:1	1/1:20:0,20:50,5,0:PASS:1
+chr1	200	rsB	G	A,T	99	PASS	IINT=11;IFLT=2.25;ISTR=beta;AINT=4,1;AFLT=0.4,0.1;RINT=20,7,2;GFLOAT=0,5,10,15,20,25;VSTR=red,blue,green;VINT=1,2,3	GT:DP:AD:PL:FT:LAA	1/2:18:9,5,4:0,10,20,30,40,50:LowQual:1,2	0/2:15:10,0,5:0,15,25,35,45,55:PASS:2

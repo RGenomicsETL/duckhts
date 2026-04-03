@@ -1,4 +1,4 @@
-.PHONY: clean clean_all function_catalog
+.PHONY: clean clean_all function_catalog test_release_fresh test_debug_fresh
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -30,6 +30,20 @@ override GEN=
 override VCPKG_TOOLCHAIN_PATH=
 override VCPKG_TARGET_TRIPLET=
 override VCPKG_HOST_TRIPLET=
+ifeq ($(OS),Windows_NT)
+RTOOLS_CC := $(strip $(word 1,$(shell R CMD config CC 2>/dev/null || true)))
+RTOOLS_AR := $(strip $(word 1,$(shell R CMD config AR 2>/dev/null || true)))
+RTOOLS_RANLIB := $(strip $(word 1,$(shell R CMD config RANLIB 2>/dev/null || true)))
+ifneq ($(RTOOLS_CC),)
+override CMAKE_EXTRA_BUILD_FLAGS += -DCMAKE_C_COMPILER='$(RTOOLS_CC)'
+endif
+ifneq ($(RTOOLS_AR),)
+override CMAKE_EXTRA_BUILD_FLAGS += -DCMAKE_AR='$(RTOOLS_AR)'
+endif
+ifneq ($(RTOOLS_RANLIB),)
+override CMAKE_EXTRA_BUILD_FLAGS += -DCMAKE_RANLIB='$(RTOOLS_RANLIB)'
+endif
+endif
 endif
 
 all: configure release
@@ -46,6 +60,8 @@ release: build_extension_library_release build_extension_with_metadata_release
 test: test_debug
 test_debug: test_extension_debug
 test_release: test_extension_release
+test_debug_fresh: debug test_extension_debug
+test_release_fresh: release test_extension_release
 
 # Override header fetch to use the actual DuckDB release version, not the C API version
 update_duckdb_headers_custom:
@@ -58,7 +74,7 @@ clean_all: clean clean_configure
 # Render README.md from README.Rmd (GitHub-flavored markdown)
 function_catalog:
 	python3 scripts/render_function_catalog.py
-rdm: function_catalog
+rdm: function_catalog release
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
 bench:
 	Rscript -e "rmarkdown::render('Benchmark.Rmd', output_format = 'github_document')"
