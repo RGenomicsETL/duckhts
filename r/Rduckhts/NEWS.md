@@ -1,7 +1,7 @@
 
 # Rduckhts 1.1.5-0.0.1
 
-- Fix bundled Windows `windows_amd64_rtools` CMake builds: the upstream extension `Makefile` now pins `CC`/`AR`/`RANLIB` from `R CMD config`, avoiding mixed non-Rtools compiler and Rtools library selection when vendored `htslib` is configured; the vendored `htslib` CMake path also returns to separate configure/build steps on MinGW for simpler diagnostics and behavior.
+- Fix bundled Windows `windows_amd64_rtools` CMake builds: the upstream extension `Makefile` now pins `CC`/`AR`/`RANLIB` from `R CMD config`, avoiding mixed non-Rtools compiler and Rtools library selection when vendored `htslib` is configured; the vendored `htslib` CMake path also returns to separate configure/build steps on MinGW for simpler diagnostics and behavior, and MinGW static-libcurl builds now define `CURL_STATICLIB` to match Rtools `libcurl.a`.
 - Fix bundled `read_bcf(...)` / `rduckhts_bcf()` mapping of fixed-count INFO/FORMAT arrays: exact-cardinality fields such as `Number=2` and `Number=4` now materialize as DuckDB array/list columns instead of silently dropping all but the first value.
 - Fix bundled `read_bcf(...)` / `rduckhts_bcf()` handling of string FORMAT lists such as DRAGEN `FORMAT/LAA`: `Number != 1` string FORMAT fields now materialize as `VARCHAR[]` instead of triggering DuckDB internal assertion failures.
 - Fix bundled `duckdb_munge(...)` / `rduckhts_munge()` multithreaded FASTA lookups: FASTA index handles are now thread-local and FASTA fetches are synchronized in `munge`, avoiding intermittent `fai_retrieve` failures and aborts when `fasta_ref` is used with `PRAGMA threads > 1`.

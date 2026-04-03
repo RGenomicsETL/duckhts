@@ -112,6 +112,10 @@ target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 # Include DuckDB C API headers
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
 
+if(WIN32 AND MINGW AND CURL_FOUND)
+    target_compile_definitions(${EXTENSION_NAME} PRIVATE CURL_STATICLIB)
+endif()
+
 # ---- htslib ----
 # Build vendored htslib using its own configure + make.  CMake drives the
 # process via ExternalProject_Add so it runs once, in-tree, producing a
@@ -200,6 +204,10 @@ if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
         set(HTSLIB_EXTRA_LDFLAGS "${HTSLIB_EXTRA_LDFLAGS} -L${_vcpkg_prefix}/lib")
         message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
     endif()
+endif()
+
+if(WIN32 AND MINGW AND CURL_FOUND)
+    set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -DCURL_STATICLIB")
 endif()
 
 # Strip leading whitespace that may appear when no arch flags were prepended
