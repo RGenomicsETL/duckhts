@@ -185,6 +185,7 @@ endif()
 # and we pass CPPFLAGS/LDFLAGS/LIBS directly to make. On plain system builds
 # these are empty and harmless.
 # ------------------------------------------------------------------
+set(HTSLIB_CONFIGURE_CFLAGS "")
 set(HTSLIB_EXTRA_CFLAGS "")
 set(HTSLIB_EXTRA_LDFLAGS "")
 
@@ -192,6 +193,7 @@ set(HTSLIB_EXTRA_LDFLAGS "")
 # macOS cross-compilation support (htslib build flags).
 # ------------------------------------------------------------------
 if(APPLE AND DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "")
+    set(HTSLIB_CONFIGURE_CFLAGS "-arch ${OSX_BUILD_ARCH}")
     set(HTSLIB_EXTRA_CFLAGS "-arch ${OSX_BUILD_ARCH}")
     set(HTSLIB_EXTRA_LDFLAGS "-arch ${OSX_BUILD_ARCH}")
     message(STATUS "macOS htslib arch: ${OSX_BUILD_ARCH}")
@@ -200,6 +202,7 @@ endif()
 if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     set(_vcpkg_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
     if(EXISTS "${_vcpkg_prefix}")
+        set(HTSLIB_CONFIGURE_CFLAGS "${HTSLIB_CONFIGURE_CFLAGS} -I${_vcpkg_prefix}/include")
         set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -I${_vcpkg_prefix}/include")
         set(HTSLIB_EXTRA_LDFLAGS "${HTSLIB_EXTRA_LDFLAGS} -L${_vcpkg_prefix}/lib")
         message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
@@ -207,10 +210,15 @@ if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
 endif()
 
 if(WIN32 AND MINGW AND CURL_FOUND)
+    # Older Rtools/MinGW curl probes are more fragile during ./configure than
+    # the actual htslib/extension build. Keep static-libcurl defines on the
+    # compiled objects, but leave configure-time feature probes closer to the
+    # package configure.win path.
     set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -DCURL_STATICLIB")
 endif()
 
 # Strip leading whitespace that may appear when no arch flags were prepended
+string(STRIP "${HTSLIB_CONFIGURE_CFLAGS}" HTSLIB_CONFIGURE_CFLAGS)
 string(STRIP "${HTSLIB_EXTRA_CFLAGS}" HTSLIB_EXTRA_CFLAGS)
 string(STRIP "${HTSLIB_EXTRA_LDFLAGS}" HTSLIB_EXTRA_LDFLAGS)
 
@@ -372,7 +380,7 @@ set(HTSLIB_CONFIGURE_COMMAND
     "AR=${CMAKE_AR}"
     "RANLIB=${CMAKE_RANLIB}"
     "CPPFLAGS="
-    "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
+    "CFLAGS=-O2 -fPIC ${HTSLIB_CONFIGURE_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
     "LIBS=${HTSLIB_CONFIGURE_LIBS_STR}"
     ${SH_COMMAND}
