@@ -1033,8 +1033,6 @@ static void process_comma_separated_list(duckdb_vector vec, idx_t row, const cha
     entry.offset = duckdb_list_vector_get_size(vec);
     entry.length = 0;
     
-    duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-    
     // Single-pass: count tokens and assign in one go
     const char* p = value;
     const char* token_start = p;
@@ -1056,6 +1054,7 @@ static void process_comma_separated_list(duckdb_vector vec, idx_t row, const cha
     if (entry.length > 0) {
         duckdb_list_vector_reserve(vec, entry.offset + entry.length);
         duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
         
         // Second pass: assign tokens
         p = value;
@@ -1993,11 +1992,21 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             ret_fmt = fmt_ret[field_idx];
                             
                             if (ret_fmt > 0 && values && values[sample_idx]) {
-                                duckdb_vector_assign_string_element(vec, row_count, values[sample_idx]);
+                                if (field->is_list) {
+                                    process_comma_separated_list(vec, row_count, values[sample_idx]);
+                                } else {
+                                    duckdb_vector_assign_string_element(vec, row_count, values[sample_idx]);
+                                }
                             } else {
                                 duckdb_vector_ensure_validity_writable(vec);
                                 uint64_t* validity = duckdb_vector_get_validity(vec);
                                 set_validity_bit(validity, row_count, 0);
+
+                                if (field->is_list) {
+                                    duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
+                                    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
+                                    list_data[row_count] = entry;
+                                }
                             }
                             
                         }
