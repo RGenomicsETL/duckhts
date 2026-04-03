@@ -253,7 +253,6 @@ if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
 endif()
 list(JOIN HTSLIB_EXTRA_LIBS " " HTSLIB_EXTRA_LIBS_STR)
 list(APPEND HTSLIB_MAKE_ARGS "LIBS=${HTSLIB_EXTRA_LIBS_STR}")
-
 message(STATUS "htslib make args: ${HTSLIB_MAKE_ARGS}")
 
 # htslib uses GNU Makefiles (not Ninja), so we must always use `make`
@@ -276,29 +275,40 @@ if(WIN32 AND MINGW)
     # Keep plugins off for now, but allow libcurl when the outer link can
     # provide the full dependency chain.
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-plugins)
-elseif(NOT CURL_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl)
 endif()
 
-set(HTSLIB_CONFIGURE_COMMAND
+if(CURL_FOUND)
+    list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-libcurl)
+    if(OPENSSL_FOUND)
+        list(APPEND HTSLIB_CONFIGURE_FLAGS --enable-s3 --enable-gcs)
+    else()
+        list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs)
+    endif()
+else()
+    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl --disable-s3 --disable-gcs)
+endif()
+
+list(JOIN HTSLIB_CONFIGURE_FLAGS " " HTSLIB_CONFIGURE_FLAGS_STR)
+
+set(HTSLIB_BUILD_COMMAND
     ${CMAKE_COMMAND} -E env
     "CC=${CMAKE_C_COMPILER}"
     "CPPFLAGS="
     "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
     "LIBS=${HTSLIB_EXTRA_LIBS_STR}"
-    ${SH_COMMAND} ./configure ${HTSLIB_CONFIGURE_FLAGS}
+    ${SH_COMMAND} -c "./configure ${HTSLIB_CONFIGURE_FLAGS_STR} && ${MAKE_COMMAND} clean lib-static"
 )
 
 ExternalProject_Add(htslib_build
     SOURCE_DIR        "${HTSLIB_SRC_DIR}"
     BUILD_IN_SOURCE   TRUE
-    CONFIGURE_COMMAND ${HTSLIB_CONFIGURE_COMMAND}
-    BUILD_COMMAND     ${MAKE_COMMAND} -j lib-static ${HTSLIB_MAKE_ARGS}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND     ${HTSLIB_BUILD_COMMAND}
     BUILD_ALWAYS      TRUE
     INSTALL_COMMAND   ""   # no install step; we link libhts.a directly
     BUILD_BYPRODUCTS  "${HTSLIB_BUILD_DIR}/libhts.a"
-    LOG_CONFIGURE     TRUE
+    LOG_CONFIGURE     FALSE
     LOG_BUILD         TRUE
 )
 

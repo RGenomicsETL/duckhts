@@ -152,6 +152,7 @@ the `R` `DBI` and `duckdb` packages.
 ``` r
 library(DBI)
 library(duckdb)
+#> Warning: package 'duckdb' was built under R version 4.5.3
 
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
@@ -323,14 +324,14 @@ dbGetQuery(con, sprintf(
   "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
   lift_src, lift_src
 ))
-#>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpymI1ro/duckhts_liftover_src_29d89b161ab2fb.fa.fai
+#>   success                                                index_path
+#> 1    TRUE /tmp/RtmpiDrDba/duckhts_liftover_src_3af247a93ea04.fa.fai
 dbGetQuery(con, sprintf(
   "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
   lift_dst, lift_dst
 ))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpymI1ro/duckhts_liftover_dst_29d89b493aba34.fa.fai
+#> 1    TRUE /tmp/RtmpiDrDba/duckhts_liftover_dst_3af2471f0a2177.fa.fai
 
 dbGetQuery(con, sprintf("
   SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
