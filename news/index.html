@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.4-0.0.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.5-0.0.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,8 +33,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="1.1.4-0.0.1" id="rduckhts-114-001">Rduckhts 1.1.4-0.0.1<a class="anchor" aria-label="anchor" href="#rduckhts-114-001"></a></h2>
-<ul><li>Add <code><a href="../reference/rduckhts_score.html">rduckhts_score()</a></code>: polygenic risk score computation backed by the <code>bcftools +score</code> plugin, supporting GT/DS/HDS/AP/GP/AS dosage modes, all major GWAS summary presets (PLINK, PLINK2, REGENIE, SAIGE, BOLT, METAL, PGS, SSF/GWAS-SSF), GWAS-VCF multi-PRS scoring, p-value thresholding, sample subsetting, and region/filter controls.</li>
+<h2 class="pkg-version" data-toc-text="1.1.5-0.0.1" id="rduckhts-115-001">Rduckhts 1.1.5-0.0.1<a class="anchor" aria-label="anchor" href="#rduckhts-115-001"></a></h2>
+<ul><li>Fix bundled <code>duckdb_munge(...)</code> / <code><a href="../reference/rduckhts_munge.html">rduckhts_munge()</a></code> multithreaded FASTA lookups: FASTA index handles are now thread-local and FASTA fetches are synchronized in <code>munge</code>, avoiding intermittent <code>fai_retrieve</code> failures and aborts when <code>fasta_ref</code> is used with <code>PRAGMA threads &gt; 1</code>.</li>
+<li>Add <code><a href="../reference/rduckhts_score.html">rduckhts_score()</a></code>: polygenic risk score computation backed by the <code>bcftools +score</code> plugin, supporting GT/DS/HDS/AP/GP/AS dosage modes, all major GWAS summary presets (PLINK, PLINK2, REGENIE, SAIGE, BOLT, METAL, PGS, SSF/GWAS-SSF), GWAS-VCF multi-PRS scoring, p-value thresholding, sample subsetting, and region/filter controls.</li>
 <li>Add <code><a href="../reference/rduckhts_munge.html">rduckhts_munge()</a></code>: GWAS summary statistics normalization backed by <code>bcftools +munge</code>, with FASTA reference allele resolution, swap-aware effect/frequency transforms, and METAL meta-analysis column support.</li>
 <li>Add <code><a href="../reference/rduckhts_liftover.html">rduckhts_liftover()</a></code>: variant coordinate liftover backed by <code>bcftools +liftover</code> using UCSC chain files, with full indel normalization, INFO/END lifting, and MT passthrough.</li>
 <li>Add <code><a href="../reference/rduckhts_bed.html">rduckhts_bed()</a></code> for BED3–BED12 interval files and <code><a href="../reference/rduckhts_fasta_nuc.html">rduckhts_fasta_nuc()</a></code> for nucleotide composition over BED intervals or fixed-width bins.</li>
@@ -43,7 +44,7 @@
 <li>Add quality encoding controls to <code><a href="../reference/rduckhts_bam.html">rduckhts_bam()</a></code> and <code><a href="../reference/rduckhts_fastq.html">rduckhts_fastq()</a></code> (<code>quality_representation</code>, <code>input_quality_encoding</code>) and <code><a href="../reference/rduckhts_detect_quality_encoding.html">rduckhts_detect_quality_encoding()</a></code> for heuristic FASTQ encoding detection.</li>
 <li>Add <code>sequence_encoding := 'nt16'</code> parameter to <code><a href="../reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="../reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, and <code><a href="../reference/rduckhts_fastq.html">rduckhts_fastq()</a></code> for raw htslib nt16 sequence output as <code>UTINYINT[]</code>.</li>
 <li>Add SAM flag helpers <code>sam_flag_bits()</code> and <code>sam_flag_has()</code>, CIGAR utility functions, and <code>is_forward_aligned()</code>.</li>
-<li>Bundle duckhts 1.1.4 extension.</li>
+<li>Bundle duckhts 1.1.5 extension.</li>
 </ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.3-0.0.2.9000" id="rduckhts-013-0029000">Rduckhts 0.1.3-0.0.2.9000<a class="anchor" aria-label="anchor" href="#rduckhts-013-0029000"></a></h2>

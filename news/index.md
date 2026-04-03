@@ -1,7 +1,13 @@
 # Changelog
 
-## Rduckhts 1.1.4-0.0.1
+## Rduckhts 1.1.5-0.0.1
 
+- Fix bundled `duckdb_munge(...)` /
+  [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_munge.md)
+  multithreaded FASTA lookups: FASTA index handles are now thread-local
+  and FASTA fetches are synchronized in `munge`, avoiding intermittent
+  `fai_retrieve` failures and aborts when `fasta_ref` is used with
+  `PRAGMA threads > 1`.
 - Add
   [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md):
   polygenic risk score computation backed by the `bcftools +score`
@@ -52,7 +58,7 @@
   for raw htslib nt16 sequence output as `UTINYINT[]`.
 - Add SAM flag helpers `sam_flag_bits()` and `sam_flag_has()`, CIGAR
   utility functions, and `is_forward_aligned()`.
-- Bundle duckhts 1.1.4 extension.
+- Bundle duckhts 1.1.5 extension.
 
 ## Rduckhts 0.1.3-0.0.2.9000
 
