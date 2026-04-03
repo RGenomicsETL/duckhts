@@ -11,6 +11,27 @@ knitr::opts_chunk$set(
   fig.path = "man/figures/README-",
   out.width = "100%"
 )
+
+knitr::knit_engines$set(sql = function(options) {
+  code <- paste(options$code, collapse = "\n")
+  load_extension <- is.null(options$load_extension) || isTRUE(options$load_extension)
+  if (load_extension) {
+    extension_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
+    extension_path <- gsub("'", "''", extension_path, fixed = TRUE)
+    code <- paste(sprintf("LOAD '%s';", extension_path), code, sep = "\n")
+  }
+  if (isTRUE(options$eval)) {
+    out <- system2("duckdb", "-unsigned", input = code, stdout = TRUE, stderr = TRUE)
+    status <- attr(out, "status")
+    if (!is.null(status) && status != 0) {
+      stop(paste(out, collapse = "\n"))
+    }
+    knitr::engine_output(options, code, out)
+  } else {
+    knitr::engine_output(options, code, NULL)
+  }
+})
+
 ```
 # DuckHTS
 
@@ -36,194 +57,118 @@ cat(paste(readLines("r/Rduckhts/inst/function_catalog/functions.md"), collapse =
 
 ## Examples
 
-The examples below run directly against bundled local test files using the `R` `DBI` and `duckdb` packages.
-
-```{r eval=TRUE}
-library(DBI)
-library(duckdb)
-
-drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-con <- dbConnect(drv, dbdir = ":memory:")
-ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
-dbExecute(con, sprintf("LOAD '%s'", ext_path))
-```
+The examples below run directly against bundled local test files through the DuckDB CLI and load the built extension from `build/release/duckhts.duckdb_extension`.
 
 ### Core readers
 
-```{r eval=TRUE}
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT CHROM, POS, REF, ALT, SAMPLE_ID
+FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
+LIMIT 3;
 
-dbGetQuery(con, "
-  SELECT CHROM, POS, REF, ALT, SAMPLE_ID
-  FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
-  LIMIT 3
-")
+SELECT count(*) AS n
+FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
 
-dbGetQuery(con, "
-  SELECT count(*) AS n
-  FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000')
-")
+SELECT *
+FROM fasta_index('test/data/ce.fa');
 
-dbGetQuery(con, "
-  SELECT * FROM fasta_index('test/data/ce.fa')
-")
+SELECT NAME, length(SEQUENCE) AS seq_length
+FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25');
 
-dbGetQuery(con, "
-  SELECT NAME, length(SEQUENCE) AS seq_length
-  FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25')
-")
-
-dbGetQuery(con, "
-  SELECT NAME, MATE, PAIR_ID
-  FROM read_fastq('test/data/interleaved.fq', interleaved := true)
-  LIMIT 3
-")
+SELECT NAME, MATE, PAIR_ID
+FROM read_fastq('test/data/interleaved.fq', interleaved := true)
+LIMIT 3;
 ```
 
 ### Interval + reference helpers
 
-```{r eval=TRUE}
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT chrom, start, "end", name, block_count
+FROM read_bed('test/data/targets.bed');
 
-dbGetQuery(con, "
-  SELECT chrom, start, \"end\", name, block_count
-  FROM read_bed('test/data/targets.bed')
-")
+SELECT chrom, start, "end", pct_gc, num_a, num_c, num_g, num_t
+FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
+ORDER BY chrom, start;
 
-dbGetQuery(con, "
-  SELECT chrom, start, \"end\", pct_gc, num_a, num_c, num_g, num_t
-  FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
-  ORDER BY chrom, start
-")
-
-dbGetQuery(con, "
-  SELECT chrom, start, \"end\", seq_len, pct_gc
-  FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20')
-")
-
+SELECT chrom, start, "end", seq_len, pct_gc
+FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20');
 ```
 
 ### Polygenic risk scoring
 
 `bcftools_score` computes per-sample polygenic risk scores (PRS) from a VCF/BCF and a GWAS summary statistics file, mirroring the `bcftools +score` plugin API.
 
-```{r eval=TRUE}
-# Hard-call (GT) PRS — PLINK summary format
-# S1: 0×0.5  + 1×(−0.2) + 2×1.0 = 1.8
-# S2: 1×0.5  + 2×(−0.2) + 0×1.0 = 0.1
-dbGetQuery(con, "
-  SELECT SAMPLE, round(score_summary, 3) AS prs
-  FROM bcftools_score(
-    'test/data/score_input.vcf',
-    'test/data/score_summary.tsv',
-    use := 'GT',
-    columns := 'PLINK'
-  )
-")
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+-- Hard-call (GT) PRS — PLINK summary format
+-- S1: 0×0.5  + 1×(−0.2) + 2×1.0 = 1.8
+-- S2: 1×0.5  + 2×(−0.2) + 0×1.0 = 0.1
+SELECT SAMPLE, round(score_summary, 3) AS prs
+FROM bcftools_score(
+  'test/data/score_input.vcf',
+  'test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+);
 
-# Dosage-based PRS (DS field) — fractional allele dosages from imputed data
-# S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
-# S2: 1.0×0.5 + 1.9×(−0.2) + 0.2×1.0 = 0.32
-dbGetQuery(con, "
-  SELECT SAMPLE, round(score_summary, 3) AS prs_ds
-  FROM bcftools_score(
-    'test/data/score_dosage.vcf',
-    'test/data/score_summary.tsv',
-    use := 'DS',
-    columns := 'PLINK'
-  )
-")
+-- Dosage-based PRS (DS field) — fractional allele dosages from imputed data
+-- S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
+-- S2: 1.0×0.5 + 1.9×(−0.2) + 0.2×1.0 = 0.32
+SELECT SAMPLE, round(score_summary, 3) AS prs_ds
+FROM bcftools_score(
+  'test/data/score_dosage.vcf',
+  'test/data/score_summary.tsv',
+  use := 'DS',
+  columns := 'PLINK'
+);
 
-# GWAS-VCF multi-PRS: each FORMAT sample column becomes a separate PRS track
-dbGetQuery(con, "
-  SELECT SAMPLE, round(PRS_A, 3) AS prs_a, round(PRS_B, 3) AS prs_b
-  FROM bcftools_score(
-    'test/data/score_input.vcf',
-    'test/data/score_gwas_summary.vcf',
-    use := 'GT'
-  )
-")
+-- GWAS-VCF multi-PRS: each FORMAT sample column becomes a separate PRS track
+SELECT SAMPLE, round(PRS_A, 3) AS prs_a, round(PRS_B, 3) AS prs_b
+FROM bcftools_score(
+  'test/data/score_input.vcf',
+  'test/data/score_gwas_summary.vcf',
+  use := 'GT'
+);
 ```
 
 ### Liftover score-style rows
 
-```{r eval=TRUE}
-lift_src <- tempfile("duckhts_liftover_src_", fileext = ".fa")
-lift_dst <- tempfile("duckhts_liftover_dst_", fileext = ".fa")
-lift_chain <- tempfile("duckhts_liftover_", fileext = ".chain")
-
-writeLines(c(
-  ">chrF",
-  "ACGTACGTAA",
-  ">chrR",
-  "AACCGGTTAA"
-), lift_src)
-writeLines(c(
-  ">chrLiftF",
-  "ACGTACGTAA",
-  ">chrLiftR",
-  "TTAACCGGTT"
-), lift_dst)
-writeLines(c(
-  "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
-  "10",
-  "",
-  "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
-  "10"
-), lift_chain)
-
-dbGetQuery(con, sprintf(
-  "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
-  lift_src, lift_src
-))
-dbGetQuery(con, sprintf(
-  "SELECT * FROM fasta_index('%s', index_path := '%s.fai')",
-  lift_dst, lift_dst
-))
-
-dbGetQuery(con, sprintf("
-  SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
-         mapped, reverse_complemented, reject_reason, note
-  FROM duckdb_liftover(
-    '(VALUES
-       (''chrF'', 2, ''C'', ''T''),
-       (''chrR'', 2, ''A'', ''G''),
-       (''chrF'', 11, ''A'', ''T'')
-     ) AS t(chrom, pos, ref, alt)',
-    'chrom',
-    'pos',
-    ref_col := 'ref',
-    alt_col := 'alt',
-    chain_path := '%s',
-    dst_fasta_ref := '%s',
-    src_fasta_ref := '%s'
-  )
-", lift_chain, lift_dst, lift_src))
-
-unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
+       mapped, reverse_complemented, reject_reason, note
+FROM duckdb_liftover(
+  '(VALUES
+     (''chrF'', 2, ''C'', ''T''),
+     (''chrR'', 2, ''A'', ''G''),
+     (''chrF'', 11, ''A'', ''T'')
+   ) AS t(chrom, pos, ref, alt)',
+  'chrom',
+  'pos',
+  ref_col := 'ref',
+  alt_col := 'alt',
+  chain_path := 'test/data/liftover.chain',
+  dst_fasta_ref := 'test/data/liftover_dst.fa',
+  src_fasta_ref := 'test/data/liftover_src.fa'
+);
 ```
 
 ### Sequence utilities
 
-```{r eval=TRUE}
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT
+  NAME,
+  seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
+  seq_encode_4bit(substr(SEQUENCE, 1, 16)) AS codes,
+  seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 16))) AS roundtrip
+FROM read_fasta('test/data/ce.fa')
+LIMIT 2;
 
-dbGetQuery(con, "
-  SELECT
-    NAME,
-    seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
-    seq_encode_4bit(substr(SEQUENCE, 1, 16)) AS codes,
-    seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 16))) AS roundtrip
-  FROM read_fasta('test/data/ce.fa')
-  LIMIT 2
-")
-
-dbGetQuery(con, "
-  SELECT
-    NAME,
-    MATE,
-    seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
-    seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
-  FROM read_fastq('test/data/interleaved.fq', interleaved := true)
-  LIMIT 2
-")
+SELECT
+  NAME,
+  MATE,
+  seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
+  seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
+FROM read_fastq('test/data/interleaved.fq', interleaved := true)
+LIMIT 2;
 ```
 
 ### FASTQ quality decoding and per-position histograms
@@ -242,75 +187,60 @@ This makes the flow explicit:
 
 For BAM/CRAM, qualities are already stored as numeric values, so there is no FASTQ text-encoding ambiguity on input.
 
-```{r eval=TRUE}
-dbGetQuery(con, "
-  SELECT *
-  FROM detect_quality_encoding('test/data/legacy_phred64.fq')
-")
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT *
+FROM detect_quality_encoding('test/data/legacy_phred64.fq');
 
-dbGetQuery(con, "
-  WITH q AS (
-    SELECT NAME, QUALITY
-    FROM read_fastq(
-      'test/data/r1.fq',
-      quality_representation := 'phred'
-    )
-  ),
-  expanded AS (
-    SELECT
-      NAME,
-      generate_subscripts(QUALITY, 1) AS pos,
-      unnest(QUALITY) AS q
-    FROM q
+WITH q AS (
+  SELECT NAME, QUALITY
+  FROM read_fastq(
+    'test/data/r1.fq',
+    quality_representation := 'phred'
   )
-  SELECT pos, q AS phred, count(*) AS n_reads
-  FROM expanded
-  GROUP BY pos, phred
-  ORDER BY pos, phred
-  LIMIT 12
-")
+),
+expanded AS (
+  SELECT
+    NAME,
+    generate_subscripts(QUALITY, 1) AS pos,
+    unnest(QUALITY) AS q
+  FROM q
+)
+SELECT pos, q AS phred, count(*) AS n_reads
+FROM expanded
+GROUP BY pos, phred
+ORDER BY pos, phred
+LIMIT 12;
 ```
 
 ### Metadata + export/index helpers
 
-```{r eval=TRUE}
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT idx, raw
+FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
+LIMIT 3;
 
-dbGetQuery(con, "
-  SELECT idx, raw
-  FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
-  LIMIT 3
-")
+SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+LIMIT 3;
 
-dbGetQuery(con, "
-  SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
-  FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
-  LIMIT 3
-")
+SELECT index_type, octet_length(raw) AS raw_bytes
+FROM read_hts_index_raw('test/data/formatcols.vcf.gz');
 
-dbGetQuery(con, "
-  SELECT index_type, octet_length(raw) AS raw_bytes
-  FROM read_hts_index_raw('test/data/formatcols.vcf.gz')
-")
+COPY (
+  SELECT chrom, start, "end", name
+  FROM read_bed('test/data/targets.bed')
+) TO '/tmp/duckhts_readme_targets.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE);
 
-dbExecute(con, "
-  COPY (
-    SELECT chrom, start, \"end\", name
-    FROM read_bed('test/data/targets.bed')
-  ) TO 'test_targets_readme.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE)
-")
+SELECT success, output_path, bytes_out
+FROM bgzip('/tmp/duckhts_readme_targets.bed',
+           output_path := '/tmp/duckhts_readme_targets.bed.gz',
+           keep := TRUE,
+           overwrite := TRUE);
 
-dbGetQuery(con, "
-  SELECT success, output_path, bytes_out
-  FROM bgzip('test_targets_readme.bed', output_path := 'test_targets_readme.bed.gz', keep := TRUE, overwrite := TRUE)
-")
-
-dbGetQuery(con, "
-  SELECT success, index_format, index_path
-  FROM tabix_index('test_targets_readme.bed.gz', preset := 'bed', index_path := 'test_targets_readme.bed.gz.tbi')
-")
-
-dbDisconnect(con, shutdown = TRUE)
-unlink(c('test_targets_readme.bed', 'test_targets_readme.bed.gz', 'test_targets_readme.bed.gz.tbi'))
+SELECT success, index_format, index_path
+FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
+                 preset := 'bed',
+                 index_path := '/tmp/duckhts_readme_targets.bed.gz.tbi');
 ```
 
 ## Remote URLs and HTS_PATH
@@ -324,15 +254,11 @@ Use `HTS_PATH` only when you want dynamic plugin discovery (for example, to poin
 
 Example (works in static-handler mode and plugin mode):
 
-```{bash, eval=TRUE}
-extension_path=build/release/duckhts.duckdb_extension
-duckdb -unsigned <<SQL
-LOAD '${extension_path}';
+```{sql, eval=TRUE, collapse=FALSE, comment=""}
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')
 GROUP BY CHROM;
-SQL
 ```
 
 If you need dynamic plugin mode, set `HTS_PATH` before loading the extension, for example:
