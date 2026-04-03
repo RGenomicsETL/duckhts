@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          make configure
+          make configure DUCKDB_PLATFORM=windows_amd64_rtools
 
       - name: Build release
         id: build_release
@@ -63,7 +63,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          make release 2>&1 | tee rtools-build.log
+          make release DUCKDB_PLATFORM=windows_amd64_rtools 2>&1 | tee rtools-build.log
 
       - name: Dump CMake and htslib diagnostics
         if: always()
