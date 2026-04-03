@@ -40,6 +40,7 @@ print(complex_cols)
 #>    column_name column_type r_type                   description
 #> 5          ALT   VARCHAR[] vector ARRAY type - will be R vector
 #> 7       FILTER   VARCHAR[] vector ARRAY type - will be R vector
+#> 9     INFO_DP4   INTEGER[] vector ARRAY type - will be R vector
 #> 10     INFO_AC   INTEGER[] vector ARRAY type - will be R vector
 #> 14 FORMAT_TT_A   INTEGER[] vector ARRAY type - will be R vector
 #> 18 FORMAT_GL_A     FLOAT[] vector ARRAY type - will be R vector

@@ -71,8 +71,8 @@ bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM variants LIMIT 2")
 #>   CHROM     POS   ID REF ALT QUAL FILTER INFO_TEST INFO_DP4 INFO_AC INFO_AN
-#> 1     1 3000150 <NA>   C   T 59.2   PASS        NA       NA       2       4
-#> 2     1 3000151 <NA>   C   T 59.2   PASS        NA       NA       2       4
+#> 1     1 3000150 <NA>   C   T 59.2   PASS        NA     NULL       2       4
+#> 2     1 3000151 <NA>   C   T 59.2   PASS        NA     NULL       2       4
 #>   INFO_INDEL INFO_STR FORMAT_TT_A FORMAT_GT_A FORMAT_GQ_A FORMAT_DP_A
 #> 1      FALSE     <NA>        NULL         0/1         245          NA
 #> 2      FALSE     <NA>        NULL         0/1         245          32
