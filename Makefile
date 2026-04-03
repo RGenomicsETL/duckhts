@@ -1,4 +1,4 @@
-.PHONY: clean clean_all function_catalog
+.PHONY: clean clean_all function_catalog test_release_fresh test_debug_fresh
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -44,8 +44,10 @@ debug: build_extension_library_debug build_extension_with_metadata_debug
 release: build_extension_library_release build_extension_with_metadata_release
 
 test: test_debug
-test_debug: debug test_extension_debug
-test_release: release test_extension_release
+test_debug: test_extension_debug
+test_release: test_extension_release
+test_debug_fresh: debug test_extension_debug
+test_release_fresh: release test_extension_release
 
 # Override header fetch to use the actual DuckDB release version, not the C API version
 update_duckdb_headers_custom:
