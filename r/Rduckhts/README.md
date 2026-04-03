@@ -233,7 +233,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_readme_29db4477c3c4ac.fai
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_readme_3ab8653a7384b3.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -292,11 +292,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_liftover_src_29db4431149afb.fa.fai
+#>   success                                                index_path
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_liftover_src_3ab86558c46ea.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_liftover_dst_29db442107f55e.fa.fai
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_liftover_dst_3ab8651de8c6d6.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -340,8 +340,8 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                          index_path
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_munge_29db44252ec4c0.fa.fai
+#>   success                                         index_path
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_munge_3ab86536ef9a5.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -414,12 +414,12 @@ writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
 #>   success                                           output_path bytes_in
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_targets_29db44410156b4.bed.gz       25
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_targets_3ab8654c64274d.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_targets_29db44410156b4.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_targets_3ab8654c64274d.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
@@ -486,7 +486,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpS7Cj4v/duckhts_readme_29db44722ea457.fai
+#> 1    TRUE /tmp/RtmpEX0fr4/duckhts_readme_3ab8655db12c40.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
@@ -512,18 +512,18 @@ bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 variants <- dbGetQuery(con, "SELECT * FROM variants LIMIT 5")
 variants
-#>   CHROM     POS    ID  REF  ALT  QUAL FILTER INFO_TEST INFO_DP4 INFO_AC INFO_AN
-#> 1     1 3000150  <NA>    C    T  59.2   PASS        NA       NA       2       4
-#> 2     1 3000151  <NA>    C    T  59.2   PASS        NA       NA       2       4
-#> 3     1 3062915  id3D GTTT    G  12.9    q10        NA        1       2       4
-#> 4     1 3062915 idSNP    G T, C  12.6   test         5        1    1, 1       3
-#> 5     1 3106154  <NA> CAAA    C 342.0   PASS        NA       NA       2       4
-#>   INFO_INDEL INFO_STR FORMAT_TT_A FORMAT_GT_A FORMAT_GQ_A FORMAT_DP_A
-#> 1      FALSE     <NA>        NULL         0/1         245          NA
-#> 2      FALSE     <NA>        NULL         0/1         245          32
-#> 3       TRUE     test        NULL         0/1         409          35
-#> 4      FALSE     <NA>        0, 1         0/1         409          35
-#> 5      FALSE     <NA>        NULL         0/1         245          32
+#>   CHROM     POS    ID  REF  ALT  QUAL FILTER INFO_TEST   INFO_DP4 INFO_AC
+#> 1     1 3000150  <NA>    C    T  59.2   PASS        NA       NULL       2
+#> 2     1 3000151  <NA>    C    T  59.2   PASS        NA       NULL       2
+#> 3     1 3062915  id3D GTTT    G  12.9    q10        NA 1, 2, 3, 4       2
+#> 4     1 3062915 idSNP    G T, C  12.6   test         5 1, 2, 3, 4    1, 1
+#> 5     1 3106154  <NA> CAAA    C 342.0   PASS        NA       NULL       2
+#>   INFO_AN INFO_INDEL INFO_STR FORMAT_TT_A FORMAT_GT_A FORMAT_GQ_A FORMAT_DP_A
+#> 1       4      FALSE     <NA>        NULL         0/1         245          NA
+#> 2       4      FALSE     <NA>        NULL         0/1         245          32
+#> 3       4       TRUE     test        NULL         0/1         409          35
+#> 4       3      FALSE     <NA>        0, 1         0/1         409          35
+#> 5       4      FALSE     <NA>        NULL         0/1         245          32
 #>                  FORMAT_GL_A FORMAT_TT_B FORMAT_GT_B FORMAT_GQ_B FORMAT_DP_B
 #> 1                       NULL        NULL         0/1         245          NA
 #> 2                       NULL        NULL         0/1         245          32

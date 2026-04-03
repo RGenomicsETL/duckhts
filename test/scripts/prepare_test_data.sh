@@ -53,4 +53,8 @@ bgzip -c "$SRC/tabix/gff_file.gff" > "$DST/gff_file.gff.gz"
 tabix -p gff "$DST/gff_file.gff.gz"
 echo "  gff_file.gff.gz + .tbi"
 
+# ---- vcfppR-generated VCF compliance fixtures ----
+Rscript "$SCRIPT_DIR/vcfpp.R"
+echo "  vcfppR-generated VCF spec/mapping fixtures + manifest"
+
 echo "==> Done. $(ls "$DST" | wc -l) files in test/data/"

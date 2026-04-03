@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##duckhts_fixture_section=spec_standard_corrections
+##contig=<ID=chr1>
+##INFO=<ID=SB,Number=1,Type=Integer,Description="Intentionally wrong: standard SB should be Number=4">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=HQ,Number=1,Type=Integer,Description="Intentionally wrong: standard HQ should be Number=2">
+##FORMAT=<ID=FT,Number=.,Type=String,Description="Intentionally wrong: standard FT should be Number=1">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chr1	300	.	C	T	.	PASS	SB=10,20,30,40	GT:HQ:FT	0/1:5,9:PASS	1/1:7,11:LowQual
+chr1	350	.	G	A	.	PASS	.	GT:HQ:FT	0/0:.,.:PASS	./.:.:.
