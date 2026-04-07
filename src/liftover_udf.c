@@ -63,8 +63,38 @@ typedef struct liftover_cache_entry {
     struct liftover_cache_entry *next;
 } liftover_cache_entry_t;
 
-static liftover_cache_entry_t *g_liftover_cache_head = NULL;
-static pthread_mutex_t g_liftover_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void liftover_bind_destroy(void *ptr);
+
+/*
+ * faidx_t owns mutable internal I/O state and cannot be shared safely across
+ * concurrent DuckDB worker threads. Keep one liftover context cache per thread.
+ */
+static pthread_key_t g_liftover_cache_key;
+static pthread_once_t g_liftover_cache_key_once = PTHREAD_ONCE_INIT;
+
+static void destroy_liftover_cache(void *ptr) {
+    liftover_cache_entry_t *entry = (liftover_cache_entry_t *)ptr;
+    while (entry) {
+        liftover_cache_entry_t *next = entry->next;
+        liftover_bind_destroy(entry->bind);
+        free(entry);
+        entry = next;
+    }
+}
+
+static void init_liftover_cache_key(void) {
+    pthread_key_create(&g_liftover_cache_key, destroy_liftover_cache);
+}
+
+static liftover_cache_entry_t *get_liftover_cache_head(void) {
+    pthread_once(&g_liftover_cache_key_once, init_liftover_cache_key);
+    return (liftover_cache_entry_t *)pthread_getspecific(g_liftover_cache_key);
+}
+
+static void set_liftover_cache_head(liftover_cache_entry_t *head) {
+    pthread_once(&g_liftover_cache_key_once, init_liftover_cache_key);
+    pthread_setspecific(g_liftover_cache_key, head);
+}
 
 enum {
     OUT_SRC_CHROM = 0,
@@ -1611,11 +1641,11 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
 static liftover_bind_t *get_liftover_context(const char *chain_path, const char *dst_fasta_ref,
                                              const char *src_fasta_ref, int max_snp_gap, int max_indel_inc,
                                              char **errbuf_out) {
+    liftover_cache_entry_t *head = get_liftover_cache_head();
     liftover_cache_entry_t *entry = NULL;
     liftover_bind_t *loaded = NULL;
 
-    pthread_mutex_lock(&g_liftover_cache_mutex);
-    for (entry = g_liftover_cache_head; entry; entry = entry->next) {
+    for (entry = head; entry; entry = entry->next) {
         liftover_bind_t *bind = entry->bind;
         if (strcmp(bind->chain_path, chain_path) == 0 &&
             strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
@@ -1623,40 +1653,21 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
              (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
             bind->max_snp_gap == max_snp_gap &&
             bind->max_indel_inc == max_indel_inc) {
-            pthread_mutex_unlock(&g_liftover_cache_mutex);
             return bind;
         }
     }
-    pthread_mutex_unlock(&g_liftover_cache_mutex);
 
     loaded = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, errbuf_out);
     if (!loaded) return NULL;
 
-    pthread_mutex_lock(&g_liftover_cache_mutex);
-    for (entry = g_liftover_cache_head; entry; entry = entry->next) {
-        liftover_bind_t *bind = entry->bind;
-        if (strcmp(bind->chain_path, chain_path) == 0 &&
-            strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
-            ((bind->src_fasta_ref == NULL && src_fasta_ref == NULL) ||
-             (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
-            bind->max_snp_gap == max_snp_gap &&
-            bind->max_indel_inc == max_indel_inc) {
-            pthread_mutex_unlock(&g_liftover_cache_mutex);
-            liftover_bind_destroy(loaded);
-            return bind;
-        }
-    }
-
     entry = (liftover_cache_entry_t *)calloc(1, sizeof(*entry));
     if (!entry) {
-        pthread_mutex_unlock(&g_liftover_cache_mutex);
         liftover_bind_destroy(loaded);
         return NULL;
     }
     entry->bind = loaded;
-    entry->next = g_liftover_cache_head;
-    g_liftover_cache_head = entry;
-    pthread_mutex_unlock(&g_liftover_cache_mutex);
+    entry->next = head;
+    set_liftover_cache_head(entry);
     return loaded;
 }
 
