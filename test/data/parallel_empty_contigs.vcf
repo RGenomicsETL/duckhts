@@ -1,0 +1,17 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##duckhts_fixture_section=parallel_empty_contigs
+##contig=<ID=empty1>
+##contig=<ID=empty2>
+##contig=<ID=empty3>
+##contig=<ID=empty4>
+##contig=<ID=empty5>
+##contig=<ID=empty6>
+##contig=<ID=empty7>
+##contig=<ID=empty8>
+##contig=<ID=chr1>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+chr1	10	.	A	C	.	PASS	.	GT	0/1
+chr1	40	.	G	T	.	PASS	.	GT	1/1
