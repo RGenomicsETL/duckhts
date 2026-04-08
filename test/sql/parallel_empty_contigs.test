@@ -1,0 +1,26 @@
+# name: test/sql/parallel_empty_contigs.test
+# description: Regression tests for indexed parallel scans with leading empty contigs
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+query I
+SELECT count(*)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bam',
+  index_path := '__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bam.bai'
+);
+----
+2
+
+query I
+SELECT count(*)
+FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz.tbi'
+);
+----
+2

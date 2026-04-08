@@ -255,6 +255,23 @@ FROM (
 ----
 1	NULL	10	Padded
 
+# Padded indel near chain edge should stay stable through clip-pad / left-align handling
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 10, 'AA', 'A',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+) s;
+----
+chrLiftF	8	T	TA	1	Padded
+
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
        coalesce(lo.reject_reason, 'NULL'),

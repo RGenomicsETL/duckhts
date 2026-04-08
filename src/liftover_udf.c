@@ -17,6 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/regidx.h>
 
 #define LIFTOVER_WARNING_BUF 256
+#define LIFTOVER_CACHE_MAX_ENTRIES 8
 typedef struct {
     int t_start;
     int q_start;
@@ -63,8 +64,54 @@ typedef struct liftover_cache_entry {
     struct liftover_cache_entry *next;
 } liftover_cache_entry_t;
 
-static liftover_cache_entry_t *g_liftover_cache_head = NULL;
-static pthread_mutex_t g_liftover_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void liftover_bind_destroy(void *ptr);
+
+/*
+ * faidx_t owns mutable internal I/O state and cannot be shared safely across
+ * concurrent DuckDB worker threads. Keep one liftover context cache per thread.
+ */
+static pthread_key_t g_liftover_cache_key;
+static pthread_once_t g_liftover_cache_key_once = PTHREAD_ONCE_INIT;
+
+static void destroy_liftover_cache(void *ptr) {
+    liftover_cache_entry_t *entry = (liftover_cache_entry_t *)ptr;
+    while (entry) {
+        liftover_cache_entry_t *next = entry->next;
+        liftover_bind_destroy(entry->bind);
+        free(entry);
+        entry = next;
+    }
+}
+
+static void init_liftover_cache_key(void) {
+    pthread_key_create(&g_liftover_cache_key, destroy_liftover_cache);
+}
+
+static liftover_cache_entry_t *get_liftover_cache_head(void) {
+    pthread_once(&g_liftover_cache_key_once, init_liftover_cache_key);
+    return (liftover_cache_entry_t *)pthread_getspecific(g_liftover_cache_key);
+}
+
+static void set_liftover_cache_head(liftover_cache_entry_t *head) {
+    pthread_once(&g_liftover_cache_key_once, init_liftover_cache_key);
+    pthread_setspecific(g_liftover_cache_key, head);
+}
+
+static void trim_liftover_cache_head(liftover_cache_entry_t *head) {
+    size_t count = 0;
+    liftover_cache_entry_t *entry = head;
+    liftover_cache_entry_t *prev = NULL;
+    while (entry) {
+        count++;
+        if (count > LIFTOVER_CACHE_MAX_ENTRIES) {
+            if (prev) prev->next = NULL;
+            destroy_liftover_cache(entry);
+            return;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+}
 
 enum {
     OUT_SRC_CHROM = 0,
@@ -1163,7 +1210,11 @@ static void scalar_realign_cleanup(scalar_realign_t *ra) {
  * Scoring values drawn from bwa mem: match=1, mismatch=-4, gap_open=-6, gap_ext=-1.
  * Returns the alignment score. Path is stored in path->s. */
 static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstring_t *path) {
+    if (!path) return -1;
+    path->l = 0;
+    if (path->s) path->s[0] = '\0';
     if (s_l == 0 || t_l == 0) return -1;
+    if (s_l > (size_t)(INT_MAX - 1) || t_l > (size_t)(INT_MAX - 1)) return -1;
     int a = 1;   /* score for a sequence match */
     int b = -4;  /* penalty for a mismatch */
     int o = -6;  /* gap open penalty */
@@ -1173,10 +1224,17 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
     int i, j, cell, ind, score[3];
     int *A[3];
     char *B[3];
-    ks_resize(path, (size_t)(n + m - 1));
+    if (ks_resize(path, (size_t)(n + m - 1)) < 0) return -1;
     for (i = 0; i < 3; i++) {
         A[i] = (int *)malloc(sizeof(int) * (size_t)(n * m));
         B[i] = (char *)malloc(sizeof(char) * (size_t)(n * m));
+        if (!A[i] || !B[i]) {
+            for (int k = 0; k <= i; k++) {
+                free(A[k]);
+                free(B[k]);
+            }
+            return -1;
+        }
     }
 
     /* Build three scoring matrices corresponding to the three possible states */
@@ -1251,17 +1309,22 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
 
 /* Exact port of upstream get_shift() */
 static int scalar_get_shift(char *path, int npad) {
+    if (!path || npad == 0) return 0;
+    size_t path_len = strlen(path);
+    if (path_len == 0) return 0;
+
     int shift = 0;
     if (npad < 0) {
         char *ptr = path;
-        while (npad < 0) {
+        while (npad < 0 && *ptr) {
             int ind = (*ptr++) - 1;
             if (ind == _M || ind == _D) shift++;
             if (ind == _M || ind == _I) npad++;
         }
     } else {
-        char *ptr = &path[strlen(path) - 1];
+        char *ptr = &path[path_len - 1];
         while (npad > 0) {
+            if (ptr < path) break;
             int ind = (*ptr--) - 1;
             if (ind == _M || ind == _D) shift--;
             if (ind == _M || ind == _I) npad--;
@@ -1298,6 +1361,7 @@ static void scalar_clip_pad(char **alleles, int n_allele,
         /* Pairwise align source and destination sequences excluding the anchors */
         int new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
                                   src_seq.s + 1, src_seq.l - 2, &path);
+        if (new_score < 0 || !path.s || path.s[0] == '\0') continue;
         if (new_score > best_score) {
             best_score = new_score;
             best_shift = scalar_get_shift(path.s, npad);
@@ -1611,11 +1675,12 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
 static liftover_bind_t *get_liftover_context(const char *chain_path, const char *dst_fasta_ref,
                                              const char *src_fasta_ref, int max_snp_gap, int max_indel_inc,
                                              char **errbuf_out) {
+    liftover_cache_entry_t *head = get_liftover_cache_head();
     liftover_cache_entry_t *entry = NULL;
+    liftover_cache_entry_t *prev = NULL;
     liftover_bind_t *loaded = NULL;
 
-    pthread_mutex_lock(&g_liftover_cache_mutex);
-    for (entry = g_liftover_cache_head; entry; entry = entry->next) {
+    for (entry = head; entry; prev = entry, entry = entry->next) {
         liftover_bind_t *bind = entry->bind;
         if (strcmp(bind->chain_path, chain_path) == 0 &&
             strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
@@ -1623,40 +1688,29 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
              (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
             bind->max_snp_gap == max_snp_gap &&
             bind->max_indel_inc == max_indel_inc) {
-            pthread_mutex_unlock(&g_liftover_cache_mutex);
+            if (prev) {
+                prev->next = entry->next;
+                entry->next = head;
+                head = entry;
+                set_liftover_cache_head(head);
+            }
             return bind;
         }
     }
-    pthread_mutex_unlock(&g_liftover_cache_mutex);
 
     loaded = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, errbuf_out);
     if (!loaded) return NULL;
 
-    pthread_mutex_lock(&g_liftover_cache_mutex);
-    for (entry = g_liftover_cache_head; entry; entry = entry->next) {
-        liftover_bind_t *bind = entry->bind;
-        if (strcmp(bind->chain_path, chain_path) == 0 &&
-            strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
-            ((bind->src_fasta_ref == NULL && src_fasta_ref == NULL) ||
-             (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
-            bind->max_snp_gap == max_snp_gap &&
-            bind->max_indel_inc == max_indel_inc) {
-            pthread_mutex_unlock(&g_liftover_cache_mutex);
-            liftover_bind_destroy(loaded);
-            return bind;
-        }
-    }
-
     entry = (liftover_cache_entry_t *)calloc(1, sizeof(*entry));
     if (!entry) {
-        pthread_mutex_unlock(&g_liftover_cache_mutex);
         liftover_bind_destroy(loaded);
         return NULL;
     }
     entry->bind = loaded;
-    entry->next = g_liftover_cache_head;
-    g_liftover_cache_head = entry;
-    pthread_mutex_unlock(&g_liftover_cache_mutex);
+    entry->next = head;
+    head = entry;
+    trim_liftover_cache_head(head);
+    set_liftover_cache_head(entry);
     return loaded;
 }
 

@@ -206,6 +206,22 @@ manifest[[length(manifest) + 1]] <- render_fixture(
   extra_lines = c("##duckhts_fixture_section=mapping_number_families")
 )
 
+manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "parallel_empty_contigs.vcf",
+  section = "mapping",
+  purpose = "Indexed parallel-scan regression with leading empty contigs before live records",
+  contigs = c(paste0("empty", 1:8), "chr1"),
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype")
+  ),
+  samples = c("S1"),
+  records = c(
+    "chr1\t10\t.\tA\tC\t.\tPASS\t.\tGT\t0/1",
+    "chr1\t40\t.\tG\tT\t.\tPASS\t.\tGT\t1/1"
+  ),
+  extra_lines = c("##duckhts_fixture_section=parallel_empty_contigs")
+)
+
 # ---------------------------------------------------------------------------
 # Section 4. Spec-Compliance Fixtures
 # ---------------------------------------------------------------------------
