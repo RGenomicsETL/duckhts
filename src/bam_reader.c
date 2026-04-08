@@ -737,28 +737,29 @@ static int claim_next_contig(bam_local_init_data_t *local,
     if (!local->is_parallel || !global || global->n_contigs == 0)
         return 0;
 
-    int next = __sync_fetch_and_add(&global->current_contig, 1);
-    if (next >= global->n_contigs)
-        return 0;  /* all contigs claimed */
-
     /* Destroy previous iterator */
     if (local->itr) {
         hts_itr_destroy(local->itr);
         local->itr = NULL;
     }
 
-    local->assigned_contig = next;
+    for (;;) {
+        int next = __sync_fetch_and_add(&global->current_contig, 1);
+        if (next >= global->n_contigs)
+            return 0;  /* all contigs claimed */
 
-    /* sam_itr_queryi: iterate reads overlapping the entire contig.
-     * tid=next, beg=0, end=HTS_POS_MAX covers the full reference. */
-    local->itr = sam_itr_queryi(local->idx, next, 0, HTS_POS_MAX);
-    if (!local->itr) {
-        /* Contig may have zero aligned reads — skip to next */
-        return claim_next_contig(local, global);
+        local->assigned_contig = next;
+
+        /* sam_itr_queryi: iterate reads overlapping the entire contig.
+         * tid=next, beg=0, end=HTS_POS_MAX covers the full reference. */
+        local->itr = sam_itr_queryi(local->idx, next, 0, HTS_POS_MAX);
+        if (local->itr) {
+            local->needs_next_contig = 0;
+            return 1;
+        }
+
+        /* Contig may have zero indexed reads — try the next claim. */
     }
-
-    local->needs_next_contig = 0;
-    return 1;
 }
 
 /* ================================================================
@@ -800,12 +801,13 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         if (ret < 0) {
             /* ret == -1: EOF/end-of-region.  ret < -1: error. */
             if (local->is_parallel && ret == -1) {
-                /* Try next contig */
+                /* Try next contig and keep filling this chunk if we can. */
                 local->needs_next_contig = 1;
                 if (!claim_next_contig(local, global)) {
                     local->done = 1;
+                    break;
                 }
-                break;
+                continue;
             }
             local->done = 1;
             break;

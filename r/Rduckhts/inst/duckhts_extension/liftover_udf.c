@@ -1193,7 +1193,8 @@ static void scalar_realign_cleanup(scalar_realign_t *ra) {
  * Scoring values drawn from bwa mem: match=1, mismatch=-4, gap_open=-6, gap_ext=-1.
  * Returns the alignment score. Path is stored in path->s. */
 static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstring_t *path) {
-    if (s_l == 0 || t_l == 0) return -1;
+    if (!path) return -1;
+    if (s_l > (size_t)(INT_MAX - 1) || t_l > (size_t)(INT_MAX - 1)) return -1;
     int a = 1;   /* score for a sequence match */
     int b = -4;  /* penalty for a mismatch */
     int o = -6;  /* gap open penalty */
@@ -1203,10 +1204,17 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
     int i, j, cell, ind, score[3];
     int *A[3];
     char *B[3];
-    ks_resize(path, (size_t)(n + m - 1));
+    if (ks_resize(path, (size_t)(n + m - 1)) < 0) return -1;
     for (i = 0; i < 3; i++) {
         A[i] = (int *)malloc(sizeof(int) * (size_t)(n * m));
         B[i] = (char *)malloc(sizeof(char) * (size_t)(n * m));
+        if (!A[i] || !B[i]) {
+            for (int k = 0; k <= i; k++) {
+                free(A[k]);
+                free(B[k]);
+            }
+            return -1;
+        }
     }
 
     /* Build three scoring matrices corresponding to the three possible states */
@@ -1281,17 +1289,22 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
 
 /* Exact port of upstream get_shift() */
 static int scalar_get_shift(char *path, int npad) {
+    if (!path || npad == 0) return 0;
+    size_t path_len = strlen(path);
+    if (path_len == 0) return 0;
+
     int shift = 0;
     if (npad < 0) {
         char *ptr = path;
-        while (npad < 0) {
+        while (npad < 0 && *ptr) {
             int ind = (*ptr++) - 1;
             if (ind == _M || ind == _D) shift++;
             if (ind == _M || ind == _I) npad++;
         }
     } else {
-        char *ptr = &path[strlen(path) - 1];
+        char *ptr = &path[path_len - 1];
         while (npad > 0) {
+            if (ptr < path) break;
             int ind = (*ptr--) - 1;
             if (ind == _M || ind == _D) shift--;
             if (ind == _M || ind == _I) npad--;
@@ -1328,6 +1341,7 @@ static void scalar_clip_pad(char **alleles, int n_allele,
         /* Pairwise align source and destination sequences excluding the anchors */
         int new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
                                   src_seq.s + 1, src_seq.l - 2, &path);
+        if (!path.s) continue;
         if (new_score > best_score) {
             best_score = new_score;
             best_shift = scalar_get_shift(path.s, npad);

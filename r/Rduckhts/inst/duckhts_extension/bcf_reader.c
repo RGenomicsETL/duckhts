@@ -1265,38 +1265,38 @@ static int claim_next_contig(bcf_init_data_t* init, bcf_global_init_data_t* glob
     if (!init->is_parallel || !global || global->n_contigs == 0) {
         return 0;
     }
-    
-    // Atomically claim next contig using fetch-and-add
-    // This prevents race conditions where two threads grab the same contig
-    int next = __sync_fetch_and_add(&global->current_contig, 1);
-    if (next >= global->n_contigs) {
-        return 0;  // No more contigs
-    }
-    
+
     // Destroy old iterator if exists
     if (init->itr) {
         hts_itr_destroy(init->itr);
         init->itr = NULL;
     }
-    
-    // Set up iterator for this contig
-    const char* contig = global->contig_names[next];
-    init->assigned_contig = next;
-    init->contig_name = contig;
-    
-    if (init->idx) {
-        init->itr = bcf_itr_querys(init->idx, init->hdr, contig);
-    } else if (init->tbx) {
-        init->itr = tbx_itr_querys(init->tbx, contig);
+
+    for (;;) {
+        // Atomically claim next contig using fetch-and-add.
+        int next = __sync_fetch_and_add(&global->current_contig, 1);
+        if (next >= global->n_contigs) {
+            return 0;  // No more contigs
+        }
+
+        // Set up iterator for this contig.
+        const char* contig = global->contig_names[next];
+        init->assigned_contig = next;
+        init->contig_name = contig;
+
+        if (init->idx) {
+            init->itr = bcf_itr_querys(init->idx, init->hdr, contig);
+        } else if (init->tbx) {
+            init->itr = tbx_itr_querys(init->tbx, contig);
+        }
+
+        if (init->itr) {
+            init->needs_next_contig = 0;
+            return 1;
+        }
+
+        // Empty contig: keep claiming until we find a live iterator.
     }
-    
-    if (!init->itr) {
-        // This contig might not have any records - try next
-        return claim_next_contig(init, global);
-    }
-    
-    init->needs_next_contig = 0;
-    return 1;
 }
 
 // =============================================================================

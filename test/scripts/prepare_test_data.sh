@@ -15,8 +15,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC="$REPO_ROOT/third_party/htslib/test"
 DST="$REPO_ROOT/test/data"
+PKG_DST="$REPO_ROOT/r/Rduckhts/inst/extdata"
 
 mkdir -p "$DST"
+mkdir -p "$PKG_DST"
 
 echo "==> Preparing test data in $DST"
 
@@ -24,6 +26,14 @@ echo "==> Preparing test data in $DST"
 cp "$SRC/range.bam" "$DST/range.bam"
 samtools index "$DST/range.bam"
 echo "  range.bam + .bai"
+
+# ---- Parallel empty-contig BAM regression fixture ----
+for out_dir in "$DST" "$PKG_DST"; do
+  samtools view -b -o "$out_dir/parallel_empty_contigs.bam" \
+    "$SCRIPT_DIR/parallel_empty_contigs.sam"
+  samtools index "$out_dir/parallel_empty_contigs.bam"
+done
+echo "  parallel_empty_contigs.bam + .bai"
 
 # ---- VCF → bgzipped VCF + index ----
 bcftools view "$SRC/formatcols.vcf" -Oz -o "$DST/formatcols.vcf.gz"
@@ -56,5 +66,12 @@ echo "  gff_file.gff.gz + .tbi"
 # ---- vcfppR-generated VCF compliance fixtures ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping fixtures + manifest"
+
+# ---- Parallel empty-contig VCF regression fixture (bgzip + tabix) ----
+for out_dir in "$DST" "$PKG_DST"; do
+  bgzip -c "$out_dir/parallel_empty_contigs.vcf" > "$out_dir/parallel_empty_contigs.vcf.gz"
+  tabix -f -p vcf "$out_dir/parallel_empty_contigs.vcf.gz"
+done
+echo "  parallel_empty_contigs.vcf.gz + .tbi"
 
 echo "==> Done. $(ls "$DST" | wc -l) files in test/data/"
