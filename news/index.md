@@ -1,7 +1,21 @@
 # Changelog
 
-## Rduckhts 1.1.5-0.0.1
+## Rduckhts 1.1.5-0.0.1 (2026-04-08)
 
+- Fix bundled `bcftools_liftover(...)` /
+  [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
+  cache and realignment hardening: per-thread chain/FASTA contexts are
+  now bounded instead of accumulating for the lifetime of worker
+  threads, and scalar left-alignment no longer reuses stale traceback
+  state after failed/empty alignments.
+- Fix bundled `read_bam(...)` /
+  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam.md)
+  and `read_bcf(...)` /
+  [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
+  indexed parallel full scans when headers contain leading empty
+  contigs: contig claiming now retries iteratively instead of
+  recursively, and the BAM reader no longer returns an empty chunk after
+  successfully handing off to the next contig.
 - Keep the top-level extension `README.Rmd` examples aligned with direct
   extension usage: the extension README now renders its example queries
   through a custom DuckDB SQL knitr engine instead of `R`/`DBI`, and its
