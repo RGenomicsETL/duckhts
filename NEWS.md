@@ -1,7 +1,8 @@
 # DuckHTS Extension News
 
-## duckhts 1.1.5 (2026-04-02)
+## duckhts 1.1.5 (2026-04-08)
 
+- fix `bcftools_liftover(...)` / `duckdb_liftover(...)` cache and realignment hardening: bound the per-thread chain/FASTA context cache instead of retaining every distinct context for the lifetime of DuckDB worker threads, and restore failure-safe scalar realignment handling so left-alignment does not reuse stale traceback state after allocation/zero-length alignment failures
 - fix indexed parallel full scans with leading empty contigs in `read_bam(...)` and `read_bcf(...)`: replace recursive contig claiming with iterative retry loops so worker threads do not recurse/starve across long runs of empty contigs, and keep `read_bam(...)` filling the current DuckDB chunk after a successful contig handoff instead of returning an empty chunk that terminates the scan early
 
 - switch the top-level extension `README.Rmd` examples from `R`/`DBI` wrapper execution to a custom knitr `sql` engine that runs `duckdb -unsigned` directly, matching the built extension workflow used in `DuckTinyCC`; point the liftover example at bundled fixtures instead of generating temporary FASTA/chain files in `R`

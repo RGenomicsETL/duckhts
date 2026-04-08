@@ -122,6 +122,23 @@ test_liftover <- function() {
   expect_equal(rescued$note[1], "Padded")
   expect_equal(rescued$dest_pos[1], 10)
 
+  padded_indel <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrF', 10, 'AA', 'A')) AS t(chrom, pos, ref, alt)",
+    chain_path = chain_path,
+    dst_fasta_ref = dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = src_fa
+  )
+  expect_equal(nrow(padded_indel), 1)
+  expect_true(padded_indel$mapped[1])
+  expect_equal(padded_indel$dest_chrom[1], "chrLiftF")
+  expect_equal(padded_indel$dest_pos[1], 8)
+  expect_equal(padded_indel$dest_ref[1], "T")
+  expect_equal(padded_indel$dest_alt[1], "TA")
+  expect_equal(padded_indel$note[1], "Padded")
+
   # pos=20 is truly beyond the chain — no rescue possible
   unmapped <- rduckhts_liftover(
     con,
@@ -443,6 +460,41 @@ test_liftover <- function() {
   expect_equal(out_nla$dest_pos[1], 2)
   expect_equal(out_nla$dest_ref[1], "C")
   expect_equal(out_nla$dest_alt[1], "T")
+
+  ## ---- mixed context cache reuse / eviction ----
+  chain_copies <- character(12)
+  src_copies <- character(12)
+  dst_copies <- character(12)
+  for (i in seq_len(12)) {
+    chain_copies[i] <- file.path(tmp_dir, sprintf("liftover_%02d.chain", i))
+    src_copies[i] <- file.path(tmp_dir, sprintf("liftover_src_%02d.fa", i))
+    dst_copies[i] <- file.path(tmp_dir, sprintf("liftover_dst_%02d.fa", i))
+    file.copy(chain_path, chain_copies[i], overwrite = TRUE)
+    file.copy(src_fa, src_copies[i], overwrite = TRUE)
+    file.copy(dst_fa, dst_copies[i], overwrite = TRUE)
+    expect_true(rduckhts_fasta_index(con, src_copies[i], index_path = paste0(src_copies[i], ".fai"))$success[1])
+    expect_true(rduckhts_fasta_index(con, dst_copies[i], index_path = paste0(dst_copies[i], ".fai"))$success[1])
+  }
+
+  for (i in c(seq_len(12), 1, 6, 12)) {
+    res <- DBI::dbGetQuery(
+      con,
+      sprintf(
+        paste(
+          "SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt, lo.mapped",
+          "FROM (SELECT bcftools_liftover(",
+          "'chrF', 2, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT, false",
+          ") AS lo) s"
+        ),
+        chain_copies[i], dst_copies[i], src_copies[i]
+      )
+    )
+    expect_equal(res$dest_chrom[1], "chrLiftF")
+    expect_equal(res$dest_pos[1], 2)
+    expect_equal(res$dest_ref[1], "C")
+    expect_equal(res$dest_alt[1], "T")
+    expect_true(res$mapped[1])
+  }
 }
 
 test_liftover()

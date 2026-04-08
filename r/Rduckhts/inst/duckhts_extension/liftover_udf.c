@@ -17,6 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/regidx.h>
 
 #define LIFTOVER_WARNING_BUF 256
+#define LIFTOVER_CACHE_MAX_ENTRIES 8
 typedef struct {
     int t_start;
     int q_start;
@@ -94,6 +95,22 @@ static liftover_cache_entry_t *get_liftover_cache_head(void) {
 static void set_liftover_cache_head(liftover_cache_entry_t *head) {
     pthread_once(&g_liftover_cache_key_once, init_liftover_cache_key);
     pthread_setspecific(g_liftover_cache_key, head);
+}
+
+static void trim_liftover_cache_head(liftover_cache_entry_t *head) {
+    size_t count = 0;
+    liftover_cache_entry_t *entry = head;
+    liftover_cache_entry_t *prev = NULL;
+    while (entry) {
+        count++;
+        if (count > LIFTOVER_CACHE_MAX_ENTRIES) {
+            if (prev) prev->next = NULL;
+            destroy_liftover_cache(entry);
+            return;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
 }
 
 enum {
@@ -1194,6 +1211,9 @@ static void scalar_realign_cleanup(scalar_realign_t *ra) {
  * Returns the alignment score. Path is stored in path->s. */
 static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstring_t *path) {
     if (!path) return -1;
+    path->l = 0;
+    if (path->s) path->s[0] = '\0';
+    if (s_l == 0 || t_l == 0) return -1;
     if (s_l > (size_t)(INT_MAX - 1) || t_l > (size_t)(INT_MAX - 1)) return -1;
     int a = 1;   /* score for a sequence match */
     int b = -4;  /* penalty for a mismatch */
@@ -1341,7 +1361,7 @@ static void scalar_clip_pad(char **alleles, int n_allele,
         /* Pairwise align source and destination sequences excluding the anchors */
         int new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
                                   src_seq.s + 1, src_seq.l - 2, &path);
-        if (!path.s) continue;
+        if (new_score < 0 || !path.s || path.s[0] == '\0') continue;
         if (new_score > best_score) {
             best_score = new_score;
             best_shift = scalar_get_shift(path.s, npad);
@@ -1657,9 +1677,10 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
                                              char **errbuf_out) {
     liftover_cache_entry_t *head = get_liftover_cache_head();
     liftover_cache_entry_t *entry = NULL;
+    liftover_cache_entry_t *prev = NULL;
     liftover_bind_t *loaded = NULL;
 
-    for (entry = head; entry; entry = entry->next) {
+    for (entry = head; entry; prev = entry, entry = entry->next) {
         liftover_bind_t *bind = entry->bind;
         if (strcmp(bind->chain_path, chain_path) == 0 &&
             strcmp(bind->dst_fasta_ref, dst_fasta_ref) == 0 &&
@@ -1667,6 +1688,12 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
              (bind->src_fasta_ref && src_fasta_ref && strcmp(bind->src_fasta_ref, src_fasta_ref) == 0)) &&
             bind->max_snp_gap == max_snp_gap &&
             bind->max_indel_inc == max_indel_inc) {
+            if (prev) {
+                prev->next = entry->next;
+                entry->next = head;
+                head = entry;
+                set_liftover_cache_head(head);
+            }
             return bind;
         }
     }
@@ -1681,6 +1708,8 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
     }
     entry->bind = loaded;
     entry->next = head;
+    head = entry;
+    trim_liftover_cache_head(head);
     set_liftover_cache_head(entry);
     return loaded;
 }
