@@ -549,10 +549,11 @@ dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")
 index_spans_preview <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
 head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
 #>   seqname tid index_type chunk_beg_vo chunk_end_vo
-#> 1       1   0        CSI           NA           NA
-#> 2       2   1        CSI           NA           NA
-#> 3       3   2        CSI           NA           NA
-#> 4       4   3        CSI           NA           NA
+#> 1       1   0        CSI         1586         1713
+#> 2       1   0        CSI         1713         1973
+#> 3       1   0        CSI         1973         2109
+#> 4       1   0        CSI         2109         2242
+#> 5       1   0        CSI         2242         2372
 ```
 
 ### Remote VCF on S3
@@ -810,10 +811,11 @@ head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
 index_spans <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
 head(index_spans[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
 #>   seqname tid index_type chunk_beg_vo chunk_end_vo
-#> 1       1   0        CSI           NA           NA
-#> 2       2   1        CSI           NA           NA
-#> 3       3   2        CSI           NA           NA
-#> 4       4   3        CSI           NA           NA
+#> 1       1   0        CSI         1586         1713
+#> 2       1   0        CSI         1713         1973
+#> 3       1   0        CSI         1973         2109
+#> 4       1   0        CSI         2109         2242
+#> 5       1   0        CSI         2242         2372
 
 index_raw <- rduckhts_hts_index_raw(con, bcf_path, index_path = bcf_index_path)
 head(index_raw, 1)

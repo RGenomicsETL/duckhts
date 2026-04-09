@@ -2,6 +2,7 @@
 
 ## duckhts 1.1.6 (2026-04-09)
 
+- implement real `read_hts_index_spans(...)` chunk expansion for binning indexes: replace the previous SQL macro placeholder rows with a native table function that enumerates CSI/TBI/BAI chunk records from the bundled `htslib` index structures, populating `bin`, `chunk_beg_vo`, `chunk_end_vo`, `chunk_bytes`, `seq_start`, and `seq_end` with real values for low-level index inspection; avoid spurious `tbx` probe errors on BCF indexes by loading BCF indexes directly
 - add `FILE_OFFSET UBIGINT` column to `read_bam(...)`: exposes the BGZF virtual file offset after reading each record via `bgzf_tell()` (a zero-cost macro over already-open BGZF struct fields). The offset is monotonically increasing within a sequential BAM scan and correctly encodes block address and block offset as `(block_address << 16) | block_offset`. This enables `ORDER BY FILE_OFFSET` in SQL window functions to reproduce exact BAM file order, which is required to faithfully replicate position-based streaming deduplication algorithms (such as WisecondorX's larp/larp2 state machine) without writing C or R loops.
 
 ## duckhts 1.1.5 (2026-04-08)

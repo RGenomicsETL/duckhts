@@ -773,7 +773,7 @@ dbGetQuery(con, "
   LIMIT 3
 ")
 #>   seqname tid index_type chunk_beg_vo chunk_end_vo
-#> 1       1   0        CSI           NA           NA
+#> 1       1   0        CSI     20381696     23789568
 
 dbGetQuery(con, "
   SELECT index_type, octet_length(raw) AS raw_bytes

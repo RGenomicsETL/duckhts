@@ -136,9 +136,20 @@ test_table_creation <- function() {
   index_meta <- rduckhts_hts_index(con, bcf_path, index_path = bcf_index_path)
   expect_true(nrow(index_meta) > 0)
   expect_true("index_type" %in% names(index_meta))
-  index_spans <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
-  expect_true(nrow(index_spans) > 0)
+  index_spans <- rduckhts_hts_index_spans(
+    con,
+    formatcols_vcf_path,
+    index_path = formatcols_vcf_index_path
+  )
+  expect_equal(nrow(index_spans), 1)
   expect_true("chunk_beg_vo" %in% names(index_spans))
+  expect_equal(index_spans$seqname[[1]], "1")
+  expect_equal(index_spans$tid[[1]], 0)
+  expect_equal(index_spans$bin[[1]], 2396745)
+  expect_equal(index_spans$chunk_beg_vo[[1]], 20381696)
+  expect_equal(index_spans$chunk_end_vo[[1]], 23789568)
+  expect_equal(index_spans$seq_start[[1]], 1)
+  expect_equal(index_spans$seq_end[[1]], 16384)
   index_raw <- rduckhts_hts_index_raw(
     con,
     formatcols_vcf_path,

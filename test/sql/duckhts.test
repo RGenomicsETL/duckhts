@@ -217,6 +217,43 @@ SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END FROM read_bam('__WORKING_DIRECTO
 ----
 1
 
+# --- FILE_OFFSET: present in schema as UBIGINT after SAMPLE_ID ---
+query TT
+SELECT column_name, column_type
+FROM (DESCRIBE SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam'))
+WHERE column_name IN ('SAMPLE_ID', 'FILE_OFFSET')
+ORDER BY column_name;
+----
+FILE_OFFSET	UBIGINT
+SAMPLE_ID	VARCHAR
+
+# --- FILE_OFFSET: positive, unique, strictly increasing across all records ---
+query I
+WITH offsets AS (
+    SELECT FILE_OFFSET FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
+),
+checks AS (
+    SELECT
+        COUNT(*) FILTER (WHERE FILE_OFFSET <= 0)        AS non_positive,
+        COUNT(*) - COUNT(DISTINCT FILE_OFFSET)           AS duplicates
+    FROM offsets
+)
+SELECT CASE WHEN non_positive = 0 AND duplicates = 0 THEN 1 ELSE 0 END FROM checks;
+----
+1
+
+# --- FILE_OFFSET: ORDER BY FILE_OFFSET in LAG() has no inversions (CTE pattern) ---
+query I
+WITH windowed AS (
+    SELECT FILE_OFFSET,
+           LAG(FILE_OFFSET) OVER (ORDER BY FILE_OFFSET) AS prev_offset
+    FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam')
+)
+SELECT COUNT(*) FILTER (WHERE prev_offset >= FILE_OFFSET) AS order_violations
+FROM windowed;
+----
+0
+
 # ==============================================================
 # read_fasta – FASTA reader
 # ==============================================================
@@ -608,9 +645,18 @@ LIMIT 1;
 ----
 CSI
 
-# --- index spans macro available ---
+# --- index spans return real chunk offsets ---
 query I
-SELECT count(*)
+SELECT CASE
+         WHEN seqname = '1'
+          AND tid = 0
+          AND bin = 2396745
+          AND chunk_beg_vo = 20381696
+          AND chunk_end_vo = 23789568
+          AND seq_start = 1
+          AND seq_end = 16384
+         THEN 1 ELSE 0
+       END
 FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
 ----
 1
