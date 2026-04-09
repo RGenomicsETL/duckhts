@@ -2,6 +2,25 @@
 
 ## Rduckhts 1.1.6.9000-0.0.2 (Development version)
 
+- Fix Wasm package builds under `rwasm` / r-universe: the package
+  `configure` script now preserves injected `NAME=VALUE` cache
+  overrides, forwards explicit `--build` / `--host` triplets into the
+  vendored `htslib` `./configure`, forwards webR’s Emscripten port flags
+  for `zlib`/`bzip2`, seeds wasm-safe Autoconf cache results for
+  `zlib`/`bzip2`/socket probes, injects a tiny Emscripten-only socket
+  compatibility shim for `recv`/`send`/`closesocket`, and disables only
+  the optional `htslib` features that are not available in the stock
+  webR/r-universe wasm toolchain (`libcurl`, `S3`, `GCS`, `lzma`,
+  plugins); this fixes the original
+  `ac_cv_func_getrandom=no: command not found` failure and the
+  subsequent nested `htslib` cross-compile probe failures without
+  changing native configure behavior.
+- Fix bundled extension wasm artifacts: the upstream CMake/CI build now
+  emits a side-module link response file so DuckDB wasm packages link
+  vendored `htslib` into the final `.duckdb_extension.wasm` instead of
+  shipping unresolved symbols such as `bcf_readrec` that only failed
+  later at `LOAD`.
+
 ## Rduckhts 1.1.6-0.0.2 (2026-04-09)
 
 CRAN release: 2026-04-09
