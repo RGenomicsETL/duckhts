@@ -393,3 +393,69 @@ message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 target_link_libraries(${EXTENSION_NAME} PRIVATE
     ${HTSLIB_LINK_LIBS}
 )
+
+if(DUCKDB_WASM_EXTENSION)
+    # The DuckDB C API wasm packager links the final side-module from the
+    # produced extension archive, so emit the vendored htslib archive and any
+    # wasm-safe transitive libraries that must be added at that final link.
+    set(DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS
+        "${HTSLIB_BUILD_DIR}/libhts.a"
+    )
+
+    if(TARGET ZLIB::ZLIB)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "$<TARGET_FILE:ZLIB::ZLIB>")
+    elseif(ZLIB_LIBRARIES)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS ${ZLIB_LIBRARIES})
+    endif()
+
+    if(BZIP2_FOUND)
+        if(TARGET BZip2::BZip2)
+            list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "$<TARGET_FILE:BZip2::BZip2>")
+        elseif(BZIP2_LIBRARIES)
+            list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS ${BZIP2_LIBRARIES})
+        endif()
+    endif()
+
+    if(LIBLZMA_FOUND)
+        if(TARGET LibLZMA::LibLZMA)
+            list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "$<TARGET_FILE:LibLZMA::LibLZMA>")
+        elseif(LIBLZMA_LIBRARIES)
+            list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS ${LIBLZMA_LIBRARIES})
+        endif()
+    endif()
+
+    if(LIBDEFLATE_FOUND)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "${LIBDEFLATE_LIBRARY}")
+    endif()
+
+    if(CURL_FOUND)
+        if(WIN32 AND MINGW)
+            list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS ${PC_LIBCURL_LDFLAGS_LIST})
+        elseif(TARGET CURL::libcurl)
+            list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "$<TARGET_FILE:CURL::libcurl>")
+        endif()
+    endif()
+
+    if(OPENSSL_FOUND AND TARGET OpenSSL::Crypto)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "$<TARGET_FILE:OpenSSL::Crypto>")
+    endif()
+
+    if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS "${GNUREGEX_LIBRARY}")
+    endif()
+
+    if(WIN32 AND MINGW)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS -lws2_32)
+    endif()
+
+    if(NOT APPLE AND NOT WIN32)
+        list(APPEND DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS -lm)
+    endif()
+
+    list(REMOVE_DUPLICATES DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS)
+    string(JOIN "\n" DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS_CONTENT ${DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS})
+    file(GENERATE
+        OUTPUT "${CMAKE_BINARY_DIR}/wasm_link_inputs.rsp"
+        CONTENT "${DUCKHTS_WASM_SIDE_MODULE_LINK_INPUTS_CONTENT}\n"
+    )
+endif()

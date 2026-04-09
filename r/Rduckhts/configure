@@ -5,13 +5,19 @@ set -eu
 THIS_DIR=`dirname "$0"`
 THIS_DIR=`cd "$THIS_DIR" && pwd`
 
-# Capture configure arguments (--host, --build, etc.)
-CONFIGURE_ARGS="$@"
+# Capture configure arguments (--host, --build, etc.) while preserving
+# Autoconf-style NAME=VALUE cache overrides injected by rwasm.
+CONFIGURE_ARGS=""
+CONFIGURE_CACHE_VARS=""
 
 HOST_TRIPLET=""
+BUILD_TRIPLET=""
 for arg in "$@"; do
   case "$arg" in
     --host=*) HOST_TRIPLET="${arg#--host=}";;
+    --build=*) BUILD_TRIPLET="${arg#--build=}";;
+    [A-Za-z_]*=*) CONFIGURE_CACHE_VARS="${CONFIGURE_CACHE_VARS} ${arg}";;
+    *) CONFIGURE_ARGS="${CONFIGURE_ARGS} ${arg}";;
   esac
 done
 
@@ -212,21 +218,44 @@ LIBS="$LIBS -lpthread"
 echo "---------- Configuring htslib ----------"
 cd "${HTSLIB_DIR}"
 
-CONFIGURE_EXTRA_FLAGS=""
+HTSLIB_CONFIGURE_CACHE_VARS="${CONFIGURE_CACHE_VARS}"
 HTSLIB_PLUGINS="--enable-plugins"
 HTSLIB_S3="--enable-s3"
 HTSLIB_GCS="--enable-gcs"
 
 if [ "${WASM_BUILD}" = "yes" ]; then
   echo "Detected WebAssembly/r-wasm build environment"
-  echo "Disabling plugins, S3, and GCS support (not available in wasm)"
-  CONFIGURE_EXTRA_FLAGS="ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no"
+  echo "Disabling plugins, libcurl, S3, GCS, BZ2, and LZMA support (not available in the stock webR/r-universe wasm toolchain)"
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no"
   HTSLIB_PLUGINS="--disable-plugins"
+  HAS_BZ2=no
+  HAS_LZMA=no
+  HAS_CURL=no
+  HAS_OPENSSL=no
   HTSLIB_S3="--disable-s3"
   HTSLIB_GCS="--disable-gcs"
+  CPPFLAGS="${CPPFLAGS} -include ${THIS_DIR}/tools/wasm_socket_compat.h"
 fi
 
 HTSLIB_CONFIGURE_FLAGS="${HTSLIB_PLUGINS} ${HTSLIB_S3} ${HTSLIB_GCS}"
+HTSLIB_CROSS_FLAGS=""
+
+if [ -n "${BUILD_TRIPLET}" ]; then
+  HTSLIB_CROSS_FLAGS="${HTSLIB_CROSS_FLAGS} --build=${BUILD_TRIPLET}"
+fi
+
+if [ -n "${HOST_TRIPLET}" ]; then
+  HTSLIB_CROSS_FLAGS="${HTSLIB_CROSS_FLAGS} --host=${HOST_TRIPLET}"
+fi
+
+if [ "$HAS_ZLIB" = "yes" ]; then
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_lib_z_inflate=yes"
+fi
+
+if [ "${WASM_BUILD}" = "yes" ]; then
+  ac_cv_search_recv="none required"
+  export ac_cv_search_recv
+fi
 
 if [ "$HAS_BZ2" = "no" ]; then
   echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
@@ -245,7 +274,8 @@ elif [ "$HAS_OPENSSL" = "no" ]; then
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
 fi
 
-${CONFIGURE_EXTRA_FLAGS} ./configure \
+env ${HTSLIB_CONFIGURE_CACHE_VARS} ./configure \
+  ${HTSLIB_CROSS_FLAGS} \
   ${CONFIGURE_ARGS} \
   --prefix="${HTSLIB_DIR}" \
   CC="${CC}" \

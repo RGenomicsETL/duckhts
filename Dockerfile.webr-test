@@ -1,13 +1,23 @@
 FROM ghcr.io/r-wasm/webr:main
 
-# Copy the package source to /work
-COPY . /work
+WORKDIR /work
+COPY description.yml functions.yaml /work/
+COPY duckdb_capi /work/duckdb_capi
+COPY r/Rduckhts /work/r/Rduckhts
+COPY scripts /work/scripts
+COPY src /work/src
+COPY third_party /work/third_party
+RUN git init /work && git -C /work config user.email docker@example.invalid && git -C /work config user.name docker && git -C /work add -A && git -C /work commit -qm docker-context
 
-# Set working directory
 WORKDIR /work/r/Rduckhts
 
-# Install the package using pak
-RUN THREADS=4 Rscript -e 'pak::pak(".", ask = FALSE)'
-RUN THREADS=4 Rscript -e 'pak::pak("tinytest", ask = FALSE)'
-# Default command to show package info
-CMD ["Rscript", "-e", "library(Rduckhts); tinytest::test_package('Rduckhts')"]
+RUN Rscript bootstrap.R /work
+RUN mkdir -p /tmp/Rduckhts-src && cp -a . /tmp/Rduckhts-src
+RUN rm -rf /tmp/Rduckhts-src/.github /tmp/Rduckhts-src/Rduckhts.Rcheck /tmp/Rduckhts-src/..Rcheck /tmp/Rduckhts-src/README.html
+RUN R CMD build /tmp/Rduckhts-src
+RUN Rscript -e 'if (!requireNamespace("pak", quietly = TRUE)) install.packages("pak", repos = "https://cloud.r-project.org")'
+RUN Rscript -e 'pak::pak("r-wasm/rwasm", ask = FALSE)'
+RUN Rscript -e 'version <- read.dcf("DESCRIPTION")[1, "Version"]; tarball <- sprintf("./Rduckhts_%s.tar.gz", version); stopifnot(file.exists(tarball)); print(tarball); rwasm::build(tarball)'
+RUN Rscript -e 'version <- read.dcf("DESCRIPTION")[1, "Version"]; tarball <- sprintf("./Rduckhts_%s.tar.gz", version); stopifnot(file.exists(tarball)); install.packages(tarball, repos = NULL, type = "source")'
+
+CMD ["Rscript", "-e", "library(DBI); library(duckdb); library(Rduckhts); con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = 'true'))); on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE); stopifnot(rduckhts_load(con)); bam_path <- system.file('extdata', 'range.bam', package = 'Rduckhts'); stopifnot(nzchar(bam_path)); rduckhts_bam(con, 'reads', bam_path, overwrite = TRUE); print(DBI::dbGetQuery(con, 'SELECT COUNT(*) AS n FROM reads'))"]
