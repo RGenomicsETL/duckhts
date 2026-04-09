@@ -1,6 +1,10 @@
 # Changelog
 
+## Rduckhts 1.1.6.9000-0.0.2 (Development version)
+
 ## Rduckhts 1.1.6-0.0.2 (2026-04-09)
+
+CRAN release: 2026-04-09
 
 - Fix `test_bam_file_offset`: cast `COUNT(*)` results to `INTEGER` in
   SQL so the DuckDB driver returns R `integer` rather than `numeric`
