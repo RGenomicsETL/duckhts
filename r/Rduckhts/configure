@@ -5,13 +5,19 @@ set -eu
 THIS_DIR=`dirname "$0"`
 THIS_DIR=`cd "$THIS_DIR" && pwd`
 
-# Capture configure arguments (--host, --build, etc.)
-CONFIGURE_ARGS="$@"
+# Capture configure arguments (--host, --build, etc.) while preserving
+# Autoconf-style NAME=VALUE cache overrides injected by rwasm.
+CONFIGURE_ARGS=""
+CONFIGURE_CACHE_VARS=""
 
 HOST_TRIPLET=""
+BUILD_TRIPLET=""
 for arg in "$@"; do
   case "$arg" in
     --host=*) HOST_TRIPLET="${arg#--host=}";;
+    --build=*) BUILD_TRIPLET="${arg#--build=}";;
+    [A-Za-z_]*=*) CONFIGURE_CACHE_VARS="${CONFIGURE_CACHE_VARS} ${arg}";;
+    *) CONFIGURE_ARGS="${CONFIGURE_ARGS} ${arg}";;
   esac
 done
 
@@ -57,6 +63,15 @@ fi
 CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
 CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
 LDFLAGS="${R_LDFLAGS}"
+EM_PORT_FLAGS=""
+
+if [ "${WASM_BUILD}" = "yes" ]; then
+  # webR/rwasm provide zlib and bzip2 via Emscripten ports, but nested
+  # Autoconf probes only see them if we forward the same link flags here.
+  EM_PORT_FLAGS="-s USE_ZLIB=1 -s USE_BZIP2=1"
+  CFLAGS="${CFLAGS} ${EM_PORT_FLAGS}"
+  LDFLAGS="${LDFLAGS} ${EM_PORT_FLAGS}"
+fi
 
 add_prefix_if_header() {
   header=$1
@@ -212,21 +227,47 @@ LIBS="$LIBS -lpthread"
 echo "---------- Configuring htslib ----------"
 cd "${HTSLIB_DIR}"
 
-CONFIGURE_EXTRA_FLAGS=""
+HTSLIB_CONFIGURE_CACHE_VARS="${CONFIGURE_CACHE_VARS}"
 HTSLIB_PLUGINS="--enable-plugins"
 HTSLIB_S3="--enable-s3"
 HTSLIB_GCS="--enable-gcs"
 
 if [ "${WASM_BUILD}" = "yes" ]; then
   echo "Detected WebAssembly/r-wasm build environment"
-  echo "Disabling plugins, S3, and GCS support (not available in wasm)"
-  CONFIGURE_EXTRA_FLAGS="ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no"
+  echo "Disabling plugins, libcurl, S3, GCS, and LZMA support (not available in the stock webR/r-universe wasm toolchain)"
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no ac_cv_func_srand48_deterministic=no"
   HTSLIB_PLUGINS="--disable-plugins"
+  HAS_LZMA=no
+  HAS_CURL=no
+  HAS_OPENSSL=no
   HTSLIB_S3="--disable-s3"
   HTSLIB_GCS="--disable-gcs"
+  CPPFLAGS="${CPPFLAGS} -include ${THIS_DIR}/tools/wasm_socket_compat.h"
 fi
 
 HTSLIB_CONFIGURE_FLAGS="${HTSLIB_PLUGINS} ${HTSLIB_S3} ${HTSLIB_GCS}"
+HTSLIB_CROSS_FLAGS=""
+
+if [ -n "${BUILD_TRIPLET}" ]; then
+  HTSLIB_CROSS_FLAGS="${HTSLIB_CROSS_FLAGS} --build=${BUILD_TRIPLET}"
+fi
+
+if [ -n "${HOST_TRIPLET}" ]; then
+  HTSLIB_CROSS_FLAGS="${HTSLIB_CROSS_FLAGS} --host=${HOST_TRIPLET}"
+fi
+
+if [ "$HAS_ZLIB" = "yes" ]; then
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_lib_z_inflate=yes"
+fi
+
+if [ "$HAS_BZ2" = "yes" ]; then
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_header_bzlib_h=yes ac_cv_lib_bz2_BZ2_bzBuffToBuffCompress=yes"
+fi
+
+if [ "${WASM_BUILD}" = "yes" ]; then
+  ac_cv_search_recv="none required"
+  export ac_cv_search_recv
+fi
 
 if [ "$HAS_BZ2" = "no" ]; then
   echo "INFO: libbz2 not found - disabling BZ2 support in htslib"
@@ -245,7 +286,26 @@ elif [ "$HAS_OPENSSL" = "no" ]; then
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
 fi
 
-${CONFIGURE_EXTRA_FLAGS} ./configure \
+HTSLIB_LIBS=""
+if [ "${WASM_BUILD}" != "yes" ] && [ "$HAS_ZLIB" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -lz"
+fi
+if [ "${WASM_BUILD}" != "yes" ] && [ "$HAS_BZ2" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -lbz2"
+fi
+if [ "$HAS_LZMA" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -llzma"
+fi
+if [ "$HAS_CURL" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -lcurl"
+fi
+if [ "$HAS_OPENSSL" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} ${OPENSSL_TEST_LIBS}"
+fi
+HTSLIB_LIBS="${HTSLIB_LIBS} -lpthread"
+
+env ${HTSLIB_CONFIGURE_CACHE_VARS} ./configure \
+  ${HTSLIB_CROSS_FLAGS} \
   ${CONFIGURE_ARGS} \
   --prefix="${HTSLIB_DIR}" \
   CC="${CC}" \
@@ -254,7 +314,7 @@ ${CONFIGURE_EXTRA_FLAGS} ./configure \
   CFLAGS="${CFLAGS}" \
   CPPFLAGS="${CPPFLAGS}" \
   LDFLAGS="${LDFLAGS}" \
-  LIBS="${LIBS}" \
+  LIBS="${HTSLIB_LIBS}" \
   ${HTSLIB_CONFIGURE_FLAGS}
 
 echo "---------- Building htslib (static + shared) ----------"

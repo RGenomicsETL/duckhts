@@ -2,6 +2,9 @@
 
 # duckhts 1.1.6.9000 Developement version
 
+- harden the bundled `Rduckhts` WebAssembly build path: the package `configure` script now preserves `rwasm`/r-universe `NAME=VALUE` cache overrides, forwards explicit `--build` / `--host` triplets into the vendored `htslib` `./configure`, forwards webR's Emscripten port flags for `zlib`/`bzip2`, seeds wasm-safe Autoconf cache results for `zlib`/`bzip2`/socket probes, injects a tiny Emscripten-only socket compatibility shim for `recv`/`send`/`closesocket`, and disables only the optional `htslib` features that are not available in the stock webR/r-universe wasm toolchain (`libcurl`, `S3`, `GCS`, `lzma`, `plugins`); this fixes the original `ac_cv_func_getrandom=no: command not found` failure and subsequent nested `htslib` cross-compile probe failures without changing non-Wasm targets
+- fix community-extension wasm packaging: the CMake/CI build now emits a final-link response file for the DuckDB wasm side-module so the generated `.duckdb_extension.wasm` links vendored `htslib` (and any enabled compression/crypto dependencies) instead of wrapping only `libduckhts.a`, which left `bcf_readrec` and other `htslib` symbols unresolved at `LOAD` time
+
 ## duckhts 1.1.6 (2026-04-09)
 
 - implement real `read_hts_index_spans(...)` chunk expansion for binning indexes: replace the previous SQL macro placeholder rows with a native table function that enumerates CSI/TBI/BAI chunk records from the bundled `htslib` index structures, populating `bin`, `chunk_beg_vo`, `chunk_end_vo`, `chunk_bytes`, `seq_start`, and `seq_end` with real values for low-level index inspection; avoid spurious `tbx` probe errors on BCF indexes by loading BCF indexes directly
