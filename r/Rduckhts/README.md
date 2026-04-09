@@ -233,7 +233,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_readme_10e4953f35569d.fai
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_readme_112d8f4646b7fb.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -293,10 +293,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_liftover_src_10e4951b0b76f2.fa.fai
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_liftover_src_112d8f67b539a5.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_liftover_dst_10e4956fef2f0b.fa.fai
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_liftover_dst_112d8f37b8c8a3.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -340,8 +340,8 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                          index_path
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_munge_10e495452272ad.fa.fai
+#>   success                                         index_path
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_munge_112d8ffd04e2a.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -414,12 +414,12 @@ writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
 #>   success                                           output_path bytes_in
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_targets_10e4956b2d6f61.bed.gz       25
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_targets_112d8f377a2741.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_targets_10e4956b2d6f61.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_targets_112d8f377a2741.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
@@ -486,7 +486,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpreURIp/duckhts_readme_10e49542184492.fai
+#> 1    TRUE /tmp/RtmpDtZah6/duckhts_readme_112d8f559811ec.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
@@ -551,10 +551,11 @@ dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")
 index_spans_preview <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
 head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
 #>   seqname tid index_type chunk_beg_vo chunk_end_vo
-#> 1       1   0        CSI           NA           NA
-#> 2       2   1        CSI           NA           NA
-#> 3       3   2        CSI           NA           NA
-#> 4       4   3        CSI           NA           NA
+#> 1       1   0        CSI         1586         1713
+#> 2       1   0        CSI         1713         1973
+#> 3       1   0        CSI         1973         2109
+#> 4       1   0        CSI         2109         2242
+#> 5       1   0        CSI         2242         2372
 ```
 
 ### Remote VCF on S3
@@ -812,10 +813,11 @@ head(index_meta[, c("seqname", "mapped", "unmapped", "index_type")], 5)
 index_spans <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)
 head(index_spans[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_vo")], 5)
 #>   seqname tid index_type chunk_beg_vo chunk_end_vo
-#> 1       1   0        CSI           NA           NA
-#> 2       2   1        CSI           NA           NA
-#> 3       3   2        CSI           NA           NA
-#> 4       4   3        CSI           NA           NA
+#> 1       1   0        CSI         1586         1713
+#> 2       1   0        CSI         1713         1973
+#> 3       1   0        CSI         1973         2109
+#> 4       1   0        CSI         2109         2242
+#> 5       1   0        CSI         2242         2372
 
 index_raw <- rduckhts_hts_index_raw(con, bcf_path, index_path = bcf_index_path)
 head(index_raw, 1)
