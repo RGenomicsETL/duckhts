@@ -67,6 +67,7 @@ subset(rduckhts_functions(kind = "table"), select = c("name", "r_wrapper"))
 #> 16             tabix_index             rduckhts_tabix_index
 #> 17         read_hts_header              rduckhts_hts_header
 #> 18          read_hts_index               rduckhts_hts_index
-#> 19          bcftools_score                   rduckhts_score
-#> 20               seq_kmers                                 
+#> 19    read_hts_index_spans         rduckhts_hts_index_spans
+#> 20          bcftools_score                   rduckhts_score
+#> 21               seq_kmers                                 
 ```
