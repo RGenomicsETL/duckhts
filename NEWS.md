@@ -1,5 +1,7 @@
 # DuckHTS Extension News
 
+# duckhts 1.1.6.9000 Developement version
+
 ## duckhts 1.1.6 (2026-04-09)
 
 - implement real `read_hts_index_spans(...)` chunk expansion for binning indexes: replace the previous SQL macro placeholder rows with a native table function that enumerates CSI/TBI/BAI chunk records from the bundled `htslib` index structures, populating `bin`, `chunk_beg_vo`, `chunk_end_vo`, `chunk_bytes`, `seq_start`, and `seq_end` with real values for low-level index inspection; avoid spurious `tbx` probe errors on BCF indexes by loading BCF indexes directly
