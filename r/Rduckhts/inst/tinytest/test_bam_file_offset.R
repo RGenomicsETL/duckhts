@@ -69,9 +69,9 @@ test_file_offset <- function() {
       FROM read_bam('%s')
     )
     SELECT
-      COUNT(*)                                             AS total,
-      COUNT(DISTINCT FILE_OFFSET)                         AS distinct_offsets,
-      COUNT(*) FILTER (WHERE prev_offset >= FILE_OFFSET)  AS order_violations
+      COUNT(*)::INTEGER                                             AS total,
+      COUNT(DISTINCT FILE_OFFSET)::INTEGER                         AS distinct_offsets,
+      COUNT(*) FILTER (WHERE prev_offset >= FILE_OFFSET)::INTEGER  AS order_violations
     FROM windowed
   ", bam_path))
 

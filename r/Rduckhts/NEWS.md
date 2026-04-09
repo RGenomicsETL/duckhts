@@ -1,4 +1,8 @@
 
+# Rduckhts 1.1.6-0.0.2 (2026-04-09)
+
+- Fix `test_bam_file_offset`: cast `COUNT(*)` results to `INTEGER` in SQL so the DuckDB driver returns R `integer` rather than `numeric` (BIGINT maps to double in the duckdb R driver), restoring `expect_identical` assertions.
+
 # Rduckhts 1.1.6-0.0.1 (2026-04-09)
 
 - Fix bundled `read_hts_index_spans(...)` / `rduckhts_hts_index_spans()`: the span view now returns real chunk rows from CSI/TBI/BAI indexes, including populated `bin`, `chunk_beg_vo`, `chunk_end_vo`, `chunk_bytes`, `seq_start`, and `seq_end` values instead of placeholder `NA`s; BCF-backed calls also avoid the previous noisy `tbx` probe warning on `.csi` indexes.
