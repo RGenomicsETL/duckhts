@@ -57,19 +57,28 @@ test_file_offset <- function() {
   # ---- Window function: LAG(FILE_OFFSET) usable without errors ----
   # Verify the column works as an ORDER BY key in a window function; this is
   # the foundation of the larp/larp2 SQL dedup used by WisecondorX.
+  #
+  # NOTE: window functions cannot be nested inside aggregate FILTER clauses in
+  # DuckDB ("Binder Error: aggregate function calls cannot contain window
+  # function calls"). Compute the window in a CTE first, then aggregate.
   lag_q <- dbGetQuery(con, sprintf("
-    SELECT FILE_OFFSET,
-           LAG(FILE_OFFSET) OVER (ORDER BY FILE_OFFSET) AS prev_offset
-    FROM read_bam('%s')
-    ORDER BY FILE_OFFSET
-    LIMIT 5
+    WITH windowed AS (
+      SELECT
+        FILE_OFFSET,
+        LAG(FILE_OFFSET) OVER (ORDER BY FILE_OFFSET) AS prev_offset
+      FROM read_bam('%s')
+    )
+    SELECT
+      COUNT(*)                                             AS total,
+      COUNT(DISTINCT FILE_OFFSET)                         AS distinct_offsets,
+      COUNT(*) FILTER (WHERE prev_offset >= FILE_OFFSET)  AS order_violations
+    FROM windowed
   ", bam_path))
 
-  expect_true(nrow(lag_q) > 0L, info = "LAG() over FILE_OFFSET returns rows")
-  expect_true(is.na(lag_q$prev_offset[1]),
-              info = "first row prev_offset is NA (no predecessor)")
-  expect_true(all(lag_q$FILE_OFFSET[-1] > lag_q$prev_offset[-1], na.rm = TRUE),
-              info = "FILE_OFFSET always exceeds its LAG value")
+  expect_identical(lag_q$total[1], lag_q$distinct_offsets[1],
+                   info = "no duplicate FILE_OFFSET values")
+  expect_identical(lag_q$order_violations[1], 0L,
+                   info = "no order violations: FILE_OFFSET strictly increases")
 
   dbDisconnect(con, shutdown = TRUE)
 }
