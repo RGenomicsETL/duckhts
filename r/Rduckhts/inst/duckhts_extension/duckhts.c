@@ -44,6 +44,7 @@ extern void register_read_gff_function(duckdb_connection connection);
 /* hts_meta_reader.c */
 extern void register_read_hts_header_function(duckdb_connection connection);
 extern void register_read_hts_index_function(duckdb_connection connection);
+extern void register_read_hts_index_spans_function(duckdb_connection connection);
 /* quality_encoding_reader.c */
 extern void register_detect_quality_encoding_function(duckdb_connection connection);
 /* score_udf.c */
@@ -119,6 +120,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_gff_function(connection);
     register_read_hts_header_function(connection);
     register_read_hts_index_function(connection);
+    register_read_hts_index_spans_function(connection);
     register_detect_quality_encoding_function(connection);
     register_bcftools_score_function(connection);
     if (!run_sql_or_fail(connection,
@@ -240,20 +242,6 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
                                    sizeof(duckdb_munge_metal_sql) / sizeof(duckdb_munge_metal_sql[0]))) {
             return false;
         }
-    }
-    if (!run_sql_or_fail(connection,
-        "CREATE OR REPLACE MACRO read_hts_index_spans(path, format := NULL, index_path := NULL) AS TABLE "
-        "SELECT "
-        "file_format, seqname, tid, "
-        "CAST(NULL AS BIGINT) AS bin, "
-        "CAST(NULL AS UBIGINT) AS chunk_beg_vo, "
-        "CAST(NULL AS UBIGINT) AS chunk_end_vo, "
-        "CAST(NULL AS UBIGINT) AS chunk_bytes, "
-        "CAST(NULL AS BIGINT) AS seq_start, "
-        "length AS seq_end, "
-        "mapped, unmapped, n_no_coor, index_type, index_path, meta "
-        "FROM read_hts_index(path, format := format, index_path := index_path)")) {
-        return false;
     }
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO read_hts_index_raw(path, format := NULL, index_path := NULL) AS TABLE "

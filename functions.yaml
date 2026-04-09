@@ -265,7 +265,7 @@
     },
     {
       "name": "read_hts_index_spans",
-      "kind": "table_macro",
+      "kind": "table",
       "category": "Metadata",
       "signature": "read_hts_index_spans(path, format := NULL, index_path := NULL)",
       "returns": "table",

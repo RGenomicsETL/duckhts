@@ -24,7 +24,7 @@ This section is generated from `functions.yaml`.
 | `detect_quality_encoding` | table | table | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file's observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding. |
 | `read_hts_header` | table | table | `rduckhts_hts_header` | Inspect HTS headers in parsed, raw, or combined form across supported formats. |
 | `read_hts_index` | table | table | `rduckhts_hts_index` | Inspect high-level HTS index metadata such as sequence names and mapped counts. |
-| `read_hts_index_spans` | table_macro | table | `rduckhts_hts_index_spans` | Expand index metadata into span and chunk rows suitable for low-level index inspection. |
+| `read_hts_index_spans` | table | table | `rduckhts_hts_index_spans` | Expand index metadata into span and chunk rows suitable for low-level index inspection. |
 | `read_hts_index_raw` | table_macro | table | `rduckhts_hts_index_raw` | Return the raw on-disk HTS index blob together with basic identifying metadata. |
 
 ### Compression

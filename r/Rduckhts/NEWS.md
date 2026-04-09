@@ -1,4 +1,9 @@
 
+# Rduckhts 1.1.6-0.0.1 (2026-04-09)
+
+- Fix bundled `read_hts_index_spans(...)` / `rduckhts_hts_index_spans()`: the span view now returns real chunk rows from CSI/TBI/BAI indexes, including populated `bin`, `chunk_beg_vo`, `chunk_end_vo`, `chunk_bytes`, `seq_start`, and `seq_end` values instead of placeholder `NA`s; BCF-backed calls also avoid the previous noisy `tbx` probe warning on `.csi` indexes.
+- Add `FILE_OFFSET` column to `rduckhts_bam()` / `read_bam(...)`: exposes the BGZF virtual file offset after each record. Zero runtime overhead (macro over already-open struct fields). Enables `ORDER BY FILE_OFFSET` in SQL `LAG()` / `LAST_VALUE()` window functions to reproduce exact BAM file order for streaming deduplication algorithms. Together with the `//` integer-division operator and `LAST_VALUE(... IGNORE NULLS)`, this permits exact replication of WisecondorX's larp/larp2 state machine in pure SQL, confirmed at 0 mismatches across 25,115 non-zero bins on a real NIPT BAM.
+
 # Rduckhts 1.1.5-0.0.1 (2026-04-08)
 
 - Fix bundled `bcftools_liftover(...)` / `rduckhts_liftover()` cache and realignment hardening: per-thread chain/FASTA contexts are now bounded instead of accumulating for the lifetime of worker threads, and scalar left-alignment no longer reuses stale traceback state after failed/empty alignments.

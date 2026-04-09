@@ -29,6 +29,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
+#include <htslib/bgzf.h>
 #include <htslib/kstring.h>
 
 #include "include/seq_encoding.h"
@@ -203,6 +204,7 @@ enum {
     BAM_COL_QUAL,
     BAM_COL_READ_GROUP_ID,
     BAM_COL_SAMPLE_ID,
+    BAM_COL_FILE_OFFSET,
     BAM_COL_CORE_COUNT
 };
 
@@ -569,6 +571,9 @@ static void bam_read_bind(duckdb_bind_info info) {
     }
     duckdb_bind_add_result_column(info, "READ_GROUP_ID", varchar_type);
     duckdb_bind_add_result_column(info, "SAMPLE_ID", varchar_type);
+    duckdb_logical_type ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+    duckdb_bind_add_result_column(info, "FILE_OFFSET", ubigint_type);
+    duckdb_destroy_logical_type(&ubigint_type);
 
     if (bind->standard_tags) {
         bind->std_col_start = BAM_COL_CORE_COUNT;
@@ -816,6 +821,15 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         bam1_t *b = local->rec;
         int seq_len = b->core.l_qseq;
 
+        /* Capture virtual file offset after reading this record.
+         * For indexed scans, itr->curr_off holds the next read's offset;
+         * for sequential scans, bgzf_tell gives the same.  Either way
+         * the value is monotonically increasing within a thread's stream,
+         * so ORDER BY FILE_OFFSET reproduces BAM file order faithfully. */
+        uint64_t file_offset = (local->fp && local->fp->fp.bgzf)
+            ? (uint64_t)bgzf_tell(local->fp->fp.bgzf)
+            : 0;
+
         /* Grow SEQ/QUAL conversion buffers if needed */
         if (!ensure_seq_buf(local, seq_len)) {
             duckdb_function_set_error(info, "read_bam: out of memory allocating sequence buffers");
@@ -1003,6 +1017,12 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 } else {
                     set_null(vec, row_count);
                 }
+                break;
+            }
+
+            case BAM_COL_FILE_OFFSET: {
+                uint64_t *data = (uint64_t *)duckdb_vector_get_data(vec);
+                data[row_count] = file_offset;
                 break;
             }
 

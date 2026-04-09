@@ -8,6 +8,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <strings.h>
 
 #include "htslib/hts.h"
+#include "htslib/khash.h"
 #include "htslib/kstring.h"
 #include "htslib/sam.h"
 #include "htslib/tbx.h"
@@ -119,6 +120,42 @@ static int64_t parse_int64(const char *s) {
     if (!endptr || endptr == s) return -1;
     return (int64_t)v;
 }
+
+// Mirror the bundled htslib binning-index layout so we can inspect
+// chunk rows. htslib does not expose this through its public API.
+typedef struct {
+    int32_t m, n;
+    uint64_t loff;
+    hts_pair64_t *list;
+} duckhts_idx_bins_t;
+
+KHASH_MAP_INIT_INT(duckhts_idx_bin, duckhts_idx_bins_t)
+typedef khash_t(duckhts_idx_bin) duckhts_idx_bidx_t;
+
+typedef struct {
+    hts_pos_t n, m;
+    uint64_t *offset;
+} duckhts_idx_lidx_t;
+
+typedef struct {
+    int fmt, min_shift, n_lvls, n_bins;
+    uint32_t l_meta;
+    int32_t n, m;
+    uint64_t n_no_coor;
+    duckhts_idx_bidx_t **bidx;
+    duckhts_idx_lidx_t *lidx;
+    uint8_t *meta;
+    int tbi_n, last_tbi_tid;
+    struct {
+        uint32_t last_bin, save_bin;
+        hts_pos_t last_coor;
+        int last_tid, save_tid, finished;
+        uint64_t last_off, save_off;
+        uint64_t off_beg, off_end;
+        uint64_t n_mapped, n_unmapped;
+    } z;
+    BGZF *otf_fp;
+} duckhts_idx_view_t;
 
 // ===============================
 // Header table function
@@ -913,8 +950,10 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         int flags = HTS_IDX_SILENT_FAIL;
         hts_idx_t *idx = NULL;
         tbx_t *tbx = NULL;
-        tbx = tbx_index_load3(file_path, index_path, flags);
-        if (tbx) idx = tbx->idx;
+        if (kind == HTS_KIND_VCF) {
+            tbx = tbx_index_load3(file_path, index_path, flags);
+            if (tbx) idx = tbx->idx;
+        }
         if (!idx) {
             idx = bcf_index_load3(file_path, index_path, flags);
         }
@@ -1109,6 +1148,608 @@ static void read_hts_index_scan(duckdb_function_info info, duckdb_data_chunk out
 }
 
 // ===============================
+// Index spans table function
+// ===============================
+
+typedef struct {
+    char *seqname;
+    int64_t tid;
+    int has_bin;
+    int64_t bin;
+    int has_chunk_beg_vo;
+    uint64_t chunk_beg_vo;
+    int has_chunk_end_vo;
+    uint64_t chunk_end_vo;
+    int has_chunk_bytes;
+    uint64_t chunk_bytes;
+    int has_seq_start;
+    int64_t seq_start;
+    int has_seq_end;
+    int64_t seq_end;
+    int has_stat;
+    uint64_t mapped;
+    uint64_t unmapped;
+    int has_n_no_coor;
+    uint64_t n_no_coor;
+    char *index_type;
+    char *index_path;
+} hts_index_span_entry_t;
+
+typedef struct {
+    char *file_path;
+    char *format_hint;
+    char *file_format;
+    char *compression;
+    hts_index_span_entry_t *entries;
+    int64_t n_entries;
+    uint8_t *meta;
+    uint32_t meta_len;
+} hts_index_spans_bind_t;
+
+typedef struct {
+    int64_t offset;
+} hts_index_spans_init_t;
+
+static void free_index_span_entries(hts_index_span_entry_t *entries, int64_t n) {
+    if (!entries) return;
+    for (int64_t i = 0; i < n; i++) {
+        free(entries[i].seqname);
+        free(entries[i].index_type);
+        free(entries[i].index_path);
+    }
+    free(entries);
+}
+
+static void destroy_hts_index_spans_bind(void *data) {
+    hts_index_spans_bind_t *bind = (hts_index_spans_bind_t *)data;
+    if (!bind) return;
+    free(bind->file_path);
+    free(bind->format_hint);
+    free(bind->file_format);
+    free(bind->compression);
+    free_index_span_entries(bind->entries, bind->n_entries);
+    free(bind->meta);
+    free(bind);
+}
+
+static void destroy_hts_index_spans_init(void *data) {
+    if (data) free(data);
+}
+
+static void capture_index_spans_meta(hts_index_spans_bind_t *bind, hts_idx_t *idx) {
+    if (!bind || !idx) return;
+    uint32_t meta_len = 0;
+    uint8_t *meta = hts_idx_get_meta(idx, &meta_len);
+    if (meta && meta_len > 0) {
+        bind->meta = (uint8_t *)malloc(meta_len);
+        if (bind->meta) {
+            memcpy(bind->meta, meta, meta_len);
+            bind->meta_len = meta_len;
+        }
+    }
+}
+
+static void index_bin_interval(const duckhts_idx_view_t *idx, int bin, int64_t seq_length,
+                               int64_t *seq_start, int64_t *seq_end) {
+    int level = hts_bin_level(bin);
+    hts_pos_t width = ((hts_pos_t)1) << ((idx->n_lvls - level) * 3 + idx->min_shift);
+    hts_pos_t beg0 = (hts_pos_t)(bin - hts_bin_first(level)) * width;
+    hts_pos_t end = beg0 + width;
+    if (seq_length > 0 && end > (hts_pos_t)seq_length) end = (hts_pos_t)seq_length;
+    if (seq_start) *seq_start = (int64_t)(beg0 + 1);
+    if (seq_end) *seq_end = (int64_t)end;
+}
+
+static void add_index_span_entry(hts_index_spans_bind_t *bind, const char *seqname, int64_t tid,
+                                 int has_bin, int64_t bin,
+                                 int has_chunk_beg_vo, uint64_t chunk_beg_vo,
+                                 int has_chunk_end_vo, uint64_t chunk_end_vo,
+                                 int has_chunk_bytes, uint64_t chunk_bytes,
+                                 int has_seq_start, int64_t seq_start,
+                                 int has_seq_end, int64_t seq_end,
+                                 int has_stat, uint64_t mapped, uint64_t unmapped,
+                                 int has_n_no_coor, uint64_t n_no_coor,
+                                 const char *index_type, const char *index_path) {
+    int64_t n = bind->n_entries + 1;
+    hts_index_span_entry_t *tmp =
+        (hts_index_span_entry_t *)realloc(bind->entries, (size_t)n * sizeof(hts_index_span_entry_t));
+    if (!tmp) return;
+    bind->entries = tmp;
+    hts_index_span_entry_t *e = &bind->entries[bind->n_entries];
+    memset(e, 0, sizeof(*e));
+    e->seqname = dup_str(seqname);
+    e->tid = tid;
+    e->has_bin = has_bin;
+    e->bin = bin;
+    e->has_chunk_beg_vo = has_chunk_beg_vo;
+    e->chunk_beg_vo = chunk_beg_vo;
+    e->has_chunk_end_vo = has_chunk_end_vo;
+    e->chunk_end_vo = chunk_end_vo;
+    e->has_chunk_bytes = has_chunk_bytes;
+    e->chunk_bytes = chunk_bytes;
+    e->has_seq_start = has_seq_start;
+    e->seq_start = seq_start;
+    e->has_seq_end = has_seq_end;
+    e->seq_end = seq_end;
+    e->has_stat = has_stat;
+    e->mapped = mapped;
+    e->unmapped = unmapped;
+    e->has_n_no_coor = has_n_no_coor;
+    e->n_no_coor = n_no_coor;
+    e->index_type = dup_str(index_type ? index_type : "UNKNOWN");
+    e->index_path = index_path ? dup_str(index_path) : NULL;
+    bind->n_entries = n;
+}
+
+static int compare_index_span_entries(const void *lhs_void, const void *rhs_void) {
+    const hts_index_span_entry_t *lhs = (const hts_index_span_entry_t *)lhs_void;
+    const hts_index_span_entry_t *rhs = (const hts_index_span_entry_t *)rhs_void;
+    if (lhs->tid != rhs->tid) return lhs->tid < rhs->tid ? -1 : 1;
+    if (lhs->has_bin != rhs->has_bin) return lhs->has_bin ? -1 : 1;
+    if (lhs->has_bin && rhs->has_bin && lhs->bin != rhs->bin) return lhs->bin < rhs->bin ? -1 : 1;
+    if (lhs->has_chunk_beg_vo != rhs->has_chunk_beg_vo) return lhs->has_chunk_beg_vo ? -1 : 1;
+    if (lhs->has_chunk_beg_vo && rhs->has_chunk_beg_vo && lhs->chunk_beg_vo != rhs->chunk_beg_vo) {
+        return lhs->chunk_beg_vo < rhs->chunk_beg_vo ? -1 : 1;
+    }
+    if (lhs->has_chunk_end_vo && rhs->has_chunk_end_vo && lhs->chunk_end_vo != rhs->chunk_end_vo) {
+        return lhs->chunk_end_vo < rhs->chunk_end_vo ? -1 : 1;
+    }
+    return 0;
+}
+
+static void add_index_chunk_rows(hts_index_spans_bind_t *bind, const duckhts_idx_view_t *idx_view,
+                                 const char *seqname, int64_t tid, int64_t seq_length,
+                                 int has_stat, uint64_t mapped, uint64_t unmapped,
+                                 int has_n_no_coor, uint64_t n_no_coor,
+                                 const char *index_type, const char *index_path) {
+    int added = 0;
+    if (idx_view && idx_view->bidx && tid >= 0 && tid < idx_view->n && idx_view->bidx[tid]) {
+        duckhts_idx_bidx_t *bidx = idx_view->bidx[tid];
+        for (khint_t k = kh_begin(bidx); k != kh_end(bidx); ++k) {
+            if (!kh_exist(bidx, k)) continue;
+            int bin = (int)kh_key(bidx, k);
+            if (bin < 0 || bin >= idx_view->n_bins) continue;
+            duckhts_idx_bins_t *chunks = &kh_value(bidx, k);
+            if (!chunks->list || chunks->n <= 0) continue;
+
+            int64_t seq_start = 0;
+            int64_t seq_end = 0;
+            index_bin_interval(idx_view, bin, seq_length, &seq_start, &seq_end);
+
+            for (int32_t i = 0; i < chunks->n; i++) {
+                uint64_t chunk_beg_vo = chunks->list[i].u;
+                uint64_t chunk_end_vo = chunks->list[i].v;
+                uint64_t chunk_bytes = 0;
+                if (chunk_end_vo >= chunk_beg_vo) {
+                    chunk_bytes = (chunk_end_vo >> 16) - (chunk_beg_vo >> 16);
+                }
+                add_index_span_entry(bind, seqname, tid,
+                                     1, bin,
+                                     1, chunk_beg_vo,
+                                     1, chunk_end_vo,
+                                     1, chunk_bytes,
+                                     1, seq_start,
+                                     1, seq_end,
+                                     has_stat, mapped, unmapped,
+                                     has_n_no_coor, n_no_coor,
+                                     index_type, index_path);
+                added = 1;
+            }
+        }
+    }
+
+    if (!added) {
+        int has_seq_start = seq_length > 0;
+        int64_t seq_start = has_seq_start ? 1 : 0;
+        int has_seq_end = seq_length >= 0;
+        int64_t seq_end = has_seq_end ? seq_length : 0;
+        add_index_span_entry(bind, seqname, tid,
+                             0, 0,
+                             0, 0,
+                             0, 0,
+                             0, 0,
+                             has_seq_start, seq_start,
+                             has_seq_end, seq_end,
+                             has_stat, mapped, unmapped,
+                             has_n_no_coor, n_no_coor,
+                             index_type, index_path);
+    }
+}
+
+static void read_hts_index_spans_bind(duckdb_bind_info info) {
+    duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
+    char *file_path = duckdb_get_varchar(path_val);
+    duckdb_destroy_value(&path_val);
+
+    if (!file_path || strlen(file_path) == 0) {
+        duckdb_bind_set_error(info, "read_hts_index_spans requires a file path");
+        if (file_path) duckdb_free(file_path);
+        return;
+    }
+
+    char *format_hint = NULL;
+    duckdb_value fmt_val = duckdb_bind_get_named_parameter(info, "format");
+    if (fmt_val && !duckdb_is_null_value(fmt_val)) {
+        format_hint = duckdb_get_varchar(fmt_val);
+    }
+    if (fmt_val) duckdb_destroy_value(&fmt_val);
+
+    char *index_path = NULL;
+    duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
+    if (idx_val && !duckdb_is_null_value(idx_val)) {
+        index_path = duckdb_get_varchar(idx_val);
+    }
+    if (idx_val) duckdb_destroy_value(&idx_val);
+
+    hts_index_spans_bind_t *bind = (hts_index_spans_bind_t *)calloc(1, sizeof(hts_index_spans_bind_t));
+    if (!bind) {
+        duckdb_bind_set_error(info, "Out of memory");
+        if (file_path) duckdb_free(file_path);
+        if (format_hint) duckdb_free(format_hint);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
+    bind->file_path = dup_str(file_path);
+    bind->format_hint = format_hint ? dup_str(format_hint) : NULL;
+
+    htsFile *fp = hts_open(file_path, "r");
+    if (!fp) {
+        duckdb_bind_set_error(info, "Failed to open file for index reading");
+        destroy_hts_index_spans_bind(bind);
+        duckdb_free(file_path);
+        if (format_hint) duckdb_free(format_hint);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
+
+    const htsFormat *fmt = hts_get_format(fp);
+    const char *fmt_ext = fmt ? hts_format_file_extension(fmt) : "unknown";
+    bind->file_format = dup_str(fmt_ext ? fmt_ext : "unknown");
+    bind->compression = dup_str(fmt ? compression_to_string(fmt->compression) : "unknown");
+
+    hts_kind_t hint_kind = parse_format_hint(format_hint);
+    hts_kind_t kind = (hint_kind == HTS_KIND_AUTO) ? kind_from_hts_format(fmt) : hint_kind;
+
+    if (kind == HTS_KIND_SAM || kind == HTS_KIND_BAM || kind == HTS_KIND_CRAM) {
+        sam_hdr_t *hdr = sam_hdr_read(fp);
+        if (!hdr) {
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to read SAM/BAM/CRAM header");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+
+        int flags = HTS_IDX_SILENT_FAIL;
+        hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, flags);
+        if (!idx) {
+            sam_hdr_destroy(hdr);
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to load index for SAM/BAM/CRAM file");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+
+        capture_index_spans_meta(bind, idx);
+        duckhts_idx_view_t *idx_view = (duckhts_idx_view_t *)idx;
+        int nseq = hts_idx_nseq(idx);
+        uint64_t n_no_coor = hts_idx_get_n_no_coor(idx);
+        for (int tid = 0; tid < nseq; tid++) {
+            const char *name = sam_hdr_tid2name(hdr, tid);
+            int64_t len = (int64_t)sam_hdr_tid2len(hdr, tid);
+            uint64_t mapped = 0, unmapped = 0;
+            int has_stat = (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0);
+            add_index_chunk_rows(bind, idx_view, name, tid, len,
+                                 has_stat, mapped, unmapped,
+                                 1, n_no_coor,
+                                 index_fmt_to_string(hts_idx_fmt(idx)), index_path);
+        }
+        hts_idx_destroy(idx);
+        sam_hdr_destroy(hdr);
+    } else if (kind == HTS_KIND_VCF || kind == HTS_KIND_BCF) {
+        bcf_hdr_t *hdr = bcf_hdr_read(fp);
+        if (!hdr) {
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to read VCF/BCF header");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+
+        int flags = HTS_IDX_SILENT_FAIL;
+        hts_idx_t *idx = NULL;
+        tbx_t *tbx = NULL;
+        if (kind == HTS_KIND_VCF) {
+            tbx = tbx_index_load3(file_path, index_path, flags);
+            if (tbx) idx = tbx->idx;
+        }
+        if (!idx) idx = bcf_index_load3(file_path, index_path, flags);
+        if (!idx) {
+            bcf_hdr_destroy(hdr);
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to load index for VCF/BCF file");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+
+        capture_index_spans_meta(bind, idx);
+        duckhts_idx_view_t *idx_view = (duckhts_idx_view_t *)idx;
+        int nseq = hts_idx_nseq(idx);
+        const char **tbx_names = NULL;
+        int tbx_nseq = 0;
+        if (tbx) tbx_names = tbx_seqnames(tbx, &tbx_nseq);
+        for (int tid = 0; tid < nseq; tid++) {
+            const char *name = NULL;
+            int64_t len = -1;
+            if (tbx && tbx_names && tid < tbx_nseq) {
+                name = tbx_names[tid];
+            } else {
+                name = bcf_hdr_id2name(hdr, tid);
+                if (tid < hdr->n[BCF_DT_CTG] && hdr->id[BCF_DT_CTG][tid].val) {
+                    len = (int64_t)hdr->id[BCF_DT_CTG][tid].val->info[0];
+                }
+            }
+            uint64_t mapped = 0, unmapped = 0;
+            int has_stat = (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0);
+            add_index_chunk_rows(bind, idx_view, name, tid, len,
+                                 has_stat, mapped, unmapped,
+                                 0, 0,
+                                 index_fmt_to_string(hts_idx_fmt(idx)), index_path);
+        }
+        if (tbx_names) free((void *)tbx_names);
+        if (tbx) tbx_destroy(tbx);
+        else hts_idx_destroy(idx);
+        bcf_hdr_destroy(hdr);
+    } else if (kind == HTS_KIND_TABIX) {
+        int flags = HTS_IDX_SILENT_FAIL;
+        tbx_t *tbx = tbx_index_load3(file_path, index_path, flags);
+        if (!tbx) {
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to load tabix index");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+        capture_index_spans_meta(bind, tbx->idx);
+        duckhts_idx_view_t *idx_view = (duckhts_idx_view_t *)tbx->idx;
+        int nseq = 0;
+        const char **names = tbx_seqnames(tbx, &nseq);
+        for (int tid = 0; tid < nseq; tid++) {
+            uint64_t mapped = 0, unmapped = 0;
+            int has_stat = (hts_idx_get_stat(tbx->idx, tid, &mapped, &unmapped) == 0);
+            add_index_chunk_rows(bind, idx_view, names[tid], tid, -1,
+                                 has_stat, mapped, unmapped,
+                                 0, 0,
+                                 index_fmt_to_string(hts_idx_fmt(tbx->idx)), index_path);
+        }
+        free((void *)names);
+        tbx_destroy(tbx);
+    } else if (kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) {
+        enum fai_format_options ffmt = (kind == HTS_KIND_FASTQ) ? FAI_FASTQ : FAI_FASTA;
+        faidx_t *fai = fai_load3_format(file_path, index_path, NULL, 0, ffmt);
+        if (!fai) {
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to load FASTA/FASTQ index");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+        const char *index_type = (kind == HTS_KIND_FASTQ) ? "FQI" : "FAI";
+        int nseq = faidx_nseq(fai);
+        for (int tid = 0; tid < nseq; tid++) {
+            const char *name = faidx_iseq(fai, tid);
+            int64_t len = (int64_t)faidx_seq_len64(fai, name);
+            add_index_span_entry(bind, name, tid,
+                                 0, 0,
+                                 0, 0,
+                                 0, 0,
+                                 0, 0,
+                                 len > 0, len > 0 ? 1 : 0,
+                                 len >= 0, len >= 0 ? len : 0,
+                                 0, 0, 0,
+                                 0, 0,
+                                 index_type, index_path);
+        }
+        fai_destroy(fai);
+    }
+
+    hts_close(fp);
+    duckdb_free(file_path);
+    if (format_hint) duckdb_free(format_hint);
+    if (index_path) duckdb_free(index_path);
+
+    if (bind->n_entries > 1) {
+        qsort(bind->entries, (size_t)bind->n_entries, sizeof(hts_index_span_entry_t),
+              compare_index_span_entries);
+    }
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+    duckdb_logical_type blob_type = duckdb_create_logical_type(DUCKDB_TYPE_BLOB);
+
+    duckdb_bind_add_result_column(info, "file_format", varchar_type);
+    duckdb_bind_add_result_column(info, "seqname", varchar_type);
+    duckdb_bind_add_result_column(info, "tid", bigint_type);
+    duckdb_bind_add_result_column(info, "bin", bigint_type);
+    duckdb_bind_add_result_column(info, "chunk_beg_vo", ubigint_type);
+    duckdb_bind_add_result_column(info, "chunk_end_vo", ubigint_type);
+    duckdb_bind_add_result_column(info, "chunk_bytes", ubigint_type);
+    duckdb_bind_add_result_column(info, "seq_start", bigint_type);
+    duckdb_bind_add_result_column(info, "seq_end", bigint_type);
+    duckdb_bind_add_result_column(info, "mapped", bigint_type);
+    duckdb_bind_add_result_column(info, "unmapped", bigint_type);
+    duckdb_bind_add_result_column(info, "n_no_coor", bigint_type);
+    duckdb_bind_add_result_column(info, "index_type", varchar_type);
+    duckdb_bind_add_result_column(info, "index_path", varchar_type);
+    duckdb_bind_add_result_column(info, "meta", blob_type);
+
+    duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&bigint_type);
+    duckdb_destroy_logical_type(&ubigint_type);
+    duckdb_destroy_logical_type(&blob_type);
+
+    duckdb_bind_set_bind_data(info, bind, destroy_hts_index_spans_bind);
+}
+
+static void read_hts_index_spans_init(duckdb_init_info info) {
+    hts_index_spans_init_t *init =
+        (hts_index_spans_init_t *)calloc(1, sizeof(hts_index_spans_init_t));
+    duckdb_init_set_init_data(info, init, destroy_hts_index_spans_init);
+}
+
+static void read_hts_index_spans_scan(duckdb_function_info info, duckdb_data_chunk output) {
+    hts_index_spans_bind_t *bind = (hts_index_spans_bind_t *)duckdb_function_get_bind_data(info);
+    hts_index_spans_init_t *init = (hts_index_spans_init_t *)duckdb_function_get_init_data(info);
+
+    if (!bind || !init || bind->n_entries <= 0) {
+        duckdb_data_chunk_set_size(output, 0);
+        return;
+    }
+
+    idx_t vector_size = duckdb_vector_size();
+    idx_t row_count = 0;
+
+    duckdb_vector vec_file_format = duckdb_data_chunk_get_vector(output, 0);
+    duckdb_vector vec_seqname = duckdb_data_chunk_get_vector(output, 1);
+    duckdb_vector vec_tid = duckdb_data_chunk_get_vector(output, 2);
+    duckdb_vector vec_bin = duckdb_data_chunk_get_vector(output, 3);
+    duckdb_vector vec_chunk_beg_vo = duckdb_data_chunk_get_vector(output, 4);
+    duckdb_vector vec_chunk_end_vo = duckdb_data_chunk_get_vector(output, 5);
+    duckdb_vector vec_chunk_bytes = duckdb_data_chunk_get_vector(output, 6);
+    duckdb_vector vec_seq_start = duckdb_data_chunk_get_vector(output, 7);
+    duckdb_vector vec_seq_end = duckdb_data_chunk_get_vector(output, 8);
+    duckdb_vector vec_mapped = duckdb_data_chunk_get_vector(output, 9);
+    duckdb_vector vec_unmapped = duckdb_data_chunk_get_vector(output, 10);
+    duckdb_vector vec_n_no_coor = duckdb_data_chunk_get_vector(output, 11);
+    duckdb_vector vec_index_type = duckdb_data_chunk_get_vector(output, 12);
+    duckdb_vector vec_index_path = duckdb_data_chunk_get_vector(output, 13);
+    duckdb_vector vec_meta = duckdb_data_chunk_get_vector(output, 14);
+
+    while (row_count < vector_size && init->offset < bind->n_entries) {
+        hts_index_span_entry_t *e = &bind->entries[init->offset];
+
+        duckdb_vector_assign_string_element(vec_file_format, row_count,
+                                            bind->file_format ? bind->file_format : "unknown");
+        if (e->seqname) duckdb_vector_assign_string_element(vec_seqname, row_count, e->seqname);
+        else {
+            duckdb_vector_ensure_validity_writable(vec_seqname);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_seqname), row_count);
+        }
+
+        int64_t *tid_data = (int64_t *)duckdb_vector_get_data(vec_tid);
+        tid_data[row_count] = e->tid;
+
+        if (e->has_bin) {
+            int64_t *bin_data = (int64_t *)duckdb_vector_get_data(vec_bin);
+            bin_data[row_count] = e->bin;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_bin);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_bin), row_count);
+        }
+
+        if (e->has_chunk_beg_vo) {
+            uint64_t *data = (uint64_t *)duckdb_vector_get_data(vec_chunk_beg_vo);
+            data[row_count] = e->chunk_beg_vo;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_chunk_beg_vo);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_chunk_beg_vo), row_count);
+        }
+
+        if (e->has_chunk_end_vo) {
+            uint64_t *data = (uint64_t *)duckdb_vector_get_data(vec_chunk_end_vo);
+            data[row_count] = e->chunk_end_vo;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_chunk_end_vo);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_chunk_end_vo), row_count);
+        }
+
+        if (e->has_chunk_bytes) {
+            uint64_t *data = (uint64_t *)duckdb_vector_get_data(vec_chunk_bytes);
+            data[row_count] = e->chunk_bytes;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_chunk_bytes);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_chunk_bytes), row_count);
+        }
+
+        if (e->has_seq_start) {
+            int64_t *data = (int64_t *)duckdb_vector_get_data(vec_seq_start);
+            data[row_count] = e->seq_start;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_seq_start);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_seq_start), row_count);
+        }
+
+        if (e->has_seq_end) {
+            int64_t *data = (int64_t *)duckdb_vector_get_data(vec_seq_end);
+            data[row_count] = e->seq_end;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_seq_end);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_seq_end), row_count);
+        }
+
+        if (e->has_stat) {
+            int64_t *mapped_data = (int64_t *)duckdb_vector_get_data(vec_mapped);
+            int64_t *unmapped_data = (int64_t *)duckdb_vector_get_data(vec_unmapped);
+            mapped_data[row_count] = (int64_t)e->mapped;
+            unmapped_data[row_count] = (int64_t)e->unmapped;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_mapped);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_mapped), row_count);
+            duckdb_vector_ensure_validity_writable(vec_unmapped);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_unmapped), row_count);
+        }
+
+        if (e->has_n_no_coor) {
+            int64_t *data = (int64_t *)duckdb_vector_get_data(vec_n_no_coor);
+            data[row_count] = (int64_t)e->n_no_coor;
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_n_no_coor);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_n_no_coor), row_count);
+        }
+
+        if (e->index_type) duckdb_vector_assign_string_element(vec_index_type, row_count, e->index_type);
+        else {
+            duckdb_vector_ensure_validity_writable(vec_index_type);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_index_type), row_count);
+        }
+
+        if (e->index_path) duckdb_vector_assign_string_element(vec_index_path, row_count, e->index_path);
+        else {
+            duckdb_vector_ensure_validity_writable(vec_index_path);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_index_path), row_count);
+        }
+
+        if (bind->meta && bind->meta_len > 0) {
+            duckdb_vector_assign_string_element_len(vec_meta, row_count,
+                                                   (const char *)bind->meta, bind->meta_len);
+        } else {
+            duckdb_vector_ensure_validity_writable(vec_meta);
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_meta), row_count);
+        }
+
+        row_count++;
+        init->offset++;
+    }
+
+    duckdb_data_chunk_set_size(output, row_count);
+}
+
+// ===============================
 // Registration
 // ===============================
 
@@ -1141,6 +1782,23 @@ void register_read_hts_index_function(duckdb_connection connection) {
     duckdb_table_function_set_bind(tf, read_hts_index_bind);
     duckdb_table_function_set_init(tf, read_hts_index_init);
     duckdb_table_function_set_function(tf, read_hts_index_scan);
+
+    duckdb_register_table_function(connection, tf);
+    duckdb_destroy_logical_type(&varchar_type);
+}
+
+void register_read_hts_index_spans_function(duckdb_connection connection) {
+    duckdb_table_function tf = duckdb_create_table_function();
+    duckdb_table_function_set_name(tf, "read_hts_index_spans");
+
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_table_function_add_parameter(tf, varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "format", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
+
+    duckdb_table_function_set_bind(tf, read_hts_index_spans_bind);
+    duckdb_table_function_set_init(tf, read_hts_index_spans_init);
+    duckdb_table_function_set_function(tf, read_hts_index_spans_scan);
 
     duckdb_register_table_function(connection, tf);
     duckdb_destroy_logical_type(&varchar_type);
