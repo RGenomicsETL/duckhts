@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.6-0.0.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.6-0.0.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,10 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.1.6-0.0.2" id="rduckhts-116-002-2026-04-09">Rduckhts 1.1.6-0.0.2 (2026-04-09)<a class="anchor" aria-label="anchor" href="#rduckhts-116-002-2026-04-09"></a></h2>
+<ul><li>Fix <code>test_bam_file_offset</code>: cast <code>COUNT(*)</code> results to <code>INTEGER</code> in SQL so the DuckDB driver returns R <code>integer</code> rather than <code>numeric</code> (BIGINT maps to double in the duckdb R driver), restoring <code>expect_identical</code> assertions.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.1.6-0.0.1" id="rduckhts-116-001-2026-04-09">Rduckhts 1.1.6-0.0.1 (2026-04-09)<a class="anchor" aria-label="anchor" href="#rduckhts-116-001-2026-04-09"></a></h2>
 <ul><li>Fix bundled <code>read_hts_index_spans(...)</code> / <code><a href="../reference/rduckhts_hts_index_spans.html">rduckhts_hts_index_spans()</a></code>: the span view now returns real chunk rows from CSI/TBI/BAI indexes, including populated <code>bin</code>, <code>chunk_beg_vo</code>, <code>chunk_end_vo</code>, <code>chunk_bytes</code>, <code>seq_start</code>, and <code>seq_end</code> values instead of placeholder <code>NA</code>s; BCF-backed calls also avoid the previous noisy <code>tbx</code> probe warning on <code>.csi</code> indexes.</li>
