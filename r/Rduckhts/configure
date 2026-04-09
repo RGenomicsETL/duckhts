@@ -63,6 +63,15 @@ fi
 CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
 CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
 LDFLAGS="${R_LDFLAGS}"
+EM_PORT_FLAGS=""
+
+if [ "${WASM_BUILD}" = "yes" ]; then
+  # webR/rwasm provide zlib and bzip2 via Emscripten ports, but nested
+  # Autoconf probes only see them if we forward the same link flags here.
+  EM_PORT_FLAGS="-s USE_ZLIB=1 -s USE_BZIP2=1"
+  CFLAGS="${CFLAGS} ${EM_PORT_FLAGS}"
+  LDFLAGS="${LDFLAGS} ${EM_PORT_FLAGS}"
+fi
 
 add_prefix_if_header() {
   header=$1
@@ -225,10 +234,9 @@ HTSLIB_GCS="--enable-gcs"
 
 if [ "${WASM_BUILD}" = "yes" ]; then
   echo "Detected WebAssembly/r-wasm build environment"
-  echo "Disabling plugins, libcurl, S3, GCS, BZ2, and LZMA support (not available in the stock webR/r-universe wasm toolchain)"
-  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no"
+  echo "Disabling plugins, libcurl, S3, GCS, and LZMA support (not available in the stock webR/r-universe wasm toolchain)"
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no ac_cv_func_srand48_deterministic=no"
   HTSLIB_PLUGINS="--disable-plugins"
-  HAS_BZ2=no
   HAS_LZMA=no
   HAS_CURL=no
   HAS_OPENSSL=no
@@ -250,6 +258,10 @@ fi
 
 if [ "$HAS_ZLIB" = "yes" ]; then
   HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_lib_z_inflate=yes"
+fi
+
+if [ "$HAS_BZ2" = "yes" ]; then
+  HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_header_bzlib_h=yes ac_cv_lib_bz2_BZ2_bzBuffToBuffCompress=yes"
 fi
 
 if [ "${WASM_BUILD}" = "yes" ]; then
@@ -274,6 +286,24 @@ elif [ "$HAS_OPENSSL" = "no" ]; then
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
 fi
 
+HTSLIB_LIBS=""
+if [ "${WASM_BUILD}" != "yes" ] && [ "$HAS_ZLIB" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -lz"
+fi
+if [ "${WASM_BUILD}" != "yes" ] && [ "$HAS_BZ2" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -lbz2"
+fi
+if [ "$HAS_LZMA" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -llzma"
+fi
+if [ "$HAS_CURL" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} -lcurl"
+fi
+if [ "$HAS_OPENSSL" = "yes" ]; then
+  HTSLIB_LIBS="${HTSLIB_LIBS} ${OPENSSL_TEST_LIBS}"
+fi
+HTSLIB_LIBS="${HTSLIB_LIBS} -lpthread"
+
 env ${HTSLIB_CONFIGURE_CACHE_VARS} ./configure \
   ${HTSLIB_CROSS_FLAGS} \
   ${CONFIGURE_ARGS} \
@@ -284,7 +314,7 @@ env ${HTSLIB_CONFIGURE_CACHE_VARS} ./configure \
   CFLAGS="${CFLAGS}" \
   CPPFLAGS="${CPPFLAGS}" \
   LDFLAGS="${LDFLAGS}" \
-  LIBS="${LIBS}" \
+  LIBS="${HTSLIB_LIBS}" \
   ${HTSLIB_CONFIGURE_FLAGS}
 
 echo "---------- Building htslib (static + shared) ----------"
