@@ -1,7 +1,10 @@
 # Changelog
 
-## Rduckhts 1.1.6.9000-0.0.2 (Development version)
+## Rduckhts 1.1.6.9000-0.0.3 (Development version)
 
+- Set the bundled extension metadata platform to `linux_i686_musl` for
+  the Emscripten/webR path in `configure`, matching the platform value
+  you are using for browser-side loading tests.
 - Fix Wasm package builds under `rwasm` / r-universe: the package
   `configure` script now preserves injected `NAME=VALUE` cache
   overrides, forwards explicit `--build` / `--host` triplets into the
