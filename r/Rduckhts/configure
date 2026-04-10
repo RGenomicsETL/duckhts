@@ -119,7 +119,7 @@ OS_NAME=`uname -s`
 ARCH_NAME=`uname -m`
 DUCKDB_PLATFORM=""
 if [ "${WASM_BUILD}" = "yes" ]; then
-  DUCKDB_PLATFORM="wasm_mvp"
+  DUCKDB_PLATFORM="linux_i686_musl"
 fi
 if [ -z "${DUCKDB_PLATFORM}" ]; then
   case "${OS_NAME}" in

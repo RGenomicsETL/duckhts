@@ -2,6 +2,7 @@
 
 # duckhts 1.1.6.9000 Developement version
 
+- adjust the bundled `Rduckhts` extension metadata trailer for wasm/browser builds to encode `linux_i686_musl` instead of `wasm_mvp` when `r/Rduckhts/configure` detects the Emscripten/webR path
 - harden the bundled `Rduckhts` WebAssembly build path: the package `configure` script now preserves `rwasm`/r-universe `NAME=VALUE` cache overrides, forwards explicit `--build` / `--host` triplets into the vendored `htslib` `./configure`, forwards webR's Emscripten port flags for `zlib`/`bzip2`, seeds wasm-safe Autoconf cache results for `zlib`/`bzip2`/socket probes, injects a tiny Emscripten-only socket compatibility shim for `recv`/`send`/`closesocket`, and disables only the optional `htslib` features that are not available in the stock webR/r-universe wasm toolchain (`libcurl`, `S3`, `GCS`, `lzma`, `plugins`); this fixes the original `ac_cv_func_getrandom=no: command not found` failure and subsequent nested `htslib` cross-compile probe failures without changing non-Wasm targets
 - fix top-level DuckDB wasm packaging without changing `extension-ci-tools`: the CMake wasm build now rebuilds `libduckhts.a` as a fat archive containing vendored `htslib` (and any static archive dependencies CMake can see), so the downstream DuckDB wasm packager no longer wraps a bare extension archive with unresolved `htslib` symbols such as `bcf_readrec`
 
