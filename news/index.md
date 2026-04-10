@@ -15,11 +15,12 @@
   `ac_cv_func_getrandom=no: command not found` failure and the
   subsequent nested `htslib` cross-compile probe failures without
   changing native configure behavior.
-- Fix bundled extension wasm artifacts: the upstream CMake/CI build now
-  emits a side-module link response file so DuckDB wasm packages link
-  vendored `htslib` into the final `.duckdb_extension.wasm` instead of
-  shipping unresolved symbols such as `bcf_readrec` that only failed
-  later at `LOAD`.
+- Fix bundled extension wasm artifacts: the upstream CMake wasm build
+  now rebuilds `libduckhts.a` as a fat archive containing vendored
+  `htslib` (and any static archive dependencies CMake can see), so
+  DuckDB wasm packaging no longer depends on `extension-ci-tools`
+  changes just to avoid unresolved symbols such as `bcf_readrec` at
+  `LOAD`.
 
 ## Rduckhts 1.1.6-0.0.2 (2026-04-09)
 
