@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PORT=${PORT:-8000}
+WEBR_IMAGE=${WEBR_IMAGE:-ghcr.io/r-wasm/webr:main}
+
+echo "Building local webR artifact with ${WEBR_IMAGE}..."
+
+docker run --rm -v "${ROOT_DIR}:/work" -w /work/r/Rduckhts "${WEBR_IMAGE}" bash -lc '
+set -eu
+
+export THREADS=5
+
+Rscript bootstrap.R /work
+
+mkdir -p /tmp/Rduckhts-src
+cp -a . /tmp/Rduckhts-src
+rm -rf /tmp/Rduckhts-src/.github \
+       /tmp/Rduckhts-src/Rduckhts.Rcheck \
+       /tmp/Rduckhts-src/..Rcheck \
+       /tmp/Rduckhts-src/README.html
+
+R CMD build /tmp/Rduckhts-src
+
+Rscript -e "if (!requireNamespace(\"pak\", quietly = TRUE)) install.packages(\"pak\", repos = \"https://repo.r-wasm.org/\"); pak::pak(\"r-wasm/rwasm\", ask = FALSE)"
+Rscript -e "ver <- read.dcf(\"DESCRIPTION\")[1, \"Version\"]; rwasm::build(sprintf(\"./Rduckhts_%s.tar.gz\", ver))"
+'
+
+VERSION=$(Rscript -e 'cat(read.dcf("r/Rduckhts/DESCRIPTION")[1, "Version"])')
+TGZ_PATH="${ROOT_DIR}/r/Rduckhts/Rduckhts_${VERSION}.tgz"
+REPO_ROOT="${ROOT_DIR}/r/Rduckhts/webr-repo"
+LOCAL_REPO_DIR="${ROOT_DIR}/r/Rduckhts/webr-repo/src/contrib"
+WEBR_R_SERIES=$(
+  docker run --rm "${WEBR_IMAGE}" bash -lc \
+    "Rscript -e 'cat(paste(R.version\$major, sub(\"\\\\..*$\", \"\", R.version\$minor), sep = \".\"))'"
+)
+BINARY_REPO_DIR="${REPO_ROOT}/bin/emscripten/contrib/${WEBR_R_SERIES}"
+
+if [ ! -f "${TGZ_PATH}" ]; then
+  echo "Expected wasm package artifact not found: ${TGZ_PATH}" >&2
+  exit 1
+fi
+
+rm -rf "${REPO_ROOT}"
+mkdir -p "${LOCAL_REPO_DIR}"
+mkdir -p "${BINARY_REPO_DIR}"
+cp -f "${TGZ_PATH}" "${LOCAL_REPO_DIR}/"
+cp -f "${TGZ_PATH}" "${BINARY_REPO_DIR}/"
+Rscript -e "
+desc <- read.dcf('r/Rduckhts/DESCRIPTION')
+fields <- as.list(desc[1, , drop = TRUE])
+fields\$File <- sprintf('Rduckhts_%s.tgz', desc[1, 'Version'])
+db <- as.data.frame(fields, stringsAsFactors = FALSE, check.names = FALSE)
+mat <- as.matrix(db)
+rownames(mat) <- mat[, 'Package']
+repo_src <- 'r/Rduckhts/webr-repo/src/contrib'
+repo_bin <- '${BINARY_REPO_DIR}'
+write_index <- function(repo) {
+  write.dcf(db, file = file.path(repo, 'PACKAGES'))
+  con <- gzfile(file.path(repo, 'PACKAGES.gz'), 'wb')
+  writeLines(readLines(file.path(repo, 'PACKAGES')), con)
+  close(con)
+  saveRDS(mat, file.path(repo, 'PACKAGES.rds'))
+}
+write_index(repo_src)
+write_index(repo_bin)
+"
+
+cat <<EOF
+Built:
+  ${TGZ_PATH}
+
+Local webR repo:
+  /r/Rduckhts/webr-repo
+
+Open in a browser:
+  http://localhost:${PORT}/scripts/webr-local-test.html
+
+The page will load:
+  /r/Rduckhts/DESCRIPTION
+  /r/Rduckhts/webr-repo/src/contrib/PACKAGES
+  /r/Rduckhts/webr-repo/bin/emscripten/contrib/${WEBR_R_SERIES}/PACKAGES
+  /r/Rduckhts/webr-repo/bin/emscripten/contrib/${WEBR_R_SERIES}/Rduckhts_${VERSION}.tgz
+EOF
+
+cd "${ROOT_DIR}"
+exec python3 -m http.server "${PORT}"
