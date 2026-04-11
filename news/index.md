@@ -1,7 +1,15 @@
 # Changelog
 
-## Rduckhts 1.1.6.9000-0.0.3 (Development version)
+## Rduckhts 1.1.6.9000-0.0.5 (Development version)
 
+- Fix the bundled wasm side-module final link during `configure`:
+  preserve webR/Emscripten `${LDFLAGS}` on the final
+  `duckhts.duckdb_extension` link so the `SIDE_MODULE` settings reach
+  the extension itself, and export `duckhts_init_c_api` explicitly for
+  DuckDB’s loader. This fixes webR/browser
+  [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
+  failures where DuckDB could not find a usable init export in
+  `duckhts.duckdb_extension`.
 - Set the bundled extension metadata platform to `linux_i686_musl` for
   the Emscripten/webR path in `configure`, matching the platform value
   you are using for browser-side loading tests.
