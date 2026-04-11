@@ -53,6 +53,19 @@
       margin: 20px 0;
       align-items: center;
     }
+    .repl textarea {
+      width: 100%;
+      min-height: 180px;
+      box-sizing: border-box;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      line-height: 1.4;
+    }
     button {
       border: 0;
       border-radius: 999px;
@@ -97,6 +110,18 @@
     <div class="card">
       <pre id="log"></pre>
     </div>
+    <div class="controls">
+      <button id="repl-run" disabled>Run R Code</button>
+      <button id="run-tinytests" disabled>Run tinytests</button>
+      <button id="repl-clear" disabled>Clear Log</button>
+      <span id="repl-status">REPL disabled until setup passes</span>
+    </div>
+    <div class="card repl">
+      <p>The REPL runs inside the same browser webR session after setup. <code>con</code>, <code>Rduckhts</code>, and the smoke-test tables stay available.</p>
+      <textarea id="repl-input">gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
+rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409", overwrite = TRUE)
+DBI::dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")</textarea>
+    </div>
   </main>
   <script type="module">
     import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
@@ -104,12 +129,28 @@
     const logNode = document.getElementById("log");
     const runButton = document.getElementById("run");
     const statusNode = document.getElementById("status");
+    const replRunButton = document.getElementById("repl-run");
+    const runTinytestsButton = document.getElementById("run-tinytests");
+    const replClearButton = document.getElementById("repl-clear");
+    const replStatusNode = document.getElementById("repl-status");
+    const replInput = document.getElementById("repl-input");
+
+    let currentShelter = null;
 
     function log(...parts) {
       const line = parts.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ");
       logNode.textContent += line + "\n";
       logNode.scrollTop = logNode.scrollHeight;
       console.log(...parts);
+    }
+
+    function setReplEnabled(enabled) {
+      replRunButton.disabled = !enabled;
+      runTinytestsButton.disabled = !enabled;
+      replClearButton.disabled = !enabled;
+      replStatusNode.textContent = enabled
+        ? "REPL ready"
+        : "REPL disabled until setup passes";
     }
 
     async function parseVersion() {
@@ -142,10 +183,42 @@
       return result;
     }
 
+    async function runRepl() {
+      if (!currentShelter) {
+        return;
+      }
+      replRunButton.disabled = true;
+      try {
+        await runCapture(currentShelter, replInput.value);
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+        console.error(err);
+      } finally {
+        replRunButton.disabled = false;
+      }
+    }
+
+    async function runTinytests() {
+      if (!currentShelter) {
+        return;
+      }
+      runTinytestsButton.disabled = true;
+      try {
+        await runCapture(currentShelter, "tinytest::test_package('Rduckhts')");
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+        console.error(err);
+      } finally {
+        runTinytestsButton.disabled = false;
+      }
+    }
+
     async function main() {
       statusNode.textContent = "Preparing";
       runButton.disabled = true;
+      setReplEnabled(false);
       logNode.textContent = "";
+      currentShelter = null;
 
       const version = await parseVersion();
       const localRepo = `${location.origin}/r/Rduckhts/webr-repo`;
@@ -158,9 +231,9 @@
 
       try {
         statusNode.textContent = "Installing dependencies";
-        log("> await webR.installPackages(['DBI', 'duckdb'], { repos: 'https://repo.r-wasm.org/' })");
-        await webR.installPackages(["DBI", "duckdb"], { repos: "https://repo.r-wasm.org/" });
-        log("Installed webR binary packages: DBI, duckdb");
+        log("> await webR.installPackages(['DBI', 'duckdb', 'tinytest'], { repos: 'https://repo.r-wasm.org/' })");
+        await webR.installPackages(["DBI", "duckdb", "tinytest"], { repos: "https://repo.r-wasm.org/" });
+        log("Installed webR binary packages: DBI, duckdb, tinytest");
 
         statusNode.textContent = "Installing local Rduckhts";
         log(`> await webR.installPackages(['Rduckhts'], { repos: ['${localRepo}', 'https://repo.r-wasm.org/'], mount: false })`);
@@ -171,6 +244,7 @@
         await runCapture(shelter, "library(DBI)");
         await runCapture(shelter, "library(duckdb)");
         await runCapture(shelter, "library(Rduckhts)");
+        await runCapture(shelter, "library(tinytest)");
         await runCapture(shelter, "packageVersion('Rduckhts')");
         await runCapture(shelter, "ext <- system.file('duckhts_extension', 'build', 'duckhts.duckdb_extension', package = 'Rduckhts'); readBin(ext, 'raw', 8)");
 
@@ -184,9 +258,11 @@
         await runCapture(shelter, "stopifnot(file.exists(fasta_path), file.exists(fastq_r1), file.exists(fastq_r2))");
         await runCapture(shelter, "rduckhts_fastq(con, 'reads', fastq_r1, mate_path = fastq_r2, overwrite = TRUE)");
         await runCapture(shelter, "DBI::dbGetQuery(con, \"SELECT COUNT(*) AS n, MIN(length(SEQUENCE)) AS min_len, MAX(length(SEQUENCE)) AS max_len FROM reads\")");
-        await runCapture(shelter, "dbDisconnect(con, shutdown = TRUE)");
 
+        currentShelter = shelter;
+        setReplEnabled(true);
         statusNode.textContent = "Passed";
+        log("REPL ready. The DuckDB connection `con` is still open for ad hoc tests.");
       } catch (err) {
         statusNode.textContent = "Failed";
         log("ERROR", err?.message ?? String(err));
@@ -198,6 +274,15 @@
 
     runButton.addEventListener("click", () => {
       void main();
+    });
+    replRunButton.addEventListener("click", () => {
+      void runRepl();
+    });
+    runTinytestsButton.addEventListener("click", () => {
+      void runTinytests();
+    });
+    replClearButton.addEventListener("click", () => {
+      logNode.textContent = "";
     });
   </script>
 </body>

@@ -234,11 +234,10 @@ HTSLIB_GCS="--enable-gcs"
 
 if [ "${WASM_BUILD}" = "yes" ]; then
   echo "Detected WebAssembly/r-wasm build environment"
-  echo "Disabling plugins, libcurl, S3, GCS, and LZMA support (not available in the stock webR/r-universe wasm toolchain)"
+  echo "Disabling plugins, S3, GCS, and LZMA support in wasm; preserving libcurl when the webR toolchain provides it"
   HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no ac_cv_func_srand48_deterministic=no"
   HTSLIB_PLUGINS="--disable-plugins"
   HAS_LZMA=no
-  HAS_CURL=no
   HAS_OPENSSL=no
   HTSLIB_S3="--disable-s3"
   HTSLIB_GCS="--disable-gcs"

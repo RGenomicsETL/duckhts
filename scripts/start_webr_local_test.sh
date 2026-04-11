@@ -3,6 +3,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PORT=${PORT:-8000}
+HOST=${HOST:-127.0.0.1}
 WEBR_IMAGE=${WEBR_IMAGE:-ghcr.io/r-wasm/webr:main}
 
 echo "Building local webR artifact with ${WEBR_IMAGE}..."
@@ -31,6 +32,7 @@ VERSION=$(Rscript -e 'cat(read.dcf("r/Rduckhts/DESCRIPTION")[1, "Version"])')
 TGZ_PATH="${ROOT_DIR}/r/Rduckhts/Rduckhts_${VERSION}.tgz"
 REPO_ROOT="${ROOT_DIR}/r/Rduckhts/webr-repo"
 LOCAL_REPO_DIR="${ROOT_DIR}/r/Rduckhts/webr-repo/src/contrib"
+SITE_ROOT="${ROOT_DIR}/r/Rduckhts/webr-local-site"
 WEBR_R_SERIES=$(
   docker run --rm "${WEBR_IMAGE}" bash -lc \
     "Rscript -e 'cat(paste(R.version\$major, sub(\"\\\\..*$\", \"\", R.version\$minor), sep = \".\"))'"
@@ -67,6 +69,12 @@ write_index(repo_src)
 write_index(repo_bin)
 "
 
+rm -rf "${SITE_ROOT}"
+mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/r/Rduckhts"
+cp -f "${ROOT_DIR}/scripts/webr-local-test.html" "${SITE_ROOT}/scripts/webr-local-test.html"
+cp -f "${ROOT_DIR}/r/Rduckhts/DESCRIPTION" "${SITE_ROOT}/r/Rduckhts/DESCRIPTION"
+cp -a "${REPO_ROOT}" "${SITE_ROOT}/r/Rduckhts/webr-repo"
+
 cat <<EOF
 Built:
   ${TGZ_PATH}
@@ -75,7 +83,7 @@ Local webR repo:
   /r/Rduckhts/webr-repo
 
 Open in a browser:
-  http://localhost:${PORT}/scripts/webr-local-test.html
+  http://${HOST}:${PORT}/scripts/webr-local-test.html
 
 The page will load:
   /r/Rduckhts/DESCRIPTION
@@ -84,5 +92,5 @@ The page will load:
   /r/Rduckhts/webr-repo/bin/emscripten/contrib/${WEBR_R_SERIES}/Rduckhts_${VERSION}.tgz
 EOF
 
-cd "${ROOT_DIR}"
-exec python3 -m http.server "${PORT}"
+cd "${SITE_ROOT}"
+exec python3 -m http.server "${PORT}" --bind "${HOST}"
