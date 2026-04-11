@@ -1,7 +1,12 @@
 # Changelog
 
-## Rduckhts 1.1.6.9000-0.0.5 (Development version)
+## Rduckhts 1.1.6.9000-0.0.6 (Development version)
 
+- Make the bundled wasm extension self-contained with respect to
+  `htslib`: the Emscripten/webR `configure` path now builds only
+  `libhts.a`, links `duckhts.duckdb_extension` directly against that
+  static archive, and no longer relies on runtime loading of bundled
+  `libhts.so*` files in webR/browser environments.
 - Fix the bundled wasm side-module final link during `configure`:
   preserve webR/Emscripten `${LDFLAGS}` on the final
   `duckhts.duckdb_extension` link so the `SIDE_MODULE` settings reach

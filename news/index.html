@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.6.9000-0.0.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.6.9000-0.0.6</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,8 +33,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="1.1.6.9000-0.0.5" id="rduckhts-1169000-005-development-version">Rduckhts 1.1.6.9000-0.0.5 (Development version)<a class="anchor" aria-label="anchor" href="#rduckhts-1169000-005-development-version"></a></h2>
-<ul><li>Fix the bundled wasm side-module final link during <code>configure</code>: preserve webR/Emscripten <code>${LDFLAGS}</code> on the final <code>duckhts.duckdb_extension</code> link so the <code>SIDE_MODULE</code> settings reach the extension itself, and export <code>duckhts_init_c_api</code> explicitly for DuckDB’s loader. This fixes webR/browser <code><a href="../reference/rduckhts_load.html">rduckhts_load()</a></code> failures where DuckDB could not find a usable init export in <code>duckhts.duckdb_extension</code>.</li>
+<h2 class="pkg-version" data-toc-text="1.1.6.9000-0.0.6" id="rduckhts-1169000-006-development-version">Rduckhts 1.1.6.9000-0.0.6 (Development version)<a class="anchor" aria-label="anchor" href="#rduckhts-1169000-006-development-version"></a></h2>
+<ul><li>Make the bundled wasm extension self-contained with respect to <code>htslib</code>: the Emscripten/webR <code>configure</code> path now builds only <code>libhts.a</code>, links <code>duckhts.duckdb_extension</code> directly against that static archive, and no longer relies on runtime loading of bundled <code>libhts.so*</code> files in webR/browser environments.</li>
+<li>Fix the bundled wasm side-module final link during <code>configure</code>: preserve webR/Emscripten <code>${LDFLAGS}</code> on the final <code>duckhts.duckdb_extension</code> link so the <code>SIDE_MODULE</code> settings reach the extension itself, and export <code>duckhts_init_c_api</code> explicitly for DuckDB’s loader. This fixes webR/browser <code><a href="../reference/rduckhts_load.html">rduckhts_load()</a></code> failures where DuckDB could not find a usable init export in <code>duckhts.duckdb_extension</code>.</li>
 <li>Set the bundled extension metadata platform to <code>linux_i686_musl</code> for the Emscripten/webR path in <code>configure</code>, matching the platform value you are using for browser-side loading tests.</li>
 <li>Fix Wasm package builds under <code>rwasm</code> / r-universe: the package <code>configure</code> script now preserves injected <code>NAME=VALUE</code> cache overrides, forwards explicit <code>--build</code> / <code>--host</code> triplets into the vendored <code>htslib</code> <code>./configure</code>, forwards webR’s Emscripten port flags for <code>zlib</code>/<code>bzip2</code>, seeds wasm-safe Autoconf cache results for <code>zlib</code>/<code>bzip2</code>/socket probes, injects a tiny Emscripten-only socket compatibility shim for <code>recv</code>/<code>send</code>/<code>closesocket</code>, and disables only the optional <code>htslib</code> features that are not available in the stock webR/r-universe wasm toolchain (<code>libcurl</code>, <code>S3</code>, <code>GCS</code>, <code>lzma</code>, plugins); this fixes the original <code>ac_cv_func_getrandom=no: command not found</code> failure and the subsequent nested <code>htslib</code> cross-compile probe failures without changing native configure behavior.</li>
 <li>Fix bundled extension wasm artifacts: the upstream CMake wasm build now rebuilds <code>libduckhts.a</code> as a fat archive containing vendored <code>htslib</code> (and any static archive dependencies CMake can see), so DuckDB wasm packaging no longer depends on <code>extension-ci-tools</code> changes just to avoid unresolved symbols such as <code>bcf_readrec</code> at <code>LOAD</code>.</li>
