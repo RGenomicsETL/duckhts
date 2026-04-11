@@ -317,11 +317,14 @@ env ${HTSLIB_CONFIGURE_CACHE_VARS} ./configure \
   LIBS="${HTSLIB_LIBS}" \
   ${HTSLIB_CONFIGURE_FLAGS}
 
-echo "---------- Building htslib (static + shared) ----------"
+echo "---------- Building htslib ----------"
 # chek if thread is set or default to 1
 THREADS=${THREADS:-1}
 
-HTSLIB_BUILD_TARGETS="libhts.a libhts.${SHLIB_EXT}"
+HTSLIB_BUILD_TARGETS="libhts.a"
+if [ "${WASM_BUILD}" != "yes" ]; then
+  HTSLIB_BUILD_TARGETS="${HTSLIB_BUILD_TARGETS} libhts.${SHLIB_EXT}"
+fi
 if [ "${HTSLIB_PLUGINS}" = "--enable-plugins" ]; then
   HTSLIB_BUILD_TARGETS="$HTSLIB_BUILD_TARGETS plugins"
 fi
@@ -331,17 +334,17 @@ ${MAKE} -j${THREADS} ${HTSLIB_BUILD_TARGETS}
 # Avoid "make install" in bundled builds: platform install tools differ and
 mkdir -p "${HTSLIB_DIR}/lib" "${HTSLIB_DIR}/include/htslib" "${HTSLIB_DIR}/libexec/htslib"
 cp -f libhts.a "${HTSLIB_DIR}/lib/libhts.a"
-if [ -f "libhts.${SHLIB_EXT}" ]; then
+if [ "${WASM_BUILD}" != "yes" ] && [ -f "libhts.${SHLIB_EXT}" ]; then
   cp -f "libhts.${SHLIB_EXT}" "${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}"
 fi
-if [ "${SHLIB_EXT}" = "so" ]; then
+if [ "${WASM_BUILD}" != "yes" ] && [ "${SHLIB_EXT}" = "so" ]; then
   # htslib on Linux typically produces libhts.so and libhts.so.3.
   if [ -e "libhts.so.3" ]; then
     cp -f "libhts.so.3" "${HTSLIB_DIR}/lib/libhts.so.3"
   elif [ -f "libhts.so" ]; then
     ln -sf "libhts.so" "${HTSLIB_DIR}/lib/libhts.so.3"
   fi
-elif [ -f "libhts.3.${SHLIB_EXT}" ]; then
+elif [ "${WASM_BUILD}" != "yes" ] && [ -f "libhts.3.${SHLIB_EXT}" ]; then
   cp -f "libhts.3.${SHLIB_EXT}" "${HTSLIB_DIR}/lib/libhts.3.${SHLIB_EXT}"
 fi
 cp -f htslib/*.h "${HTSLIB_DIR}/include/htslib/" || true
@@ -361,17 +364,22 @@ if [ ! -f "libhts.a" ]; then
   exit 1
 fi
 
-HTSLIB_SHARED_LIB=""
-if [ -f "${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}" ]; then
-  HTSLIB_SHARED_LIB="${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}"
+HTSLIB_LINK_INPUT="-L${HTSLIB_DIR}/lib -lhts"
+if [ "${WASM_BUILD}" = "yes" ]; then
+  HTSLIB_LINK_INPUT="${HTSLIB_DIR}/lib/libhts.a"
+else
+  HTSLIB_SHARED_LIB=""
+  if [ -f "${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}" ]; then
+    HTSLIB_SHARED_LIB="${HTSLIB_DIR}/lib/libhts.${SHLIB_EXT}"
+  fi
+
+  if [ -z "${HTSLIB_SHARED_LIB}" ]; then
+    echo "ERROR: htslib shared library not found (libhts.so/libhts.dylib)"
+    exit 1
+  fi
 fi
 
-if [ -z "${HTSLIB_SHARED_LIB}" ]; then
-  echo "ERROR: htslib shared library not found (libhts.so/libhts.dylib)"
-  exit 1
-fi
-
-if [ "`uname`" = "Darwin" ]; then
+if [ "${WASM_BUILD}" != "yes" ] && [ "`uname`" = "Darwin" ]; then
   echo "Fixing htslib install names for macOS..."
   if [ -f "${HTSLIB_DIR}/lib/libhts.3.dylib" ]; then
     install_name_tool -id @rpath/libhts.3.dylib "${HTSLIB_DIR}/lib/libhts.3.dylib" || true
@@ -429,7 +437,7 @@ FINAL_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension"
 ${CC} -shared -fPIC ${LDFLAGS} ${EXT_RPATH} -o "${RAW_EXT_FILE}" \
     ${EXT_EXPORT_FLAGS} \
     $OBJECT_FILES \
-  -L"${HTSLIB_DIR}/lib" -lhts \
+  ${HTSLIB_LINK_INPUT} \
   $LIBS
 
 if [ $? -ne 0 ]; then

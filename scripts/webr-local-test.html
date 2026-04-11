@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>webR Local Rduckhts Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3efe4;
+      --panel: #fffdf7;
+      --ink: #1a1a1a;
+      --muted: #6a665c;
+      --accent: #0f766e;
+      --accent-2: #b45309;
+      --border: #d6cfbf;
+    }
+    body {
+      margin: 0;
+      font-family: "Iosevka Web", "IBM Plex Mono", monospace;
+      background:
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.10), transparent 35%),
+        radial-gradient(circle at bottom left, rgba(180, 83, 9, 0.10), transparent 30%),
+        var(--bg);
+      color: var(--ink);
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+    p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 20px 0;
+      align-items: center;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent);
+      color: white;
+      padding: 10px 16px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    code {
+      background: rgba(15, 118, 110, 0.08);
+      padding: 1px 5px;
+      border-radius: 6px;
+    }
+    #status {
+      font-weight: 700;
+      color: var(--accent-2);
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.4;
+      min-height: 320px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>webR Local Rduckhts Test</h1>
+    <p>This page installs <code>DBI</code>, <code>duckdb</code>, and the locally built <code>Rduckhts</code> from a tiny local webR binary repository, then runs <code>rduckhts_load(con)</code> and a bundled FASTA/FASTQ smoke test inside a real browser webR worker.</p>
+    <div class="controls">
+      <button id="run">Run Test</button>
+      <span id="status">Idle</span>
+    </div>
+    <div class="card">
+      <pre id="log"></pre>
+    </div>
+  </main>
+  <script type="module">
+    import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
+
+    const logNode = document.getElementById("log");
+    const runButton = document.getElementById("run");
+    const statusNode = document.getElementById("status");
+
+    function log(...parts) {
+      const line = parts.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ");
+      logNode.textContent += line + "\n";
+      logNode.scrollTop = logNode.scrollHeight;
+      console.log(...parts);
+    }
+
+    async function parseVersion() {
+      const response = await fetch("/r/Rduckhts/DESCRIPTION", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch DESCRIPTION: ${response.status}`);
+      }
+      const text = await response.text();
+      const match = text.match(/^Version:\s*(.+)$/m);
+      if (!match) {
+        throw new Error("Could not parse Rduckhts version from DESCRIPTION");
+      }
+      return match[1].trim();
+    }
+
+    async function createWebR() {
+      const webR = new WebR();
+      await webR.init();
+      return webR;
+    }
+
+    async function runCapture(shelter, code) {
+      log(`> ${code}`);
+      const result = await shelter.captureR(code, { withAutoprint: true });
+      for (const item of result.output) {
+        if (item.type === "stdout" || item.type === "stderr") {
+          log(item.data);
+        }
+      }
+      return result;
+    }
+
+    async function main() {
+      statusNode.textContent = "Preparing";
+      runButton.disabled = true;
+      logNode.textContent = "";
+
+      const version = await parseVersion();
+      const localRepo = `${location.origin}/r/Rduckhts/webr-repo`;
+      const localArtifact = `${localRepo}/bin/emscripten/contrib/4.5/Rduckhts_${version}.tgz`;
+      log(`Using local webR repo: ${localRepo}`);
+      log(`Using local artifact: ${localArtifact}`);
+
+      const webR = await createWebR();
+      const shelter = await new webR.Shelter();
+
+      try {
+        statusNode.textContent = "Installing dependencies";
+        log("> await webR.installPackages(['DBI', 'duckdb'], { repos: 'https://repo.r-wasm.org/' })");
+        await webR.installPackages(["DBI", "duckdb"], { repos: "https://repo.r-wasm.org/" });
+        log("Installed webR binary packages: DBI, duckdb");
+
+        statusNode.textContent = "Installing local Rduckhts";
+        log(`> await webR.installPackages(['Rduckhts'], { repos: ['${localRepo}', 'https://repo.r-wasm.org/'], mount: false })`);
+        await webR.installPackages(["Rduckhts"], { repos: [localRepo, "https://repo.r-wasm.org/"], mount: false });
+        log("Installed local webR binary package: Rduckhts");
+
+        statusNode.textContent = "Loading package";
+        await runCapture(shelter, "library(DBI)");
+        await runCapture(shelter, "library(duckdb)");
+        await runCapture(shelter, "library(Rduckhts)");
+        await runCapture(shelter, "packageVersion('Rduckhts')");
+        await runCapture(shelter, "ext <- system.file('duckhts_extension', 'build', 'duckhts.duckdb_extension', package = 'Rduckhts'); readBin(ext, 'raw', 8)");
+
+        statusNode.textContent = "Running DuckDB load";
+        await runCapture(shelter, "con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = 'true')))");
+        await runCapture(shelter, "rduckhts_load(con)");
+        statusNode.textContent = "Running FASTQ smoke test";
+        await runCapture(shelter, "fasta_path <- system.file('extdata', 'ce.fa', package = 'Rduckhts')");
+        await runCapture(shelter, "fastq_r1 <- system.file('extdata', 'r1.fq', package = 'Rduckhts')");
+        await runCapture(shelter, "fastq_r2 <- system.file('extdata', 'r2.fq', package = 'Rduckhts')");
+        await runCapture(shelter, "stopifnot(file.exists(fasta_path), file.exists(fastq_r1), file.exists(fastq_r2))");
+        await runCapture(shelter, "rduckhts_fastq(con, 'reads', fastq_r1, mate_path = fastq_r2, overwrite = TRUE)");
+        await runCapture(shelter, "DBI::dbGetQuery(con, \"SELECT COUNT(*) AS n, MIN(length(SEQUENCE)) AS min_len, MAX(length(SEQUENCE)) AS max_len FROM reads\")");
+        await runCapture(shelter, "dbDisconnect(con, shutdown = TRUE)");
+
+        statusNode.textContent = "Passed";
+      } catch (err) {
+        statusNode.textContent = "Failed";
+        log("ERROR", err?.message ?? String(err));
+        console.error(err);
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    runButton.addEventListener("click", () => {
+      void main();
+    });
+  </script>
+</body>
+</html>
