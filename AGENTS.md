@@ -37,6 +37,7 @@ Never consider a feature complete until both are updated.
 - Reproduce `Rduckhts` wasm failures in the webR container, not from host build directories: use `ghcr.io/r-wasm/webr:main` and the `rwasm::build()` path.
 - Do not assume `r/Rduckhts/inst/duckhts_extension/build/` in the repo is a wasm build artifact. Host `R CMD build` / `.Rcheck` trees often contain native ELF binaries with the same filename.
 - For wasm package debugging, inspect the built `Rduckhts_<Version>.tgz` produced by `rwasm::build()`. The real browser payload is the bundled `Rduckhts/duckhts_extension/build/duckhts.duckdb_extension` inside that `.tgz`.
+- For browser-real testing, prefer the local harness in `scripts/start_webr_local_test.sh` plus `scripts/webr-local-test.html`. This path now exercises the actual browser webR worker, installs the locally built `.tgz` from a tiny staged binary repo, runs `rduckhts_load()`, runs a bundled FASTQ smoke test, and can run the installed `tinytest` suite in-browser.
 - When checking a wasm extension, verify both:
 - the symbol table, e.g. with `emnm`
 - the actual wasm export section, because a symbol name may exist in the module but still not be exported for DuckDB's loader
@@ -44,6 +45,10 @@ Never consider a feature complete until both are updated.
 - If DuckDB reports that `duckhts.duckdb_extension` does not contain `duckhts_init_c_api`, do not stop at `strings`/`emnm`. Parse the wasm export section and confirm that `duckhts_init_c_api` is actually exported.
 - Keep wasm-specific behavior gated on the real Emscripten target detection (`--host=wasm32-unknown-emscripten`, `emcc`, etc.). Do not let wasm workarounds change non-wasm targets accidentally.
 - The DuckDB metadata trailer appended by `append_extension_metadata.R` is separate from `configure`/`htslib` probing. It affects DuckDB's runtime loader selection, not whether the package build succeeds.
+- Do not trust the outer host `pkg-config` curl probe on wasm. The webR Docker image exposes host Linux `curl/curl.h` headers via Linux paths, but those are not a usable wasm libcurl backend. The `configure` script skips curl detection entirely on wasm; do not re-enable host pkg-config for this path.
+- `r-wasm/webr` ships `/opt/webr/wasm/lib/libcurl.a` (a real wasm-compiled libcurl), and the emcc link test passes against it. However, libcurl's `connect()` / socket calls from a SIDE_MODULE hit a webR Emscripten message-bus limitation (`resolved is not a function` at `prop` in `R.js`) when the first network connection is attempted. Keep libcurl disabled on wasm in the package build.
+- Current wasm/browser status: local-file workflows and the installed `tinytest` suite pass end-to-end in a real browser webR worker. HTTP/HTTPS access on wasm now goes through the package-owned `src/wasm_http_hfile.c` backend, which uses synchronous browser XHR from the worker instead of libcurl sockets.
+- Browser constraints still apply on wasm: same-origin URLs work, remote URLs require permissive CORS headers, and `ALL_PROXY` / ws-proxy do not affect the XHR backend. Keep upstream `htslib` `libcurl`, `S3`, and `GCS` disabled on wasm unless the runtime model changes.
 
 ## R Package Workflow — Mandatory After Any Extension Source Change
 ```

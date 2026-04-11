@@ -88,6 +88,7 @@ set(EXTENSION_SOURCES
         src/score_udf.c
         src/bcftools_filter.c
         src/bcftools_shim.c
+        src/wasm_http_hfile.c
 )
 
 if (DUCKDB_WASM_EXTENSION)

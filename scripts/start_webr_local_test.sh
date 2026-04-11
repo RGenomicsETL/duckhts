@@ -70,10 +70,16 @@ write_index(repo_bin)
 "
 
 rm -rf "${SITE_ROOT}"
-mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/r/Rduckhts"
+mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/r/Rduckhts" "${SITE_ROOT}/extdata"
 cp -f "${ROOT_DIR}/scripts/webr-local-test.html" "${SITE_ROOT}/scripts/webr-local-test.html"
 cp -f "${ROOT_DIR}/r/Rduckhts/DESCRIPTION" "${SITE_ROOT}/r/Rduckhts/DESCRIPTION"
 cp -a "${REPO_ROOT}" "${SITE_ROOT}/r/Rduckhts/webr-repo"
+# Expose tabix-indexed test files under /extdata so the browser REPL can open
+# them via a real http:// URL without needing a remote server or ws-proxy.
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/header_tabix.tsv.gz" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/header_tabix.tsv.gz.tbi" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/gff_file.gff.gz" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/gff_file.gff.gz.tbi" "${SITE_ROOT}/extdata/"
 
 cat <<EOF
 Built:

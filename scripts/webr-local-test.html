@@ -118,9 +118,7 @@
     </div>
     <div class="card repl">
       <p>The REPL runs inside the same browser webR session after setup. <code>con</code>, <code>Rduckhts</code>, and the smoke-test tables stay available.</p>
-      <textarea id="repl-input">gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"
-rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409", overwrite = TRUE)
-DBI::dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")</textarea>
+      <textarea id="repl-input"># placeholder – filled in by JS below</textarea>
     </div>
   </main>
   <script type="module">
@@ -271,6 +269,22 @@ DBI::dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")</textarea>
         runButton.disabled = false;
       }
     }
+
+    // Fill REPL default with browser-http tests.
+    // The wasm backend uses synchronous XHR, not libcurl, so ALL_PROXY does
+    // not apply here. Remote URLs still need browser-allowed CORS headers.
+    replInput.value = [
+      "# Local HTTP tabix test — served by the Python server, no proxy needed.",
+      `local_url <- "${location.origin}/extdata/header_tabix.tsv.gz"`,
+      'rduckhts_tabix(con, "http_tabix", local_url, region = "chr1:1-2", overwrite = TRUE)',
+      'DBI::dbGetQuery(con, "SELECT * FROM http_tabix")',
+      "",
+      "# Remote HTTP example: use only with a same-origin relay or a host that",
+      "# sends permissive CORS headers. The EBI GTEx URL does not satisfy that.",
+      '# remote_url <- "https://example.com/path/to/file.tsv.gz"',
+      '# rduckhts_tabix(con, "remote_tabix", remote_url, region = "chr1:1-2", overwrite = TRUE)',
+      '# DBI::dbGetQuery(con, "SELECT * FROM remote_tabix")',
+    ].join("\n");
 
     runButton.addEventListener("click", () => {
       void main();

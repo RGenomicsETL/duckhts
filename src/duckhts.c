@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "wasm_http_hfile.h"
+
 DUCKDB_EXTENSION_EXTERN
 
 /* bcf_reader.c */
@@ -99,6 +101,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
                             struct duckdb_extension_access* access) {
     (void)info;
     (void)access;
+    register_wasm_http_hfile_backend();
 
     register_read_bcf_function(connection);
     register_read_bam_function(connection);
