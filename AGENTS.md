@@ -33,6 +33,18 @@ Never consider a feature complete until both are updated.
 - No network access in the extension build step; only in explicit vendoring scripts.
 - No vcpkg — use CMake and traditional autotools (CRAN requirement).
 
+## Wasm / webR Debugging
+- Reproduce `Rduckhts` wasm failures in the webR container, not from host build directories: use `ghcr.io/r-wasm/webr:main` and the `rwasm::build()` path.
+- Do not assume `r/Rduckhts/inst/duckhts_extension/build/` in the repo is a wasm build artifact. Host `R CMD build` / `.Rcheck` trees often contain native ELF binaries with the same filename.
+- For wasm package debugging, inspect the built `Rduckhts_<Version>.tgz` produced by `rwasm::build()`. The real browser payload is the bundled `Rduckhts/duckhts_extension/build/duckhts.duckdb_extension` inside that `.tgz`.
+- When checking a wasm extension, verify both:
+- the symbol table, e.g. with `emnm`
+- the actual wasm export section, because a symbol name may exist in the module but still not be exported for DuckDB's loader
+- A missing DuckDB init symbol in webR/browser can come from the final extension link dropping Emscripten `LDFLAGS`. In `r/Rduckhts/configure`, the final `duckhts.duckdb_extension` link must preserve `${LDFLAGS}` so `SIDE_MODULE` and related wasm flags reach the extension itself.
+- If DuckDB reports that `duckhts.duckdb_extension` does not contain `duckhts_init_c_api`, do not stop at `strings`/`emnm`. Parse the wasm export section and confirm that `duckhts_init_c_api` is actually exported.
+- Keep wasm-specific behavior gated on the real Emscripten target detection (`--host=wasm32-unknown-emscripten`, `emcc`, etc.). Do not let wasm workarounds change non-wasm targets accidentally.
+- The DuckDB metadata trailer appended by `append_extension_metadata.R` is separate from `configure`/`htslib` probing. It affects DuckDB's runtime loader selection, not whether the package build succeeds.
+
 ## R Package Workflow — Mandatory After Any Extension Source Change
 ```
 cd ~/duckhts/r/Rduckhts/

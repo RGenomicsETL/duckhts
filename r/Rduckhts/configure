@@ -414,11 +414,20 @@ case "${OS_NAME}" in
     ;;
 esac
 
+EXT_EXPORT_FLAGS=""
+if [ "${WASM_BUILD}" = "yes" ]; then
+  # Emscripten side modules do not automatically expose default-visible
+  # symbols as wasm exports. DuckDB's loader looks up duckhts_init_c_api
+  # by name, so export it explicitly in the final wasm link.
+  EXT_EXPORT_FLAGS="-Wl,--export=duckhts_init_c_api"
+fi
+
 # Link the extension (raw, metadata appended later)
 echo "Linking DuckHTS extension..."
 RAW_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension.raw"
 FINAL_EXT_FILE="${BUILD_DIR}/duckhts.duckdb_extension"
-${CC} -shared -fPIC ${EXT_RPATH} -o "${RAW_EXT_FILE}" \
+${CC} -shared -fPIC ${LDFLAGS} ${EXT_RPATH} -o "${RAW_EXT_FILE}" \
+    ${EXT_EXPORT_FLAGS} \
     $OBJECT_FILES \
   -L"${HTSLIB_DIR}/lib" -lhts \
   $LIBS
