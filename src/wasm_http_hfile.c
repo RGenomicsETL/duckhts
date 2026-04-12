@@ -26,6 +26,7 @@
 
 #include "hfile_internal.h"   /* hFILE_backend, hFILE_scheme_handler, hfile_init/destroy */
 #include "htslib/hts_defs.h"
+#include "htslib/hts_log.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -34,6 +35,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <emscripten.h>
+
+#define WASM_HTTP_LARGE_FULL_DOWNLOAD_BYTES (64.0 * 1024.0 * 1024.0)
 
 /* -------------------------------------------------------------------------
  * Our hFILE subclass.  The base member must be first so that (hFILE *) casts
@@ -44,19 +47,108 @@ typedef struct {
     char *url;           /* owned, null-terminated */
     off_t http_offset;   /* next byte position for HTTP range requests */
     off_t file_size;     /* Content-Length from HEAD; -1 if not yet fetched */
+    int warned_no_range; /* whether we've warned that Range is ignored */
+    int warned_large_full_download; /* whether we've warned about large 200 payload */
 } hFILE_wasm_http;
 
-static double wasm_http_discover_size(const char *url)
+/*
+ * Optional browser-side configuration object:
+ *   Module.duckhtsWasmHttpConfig = {
+ *     headers: {"Authorization": "Bearer ...", "X-Foo": "bar"},
+ *     allowHosts: ["example.org", ".ebi.ac.uk"],
+ *     enforceHostAllowlist: false,
+ *     withCredentials: false,
+ *     allowInsecureAuth: false
+ *   }
+ *
+ * Security model:
+ * - Custom headers are applied only when allowHosts matches URL hostname.
+ * - Optional hard host allowlist: enforceHostAllowlist=true blocks requests to
+ *   hosts that do not match allowHosts.
+ * - Authorization is stripped on non-HTTPS URLs unless allowInsecureAuth=true.
+ */
+
+static double wasm_http_discover_size(const char *url, uintptr_t cache_key)
 {
     return EM_ASM_DOUBLE({
         var url = UTF8ToString($0);
+        var key = String($1 >>> 0);
+        var cache = Module.duckhtsWasmHttpFullObjectCache;
+        var cfg = Module.duckhtsWasmHttpConfig || null;
         var xhr = new XMLHttpRequest();
         var cl = null;
         var cr = null;
         var totalStr = null;
         var slash = -1;
 
+        function hostMatchesAllowlist(targetUrl, allowHosts) {
+            var host = "";
+            var allow = allowHosts;
+            var i;
+            if (!allow) return false;
+            if (typeof allow === "string") {
+                allow = allow.split(",");
+            }
+            try {
+                host = new URL(targetUrl).hostname.toLowerCase();
+            } catch (e) {
+                return false;
+            }
+            if (!Array.isArray(allow)) return false;
+            for (i = 0; i < allow.length; i++) {
+                var raw = allow[i];
+                if (raw === null || raw === undefined) continue;
+                var rule = String(raw).trim().toLowerCase();
+                if (!rule) continue;
+                if (rule.charAt(0) === ".") {
+                    if (host.length > rule.length && host.endsWith(rule)) return true;
+                } else {
+                    if (host === rule) return true;
+                }
+            }
+            return false;
+        }
+
+        function applyConfiguredHeaders(xhrObj, targetUrl) {
+            var headers;
+            var keyName;
+            var isHttps = (typeof targetUrl === "string") && targetUrl.toLowerCase().startsWith("https://");
+            var allowInsecureAuth = !!(cfg && cfg.allowInsecureAuth);
+            if (!cfg || !cfg.headers) return;
+            if (!hostMatchesAllowlist(targetUrl, cfg.allowHosts)) return;
+            headers = cfg.headers;
+            for (keyName in headers) {
+                if (!Object.prototype.hasOwnProperty.call(headers, keyName)) continue;
+                if (headers[keyName] === null || headers[keyName] === undefined) continue;
+                if (!allowInsecureAuth && keyName.toLowerCase() === "authorization" && !isHttps) continue;
+                try {
+                    xhrObj.setRequestHeader(String(keyName), String(headers[keyName]));
+                } catch (e) {
+                }
+            }
+            if (cfg.withCredentials === true) xhrObj.withCredentials = true;
+        }
+
+        function shouldAllowRequest(targetUrl) {
+            if (!cfg || cfg.enforceHostAllowlist !== true) return true;
+            return hostMatchesAllowlist(targetUrl, cfg.allowHosts);
+        }
+
+        if (!shouldAllowRequest(url)) {
+            return -1.0;
+        }
+
+        if (!cache) {
+            cache = Object.create(null);
+            Module.duckhtsWasmHttpFullObjectCache = cache;
+        }
+
+        if (cache[key]) {
+            return cache[key].length;
+        }
+
         xhr.open("HEAD", url, false);
+        applyConfiguredHeaders(xhr, url);
         try {
             xhr.send(null);
         } catch (e) {
@@ -74,6 +166,7 @@ static double wasm_http_discover_size(const char *url)
         xhr = new XMLHttpRequest();
         xhr.open("GET", url, false);
         xhr.setRequestHeader("Range", "bytes=0-0");
+        applyConfiguredHeaders(xhr, url);
         xhr.responseType = "arraybuffer";
         try {
             xhr.send(null);
@@ -103,11 +196,12 @@ static double wasm_http_discover_size(const char *url)
 
         if (xhr.status === 200) {
             var data = new Uint8Array(xhr.response || new ArrayBuffer(0));
+            cache[key] = data;
             return data.length;
         }
 
         return -1.0;
-    }, url);
+    }, url, (unsigned int)cache_key);
 }
 
 /* -------------------------------------------------------------------------
@@ -128,13 +222,15 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
     hFILE_wasm_http *fp = (hFILE_wasm_http *)fpv;
     double discovered_size = -1.0;
     double probed_size;
+    double full_response_bytes = 0.0;
     int request_len;
     int got;
+    int range_ignored = 0;
 
     if (nbytes == 0) return 0;
 
     if (fp->file_size < 0 && fp->http_offset > 0) {
-        probed_size = wasm_http_discover_size(fp->url);
+        probed_size = wasm_http_discover_size(fp->url, (uintptr_t)fp);
         if (probed_size >= 0.0) fp->file_size = (off_t)probed_size;
     }
 
@@ -149,13 +245,94 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
         var buf  = $3;          /* pointer: destination in HEAPU8 */
         var outp = $4;          /* pointer: discovered size (double) */
         var knownSize = $5;     /* double: cached size, -1 if unknown */
+        var outRangeIgnored = $6; /* pointer: int flag */
+        var outFullBytes = $7;    /* pointer: full response bytes (double) */
+        var key = String($8 >>> 0); /* per-handle cache key */
         var end = from + len - 1;
         var cl = null;
         var cr = null;
         var totalStr = null;
         var slash = -1;
+        var cache = Module.duckhtsWasmHttpFullObjectCache;
+        var cached = null;
+        var cfg = Module.duckhtsWasmHttpConfig || null;
+
+        function hostMatchesAllowlist(targetUrl, allowHosts) {
+            var host = "";
+            var allow = allowHosts;
+            var i;
+            if (!allow) return false;
+            if (typeof allow === "string") {
+                allow = allow.split(",");
+            }
+            try {
+                host = new URL(targetUrl).hostname.toLowerCase();
+            } catch (e) {
+                return false;
+            }
+            if (!Array.isArray(allow)) return false;
+            for (i = 0; i < allow.length; i++) {
+                var raw = allow[i];
+                if (raw === null || raw === undefined) continue;
+                var rule = String(raw).trim().toLowerCase();
+                if (!rule) continue;
+                if (rule.charAt(0) === ".") {
+                    if (host.length > rule.length && host.endsWith(rule)) return true;
+                } else {
+                    if (host === rule) return true;
+                }
+            }
+            return false;
+        }
+
+        function applyConfiguredHeaders(xhrObj, targetUrl) {
+            var headers;
+            var keyName;
+            var isHttps = (typeof targetUrl === "string") && targetUrl.toLowerCase().startsWith("https://");
+            var allowInsecureAuth = !!(cfg && cfg.allowInsecureAuth);
+            if (!cfg || !cfg.headers) return;
+            if (!hostMatchesAllowlist(targetUrl, cfg.allowHosts)) return;
+            headers = cfg.headers;
+            for (keyName in headers) {
+                if (!Object.prototype.hasOwnProperty.call(headers, keyName)) continue;
+                if (headers[keyName] === null || headers[keyName] === undefined) continue;
+                if (!allowInsecureAuth && keyName.toLowerCase() === "authorization" && !isHttps) continue;
+                try {
+                    xhrObj.setRequestHeader(String(keyName), String(headers[keyName]));
+                } catch (e) {
+                }
+            }
+            if (cfg.withCredentials === true) xhrObj.withCredentials = true;
+        }
+
+        function shouldAllowRequest(targetUrl) {
+            if (!cfg || cfg.enforceHostAllowlist !== true) return true;
+            return hostMatchesAllowlist(targetUrl, cfg.allowHosts);
+        }
 
         HEAPF64[outp >> 3] = -1.0;
+        HEAP32[outRangeIgnored >> 2] = 0;
+        HEAPF64[outFullBytes >> 3] = 0.0;
+
+        if (!shouldAllowRequest(url)) {
+            return -2;
+        }
+
+        if (!cache) {
+            cache = Object.create(null);
+            Module.duckhtsWasmHttpFullObjectCache = cache;
+        }
+
+        cached = cache[key] || null;
+        if (cached) {
+            HEAPF64[outp >> 3] = cached.length;
+            HEAP32[outRangeIgnored >> 2] = 1;
+            HEAPF64[outFullBytes >> 3] = cached.length;
+            if (from >= cached.length) return 0;
+            var cn = ((cached.length - from) < len) ? (cached.length - from) : len;
+            HEAPU8.set(cached.subarray(from, from + cn), buf);
+            return cn;
+        }
 
         if (knownSize >= 0 && from >= knownSize) return 0;
         if (knownSize >= 0 && end >= knownSize) end = knownSize - 1;
@@ -164,6 +341,7 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
         var xhr = new XMLHttpRequest();
         xhr.open("GET", url, false);   /* false = synchronous; allowed in Workers */
         xhr.setRequestHeader("Range", "bytes=" + from + "-" + end);
+        applyConfiguredHeaders(xhr, url);
         xhr.responseType = "arraybuffer";
         try {
             xhr.send(null);
@@ -193,9 +371,15 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
                 var clv = parseFloat(cl);
                 if (!isNaN(clv) && clv >= 0) HEAPF64[outp >> 3] = clv;
             }
+            HEAP32[outRangeIgnored >> 2] = 1;
         }
 
         var data = new Uint8Array(xhr.response || new ArrayBuffer(0));
+        if (xhr.status === 200) {
+            HEAPF64[outp >> 3] = data.length;
+            HEAPF64[outFullBytes >> 3] = data.length;
+            cache[key] = data;
+        }
         var start = 0;
         if (xhr.status === 200 && from > 0) {
             if (from >= data.length) return 0;
@@ -206,9 +390,29 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
         HEAPU8.set(data.subarray(start, start + n), buf);
         return n;
     }, fp->url, (double)fp->http_offset, request_len, (uint8_t *)buffer,
-       &discovered_size, (double)fp->file_size);
+       &discovered_size, (double)fp->file_size, &range_ignored, &full_response_bytes,
+       (unsigned int)(uintptr_t)fp);
 
-    if (got < 0) { errno = EIO; return (ssize_t)-1; }
+    if (got < 0) {
+        errno = (got == -2) ? EACCES : EIO;
+        return (ssize_t)-1;
+    }
+    if (range_ignored && !fp->warned_no_range) {
+        hts_log_warning(
+            "wasm_http_hfile: server ignored HTTP Range for %s; "
+            "the browser backend will fetch full-object responses and slice bytes locally",
+            fp->url);
+        fp->warned_no_range = 1;
+    }
+    if (range_ignored && full_response_bytes >= WASM_HTTP_LARGE_FULL_DOWNLOAD_BYTES
+        && !fp->warned_large_full_download) {
+        hts_log_warning(
+            "wasm_http_hfile: large fallback download %.2f MiB for %s "
+            "(offset=%lld request=%d); consider a Range-capable endpoint to avoid repeated full downloads",
+            full_response_bytes / (1024.0 * 1024.0), fp->url,
+            (long long)fp->http_offset, request_len);
+        fp->warned_large_full_download = 1;
+    }
     if (discovered_size >= 0.0) fp->file_size = (off_t)discovered_size;
     fp->http_offset += (off_t)got;
     return (ssize_t)got;
@@ -242,7 +446,7 @@ static off_t wasm_http_seek(hFILE *fpv, off_t offset, int whence)
         break;
     case SEEK_END:
         if (fp->file_size < 0) {
-            double sz = wasm_http_discover_size(fp->url);
+            double sz = wasm_http_discover_size(fp->url, (uintptr_t)fp);
             if (sz < 0.0) { errno = ESPIPE; return (off_t)-1; }
             fp->file_size = (off_t)sz;
         }
@@ -269,6 +473,13 @@ static int wasm_http_flush(hFILE *fpv)
 static int wasm_http_close(hFILE *fpv)
 {
     hFILE_wasm_http *fp = (hFILE_wasm_http *)fpv;
+    EM_ASM({
+        var key = String($0 >>> 0);
+        var cache = Module.duckhtsWasmHttpFullObjectCache;
+        if (cache && cache[key]) {
+            delete cache[key];
+        }
+    }, (unsigned int)(uintptr_t)fp);
     free(fp->url);
     fp->url = NULL;
     return 0;
@@ -307,6 +518,8 @@ static hFILE *wasm_http_open(const char *url, const char *mode)
     }
     fp->http_offset = 0;
     fp->file_size   = -1;
+    fp->warned_no_range = 0;
+    fp->warned_large_full_download = 0;
     fp->base.backend = &wasm_http_backend;
     return &fp->base;
 }

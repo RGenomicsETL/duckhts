@@ -116,6 +116,24 @@
       <button id="repl-clear" disabled>Clear Log</button>
       <span id="repl-status">REPL disabled until setup passes</span>
     </div>
+    <div class="card repl" style="margin-bottom: 16px;">
+      <p>Optional wasm HTTP headers/auth config (applies inside webR worker):</p>
+      <p><code>Module.duckhtsWasmHttpConfig</code> is set via <code>webr::eval_js()</code>.</p>
+      <div class="controls" style="margin: 10px 0;">
+        <label for="cfg-hosts">Hosts:</label>
+        <input id="cfg-hosts" type="text" value="ftp.ebi.ac.uk" style="min-width: 360px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font: inherit;">
+      </div>
+      <textarea id="cfg-headers" style="min-height: 100px;">{
+  "X-Request-Source": "webr-local"
+}</textarea>
+      <div class="controls" style="margin-top: 10px;">
+        <label><input id="cfg-with-credentials" type="checkbox"> withCredentials</label>
+        <label><input id="cfg-enforce-allowlist" type="checkbox"> enforceHostAllowlist</label>
+        <label><input id="cfg-allow-insecure-auth" type="checkbox"> allowInsecureAuth</label>
+        <button id="cfg-apply" disabled>Apply HTTP Config</button>
+        <button id="cfg-clear" disabled>Clear HTTP Config</button>
+      </div>
+    </div>
     <div class="card repl">
       <p>The REPL runs inside the same browser webR session after setup. <code>con</code>, <code>Rduckhts</code>, and the smoke-test tables stay available.</p>
       <textarea id="repl-input"># placeholder – filled in by JS below</textarea>
@@ -132,6 +150,13 @@
     const replClearButton = document.getElementById("repl-clear");
     const replStatusNode = document.getElementById("repl-status");
     const replInput = document.getElementById("repl-input");
+    const cfgHosts = document.getElementById("cfg-hosts");
+    const cfgHeaders = document.getElementById("cfg-headers");
+    const cfgWithCredentials = document.getElementById("cfg-with-credentials");
+    const cfgEnforceAllowlist = document.getElementById("cfg-enforce-allowlist");
+    const cfgAllowInsecureAuth = document.getElementById("cfg-allow-insecure-auth");
+    const cfgApplyButton = document.getElementById("cfg-apply");
+    const cfgClearButton = document.getElementById("cfg-clear");
 
     let currentShelter = null;
 
@@ -146,9 +171,71 @@
       replRunButton.disabled = !enabled;
       runTinytestsButton.disabled = !enabled;
       replClearButton.disabled = !enabled;
+      cfgApplyButton.disabled = !enabled;
+      cfgClearButton.disabled = !enabled;
       replStatusNode.textContent = enabled
         ? "REPL ready"
         : "REPL disabled until setup passes";
+    }
+
+    function escapeForRSingleQuotedString(x) {
+      return x.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+    }
+
+    async function setWasmHttpConfig(configObjOrNull) {
+      if (!currentShelter) return;
+      const jsExpr = configObjOrNull === null
+        ? "Module.duckhtsWasmHttpConfig = undefined; 'duckhtsWasmHttpConfig cleared'"
+        : `Module.duckhtsWasmHttpConfig = ${JSON.stringify(configObjOrNull)}; 'duckhtsWasmHttpConfig set'`;
+      const rCode = `webr::eval_js('${escapeForRSingleQuotedString(jsExpr)}')`;
+      await runCapture(currentShelter, rCode);
+    }
+
+    async function applyHttpConfigFromUi() {
+      if (!currentShelter) return;
+      cfgApplyButton.disabled = true;
+      try {
+        const allowHosts = cfgHosts.value
+          .split(",")
+          .map(x => x.trim())
+          .filter(Boolean);
+        let headers = {};
+        if (cfgHeaders.value.trim()) {
+          headers = JSON.parse(cfgHeaders.value);
+          if (headers === null || Array.isArray(headers) || typeof headers !== "object") {
+            throw new Error("Headers must be a JSON object");
+          }
+        }
+        await setWasmHttpConfig({
+          headers,
+          allowHosts,
+          enforceHostAllowlist: cfgEnforceAllowlist.checked,
+          withCredentials: cfgWithCredentials.checked,
+          allowInsecureAuth: cfgAllowInsecureAuth.checked,
+        });
+        log("Applied Module.duckhtsWasmHttpConfig", {
+          allowHosts,
+          enforceHostAllowlist: cfgEnforceAllowlist.checked,
+          withCredentials: cfgWithCredentials.checked,
+          allowInsecureAuth: cfgAllowInsecureAuth.checked,
+        });
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+      } finally {
+        cfgApplyButton.disabled = false;
+      }
+    }
+
+    async function clearHttpConfigFromUi() {
+      if (!currentShelter) return;
+      cfgClearButton.disabled = true;
+      try {
+        await setWasmHttpConfig(null);
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+      } finally {
+        cfgClearButton.disabled = false;
+      }
     }
 
     async function parseVersion() {
@@ -283,9 +370,9 @@
       "# sends permissive CORS headers, including for Range and index reads.",
       "# EBI GTEx currently works in this harness, but this can vary by browser",
       "# policy and upstream CORS behavior over time.",
-      '# remote_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"',
-      '# rduckhts_tabix(con, "remote_tabix", remote_url, region = "1:11868-14409", header = TRUE, auto_detect = TRUE, overwrite = TRUE)',
-      '# DBI::dbGetQuery(con, "SELECT * FROM remote_tabix")',
+       '# remote_url <- "https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"',
+       '# rduckhts_tabix(con, "remote_tabix", remote_url, region = "1:11868-14409", header = TRUE, auto_detect = TRUE, overwrite = TRUE)',
+       '# DBI::dbGetQuery(con, "SELECT * FROM remote_tabix")',
     ].join("\n");
 
     runButton.addEventListener("click", () => {
@@ -299,6 +386,12 @@
     });
     replClearButton.addEventListener("click", () => {
       logNode.textContent = "";
+    });
+    cfgApplyButton.addEventListener("click", () => {
+      void applyHttpConfigFromUi();
+    });
+    cfgClearButton.addEventListener("click", () => {
+      void clearHttpConfigFromUi();
     });
   </script>
 </body>

@@ -286,6 +286,52 @@ Browser constraints still apply:
 - Behavior can vary by browser and by server-side CORS policy changes over time.
 - `ALL_PROXY` / websocket proxy settings do not affect this XHR backend.
 
+Optional header/auth configuration for browser wasm can be provided from JavaScript before loading/querying:
+
+```js
+Module.duckhtsWasmHttpConfig = {
+  headers: {
+    Authorization: "Bearer <short-lived-token>",
+    "X-Request-Source": "webr-local"
+  },
+  allowHosts: ["ftp.ebi.ac.uk", ".s3.amazonaws.com"],
+  enforceHostAllowlist: true,
+  withCredentials: false,
+  allowInsecureAuth: false
+};
+```
+
+Security behavior of this config:
+
+- Headers are only attached when the URL hostname matches `allowHosts`.
+- Requests are blocked for non-matching hosts when `enforceHostAllowlist: true`.
+- `Authorization` is blocked on non-HTTPS URLs unless `allowInsecureAuth: true` is set explicitly.
+- Credentials/cookies are only sent when `withCredentials: true` is set.
+
+### Browser wasm/duckdb-wasm local harness
+
+DuckHTS is also intended to run as a generic DuckDB community extension in browser wasm hosts (not only webR).
+
+Use the local duckdb-wasm harness to exercise that path end-to-end:
+
+```bash
+./scripts/start_duckdb_wasm_local_test.sh
+```
+
+Prerequisite: run this from a shell where the Emscripten toolchain is active (`emcmake` on `PATH`) and the repo's normal DuckDB/vcpkg wasm build prerequisites are available.
+
+The helper script exports the same key vcpkg variables used by extension-ci-tools wasm builds (`VCPKG_TOOLCHAIN_PATH`, `VCPKG_TARGET_TRIPLET=wasm32-emscripten`, `VCPKG_HOST_TRIPLET=x64-linux`, overlays), and bootstraps local vcpkg automatically when needed.
+
+If your host does not have `emcmake`, the script auto-builds and uses the project-owned Docker image at `scripts/docker/duckdb-wasm-local.Dockerfile`, which installs the same core wasm build pieces used by extension-ci-tools locally (`emsdk`, `vcpkg`, CMake/Ninja).
+
+Then open:
+
+```text
+http://127.0.0.1:8001/scripts/duckdb-wasm-local-test.html
+```
+
+This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs local HTTP reader smoke tests, and lets you set/clear `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
+
 ### S3 credentials and configuration
 
 The htslib S3 plugin supports credentials embedded in the URL or provided via environment variables or standard credentials files. For AWS-style credentials, the most common variables are:

@@ -56,6 +56,26 @@ What this means in practice:
 - CORS must allow both the primary file and index sidecars (`.tbi`/`.csi`), including range requests.
 - `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR backend.
 
+Optional browser-side request header/auth configuration can be set from JavaScript before running queries:
+
+```js
+Module.duckhtsWasmHttpConfig = {
+  headers: {
+    Authorization: "Bearer <short-lived-token>",
+    "X-Request-Source": "webr-local"
+  },
+  allowHosts: ["ftp.ebi.ac.uk", ".s3.amazonaws.com"],
+  withCredentials: false,
+  allowInsecureAuth: false
+};
+```
+
+Security behavior of this config:
+
+- Headers are only attached when URL hostnames match `allowHosts`.
+- `Authorization` is blocked for non-HTTPS URLs unless `allowInsecureAuth: true` is set.
+- Cookies/credentials are only sent when `withCredentials: true` is set.
+
 
 ## Quick Start 
 
@@ -513,9 +533,9 @@ head(index_raw, 1)
 GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this still depends on CORS policy on both the data object and index object.
 
 ```{r, eval=TRUE}
-gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
+gtex_url <- "https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
-                 header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+                  header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
 
 ```
