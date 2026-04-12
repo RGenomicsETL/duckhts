@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>duckdb-wasm Local DuckHTS Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3efe4;
+      --panel: #fffdf7;
+      --ink: #1a1a1a;
+      --muted: #6a665c;
+      --accent: #0f766e;
+      --border: #d6cfbf;
+    }
+    body {
+      margin: 0;
+      font-family: "Iosevka Web", "IBM Plex Mono", monospace;
+      background:
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.10), transparent 35%),
+        radial-gradient(circle at bottom left, rgba(180, 83, 9, 0.10), transparent 30%),
+        var(--bg);
+      color: var(--ink);
+    }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; }
+    p { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+      margin-bottom: 16px;
+    }
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+    button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent);
+      color: white;
+      padding: 10px 16px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      box-sizing: border-box;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      line-height: 1.4;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.4;
+      min-height: 280px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    code { background: rgba(15, 118, 110, 0.08); padding: 1px 5px; border-radius: 6px; }
+    #status { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>duckdb-wasm Local DuckHTS Test</h1>
+    <p>This harness loads the local DuckHTS wasm extension in duckdb-wasm and runs same-origin HTTP smoke tests.</p>
+
+    <div class="controls">
+      <button id="run">Run Setup + Smoke Test</button>
+      <span id="status">Idle</span>
+    </div>
+
+    <div class="card">
+      <pre id="log"></pre>
+    </div>
+
+    <div class="card">
+      <p>Optional wasm HTTP config (set on <code>globalThis.Module.duckhtsWasmHttpConfig</code>):</p>
+      <textarea id="cfg">{
+  "headers": {
+    "X-Request-Source": "duckdb-wasm-local"
+  },
+  "allowHosts": ["127.0.0.1", "localhost"],
+  "enforceHostAllowlist": true,
+  "withCredentials": false,
+  "allowInsecureAuth": false
+}</textarea>
+      <div class="controls">
+        <button id="apply-config" disabled>Apply Config</button>
+        <button id="clear-config" disabled>Clear Config</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <p>SQL REPL (runs against same DuckDB connection):</p>
+      <textarea id="sql">SELECT COUNT(*) AS n
+FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
+      <div class="controls">
+        <button id="run-sql" disabled>Run SQL</button>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import * as duckdb from "/duckdb-wasm-runtime/duckdb-browser.mjs";
+
+    const logNode = document.getElementById("log");
+    const runButton = document.getElementById("run");
+    const runSqlButton = document.getElementById("run-sql");
+    const statusNode = document.getElementById("status");
+    const sqlNode = document.getElementById("sql");
+    const cfgNode = document.getElementById("cfg");
+    const applyCfgButton = document.getElementById("apply-config");
+    const clearCfgButton = document.getElementById("clear-config");
+
+    let conn = null;
+
+    function log(...parts) {
+      const line = parts.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ");
+      logNode.textContent += line + "\n";
+      logNode.scrollTop = logNode.scrollHeight;
+      console.log(...parts);
+    }
+
+    function setEnabled(enabled) {
+      runSqlButton.disabled = !enabled;
+      applyCfgButton.disabled = !enabled;
+      clearCfgButton.disabled = !enabled;
+    }
+
+    function defaultOriginUrl(path) {
+      return `${location.origin}${path}`;
+    }
+
+    async function runSQL(sql) {
+      if (!conn) return;
+      log(`> ${sql}`);
+      const result = await conn.query(sql);
+      log(result.toString());
+    }
+
+    async function applyConfig() {
+      if (!conn) return;
+      try {
+        const cfg = JSON.parse(cfgNode.value);
+        globalThis.Module = globalThis.Module || {};
+        globalThis.Module.duckhtsWasmHttpConfig = cfg;
+        log("Applied Module.duckhtsWasmHttpConfig");
+      } catch (e) {
+        log("ERROR", e?.message ?? String(e));
+      }
+    }
+
+    async function clearConfig() {
+      globalThis.Module = globalThis.Module || {};
+      globalThis.Module.duckhtsWasmHttpConfig = undefined;
+      log("Cleared Module.duckhtsWasmHttpConfig");
+    }
+
+    async function main() {
+      statusNode.textContent = "Preparing";
+      runButton.disabled = true;
+      setEnabled(false);
+      logNode.textContent = "";
+
+      try {
+        const worker = new Worker("/duckdb-wasm-runtime/duckdb-browser-eh.worker.js");
+        const logger = new duckdb.ConsoleLogger();
+        const db = new duckdb.AsyncDuckDB(logger, worker);
+        await db.instantiate("/duckdb-wasm-runtime/duckdb-eh.wasm");
+        conn = await db.connect();
+
+        const extUrl = defaultOriginUrl("/duckdb-wasm/duckhts.duckdb_extension.wasm");
+        await db.registerFileURL("duckhts.duckdb_extension.wasm", extUrl, duckdb.DuckDBDataProtocol.HTTP, false);
+
+        await conn.query("SET allow_unsigned_extensions=true");
+        await conn.query("LOAD 'duckhts.duckdb_extension.wasm'");
+        log("Loaded extension:", extUrl);
+
+        const fastqUrl = defaultOriginUrl("/extdata/r1.fq");
+        const tabixUrl = defaultOriginUrl("/extdata/header_tabix.tsv.gz");
+
+        await runSQL(`SELECT COUNT(*) AS n FROM read_fastq('${fastqUrl}')`);
+        await runSQL(`SELECT * FROM read_tabix('${tabixUrl}', region := 'chr1:1-2')`);
+
+        sqlNode.value = `SELECT *\nFROM read_tabix('${tabixUrl}', region := 'chr1:1-2')`;
+        statusNode.textContent = "Passed";
+        setEnabled(true);
+      } catch (e) {
+        statusNode.textContent = "Failed";
+        log("ERROR", e?.message ?? String(e));
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    runButton.addEventListener("click", () => { void main(); });
+    runSqlButton.addEventListener("click", () => { void runSQL(sqlNode.value); });
+    applyCfgButton.addEventListener("click", () => { void applyConfig(); });
+    clearCfgButton.addEventListener("click", () => { void clearConfig(); });
+  </script>
+</body>
+</html>
