@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG EMSDK_VERSION=3.1.71
 ARG VCPKG_COMMIT=84bab45d415d22042bd0b9081aea57f362da3f35
+ARG DUCKDB_WASM_NPM_VERSION=1.29.0
 
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential \
@@ -16,6 +17,8 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     pkg-config \
     python3 \
     python3-venv \
+    nodejs \
+    npm \
     unzip \
     zip \
     && rm -rf /var/lib/apt/lists/*
@@ -33,6 +36,12 @@ RUN mkdir -p /opt/vcpkg \
     && git fetch --depth=1 origin ${VCPKG_COMMIT} \
     && git checkout FETCH_HEAD \
     && ./bootstrap-vcpkg.sh -disableMetrics
+
+RUN mkdir -p /opt/duckdb-wasm-runtime \
+    && cd /opt/duckdb-wasm-runtime \
+    && curl -fsSL "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist/duckdb-browser.mjs" -o duckdb-browser.mjs \
+    && curl -fsSL "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist/duckdb-browser-eh.worker.js" -o duckdb-browser-eh.worker.js \
+    && curl -fsSL "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist/duckdb-eh.wasm" -o duckdb-eh.wasm
 
 ENV EMSDK=/opt/emsdk
 ENV VCPKG_ROOT=/opt/vcpkg

@@ -618,21 +618,17 @@ Use the local duckdb-wasm harness to exercise that path end-to-end:
 ./scripts/start_duckdb_wasm_local_test.sh
 ```
 
-Prerequisite: run this from a shell where the Emscripten toolchain is
-active (`emcmake` on `PATH`) and the repo’s normal DuckDB/vcpkg wasm
-build prerequisites are available.
+This harness uses a Docker-only build path via
+`scripts/docker/duckdb-wasm-local.Dockerfile`.
 
-The helper script exports the same key vcpkg variables used by
-extension-ci-tools wasm builds (`VCPKG_TOOLCHAIN_PATH`,
-`VCPKG_TARGET_TRIPLET=wasm32-emscripten`,
-`VCPKG_HOST_TRIPLET=x64-linux`, overlays), and bootstraps local vcpkg
-automatically when needed.
+The container pre-installs cache-friendly, pinned wasm build/runtime
+dependencies (`emsdk`, `vcpkg`, and duckdb-wasm runtime assets) so
+repeated local runs do minimal setup work.
 
-If your host does not have `emcmake`, the script auto-builds and uses
-the project-owned Docker image at
-`scripts/docker/duckdb-wasm-local.Dockerfile`, which installs the same
-core wasm build pieces used by extension-ci-tools locally (`emsdk`,
-`vcpkg`, CMake/Ninja).
+Builds run in an isolated mirror worktree (`.duckdb_wasm_docker_work`)
+and copy back only the wasm extension artifact, so your host native
+`build/` and `cmake_build/` trees remain available for normal native
+development and testing.
 
 Then open:
 
@@ -643,6 +639,11 @@ http://127.0.0.1:8001/scripts/duckdb-wasm-local-test.html
 This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
 local HTTP reader smoke tests, and lets you set/clear
 `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
+
+The script stages a local copy of duckdb-wasm runtime assets
+(`duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`, `duckdb-eh.wasm`)
+under `/duckdb-wasm-runtime/`, avoiding cross-origin worker restrictions
+from CDN-hosted worker scripts.
 
 ### S3 credentials and configuration
 
