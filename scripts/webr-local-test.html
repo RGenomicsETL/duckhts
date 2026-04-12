@@ -280,9 +280,11 @@
       'DBI::dbGetQuery(con, "SELECT * FROM http_tabix")',
       "",
       "# Remote HTTP example: use only with a same-origin relay or a host that",
-      "# sends permissive CORS headers. The EBI GTEx URL does not satisfy that.",
-      '# remote_url <- "https://example.com/path/to/file.tsv.gz"',
-      '# rduckhts_tabix(con, "remote_tabix", remote_url, region = "chr1:1-2", overwrite = TRUE)',
+      "# sends permissive CORS headers, including for Range and index reads.",
+      "# EBI GTEx currently works in this harness, but this can vary by browser",
+      "# policy and upstream CORS behavior over time.",
+      '# remote_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"',
+      '# rduckhts_tabix(con, "remote_tabix", remote_url, region = "1:11868-14409", header = TRUE, auto_detect = TRUE, overwrite = TRUE)',
       '# DBI::dbGetQuery(con, "SELECT * FROM remote_tabix")',
     ].join("\n");
 

@@ -29,6 +29,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +45,70 @@ typedef struct {
     off_t http_offset;   /* next byte position for HTTP range requests */
     off_t file_size;     /* Content-Length from HEAD; -1 if not yet fetched */
 } hFILE_wasm_http;
+
+static double wasm_http_discover_size(const char *url)
+{
+    return EM_ASM_DOUBLE({
+        var url = UTF8ToString($0);
+        var xhr = new XMLHttpRequest();
+        var cl = null;
+        var cr = null;
+        var totalStr = null;
+        var slash = -1;
+
+        xhr.open("HEAD", url, false);
+        try {
+            xhr.send(null);
+        } catch (e) {
+            xhr = null;
+        }
+
+        if (xhr && (xhr.status === 200 || xhr.status === 206)) {
+            cl = xhr.getResponseHeader("Content-Length");
+            if (cl !== null) {
+                var clv = parseFloat(cl);
+                if (!isNaN(clv) && clv >= 0) return clv;
+            }
+        }
+
+        xhr = new XMLHttpRequest();
+        xhr.open("GET", url, false);
+        xhr.setRequestHeader("Range", "bytes=0-0");
+        xhr.responseType = "arraybuffer";
+        try {
+            xhr.send(null);
+        } catch (e) {
+            return -1.0;
+        }
+
+        if (xhr.status !== 200 && xhr.status !== 206) return -1.0;
+
+        cr = xhr.getResponseHeader("Content-Range");
+        if (cr !== null) {
+            slash = cr.lastIndexOf("/");
+            if (slash >= 0) {
+                totalStr = cr.substring(slash + 1).trim();
+                if (totalStr !== "*") {
+                    var total = parseFloat(totalStr);
+                    if (!isNaN(total) && total >= 0) return total;
+                }
+            }
+        }
+
+        cl = xhr.getResponseHeader("Content-Length");
+        if (cl !== null && xhr.status === 200) {
+            var cl2 = parseFloat(cl);
+            if (!isNaN(cl2) && cl2 >= 0) return cl2;
+        }
+
+        if (xhr.status === 200) {
+            var data = new Uint8Array(xhr.response || new ArrayBuffer(0));
+            return data.length;
+        }
+
+        return -1.0;
+    }, url);
+}
 
 /* -------------------------------------------------------------------------
  * wasm_xhr_range_read -- synchronous range GET via XMLHttpRequest.
@@ -61,19 +126,44 @@ typedef struct {
 static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
 {
     hFILE_wasm_http *fp = (hFILE_wasm_http *)fpv;
+    double discovered_size = -1.0;
+    double probed_size;
+    int request_len;
     int got;
 
     if (nbytes == 0) return 0;
+
+    if (fp->file_size < 0 && fp->http_offset > 0) {
+        probed_size = wasm_http_discover_size(fp->url);
+        if (probed_size >= 0.0) fp->file_size = (off_t)probed_size;
+    }
+
+    if (fp->file_size >= 0 && fp->http_offset >= fp->file_size) return 0;
+
+    request_len = (nbytes > (size_t)INT_MAX) ? INT_MAX : (int)nbytes;
 
     got = EM_ASM_INT({
         var url  = UTF8ToString($0);
         var from = $1;          /* double: start offset */
         var len  = $2;          /* int: bytes requested */
         var buf  = $3;          /* pointer: destination in HEAPU8 */
+        var outp = $4;          /* pointer: discovered size (double) */
+        var knownSize = $5;     /* double: cached size, -1 if unknown */
+        var end = from + len - 1;
+        var cl = null;
+        var cr = null;
+        var totalStr = null;
+        var slash = -1;
+
+        HEAPF64[outp >> 3] = -1.0;
+
+        if (knownSize >= 0 && from >= knownSize) return 0;
+        if (knownSize >= 0 && end >= knownSize) end = knownSize - 1;
+        if (end < from) return 0;
 
         var xhr = new XMLHttpRequest();
         xhr.open("GET", url, false);   /* false = synchronous; allowed in Workers */
-        xhr.setRequestHeader("Range", "bytes=" + from + "-" + (from + len - 1));
+        xhr.setRequestHeader("Range", "bytes=" + from + "-" + end);
         xhr.responseType = "arraybuffer";
         try {
             xhr.send(null);
@@ -85,6 +175,26 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
         /* 200 (server ignored Range) or 206 (partial content) are both OK */
         if (xhr.status !== 200 && xhr.status !== 206) return -1;
 
+        if (xhr.status === 206) {
+            cr = xhr.getResponseHeader("Content-Range");
+            if (cr !== null) {
+                slash = cr.lastIndexOf("/");
+                if (slash >= 0) {
+                    totalStr = cr.substring(slash + 1).trim();
+                    if (totalStr !== "*") {
+                        var total = parseFloat(totalStr);
+                        if (!isNaN(total) && total >= 0) HEAPF64[outp >> 3] = total;
+                    }
+                }
+            }
+        } else {
+            cl = xhr.getResponseHeader("Content-Length");
+            if (from === 0 && cl !== null) {
+                var clv = parseFloat(cl);
+                if (!isNaN(clv) && clv >= 0) HEAPF64[outp >> 3] = clv;
+            }
+        }
+
         var data = new Uint8Array(xhr.response || new ArrayBuffer(0));
         var start = 0;
         if (xhr.status === 200 && from > 0) {
@@ -95,9 +205,11 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
         var n = (available < len) ? available : len;
         HEAPU8.set(data.subarray(start, start + n), buf);
         return n;
-    }, fp->url, (double)fp->http_offset, (int)nbytes, (uint8_t *)buffer);
+    }, fp->url, (double)fp->http_offset, request_len, (uint8_t *)buffer,
+       &discovered_size, (double)fp->file_size);
 
     if (got < 0) { errno = EIO; return (ssize_t)-1; }
+    if (discovered_size >= 0.0) fp->file_size = (off_t)discovered_size;
     fp->http_offset += (off_t)got;
     return (ssize_t)got;
 }
@@ -130,19 +242,7 @@ static off_t wasm_http_seek(hFILE *fpv, off_t offset, int whence)
         break;
     case SEEK_END:
         if (fp->file_size < 0) {
-            double sz = EM_ASM_DOUBLE({
-                var url = UTF8ToString($0);
-                var xhr = new XMLHttpRequest();
-                xhr.open("HEAD", url, false);
-                try {
-                    xhr.send(null);
-                } catch (e) {
-                    return -1.0;
-                }
-                if (xhr.status !== 200 && xhr.status !== 206) return -1.0;
-                var cl = xhr.getResponseHeader("Content-Length");
-                return (cl !== null) ? parseFloat(cl) : -1.0;
-            }, fp->url);
+            double sz = wasm_http_discover_size(fp->url);
             if (sz < 0.0) { errno = ESPIPE; return (off_t)-1; }
             fp->file_size = (off_t)sz;
         }

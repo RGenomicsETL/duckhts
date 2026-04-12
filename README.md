@@ -561,6 +561,27 @@ prebuilt binaries from the r-universe-binaries GitHub release and point
 package bundle.
 <https://github.com/RGenomicsETL/duckhts/releases/tag/r-universe-binaries>
 
+### Browser wasm/webR HTTP backend
+
+For browser wasm/webR builds, DuckHTS does **not** use htslib `libcurl`
+for remote `http`/`https` access.
+
+- The webR side-module path disables htslib `libcurl`/`S3`/`GCS`
+  features because socket-based libcurl calls from a wasm side module
+  are not reliable in the current webR runtime model.
+- DuckHTS registers a package-owned htslib `hFILE` scheme handler
+  implemented in `src/wasm_http_hfile.c` for `http` and `https`.
+- This backend uses synchronous `XMLHttpRequest` from the worker for
+  range reads, index probes, and seek behavior.
+
+Browser constraints still apply:
+
+- Remote hosts must allow CORS for the main file **and** index sidecars
+  (`.tbi`/`.csi`), including range requests.
+- Behavior can vary by browser and by server-side CORS policy changes
+  over time.
+- `ALL_PROXY` / websocket proxy settings do not affect this XHR backend.
+
 ### S3 credentials and configuration
 
 The htslib S3 plugin supports credentials embedded in the URL or
