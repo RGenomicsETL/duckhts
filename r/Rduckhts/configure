@@ -246,7 +246,7 @@ if [ "${WASM_BUILD}" = "yes" ]; then
   HAS_LZMA=no
   HTSLIB_S3="--disable-s3"
   HTSLIB_GCS="--disable-gcs"
-  CPPFLAGS="${CPPFLAGS} -include ${THIS_DIR}/tools/wasm_socket_compat.h"
+  CPPFLAGS="${CPPFLAGS} -include ${EXT_DIR}/include/wasm_socket_compat.h"
 fi
 
 HTSLIB_CONFIGURE_FLAGS="${HTSLIB_PLUGINS} ${HTSLIB_S3} ${HTSLIB_GCS}"

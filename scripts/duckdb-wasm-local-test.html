@@ -112,8 +112,15 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
     </div>
   </main>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "apache-arrow": "https://cdn.jsdelivr.net/npm/apache-arrow@17.0.0/+esm"
+      }
+    }
+  </script>
   <script type="module">
-    import * as duckdb from "/duckdb-wasm-runtime/duckdb-browser.mjs";
+    import * as duckdb from "/duckdb-browser.mjs";
 
     const logNode = document.getElementById("log");
     const runButton = document.getElementById("run");
@@ -175,17 +182,19 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
       logNode.textContent = "";
 
       try {
-        const worker = new Worker("/duckdb-wasm-runtime/duckdb-browser-eh.worker.js");
+        const worker = new Worker("/duckdb-browser-eh.worker.js");
         const logger = new duckdb.ConsoleLogger();
         const db = new duckdb.AsyncDuckDB(logger, worker);
-        await db.instantiate("/duckdb-wasm-runtime/duckdb-eh.wasm");
+        await db.instantiate("/duckdb-eh.wasm");
+        await db.open({ allowUnsignedExtensions: true });
         conn = await db.connect();
 
-        const extUrl = defaultOriginUrl("/duckdb-wasm/duckhts.duckdb_extension.wasm");
-        await db.registerFileURL("duckhts.duckdb_extension.wasm", extUrl, duckdb.DuckDBDataProtocol.HTTP, false);
+        const extPath = "/duckdb-wasm/duckhts.duckdb_extension.wasm";
+        const extUrl = defaultOriginUrl(extPath);
+        await db.registerFileURL(extPath, extUrl, duckdb.DuckDBDataProtocol.HTTP, false);
 
-        await conn.query("SET allow_unsigned_extensions=true");
-        await conn.query("LOAD 'duckhts.duckdb_extension.wasm'");
+        await conn.query("PRAGMA platform");
+        await conn.query("LOAD '/duckdb-wasm/duckhts.duckdb_extension.wasm'");
         log("Loaded extension:", extUrl);
 
         const fastqUrl = defaultOriginUrl("/extdata/r1.fq");

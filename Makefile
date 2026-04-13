@@ -42,6 +42,29 @@ configure: venv platform extension_version
 debug: build_extension_library_debug build_extension_with_metadata_debug
 release: build_extension_library_release build_extension_with_metadata_release
 
+# duckdb-wasm is compiled with native WASM EH and WASM_BIGINT.
+# Without -fwasm-exceptions at link time, emcc generates dynCall_* wrappers locally
+# in the SIDE_MODULE for any call_indirect with i64 types (e.g. htslib's off_t seek
+# callback). duckdb-wasm already defines dynCall_* with its own signatures, so a
+# locally-defined dynCall_jiji etc. causes "indirect call signature mismatch" at
+# extension load time.
+#
+# Without -sWASM_BIGINT, emcc legalizes i64 imports/exports into split i32 ABIs and
+# injects setTempRet0/getTempRet0 shims. duckdb-wasm uses native i64/BigInt imports,
+# so the legalized ABI also mismatches at extension load time. Override the CI-tools
+# link step to preserve the same EH + BigInt ABI as duckdb-wasm itself.
+ifneq ($(DUCKDB_WASM_PLATFORM),)
+link_wasm_debug:
+	@WASM_LINK_RSP=""; \
+	if [ -f "$(EXTENSION_BUILD_PATH)/debug/wasm_link_inputs.rsp" ]; then WASM_LINK_RSP="@$(EXTENSION_BUILD_PATH)/debug/wasm_link_inputs.rsp"; fi; \
+	emcc $(EXTENSION_BUILD_PATH)/debug/$(EXTENSION_LIB_FILENAME) $$WASM_LINK_RSP -o $(EXTENSION_BUILD_PATH)/debug/$(EXTENSION_FILENAME_NO_METADATA) -O3 -g -fwasm-exceptions -sWASM_BIGINT -sSIDE_MODULE=2 -sEXPORTED_FUNCTIONS="_$(EXTENSION_NAME)_init_c_api"
+
+link_wasm_release:
+	@WASM_LINK_RSP=""; \
+	if [ -f "$(EXTENSION_BUILD_PATH)/release/wasm_link_inputs.rsp" ]; then WASM_LINK_RSP="@$(EXTENSION_BUILD_PATH)/release/wasm_link_inputs.rsp"; fi; \
+	emcc $(EXTENSION_BUILD_PATH)/release/$(EXTENSION_LIB_FILENAME) $$WASM_LINK_RSP -o $(EXTENSION_BUILD_PATH)/release/$(EXTENSION_FILENAME_NO_METADATA) -O3 -fwasm-exceptions -sWASM_BIGINT -sSIDE_MODULE=2 -sEXPORTED_FUNCTIONS="_$(EXTENSION_NAME)_init_c_api"
+endif
+
 test: test_debug
 test_debug: test_extension_debug
 test_release: test_extension_release

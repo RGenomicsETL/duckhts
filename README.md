@@ -621,9 +621,9 @@ Use the local duckdb-wasm harness to exercise that path end-to-end:
 This harness uses a Docker-only build path via
 `scripts/docker/duckdb-wasm-local.Dockerfile`.
 
-The container pre-installs cache-friendly, pinned wasm build/runtime
-dependencies (`emsdk`, `vcpkg`, and duckdb-wasm runtime assets) so
-repeated local runs do minimal setup work.
+The container pre-installs cache-friendly, pinned wasm build
+dependencies (`emsdk`, `vcpkg`) so repeated local runs do minimal setup
+work.
 
 Builds run in an isolated mirror worktree (`.duckdb_wasm_docker_work`)
 and copy back only the wasm extension artifact, so your host native
@@ -640,10 +640,10 @@ This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
 local HTTP reader smoke tests, and lets you set/clear
 `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
 
-The script stages a local copy of duckdb-wasm runtime assets
-(`duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`, `duckdb-eh.wasm`)
-under `/duckdb-wasm-runtime/`, avoiding cross-origin worker restrictions
-from CDN-hosted worker scripts.
+The harness imports duckdb-wasm via jsDelivr `+esm`, and the script
+stages local copies of `duckdb-browser-eh.worker.js` and
+`duckdb-eh.wasm` at the site root so worker and main module loads stay
+same-origin.
 
 ### S3 credentials and configuration
 

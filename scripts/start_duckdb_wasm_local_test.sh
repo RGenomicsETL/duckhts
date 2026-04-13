@@ -7,7 +7,9 @@ HOST=${HOST:-127.0.0.1}
 LOCAL_WASM_IMAGE=${LOCAL_WASM_IMAGE:-duckhts/duckdb-wasm-local:latest}
 LOCAL_WASM_DOCKERFILE=${LOCAL_WASM_DOCKERFILE:-scripts/docker/duckdb-wasm-local.Dockerfile}
 DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.29.0}
-SITE_ROOT=${SITE_ROOT:-${ROOT_DIR}/duckdb-wasm-local-site}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.duckdb-wasm-local-artifacts}
+SITE_ROOT=${SITE_ROOT:-${ARTIFACT_ROOT}/site}
+WASM_BUILD_DIR=${WASM_BUILD_DIR:-${ARTIFACT_ROOT}/build/wasm_eh/extension/duckhts}
 DOCKER_WORK_ROOT=${DOCKER_WORK_ROOT:-${ROOT_DIR}/.duckdb_wasm_docker_work}
 DOCKER_REBUILD_IMAGE=${DOCKER_REBUILD_IMAGE:-0}
 
@@ -23,10 +25,11 @@ rsync -a --delete \
   --exclude 'build/' \
   --exclude 'cmake_build/' \
   --exclude 'duckdb-wasm-local-site/' \
+  --exclude '.duckdb-wasm-local-artifacts/' \
+  --exclude '.webr-local-artifacts/' \
   --exclude '.duckdb_wasm_docker_work/' \
   "${ROOT_DIR}/" "${DOCKER_WORK_ROOT}/"
 docker run --rm -v "${DOCKER_WORK_ROOT}:/work" -w /work \
-  -e "DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION}" \
   "${LOCAL_WASM_IMAGE}" bash -lc '
 set -eu
 source /opt/emsdk/emsdk_env.sh
@@ -35,19 +38,22 @@ export VCPKG_TARGET_TRIPLET=wasm32-emscripten
 export VCPKG_HOST_TRIPLET=x64-linux
 export VCPKG_OVERLAY_PORTS=/work/extension-ci-tools/vcpkg_ports
 export VCPKG_OVERLAY_TRIPLETS=/work/extension-ci-tools/toolchains
-rm -rf cmake_build
+# Avoid mixed-arch htslib artifacts from host copies contaminating wasm build.
+# cmake_build/ is preserved across runs so vcpkg packages are not re-downloaded.
+find third_party/htslib -type f \( \
+  -name "*.o" -o -name "*.a" -o -name "*.pico" -o -name "*.lo" -o -name "*.la" -o \
+  -name "*.so" -o -name "*.dylib" -o -name "*.dll" -o \
+  -name "config.h" -o -name "config.mk" -o -name "config_vars.h" -o \
+  -name "htslib.pc.tmp" -o -name "a.wasm" \
+\) -delete || true
 make DUCKDB_PLATFORM=wasm_eh configure release move_wasm_extension
-mkdir -p /work/.duckdb_wasm_runtime_cache
-cp -f /opt/duckdb-wasm-runtime/duckdb-browser.mjs /work/.duckdb_wasm_runtime_cache/
-cp -f /opt/duckdb-wasm-runtime/duckdb-browser-eh.worker.js /work/.duckdb_wasm_runtime_cache/
-cp -f /opt/duckdb-wasm-runtime/duckdb-eh.wasm /work/.duckdb_wasm_runtime_cache/
 '
 
-mkdir -p "${ROOT_DIR}/build/wasm_eh/extension/duckhts"
+mkdir -p "${WASM_BUILD_DIR}"
 cp -f "${DOCKER_WORK_ROOT}/build/wasm_eh/extension/duckhts/duckhts.duckdb_extension.wasm" \
-      "${ROOT_DIR}/build/wasm_eh/extension/duckhts/duckhts.duckdb_extension.wasm"
+      "${WASM_BUILD_DIR}/duckhts.duckdb_extension.wasm"
 
-WASM_EXT="${ROOT_DIR}/build/wasm_eh/extension/duckhts/duckhts.duckdb_extension.wasm"
+WASM_EXT="${WASM_BUILD_DIR}/duckhts.duckdb_extension.wasm"
 if [ ! -f "${WASM_EXT}" ]; then
   echo "Expected wasm extension not found: ${WASM_EXT}" >&2
   exit 1
@@ -56,13 +62,14 @@ fi
 rm -rf "${SITE_ROOT}"
 mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/duckdb-wasm" "${SITE_ROOT}/extdata"
 
-# Host duckdb-wasm runtime locally to avoid cross-origin worker loading issues
-mkdir -p "${SITE_ROOT}/duckdb-wasm-runtime"
-cp -f "${DOCKER_WORK_ROOT}/.duckdb_wasm_runtime_cache/duckdb-browser.mjs" "${SITE_ROOT}/duckdb-wasm-runtime/duckdb-browser.mjs"
-cp -f "${DOCKER_WORK_ROOT}/.duckdb_wasm_runtime_cache/duckdb-browser-eh.worker.js" "${SITE_ROOT}/duckdb-wasm-runtime/duckdb-browser-eh.worker.js"
-cp -f "${DOCKER_WORK_ROOT}/.duckdb_wasm_runtime_cache/duckdb-eh.wasm" "${SITE_ROOT}/duckdb-wasm-runtime/duckdb-eh.wasm"
+RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist"
+curl -fsSL "${RUNTIME_BASE}/duckdb-browser.mjs" -o "${SITE_ROOT}/duckdb-browser.mjs"
+curl -fsSL "${RUNTIME_BASE}/duckdb-browser-eh.worker.js" -o "${SITE_ROOT}/duckdb-browser-eh.worker.js"
+curl -fsSL "${RUNTIME_BASE}/duckdb-eh.wasm" -o "${SITE_ROOT}/duckdb-eh.wasm"
+curl -fsSL "${RUNTIME_BASE}/duckdb-browser-eh.worker.js.map" -o "${SITE_ROOT}/duckdb-browser-eh.worker.js.map" || true
+printf '%s\n' '<!doctype html><title>duckhts</title>' > "${SITE_ROOT}/favicon.ico"
 
-cp -f "${ROOT_DIR}/scripts/duckdb-wasm-local-test.html" "${SITE_ROOT}/scripts/duckdb-wasm-local-test.html"
+ln -sf "${ROOT_DIR}/scripts/duckdb-wasm-local-test.html" "${SITE_ROOT}/scripts/duckdb-wasm-local-test.html"
 cp -f "${WASM_EXT}" "${SITE_ROOT}/duckdb-wasm/duckhts.duckdb_extension.wasm"
 
 # Expose local test data over HTTP for real browser http(s) reads
@@ -77,10 +84,14 @@ Built:
 Open in a browser:
   http://${HOST}:${PORT}/scripts/duckdb-wasm-local-test.html
 
+Artifact roots:
+  ${ARTIFACT_ROOT}
+  ${DOCKER_WORK_ROOT}
+
 Served files:
-  /duckdb-wasm-runtime/duckdb-browser.mjs
-  /duckdb-wasm-runtime/duckdb-browser-eh.worker.js
-  /duckdb-wasm-runtime/duckdb-eh.wasm
+  /duckdb-browser.mjs
+  /duckdb-browser-eh.worker.js
+  /duckdb-eh.wasm
   /duckdb-wasm/duckhts.duckdb_extension.wasm
   /extdata/r1.fq
   /extdata/header_tabix.tsv.gz
