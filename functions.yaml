@@ -368,8 +368,8 @@
       "category": "Readers",
       "signature": "hts_union_query(reader, pattern, params := '')",
       "returns": "VARCHAR",
-      "r_wrapper": "",
-      "description": "Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a 'filename' column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(...)). Optional params string is appended to each reader call.",
+      "r_wrapper": "rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi",
+      "description": "Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a 'filename' column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(...)). Optional params string is appended to each reader call. In R, use the typed rduckhts_*_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly.",
       "examples": [
         "SET VARIABLE q = hts_union_query('read_bam', 'samples/*.bam'); SELECT * FROM query(getvariable('q'));",
         "SET VARIABLE q = hts_union_query('read_bcf', 'cohort/*.vcf.gz', 'tidy_format := true'); SELECT * FROM query(getvariable('q'));"
