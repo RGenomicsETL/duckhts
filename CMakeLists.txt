@@ -88,10 +88,19 @@ set(EXTENSION_SOURCES
         src/score_udf.c
         src/bcftools_filter.c
         src/bcftools_shim.c
+        src/wasm_http_hfile.c
 )
 
 if (DUCKDB_WASM_EXTENSION)
 	add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
+	# C files must use the same setjmp/longjmp mechanism as the DuckDB WASM
+	# runtime (__wasm_longjmp / __wasm_setjmp).  Without -fwasm-exceptions the
+	# C compiler falls back to the old emscripten_longjmp import, which DuckDB
+	# WASM does not export, causing an "indirect call signature mismatch" trap
+	# at extension load time.
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fwasm-exceptions")
+	target_compile_definitions(${EXTENSION_NAME} PRIVATE DUCKHTS_WASM_DUCKDB_RUNTIME=1)
+	target_compile_options(${EXTENSION_NAME} PRIVATE -include ${CMAKE_SOURCE_DIR}/src/include/wasm_socket_compat.h)
 else()
 	add_library(${EXTENSION_NAME} SHARED ${EXTENSION_SOURCES})
 endif()
@@ -182,7 +191,20 @@ endif()
 # these are empty and harmless.
 # ------------------------------------------------------------------
 set(HTSLIB_EXTRA_CFLAGS "")
+set(HTSLIB_EXTRA_CPPFLAGS "")
+set(HTSLIB_BUILD_CPPFLAGS "")
 set(HTSLIB_EXTRA_LDFLAGS "")
+
+# duckdb-wasm uses -fwasm-exceptions throughout; htslib must match so its
+# setjmp/longjmp uses __wasm_longjmp rather than emscripten_longjmp.
+if(DUCKDB_WASM_EXTENSION)
+    set(HTSLIB_EXTRA_CFLAGS "-fwasm-exceptions")
+    # Keep the shared compatibility shim wasm-only.
+    # The duckdb-wasm host exports native i64 file APIs as orig$lseek /
+    # orig$ftruncate, so mark the top-level DuckDB wasm build explicitly while
+    # leaving the webR/package wasm path on the default symbols.
+    set(HTSLIB_BUILD_CPPFLAGS "-DDUCKHTS_WASM_DUCKDB_RUNTIME=1 -include ${CMAKE_SOURCE_DIR}/src/include/wasm_socket_compat.h")
+endif()
 
 # ------------------------------------------------------------------
 # macOS cross-compilation support (htslib build flags).
@@ -198,12 +220,16 @@ if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     if(EXISTS "${_vcpkg_prefix}")
         set(HTSLIB_EXTRA_CFLAGS "${HTSLIB_EXTRA_CFLAGS} -I${_vcpkg_prefix}/include")
         set(HTSLIB_EXTRA_LDFLAGS "${HTSLIB_EXTRA_LDFLAGS} -L${_vcpkg_prefix}/lib")
+        set(HTSLIB_EXTRA_CPPFLAGS "${HTSLIB_EXTRA_CPPFLAGS} -I${_vcpkg_prefix}/include")
+        set(HTSLIB_BUILD_CPPFLAGS "${HTSLIB_BUILD_CPPFLAGS} -I${_vcpkg_prefix}/include")
         message(STATUS "vcpkg prefix for htslib: ${_vcpkg_prefix}")
     endif()
 endif()
 
 # Strip leading whitespace that may appear when no arch flags were prepended
 string(STRIP "${HTSLIB_EXTRA_CFLAGS}" HTSLIB_EXTRA_CFLAGS)
+string(STRIP "${HTSLIB_EXTRA_CPPFLAGS}" HTSLIB_EXTRA_CPPFLAGS)
+string(STRIP "${HTSLIB_BUILD_CPPFLAGS}" HTSLIB_BUILD_CPPFLAGS)
 string(STRIP "${HTSLIB_EXTRA_LDFLAGS}" HTSLIB_EXTRA_LDFLAGS)
 
 set(HTSLIB_MAKE_ARGS
@@ -212,9 +238,8 @@ set(HTSLIB_MAKE_ARGS
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
 )
 
-# Only pass -I flags in CPPFLAGS (not -arch or other compiler flags).
-if(DEFINED _vcpkg_prefix AND EXISTS "${_vcpkg_prefix}")
-    list(APPEND HTSLIB_MAKE_ARGS "CPPFLAGS=-I${_vcpkg_prefix}/include")
+if(NOT "${HTSLIB_BUILD_CPPFLAGS}" STREQUAL "")
+    list(APPEND HTSLIB_MAKE_ARGS "CPPFLAGS=${HTSLIB_BUILD_CPPFLAGS}")
 endif()
 
 # Static-library transitive dependencies.
@@ -223,11 +248,11 @@ endif()
 # -lssl -lcrypto -lz -lpthread etc.  Autotools' LIBS variable is
 # appended to every link check, so we collect all transitive deps here.
 set(HTSLIB_EXTRA_LIBS "")
-if(OPENSSL_FOUND)
+if(OPENSSL_FOUND AND NOT DUCKDB_WASM_EXTENSION)
     list(APPEND HTSLIB_EXTRA_LIBS "-lssl" "-lcrypto")
 endif()
 list(APPEND HTSLIB_EXTRA_LIBS "-lz")
-if(LIBLZMA_FOUND)
+if(LIBLZMA_FOUND AND NOT DUCKDB_WASM_EXTENSION)
     list(APPEND HTSLIB_EXTRA_LIBS "-llzma")
 endif()
 if(BZIP2_FOUND)
@@ -246,7 +271,9 @@ if(APPLE)
     endif()
 else()
     list(APPEND HTSLIB_EXTRA_LIBS "-lpthread")
-    list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
+    if(NOT DUCKDB_WASM_EXTENSION)
+        list(APPEND HTSLIB_EXTRA_LIBS "-ldl")
+    endif()
 endif()
 if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
     list(APPEND HTSLIB_EXTRA_LIBS "-lgnurx")
@@ -271,7 +298,16 @@ endif()
 if(NOT LIBDEFLATE_FOUND)
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libdeflate)
 endif()
-if(WIN32 AND MINGW)
+if(DUCKDB_WASM_EXTENSION)
+    # Curl-based HTTP and plugin loading both fail in a WASM SIDE_MODULE context
+    # (no socket access in Web Workers, no dlopen support).  HTTP/HTTPS access
+    # is provided by wasm_http_hfile.c (synchronous XHR via EM_ASM) instead.
+    # Curl's internal function pointer callbacks also produce i64 call_indirect
+    # signatures that mismatch duckdb-wasm's function table ABI.
+    # Match the stricter webR/browser path: no curl, no remote plugin loaders,
+    # and no wasm-side lzma dependency.
+    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl --disable-plugins --disable-s3 --disable-gcs --disable-lzma)
+elseif(WIN32 AND MINGW)
     # MinGW/Rtools builds should not rely on htslib's checked-in config.mk.
     # Keep plugins off for now, but allow libcurl when the outer link can
     # provide the full dependency chain.
@@ -280,13 +316,21 @@ elseif(NOT CURL_FOUND)
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libcurl)
 endif()
 
+set(HTSLIB_CONFIGURE_ENV_VARS "")
+if(DUCKDB_WASM_EXTENSION)
+    # Match the package configure path: skip htslib's recv() library probe in
+    # browser wasm builds, where socket libraries do not exist.
+    list(APPEND HTSLIB_CONFIGURE_ENV_VARS "ac_cv_search_recv=none required")
+endif()
+
 set(HTSLIB_CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
     "CC=${CMAKE_C_COMPILER}"
-    "CPPFLAGS="
+    "CPPFLAGS=${HTSLIB_EXTRA_CPPFLAGS}"
     "CFLAGS=-O2 -fPIC ${HTSLIB_EXTRA_CFLAGS}"
     "LDFLAGS=${HTSLIB_EXTRA_LDFLAGS}"
     "LIBS=${HTSLIB_EXTRA_LIBS_STR}"
+    ${HTSLIB_CONFIGURE_ENV_VARS}
     ${SH_COMMAND} ./configure ${HTSLIB_CONFIGURE_FLAGS}
 )
 
@@ -325,7 +369,7 @@ endif()
 if(LIBDEFLATE_FOUND)
     list(APPEND HTSLIB_LINK_LIBS ${LIBDEFLATE_LIBRARY})
 endif()
-if(CURL_FOUND)
+if(CURL_FOUND AND NOT DUCKDB_WASM_EXTENSION)
     if(WIN32 AND MINGW)
         if(PC_LIBCURL_FOUND)
             string(STRIP "${PC_LIBCURL_LDFLAGS}" PC_LIBCURL_LDFLAGS_STRIPPED)
@@ -370,7 +414,7 @@ if(CURL_FOUND)
         list(APPEND HTSLIB_LINK_LIBS CURL::libcurl)
     endif()
 endif()
-if(OPENSSL_FOUND)
+if(OPENSSL_FOUND AND NOT DUCKDB_WASM_EXTENSION)
     list(APPEND HTSLIB_LINK_LIBS OpenSSL::Crypto)
 endif()
 if(WIN32 AND MINGW AND GNUREGEX_LIBRARY)
@@ -428,7 +472,7 @@ if(DUCKDB_WASM_EXTENSION)
         list(APPEND DUCKHTS_WASM_FAT_ARCHIVE_INPUTS "${LIBDEFLATE_LIBRARY}")
     endif()
 
-    if(CURL_FOUND)
+    if(CURL_FOUND AND NOT DUCKDB_WASM_EXTENSION)
         if(WIN32 AND MINGW)
             list(APPEND DUCKHTS_WASM_FAT_ARCHIVE_INPUTS ${PC_LIBCURL_LDFLAGS_LIST})
         elseif(TARGET CURL::libcurl)
@@ -436,7 +480,7 @@ if(DUCKDB_WASM_EXTENSION)
         endif()
     endif()
 
-    if(OPENSSL_FOUND AND TARGET OpenSSL::Crypto)
+    if(OPENSSL_FOUND AND NOT DUCKDB_WASM_EXTENSION AND TARGET OpenSSL::Crypto)
         list(APPEND DUCKHTS_WASM_FAT_ARCHIVE_INPUTS "$<TARGET_FILE:OpenSSL::Crypto>")
     endif()
 

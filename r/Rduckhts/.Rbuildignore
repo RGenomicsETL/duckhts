@@ -1,6 +1,7 @@
 ^README\.html$
 ^bootstrap\.R$
 ^.*\.tar\.gz$
+^.*\.tgz$
 ^\.Rproj\.user$
 ^.*\.Rcheck$
 ^.*\.Rcheck$
@@ -20,6 +21,10 @@
 ^duckdb_capi/
 ^DESCRIPTION\.yml$
 ^test_installation\.R$
+^webr-repo$
+^webr-repo/
+^webr-local-site$
+^webr-local-site/
 ^3202_samples_cohort_gg_chr22\.vcf\.gz\.tbi$
 ^Brain_Cerebellar_Hemisphere\.tsv\.gz\.tbi$
 # Build artifacts to ignore

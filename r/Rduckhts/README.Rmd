@@ -42,6 +42,40 @@ install.packages("Rduckhts")
 
 Installation requires `htslib` dependencies such ad zlib and libbz2, and  optionally for full functionally liblzma, libcurl, and openssl. The package requires GNU make. On Windows's Rtools, `htslib` plugins are not enabled. 
 
+## Browser wasm/webR networking note
+
+In browser wasm/webR builds, remote `http`/`https` access does not use htslib `libcurl`.
+
+- The bundled extension enables a custom htslib `hFILE` backend in `src/wasm_http_hfile.c` for `http` and `https`.
+- This backend uses synchronous worker-side XHR for range reads and tabix index access.
+- htslib `libcurl`/`S3`/`GCS` paths are intentionally disabled for wasm in the package build.
+
+What this means in practice:
+
+- Remote URLs work only when browser CORS policy allows them.
+- CORS must allow both the primary file and index sidecars (`.tbi`/`.csi`), including range requests.
+- `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR backend.
+
+Optional browser-side request header/auth configuration can be set from JavaScript before running queries:
+
+```js
+Module.duckhtsWasmHttpConfig = {
+  headers: {
+    Authorization: "Bearer <short-lived-token>",
+    "X-Request-Source": "webr-local"
+  },
+  allowHosts: ["ftp.ebi.ac.uk", ".s3.amazonaws.com"],
+  withCredentials: false,
+  allowInsecureAuth: false
+};
+```
+
+Security behavior of this config:
+
+- Headers are only attached when URL hostnames match `allowHosts`.
+- `Authorization` is blocked for non-HTTPS URLs unless `allowInsecureAuth: true` is set.
+- Cookies/credentials are only sent when `withCredentials: true` is set.
+
 
 ## Quick Start 
 
@@ -496,12 +530,12 @@ head(index_raw, 1)
 
 ### Remote GTEx tabix example
 
-GTEx eQTL matrices on EBI are tabix-indexed 
+GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this still depends on CORS policy on both the data object and index object.
 
 ```{r, eval=TRUE}
-gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
+gtex_url <- "https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
-                 header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+                  header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
 
 ```

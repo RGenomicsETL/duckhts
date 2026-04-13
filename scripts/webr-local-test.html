@@ -53,6 +53,19 @@
       margin: 20px 0;
       align-items: center;
     }
+    .repl textarea {
+      width: 100%;
+      min-height: 180px;
+      box-sizing: border-box;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      line-height: 1.4;
+    }
     button {
       border: 0;
       border-radius: 999px;
@@ -97,6 +110,34 @@
     <div class="card">
       <pre id="log"></pre>
     </div>
+    <div class="controls">
+      <button id="repl-run" disabled>Run R Code</button>
+      <button id="run-tinytests" disabled>Run tinytests</button>
+      <button id="repl-clear" disabled>Clear Log</button>
+      <span id="repl-status">REPL disabled until setup passes</span>
+    </div>
+    <div class="card repl" style="margin-bottom: 16px;">
+      <p>Optional wasm HTTP headers/auth config (applies inside webR worker):</p>
+      <p><code>Module.duckhtsWasmHttpConfig</code> is set via <code>webr::eval_js()</code>.</p>
+      <div class="controls" style="margin: 10px 0;">
+        <label for="cfg-hosts">Hosts:</label>
+        <input id="cfg-hosts" type="text" value="ftp.ebi.ac.uk" style="min-width: 360px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font: inherit;">
+      </div>
+      <textarea id="cfg-headers" style="min-height: 100px;">{
+  "X-Request-Source": "webr-local"
+}</textarea>
+      <div class="controls" style="margin-top: 10px;">
+        <label><input id="cfg-with-credentials" type="checkbox"> withCredentials</label>
+        <label><input id="cfg-enforce-allowlist" type="checkbox"> enforceHostAllowlist</label>
+        <label><input id="cfg-allow-insecure-auth" type="checkbox"> allowInsecureAuth</label>
+        <button id="cfg-apply" disabled>Apply HTTP Config</button>
+        <button id="cfg-clear" disabled>Clear HTTP Config</button>
+      </div>
+    </div>
+    <div class="card repl">
+      <p>The REPL runs inside the same browser webR session after setup. <code>con</code>, <code>Rduckhts</code>, and the smoke-test tables stay available.</p>
+      <textarea id="repl-input"># placeholder – filled in by JS below</textarea>
+    </div>
   </main>
   <script type="module">
     import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
@@ -104,12 +145,97 @@
     const logNode = document.getElementById("log");
     const runButton = document.getElementById("run");
     const statusNode = document.getElementById("status");
+    const replRunButton = document.getElementById("repl-run");
+    const runTinytestsButton = document.getElementById("run-tinytests");
+    const replClearButton = document.getElementById("repl-clear");
+    const replStatusNode = document.getElementById("repl-status");
+    const replInput = document.getElementById("repl-input");
+    const cfgHosts = document.getElementById("cfg-hosts");
+    const cfgHeaders = document.getElementById("cfg-headers");
+    const cfgWithCredentials = document.getElementById("cfg-with-credentials");
+    const cfgEnforceAllowlist = document.getElementById("cfg-enforce-allowlist");
+    const cfgAllowInsecureAuth = document.getElementById("cfg-allow-insecure-auth");
+    const cfgApplyButton = document.getElementById("cfg-apply");
+    const cfgClearButton = document.getElementById("cfg-clear");
+
+    let currentShelter = null;
 
     function log(...parts) {
       const line = parts.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ");
       logNode.textContent += line + "\n";
       logNode.scrollTop = logNode.scrollHeight;
       console.log(...parts);
+    }
+
+    function setReplEnabled(enabled) {
+      replRunButton.disabled = !enabled;
+      runTinytestsButton.disabled = !enabled;
+      replClearButton.disabled = !enabled;
+      cfgApplyButton.disabled = !enabled;
+      cfgClearButton.disabled = !enabled;
+      replStatusNode.textContent = enabled
+        ? "REPL ready"
+        : "REPL disabled until setup passes";
+    }
+
+    function escapeForRSingleQuotedString(x) {
+      return x.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+    }
+
+    async function setWasmHttpConfig(configObjOrNull) {
+      if (!currentShelter) return;
+      const jsExpr = configObjOrNull === null
+        ? "Module.duckhtsWasmHttpConfig = undefined; 'duckhtsWasmHttpConfig cleared'"
+        : `Module.duckhtsWasmHttpConfig = ${JSON.stringify(configObjOrNull)}; 'duckhtsWasmHttpConfig set'`;
+      const rCode = `webr::eval_js('${escapeForRSingleQuotedString(jsExpr)}')`;
+      await runCapture(currentShelter, rCode);
+    }
+
+    async function applyHttpConfigFromUi() {
+      if (!currentShelter) return;
+      cfgApplyButton.disabled = true;
+      try {
+        const allowHosts = cfgHosts.value
+          .split(",")
+          .map(x => x.trim())
+          .filter(Boolean);
+        let headers = {};
+        if (cfgHeaders.value.trim()) {
+          headers = JSON.parse(cfgHeaders.value);
+          if (headers === null || Array.isArray(headers) || typeof headers !== "object") {
+            throw new Error("Headers must be a JSON object");
+          }
+        }
+        await setWasmHttpConfig({
+          headers,
+          allowHosts,
+          enforceHostAllowlist: cfgEnforceAllowlist.checked,
+          withCredentials: cfgWithCredentials.checked,
+          allowInsecureAuth: cfgAllowInsecureAuth.checked,
+        });
+        log("Applied Module.duckhtsWasmHttpConfig", {
+          allowHosts,
+          enforceHostAllowlist: cfgEnforceAllowlist.checked,
+          withCredentials: cfgWithCredentials.checked,
+          allowInsecureAuth: cfgAllowInsecureAuth.checked,
+        });
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+      } finally {
+        cfgApplyButton.disabled = false;
+      }
+    }
+
+    async function clearHttpConfigFromUi() {
+      if (!currentShelter) return;
+      cfgClearButton.disabled = true;
+      try {
+        await setWasmHttpConfig(null);
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+      } finally {
+        cfgClearButton.disabled = false;
+      }
     }
 
     async function parseVersion() {
@@ -142,10 +268,42 @@
       return result;
     }
 
+    async function runRepl() {
+      if (!currentShelter) {
+        return;
+      }
+      replRunButton.disabled = true;
+      try {
+        await runCapture(currentShelter, replInput.value);
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+        console.error(err);
+      } finally {
+        replRunButton.disabled = false;
+      }
+    }
+
+    async function runTinytests() {
+      if (!currentShelter) {
+        return;
+      }
+      runTinytestsButton.disabled = true;
+      try {
+        await runCapture(currentShelter, "tinytest::test_package('Rduckhts')");
+      } catch (err) {
+        log("ERROR", err?.message ?? String(err));
+        console.error(err);
+      } finally {
+        runTinytestsButton.disabled = false;
+      }
+    }
+
     async function main() {
       statusNode.textContent = "Preparing";
       runButton.disabled = true;
+      setReplEnabled(false);
       logNode.textContent = "";
+      currentShelter = null;
 
       const version = await parseVersion();
       const localRepo = `${location.origin}/r/Rduckhts/webr-repo`;
@@ -158,9 +316,9 @@
 
       try {
         statusNode.textContent = "Installing dependencies";
-        log("> await webR.installPackages(['DBI', 'duckdb'], { repos: 'https://repo.r-wasm.org/' })");
-        await webR.installPackages(["DBI", "duckdb"], { repos: "https://repo.r-wasm.org/" });
-        log("Installed webR binary packages: DBI, duckdb");
+        log("> await webR.installPackages(['DBI', 'duckdb', 'tinytest'], { repos: 'https://repo.r-wasm.org/' })");
+        await webR.installPackages(["DBI", "duckdb", "tinytest"], { repos: "https://repo.r-wasm.org/" });
+        log("Installed webR binary packages: DBI, duckdb, tinytest");
 
         statusNode.textContent = "Installing local Rduckhts";
         log(`> await webR.installPackages(['Rduckhts'], { repos: ['${localRepo}', 'https://repo.r-wasm.org/'], mount: false })`);
@@ -171,6 +329,7 @@
         await runCapture(shelter, "library(DBI)");
         await runCapture(shelter, "library(duckdb)");
         await runCapture(shelter, "library(Rduckhts)");
+        await runCapture(shelter, "library(tinytest)");
         await runCapture(shelter, "packageVersion('Rduckhts')");
         await runCapture(shelter, "ext <- system.file('duckhts_extension', 'build', 'duckhts.duckdb_extension', package = 'Rduckhts'); readBin(ext, 'raw', 8)");
 
@@ -184,9 +343,11 @@
         await runCapture(shelter, "stopifnot(file.exists(fasta_path), file.exists(fastq_r1), file.exists(fastq_r2))");
         await runCapture(shelter, "rduckhts_fastq(con, 'reads', fastq_r1, mate_path = fastq_r2, overwrite = TRUE)");
         await runCapture(shelter, "DBI::dbGetQuery(con, \"SELECT COUNT(*) AS n, MIN(length(SEQUENCE)) AS min_len, MAX(length(SEQUENCE)) AS max_len FROM reads\")");
-        await runCapture(shelter, "dbDisconnect(con, shutdown = TRUE)");
 
+        currentShelter = shelter;
+        setReplEnabled(true);
         statusNode.textContent = "Passed";
+        log("REPL ready. The DuckDB connection `con` is still open for ad hoc tests.");
       } catch (err) {
         statusNode.textContent = "Failed";
         log("ERROR", err?.message ?? String(err));
@@ -196,8 +357,41 @@
       }
     }
 
+    // Fill REPL default with browser-http tests.
+    // The wasm backend uses synchronous XHR, not libcurl, so ALL_PROXY does
+    // not apply here. Remote URLs still need browser-allowed CORS headers.
+    replInput.value = [
+      "# Local HTTP tabix test — served by the Python server, no proxy needed.",
+      `local_url <- "${location.origin}/extdata/header_tabix.tsv.gz"`,
+      'rduckhts_tabix(con, "http_tabix", local_url, region = "chr1:1-2", overwrite = TRUE)',
+      'DBI::dbGetQuery(con, "SELECT * FROM http_tabix")',
+      "",
+      "# Remote HTTP example: use only with a same-origin relay or a host that",
+      "# sends permissive CORS headers, including for Range and index reads.",
+      "# EBI GTEx currently works in this harness, but this can vary by browser",
+      "# policy and upstream CORS behavior over time.",
+       '# remote_url <- "https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"',
+       '# rduckhts_tabix(con, "remote_tabix", remote_url, region = "1:11868-14409", header = TRUE, auto_detect = TRUE, overwrite = TRUE)',
+       '# DBI::dbGetQuery(con, "SELECT * FROM remote_tabix")',
+    ].join("\n");
+
     runButton.addEventListener("click", () => {
       void main();
+    });
+    replRunButton.addEventListener("click", () => {
+      void runRepl();
+    });
+    runTinytestsButton.addEventListener("click", () => {
+      void runTinytests();
+    });
+    replClearButton.addEventListener("click", () => {
+      logNode.textContent = "";
+    });
+    cfgApplyButton.addEventListener("click", () => {
+      void applyHttpConfigFromUi();
+    });
+    cfgClearButton.addEventListener("click", () => {
+      void clearHttpConfigFromUi();
     });
   </script>
 </body>

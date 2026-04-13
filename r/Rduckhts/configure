@@ -206,7 +206,11 @@ if try_compile_header_lib "lzma" "lzma.h" "-llzma" "no"; then
   LIBS="$LIBS -llzma"
 fi
 
-if try_compile_header_lib "curl" "curl/curl.h" "-lcurl" "no"; then
+if [ "${WASM_BUILD}" = "yes" ]; then
+  : # libcurl intentionally disabled on wasm: socket emulation fails from DuckDB
+    # SIDE_MODULE context.  HTTP/HTTPS access uses our own wasm_http_hfile.c
+    # backend (synchronous XHR via EM_ASM) registered at extension init.
+elif try_compile_header_lib "curl" "curl/curl.h" "-lcurl" "no"; then
   HAS_CURL=yes
   LIBS="$LIBS -lcurl"
 fi
@@ -217,9 +221,11 @@ else
   OPENSSL_TEST_LIBS="-lssl -lcrypto"
 fi
 
-if try_compile_header_lib "openssl" "openssl/ssl.h" "${OPENSSL_TEST_LIBS}" "no"; then
-  HAS_OPENSSL=yes
-  LIBS="$LIBS ${OPENSSL_TEST_LIBS}"
+if [ "${WASM_BUILD}" != "yes" ]; then
+  if try_compile_header_lib "openssl" "openssl/ssl.h" "${OPENSSL_TEST_LIBS}" "no"; then
+    HAS_OPENSSL=yes
+    LIBS="$LIBS ${OPENSSL_TEST_LIBS}"
+  fi
 fi
 
 LIBS="$LIBS -lpthread"
@@ -234,15 +240,13 @@ HTSLIB_GCS="--enable-gcs"
 
 if [ "${WASM_BUILD}" = "yes" ]; then
   echo "Detected WebAssembly/r-wasm build environment"
-  echo "Disabling plugins, libcurl, S3, GCS, and LZMA support (not available in the stock webR/r-universe wasm toolchain)"
+  echo "Disabling plugins, S3, GCS, and LZMA support in wasm"
   HTSLIB_CONFIGURE_CACHE_VARS="${HTSLIB_CONFIGURE_CACHE_VARS} ac_cv_func_getrandom=no ac_cv_func_fork=no ac_cv_func_vfork=no ac_cv_func_CCHmac=no ac_cv_func_srand48_deterministic=no"
   HTSLIB_PLUGINS="--disable-plugins"
   HAS_LZMA=no
-  HAS_CURL=no
-  HAS_OPENSSL=no
   HTSLIB_S3="--disable-s3"
   HTSLIB_GCS="--disable-gcs"
-  CPPFLAGS="${CPPFLAGS} -include ${THIS_DIR}/tools/wasm_socket_compat.h"
+  CPPFLAGS="${CPPFLAGS} -include ${EXT_DIR}/include/wasm_socket_compat.h"
 fi
 
 HTSLIB_CONFIGURE_FLAGS="${HTSLIB_PLUGINS} ${HTSLIB_S3} ${HTSLIB_GCS}"
@@ -280,7 +284,11 @@ if [ "$HAS_LZMA" = "no" ]; then
 fi
 
 if [ "$HAS_CURL" = "no" ]; then
-  echo "INFO: libcurl not found - disabling remote URL support in htslib"
+  if [ "${WASM_BUILD}" = "yes" ]; then
+    echo "INFO: libcurl disabled on wasm - disabling htslib's libcurl URL backend; browser HTTP uses wasm_http_hfile.c"
+  else
+    echo "INFO: libcurl not found - disabling remote URL support in htslib"
+  fi
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libcurl --disable-s3 --disable-gcs"
 elif [ "$HAS_OPENSSL" = "no" ]; then
   HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-s3 --disable-gcs"
@@ -393,7 +401,7 @@ echo "---------- Building DuckHTS extension ----------"
 
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c bcf_reader.c bam_reader.c bgzip.c hts_index_builder.c liftover_udf.c munge_udf.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c kmer_udf.c"
+C_SOURCES="duckhts.c bcf_reader.c bam_reader.c bgzip.c hts_index_builder.c liftover_udf.c munge_udf.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c kmer_udf.c wasm_http_hfile.c"
 INCLUDES="-I./include -I./duckdb_capi -I./htslib"
 
 echo "Compiling extension sources..."

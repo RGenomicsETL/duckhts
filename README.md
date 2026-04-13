@@ -561,6 +561,90 @@ prebuilt binaries from the r-universe-binaries GitHub release and point
 package bundle.
 <https://github.com/RGenomicsETL/duckhts/releases/tag/r-universe-binaries>
 
+### Browser wasm/webR HTTP backend
+
+For browser wasm/webR builds, DuckHTS does **not** use htslib `libcurl`
+for remote `http`/`https` access.
+
+- The webR side-module path disables htslib `libcurl`/`S3`/`GCS`
+  features because socket-based libcurl calls from a wasm side module
+  are not reliable in the current webR runtime model.
+- DuckHTS registers a package-owned htslib `hFILE` scheme handler
+  implemented in `src/wasm_http_hfile.c` for `http` and `https`.
+- This backend uses synchronous `XMLHttpRequest` from the worker for
+  range reads, index probes, and seek behavior.
+
+Browser constraints still apply:
+
+- Remote hosts must allow CORS for the main file **and** index sidecars
+  (`.tbi`/`.csi`), including range requests.
+- Behavior can vary by browser and by server-side CORS policy changes
+  over time.
+- `ALL_PROXY` / websocket proxy settings do not affect this XHR backend.
+
+Optional header/auth configuration for browser wasm can be provided from
+JavaScript before loading/querying:
+
+``` js
+Module.duckhtsWasmHttpConfig = {
+  headers: {
+    Authorization: "Bearer <short-lived-token>",
+    "X-Request-Source": "webr-local"
+  },
+  allowHosts: ["ftp.ebi.ac.uk", ".s3.amazonaws.com"],
+  enforceHostAllowlist: true,
+  withCredentials: false,
+  allowInsecureAuth: false
+};
+```
+
+Security behavior of this config:
+
+- Headers are only attached when the URL hostname matches `allowHosts`.
+- Requests are blocked for non-matching hosts when
+  `enforceHostAllowlist: true`.
+- `Authorization` is blocked on non-HTTPS URLs unless
+  `allowInsecureAuth: true` is set explicitly.
+- Credentials/cookies are only sent when `withCredentials: true` is set.
+
+### Browser wasm/duckdb-wasm local harness
+
+DuckHTS is also intended to run as a generic DuckDB community extension
+in browser wasm hosts (not only webR).
+
+Use the local duckdb-wasm harness to exercise that path end-to-end:
+
+``` bash
+./scripts/start_duckdb_wasm_local_test.sh
+```
+
+This harness uses a Docker-only build path via
+`scripts/docker/duckdb-wasm-local.Dockerfile`.
+
+The container pre-installs cache-friendly, pinned wasm build
+dependencies (`emsdk`, `vcpkg`) so repeated local runs do minimal setup
+work.
+
+Builds run in an isolated mirror worktree (`.duckdb_wasm_docker_work`)
+and copy back only the wasm extension artifact, so your host native
+`build/` and `cmake_build/` trees remain available for normal native
+development and testing.
+
+Then open:
+
+``` text
+http://127.0.0.1:8001/scripts/duckdb-wasm-local-test.html
+```
+
+This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
+local HTTP reader smoke tests, and lets you set/clear
+`Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
+
+The harness imports duckdb-wasm via jsDelivr `+esm`, and the script
+stages local copies of `duckdb-browser-eh.worker.js` and
+`duckdb-eh.wasm` at the site root so worker and main module loads stay
+same-origin.
+
 ### S3 credentials and configuration
 
 The htslib S3 plugin supports credentials embedded in the URL or

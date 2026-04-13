@@ -54,7 +54,8 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "bcftools_filter.c",
     "bcftools_shim.c",
     "score_udf.c",
-    "vep_parser.c"
+    "vep_parser.c",
+    "wasm_http_hfile.c"
   )
   file.copy(file.path(src_dir, c_files), dest)
   message("  Copied ", length(c_files), " C source files")

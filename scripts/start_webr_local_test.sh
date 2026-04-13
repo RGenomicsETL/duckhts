@@ -3,7 +3,9 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PORT=${PORT:-8000}
+HOST=${HOST:-127.0.0.1}
 WEBR_IMAGE=${WEBR_IMAGE:-ghcr.io/r-wasm/webr:main}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.webr-local-artifacts}
 
 echo "Building local webR artifact with ${WEBR_IMAGE}..."
 
@@ -28,19 +30,24 @@ Rscript -e "ver <- read.dcf(\"DESCRIPTION\")[1, \"Version\"]; rwasm::build(sprin
 '
 
 VERSION=$(Rscript -e 'cat(read.dcf("r/Rduckhts/DESCRIPTION")[1, "Version"])')
-TGZ_PATH="${ROOT_DIR}/r/Rduckhts/Rduckhts_${VERSION}.tgz"
-REPO_ROOT="${ROOT_DIR}/r/Rduckhts/webr-repo"
-LOCAL_REPO_DIR="${ROOT_DIR}/r/Rduckhts/webr-repo/src/contrib"
+BUILD_TGZ_PATH="${ROOT_DIR}/r/Rduckhts/Rduckhts_${VERSION}.tgz"
+TGZ_PATH="${ARTIFACT_ROOT}/Rduckhts_${VERSION}.tgz"
+REPO_ROOT="${ARTIFACT_ROOT}/repo"
+LOCAL_REPO_DIR="${REPO_ROOT}/src/contrib"
+SITE_ROOT="${ARTIFACT_ROOT}/site"
 WEBR_R_SERIES=$(
   docker run --rm "${WEBR_IMAGE}" bash -lc \
     "Rscript -e 'cat(paste(R.version\$major, sub(\"\\\\..*$\", \"\", R.version\$minor), sep = \".\"))'"
 )
 BINARY_REPO_DIR="${REPO_ROOT}/bin/emscripten/contrib/${WEBR_R_SERIES}"
 
-if [ ! -f "${TGZ_PATH}" ]; then
-  echo "Expected wasm package artifact not found: ${TGZ_PATH}" >&2
+if [ ! -f "${BUILD_TGZ_PATH}" ]; then
+  echo "Expected wasm package artifact not found: ${BUILD_TGZ_PATH}" >&2
   exit 1
 fi
+
+mkdir -p "${ARTIFACT_ROOT}"
+cp -f "${BUILD_TGZ_PATH}" "${TGZ_PATH}"
 
 rm -rf "${REPO_ROOT}"
 mkdir -p "${LOCAL_REPO_DIR}"
@@ -54,7 +61,7 @@ fields\$File <- sprintf('Rduckhts_%s.tgz', desc[1, 'Version'])
 db <- as.data.frame(fields, stringsAsFactors = FALSE, check.names = FALSE)
 mat <- as.matrix(db)
 rownames(mat) <- mat[, 'Package']
-repo_src <- 'r/Rduckhts/webr-repo/src/contrib'
+repo_src <- '${LOCAL_REPO_DIR}'
 repo_bin <- '${BINARY_REPO_DIR}'
 write_index <- function(repo) {
   write.dcf(db, file = file.path(repo, 'PACKAGES'))
@@ -67,22 +74,37 @@ write_index(repo_src)
 write_index(repo_bin)
 "
 
+rm -rf "${SITE_ROOT}"
+mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/r/Rduckhts" "${SITE_ROOT}/extdata"
+cp -f "${ROOT_DIR}/scripts/webr-local-test.html" "${SITE_ROOT}/scripts/webr-local-test.html"
+cp -f "${ROOT_DIR}/r/Rduckhts/DESCRIPTION" "${SITE_ROOT}/r/Rduckhts/DESCRIPTION"
+cp -a "${REPO_ROOT}" "${SITE_ROOT}/r/Rduckhts/webr-repo"
+# Expose tabix-indexed test files under /extdata so the browser REPL can open
+# them via a real http:// URL without needing a remote server or ws-proxy.
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/header_tabix.tsv.gz" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/header_tabix.tsv.gz.tbi" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/gff_file.gff.gz" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/gff_file.gff.gz.tbi" "${SITE_ROOT}/extdata/"
+
 cat <<EOF
 Built:
   ${TGZ_PATH}
 
 Local webR repo:
-  /r/Rduckhts/webr-repo
+  ${REPO_ROOT}
 
 Open in a browser:
-  http://localhost:${PORT}/scripts/webr-local-test.html
+  http://${HOST}:${PORT}/scripts/webr-local-test.html
 
 The page will load:
   /r/Rduckhts/DESCRIPTION
   /r/Rduckhts/webr-repo/src/contrib/PACKAGES
   /r/Rduckhts/webr-repo/bin/emscripten/contrib/${WEBR_R_SERIES}/PACKAGES
   /r/Rduckhts/webr-repo/bin/emscripten/contrib/${WEBR_R_SERIES}/Rduckhts_${VERSION}.tgz
+
+Artifact root:
+  ${ARTIFACT_ROOT}
 EOF
 
-cd "${ROOT_DIR}"
-exec python3 -m http.server "${PORT}"
+cd "${SITE_ROOT}"
+exec python3 -m http.server "${PORT}" --bind "${HOST}"
