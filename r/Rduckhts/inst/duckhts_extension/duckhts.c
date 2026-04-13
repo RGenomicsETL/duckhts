@@ -131,6 +131,23 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
         return false;
     }
+    {
+        static const char *const hts_union_query_sql[] = {
+            "CREATE OR REPLACE MACRO hts_union_query(reader, pattern, params := '') AS (",
+            "(SELECT string_agg(",
+            "'SELECT ''' || replace(file, '''', '''''') || ''' AS filename, * FROM ' ",
+            "|| reader || '(''' || replace(file, '''', '''''') || '''' ",
+            "|| CASE WHEN length(params) > 0 THEN ', ' || params ELSE '' END ",
+            "|| ')', ",
+            "' UNION ALL BY NAME '",
+            ") FROM glob(pattern) g(file))",
+            ")"
+        };
+        if (!run_sql_parts_or_fail(connection, hts_union_query_sql,
+                                    sizeof(hts_union_query_sql) / sizeof(hts_union_query_sql[0]))) {
+            return false;
+        }
+    }
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckdb_munge_preset_map(preset) AS "
         "CASE "

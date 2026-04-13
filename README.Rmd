@@ -243,6 +243,27 @@ FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
                  index_path := '/tmp/duckhts_readme_targets.bed.gz.tbi');
 ```
 
+### Multi-file queries
+
+`hts_union_query` builds a `UNION ALL BY NAME` across files matching a glob pattern.
+Because DuckDB's `query()` cannot accept subquery expressions, use the
+`SET VARIABLE` + `getvariable()` pattern:
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SET VARIABLE q = hts_union_query('read_fastq', 'test/data/r*.fq');
+SELECT filename, count(*) AS n
+FROM query(getvariable('q'))
+GROUP BY ALL;
+```
+
+Per-file parameters can be passed as the third argument (SQL literal):
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SET VARIABLE q = hts_union_query('read_bam', 'test/data/range.bam',
+                                  'region := ''CHROMOSOME_I:1-1000''');
+SELECT count(*) AS n FROM query(getvariable('q'));
+```
+
 ## Remote URLs and HTS_PATH
 
 Remote URLs (S3/GCS/HTTP/S) can work in two htslib build modes:
@@ -308,17 +329,17 @@ Security behavior of this config:
 - `Authorization` is blocked on non-HTTPS URLs unless `allowInsecureAuth: true` is set explicitly.
 - Credentials/cookies are only sent when `withCredentials: true` is set.
 
-### Browser wasm/duckdb-wasm local harness
+### Browser wasm/duckdb-wasm local setup
 
 DuckHTS is also intended to run as a generic DuckDB community extension in browser wasm hosts (not only webR).
 
-Use the local duckdb-wasm harness to exercise that path end-to-end:
+Use the local duckdb-wasm setup to exercise that path end-to-end:
 
 ```bash
 ./scripts/start_duckdb_wasm_local_test.sh
 ```
 
-This harness uses a Docker-only build path via `scripts/docker/duckdb-wasm-local.Dockerfile`.
+This setup uses a Docker-only build path via `scripts/docker/duckdb-wasm-local.Dockerfile`.
 
 The container pre-installs cache-friendly, pinned wasm build dependencies (`emsdk`, `vcpkg`) so repeated local runs do minimal setup work.
 
@@ -330,9 +351,9 @@ Then open:
 http://127.0.0.1:8001/scripts/duckdb-wasm-local-test.html
 ```
 
-This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs local HTTP reader smoke tests, and lets you set/clear `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
+This setup loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs local HTTP reader smoke tests, and lets you set/clear `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
 
-The harness stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`, and `duckdb-eh.wasm` at the site root for same-origin runtime loading, while using an import map for `apache-arrow` resolution.
+The setup stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`, and `duckdb-eh.wasm` at the site root for same-origin runtime loading, while using an import map for `apache-arrow` resolution.
 
 ### S3 credentials and configuration
 
@@ -552,9 +573,11 @@ src/
   seq_reader.c       # FASTA/FASTQ reader (read_fasta, read_fastq)
   tabix_reader.c     # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
   vep_parser.c       # VEP/CSQ annotation parser
+  ......
   include/
     vcf_types.h
     vep_parser.h
+    .....
 third_party/
   htslib/            # Vendored htslib 1.23 (built automatically)
 test/
@@ -563,7 +586,7 @@ duckdb_capi/
   duckdb.h           # DuckDB C API headers
   duckdb_extension.h
 r/
-  Rduckhts/          # R package harness
+  Rduckhts/          # R package 
 ```
 
 ## References

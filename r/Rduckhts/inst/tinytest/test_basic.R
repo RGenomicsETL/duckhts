@@ -232,4 +232,58 @@ expect_error(rduckhts_hts_index_spans(NULL, "nonexistent.bcf"))
 expect_error(rduckhts_hts_index_raw(NULL, "nonexistent.bcf"))
 expect_error(rduckhts_liftover(NULL, "SELECT 1 AS chrom, 1 AS pos", "x.chain", "y.fa"))
 
+# Test multi-file reading functions exist
+expect_true(exists("read_bam_multi"))
+expect_true(exists("read_bcf_multi"))
+expect_true(exists("read_fastq_multi"))
+expect_true(exists("read_fasta_multi"))
+expect_true(exists("read_bed_multi"))
+expect_true(exists("read_tabix_multi"))
+expect_true(exists("read_gff_multi"))
+expect_true(exists("read_gtf_multi"))
+
+# Test multi-file reading function signatures
+expect_identical(
+  names(formals(read_bam_multi)),
+  c("con", "files", "region", "index_path", "reference", "standard_tags",
+    "auxiliary_tags", "sequence_encoding", "quality_representation", ".params")
+)
+expect_identical(
+  names(formals(read_bcf_multi)),
+  c("con", "files", "region", "index_path", "tidy_format",
+    "additional_csq_column_types", ".params")
+)
+expect_identical(
+  names(formals(read_fastq_multi)),
+  c("con", "files", "mate_path", "interleaved", "sequence_encoding",
+    "quality_representation", "input_quality_encoding", ".params")
+)
+expect_identical(
+  names(formals(read_fasta_multi)),
+  c("con", "files", "region", "index_path", "sequence_encoding", ".params")
+)
+expect_identical(
+  names(formals(read_bed_multi)),
+  c("con", "files", "region", "index_path", ".params")
+)
+expect_identical(
+  names(formals(read_tabix_multi)),
+  c("con", "files", "region", "index_path", "header", "header_names",
+    "auto_detect", "column_types", ".params")
+)
+expect_identical(
+  names(formals(read_gff_multi)),
+  c("con", "files", "region", "index_path", "header", "header_names",
+    "auto_detect", "column_types", "attributes_map", ".params")
+)
+expect_identical(
+  names(formals(read_gtf_multi)),
+  c("con", "files", "region", "index_path", "header", "header_names",
+    "auto_detect", "column_types", "attributes_map", ".params")
+)
+
+# Test .params validation (these should fail with bad input, no connection needed)
+expect_error(read_bam_multi(NULL, "*.bam", .params = "not a data.frame"))
+expect_error(read_bam_multi(NULL, "*.bam", .params = data.frame(x = 1)))
+
 message("All basic tests passed!")

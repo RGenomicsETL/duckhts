@@ -16,6 +16,7 @@ This section is generated from `functions.yaml`.
 | `read_gtf` | table | table | `rduckhts_gtf` | Read GTF annotations with optional parsed attribute maps and indexed region filtering. |
 | `read_tabix` | table | table | `rduckhts_tabix` | Read generic tabix-indexed text data with optional header handling and type inference. |
 | `fasta_index` | table | table | `rduckhts_fasta_index` | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR). |
+| `hts_union_query` | scalar_macro | VARCHAR |  | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a 'filename' column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(...)). Optional params string is appended to each reader call. |
 
 ### Metadata
 

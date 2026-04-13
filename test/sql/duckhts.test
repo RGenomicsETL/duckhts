@@ -973,3 +973,49 @@ statement error
 SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', sequence_encoding := 'xyz');
 ----
 sequence_encoding must be 'string' or 'nt16'
+
+# ==============================================================
+# hts_union_query – multi-file UNION ALL BY NAME macro
+# ==============================================================
+
+# --- hts_union_query: generates valid SQL for a single BAM file ---
+statement ok
+SET VARIABLE hts_q = hts_union_query('read_bam', '__WORKING_DIRECTORY__/test/data/range.bam');
+
+query I
+SELECT count(*) FROM query(getvariable('hts_q'));
+----
+112
+
+# --- hts_union_query: result includes filename column ---
+query I
+SELECT count(DISTINCT filename) FROM query(getvariable('hts_q'));
+----
+1
+
+# --- hts_union_query: with params passthrough ---
+statement ok
+SET VARIABLE hts_q = hts_union_query('read_bam', '__WORKING_DIRECTORY__/test/data/range.bam', 'region := ''CHROMOSOME_I:1-1000''');
+
+query I
+SELECT count(*) FROM query(getvariable('hts_q'));
+----
+2
+
+# --- hts_union_query: BCF reader ---
+statement ok
+SET VARIABLE hts_q = hts_union_query('read_bcf', '__WORKING_DIRECTORY__/test/data/vcf_file.bcf');
+
+query I
+SELECT count(*) > 0 FROM query(getvariable('hts_q'));
+----
+1
+
+# --- hts_union_query: FASTQ reader ---
+statement ok
+SET VARIABLE hts_q = hts_union_query('read_fastq', '__WORKING_DIRECTORY__/test/data/r1.fq');
+
+query I
+SELECT count(*) > 0 FROM query(getvariable('hts_q'));
+----
+1

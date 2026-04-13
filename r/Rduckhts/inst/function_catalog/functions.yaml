@@ -363,6 +363,19 @@
       ]
     },
     {
+      "name": "hts_union_query",
+      "kind": "scalar_macro",
+      "category": "Readers",
+      "signature": "hts_union_query(reader, pattern, params := '')",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a 'filename' column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(...)). Optional params string is appended to each reader call.",
+      "examples": [
+        "SET VARIABLE q = hts_union_query('read_bam', 'samples/*.bam'); SELECT * FROM query(getvariable('q'));",
+        "SET VARIABLE q = hts_union_query('read_bcf', 'cohort/*.vcf.gz', 'tidy_format := true'); SELECT * FROM query(getvariable('q'));"
+      ]
+    },
+    {
       "name": "seq_revcomp",
       "kind": "scalar",
       "category": "Sequence UDFs",
