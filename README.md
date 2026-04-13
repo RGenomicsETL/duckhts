@@ -640,10 +640,9 @@ This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
 local HTTP reader smoke tests, and lets you set/clear
 `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
 
-The harness imports duckdb-wasm via jsDelivr `+esm`, and the script
-stages local copies of `duckdb-browser-eh.worker.js` and
-`duckdb-eh.wasm` at the site root so worker and main module loads stay
-same-origin.
+The harness stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`,
+and `duckdb-eh.wasm` at the site root for same-origin runtime loading,
+while using an import map for `apache-arrow` resolution.
 
 ### S3 credentials and configuration
 

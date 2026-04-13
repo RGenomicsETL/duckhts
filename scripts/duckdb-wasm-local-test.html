@@ -188,6 +188,7 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
         await db.instantiate("/duckdb-eh.wasm");
         await db.open({ allowUnsignedExtensions: true });
         conn = await db.connect();
+        await runSQL("SELECT version() AS duckdb_version");
 
         const extPath = "/duckdb-wasm/duckhts.duckdb_extension.wasm";
         const extUrl = defaultOriginUrl(extPath);

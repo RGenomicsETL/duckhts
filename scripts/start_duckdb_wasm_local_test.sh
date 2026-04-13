@@ -6,7 +6,9 @@ PORT=${PORT:-8001}
 HOST=${HOST:-127.0.0.1}
 LOCAL_WASM_IMAGE=${LOCAL_WASM_IMAGE:-duckhts/duckdb-wasm-local:latest}
 LOCAL_WASM_DOCKERFILE=${LOCAL_WASM_DOCKERFILE:-scripts/docker/duckdb-wasm-local.Dockerfile}
-DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.29.0}
+# duckdb-wasm 1.29.0 is based on DuckDB v1.1.1 and traps while loading our
+# current extension build; use the first 1.4.x-aligned runtime by default.
+DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.31.0}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.duckdb-wasm-local-artifacts}
 SITE_ROOT=${SITE_ROOT:-${ARTIFACT_ROOT}/site}
 WASM_BUILD_DIR=${WASM_BUILD_DIR:-${ARTIFACT_ROOT}/build/wasm_eh/extension/duckhts}
