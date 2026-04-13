@@ -42,6 +42,48 @@ optionally for full functionally liblzma, libcurl, and openssl. The
 package requires GNU make. On Windows’s Rtools, `htslib` plugins are not
 enabled.
 
+## Browser wasm/webR networking note
+
+In browser wasm/webR builds, remote `http`/`https` access does not use
+htslib `libcurl`.
+
+- The bundled extension enables a custom htslib `hFILE` backend in
+  `src/wasm_http_hfile.c` for `http` and `https`.
+- This backend uses synchronous worker-side XHR for range reads and
+  tabix index access.
+- htslib `libcurl`/`S3`/`GCS` paths are intentionally disabled for wasm
+  in the package build.
+
+What this means in practice:
+
+- Remote URLs work only when browser CORS policy allows them.
+- CORS must allow both the primary file and index sidecars
+  (`.tbi`/`.csi`), including range requests.
+- `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR
+  backend.
+
+Optional browser-side request header/auth configuration can be set from
+JavaScript before running queries:
+
+``` js
+Module.duckhtsWasmHttpConfig = {
+  headers: {
+    Authorization: "Bearer <short-lived-token>",
+    "X-Request-Source": "webr-local"
+  },
+  allowHosts: ["ftp.ebi.ac.uk", ".s3.amazonaws.com"],
+  withCredentials: false,
+  allowInsecureAuth: false
+};
+```
+
+Security behavior of this config:
+
+- Headers are only attached when URL hostnames match `allowHosts`.
+- `Authorization` is blocked for non-HTTPS URLs unless
+  `allowInsecureAuth: true` is set.
+- Cookies/credentials are only sent when `withCredentials: true` is set.
+
 ## Quick Start
 
 The extension is loaded with
@@ -245,7 +287,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_readme_1a9bc421fe924f.fai
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_readme_20e10779f4e16f.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -305,10 +347,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_liftover_src_1a9bc47becd3b5.fa.fai
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_liftover_src_20e10756805903.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_liftover_dst_1a9bc424ba9758.fa.fai
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_liftover_dst_20e107572f3a14.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -353,7 +395,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                          index_path
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_munge_1a9bc478eec433.fa.fai
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_munge_20e1073aaa19be.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -426,12 +468,12 @@ writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
 #>   success                                           output_path bytes_in
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_targets_1a9bc46b9f04b6.bed.gz       25
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_targets_20e10744405711.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_targets_1a9bc46b9f04b6.bed.gz.tbi
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_targets_20e10744405711.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
@@ -497,8 +539,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                        index_path
-#> 1    TRUE /tmp/RtmpWvlxA8/duckhts_readme_1a9bc4346d7dd3.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/RtmppKpk3R/duckhts_readme_20e10751121eb.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
@@ -841,12 +883,13 @@ head(index_raw, 1)
 
 ### Remote GTEx tabix example
 
-GTEx eQTL matrices on EBI are tabix-indexed
+GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this
+still depends on CORS policy on both the data object and index object.
 
 ``` r
-gtex_url <- "http://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
+gtex_url <- "https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
-                 header = TRUE, auto_detect = TRUE, overwrite = TRUE)
+                  header = TRUE, auto_detect = TRUE, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM gtex_eqtl LIMIT 5")
 #>          variant r2    pvalue molecular_trait_object_id molecular_trait_id
 #> 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290

@@ -2,11 +2,62 @@
 
 ## Rduckhts 1.1.6.9000-0.0.6 (Development version)
 
+- Fix DuckDB community-extension wasm side-module ABI parity with the
+  bundled `webR` build: the top-level wasm link now preserves
+  `-sWASM_BIGINT` together with `-fwasm-exceptions`, and the CMake
+  `htslib` wasm path plus package `configure` now share one
+  extension-owned Emscripten compat header from `src/include/`. The
+  duckdb-wasm/community-extension path also remaps htslib and
+  extension-level native i64 libc calls (`lseek`, `ftruncate`,
+  `strtoll`, `strtoull`, `atoll`, `time`) onto duckdb-wasm’s `orig$...`
+  exports while the webR/package path keeps the default symbols. This
+  removes the wasm ABI drift that was causing browser `LOAD` failures
+  (`indirect call signature mismatch`, then `env.ftruncate` /
+  `env.strtoll` signature mismatch) without changing native builds.
+- Separate the two local browser wasm harnesses so they no longer stage
+  outputs into overlapping code-owned areas: the duckdb-wasm harness now
+  defaults to `.duckdb-wasm-local-artifacts/`, and the webR harness now
+  defaults to `.webr-local-artifacts/` for its tarball, staged repo, and
+  served site.
 - Make the bundled wasm extension self-contained with respect to
   `htslib`: the Emscripten/webR `configure` path now builds only
   `libhts.a`, links `duckhts.duckdb_extension` directly against that
   static archive, and no longer relies on runtime loading of bundled
   `libhts.so*` files in webR/browser environments.
+- Add a browser-native wasm `http` / `https` backend in the bundled
+  extension: `src/wasm_http_hfile.c` now registers a synchronous
+  XHR-backed `htslib` scheme handler from the DuckDB extension entry
+  point, so browser wasm builds can read same-origin and CORS-enabled
+  remote HTS URLs without going through libcurl sockets.
+- Keep wasm `libcurl` disabled in `configure`: `r-wasm/webr` ships
+  `/opt/webr/wasm/lib/libcurl.a` and the emcc link test against it
+  passes, but libcurl’s `connect()` calls from a SIDE_MODULE still
+  trigger a webR Emscripten message-bus error
+  (`resolved is not a function`) on first network use, so the
+  package-owned XHR backend is the supported wasm HTTP path.
+- Harden wasm browser HTTP range behavior in the bundled extension:
+  `wasm_http_hfile.c` now caches object sizes from
+  `Content-Range`/`Content-Length`, clamps range requests when size is
+  known, short-circuits reads at/after EOF, and uses a
+  `GET Range: bytes=0-0` fallback for `SEEK_END` size discovery when
+  `HEAD` metadata is unavailable; this avoids cross-origin 416 failures
+  on `.tbi` index EOF probes (including GTEx tabix in webR/browser).
+- Harden non-Range wasm/browser HTTP fallback in the bundled extension:
+  when ranged reads receive `200 OK`, `wasm_http_hfile.c` now caches the
+  full object per open handle and serves later reads from that in-memory
+  cache to avoid repeated full downloads, while still emitting one-time
+  warnings when Range is ignored and when large fallback payloads (\>=64
+  MiB) are used.
+- Add optional wasm/browser request-header configuration in the bundled
+  extension via `Module.duckhtsWasmHttpConfig`: supports custom headers
+  (including bearer auth), host allowlisting, optional
+  `withCredentials`, and a default HTTPS-only guard that blocks
+  `Authorization` on non-HTTPS URLs unless `allowInsecureAuth` is
+  explicitly enabled.
+- Extend `Module.duckhtsWasmHttpConfig` with `enforceHostAllowlist` in
+  the bundled wasm backend: when enabled, requests to hosts outside
+  `allowHosts` are blocked instead of merely omitting configured
+  headers.
 - Fix the bundled wasm side-module final link during `configure`:
   preserve webR/Emscripten `${LDFLAGS}` on the final
   `duckhts.duckdb_extension` link so the `SIDE_MODULE` settings reach
@@ -24,10 +75,10 @@
   vendored `htslib` `./configure`, forwards webR’s Emscripten port flags
   for `zlib`/`bzip2`, seeds wasm-safe Autoconf cache results for
   `zlib`/`bzip2`/socket probes, injects a tiny Emscripten-only socket
-  compatibility shim for `recv`/`send`/`closesocket`, and disables only
-  the optional `htslib` features that are not available in the stock
+  compatibility shim for `recv`/`send`/`closesocket`, and disables the
+  optional `htslib` features that are not available in the stock
   webR/r-universe wasm toolchain (`libcurl`, `S3`, `GCS`, `lzma`,
-  plugins); this fixes the original
+  `plugins`); this fixes the original
   `ac_cv_func_getrandom=no: command not found` failure and the
   subsequent nested `htslib` cross-compile probe failures without
   changing native configure behavior.
