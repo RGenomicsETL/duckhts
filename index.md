@@ -151,6 +151,10 @@ into:
   [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md),
   [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md),
   [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed.md)
+- multi-file readers: `rduckhts_bam_multi()`, `rduckhts_bcf_multi()`,
+  `rduckhts_fastq_multi()`, `rduckhts_fasta_multi()`,
+  `rduckhts_gff_multi()`, `rduckhts_gtf_multi()`,
+  `rduckhts_tabix_multi()`, `rduckhts_bed_multi()`
 - reference helpers:
   [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.md),
   [`rduckhts_fasta_nuc()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_nuc.md)
@@ -195,19 +199,20 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
 ## Multi-file Reading
 
-The `read_*_multi` family reads multiple files into a single result with
-a `filename` column. Pass a character vector of paths or glob patterns:
+The `rduckhts_*_multi` family reads multiple files into a single DuckDB
+table with a `filename` column, following the same
+`(con, table_name, ...)` convention as the single-file wrappers:
 
 ``` r
 fq_files <- c(
   system.file("extdata", "r1.fq", package = "Rduckhts"),
   system.file("extdata", "r2.fq", package = "Rduckhts")
 )
-df <- read_fastq_multi(con, fq_files)
-aggregate(NAME ~ basename(filename), data = df, FUN = length)
-#>   basename(filename) NAME
-#> 1              r1.fq    5
-#> 2              r2.fq    5
+rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
+dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL")
+#>                                               filename n
+#> 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5
+#> 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a
@@ -223,9 +228,11 @@ params <- data.frame(
   region     = "CHROMOSOME_I:1-1000",
   index_path = bam_idx
 )
-df <- read_bam_multi(con, bam_path, .params = params)
-nrow(df)
-#> [1] 2
+rduckhts_bam_multi(con, "bam_multi", bam_path, .params = params,
+                   overwrite = TRUE)
+dbGetQuery(con, "SELECT count(*) AS n FROM bam_multi")
+#>   n
+#> 1 2
 ```
 
 ## Function Catalog
@@ -240,19 +247,19 @@ This section is generated from `functions.yaml`.
 
 ### Readers
 
-| Function          | Kind         | Returns | R helper               | Description                                                                                                                                                                                                                                                                                                                                                                                                     |
-|-------------------|--------------|---------|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `read_bcf`        | table        | table   | `rduckhts_bcf`         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, and optional bcftools-style CSQ type overrides.                                                                                                                                                                                                                                               |
-| `read_bam`        | table        | table   | `rduckhts_bam`         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR.                                                                                                                                                                   |
-| `read_fasta`      | table        | table   | `rduckhts_fasta`       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR.                                                                                                                                                                                                                                  |
-| `read_bed`        | table        | table   | `rduckhts_bed`         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                         |
-| `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                              |
-| `read_fastq`      | table        | table   | `rduckhts_fastq`       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’. |
-| `read_gff`        | table        | table   | `rduckhts_gff`         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                          |
-| `read_gtf`        | table        | table   | `rduckhts_gtf`         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                          |
-| `read_tabix`      | table        | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                          |
-| `fasta_index`     | table        | table   | `rduckhts_fasta_index` | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                     |
-| `hts_union_query` | scalar_macro | VARCHAR |                        | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call.                                                              |
+| Function          | Kind         | Returns | R helper                                                                                                                                                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-------------------|--------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `read_bcf`        | table        | table   | `rduckhts_bcf`                                                                                                                                                         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, and optional bcftools-style CSQ type overrides.                                                                                                                                                                                                                                                                                                                                            |
+| `read_bam`        | table        | table   | `rduckhts_bam`                                                                                                                                                         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR.                                                                                                                                                                                                                                                                |
+| `read_fasta`      | table        | table   | `rduckhts_fasta`                                                                                                                                                       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR.                                                                                                                                                                                                                                                                                                                               |
+| `read_bed`        | table        | table   | `rduckhts_bed`                                                                                                                                                         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                                                                                                                           |
+| `read_fastq`      | table        | table   | `rduckhts_fastq`                                                                                                                                                       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’.                                                                                              |
+| `read_gff`        | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `read_gtf`        | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `read_tabix`      | table        | table   | `rduckhts_tabix`                                                                                                                                                       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
 
 ### Metadata
 
@@ -374,8 +381,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                      index_path
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_readme_5286309ab73e.fai
+#>   success                                     index_path
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_14855d41bc0.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -434,11 +441,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                               index_path
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_liftover_src_5286169d5788.fa.fai
+#>   success                                                index_path
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_src_1485564f30496.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                               index_path
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_liftover_dst_5286388cf43a.fa.fai
+#>   success                                                index_path
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_dst_1485513b3f6a9.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -482,8 +489,8 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                        index_path
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_munge_52867cd2d9bc.fa.fai
+#>   success                                         index_path
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_munge_148554870b69c.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -555,13 +562,13 @@ tmp_tbi <- paste0(tmp_bgz, ".tbi")
 writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
 
 rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
-#>   success                                         output_path bytes_in
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_targets_52865b74b94b.bed.gz       25
+#>   success                                          output_path bytes_in
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz       25
 #>   bytes_out
 #> 1        84
 rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
-#>   success                                              index_path index_format
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_targets_52865b74b94b.bed.gz.tbi          TBI
+#>   success                                               index_path index_format
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz.tbi          TBI
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
 #>   chrom start end name score strand thick_start thick_end item_rgb block_count
@@ -625,8 +632,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                      index_path
-#> 1    TRUE /tmp/Rtmp1fhDya/duckhts_readme_52863df8ba9b.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_148555a0ed12c.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

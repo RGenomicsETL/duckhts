@@ -2,13 +2,14 @@
 
 ## Rduckhts 1.1.6.9000-0.0.6 (Development version)
 
-- Add multi-file reading wrappers: `read_bam_multi`, `read_bcf_multi`,
-  `read_fastq_multi`, `read_fasta_multi`, `read_bed_multi`,
-  `read_tabix_multi`, `read_gff_multi`, `read_gtf_multi`. Each accepts a
-  `files` vector of paths/globs and an optional `.params` data.frame for
-  per-file parameter overrides (e.g. per-sample regions or index paths),
-  returns a combined data.frame with a `filename` column identifying
-  each row’s source file. File expansion uses DuckDB’s `glob()` so S3
+- Add multi-file reading wrappers: `rduckhts_bam_multi`,
+  `rduckhts_bcf_multi`, `rduckhts_fastq_multi`, `rduckhts_fasta_multi`,
+  `rduckhts_bed_multi`, `rduckhts_tabix_multi`, `rduckhts_gff_multi`,
+  `rduckhts_gtf_multi`. Each follows the standard
+  `(con, table_name, files, ..., overwrite)` convention, creates a
+  DuckDB table with a `filename` column, and accepts an optional
+  `.params` data.frame for per-file parameter overrides (e.g. per-sample
+  regions or index paths). File expansion uses DuckDB’s `glob()` so S3
   URLs work transparently.
 - Add bundled `hts_union_query(reader, pattern, params)` SQL scalar
   macro for pure-SQL multi-file reading via

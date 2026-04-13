@@ -154,6 +154,8 @@
 <ul>
 <li>readers: <code><a href="reference/rduckhts_bcf.html">rduckhts_bcf()</a></code>, <code><a href="reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, <code><a href="reference/rduckhts_fastq.html">rduckhts_fastq()</a></code>, <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code>, <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code>, <code><a href="reference/rduckhts_tabix.html">rduckhts_tabix()</a></code>, <code><a href="reference/rduckhts_bed.html">rduckhts_bed()</a></code>
 </li>
+<li>multi-file readers: <code>rduckhts_bam_multi()</code>, <code>rduckhts_bcf_multi()</code>, <code>rduckhts_fastq_multi()</code>, <code>rduckhts_fasta_multi()</code>, <code>rduckhts_gff_multi()</code>, <code>rduckhts_gtf_multi()</code>, <code>rduckhts_tabix_multi()</code>, <code>rduckhts_bed_multi()</code>
+</li>
 <li>reference helpers: <code><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index()</a></code>, <code><a href="reference/rduckhts_fasta_nuc.html">rduckhts_fasta_nuc()</a></code>
 </li>
 <li>compression/indexing: <code><a href="reference/rduckhts_bgzip.html">rduckhts_bgzip()</a></code>, <code><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip()</a></code>, <code><a href="reference/rduckhts_bam_index.html">rduckhts_bam_index()</a></code>, <code><a href="reference/rduckhts_bcf_index.html">rduckhts_bcf_index()</a></code>, <code><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index()</a></code>
@@ -188,17 +190,17 @@
 <div class="section level2">
 <h2 id="multi-file-reading">Multi-file Reading<a class="anchor" aria-label="anchor" href="#multi-file-reading"></a>
 </h2>
-<p>The <code>read_*_multi</code> family reads multiple files into a single result with a <code>filename</code> column. Pass a character vector of paths or glob patterns:</p>
+<p>The <code>rduckhts_*_multi</code> family reads multiple files into a single DuckDB table with a <code>filename</code> column, following the same <code>(con, table_name, ...)</code> convention as the single-file wrappers:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fq_files</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu">read_fastq_multi</span><span class="op">(</span><span class="va">con</span>, <span class="va">fq_files</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/stats/aggregate.html" class="external-link">aggregate</a></span><span class="op">(</span><span class="va">NAME</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/base/basename.html" class="external-link">basename</a></span><span class="op">(</span><span class="va">filename</span><span class="op">)</span>, data <span class="op">=</span> <span class="va">df</span>, FUN <span class="op">=</span> <span class="va">length</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   basename(filename) NAME</span></span>
-<span><span class="co">#&gt; 1              r1.fq    5</span></span>
-<span><span class="co">#&gt; 2              r2.fq    5</span></span></code></pre></div>
+<span><span class="fu">rduckhts_fastq_multi</span><span class="op">(</span><span class="va">con</span>, <span class="st">"fq_multi"</span>, <span class="va">fq_files</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;                                               filename n</span></span>
+<span><span class="co">#&gt; 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5</span></span>
+<span><span class="co">#&gt; 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5</span></span></code></pre></div>
 <p>Per-file parameters are supported via a <code>.params</code> data.frame with a <code>file</code> column and columns matching reader arguments. <code>NA</code> values fall back to the uniform default:</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -209,9 +211,11 @@
 <span>  region     <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-1000"</span>,</span>
 <span>  index_path <span class="op">=</span> <span class="va">bam_idx</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu">read_bam_multi</span><span class="op">(</span><span class="va">con</span>, <span class="va">bam_path</span>, .params <span class="op">=</span> <span class="va">params</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 2</span></span></code></pre></div>
+<span><span class="fu">rduckhts_bam_multi</span><span class="op">(</span><span class="va">con</span>, <span class="st">"bam_multi"</span>, <span class="va">bam_path</span>, .params <span class="op">=</span> <span class="va">params</span>,</span>
+<span>                   overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT count(*) AS n FROM bam_multi"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   n</span></span>
+<span><span class="co">#&gt; 1 2</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="function-catalog">Function Catalog<a class="anchor" aria-label="anchor" href="#function-catalog"></a>
@@ -227,11 +231,11 @@
 </h3>
 <table class="table">
 <colgroup>
-<col width="4%">
 <col width="2%">
 <col width="1%">
-<col width="5%">
-<col width="85%">
+<col width="1%">
+<col width="23%">
+<col width="70%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -315,8 +319,8 @@
 <td><code>hts_union_query</code></td>
 <td>scalar_macro</td>
 <td>VARCHAR</td>
-<td></td>
-<td>Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call.</td>
+<td><code>rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi</code></td>
+<td>Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts_*_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly.</td>
 </tr>
 </tbody>
 </table>
@@ -839,8 +843,8 @@
 <code class="sourceCode R"><span><span class="va">bed_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                      index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_readme_5286309ab73e.fai</span></span>
+<span><span class="co">#&gt;   success                                     index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_14855d41bc0.fai</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets"</span>, <span class="va">bed_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT chrom, start, \"end\", name, block_count FROM targets"</span><span class="op">)</span></span>
@@ -899,11 +903,11 @@
 <span><span class="op">)</span>, <span class="va">lift_chain</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_src</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_src</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                               index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_liftover_src_5286169d5788.fa.fai</span></span>
+<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_src_1485564f30496.fa.fai</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_dst</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_dst</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                               index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_liftover_dst_5286388cf43a.fa.fai</span></span>
+<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_dst_1485513b3f6a9.fa.fai</span></span>
 <span></span>
 <span><span class="va">lifted</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_liftover.html">rduckhts_liftover</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -947,8 +951,8 @@
 <span>  <span class="st">"ACGTACGTAA"</span></span>
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                        index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_munge_52867cd2d9bc.fa.fai</span></span>
+<span><span class="co">#&gt;   success                                         index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_munge_148554870b69c.fa.fai</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -1017,13 +1021,13 @@
 <span><span class="fu"><a href="https://rdrr.io/r/base/writeLines.html" class="external-link">writeLines</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"chr1\t0\t10\ta"</span>, <span class="st">"chr1\t10\t20\tb"</span><span class="op">)</span>, <span class="va">tmp_bed</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bgzip.html">rduckhts_bgzip</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">tmp_bed</span>, output_path <span class="op">=</span> <span class="va">tmp_bgz</span>, keep <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                         output_path bytes_in</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_targets_52865b74b94b.bed.gz       25</span></span>
+<span><span class="co">#&gt;   success                                          output_path bytes_in</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz       25</span></span>
 <span><span class="co">#&gt;   bytes_out</span></span>
 <span><span class="co">#&gt; 1        84</span></span>
 <span><span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">tmp_bgz</span>, preset <span class="op">=</span> <span class="st">"bed"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, threads <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_targets_52865b74b94b.bed.gz.tbi          TBI</span></span>
+<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz.tbi          TBI</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"chr1:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   chrom start end name score strand thick_start thick_end item_rgb block_count</span></span>
@@ -1082,8 +1086,8 @@
 <code class="sourceCode R"><span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span></span>
-<span><span class="co">#&gt;   success                                      index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp1fhDya/duckhts_readme_52863df8ba9b.fai</span></span>
+<span><span class="co">#&gt;   success                                       index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_148555a0ed12c.fai</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="st">"fasta_region"</span>, <span class="va">fasta_path</span>,</span>
