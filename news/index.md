@@ -2,23 +2,12 @@
 
 ## Rduckhts 1.1.6.9000-0.0.6 (Development version)
 
-- Fix DuckDB community-extension wasm side-module ABI parity with the
-  bundled `webR` build: the top-level wasm link now preserves
-  `-sWASM_BIGINT` together with `-fwasm-exceptions`, and the CMake
-  `htslib` wasm path plus package `configure` now share one
-  extension-owned Emscripten compat header from `src/include/`. The
-  duckdb-wasm/community-extension path also remaps htslib and
-  extension-level native i64 libc calls (`lseek`, `ftruncate`,
-  `strtoll`, `strtoull`, `atoll`, `time`) onto duckdb-wasm’s `orig$...`
-  exports while the webR/package path keeps the default symbols. This
-  removes the wasm ABI drift that was causing browser `LOAD` failures
-  (`indirect call signature mismatch`, then `env.ftruncate` /
-  `env.strtoll` signature mismatch) without changing native builds.
-- Separate the two local browser wasm harnesses so they no longer stage
-  outputs into overlapping code-owned areas: the duckdb-wasm harness now
-  defaults to `.duckdb-wasm-local-artifacts/`, and the webR harness now
-  defaults to `.webr-local-artifacts/` for its tarball, staged repo, and
-  served site.
+- Use one extension-owned Emscripten compatibility header in the package
+  wasm/webR build: `configure` now includes the shared header from
+  `src/include/` via the bootstrapped
+  `inst/duckhts_extension/include/wasm_socket_compat.h` copy, keeping
+  the bundled browser build aligned with the extension sources without
+  changing native package builds.
 - Make the bundled wasm extension self-contained with respect to
   `htslib`: the Emscripten/webR `configure` path now builds only
   `libhts.a`, links `duckhts.duckdb_extension` directly against that
@@ -82,12 +71,9 @@
   `ac_cv_func_getrandom=no: command not found` failure and the
   subsequent nested `htslib` cross-compile probe failures without
   changing native configure behavior.
-- Fix bundled extension wasm artifacts: the upstream CMake wasm build
-  now rebuilds `libduckhts.a` as a fat archive containing vendored
-  `htslib` (and any static archive dependencies CMake can see), so
-  DuckDB wasm packaging no longer depends on `extension-ci-tools`
-  changes just to avoid unresolved symbols such as `bcf_readrec` at
-  `LOAD`.
+- Fix bundled wasm extension artifacts: the package/browser wasm build
+  now includes vendored `htslib` in the linked archive, avoiding
+  unresolved symbols such as `bcf_readrec` at `LOAD`.
 
 ## Rduckhts 1.1.6-0.0.2 (2026-04-09)
 
@@ -135,25 +121,17 @@ CRAN release: 2026-04-09
   contigs: contig claiming now retries iteratively instead of
   recursively, and the BAM reader no longer returns an empty chunk after
   successfully handing off to the next contig.
-- Keep the top-level extension `README.Rmd` examples aligned with direct
-  extension usage: the extension README now renders its example queries
-  through a custom DuckDB SQL knitr engine instead of `R`/`DBI`, and its
-  liftover example uses bundled fixtures rather than temporary
-  `R`-generated FASTA/chain files.
-- Fix bundled Windows GNU CMake builds: the vendored `htslib` configure
-  step now distinguishes `windows_amd64_mingw` from
-  `windows_amd64_rtools`; the MinGW path keeps the smaller
-  `configure.win`-style library set, while the Rtools path restores the
-  fuller static `libcurl` dependency closure required by its `htslib`
-  feature probes. `CURL_STATICLIB` remains on the built objects rather
-  than on `./configure` test probes.
-- Fix bundled Windows `windows_amd64_rtools` CMake builds: the upstream
-  extension `Makefile` now pins `CC`/`AR`/`RANLIB` from `R CMD config`,
-  avoiding mixed non-Rtools compiler and Rtools library selection when
-  vendored `htslib` is configured; the vendored `htslib` CMake path also
-  returns to separate configure/build steps on MinGW for simpler
-  diagnostics and behavior, and MinGW static-libcurl builds now define
-  `CURL_STATICLIB` to match Rtools `libcurl.a`.
+- Fix bundled Windows builds under MinGW and Rtools: vendored `htslib`
+  configuration now distinguishes `windows_amd64_mingw` from
+  `windows_amd64_rtools`, keeping the smaller `configure.win`-style
+  library set on MinGW while restoring the fuller static `libcurl`
+  dependency closure needed on Rtools. `CURL_STATICLIB` remains on built
+  objects rather than `./configure` probes.
+- Fix bundled Windows `windows_amd64_rtools` builds: the package build
+  now pins `CC`/`AR`/`RANLIB` from `R CMD config`, avoiding mixed
+  compiler/library selection when vendored `htslib` is configured, and
+  keeps the MinGW static-libcurl configuration aligned with Rtools
+  `libcurl.a`.
 - Fix bundled `read_bcf(...)` /
   [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
   mapping of fixed-count INFO/FORMAT arrays: exact-cardinality fields
