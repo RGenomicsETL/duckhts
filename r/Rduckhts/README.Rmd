@@ -42,7 +42,7 @@ install.packages("Rduckhts")
 
 Installation requires `htslib` dependencies such ad zlib and libbz2, and  optionally for full functionally liblzma, libcurl, and openssl. The package requires GNU make. On Windows's Rtools, `htslib` plugins are not enabled. 
 
-## Browser wasm/webR networking note
+## Browser wasm/webR networking and setup
 
 In browser wasm/webR builds, remote `http`/`https` access does not use htslib `libcurl`.
 
@@ -52,11 +52,21 @@ In browser wasm/webR builds, remote `http`/`https` access does not use htslib `l
 
 What this means in practice:
 
+- Same-origin URLs are the simplest setup and work well for local browser testing.
 - Remote URLs work only when browser CORS policy allows them.
 - CORS must allow both the primary file and index sidecars (`.tbi`/`.csi`), including range requests.
+- htslib may probe a `.csi` sidecar before falling back to `.tbi`; a `.csi` `404` is not a regression if the `.tbi` path succeeds.
 - `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR backend.
+- The simple local `python3 -m http.server` setup ignores HTTP `Range`; in that case the backend warns and falls back to full-object fetch + local byte slicing. This is acceptable for small smoke tests, but production servers should support `Range`.
 
-Optional browser-side request header/auth configuration can be set from JavaScript before running queries:
+### `Module.duckhtsWasmHttpConfig`
+
+The browser HTTP backend reads optional request/auth settings from `Module.duckhtsWasmHttpConfig`.
+
+- In plain browser JavaScript, set it in the page/worker before running queries.
+- In webR, consumers can set it from R with `webr::eval_js()`; they do not need to hand-edit the host HTML/JS as long as they can run that call before the relevant HTTP reads.
+
+Plain JavaScript example:
 
 ```js
 Module.duckhtsWasmHttpConfig = {
@@ -64,17 +74,44 @@ Module.duckhtsWasmHttpConfig = {
     Authorization: "Bearer <short-lived-token>",
     "X-Request-Source": "webr-local"
   },
-  allowHosts: ["ftp.ebi.ac.uk", ".s3.amazonaws.com"],
+  allowHosts: ["ftp.ebi.ac.uk", ".ebi.ac.uk"],
+  enforceHostAllowlist: true,
   withCredentials: false,
   allowInsecureAuth: false
 };
 ```
+
+Inside webR, set the same config through `webr::eval_js()` because the code runs inside the webR worker:
+
+```r
+webr::eval_js("
+  Module.duckhtsWasmHttpConfig = {
+    headers: {
+      Authorization: 'Bearer <short-lived-token>',
+      'X-Request-Source': 'webr-local'
+    },
+    allowHosts: ['ftp.ebi.ac.uk', '.ebi.ac.uk'],
+    enforceHostAllowlist: true,
+    withCredentials: false,
+    allowInsecureAuth: false
+  };
+")
+```
+
+Configuration fields:
+
+- `headers`: named request headers to attach to matching hosts.
+- `allowHosts`: hostname allowlist for header injection. Entries can be exact hosts (`"ftp.ebi.ac.uk"`) or suffix matches with a leading dot (`".ebi.ac.uk"`).
+- `enforceHostAllowlist`: when `true`, block requests to hosts outside `allowHosts` instead of merely omitting configured headers.
+- `withCredentials`: when `true`, send cookies/credentials with XHR requests.
+- `allowInsecureAuth`: when `true`, allow `Authorization` headers on non-HTTPS URLs. The default is `false`.
 
 Security behavior of this config:
 
 - Headers are only attached when URL hostnames match `allowHosts`.
 - `Authorization` is blocked for non-HTTPS URLs unless `allowInsecureAuth: true` is set.
 - Cookies/credentials are only sent when `withCredentials: true` is set.
+- The config can be updated or cleared between queries if different hosts need different policies.
 
 
 ## Quick Start 
@@ -106,6 +143,37 @@ rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
+```
+
+## Multi-file Reading
+
+The `read_*_multi` family reads multiple files into a single result with a
+`filename` column.  Pass a character vector of paths or glob patterns:
+
+```{r}
+fq_files <- c(
+  system.file("extdata", "r1.fq", package = "Rduckhts"),
+  system.file("extdata", "r2.fq", package = "Rduckhts")
+)
+df <- read_fastq_multi(con, fq_files)
+aggregate(NAME ~ basename(filename), data = df, FUN = length)
+```
+
+Per-file parameters are supported via a `.params` data.frame with a `file` column
+and columns matching reader arguments. `NA` values fall back to the uniform
+default:
+
+```{r}
+bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
+bam_idx  <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+
+params <- data.frame(
+  file       = bam_path,
+  region     = "CHROMOSOME_I:1-1000",
+  index_path = bam_idx
+)
+df <- read_bam_multi(con, bam_path, .params = params)
+nrow(df)
 ```
 
 ## Function Catalog

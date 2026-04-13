@@ -1931,3 +1931,359 @@ rduckhts_score <- function(
   sql <- sprintf("SELECT * FROM bcftools_score(%s)", paste(params, collapse = ", "))
   DBI::dbGetQuery(con, sql)
 }
+
+# --------------------------------------------------------------------------
+# Multi-file reading helpers (internal)
+# --------------------------------------------------------------------------
+
+.format_hts_param <- function(name, value) {
+
+  if (is.logical(value)) {
+    return(sprintf("%s := %s", name, if (isTRUE(value)) "true" else "false"))
+  }
+  if (is.numeric(value)) {
+    return(sprintf("%s := %s", name, value))
+  }
+  if (is.character(value) && length(value) > 1) {
+    # LIST literal
+    items <- paste(sql_quote_string(value), collapse = ", ")
+    return(sprintf("%s := [%s]", name, items))
+  }
+  if (is.character(value) && length(value) == 1) {
+    return(sprintf("%s := %s", name, sql_quote_string(value)))
+  }
+  stop(sprintf("Unsupported parameter type for '%s': %s", name, class(value)[1]),
+       call. = FALSE)
+}
+
+.build_hts_arm <- function(reader, file, params) {
+  # params is a named list of already-validated non-NULL values
+  param_parts <- character(0)
+  if (length(params) > 0) {
+    param_parts <- vapply(names(params), function(nm) {
+      .format_hts_param(nm, params[[nm]])
+    }, character(1))
+  }
+  param_str <- if (length(param_parts) > 0) {
+    paste0(", ", paste(param_parts, collapse = ", "))
+  } else {
+    ""
+  }
+  quoted_file <- sql_quote_string(file)
+  sprintf("SELECT %s AS filename, t.* FROM %s(%s%s) t",
+          quoted_file, reader, quoted_file, param_str)
+}
+
+.expand_hts_files <- function(con, files) {
+  # Use DuckDB glob() to expand each pattern (works with local and S3 paths)
+  all_files <- character(0)
+  for (pattern in files) {
+    sql <- sprintf("SELECT file FROM glob(%s) g(file)", sql_quote_string(pattern))
+    res <- DBI::dbGetQuery(con, sql)
+    if (nrow(res) == 0) {
+      warning(sprintf("Pattern '%s' matched no files", pattern), call. = FALSE)
+    } else {
+      all_files <- c(all_files, res$file)
+    }
+  }
+  if (length(all_files) == 0) {
+    stop("No files matched any of the supplied patterns", call. = FALSE)
+  }
+  unique(all_files)
+}
+
+.hts_multi_read <- function(con, reader, files, uniform_params, .params) {
+  # Validate .params
+  if (!is.null(.params)) {
+    if (!is.data.frame(.params)) {
+      stop(".params must be a data.frame or NULL", call. = FALSE)
+    }
+    if (!"file" %in% names(.params)) {
+      stop(".params must contain a 'file' column", call. = FALSE)
+    }
+  }
+
+  if (!is.null(.params)) {
+    # Per-file mode: each row of .params specifies a file and optional overrides
+    expanded <- character(0)
+    row_map <- list()
+    for (i in seq_len(nrow(.params))) {
+      pat <- .params$file[i]
+      row_files <- .expand_hts_files(con, pat)
+      for (f in row_files) {
+        expanded <- c(expanded, f)
+        row_map[[f]] <- i
+      }
+    }
+    if (length(expanded) == 0) {
+      stop("No files matched any patterns in .params$file", call. = FALSE)
+    }
+    override_cols <- setdiff(names(.params), "file")
+    arms <- vapply(expanded, function(f) {
+      row_idx <- row_map[[f]]
+      merged <- uniform_params
+      for (col in override_cols) {
+        val <- .params[[col]][row_idx]
+        if (!is.na(val) && !is.null(val)) {
+          merged[[col]] <- val
+        }
+      }
+      .build_hts_arm(reader, f, merged)
+    }, character(1), USE.NAMES = FALSE)
+  } else {
+    # Uniform mode: expand all globs and apply same params
+    expanded <- .expand_hts_files(con, files)
+    arms <- vapply(expanded, function(f) {
+      .build_hts_arm(reader, f, uniform_params)
+    }, character(1), USE.NAMES = FALSE)
+  }
+
+  sql <- paste(arms, collapse = " UNION ALL BY NAME ")
+  DBI::dbGetQuery(con, sql)
+}
+
+# --------------------------------------------------------------------------
+# Multi-file reading wrappers (exported)
+# --------------------------------------------------------------------------
+
+#' Read multiple BAM/SAM files
+#'
+#' Read and combine multiple BAM/SAM files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string (e.g. \code{"chr1:1-1000"}).
+#' @param index_path Optional index file path.
+#' @param reference Optional reference FASTA path (for CRAM).
+#' @param standard_tags Logical; include standard SAM tag columns.
+#' @param auxiliary_tags Logical; include auxiliary tag map column.
+#' @param sequence_encoding Optional sequence encoding (e.g. \code{"twoBit"}).
+#' @param quality_representation Optional quality representation.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#'   Must contain a \code{file} column; other columns override uniform parameters.
+#'   \code{NA} values use the uniform default.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_bam_multi <- function(con, files, region = NULL, index_path = NULL,
+                           reference = NULL, standard_tags = FALSE,
+                           auxiliary_tags = FALSE, sequence_encoding = NULL,
+                           quality_representation = NULL, .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(reference)) params$reference <- reference
+  params$standard_tags <- standard_tags
+  params$auxiliary_tags <- auxiliary_tags
+  if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
+  if (!is.null(quality_representation)) params$quality_representation <- quality_representation
+  .hts_multi_read(con, "read_bam", files, params, .params)
+}
+
+#' Read multiple VCF/BCF files
+#'
+#' Read and combine multiple VCF/BCF files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string.
+#' @param index_path Optional index file path.
+#' @param tidy_format Logical; use tidy FORMAT column output.
+#' @param additional_csq_column_types Optional CSQ type override string.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_bcf_multi <- function(con, files, region = NULL, index_path = NULL,
+                           tidy_format = FALSE, additional_csq_column_types = NULL,
+                           .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  if (isTRUE(tidy_format)) params$tidy_format <- TRUE
+  if (!is.null(additional_csq_column_types)) {
+    params$additional_csq_column_types <- additional_csq_column_types
+  }
+  .hts_multi_read(con, "read_bcf", files, params, .params)
+}
+
+#' Read multiple FASTQ files
+#'
+#' Read and combine multiple FASTQ files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param mate_path Optional mate file path (for paired-end).
+#' @param interleaved Logical; TRUE if file contains interleaved paired reads.
+#' @param sequence_encoding Optional sequence encoding.
+#' @param quality_representation Optional quality representation.
+#' @param input_quality_encoding Optional input quality encoding override.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_fastq_multi <- function(con, files, mate_path = NULL, interleaved = FALSE,
+                             sequence_encoding = NULL, quality_representation = NULL,
+                             input_quality_encoding = NULL, .params = NULL) {
+  params <- list()
+  if (!is.null(mate_path)) params$mate_path <- mate_path
+  if (isTRUE(interleaved)) params$interleaved <- TRUE
+  if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
+  if (!is.null(quality_representation)) params$quality_representation <- quality_representation
+  if (!is.null(input_quality_encoding)) params$input_quality_encoding <- input_quality_encoding
+  .hts_multi_read(con, "read_fastq", files, params, .params)
+}
+
+#' Read multiple FASTA files
+#'
+#' Read and combine multiple FASTA files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string.
+#' @param index_path Optional index file path.
+#' @param sequence_encoding Optional sequence encoding.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_fasta_multi <- function(con, files, region = NULL, index_path = NULL,
+                             sequence_encoding = NULL, .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
+  .hts_multi_read(con, "read_fasta", files, params, .params)
+}
+
+#' Read multiple BED files
+#'
+#' Read and combine multiple BED files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string.
+#' @param index_path Optional index file path.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_bed_multi <- function(con, files, region = NULL, index_path = NULL,
+                           .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  .hts_multi_read(con, "read_bed", files, params, .params)
+}
+
+#' Read multiple tabix-indexed files
+#'
+#' Read and combine multiple tabix-indexed files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string.
+#' @param index_path Optional index file path.
+#' @param header Logical or NULL; whether the file has a header line.
+#' @param header_names Character vector of column names.
+#' @param auto_detect Logical or NULL; enable type auto-detection.
+#' @param column_types Character vector of column type names.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_tabix_multi <- function(con, files, region = NULL, index_path = NULL,
+                             header = NULL, header_names = NULL,
+                             auto_detect = NULL, column_types = NULL,
+                             .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(header)) params$header <- isTRUE(header)
+  if (!is.null(auto_detect)) params$auto_detect <- isTRUE(auto_detect)
+  if (!is.null(header_names)) {
+    if (!is.character(header_names)) stop("header_names must be a character vector", call. = FALSE)
+    params$header_names <- header_names
+  }
+  if (!is.null(column_types)) {
+    if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
+    params$column_types <- normalize_tabix_types(column_types)
+  }
+  .hts_multi_read(con, "read_tabix", files, params, .params)
+}
+
+#' Read multiple GFF files
+#'
+#' Read and combine multiple GFF3 files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string.
+#' @param index_path Optional index file path.
+#' @param header Logical or NULL; whether the file has a header line.
+#' @param header_names Character vector of column names.
+#' @param auto_detect Logical or NULL; enable type auto-detection.
+#' @param column_types Character vector of column type names.
+#' @param attributes_map Logical; return attributes as a parsed MAP.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_gff_multi <- function(con, files, region = NULL, index_path = NULL,
+                           header = NULL, header_names = NULL,
+                           auto_detect = NULL, column_types = NULL,
+                           attributes_map = FALSE, .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(header)) params$header <- isTRUE(header)
+  if (!is.null(auto_detect)) params$auto_detect <- isTRUE(auto_detect)
+  if (!is.null(header_names)) {
+    if (!is.character(header_names)) stop("header_names must be a character vector", call. = FALSE)
+    params$header_names <- header_names
+  }
+  if (!is.null(column_types)) {
+    if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
+    params$column_types <- normalize_tabix_types(column_types)
+  }
+  if (isTRUE(attributes_map)) params$attributes_map <- TRUE
+  .hts_multi_read(con, "read_gff", files, params, .params)
+}
+
+#' Read multiple GTF files
+#'
+#' Read and combine multiple GTF files via UNION ALL BY NAME.
+#' Each row includes a \code{filename} column identifying its source file.
+#'
+#' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param files Character vector of file paths or glob patterns.
+#' @param region Optional region string.
+#' @param index_path Optional index file path.
+#' @param header Logical or NULL; whether the file has a header line.
+#' @param header_names Character vector of column names.
+#' @param auto_detect Logical or NULL; enable type auto-detection.
+#' @param column_types Character vector of column type names.
+#' @param attributes_map Logical; return attributes as a parsed MAP.
+#' @param .params Optional data.frame with per-file parameter overrides.
+#' @return A data.frame with combined results and a \code{filename} column.
+#' @export
+read_gtf_multi <- function(con, files, region = NULL, index_path = NULL,
+                           header = NULL, header_names = NULL,
+                           auto_detect = NULL, column_types = NULL,
+                           attributes_map = FALSE, .params = NULL) {
+  params <- list()
+  if (!is.null(region)) params$region <- region
+  if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(header)) params$header <- isTRUE(header)
+  if (!is.null(auto_detect)) params$auto_detect <- isTRUE(auto_detect)
+  if (!is.null(header_names)) {
+    if (!is.character(header_names)) stop("header_names must be a character vector", call. = FALSE)
+    params$header_names <- header_names
+  }
+  if (!is.null(column_types)) {
+    if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
+    params$column_types <- normalize_tabix_types(column_types)
+  }
+  if (isTRUE(attributes_map)) params$attributes_map <- TRUE
+  .hts_multi_read(con, "read_gtf", files, params, .params)
+}

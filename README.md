@@ -40,18 +40,19 @@ This section is generated from `functions.yaml`.
 
 ### Readers
 
-| Function      | Kind  | Returns | R helper               | Description                                                                                                                                                                                                                                                                                                                                                                                                     |
-|---------------|-------|---------|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `read_bcf`    | table | table   | `rduckhts_bcf`         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, and optional bcftools-style CSQ type overrides.                                                                                                                                                                                                                                               |
-| `read_bam`    | table | table   | `rduckhts_bam`         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR.                                                                                                                                                                   |
-| `read_fasta`  | table | table   | `rduckhts_fasta`       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR.                                                                                                                                                                                                                                  |
-| `read_bed`    | table | table   | `rduckhts_bed`         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                         |
-| `fasta_nuc`   | table | table   | `rduckhts_fasta_nuc`   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                              |
-| `read_fastq`  | table | table   | `rduckhts_fastq`       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’. |
-| `read_gff`    | table | table   | `rduckhts_gff`         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                          |
-| `read_gtf`    | table | table   | `rduckhts_gtf`         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                          |
-| `read_tabix`  | table | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                          |
-| `fasta_index` | table | table   | `rduckhts_fasta_index` | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                     |
+| Function          | Kind         | Returns | R helper               | Description                                                                                                                                                                                                                                                                                                                                                                                                     |
+|-------------------|--------------|---------|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `read_bcf`        | table        | table   | `rduckhts_bcf`         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, and optional bcftools-style CSQ type overrides.                                                                                                                                                                                                                                               |
+| `read_bam`        | table        | table   | `rduckhts_bam`         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR.                                                                                                                                                                   |
+| `read_fasta`      | table        | table   | `rduckhts_fasta`       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR.                                                                                                                                                                                                                                  |
+| `read_bed`        | table        | table   | `rduckhts_bed`         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                         |
+| `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                              |
+| `read_fastq`      | table        | table   | `rduckhts_fastq`       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’. |
+| `read_gff`        | table        | table   | `rduckhts_gff`         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                          |
+| `read_gtf`        | table        | table   | `rduckhts_gtf`         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                          |
+| `read_tabix`      | table        | table   | `rduckhts_tabix`       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                          |
+| `fasta_index`     | table        | table   | `rduckhts_fasta_index` | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                     |
+| `hts_union_query` | scalar_macro | VARCHAR |                        | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call.                                                              |
 
 ### Metadata
 
@@ -516,6 +517,44 @@ FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
     │ true    │ TBI          │ /tmp/duckhts_readme_targets.bed.gz.tbi │
     └─────────┴──────────────┴────────────────────────────────────────┘
 
+### Multi-file queries
+
+`hts_union_query` builds a `UNION ALL BY NAME` across files matching a
+glob pattern. Because DuckDB’s `query()` cannot accept subquery
+expressions, use the `SET VARIABLE` + `getvariable()` pattern:
+
+``` sql
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SET VARIABLE q = hts_union_query('read_fastq', 'test/data/r*.fq');
+SELECT filename, count(*) AS n
+FROM query(getvariable('q'))
+GROUP BY ALL;
+```
+
+    ┌─────────────────┬───────┐
+    │    filename     │   n   │
+    │     varchar     │ int64 │
+    ├─────────────────┼───────┤
+    │ test/data/r2.fq │     5 │
+    │ test/data/r1.fq │     5 │
+    └─────────────────┴───────┘
+
+Per-file parameters can be passed as the third argument (SQL literal):
+
+``` sql
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SET VARIABLE q = hts_union_query('read_bam', 'test/data/range.bam',
+                                  'region := ''CHROMOSOME_I:1-1000''');
+SELECT count(*) AS n FROM query(getvariable('q'));
+```
+
+    ┌───────┐
+    │   n   │
+    │ int64 │
+    ├───────┤
+    │     2 │
+    └───────┘
+
 ## Remote URLs and HTS_PATH
 
 Remote URLs (S3/GCS/HTTP/S) can work in two htslib build modes:
@@ -607,18 +646,18 @@ Security behavior of this config:
   `allowInsecureAuth: true` is set explicitly.
 - Credentials/cookies are only sent when `withCredentials: true` is set.
 
-### Browser wasm/duckdb-wasm local harness
+### Browser wasm/duckdb-wasm local setup
 
 DuckHTS is also intended to run as a generic DuckDB community extension
 in browser wasm hosts (not only webR).
 
-Use the local duckdb-wasm harness to exercise that path end-to-end:
+Use the local duckdb-wasm setup to exercise that path end-to-end:
 
 ``` bash
 ./scripts/start_duckdb_wasm_local_test.sh
 ```
 
-This harness uses a Docker-only build path via
+This setup uses a Docker-only build path via
 `scripts/docker/duckdb-wasm-local.Dockerfile`.
 
 The container pre-installs cache-friendly, pinned wasm build
@@ -636,11 +675,11 @@ Then open:
 http://127.0.0.1:8001/scripts/duckdb-wasm-local-test.html
 ```
 
-This harness loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
+This setup loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
 local HTTP reader smoke tests, and lets you set/clear
 `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
 
-The harness stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`,
+The setup stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`,
 and `duckdb-eh.wasm` at the site root for same-origin runtime loading,
 while using an import map for `apache-arrow` resolution.
 
@@ -938,9 +977,11 @@ dbDisconnect(con, shutdown = TRUE)
       seq_reader.c       # FASTA/FASTQ reader (read_fasta, read_fastq)
       tabix_reader.c     # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
       vep_parser.c       # VEP/CSQ annotation parser
+      ......
       include/
         vcf_types.h
         vep_parser.h
+        .....
     third_party/
       htslib/            # Vendored htslib 1.23 (built automatically)
     test/
@@ -949,7 +990,7 @@ dbDisconnect(con, shutdown = TRUE)
       duckdb.h           # DuckDB C API headers
       duckdb_extension.h
     r/
-      Rduckhts/          # R package harness
+      Rduckhts/          # R package 
 
 ## References
 
