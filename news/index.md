@@ -2,6 +2,25 @@
 
 ## Rduckhts 1.1.6.9000-0.0.6 (Development version)
 
+- Add multi-file reading wrappers: `read_bam_multi`, `read_bcf_multi`,
+  `read_fastq_multi`, `read_fasta_multi`, `read_bed_multi`,
+  `read_tabix_multi`, `read_gff_multi`, `read_gtf_multi`. Each accepts a
+  `files` vector of paths/globs and an optional `.params` data.frame for
+  per-file parameter overrides (e.g. per-sample regions or index paths),
+  returns a combined data.frame with a `filename` column identifying
+  each row’s source file. File expansion uses DuckDB’s `glob()` so S3
+  URLs work transparently.
+- Add bundled `hts_union_query(reader, pattern, params)` SQL scalar
+  macro for pure-SQL multi-file reading via
+  `SELECT * FROM query(hts_union_query('read_bam', '*.bam'))`.
+- Clarify the package README’s browser/webR documentation: `README.Rmd`
+  now covers the full `Module.duckhtsWasmHttpConfig` parameter set
+  (`headers`, `allowHosts`, `enforceHostAllowlist`, `withCredentials`,
+  `allowInsecureAuth`), explicitly notes that webR consumers can set
+  that config from R via `webr::eval_js()` without editing the host
+  page, and covers practical wasm/browser behaviors such as same-origin
+  setup, CORS requirements, `.csi` to `.tbi` fallback, and non-fatal
+  `Range` warnings under the local `http.server` harness.
 - Use one extension-owned Emscripten compatibility header in the package
   wasm/webR build: `configure` now includes the shared header from
   `src/include/` via the bootstrapped
