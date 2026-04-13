@@ -1992,7 +1992,21 @@ rduckhts_score <- function(
   unique(all_files)
 }
 
-.hts_multi_read <- function(con, reader, files, uniform_params, .params) {
+.hts_multi_read <- function(con, table_name, reader, files, uniform_params,
+                            .params, overwrite) {
+  # Table guard — same pattern as rduckhts_bam, rduckhts_bcf, etc.
+  if (!missing(table_name) && !is.null(table_name)) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+      stop(
+        "Table '", table_name,
+        "' already exists. Use overwrite = TRUE to replace it."
+      )
+    }
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
+    }
+  }
+
   # Validate .params
   if (!is.null(.params)) {
     if (!is.data.frame(.params)) {
@@ -2038,20 +2052,24 @@ rduckhts_score <- function(
     }, character(1), USE.NAMES = FALSE)
   }
 
-  sql <- paste(arms, collapse = " UNION ALL BY NAME ")
-  DBI::dbGetQuery(con, sql)
+  union_sql <- paste(arms, collapse = " UNION ALL BY NAME ")
+  create_sql <- sprintf("CREATE TABLE %s AS %s", table_name, union_sql)
+  DBI::dbExecute(con, create_sql)
+  invisible(TRUE)
 }
 
 # --------------------------------------------------------------------------
 # Multi-file reading wrappers (exported)
 # --------------------------------------------------------------------------
 
-#' Read multiple BAM/SAM files
+#' Read multiple BAM/SAM files into a DuckDB table
 #'
-#' Read and combine multiple BAM/SAM files via UNION ALL BY NAME.
+#' Read and combine multiple BAM/SAM files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string (e.g. \code{"chr1:1-1000"}).
 #' @param index_path Optional index file path.
@@ -2063,12 +2081,15 @@ rduckhts_score <- function(
 #' @param .params Optional data.frame with per-file parameter overrides.
 #'   Must contain a \code{file} column; other columns override uniform parameters.
 #'   \code{NA} values use the uniform default.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_bam_multi <- function(con, files, region = NULL, index_path = NULL,
-                           reference = NULL, standard_tags = FALSE,
-                           auxiliary_tags = FALSE, sequence_encoding = NULL,
-                           quality_representation = NULL, .params = NULL) {
+rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
+                               index_path = NULL, reference = NULL,
+                               standard_tags = FALSE, auxiliary_tags = FALSE,
+                               sequence_encoding = NULL,
+                               quality_representation = NULL,
+                               .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
@@ -2077,26 +2098,30 @@ read_bam_multi <- function(con, files, region = NULL, index_path = NULL,
   params$auxiliary_tags <- auxiliary_tags
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   if (!is.null(quality_representation)) params$quality_representation <- quality_representation
-  .hts_multi_read(con, "read_bam", files, params, .params)
+  .hts_multi_read(con, table_name, "read_bam", files, params, .params, overwrite)
 }
 
-#' Read multiple VCF/BCF files
+#' Read multiple VCF/BCF files into a DuckDB table
 #'
-#' Read and combine multiple VCF/BCF files via UNION ALL BY NAME.
+#' Read and combine multiple VCF/BCF files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
 #' @param tidy_format Logical; use tidy FORMAT column output.
 #' @param additional_csq_column_types Optional CSQ type override string.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_bcf_multi <- function(con, files, region = NULL, index_path = NULL,
-                           tidy_format = FALSE, additional_csq_column_types = NULL,
-                           .params = NULL) {
+rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
+                               index_path = NULL, tidy_format = FALSE,
+                               additional_csq_column_types = NULL,
+                               .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
@@ -2104,15 +2129,17 @@ read_bcf_multi <- function(con, files, region = NULL, index_path = NULL,
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- additional_csq_column_types
   }
-  .hts_multi_read(con, "read_bcf", files, params, .params)
+  .hts_multi_read(con, table_name, "read_bcf", files, params, .params, overwrite)
 }
 
-#' Read multiple FASTQ files
+#' Read multiple FASTQ files into a DuckDB table
 #'
-#' Read and combine multiple FASTQ files via UNION ALL BY NAME.
+#' Read and combine multiple FASTQ files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param mate_path Optional mate file path (for paired-end).
 #' @param interleaved Logical; TRUE if file contains interleaved paired reads.
@@ -2120,68 +2147,81 @@ read_bcf_multi <- function(con, files, region = NULL, index_path = NULL,
 #' @param quality_representation Optional quality representation.
 #' @param input_quality_encoding Optional input quality encoding override.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_fastq_multi <- function(con, files, mate_path = NULL, interleaved = FALSE,
-                             sequence_encoding = NULL, quality_representation = NULL,
-                             input_quality_encoding = NULL, .params = NULL) {
+rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
+                                 interleaved = FALSE, sequence_encoding = NULL,
+                                 quality_representation = NULL,
+                                 input_quality_encoding = NULL,
+                                 .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(mate_path)) params$mate_path <- mate_path
   if (isTRUE(interleaved)) params$interleaved <- TRUE
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   if (!is.null(quality_representation)) params$quality_representation <- quality_representation
   if (!is.null(input_quality_encoding)) params$input_quality_encoding <- input_quality_encoding
-  .hts_multi_read(con, "read_fastq", files, params, .params)
+  .hts_multi_read(con, table_name, "read_fastq", files, params, .params, overwrite)
 }
 
-#' Read multiple FASTA files
+#' Read multiple FASTA files into a DuckDB table
 #'
-#' Read and combine multiple FASTA files via UNION ALL BY NAME.
+#' Read and combine multiple FASTA files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
 #' @param sequence_encoding Optional sequence encoding.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_fasta_multi <- function(con, files, region = NULL, index_path = NULL,
-                             sequence_encoding = NULL, .params = NULL) {
+rduckhts_fasta_multi <- function(con, table_name, files, region = NULL,
+                                 index_path = NULL, sequence_encoding = NULL,
+                                 .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
-  .hts_multi_read(con, "read_fasta", files, params, .params)
+  .hts_multi_read(con, table_name, "read_fasta", files, params, .params, overwrite)
 }
 
-#' Read multiple BED files
+#' Read multiple BED files into a DuckDB table
 #'
-#' Read and combine multiple BED files via UNION ALL BY NAME.
+#' Read and combine multiple BED files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_bed_multi <- function(con, files, region = NULL, index_path = NULL,
-                           .params = NULL) {
+rduckhts_bed_multi <- function(con, table_name, files, region = NULL,
+                               index_path = NULL, .params = NULL,
+                               overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
-  .hts_multi_read(con, "read_bed", files, params, .params)
+  .hts_multi_read(con, table_name, "read_bed", files, params, .params, overwrite)
 }
 
-#' Read multiple tabix-indexed files
+#' Read multiple tabix-indexed files into a DuckDB table
 #'
-#' Read and combine multiple tabix-indexed files via UNION ALL BY NAME.
+#' Read and combine multiple tabix-indexed files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
@@ -2190,12 +2230,14 @@ read_bed_multi <- function(con, files, region = NULL, index_path = NULL,
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_tabix_multi <- function(con, files, region = NULL, index_path = NULL,
-                             header = NULL, header_names = NULL,
-                             auto_detect = NULL, column_types = NULL,
-                             .params = NULL) {
+rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
+                                 index_path = NULL, header = NULL,
+                                 header_names = NULL, auto_detect = NULL,
+                                 column_types = NULL, .params = NULL,
+                                 overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
@@ -2209,15 +2251,17 @@ read_tabix_multi <- function(con, files, region = NULL, index_path = NULL,
     if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
     params$column_types <- normalize_tabix_types(column_types)
   }
-  .hts_multi_read(con, "read_tabix", files, params, .params)
+  .hts_multi_read(con, table_name, "read_tabix", files, params, .params, overwrite)
 }
 
-#' Read multiple GFF files
+#' Read multiple GFF files into a DuckDB table
 #'
-#' Read and combine multiple GFF3 files via UNION ALL BY NAME.
+#' Read and combine multiple GFF3 files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
@@ -2227,12 +2271,14 @@ read_tabix_multi <- function(con, files, region = NULL, index_path = NULL,
 #' @param column_types Character vector of column type names.
 #' @param attributes_map Logical; return attributes as a parsed MAP.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_gff_multi <- function(con, files, region = NULL, index_path = NULL,
-                           header = NULL, header_names = NULL,
-                           auto_detect = NULL, column_types = NULL,
-                           attributes_map = FALSE, .params = NULL) {
+rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
+                               index_path = NULL, header = NULL,
+                               header_names = NULL, auto_detect = NULL,
+                               column_types = NULL, attributes_map = FALSE,
+                               .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
@@ -2247,15 +2293,17 @@ read_gff_multi <- function(con, files, region = NULL, index_path = NULL,
     params$column_types <- normalize_tabix_types(column_types)
   }
   if (isTRUE(attributes_map)) params$attributes_map <- TRUE
-  .hts_multi_read(con, "read_gff", files, params, .params)
+  .hts_multi_read(con, table_name, "read_gff", files, params, .params, overwrite)
 }
 
-#' Read multiple GTF files
+#' Read multiple GTF files into a DuckDB table
 #'
-#' Read and combine multiple GTF files via UNION ALL BY NAME.
+#' Read and combine multiple GTF files via UNION ALL BY NAME,
+#' materialising the result as a DuckDB table.
 #' Each row includes a \code{filename} column identifying its source file.
 #'
 #' @param con A DBI connection to DuckDB with the duckhts extension loaded.
+#' @param table_name Name of the DuckDB table to create.
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
@@ -2265,12 +2313,14 @@ read_gff_multi <- function(con, files, region = NULL, index_path = NULL,
 #' @param column_types Character vector of column type names.
 #' @param attributes_map Logical; return attributes as a parsed MAP.
 #' @param .params Optional data.frame with per-file parameter overrides.
-#' @return A data.frame with combined results and a \code{filename} column.
+#' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @return Invisible \code{TRUE} on success.
 #' @export
-read_gtf_multi <- function(con, files, region = NULL, index_path = NULL,
-                           header = NULL, header_names = NULL,
-                           auto_detect = NULL, column_types = NULL,
-                           attributes_map = FALSE, .params = NULL) {
+rduckhts_gtf_multi <- function(con, table_name, files, region = NULL,
+                               index_path = NULL, header = NULL,
+                               header_names = NULL, auto_detect = NULL,
+                               column_types = NULL, attributes_map = FALSE,
+                               .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
@@ -2285,5 +2335,5 @@ read_gtf_multi <- function(con, files, region = NULL, index_path = NULL,
     params$column_types <- normalize_tabix_types(column_types)
   }
   if (isTRUE(attributes_map)) params$attributes_map <- TRUE
-  .hts_multi_read(con, "read_gtf", files, params, .params)
+  .hts_multi_read(con, table_name, "read_gtf", files, params, .params, overwrite)
 }

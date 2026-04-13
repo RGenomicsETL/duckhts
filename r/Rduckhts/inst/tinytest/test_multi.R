@@ -30,85 +30,93 @@ test_multi_read <- function() {
   expect_true(file.exists(gff_path))
 
   # -------------------------------------------------------
-  # read_bam_multi: combine two BAM files
+  # rduckhts_bam_multi: combine two BAM files
   # -------------------------------------------------------
-  res <- read_bam_multi(con, c(bam_path, bam2_path))
+  rduckhts_bam_multi(con, "bam_multi", c(bam_path, bam2_path))
+  res <- dbGetQuery(con, "SELECT * FROM bam_multi")
   expect_true(is.data.frame(res))
   expect_true("filename" %in% names(res))
   expect_true(nrow(res) > 0)
-  # Should have rows from both files
   expect_equal(length(unique(res$filename)), 2L)
-  # Each filename should be one of the inputs
   expect_true(all(unique(res$filename) %in% c(bam_path, bam2_path)))
 
-  # read_bam_multi: single file (verify filename column still present)
-  res_single <- read_bam_multi(con, bam_path)
-  expect_true(is.data.frame(res_single))
-  expect_equal(unique(res_single$filename), bam_path)
+  # overwrite guard
+  expect_error(rduckhts_bam_multi(con, "bam_multi", bam_path),
+               "already exists")
+
+  # overwrite = TRUE replaces
+  rduckhts_bam_multi(con, "bam_multi", bam_path, overwrite = TRUE)
+  res_single <- dbGetQuery(con, "SELECT DISTINCT filename FROM bam_multi")
+  expect_equal(nrow(res_single), 1L)
 
   # -------------------------------------------------------
-  # read_bcf_multi: combine two VCF/BCF files
+  # rduckhts_bcf_multi: combine two VCF/BCF files
   # -------------------------------------------------------
-  res <- read_bcf_multi(con, c(bcf_path, bcf2_path))
-  expect_true(is.data.frame(res))
+  rduckhts_bcf_multi(con, "bcf_multi", c(bcf_path, bcf2_path))
+  res <- dbGetQuery(con, "SELECT * FROM bcf_multi")
   expect_true("filename" %in% names(res))
   expect_true(nrow(res) > 0)
   expect_equal(length(unique(res$filename)), 2L)
 
   # -------------------------------------------------------
-  # read_fastq_multi: combine two FASTQ files
+  # rduckhts_fastq_multi: combine two FASTQ files
   # -------------------------------------------------------
-  res <- read_fastq_multi(con, c(fq_r1, fq_r2))
-  expect_true(is.data.frame(res))
+  rduckhts_fastq_multi(con, "fq_multi", c(fq_r1, fq_r2))
+  res <- dbGetQuery(con, "SELECT * FROM fq_multi")
   expect_true("filename" %in% names(res))
   expect_true(nrow(res) > 0)
   expect_equal(length(unique(res$filename)), 2L)
 
   # -------------------------------------------------------
-  # read_fasta_multi: single file (only one FASTA in extdata)
+  # rduckhts_fasta_multi: single file (only one FASTA in extdata)
   # -------------------------------------------------------
-  res <- read_fasta_multi(con, fasta_path)
-  expect_true(is.data.frame(res))
+  rduckhts_fasta_multi(con, "fa_multi", fasta_path)
+  res <- dbGetQuery(con, "SELECT * FROM fa_multi")
   expect_true("filename" %in% names(res))
   expect_true(nrow(res) > 0)
   expect_equal(unique(res$filename), fasta_path)
 
   # -------------------------------------------------------
-  # read_bed_multi: single file
+  # rduckhts_bed_multi: single file
   # -------------------------------------------------------
-  res <- read_bed_multi(con, bed_path)
-  expect_true(is.data.frame(res))
+  rduckhts_bed_multi(con, "bed_multi", bed_path)
+  res <- dbGetQuery(con, "SELECT * FROM bed_multi")
   expect_true("filename" %in% names(res))
   expect_true(nrow(res) > 0)
   expect_equal(unique(res$filename), bed_path)
 
   # -------------------------------------------------------
-  # read_gff_multi: single file
+  # rduckhts_gff_multi: single file
   # -------------------------------------------------------
-  res <- read_gff_multi(con, gff_path)
-  expect_true(is.data.frame(res))
+  rduckhts_gff_multi(con, "gff_multi", gff_path)
+  res <- dbGetQuery(con, "SELECT * FROM gff_multi")
   expect_true("filename" %in% names(res))
   expect_true(nrow(res) > 0)
 
   # -------------------------------------------------------
   # .params data.frame: per-file parameter overrides
   # -------------------------------------------------------
-  # Use .params to read two FASTQ files separately (no uniform mate_path)
   params_df <- data.frame(file = c(fq_r1, fq_r2), stringsAsFactors = FALSE)
-  res <- read_fastq_multi(con, files = character(0), .params = params_df)
-  expect_true(is.data.frame(res))
+  rduckhts_fastq_multi(con, "fq_params", files = character(0),
+                       .params = params_df)
+  res <- dbGetQuery(con, "SELECT * FROM fq_params")
   expect_true(nrow(res) > 0)
   expect_equal(length(unique(res$filename)), 2L)
 
   # -------------------------------------------------------
   # .params validation: missing file column
   # -------------------------------------------------------
-  expect_error(read_bam_multi(con, bam_path, .params = data.frame(x = 1)),
-               "file")
+  expect_error(
+    rduckhts_bam_multi(con, "t_bad", bam_path,
+                       .params = data.frame(x = 1)),
+    "file"
+  )
 
   # .params validation: not a data.frame
-  expect_error(read_bam_multi(con, bam_path, .params = "bad"),
-               "data.frame")
+  expect_error(
+    rduckhts_bam_multi(con, "t_bad2", bam_path, .params = "bad"),
+    "data.frame"
+  )
 
   # -------------------------------------------------------
   # hts_union_query SQL macro: verify it generates valid SQL
@@ -122,8 +130,12 @@ test_multi_read <- function() {
   expect_true(grepl("read_bam", query_sql$q[1]))
   expect_true(grepl("filename", query_sql$q[1]))
 
-  # Execute the generated query
-  generated <- DBI::dbGetQuery(con, query_sql$q[1])
+  # Execute the generated query via SET VARIABLE pattern
+  DBI::dbExecute(con, sprintf(
+    "SET VARIABLE q = hts_union_query('read_bam', '%s')",
+    gsub("'", "''", bam_path)
+  ))
+  generated <- DBI::dbGetQuery(con, "SELECT * FROM query(getvariable('q'))")
   expect_true(is.data.frame(generated))
   expect_true("filename" %in% names(generated))
   expect_true(nrow(generated) > 0)

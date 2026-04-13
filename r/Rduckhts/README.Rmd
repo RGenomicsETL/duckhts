@@ -119,6 +119,7 @@ Security behavior of this config:
 The extension is loaded with `rduckhts_load(con, extension_path = NULL)`. The wrappers break down into:
 
 - readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`, `rduckhts_fastq()`, `rduckhts_gff()`, `rduckhts_gtf()`, `rduckhts_tabix()`, `rduckhts_bed()`
+- multi-file readers: `rduckhts_bam_multi()`, `rduckhts_bcf_multi()`, `rduckhts_fastq_multi()`, `rduckhts_fasta_multi()`, `rduckhts_gff_multi()`, `rduckhts_gtf_multi()`, `rduckhts_tabix_multi()`, `rduckhts_bed_multi()`
 - reference helpers: `rduckhts_fasta_index()`, `rduckhts_fasta_nuc()`
 - compression/indexing: `rduckhts_bgzip()`, `rduckhts_bgunzip()`, `rduckhts_bam_index()`, `rduckhts_bcf_index()`, `rduckhts_tabix_index()`
 - metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`, `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
@@ -147,16 +148,17 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
 ## Multi-file Reading
 
-The `read_*_multi` family reads multiple files into a single result with a
-`filename` column.  Pass a character vector of paths or glob patterns:
+The `rduckhts_*_multi` family reads multiple files into a single DuckDB table
+with a `filename` column, following the same `(con, table_name, ...)` convention
+as the single-file wrappers:
 
 ```{r}
 fq_files <- c(
   system.file("extdata", "r1.fq", package = "Rduckhts"),
   system.file("extdata", "r2.fq", package = "Rduckhts")
 )
-df <- read_fastq_multi(con, fq_files)
-aggregate(NAME ~ basename(filename), data = df, FUN = length)
+rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
+dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL")
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a `file` column
@@ -172,8 +174,9 @@ params <- data.frame(
   region     = "CHROMOSOME_I:1-1000",
   index_path = bam_idx
 )
-df <- read_bam_multi(con, bam_path, .params = params)
-nrow(df)
+rduckhts_bam_multi(con, "bam_multi", bam_path, .params = params,
+                   overwrite = TRUE)
+dbGetQuery(con, "SELECT count(*) AS n FROM bam_multi")
 ```
 
 ## Function Catalog
