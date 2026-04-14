@@ -65,6 +65,8 @@ typedef struct {
     char *file_path;
     char *index_path;
     char *region;
+    uint64_t index_row_count;
+    int index_row_count_valid;
 } bed_bind_data_t;
 
 typedef struct {
@@ -75,6 +77,8 @@ typedef struct {
     bool finished;
     idx_t *column_ids;
     idx_t n_projected_cols;
+    int count_only;
+    uint64_t count_remaining;
 } bed_init_data_t;
 
 typedef enum {
@@ -194,6 +198,26 @@ static const char *get_extra_span(const char *s, int start_field, int *len) {
     return NULL;
 }
 
+static int bed_try_get_index_row_count(tbx_t *tbx, uint64_t *out_total) {
+    if (!tbx || !tbx->idx || !out_total) return 0;
+
+    int nseq = 0;
+    const char **seqnames = tbx_seqnames(tbx, &nseq);
+    uint64_t total = 0;
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(tbx->idx, tid, &mapped, &unmapped) != 0) {
+            free(seqnames);
+            return 0;
+        }
+        total += mapped + unmapped;
+    }
+    free(seqnames);
+
+    *out_total = total;
+    return 1;
+}
+
 static void destroy_bed_bind(void *data) {
     bed_bind_data_t *bind = (bed_bind_data_t *)data;
     if (!bind) return;
@@ -286,9 +310,18 @@ static void read_bed_bind(duckdb_bind_info info) {
     add_bed_result_columns(info);
 
     bed_bind_data_t *bind = (bed_bind_data_t *)duckdb_malloc(sizeof(bed_bind_data_t));
+    memset(bind, 0, sizeof(*bind));
     bind->file_path = file_path;
     bind->index_path = index_path;
     bind->region = region;
+    if (!region) {
+        tbx_t *tbx_stats = tbx_index_load3(file_path, index_path, HTS_IDX_SILENT_FAIL);
+        if (tbx_stats) {
+            bind->index_row_count_valid =
+                bed_try_get_index_row_count(tbx_stats, &bind->index_row_count);
+            tbx_destroy(tbx_stats);
+        }
+    }
     duckdb_bind_set_bind_data(info, bind, destroy_bed_bind);
 }
 
@@ -296,6 +329,22 @@ static void read_bed_init(duckdb_init_info info) {
     bed_bind_data_t *bind = (bed_bind_data_t *)duckdb_init_get_bind_data(info);
     bed_init_data_t *init = (bed_init_data_t *)duckdb_malloc(sizeof(bed_init_data_t));
     memset(init, 0, sizeof(*init));
+
+    init->n_projected_cols = duckdb_init_get_column_count(info);
+    if (init->n_projected_cols > 0) {
+        init->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * init->n_projected_cols);
+        for (idx_t i = 0; i < init->n_projected_cols; i++) {
+            init->column_ids[i] = duckdb_init_get_column_index(info, i);
+        }
+    }
+
+    if (init->n_projected_cols == 0 && !bind->region && bind->index_row_count_valid) {
+        init->count_only = 1;
+        init->count_remaining = bind->index_row_count;
+        init->finished = (init->count_remaining == 0);
+        duckdb_init_set_init_data(info, init, destroy_bed_init);
+        return;
+    }
 
     init->fp = hts_open(bind->file_path, "r");
     if (!init->fp) {
@@ -318,12 +367,6 @@ static void read_bed_init(duckdb_init_info info) {
             return;
         }
     }
-
-    init->n_projected_cols = duckdb_init_get_column_count(info);
-    init->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * init->n_projected_cols);
-    for (idx_t i = 0; i < init->n_projected_cols; i++) {
-        init->column_ids[i] = duckdb_init_get_column_index(info, i);
-    }
     duckdb_init_set_init_data(info, init, destroy_bed_init);
 }
 
@@ -345,6 +388,18 @@ static void read_bed_scan(duckdb_function_info info, duckdb_data_chunk output) {
     bed_init_data_t *init = (bed_init_data_t *)duckdb_function_get_init_data(info);
     if (!init || init->finished) {
         duckdb_data_chunk_set_size(output, 0);
+        return;
+    }
+
+    if (init->count_only) {
+        idx_t row_count = (init->count_remaining > (uint64_t)duckdb_vector_size())
+            ? duckdb_vector_size()
+            : (idx_t)init->count_remaining;
+        init->count_remaining -= row_count;
+        if (init->count_remaining == 0) {
+            init->finished = true;
+        }
+        duckdb_data_chunk_set_size(output, row_count);
         return;
     }
 

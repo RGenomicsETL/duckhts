@@ -123,6 +123,8 @@ typedef struct {
     int  auto_detect;
     int  col_types_provided;
     int *col_types;
+    uint64_t index_row_count;
+    int index_row_count_valid;
 } tabix_bind_data_t;
 
 static void tabix_bind_data_destroy(void *data) {
@@ -160,6 +162,8 @@ typedef struct {
     bool       finished;
     idx_t     *column_ids;      /* logical column indices (for projection pushdown) */
     idx_t      n_projected_cols;
+    int        count_only;
+    uint64_t   count_remaining;
     unsigned int next_region_idx;
     int        skip_remaining;
     int        skipped_header;
@@ -357,6 +361,25 @@ static int tabix_advance_region_iterator(tabix_init_data_t *id, tabix_bind_data_
         if (id->itr) return 1;
     }
     return 0;
+}
+
+static int tabix_try_get_index_row_count(tbx_t *tbx, uint64_t *out_total) {
+    if (!tbx || !tbx->idx || !out_total) return 0;
+
+    int n = 0;
+    const char **names = tbx_seqnames(tbx, &n);
+    uint64_t total = 0;
+    for (int tid = 0; tid < n; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(tbx->idx, tid, &mapped, &unmapped) != 0) {
+            free(names);
+            return 0;
+        }
+        total += mapped + unmapped;
+    }
+    free(names);
+    *out_total = total;
+    return 1;
 }
 
 static int count_gff_pairs(const char *s) {
@@ -772,6 +795,18 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_destroy_logical_type(&varchar_type);
     }
 
+    if (bd->n_regions == 0) {
+        tbx_t *tbx_stats = tbx_index_load2(bd->file_path, bd->index_path);
+        if (tbx_stats) {
+            bd->index_row_count_valid =
+                tabix_try_get_index_row_count(tbx_stats, &bd->index_row_count);
+            if (bd->index_row_count_valid && bd->skip_header_line && bd->index_row_count > 0) {
+                bd->index_row_count--;
+            }
+            tbx_destroy(tbx_stats);
+        }
+    }
+
     duckdb_bind_set_bind_data(info, bd, tabix_bind_data_destroy);
 }
 
@@ -788,6 +823,24 @@ static void tabix_init(duckdb_init_info info) {
     tabix_init_data_t *id = calloc(1, sizeof(tabix_init_data_t));
     if (!id) {
         duckdb_init_set_error(info, "Out of memory");
+        return;
+    }
+
+    id->n_projected_cols = duckdb_init_get_column_count(info);
+    if (id->n_projected_cols > 0) {
+        id->column_ids = (idx_t *)malloc(sizeof(idx_t) * id->n_projected_cols);
+        for (idx_t i = 0; i < id->n_projected_cols; i++) {
+            id->column_ids[i] = duckdb_init_get_column_index(info, i);
+        }
+    } else {
+        id->column_ids = NULL;
+    }
+
+    if (id->n_projected_cols == 0 && bd->n_regions == 0 && bd->index_row_count_valid) {
+        id->count_only = 1;
+        id->count_remaining = bd->index_row_count;
+        id->finished = (id->count_remaining == 0);
+        duckdb_init_set_init_data(info, id, tabix_init_data_destroy);
         return;
     }
 
@@ -831,17 +884,6 @@ static void tabix_init(duckdb_init_info info) {
     id->skip_remaining = bd->line_skip;
     id->skipped_header = 0;
 
-    /* Store projection pushdown column mapping */
-    id->n_projected_cols = duckdb_init_get_column_count(info);
-    if (id->n_projected_cols > 0) {
-        id->column_ids = (idx_t *)malloc(sizeof(idx_t) * id->n_projected_cols);
-        for (idx_t i = 0; i < id->n_projected_cols; i++) {
-            id->column_ids[i] = duckdb_init_get_column_index(info, i);
-        }
-    } else {
-        id->column_ids = NULL;
-    }
-
     duckdb_init_set_init_data(info, id, tabix_init_data_destroy);
 }
 
@@ -855,6 +897,18 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
     if (id->finished) {
         duckdb_data_chunk_set_size(output, 0);
+        return;
+    }
+
+    if (id->count_only) {
+        idx_t row_count = (id->count_remaining > (uint64_t)duckdb_vector_size())
+            ? duckdb_vector_size()
+            : (idx_t)id->count_remaining;
+        id->count_remaining -= row_count;
+        if (id->count_remaining == 0) {
+            id->finished = true;
+        }
+        duckdb_data_chunk_set_size(output, row_count);
         return;
     }
 

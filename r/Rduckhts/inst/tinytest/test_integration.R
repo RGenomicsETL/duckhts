@@ -28,6 +28,11 @@ test_table_creation <- function() {
     "header_tabix.tsv.gz",
     package = "Rduckhts"
   )
+  header_tabix_index_path <- system.file(
+    "extdata",
+    "header_tabix.tsv.gz.tbi",
+    package = "Rduckhts"
+  )
   meta_tabix_path <- system.file(
     "extdata",
     "meta_tabix.tsv.gz",
@@ -48,6 +53,7 @@ test_table_creation <- function() {
   expect_true(file.exists(gff_index_path))
   expect_true(file.exists(tabix_path))
   expect_true(file.exists(header_tabix_path))
+  expect_true(file.exists(header_tabix_index_path))
   expect_true(file.exists(meta_tabix_path))
   expect_true(file.exists(vep_path))
 
@@ -125,6 +131,24 @@ test_table_creation <- function() {
   expect_true(DBI::dbExistsTable(con, "sequences_region"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sequences_region")$n[1] == 1)
   expect_true(DBI::dbGetQuery(con, "SELECT length(SEQUENCE) AS n FROM sequences_region")$n[1] == 10)
+
+  bcf_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_bcf(",
+    "'%s', tidy_format := true, index_path := '%s')"
+  ), bcf_path, bcf_index_path))
+  expect_equal(bcf_count_only$n[1], 30)
+
+  gff_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_gff(",
+    "'%s', index_path := '%s')"
+  ), gff_path, gff_index_path))
+  expect_equal(gff_count_only$n[1], 62)
+
+  tabix_header_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_tabix(",
+    "'%s', header := TRUE, index_path := '%s')"
+  ), header_tabix_path, header_tabix_index_path))
+  expect_equal(tabix_header_count_only$n[1], 2)
 
   header_meta <- rduckhts_hts_header(con, bcf_path)
   expect_true(nrow(header_meta) > 0)

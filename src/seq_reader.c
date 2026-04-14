@@ -91,7 +91,10 @@ typedef struct {
     int is_fastq;
     int interleaved;
     int paired;
+    int count_only;
     int fastq_count_only;
+    int fasta_count_only;
+    uint64_t count_remaining;
     int pending_mate;
     int interleaved_mate;
     faidx_t *fai;
@@ -542,6 +545,43 @@ static void seq_read_init(duckdb_init_info info) {
     init->next_region_idx = 0;
     init->regions = bind->regions;
 
+    if (init->column_count == 0 && bind->n_regions == 0) {
+        if (bind->is_fastq && !bind->paired && !bind->interleaved) {
+            faidx_t *fqi = fai_load3_format(bind->file_path, NULL, NULL, 0, FAI_FASTQ);
+            if (fqi) {
+                init->count_only = 1;
+                init->count_remaining = (uint64_t)faidx_nseq(fqi);
+                init->done = (init->count_remaining == 0);
+                fai_destroy(fqi);
+                duckdb_init_set_max_threads(info, 1);
+                duckdb_init_set_init_data(info, init, destroy_seq_init);
+                return;
+            }
+        } else if (!bind->is_fastq) {
+            faidx_t *fai_count = fai_load3_format(bind->file_path, bind->index_path, NULL, 0, FAI_FASTA);
+            if (fai_count) {
+                init->count_only = 1;
+                init->count_remaining = (uint64_t)faidx_nseq(fai_count);
+                init->done = (init->count_remaining == 0);
+                fai_destroy(fai_count);
+                duckdb_init_set_max_threads(info, 1);
+                duckdb_init_set_init_data(info, init, destroy_seq_init);
+                return;
+            }
+            init->fasta_count_only = 1;
+            init->count_fp = hts_open(bind->file_path, "r");
+            if (!init->count_fp) {
+                duckdb_init_set_error(info, "Failed to open FASTA file");
+                destroy_seq_init(init);
+                return;
+            }
+            init->done = 0;
+            duckdb_init_set_max_threads(info, 1);
+            duckdb_init_set_init_data(info, init, destroy_seq_init);
+            return;
+        }
+    }
+
     if (bind->is_fastq && init->column_count == 0) {
         init->fastq_count_only = 1;
         init->count_fp = hts_open(bind->file_path, "r");
@@ -706,6 +746,38 @@ static void seq_fastq_count_only_function(duckdb_function_info info,
     duckdb_data_chunk_set_size(output, row_count);
 }
 
+static void seq_fasta_count_only_function(duckdb_function_info info,
+                                          duckdb_data_chunk output,
+                                          seq_init_data_t *init,
+                                          const seq_bind_data_t *bind) {
+    idx_t vector_size = duckdb_vector_size();
+    idx_t row_count = 0;
+    int ret;
+
+    while (row_count < vector_size) {
+        ret = hts_getline(init->count_fp, KS_SEP_LINE, &init->count_line);
+        if (ret == -1) {
+            init->done = 1;
+            break;
+        }
+        if (ret < -1) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "read_fasta: failed while parsing %s",
+                     bind->file_path ? bind->file_path : "");
+            duckdb_function_set_error(info, msg);
+            init->done = 1;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+        if (init->count_line.l == 0) continue;
+        if (init->count_line.s[0] == '>') {
+            row_count++;
+        }
+    }
+
+    duckdb_data_chunk_set_size(output, row_count);
+}
+
 /* ================================================================
  * Scan
  *
@@ -724,8 +796,25 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         return;
     }
 
+    if (init->count_only) {
+        idx_t row_count = (init->count_remaining > (uint64_t)duckdb_vector_size())
+            ? duckdb_vector_size()
+            : (idx_t)init->count_remaining;
+        init->count_remaining -= row_count;
+        if (init->count_remaining == 0) {
+            init->done = 1;
+        }
+        duckdb_data_chunk_set_size(output, row_count);
+        return;
+    }
+
     if (init->fastq_count_only) {
         seq_fastq_count_only_function(info, output, init, bind);
+        return;
+    }
+
+    if (init->fasta_count_only) {
+        seq_fasta_count_only_function(info, output, init, bind);
         return;
     }
 
