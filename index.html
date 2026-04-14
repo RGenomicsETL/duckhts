@@ -154,7 +154,7 @@
 <ul>
 <li>readers: <code><a href="reference/rduckhts_bcf.html">rduckhts_bcf()</a></code>, <code><a href="reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, <code><a href="reference/rduckhts_fastq.html">rduckhts_fastq()</a></code>, <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code>, <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code>, <code><a href="reference/rduckhts_tabix.html">rduckhts_tabix()</a></code>, <code><a href="reference/rduckhts_bed.html">rduckhts_bed()</a></code>
 </li>
-<li>multi-file readers: <code>rduckhts_bam_multi()</code>, <code>rduckhts_bcf_multi()</code>, <code>rduckhts_fastq_multi()</code>, <code>rduckhts_fasta_multi()</code>, <code>rduckhts_gff_multi()</code>, <code>rduckhts_gtf_multi()</code>, <code>rduckhts_tabix_multi()</code>, <code>rduckhts_bed_multi()</code>
+<li>multi-file readers: <code><a href="reference/rduckhts_bam_multi.html">rduckhts_bam_multi()</a></code>, <code><a href="reference/rduckhts_bcf_multi.html">rduckhts_bcf_multi()</a></code>, <code><a href="reference/rduckhts_fastq_multi.html">rduckhts_fastq_multi()</a></code>, <code><a href="reference/rduckhts_fasta_multi.html">rduckhts_fasta_multi()</a></code>, <code><a href="reference/rduckhts_gff_multi.html">rduckhts_gff_multi()</a></code>, <code><a href="reference/rduckhts_gtf_multi.html">rduckhts_gtf_multi()</a></code>, <code><a href="reference/rduckhts_tabix_multi.html">rduckhts_tabix_multi()</a></code>, <code><a href="reference/rduckhts_bed_multi.html">rduckhts_bed_multi()</a></code>
 </li>
 <li>reference helpers: <code><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index()</a></code>, <code><a href="reference/rduckhts_fasta_nuc.html">rduckhts_fasta_nuc()</a></code>
 </li>
@@ -196,7 +196,7 @@
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span><span class="fu">rduckhts_fastq_multi</span><span class="op">(</span><span class="va">con</span>, <span class="st">"fq_multi"</span>, <span class="va">fq_files</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/rduckhts_fastq_multi.html">rduckhts_fastq_multi</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"fq_multi"</span>, <span class="va">fq_files</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;                                               filename n</span></span>
 <span><span class="co">#&gt; 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5</span></span>
@@ -211,7 +211,7 @@
 <span>  region     <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-1000"</span>,</span>
 <span>  index_path <span class="op">=</span> <span class="va">bam_idx</span></span>
 <span><span class="op">)</span></span>
-<span><span class="fu">rduckhts_bam_multi</span><span class="op">(</span><span class="va">con</span>, <span class="st">"bam_multi"</span>, <span class="va">bam_path</span>, .params <span class="op">=</span> <span class="va">params</span>,</span>
+<span><span class="fu"><a href="reference/rduckhts_bam_multi.html">rduckhts_bam_multi</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"bam_multi"</span>, <span class="va">bam_path</span>, .params <span class="op">=</span> <span class="va">params</span>,</span>
 <span>                   overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT count(*) AS n FROM bam_multi"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   n</span></span>

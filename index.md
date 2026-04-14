@@ -151,10 +151,15 @@ into:
   [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md),
   [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md),
   [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed.md)
-- multi-file readers: `rduckhts_bam_multi()`, `rduckhts_bcf_multi()`,
-  `rduckhts_fastq_multi()`, `rduckhts_fasta_multi()`,
-  `rduckhts_gff_multi()`, `rduckhts_gtf_multi()`,
-  `rduckhts_tabix_multi()`, `rduckhts_bed_multi()`
+- multi-file readers:
+  [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_multi.md),
+  [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.md),
+  [`rduckhts_fastq_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq_multi.md),
+  [`rduckhts_fasta_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_multi.md),
+  [`rduckhts_gff_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_multi.md),
+  [`rduckhts_gtf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf_multi.md),
+  [`rduckhts_tabix_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_multi.md),
+  [`rduckhts_bed_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed_multi.md)
 - reference helpers:
   [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.md),
   [`rduckhts_fasta_nuc()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_nuc.md)

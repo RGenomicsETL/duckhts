@@ -22,12 +22,18 @@
   : Create SAM/BAM/CRAM Table
 - [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_index.md)
   : Build BAM or CRAM Index
+- [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_multi.md)
+  : Read multiple BAM/SAM files into a DuckDB table
 - [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
   : Create VCF/BCF Table
 - [`rduckhts_bcf_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_index.md)
   : Build VCF or BCF Index
+- [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.md)
+  : Read multiple VCF/BCF files into a DuckDB table
 - [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed.md)
   : Create BED Table
+- [`rduckhts_bed_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed_multi.md)
+  : Read multiple BED files into a DuckDB table
 - [`rduckhts_bgunzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgunzip.md)
   : BGZF Decompress a File
 - [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgzip.md)
@@ -38,16 +44,24 @@
   : Create FASTA Table
 - [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.md)
   : Build FASTA Index
+- [`rduckhts_fasta_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_multi.md)
+  : Read multiple FASTA files into a DuckDB table
 - [`rduckhts_fasta_nuc()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_nuc.md)
   : Compute FASTA Interval Nucleotide Composition
 - [`rduckhts_fastq()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq.md)
   : Create FASTQ Table
+- [`rduckhts_fastq_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq_multi.md)
+  : Read multiple FASTQ files into a DuckDB table
 - [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_functions.md)
   : List DuckHTS Extension Functions
 - [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
   : Create GFF3 Table
+- [`rduckhts_gff_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_multi.md)
+  : Read multiple GFF files into a DuckDB table
 - [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md)
   : Create GTF Table
+- [`rduckhts_gtf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf_multi.md)
+  : Read multiple GTF files into a DuckDB table
 - [`rduckhts_hts_header()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_header.md)
   : Read HTS Header Metadata
 - [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.md)
@@ -68,5 +82,7 @@
   : Create Tabix-Indexed File Table
 - [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.md)
   : Build Tabix Index
+- [`rduckhts_tabix_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_multi.md)
+  : Read multiple tabix-indexed files into a DuckDB table
 - [`setup_hts_env()`](https://rgenomicsetl.github.io/duckhts/reference/setup_hts_env.md)
   : Setup HTSlib Environment
