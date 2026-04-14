@@ -17,6 +17,7 @@ rduckhts_bam(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  decompression_threads = 2,
   overwrite = FALSE
 )
 ```
@@ -68,6 +69,11 @@ rduckhts_bam(
   Character. Quality representation for the QUAL column: `"string"`
   (default) returns canonical Phred+33 text; `"phred"` returns raw Phred
   values as `UTINYINT[]`.
+
+- decompression_threads:
+
+  Integer. Number of htslib decompression worker threads per file
+  handle. Default `2`. Use `0` to disable worker threads.
 
 - overwrite:
 

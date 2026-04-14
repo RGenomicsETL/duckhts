@@ -56,6 +56,7 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 <span>  auxiliary_tags <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  sequence_encoding <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  quality_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  decompression_threads <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  .params <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -103,6 +104,12 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 
 <dt id="arg-quality-representation">quality_representation<a class="anchor" aria-label="anchor" href="#arg-quality-representation"></a></dt>
 <dd><p>Optional quality representation.</p></dd>
+
+
+<dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>
+<dd><p>Integer. Number of htslib decompression worker
+threads per file handle. Default <code>2</code>. Use <code>0</code> to disable worker
+threads.</p></dd>
 
 
 <dt id="arg--params">.params<a class="anchor" aria-label="anchor" href="#arg--params"></a></dt>

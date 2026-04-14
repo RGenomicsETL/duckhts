@@ -18,6 +18,7 @@ rduckhts_bam_multi(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  decompression_threads = 2,
   .params = NULL,
   overwrite = FALSE
 )
@@ -64,6 +65,11 @@ rduckhts_bam_multi(
 - quality_representation:
 
   Optional quality representation.
+
+- decompression_threads:
+
+  Integer. Number of htslib decompression worker threads per file
+  handle. Default `2`. Use `0` to disable worker threads.
 
 - .params:
 
