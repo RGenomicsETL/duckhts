@@ -175,7 +175,18 @@ FROM read_bam(
   '__WORKING_DIRECTORY__/test/data/range.bam',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   sequence_encoding := 'nt16',
-  quality_representation := 'phred'
+  quality_representation := 'phred',
+  decompression_threads := 1
+);
+----
+112
+
+# --- decompression_threads := 0 disables htslib worker threads ---
+query I
+SELECT count(*)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  decompression_threads := 0
 );
 ----
 112
@@ -979,6 +990,11 @@ statement error
 SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', sequence_encoding := 'invalid') LIMIT 1;
 ----
 sequence_encoding must be 'string' or 'nt16'
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', decompression_threads := -1) LIMIT 1;
+----
+decompression_threads must be between 0 and INT_MAX
 
 # --- read_fasta: nt16 returns UTINYINT list ---
 query T

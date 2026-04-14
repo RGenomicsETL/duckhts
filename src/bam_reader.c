@@ -26,6 +26,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdbool.h>
 #include <inttypes.h>
+#include <limits.h>
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
@@ -34,6 +35,8 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
+
+#define DUCKHTS_DEFAULT_BAM_DECOMPRESSION_THREADS 2
 
 /* ================================================================
  * Helpers
@@ -228,6 +231,7 @@ typedef struct {
     int standard_tags;
     int auxiliary_tags;
     int seq_nt16;       /* 1 if sequence_encoding := 'nt16'; SEQ → LIST(UTINYINT) */
+    int decompression_threads;
     duckhts_quality_representation qual_repr;
     uint64_t index_row_count;
     int index_row_count_valid;
@@ -504,6 +508,7 @@ static void bam_read_bind(duckdb_bind_info info) {
     bind->std_col_count = 0;
     bind->aux_col_idx = -1;
     bind->qual_repr = DUCKHTS_QUALITY_REPR_STRING;
+    bind->decompression_threads = DUCKHTS_DEFAULT_BAM_DECOMPRESSION_THREADS;
 
     /* Parse comma-separated regions (if any) */
     parse_regions(region, &bind->regions, &bind->n_regions);
@@ -548,6 +553,18 @@ static void bam_read_bind(duckdb_bind_info info) {
         }
     }
     if (qrepr_val) duckdb_destroy_value(&qrepr_val);
+
+    duckdb_value dthreads_val = duckdb_bind_get_named_parameter(info, "decompression_threads");
+    if (dthreads_val && !duckdb_is_null_value(dthreads_val)) {
+        int64_t decompression_threads = duckdb_get_int64(dthreads_val);
+        if (decompression_threads < 0 || decompression_threads > INT_MAX) {
+            duckdb_bind_set_error(info,
+                "read_bam: decompression_threads must be between 0 and INT_MAX");
+        } else {
+            bind->decompression_threads = (int)decompression_threads;
+        }
+    }
+    if (dthreads_val) duckdb_destroy_value(&dthreads_val);
 
     /* Check for index availability */
     hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, HTS_IDX_SILENT_FAIL);
@@ -720,9 +737,14 @@ static void bam_read_local_init(duckdb_init_info info) {
         }
     }
 
-    /* Enable htslib I/O threads for BAM/CRAM decompression.
+    /* Enable htslib I/O threads for BAM/CRAM decompression when requested.
      * hts_set_threads creates non-shared threads for this file handle. */
-    hts_set_threads(local->fp, 2);
+    if (bind->decompression_threads > 0 &&
+        hts_set_threads(local->fp, bind->decompression_threads) < 0) {
+        duckdb_init_set_error(info, "Failed to configure BAM decompression threads");
+        destroy_bam_local(local);
+        return;
+    }
 
     /* Read header — each thread needs its own copy */
     local->hdr = sam_hdr_read(local->fp);
@@ -1225,6 +1247,10 @@ void register_read_bam_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "standard_tags", bool_type);
     duckdb_table_function_add_named_parameter(tf, "auxiliary_tags", bool_type);
     duckdb_destroy_logical_type(&bool_type);
+
+    duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);
+    duckdb_destroy_logical_type(&bigint_type);
 
     duckdb_table_function_set_bind(tf, bam_read_bind);
     duckdb_table_function_set_init(tf, bam_read_global_init);
