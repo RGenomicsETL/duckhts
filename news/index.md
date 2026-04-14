@@ -2,6 +2,31 @@
 
 ## Rduckhts 1.1.6.9000-0.0.6 (Development version)
 
+- Expand `README.Rmd` with runnable compression/indexing examples
+  covering
+  [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgzip.md),
+  [`rduckhts_bgunzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgunzip.md),
+  [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_index.md),
+  [`rduckhts_bcf_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_index.md),
+  and
+  [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.md),
+  then regenerate the rendered package README outputs.
+- Add `decompression_threads` to
+  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam.md)
+  and
+  [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_multi.md),
+  matching the bundled `read_bam(..., decompression_threads := 2)` SQL
+  parameter. The previous hardcoded htslib worker-thread count is now
+  the documented default, and `0` disables per-file worker threads.
+- Speed up bundled zero-column `COUNT(*)` queries across the HTS
+  readers: `read_bam(...)`, `read_bcf(...)`, `read_tabix(...)`,
+  `read_gff(...)`, `read_gtf(...)`, and indexed `read_bed(...)` now use
+  index metadata for full-file count-only scans when DuckDB projects no
+  output columns; `read_fasta(...)` uses `faidx` sequence counts when an
+  index is available and otherwise counts FASTA headers directly;
+  `read_fastq(...)` continues to count raw FASTQ records directly when
+  no projected columns are needed, while preserving paired/interleaved
+  validation errors.
 - Add multi-file reading wrappers: `rduckhts_bam_multi`,
   `rduckhts_bcf_multi`, `rduckhts_fastq_multi`, `rduckhts_fasta_multi`,
   `rduckhts_bed_multi`, `rduckhts_tabix_multi`, `rduckhts_gff_multi`,

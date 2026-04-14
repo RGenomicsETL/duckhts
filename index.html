@@ -257,7 +257,7 @@
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bam</code></td>
-<td>Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT[] and quality_representation := ‘phred’ to return QUAL as UTINYINT[] instead of VARCHAR.</td>
+<td>Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT[] and quality_representation := ‘phred’ to return QUAL as UTINYINT[] instead of VARCHAR. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.</td>
 </tr>
 <tr class="odd">
 <td><code>read_fasta</code></td>
@@ -843,8 +843,8 @@
 <code class="sourceCode R"><span><span class="va">bed_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                     index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_14855d41bc0.fai</span></span>
+<span><span class="co">#&gt;   success                                       index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_readme_e1b684999d868.fai</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets"</span>, <span class="va">bed_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT chrom, start, \"end\", name, block_count FROM targets"</span><span class="op">)</span></span>
@@ -904,10 +904,10 @@
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_src</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_src</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   success                                                index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_src_1485564f30496.fa.fai</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_liftover_src_e1b683bcc2f25.fa.fai</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_dst</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_dst</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   success                                                index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_dst_1485513b3f6a9.fa.fai</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_liftover_dst_e1b687353af04.fa.fai</span></span>
 <span></span>
 <span><span class="va">lifted</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_liftover.html">rduckhts_liftover</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -952,7 +952,7 @@
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   success                                         index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_munge_148554870b69c.fa.fai</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_munge_e1b6872fb4298.fa.fai</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -1015,29 +1015,79 @@
 <h3 id="compression--tabix-round-trips">Compression + tabix round-trips<a class="anchor" aria-label="anchor" href="#compression--tabix-round-trips"></a>
 </h3>
 <div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">tmp_bed</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_targets_"</span>, fileext <span class="op">=</span> <span class="st">".bed"</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">bed_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="va">bam_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="va">bcf_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">tmp_bed</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_targets_"</span>, fileext <span class="op">=</span> <span class="st">".bed"</span><span class="op">)</span></span>
 <span><span class="va">tmp_bgz</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">tmp_bed</span>, <span class="st">".gz"</span><span class="op">)</span></span>
 <span><span class="va">tmp_tbi</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">tmp_bgz</span>, <span class="st">".tbi"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/writeLines.html" class="external-link">writeLines</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"chr1\t0\t10\ta"</span>, <span class="st">"chr1\t10\t20\tb"</span><span class="op">)</span>, <span class="va">tmp_bed</span><span class="op">)</span></span>
+<span><span class="va">tmp_roundtrip</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_targets_roundtrip_"</span>, fileext <span class="op">=</span> <span class="st">".bed"</span><span class="op">)</span></span>
+<span><span class="va">tmp_bai</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_range_"</span>, fileext <span class="op">=</span> <span class="st">".bam.bai"</span><span class="op">)</span></span>
+<span><span class="va">tmp_csi</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_variants_"</span>, fileext <span class="op">=</span> <span class="st">".bcf.csi"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/files.html" class="external-link">file.copy</a></span><span class="op">(</span><span class="va">bed_src</span>, <span class="va">tmp_bed</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span>
 <span></span>
-<span><span class="fu"><a href="reference/rduckhts_bgzip.html">rduckhts_bgzip</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">tmp_bed</span>, output_path <span class="op">=</span> <span class="va">tmp_bgz</span>, keep <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                          output_path bytes_in</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz       25</span></span>
-<span><span class="co">#&gt;   bytes_out</span></span>
-<span><span class="co">#&gt; 1        84</span></span>
-<span><span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">tmp_bgz</span>, preset <span class="op">=</span> <span class="st">"bed"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, threads <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">bgzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgzip.html">rduckhts_bgzip</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="va">tmp_bed</span>,</span>
+<span>  output_path <span class="op">=</span> <span class="va">tmp_bgz</span>,</span>
+<span>  threads <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  keep <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_e1b6817f1e51f.bed.gz       169</span></span>
+<span></span>
+<span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="va">tmp_bgz</span>,</span>
+<span>  output_path <span class="op">=</span> <span class="va">tmp_roundtrip</span>,</span>
+<span>  threads <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  keep <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">bgunzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="co">#&gt;   success                                                 output_path bytes_out</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_roundtrip_e1b6850a791ba.bed       194</span></span>
+<span></span>
+<span><span class="va">bam_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bam_index.html">rduckhts_bam_index</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="va">bam_src</span>,</span>
+<span>  index_path <span class="op">=</span> <span class="va">tmp_bai</span>,</span>
+<span>  threads <span class="op">=</span> <span class="fl">1</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">bam_index_meta</span></span>
+<span><span class="co">#&gt;   success                                          index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_range_e1b6845e3f4e8.bam.bai          BAI</span></span>
+<span></span>
+<span><span class="va">bcf_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bcf_index.html">rduckhts_bcf_index</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="va">bcf_src</span>,</span>
+<span>  index_path <span class="op">=</span> <span class="va">tmp_csi</span>,</span>
+<span>  threads <span class="op">=</span> <span class="fl">1</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">bcf_index_meta</span></span>
+<span><span class="co">#&gt;   success                                             index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_variants_e1b68573772ac.bcf.csi          CSI</span></span>
+<span></span>
+<span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>, <span class="va">tmp_bgz</span>,</span>
+<span>  preset <span class="op">=</span> <span class="st">"bed"</span>,</span>
+<span>  index_path <span class="op">=</span> <span class="va">tmp_tbi</span>,</span>
+<span>  threads <span class="op">=</span> <span class="fl">1</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">tabix_meta</span></span>
 <span><span class="co">#&gt;   success                                               index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz.tbi          TBI</span></span>
-<span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"chr1:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   chrom start end name score strand thick_start thick_end item_rgb block_count</span></span>
-<span><span class="co">#&gt; 1  chr1     0  10    a  &lt;NA&gt;   &lt;NA&gt;          NA        NA     &lt;NA&gt;          NA</span></span>
-<span><span class="co">#&gt; 2  chr1    10  20    b  &lt;NA&gt;   &lt;NA&gt;          NA        NA     &lt;NA&gt;          NA</span></span>
-<span><span class="co">#&gt;   block_sizes block_starts extra</span></span>
-<span><span class="co">#&gt; 1        &lt;NA&gt;         &lt;NA&gt;  &lt;NA&gt;</span></span>
-<span><span class="co">#&gt; 2        &lt;NA&gt;         &lt;NA&gt;  &lt;NA&gt;</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_e1b6817f1e51f.bed.gz.tbi          TBI</span></span>
 <span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">tmp_bed</span>, <span class="va">tmp_bgz</span>, <span class="va">tmp_tbi</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;          chrom start end    name score strand thick_start thick_end item_rgb</span></span>
+<span><span class="co">#&gt; 1 CHROMOSOME_I     0  10 target1   100      +           0        10  255,0,0</span></span>
+<span><span class="co">#&gt; 2 CHROMOSOME_I    10  20 target2   200      -          10        20  0,0,255</span></span>
+<span><span class="co">#&gt;   block_count block_sizes block_starts extra</span></span>
+<span><span class="co">#&gt; 1           2         5,5          0,5  &lt;NA&gt;</span></span>
+<span><span class="co">#&gt; 2           1          10            0  &lt;NA&gt;</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">tmp_bed</span>, <span class="va">tmp_bgz</span>, <span class="va">tmp_tbi</span>, <span class="va">tmp_roundtrip</span>, <span class="va">tmp_bai</span>, <span class="va">tmp_csi</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -1086,8 +1136,8 @@
 <code class="sourceCode R"><span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span></span>
-<span><span class="co">#&gt;   success                                       index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_148555a0ed12c.fai</span></span>
+<span><span class="co">#&gt;   success                                      index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE /tmp/Rtmp4bzzYg/duckhts_readme_e1b68c317e8c.fai</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="st">"fasta_region"</span>, <span class="va">fasta_path</span>,</span>

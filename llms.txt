@@ -255,7 +255,7 @@ This section is generated from `functions.yaml`.
 | Function          | Kind         | Returns | R helper                                                                                                                                                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 |-------------------|--------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `read_bcf`        | table        | table   | `rduckhts_bcf`                                                                                                                                                         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, and optional bcftools-style CSQ type overrides.                                                                                                                                                                                                                                                                                                                                            |
-| `read_bam`        | table        | table   | `rduckhts_bam`                                                                                                                                                         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR.                                                                                                                                                                                                                                                                |
+| `read_bam`        | table        | table   | `rduckhts_bam`                                                                                                                                                         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.                                                                                                                                              |
 | `read_fasta`      | table        | table   | `rduckhts_fasta`                                                                                                                                                       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR.                                                                                                                                                                                                                                                                                                                               |
 | `read_bed`        | table        | table   | `rduckhts_bed`                                                                                                                                                         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                                                                                                                           |
@@ -386,8 +386,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                     index_path
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_14855d41bc0.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_readme_e1b684999d868.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -447,10 +447,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_src_1485564f30496.fa.fai
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_liftover_src_e1b683bcc2f25.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_liftover_dst_1485513b3f6a9.fa.fai
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_liftover_dst_e1b687353af04.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -495,7 +495,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                         index_path
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_munge_148554870b69c.fa.fai
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_munge_e1b6872fb4298.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -561,29 +561,79 @@ gwas_prs[, c("SAMPLE", "PRS_A", "PRS_B")]
 ### Compression + tabix round-trips
 
 ``` r
+bed_src <- system.file("extdata", "targets.bed", package = "Rduckhts")
+bam_src <- system.file("extdata", "range.bam", package = "Rduckhts")
+bcf_src <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+
 tmp_bed <- tempfile("duckhts_targets_", fileext = ".bed")
 tmp_bgz <- paste0(tmp_bed, ".gz")
 tmp_tbi <- paste0(tmp_bgz, ".tbi")
-writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
+tmp_roundtrip <- tempfile("duckhts_targets_roundtrip_", fileext = ".bed")
+tmp_bai <- tempfile("duckhts_range_", fileext = ".bam.bai")
+tmp_csi <- tempfile("duckhts_variants_", fileext = ".bcf.csi")
+file.copy(bed_src, tmp_bed, overwrite = TRUE)
+#> [1] TRUE
 
-rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
-#>   success                                          output_path bytes_in
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz       25
-#>   bytes_out
-#> 1        84
-rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
+bgzip_meta <- rduckhts_bgzip(
+  con, tmp_bed,
+  output_path = tmp_bgz,
+  threads = 1,
+  keep = TRUE,
+  overwrite = TRUE
+)
+bgzip_meta[, c("success", "output_path", "bytes_out")]
+#>   success                                          output_path bytes_out
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_e1b6817f1e51f.bed.gz       169
+
+bgunzip_meta <- rduckhts_bgunzip(
+  con, tmp_bgz,
+  output_path = tmp_roundtrip,
+  threads = 1,
+  keep = TRUE,
+  overwrite = TRUE
+)
+bgunzip_meta[, c("success", "output_path", "bytes_out")]
+#>   success                                                 output_path bytes_out
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_roundtrip_e1b6850a791ba.bed       194
+
+bam_index_meta <- rduckhts_bam_index(
+  con, bam_src,
+  index_path = tmp_bai,
+  threads = 1
+)
+bam_index_meta
+#>   success                                          index_path index_format
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_range_e1b6845e3f4e8.bam.bai          BAI
+
+bcf_index_meta <- rduckhts_bcf_index(
+  con, bcf_src,
+  index_path = tmp_csi,
+  threads = 1
+)
+bcf_index_meta
+#>   success                                             index_path index_format
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_variants_e1b68573772ac.bcf.csi          CSI
+
+tabix_meta <- rduckhts_tabix_index(
+  con, tmp_bgz,
+  preset = "bed",
+  index_path = tmp_tbi,
+  threads = 1
+)
+tabix_meta
 #>   success                                               index_path index_format
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_targets_14855282d7b54.bed.gz.tbi          TBI
-rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
-dbGetQuery(con, "SELECT * FROM targets_idx")
-#>   chrom start end name score strand thick_start thick_end item_rgb block_count
-#> 1  chr1     0  10    a  <NA>   <NA>          NA        NA     <NA>          NA
-#> 2  chr1    10  20    b  <NA>   <NA>          NA        NA     <NA>          NA
-#>   block_sizes block_starts extra
-#> 1        <NA>         <NA>  <NA>
-#> 2        <NA>         <NA>  <NA>
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_e1b6817f1e51f.bed.gz.tbi          TBI
 
-unlink(c(tmp_bed, tmp_bgz, tmp_tbi))
+rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
+dbGetQuery(con, "SELECT * FROM targets_idx")
+#>          chrom start end    name score strand thick_start thick_end item_rgb
+#> 1 CHROMOSOME_I     0  10 target1   100      +           0        10  255,0,0
+#> 2 CHROMOSOME_I    10  20 target2   200      -          10        20  0,0,255
+#>   block_count block_sizes block_starts extra
+#> 1           2         5,5          0,5  <NA>
+#> 2           1          10            0  <NA>
+
+unlink(c(tmp_bed, tmp_bgz, tmp_tbi, tmp_roundtrip, tmp_bai, tmp_csi))
 ```
 
 ## Sequence UDFs
@@ -637,8 +687,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
-#> 1    TRUE /tmp/RtmpR0fKaG/duckhts_readme_148555a0ed12c.fai
+#>   success                                      index_path
+#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_readme_e1b68c317e8c.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
