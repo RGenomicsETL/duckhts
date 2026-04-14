@@ -31,7 +31,7 @@ rduckhts_mosdepth(
 
 \item{by}{Optional fixed-width window size as a string or a BED file path}
 
-\item{no_per_base}{Skip writing `{prefix}.per-base.bed.gz`}
+\item{no_per_base}{Skip writing `\{prefix\}.per-base.bed.gz`}
 
 \item{threads}{Number of BAM decompression threads}
 
