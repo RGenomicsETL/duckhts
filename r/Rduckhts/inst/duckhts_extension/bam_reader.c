@@ -229,6 +229,8 @@ typedef struct {
     int auxiliary_tags;
     int seq_nt16;       /* 1 if sequence_encoding := 'nt16'; SEQ → LIST(UTINYINT) */
     duckhts_quality_representation qual_repr;
+    uint64_t index_row_count;
+    int index_row_count_valid;
     int std_col_start;
     int std_col_count;
     int aux_col_idx;
@@ -259,6 +261,10 @@ typedef struct {
     int is_parallel;
     int assigned_contig;
     int needs_next_contig;
+    int count_only;
+    int need_seq_buffers;
+    int need_file_offset;
+    uint64_t count_remaining;
 
     idx_t column_count;
     idx_t *column_ids;
@@ -405,6 +411,23 @@ static void qual_to_string(const uint8_t *qual, int len, char *buf) {
     buf[len] = '\0';
 }
 
+static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
+    if (!idx || !out_total) return 0;
+
+    int nseq = hts_idx_nseq(idx);
+    uint64_t total = hts_idx_get_n_no_coor(idx);
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0) {
+            return 0;
+        }
+        total += mapped + unmapped;
+    }
+
+    *out_total = total;
+    return 1;
+}
+
 /* ================================================================
  * Bind
  * ================================================================ */
@@ -530,6 +553,7 @@ static void bam_read_bind(duckdb_bind_info info) {
     hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, HTS_IDX_SILENT_FAIL);
     if (idx) {
         bind->has_index = 1;
+        bind->index_row_count_valid = bam_try_get_index_row_count(idx, &bind->index_row_count);
         hts_idx_destroy(idx);
     }
 
@@ -612,6 +636,7 @@ static void bam_read_bind(duckdb_bind_info info) {
 
 static void bam_read_global_init(duckdb_init_info info) {
     bam_bind_data_t *bind = (bam_bind_data_t *)duckdb_init_get_bind_data(info);
+    idx_t column_count = duckdb_init_get_column_count(info);
 
     bam_global_init_data_t *global = (bam_global_init_data_t *)duckdb_malloc(
         sizeof(bam_global_init_data_t));
@@ -624,7 +649,10 @@ static void bam_read_global_init(duckdb_init_info info) {
      * Parallel scan: each thread claims contigs via sam_itr_queryi().
      * Only when indexed and no user-specified region.
      */
-    if (bind->has_index && bind->n_contigs > 1 && !global->has_region) {
+    if (column_count == 0 && bind->index_row_count_valid && !global->has_region) {
+        global->n_contigs = 0;
+        duckdb_init_set_max_threads(info, 1);
+    } else if (bind->has_index && bind->n_contigs > 1 && !global->has_region) {
         global->n_contigs = bind->n_contigs;
         idx_t max_threads = (idx_t)bind->n_contigs;
         if (max_threads > 16) max_threads = 16;
@@ -647,6 +675,27 @@ static void bam_read_local_init(duckdb_init_info info) {
     bam_local_init_data_t *local = (bam_local_init_data_t *)duckdb_malloc(
         sizeof(bam_local_init_data_t));
     memset(local, 0, sizeof(bam_local_init_data_t));
+
+    local->column_count = duckdb_init_get_column_count(info);
+    if (local->column_count > 0) {
+        local->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * local->column_count);
+        for (idx_t i = 0; i < local->column_count; i++) {
+            local->column_ids[i] = duckdb_init_get_column_index(info, i);
+            if (local->column_ids[i] == BAM_COL_SEQ || local->column_ids[i] == BAM_COL_QUAL) {
+                local->need_seq_buffers = 1;
+            } else if (local->column_ids[i] == BAM_COL_FILE_OFFSET) {
+                local->need_file_offset = 1;
+            }
+        }
+    }
+
+    if (local->column_count == 0 && bind->n_regions == 0 && bind->index_row_count_valid) {
+        local->count_only = 1;
+        local->count_remaining = bind->index_row_count;
+        local->done = (local->count_remaining == 0);
+        duckdb_init_set_init_data(info, local, destroy_bam_local);
+        return;
+    }
 
     int is_parallel = (bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
     local->is_parallel = is_parallel;
@@ -723,12 +772,6 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     local->done = 0;
 
-    /* Projection pushdown: record which columns DuckDB actually needs */
-    local->column_count = duckdb_init_get_column_count(info);
-    local->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * local->column_count);
-    for (idx_t i = 0; i < local->column_count; i++)
-        local->column_ids[i] = duckdb_init_get_column_index(info, i);
-
     duckdb_init_set_init_data(info, local, destroy_bam_local);
 }
 
@@ -784,6 +827,18 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         return;
     }
 
+    if (local->count_only) {
+        idx_t row_count = (local->count_remaining > (uint64_t)duckdb_vector_size())
+            ? duckdb_vector_size()
+            : (idx_t)local->count_remaining;
+        local->count_remaining -= row_count;
+        if (local->count_remaining == 0) {
+            local->done = 1;
+        }
+        duckdb_data_chunk_set_size(output, row_count);
+        return;
+    }
+
     /* For parallel scans, claim first/next contig if needed */
     if (local->needs_next_contig) {
         if (!claim_next_contig(local, global)) {
@@ -819,23 +874,26 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         }
 
         bam1_t *b = local->rec;
-        int seq_len = b->core.l_qseq;
+        int seq_len = 0;
+        uint64_t file_offset = 0;
 
-        /* Capture virtual file offset after reading this record.
-         * For indexed scans, itr->curr_off holds the next read's offset;
-         * for sequential scans, bgzf_tell gives the same.  Either way
-         * the value is monotonically increasing within a thread's stream,
-         * so ORDER BY FILE_OFFSET reproduces BAM file order faithfully. */
-        uint64_t file_offset = (local->fp && local->fp->fp.bgzf)
-            ? (uint64_t)bgzf_tell(local->fp->fp.bgzf)
-            : 0;
+        if (local->need_file_offset) {
+            /* Capture virtual file offset after reading this record.
+             * For indexed scans, itr->curr_off holds the next read's offset;
+             * for sequential scans, bgzf_tell gives the same. */
+            file_offset = (local->fp && local->fp->fp.bgzf)
+                ? (uint64_t)bgzf_tell(local->fp->fp.bgzf)
+                : 0;
+        }
 
-        /* Grow SEQ/QUAL conversion buffers if needed */
-        if (!ensure_seq_buf(local, seq_len)) {
-            duckdb_function_set_error(info, "read_bam: out of memory allocating sequence buffers");
-            local->done = 1;
-            duckdb_data_chunk_set_size(output, 0);
-            return;
+        if (local->need_seq_buffers) {
+            seq_len = b->core.l_qseq;
+            if (!ensure_seq_buf(local, seq_len)) {
+                duckdb_function_set_error(info, "read_bam: out of memory allocating sequence buffers");
+                local->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
         }
 
         for (idx_t i = 0; i < local->column_count; i++) {
