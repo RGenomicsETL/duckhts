@@ -237,6 +237,22 @@ FROM bgzip('/tmp/duckhts_readme_targets.bed',
            keep := TRUE,
            overwrite := TRUE);
 
+SELECT success, output_path, bytes_out
+FROM bgunzip('/tmp/duckhts_readme_targets.bed.gz',
+             output_path := '/tmp/duckhts_readme_targets.roundtrip.bed',
+             keep := TRUE,
+             overwrite := TRUE);
+
+SELECT success, index_format, index_path
+FROM bam_index('test/data/range.bam',
+               index_path := '/tmp/duckhts_readme_range.bam.bai',
+               threads := 1);
+
+SELECT success, index_format, index_path
+FROM bcf_index('test/data/vcf_file.bcf',
+               index_path := '/tmp/duckhts_readme_vcf_file.bcf.csi',
+               threads := 1);
+
 SELECT success, index_format, index_path
 FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
                  preset := 'bed',

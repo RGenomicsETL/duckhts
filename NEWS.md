@@ -2,6 +2,7 @@
 
 # duckhts 1.1.6.9000 Developement version
 
+- expand the source READMEs with runnable compression/indexing examples covering `bgzip(...)`, `bgunzip(...)`, `bam_index(...)`, `bcf_index(...)`, and `tabix_index(...)`, and regenerate the rendered README outputs
 - make `read_bam(...)` htslib decompression workers configurable via `decompression_threads := 2`; the previous hardcoded thread count is now the documented default, and `decompression_threads := 0` disables per-file htslib worker threads
 - speed up zero-column `COUNT(*)` scans across the HTS readers: `read_bam(...)`, `read_bcf(...)`, `read_tabix(...)`, `read_gff(...)`, `read_gtf(...)`, and indexed `read_bed(...)` now use index metadata for full-file count-only scans when DuckDB projects no output columns; `read_fasta(...)` uses `faidx` sequence counts when an index is available and otherwise counts FASTA headers directly; `read_fastq(...)` continues to count raw FASTQ records directly when no projected columns are needed, while preserving paired/interleaved validation errors
 - add `hts_union_query(reader, pattern, params)` SQL scalar macro: generates a `UNION ALL BY NAME` query string that reads every file matching a glob pattern through any named reader function (`read_bam`, `read_bcf`, etc.), with a `filename` column identifying each row's source file; pass the result to `query()` to execute
