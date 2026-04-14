@@ -47,7 +47,7 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
-| `duckhts_mosdepth` | table | table | `rduckhts_mosdepth` | Write an initial native mosdepth-compatible fast-mode output set for indexed BAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, and optional window/BED region outputs; fast_mode must currently remain TRUE. |
+| `duckhts_mosdepth` | table | table | `rduckhts_mosdepth` | Write an initial native mosdepth-compatible fast-mode output set for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, and optional threshold counts for `by`; set `fasta` for CRAM files when required by htslib, `precision_digits` controls decimal places in the text outputs, and `fast_mode` must currently remain TRUE. |
 
 ### Variants
 

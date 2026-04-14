@@ -1088,15 +1088,18 @@ rduckhts_bgunzip <- function(
 #'
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param prefix Output prefix for the mosdepth-style files
-#' @param path Path to the input BAM file
+#' @param path Path to the input BAM or CRAM file
 #' @param chrom Optional chromosome name filter
 #' @param by Optional fixed-width window size as a string or a BED file path
+#' @param fasta Optional reference FASTA path for CRAM input when required
 #' @param no_per_base Skip writing `\{prefix\}.per-base.bed.gz`
 #' @param threads Number of BAM decompression threads
 #' @param flag Excluded SAM flag mask, matching mosdepth's `-F`
 #' @param include_flag Required SAM flag mask, matching mosdepth's `-i`
 #' @param fast_mode Must currently remain `TRUE`
 #' @param mapq Minimum mapping quality threshold
+#' @param precision_digits Number of decimal places to write in the text outputs
+#' @param thresholds Optional comma-separated coverage thresholds for `by`, matching mosdepth's `-T`
 #' @param index_path Optional explicit BAM index path
 #' @param overwrite Overwrite existing output files
 #'
@@ -1109,12 +1112,15 @@ rduckhts_mosdepth <- function(
   path,
   chrom = NULL,
   by = NULL,
+  fasta = NULL,
   no_per_base = FALSE,
   threads = 0,
   flag = 1796,
   include_flag = 0,
   fast_mode = TRUE,
   mapq = 0,
+  precision_digits = 2,
+  thresholds = NULL,
   index_path = NULL,
   overwrite = FALSE
 ) {
@@ -1124,10 +1130,13 @@ rduckhts_mosdepth <- function(
     flag = flag,
     include_flag = include_flag,
     fast_mode = if (isTRUE(fast_mode)) "true" else "false",
-    mapq = mapq
+    mapq = mapq,
+    precision_digits = precision_digits
   )
   if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
   if (!is.null(by)) params$by <- sql_quote_string(by)
+  if (!is.null(fasta)) params$fasta <- sql_quote_string(fasta)
+  if (!is.null(thresholds)) params$thresholds <- sql_quote_string(thresholds)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
   if (isTRUE(overwrite)) params$overwrite <- "true"
   param_str <- build_param_str(params)

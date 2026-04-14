@@ -62,8 +62,8 @@ expect_identical(
 )
 expect_identical(
   names(formals(rduckhts_mosdepth)),
-  c("con", "prefix", "path", "chrom", "by", "no_per_base", "threads",
-    "flag", "include_flag", "fast_mode", "mapq", "index_path", "overwrite")
+  c("con", "prefix", "path", "chrom", "by", "fasta", "no_per_base", "threads",
+    "flag", "include_flag", "fast_mode", "mapq", "precision_digits", "thresholds", "index_path", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_fasta)),

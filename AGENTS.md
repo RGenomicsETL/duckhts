@@ -22,6 +22,11 @@ Every user-visible change must update **both**:
 
 Never consider a feature complete until both are updated.
 
+R package changelog scope is strict:
+- `r/Rduckhts/NEWS.md` must only describe R package user-facing changes: wrapper behavior, bundled extension behavior as exposed through the package, package docs/examples, package tests, CRAN/build/install behavior.
+- Do **not** add repo-only developer tooling, extension-only benchmarking scripts, upstream comparison notes, or other non-package workflow items to `r/Rduckhts/NEWS.md`.
+- Put repo-level tooling or extension-only notes in `NEWS.md` instead.
+
 ## Documentation
 - `functions.yaml` is the source of truth for public function documentation and the community-extension descriptor.
 - After adding/removing/renaming functions: update `functions.yaml`, run `python3 scripts/render_function_catalog.py`, bootstrap the R package, verify generated files in `r/Rduckhts/inst/function_catalog/` and `community-extensions/extensions/duckhts/description.yml` are in sync.

@@ -10,6 +10,9 @@ test_mosdepth <- function() {
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+  cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
+  cram_index_path <- system.file("extdata", "range.cram.crai", package = "Rduckhts")
+  fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
 
   tmp_dir <- tempfile("duckhts_mosdepth_")
   dir.create(tmp_dir)
@@ -32,6 +35,40 @@ test_mosdepth <- function() {
   summary_lines <- readLines(file.path(tmp_dir, "range_fast.mosdepth.summary.txt"))
   expect_equal(
     summary_lines[1:3],
+    c(
+      "chrom\tlength\tbases\tmean\tmin\tmax",
+      "CHROMOSOME_I\t1009800\t1730\t0.00\t0\t4",
+      "CHROMOSOME_II\t5000\t3400\t0.68\t0\t5"
+    )
+  )
+
+  prefix_prec <- file.path(tmp_dir, "range_prec")
+  out_prec <- rduckhts_mosdepth(
+    con,
+    prefix_prec,
+    bam_path,
+    index_path = bam_index_path,
+    precision_digits = 4,
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_prec$success[1]))
+  summary_prec <- readLines(file.path(tmp_dir, "range_prec.mosdepth.summary.txt"))
+  expect_true(any(grepl("^CHROMOSOME_I\\t1009800\\t1730\\t0\\.0017\\t0\\t4$", summary_prec)))
+  expect_true(any(grepl("^total\\t1024800\\t11129\\t0\\.0109\\t0\\t6$", summary_prec)))
+
+  prefix_cram <- file.path(tmp_dir, "range_cram")
+  out_cram <- rduckhts_mosdepth(
+    con,
+    prefix_cram,
+    cram_path,
+    fasta = fasta_path,
+    index_path = cram_index_path,
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_cram$success[1]))
+  summary_cram <- readLines(file.path(tmp_dir, "range_cram.mosdepth.summary.txt"))
+  expect_equal(
+    summary_cram[1:3],
     c(
       "chrom\tlength\tbases\tmean\tmin\tmax",
       "CHROMOSOME_I\t1009800\t1730\t0.00\t0\t4",
@@ -92,6 +129,129 @@ test_mosdepth <- function() {
     )
   )
 
+  prefix_thr <- file.path(tmp_dir, "range_thr")
+  out_thr <- rduckhts_mosdepth(
+    con,
+    prefix_thr,
+    bam_path,
+    index_path = bam_index_path,
+    by = "1000",
+    thresholds = "1,2",
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_thr$success[1]))
+  expect_true(file.exists(file.path(tmp_dir, "range_thr.thresholds.bed.gz")))
+  expect_true(file.exists(file.path(tmp_dir, "range_thr.thresholds.bed.gz.csi")))
+  expect_true(!is.na(out_thr$thresholds_path[1]))
+  thresholds_rows <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste(
+        "SELECT chrom, region, ge1, ge2",
+        "FROM read_csv(%s,",
+        "  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'region':'VARCHAR', 'ge1':'BIGINT', 'ge2':'BIGINT'},",
+        "  delim = '\t',",
+        "  header = FALSE,",
+        "  skip = 1",
+        ")",
+        "WHERE chrom = 'CHROMOSOME_II'",
+        "ORDER BY start_pos",
+        "LIMIT 5"
+      ),
+      sprintf("'%s'", file.path(tmp_dir, "range_thr.thresholds.bed.gz"))
+    )
+  )
+  expect_equal(
+    thresholds_rows,
+    data.frame(
+      chrom = rep("CHROMOSOME_II", 5),
+      region = rep("unknown", 5),
+      ge1 = c(0, 840, 737, 82, 0),
+      ge2 = c(0, 555, 368, 75, 0)
+    )
+  )
+
+  big_bam_path <- system.file("extdata", "big.bam", package = "Rduckhts")
+  big_index_path <- system.file("extdata", "big.bam.csi", package = "Rduckhts")
+  prefix_big <- file.path(tmp_dir, "big_fast")
+  out_big <- rduckhts_mosdepth(
+    con,
+    prefix_big,
+    big_bam_path,
+    index_path = big_index_path,
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_big$success[1]))
+  summary_big <- readLines(file.path(tmp_dir, "big_fast.mosdepth.summary.txt"))
+  expect_equal(
+    summary_big[1:3],
+    c(
+      "chrom\tlength\tbases\tmean\tmin\tmax",
+      "ref\t600000045\t16\t0.00\t0\t1",
+      "total\t600000045\t16\t0.00\t0\t1"
+    )
+  )
+  expect_true(file.exists(file.path(tmp_dir, "big_fast.per-base.bed.gz.csi")))
+
+  empty_bam_path <- system.file("extdata", "empty-tids.bam", package = "Rduckhts")
+  empty_index_path <- system.file("extdata", "empty-tids.bam.bai", package = "Rduckhts")
+  prefix_empty <- file.path(tmp_dir, "empty_tids")
+  out_empty <- rduckhts_mosdepth(
+    con,
+    prefix_empty,
+    empty_bam_path,
+    index_path = empty_index_path,
+    by = "1000",
+    no_per_base = TRUE,
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_empty$success[1]))
+  expect_true(is.na(out_empty$per_base_path[1]))
+  summary_empty <- DBI::dbGetQuery(
+    con,
+    paste0(
+      "SELECT chrom, length, bases, round(\"mean\", 2) AS mean_depth, max ",
+      "FROM read_csv('", file.path(tmp_dir, "empty_tids.mosdepth.summary.txt"), "', delim = '\t', header = TRUE) ",
+      "WHERE chrom = 'HPV18'"
+    )
+  )
+  expect_equal(
+    summary_empty,
+    data.frame(
+      chrom = "HPV18",
+      length = 7857,
+      bases = 1776620,
+      mean_depth = 226.12,
+      max = 647
+    )
+  )
+  empty_windows <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste(
+        "SELECT chrom, start_pos, end_pos, round(mean_depth, 2) AS mean_depth",
+        "FROM read_csv(%s,",
+        "  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'mean_depth':'DOUBLE'},",
+        "  delim = '\\t',",
+        "  header = FALSE",
+        ")",
+        "WHERE chrom = 'CMV'",
+        "ORDER BY start_pos",
+        "LIMIT 3"
+      ),
+      sprintf("'%s'", file.path(tmp_dir, "empty_tids.regions.bed.gz"))
+    )
+  )
+  expect_equal(
+    empty_windows,
+    data.frame(
+      chrom = rep("CMV", 3),
+      start_pos = c(0, 1000, 2000),
+      end_pos = c(1000, 2000, 3000),
+      mean_depth = c(0, 0, 0)
+    )
+  )
+
   prefix_noper <- file.path(tmp_dir, "range_noper")
   out_noper <- rduckhts_mosdepth(
     con,
@@ -115,6 +275,43 @@ test_mosdepth <- function() {
       fast_mode = FALSE,
       overwrite = TRUE
     )
+  )
+
+  expect_error(
+    rduckhts_mosdepth(
+      con,
+      file.path(tmp_dir, "range_badprec"),
+      bam_path,
+      index_path = bam_index_path,
+      precision_digits = -1,
+      overwrite = TRUE
+    ),
+    pattern = "precision_digits must be between 0 and 18"
+  )
+
+  expect_error(
+    rduckhts_mosdepth(
+      con,
+      file.path(tmp_dir, "range_badthr"),
+      bam_path,
+      index_path = bam_index_path,
+      thresholds = "1,2",
+      overwrite = TRUE
+    ),
+    pattern = "thresholds requires by"
+  )
+
+  expect_error(
+    rduckhts_mosdepth(
+      con,
+      file.path(tmp_dir, "range_badthrspec"),
+      bam_path,
+      index_path = bam_index_path,
+      by = "1000",
+      thresholds = "1,nope",
+      overwrite = TRUE
+    ),
+    pattern = "invalid thresholds string"
   )
 }
 

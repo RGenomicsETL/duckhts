@@ -10,12 +10,15 @@ rduckhts_mosdepth(
   path,
   chrom = NULL,
   by = NULL,
+  fasta = NULL,
   no_per_base = FALSE,
   threads = 0,
   flag = 1796,
   include_flag = 0,
   fast_mode = TRUE,
   mapq = 0,
+  precision_digits = 2,
+  thresholds = NULL,
   index_path = NULL,
   overwrite = FALSE
 )
@@ -25,11 +28,13 @@ rduckhts_mosdepth(
 
 \item{prefix}{Output prefix for the mosdepth-style files}
 
-\item{path}{Path to the input BAM file}
+\item{path}{Path to the input BAM or CRAM file}
 
 \item{chrom}{Optional chromosome name filter}
 
 \item{by}{Optional fixed-width window size as a string or a BED file path}
+
+\item{fasta}{Optional reference FASTA path for CRAM input when required}
 
 \item{no_per_base}{Skip writing `\{prefix\}.per-base.bed.gz`}
 
@@ -42,6 +47,10 @@ rduckhts_mosdepth(
 \item{fast_mode}{Must currently remain `TRUE`}
 
 \item{mapq}{Minimum mapping quality threshold}
+
+\item{precision_digits}{Number of decimal places to write in the text outputs}
+
+\item{thresholds}{Optional comma-separated coverage thresholds for `by`, matching mosdepth's `-T`}
 
 \item{index_path}{Optional explicit BAM index path}
 

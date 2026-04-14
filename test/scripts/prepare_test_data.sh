@@ -35,6 +35,29 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  parallel_empty_contigs.bam + .bai"
 
+# ---- Upstream mosdepth conformance fixtures (copy as-is) ----
+MOSDEPTH_SRC="$REPO_ROOT/.sync/mosdepth/tests"
+for out_dir in "$DST" "$PKG_DST"; do
+  cp "$MOSDEPTH_SRC/bad.bed" "$out_dir/bad.bed"
+  cp "$MOSDEPTH_SRC/big.bam" "$out_dir/big.bam"
+  cp "$MOSDEPTH_SRC/big.bam.csi" "$out_dir/big.bam.csi"
+  cp "$MOSDEPTH_SRC/empty-tids.bam" "$out_dir/empty-tids.bam"
+  cp "$MOSDEPTH_SRC/empty-tids.bam.bai" "$out_dir/empty-tids.bam.bai"
+  cp "$MOSDEPTH_SRC/empty-tids.bed" "$out_dir/empty-tids.bed"
+  cp "$MOSDEPTH_SRC/full-fragment-pairs.bam" "$out_dir/full-fragment-pairs.bam"
+  cp "$MOSDEPTH_SRC/full-fragment-pairs.bam.bai" "$out_dir/full-fragment-pairs.bam.bai"
+  cp "$MOSDEPTH_SRC/missing.bed" "$out_dir/missing.bed"
+  cp "$MOSDEPTH_SRC/nanopore.bam" "$out_dir/nanopore.bam"
+  cp "$MOSDEPTH_SRC/nanopore.bam.bai" "$out_dir/nanopore.bam.bai"
+  cp "$MOSDEPTH_SRC/overlapping-pairs.bam" "$out_dir/overlapping-pairs.bam"
+  cp "$MOSDEPTH_SRC/overlapping-pairs.bam.bai" "$out_dir/overlapping-pairs.bam.bai"
+  cp "$MOSDEPTH_SRC/ovl.bam" "$out_dir/ovl.bam"
+  cp "$MOSDEPTH_SRC/ovl.bam.bai" "$out_dir/ovl.bam.bai"
+  cp "$MOSDEPTH_SRC/track.bed" "$out_dir/track.bed"
+  cp "$MOSDEPTH_SRC/unordered.bed" "$out_dir/unordered.bed"
+done
+echo "  mosdepth upstream fixtures + indexes"
+
 # ---- VCF → bgzipped VCF + index ----
 bcftools view "$SRC/formatcols.vcf" -Oz -o "$DST/formatcols.vcf.gz"
 bcftools index "$DST/formatcols.vcf.gz"

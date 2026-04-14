@@ -10,3 +10,9 @@ DuckDB C API headers
 	Source: inst/duckhts_extension/duckdb_capi/duckdb.h and duckdb_extension.h
 	Authors: DuckDB contributors
 	License: See the DuckDB project license for the version of these headers
+
+Mosdepth test fixtures
+	Source: inst/extdata/{bad.bed,big.bam,empty-tids.*,full-fragment-pairs.*,missing.bed,nanopore.*,overlapping-pairs.*,ovl.*,track.bed,unordered.bed}
+	Authors: Brent Pedersen and mosdepth contributors
+	License: MIT
+	Reference: upstream mosdepth project LICENSE

@@ -34,6 +34,7 @@ DUCKDB_EXTENSION_EXTERN
 #define MOSDEPTH_DEFAULT_PRECISION 2
 #define MOSDEPTH_MAX_COVERAGE 400000
 #define MOSDEPTH_CSI_MIN_SHIFT 14
+#define MOSDEPTH_REGION_DIST_BUCKETS 512
 
 typedef struct {
     int64_t start;
@@ -53,6 +54,11 @@ typedef struct {
 } mosdepth_dist_t;
 
 typedef struct {
+    int64_t *data;
+    size_t count;
+} mosdepth_threshold_list_t;
+
+typedef struct {
     uint64_t cum_depth;
     int64_t cum_length;
     uint32_t min_depth;
@@ -64,16 +70,20 @@ typedef struct {
     char *path;
     char *chrom;
     char *by;
+    char *fasta;
     char *index_path;
     char *summary_path;
     char *global_dist_path;
     char *per_base_path;
     char *regions_path;
     char *region_dist_path;
+    char *thresholds_path;
     int64_t threads;
     int64_t flag;
     int64_t include_flag;
     int64_t mapq;
+    int64_t precision;
+    mosdepth_threshold_list_t thresholds;
     int no_per_base;
     int fast_mode;
     int overwrite;
@@ -167,15 +177,6 @@ static const char *get_field_span(const char *s, int idx, int *len) {
     return NULL;
 }
 
-static int get_mosdepth_precision(void) {
-    const char *env = getenv("MOSDEPTH_PRECISION");
-    if (!env || !*env) return MOSDEPTH_DEFAULT_PRECISION;
-    char *end = NULL;
-    long v = strtol(env, &end, 10);
-    if (!end || *end != '\0' || v < 0 || v > 18) return MOSDEPTH_DEFAULT_PRECISION;
-    return (int)v;
-}
-
 static void stat_clear(mosdepth_stat_t *stat) {
     stat->cum_depth = 0;
     stat->cum_length = 0;
@@ -204,6 +205,18 @@ static int depth_bucket_value(uint32_t depth) {
     return (int)depth;
 }
 
+/*
+ * Upstream mosdepth buckets window-region distributions from the mean depth
+ * using the integer bucket that matches its current implementation behavior.
+ * Keep this helper trivial and inline so the compiler can fold it directly
+ * into the hot region loop.
+ */
+static inline int mosdepth_window_mean_bucket(double mean_depth) {
+    int bucket = (int)(mean_depth + 0.5);
+    int max_bucket = MOSDEPTH_REGION_DIST_BUCKETS - 1;
+    return bucket > max_bucket ? max_bucket : bucket;
+}
+
 static int dist_ensure(mosdepth_dist_t *dist, size_t idx) {
     if (!dist) return -1;
     if (idx < dist->len) return 0;
@@ -226,6 +239,74 @@ static void dist_destroy(mosdepth_dist_t *dist) {
     free(dist->data);
     dist->data = NULL;
     dist->len = 0;
+}
+
+static int threshold_cmp(const void *a, const void *b) {
+    const int64_t aa = *(const int64_t *)a;
+    const int64_t bb = *(const int64_t *)b;
+    if (aa < bb) return -1;
+    if (aa > bb) return 1;
+    return 0;
+}
+
+static void threshold_list_destroy(mosdepth_threshold_list_t *thresholds) {
+    if (!thresholds) return;
+    free(thresholds->data);
+    thresholds->data = NULL;
+    thresholds->count = 0;
+}
+
+static int parse_thresholds_string(const char *spec, mosdepth_threshold_list_t *out,
+                                   char *err, size_t errlen) {
+    char *copy = NULL;
+    char *saveptr = NULL;
+    char *token = NULL;
+    size_t count = 0;
+    size_t cap = 1;
+    int64_t *values = NULL;
+
+    if (!spec || !*spec) return 0;
+
+    for (const char *p = spec; *p; p++) {
+        if (*p == ',') cap++;
+    }
+
+    copy = strdup(spec);
+    values = (int64_t *)malloc(cap * sizeof(int64_t));
+    if (!copy || !values) {
+        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+        free(copy);
+        free(values);
+        return -1;
+    }
+
+    token = strtok_r(copy, ",", &saveptr);
+    while (token) {
+        char *endptr = NULL;
+        long long value;
+        if (*token == '\0') {
+            snprintf(err, errlen, "duckhts_mosdepth: invalid thresholds string");
+            free(copy);
+            free(values);
+            return -1;
+        }
+        errno = 0;
+        value = strtoll(token, &endptr, 10);
+        if (errno != 0 || !endptr || *endptr != '\0') {
+            snprintf(err, errlen, "duckhts_mosdepth: invalid thresholds string");
+            free(copy);
+            free(values);
+            return -1;
+        }
+        values[count++] = (int64_t)value;
+        token = strtok_r(NULL, ",", &saveptr);
+    }
+
+    qsort(values, count, sizeof(int64_t), threshold_cmp);
+    out->data = values;
+    out->count = count;
+    free(copy);
+    return 0;
 }
 
 static int dist_add_count(mosdepth_dist_t *dist, int depth, int64_t count) {
@@ -488,6 +569,35 @@ static int write_zero_per_base(BGZF *fp, kstring_t *line, const char *chrom, int
     return bgzf_write_line(fp, line);
 }
 
+static int write_thresholds_header(BGZF *fp, const mosdepth_threshold_list_t *thresholds) {
+    static const char header[] = "#chrom\tstart\tend\tregion";
+    if (!fp || !thresholds || thresholds->count == 0) return 0;
+    if (bgzf_write(fp, header, strlen(header)) < 0) return -1;
+    for (size_t i = 0; i < thresholds->count; i++) {
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "\t%" PRId64 "X", thresholds->data[i]);
+        if (len < 0 || bgzf_write(fp, buf, (size_t)len) < 0) return -1;
+    }
+    if (bgzf_write(fp, "\n", 1) < 0) return -1;
+    return 0;
+}
+
+static int write_thresholds_row(BGZF *fp, kstring_t *line, const char *chrom,
+                                int64_t start, int64_t stop, const char *name,
+                                const int64_t *counts,
+                                const mosdepth_threshold_list_t *thresholds) {
+    if (!fp || !line || !chrom || !thresholds || thresholds->count == 0) return 0;
+    line->l = 0;
+    if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s",
+                 chrom, start, stop, (name && *name) ? name : "unknown") < 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < thresholds->count; i++) {
+        if (ksprintf(line, "\t%" PRId64, counts ? counts[i] : 0) < 0) return -1;
+    }
+    return bgzf_write_line(fp, line);
+}
+
 static int write_per_base_rle(BGZF *fp, kstring_t *line, const char *chrom,
                               const int32_t *coverage, int64_t len) {
     if (len <= 0) return 0;
@@ -517,28 +627,53 @@ static int write_window_regions(BGZF *fp, kstring_t *line, const char *chrom,
                                 const int32_t *coverage, int64_t len, int64_t window,
                                 mosdepth_stat_t *region_stat,
                                 mosdepth_dist_t *region_dist, int precision,
-                                int has_reads) {
+                                int has_reads, BGZF *thresholds_fp,
+                                const mosdepth_threshold_list_t *thresholds) {
+    int64_t *threshold_counts = NULL;
+    if (thresholds_fp && thresholds && thresholds->count > 0) {
+        threshold_counts = (int64_t *)calloc(thresholds->count, sizeof(int64_t));
+        if (!threshold_counts) return -1;
+    }
     for (int64_t start = 0; start < len; start += window) {
         int64_t stop = start + window;
         if (stop > len) stop = len;
         double mean = 0.0;
+        if (threshold_counts) memset(threshold_counts, 0, thresholds->count * sizeof(int64_t));
         if (has_reads) {
-            uint64_t sum = 0;
             for (int64_t i = start; i < stop; i++) {
                 uint32_t depth = (uint32_t)coverage[i];
-                sum += depth;
+                mean += (double)depth / (double)(stop - start);
                 stat_add_depth(region_stat, depth);
+                if (threshold_counts) {
+                    for (size_t j = 0; j < thresholds->count; j++) {
+                        if ((int64_t)depth < thresholds->data[j]) break;
+                        threshold_counts[j] += 1;
+                    }
+                }
             }
-            mean = (double)sum / (double)(stop - start);
-            if (dist_add_count(region_dist, (int)(mean + 0.5), 1) != 0) return -1;
+            if (dist_add_count(region_dist, mosdepth_window_mean_bucket(mean), 1) != 0) {
+                free(threshold_counts);
+                return -1;
+            }
         }
         line->l = 0;
         if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%.*f",
                      chrom, start, stop, precision, mean) < 0) {
+            free(threshold_counts);
             return -1;
         }
-        if (bgzf_write_line(fp, line) != 0) return -1;
+        if (bgzf_write_line(fp, line) != 0) {
+            free(threshold_counts);
+            return -1;
+        }
+        if (threshold_counts &&
+            write_thresholds_row(thresholds_fp, line, chrom, start, stop, NULL,
+                                 threshold_counts, thresholds) != 0) {
+            free(threshold_counts);
+            return -1;
+        }
     }
+    free(threshold_counts);
     return 0;
 }
 
@@ -547,37 +682,63 @@ static int write_bed_regions(BGZF *fp, kstring_t *line, const char *chrom,
                              const mosdepth_region_list_t *regions,
                              mosdepth_stat_t *region_stat,
                              mosdepth_dist_t *region_dist, int precision,
-                             int has_reads) {
+                             int has_reads, BGZF *thresholds_fp,
+                             const mosdepth_threshold_list_t *thresholds) {
+    int64_t *threshold_counts = NULL;
     if (!regions) return 0;
+    if (thresholds_fp && thresholds && thresholds->count > 0) {
+        threshold_counts = (int64_t *)calloc(thresholds->count, sizeof(int64_t));
+        if (!threshold_counts) return -1;
+    }
     for (size_t i = 0; i < regions->count; i++) {
         const mosdepth_region_t *r = &regions->data[i];
         int64_t in_start = r->start < 0 ? 0 : r->start;
         int64_t in_stop = r->stop > len ? len : r->stop;
         double mean = 0.0;
+        if (threshold_counts) memset(threshold_counts, 0, thresholds->count * sizeof(int64_t));
         if (has_reads && in_start < in_stop) {
-            uint64_t sum = 0;
             for (int64_t pos = in_start; pos < in_stop; pos++) {
                 uint32_t depth = (uint32_t)coverage[pos];
-                sum += depth;
+                mean += (double)depth / (double)(r->stop - r->start);
                 stat_add_depth(region_stat, depth);
-                if (dist_add_count(region_dist, depth_bucket_value(depth), 1) != 0) return -1;
+                if (dist_add_count(region_dist, depth_bucket_value(depth), 1) != 0) {
+                    free(threshold_counts);
+                    return -1;
+                }
+                if (threshold_counts) {
+                    for (size_t j = 0; j < thresholds->count; j++) {
+                        if ((int64_t)depth < thresholds->data[j]) break;
+                        threshold_counts[j] += 1;
+                    }
+                }
             }
-            mean = (double)sum / (double)(r->stop - r->start);
         }
         line->l = 0;
         if (r->name && *r->name) {
             if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s\t%.*f",
                          chrom, r->start, r->stop, r->name, precision, mean) < 0) {
+                free(threshold_counts);
                 return -1;
             }
         } else {
             if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%.*f",
                          chrom, r->start, r->stop, precision, mean) < 0) {
+                free(threshold_counts);
                 return -1;
             }
         }
-        if (bgzf_write_line(fp, line) != 0) return -1;
+        if (bgzf_write_line(fp, line) != 0) {
+            free(threshold_counts);
+            return -1;
+        }
+        if (threshold_counts &&
+            write_thresholds_row(thresholds_fp, line, chrom, r->start, r->stop, r->name,
+                                 threshold_counts, thresholds) != 0) {
+            free(threshold_counts);
+            return -1;
+        }
     }
+    free(threshold_counts);
     return 0;
 }
 
@@ -591,6 +752,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     FILE *fh_region = NULL;
     BGZF *bgzf_per_base = NULL;
     BGZF *bgzf_regions = NULL;
+    BGZF *bgzf_thresholds = NULL;
     kstring_t line = {0, 0, NULL};
     mosdepth_region_list_t *region_lists = NULL;
     mosdepth_dist_t total_global_dist = {0};
@@ -598,7 +760,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     mosdepth_stat_t total_stat;
     mosdepth_stat_t total_region_stat;
     int summary_header_written = 0;
-    int precision = get_mosdepth_precision();
+    int precision = (int)bind->precision;
     int rc = -1;
     int n_targets;
     int by_is_window = 0;
@@ -612,25 +774,29 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         snprintf(err, errlen, "duckhts_mosdepth: failed to open alignment file '%s'", bind->path);
         goto cleanup;
     }
-    if (bind->threads > 0 && hts_set_threads(fp, (int)bind->threads) < 0) {
-        snprintf(err, errlen, "duckhts_mosdepth: failed to configure decompression threads");
+    if (bind->fasta && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->fasta) < 0) {
+        snprintf(err, errlen, "duckhts_mosdepth: failed to set CRAM reference '%s'", bind->fasta);
         goto cleanup;
     }
-    if (fp->format.format == cram) {
-        snprintf(err, errlen,
-                 "duckhts_mosdepth: CRAM input is not supported yet in the native rewrite; use BAM for now");
+    if (bind->threads > 0 && hts_set_threads(fp, (int)bind->threads) < 0) {
+        snprintf(err, errlen, "duckhts_mosdepth: failed to configure decompression threads");
         goto cleanup;
     }
 
     hdr = sam_hdr_read(fp);
     if (!hdr) {
-        snprintf(err, errlen, "duckhts_mosdepth: failed to read BAM header");
+        if (fp->format.format == cram && !bind->fasta) {
+            snprintf(err, errlen,
+                     "duckhts_mosdepth: failed to read CRAM header; provide fasta := '<reference.fa>' when required");
+        } else {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to read alignment header");
+        }
         goto cleanup;
     }
     idx = sam_index_load3(fp, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL | HTS_IDX_SAVE_REMOTE);
     if (!idx) {
         snprintf(err, errlen,
-                 "duckhts_mosdepth: indexed BAM input is required (failed to load .bai/.csi)");
+                 "duckhts_mosdepth: indexed BAM/CRAM input is required (failed to load .bai/.csi/.crai)");
         goto cleanup;
     }
     rec = bam_init1();
@@ -676,6 +842,13 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     if (bind->regions_path && open_bgzf_or_error(&bgzf_regions, bind->regions_path, err, errlen) != 0) {
         goto cleanup;
     }
+    if (bind->thresholds_path && open_bgzf_or_error(&bgzf_thresholds, bind->thresholds_path, err, errlen) != 0) {
+        goto cleanup;
+    }
+    if (bgzf_thresholds && write_thresholds_header(bgzf_thresholds, &bind->thresholds) != 0) {
+        snprintf(err, errlen, "duckhts_mosdepth: failed to write thresholds header");
+        goto cleanup;
+    }
 
     for (int tid = 0; tid < n_targets; tid++) {
         const char *chrom = sam_hdr_tid2name(hdr, tid);
@@ -683,6 +856,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         hts_itr_t *itr = NULL;
         int32_t *coverage = NULL;
         int has_reads = 0;
+        int iter_rc = -1;
         mosdepth_dist_t chrom_global_dist = {0};
         mosdepth_dist_t chrom_region_dist = {0};
         mosdepth_stat_t chrom_stat;
@@ -706,7 +880,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
 
         itr = sam_itr_queryi(idx, tid, 0, chrom_len);
         if (itr) {
-            while (sam_itr_next(fp, itr, rec) >= 0) {
+            while ((iter_rc = sam_itr_next(fp, itr, rec)) >= 0) {
                 hts_pos_t start = rec->core.pos;
                 hts_pos_t stop = bam_endpos(rec);
 
@@ -724,6 +898,16 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
                 coverage[stop] -= 1;
                 has_reads = 1;
             }
+            if (iter_rc < -1) {
+                if (fp->format.format == cram && !bind->fasta) {
+                    snprintf(err, errlen,
+                             "duckhts_mosdepth: CRAM decode failed while scanning '%s'; provide fasta := '<reference.fa>'",
+                             chrom);
+                } else {
+                    snprintf(err, errlen, "duckhts_mosdepth: failed while scanning '%s'", chrom);
+                }
+                goto contig_cleanup;
+            }
         }
 
         if (!has_reads) {
@@ -735,14 +919,16 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
                 if (by_is_window) {
                     if (write_window_regions(bgzf_regions, &line, chrom, NULL, chrom_len, window,
                                              &chrom_region_stat, &chrom_region_dist,
-                                             precision, 0) != 0) {
+                                             precision, 0, bgzf_thresholds,
+                                             &bind->thresholds) != 0) {
                         snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                         goto contig_cleanup;
                     }
                 } else if (region_lists) {
                     if (write_bed_regions(bgzf_regions, &line, chrom, NULL, chrom_len, &region_lists[tid],
                                           &chrom_region_stat, &chrom_region_dist,
-                                          precision, 0) != 0) {
+                                          precision, 0, bgzf_thresholds,
+                                          &bind->thresholds) != 0) {
                         snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                         goto contig_cleanup;
                     }
@@ -785,14 +971,16 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             if (by_is_window) {
                 if (write_window_regions(bgzf_regions, &line, chrom, coverage, chrom_len, window,
                                          &chrom_region_stat, &chrom_region_dist,
-                                         precision, 1) != 0) {
+                                         precision, 1, bgzf_thresholds,
+                                         &bind->thresholds) != 0) {
                     snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                     goto contig_cleanup;
                 }
             } else if (region_lists) {
                 if (write_bed_regions(bgzf_regions, &line, chrom, coverage, chrom_len, &region_lists[tid],
                                       &chrom_region_stat, &chrom_region_dist,
-                                      precision, 1) != 0) {
+                                      precision, 1, bgzf_thresholds,
+                                      &bind->thresholds) != 0) {
                     snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                     goto contig_cleanup;
                 }
@@ -866,6 +1054,12 @@ cleanup:
             rc = -1;
         }
     }
+    if (bgzf_thresholds) {
+        if (bgzf_close(bgzf_thresholds) != 0 && rc == 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to close thresholds output");
+            rc = -1;
+        }
+    }
     if (fh_summary && fclose(fh_summary) != 0 && rc == 0) {
         snprintf(err, errlen, "duckhts_mosdepth: failed to close summary output");
         rc = -1;
@@ -892,6 +1086,7 @@ cleanup:
     if (rc == 0) {
         if (bind->per_base_path && build_bed_csi(bind->per_base_path, err, errlen) != 0) rc = -1;
         if (rc == 0 && bind->regions_path && build_bed_csi(bind->regions_path, err, errlen) != 0) rc = -1;
+        if (rc == 0 && bind->thresholds_path && build_bed_csi(bind->thresholds_path, err, errlen) != 0) rc = -1;
     }
     return rc;
 }
@@ -903,12 +1098,15 @@ static void destroy_mosdepth_bind(void *data) {
     if (bind->path) duckdb_free(bind->path);
     if (bind->chrom) duckdb_free(bind->chrom);
     if (bind->by) duckdb_free(bind->by);
+    if (bind->fasta) duckdb_free(bind->fasta);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->summary_path) duckdb_free(bind->summary_path);
     if (bind->global_dist_path) duckdb_free(bind->global_dist_path);
     if (bind->per_base_path) duckdb_free(bind->per_base_path);
     if (bind->regions_path) duckdb_free(bind->regions_path);
     if (bind->region_dist_path) duckdb_free(bind->region_dist_path);
+    if (bind->thresholds_path) duckdb_free(bind->thresholds_path);
+    threshold_list_destroy(&bind->thresholds);
     duckdb_free(bind);
 }
 
@@ -922,6 +1120,7 @@ static void add_result_columns(duckdb_bind_info info) {
     duckdb_bind_add_result_column(info, "per_base_path", varchar_type);
     duckdb_bind_add_result_column(info, "regions_path", varchar_type);
     duckdb_bind_add_result_column(info, "region_dist_path", varchar_type);
+    duckdb_bind_add_result_column(info, "thresholds_path", varchar_type);
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_logical_type(&varchar_type);
 }
@@ -967,6 +1166,7 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     bind->flag = 1796;
     bind->include_flag = 0;
     bind->mapq = 0;
+    bind->precision = MOSDEPTH_DEFAULT_PRECISION;
     bind->fast_mode = 1;
     bind->no_per_base = 0;
     bind->overwrite = 0;
@@ -977,6 +1177,10 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
 
     val = duckdb_bind_get_named_parameter(info, "by");
     if (val && !duckdb_is_null_value(val)) bind->by = duckdb_get_varchar(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "fasta");
+    if (val && !duckdb_is_null_value(val)) bind->fasta = duckdb_get_varchar(val);
     if (val) duckdb_destroy_value(&val);
 
     val = duckdb_bind_get_named_parameter(info, "index_path");
@@ -999,6 +1203,26 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) bind->mapq = duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
+    val = duckdb_bind_get_named_parameter(info, "precision_digits");
+    if (val && !duckdb_is_null_value(val)) bind->precision = duckdb_get_int64(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "thresholds");
+    if (val && !duckdb_is_null_value(val)) {
+        char *thresholds = duckdb_get_varchar(val);
+        if (thresholds) {
+            if (parse_thresholds_string(thresholds, &bind->thresholds, err, sizeof(err)) != 0) {
+                duckdb_free(thresholds);
+                duckdb_destroy_value(&val);
+                destroy_mosdepth_bind(bind);
+                duckdb_bind_set_error(info, err);
+                return;
+            }
+            duckdb_free(thresholds);
+        }
+    }
+    if (val) duckdb_destroy_value(&val);
+
     val = duckdb_bind_get_named_parameter(info, "no_per_base");
     if (val && !duckdb_is_null_value(val)) bind->no_per_base = duckdb_get_bool(val) ? 1 : 0;
     if (val) duckdb_destroy_value(&val);
@@ -1016,6 +1240,11 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckhts_mosdepth: threads must be >= 0");
         return;
     }
+    if (bind->fasta && bind->fasta[0] == '\0') {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_mosdepth: fasta must be non-empty when provided");
+        return;
+    }
     if (bind->flag < 0 || bind->flag > 65535 || bind->include_flag < 0 || bind->include_flag > 65535) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, "duckhts_mosdepth: flag and include_flag must be between 0 and 65535");
@@ -1026,10 +1255,21 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckhts_mosdepth: mapq must be >= 0");
         return;
     }
+    if (bind->precision < 0 || bind->precision > 18) {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_mosdepth: precision_digits must be between 0 and 18");
+        return;
+    }
     if (!bind->fast_mode) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info,
                               "duckhts_mosdepth currently implements only fast_mode := TRUE");
+        return;
+    }
+    if (bind->thresholds.count > 0 && (!bind->by || bind->by[0] == '\0')) {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info,
+                              "duckhts_mosdepth: thresholds requires by := '<window|bed>'");
         return;
     }
 
@@ -1038,9 +1278,11 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     bind->per_base_path = bind->no_per_base ? NULL : append_suffix(bind->prefix, ".per-base.bed.gz");
     bind->regions_path = (bind->by && bind->by[0] != '\0') ? append_suffix(bind->prefix, ".regions.bed.gz") : NULL;
     bind->region_dist_path = (bind->by && bind->by[0] != '\0') ? append_suffix(bind->prefix, ".mosdepth.region.dist.txt") : NULL;
+    bind->thresholds_path = (bind->thresholds.count > 0) ? append_suffix(bind->prefix, ".thresholds.bed.gz") : NULL;
     if (!bind->summary_path || !bind->global_dist_path ||
         (!bind->no_per_base && !bind->per_base_path) ||
-        ((bind->by && bind->by[0] != '\0') && (!bind->regions_path || !bind->region_dist_path))) {
+        ((bind->by && bind->by[0] != '\0') && (!bind->regions_path || !bind->region_dist_path)) ||
+        (bind->thresholds.count > 0 && !bind->thresholds_path)) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, "duckhts_mosdepth: out of memory");
         return;
@@ -1050,7 +1292,8 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
         ensure_output_available(bind->global_dist_path, bind->overwrite, err, sizeof(err)) != 0 ||
         ensure_output_available(bind->per_base_path, bind->overwrite, err, sizeof(err)) != 0 ||
         ensure_output_available(bind->regions_path, bind->overwrite, err, sizeof(err)) != 0 ||
-        ensure_output_available(bind->region_dist_path, bind->overwrite, err, sizeof(err)) != 0) {
+        ensure_output_available(bind->region_dist_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->thresholds_path, bind->overwrite, err, sizeof(err)) != 0) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, err);
         return;
@@ -1086,6 +1329,7 @@ static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk o
     duckdb_vector per_base_vec = duckdb_data_chunk_get_vector(output, 4);
     duckdb_vector regions_vec = duckdb_data_chunk_get_vector(output, 5);
     duckdb_vector region_dist_vec = duckdb_data_chunk_get_vector(output, 6);
+    duckdb_vector thresholds_vec = duckdb_data_chunk_get_vector(output, 7);
 
     bool *success = (bool *)duckdb_vector_get_data(success_vec);
     success[0] = true;
@@ -1098,6 +1342,8 @@ static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk o
     else set_null(regions_vec, 0);
     if (bind->region_dist_path) duckdb_vector_assign_string_element(region_dist_vec, 0, bind->region_dist_path);
     else set_null(region_dist_vec, 0);
+    if (bind->thresholds_path) duckdb_vector_assign_string_element(thresholds_vec, 0, bind->thresholds_path);
+    else set_null(thresholds_vec, 0);
 
     bind->emitted = 1;
     duckdb_data_chunk_set_size(output, 1);
@@ -1114,12 +1360,15 @@ void register_duckhts_mosdepth_function(duckdb_connection connection) {
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "chrom", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "by", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "fasta", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "no_per_base", bool_type);
     duckdb_table_function_add_named_parameter(tf, "threads", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "flag", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "include_flag", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "fast_mode", bool_type);
     duckdb_table_function_add_named_parameter(tf, "mapq", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "precision_digits", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "thresholds", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "overwrite", bool_type);
     duckdb_table_function_set_bind(tf, duckhts_mosdepth_bind);

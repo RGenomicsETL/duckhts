@@ -42,10 +42,12 @@ python3 scripts/mosdepth_benchmark.py \
 
 Observed local results on that date:
 
-- conformance: `7/7` pass on the current SQL reproduction
-- benchmark on `HG00106 chr11`:
-  - fast mode: DuckHTS SQL `0.9s`, mosdepth `1.9s`
-  - default mode: DuckHTS SQL `3.7s`, mosdepth `2.2s`
+- the original SQL reconstruction was useful as an early oracle, but it is no
+  longer the validation target
+- `scripts/mosdepth_conformance.py` and `scripts/mosdepth_benchmark.py` should
+  now exercise only the native `duckhts_mosdepth(...)` table function
+- any remaining SQL-first coverage logic belongs to generic interval/depth
+  primitives, not to the mosdepth rewrite workflow
 
 ### Important versioning warning
 
