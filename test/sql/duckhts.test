@@ -390,6 +390,16 @@ SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq');
 ----
 5
 
+# --- projection pushdown: COUNT(*) fast path ---
+query I
+SELECT count(*) FROM read_fastq(
+    '__WORKING_DIRECTORY__/test/data/r1.fq',
+    sequence_encoding := 'nt16',
+    quality_representation := 'phred'
+);
+----
+5
+
 # --- first row: name and lengths ---
 query III
 SELECT NAME, length(SEQUENCE), length(QUALITY) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq') LIMIT 1;

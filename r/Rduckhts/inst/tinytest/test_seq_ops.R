@@ -175,6 +175,13 @@ test_seq_ops <- function() {
   fq_nt16_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM fq_nt16")
   expect_equal(fq_str_n$n[1], fq_nt16_n$n[1])
 
+  # direct SQL COUNT(*) should stay on the zero-column FASTQ fast path
+  fq_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_fastq(",
+    "'%s', sequence_encoding := 'nt16', quality_representation := 'phred')"
+  ), fastq_r1))
+  expect_equal(fq_count_only$n[1], fq_str_n$n[1])
+
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(
     "SELECT * FROM read_fastq('%s', sequence_encoding := 'xyz')", fastq_r1)))
