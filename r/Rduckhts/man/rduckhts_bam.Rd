@@ -15,6 +15,7 @@ rduckhts_bam(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  decompression_threads = 2,
   overwrite = FALSE
 )
 }
@@ -42,6 +43,10 @@ rduckhts_bam(
 \item{quality_representation}{Character. Quality representation for the QUAL column:
 \code{"string"} (default) returns canonical Phred+33 text;
 \code{"phred"} returns raw Phred values as \code{UTINYINT[]}.}
+
+\item{decompression_threads}{Integer. Number of htslib decompression worker
+threads per file handle. Default \code{2}. Use \code{0} to disable worker
+threads.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

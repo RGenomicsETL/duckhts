@@ -1082,6 +1082,64 @@ rduckhts_bgunzip <- function(
   DBI::dbGetQuery(con, query)
 }
 
+#' Native mosdepth-Compatible Fast-Mode Coverage Outputs
+#'
+#' Writes an initial native mosdepth-compatible fast-mode output set for an indexed BAM file.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param prefix Output prefix for the mosdepth-style files
+#' @param path Path to the input BAM file
+#' @param chrom Optional chromosome name filter
+#' @param by Optional fixed-width window size as a string or a BED file path
+#' @param no_per_base Skip writing `{prefix}.per-base.bed.gz`
+#' @param threads Number of BAM decompression threads
+#' @param flag Excluded SAM flag mask, matching mosdepth's `-F`
+#' @param include_flag Required SAM flag mask, matching mosdepth's `-i`
+#' @param fast_mode Must currently remain `TRUE`
+#' @param mapq Minimum mapping quality threshold
+#' @param index_path Optional explicit BAM index path
+#' @param overwrite Overwrite existing output files
+#'
+#' @return A data frame describing the written output paths
+#'
+#' @export
+rduckhts_mosdepth <- function(
+  con,
+  prefix,
+  path,
+  chrom = NULL,
+  by = NULL,
+  no_per_base = FALSE,
+  threads = 0,
+  flag = 1796,
+  include_flag = 0,
+  fast_mode = TRUE,
+  mapq = 0,
+  index_path = NULL,
+  overwrite = FALSE
+) {
+  params <- list(
+    no_per_base = if (isTRUE(no_per_base)) "true" else "false",
+    threads = threads,
+    flag = flag,
+    include_flag = include_flag,
+    fast_mode = if (isTRUE(fast_mode)) "true" else "false",
+    mapq = mapq
+  )
+  if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
+  if (!is.null(by)) params$by <- sql_quote_string(by)
+  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
+  if (isTRUE(overwrite)) params$overwrite <- "true"
+  param_str <- build_param_str(params)
+  query <- sprintf(
+    "SELECT * FROM duckhts_mosdepth(%s, %s%s)",
+    sql_quote_string(prefix),
+    sql_quote_string(path),
+    param_str
+  )
+  DBI::dbGetQuery(con, query)
+}
+
 #' Build BAM or CRAM Index
 #'
 #' Builds a BAM or CRAM index using the DuckHTS extension.

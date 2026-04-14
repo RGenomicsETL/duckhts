@@ -240,6 +240,18 @@
       ]
     },
     {
+      "name": "duckhts_mosdepth",
+      "kind": "table",
+      "category": "Coverage",
+      "signature": "duckhts_mosdepth(prefix, path, chrom := NULL, by := NULL, no_per_base := FALSE, threads := 0, flag := 1796, include_flag := 0, fast_mode := TRUE, mapq := 0, index_path := NULL, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_mosdepth",
+      "description": "Write an initial native mosdepth-compatible fast-mode output set for indexed BAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, and optional window/BED region outputs; fast_mode must currently remain TRUE.",
+      "examples": [
+        "SELECT * FROM duckhts_mosdepth('sample', 'range.bam', by := '1000', overwrite := TRUE);"
+      ]
+    },
+    {
       "name": "read_hts_header",
       "kind": "table",
       "category": "Metadata",

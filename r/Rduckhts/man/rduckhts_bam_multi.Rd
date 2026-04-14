@@ -15,6 +15,7 @@ rduckhts_bam_multi(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  decompression_threads = 2,
   .params = NULL,
   overwrite = FALSE
 )
@@ -39,6 +40,10 @@ rduckhts_bam_multi(
 \item{sequence_encoding}{Optional sequence encoding (e.g. \code{"twoBit"}).}
 
 \item{quality_representation}{Optional quality representation.}
+
+\item{decompression_threads}{Integer. Number of htslib decompression worker
+threads per file handle. Default \code{2}. Use \code{0} to disable worker
+threads.}
 
 \item{.params}{Optional data.frame with per-file parameter overrides.
 Must contain a \code{file} column; other columns override uniform parameters.
