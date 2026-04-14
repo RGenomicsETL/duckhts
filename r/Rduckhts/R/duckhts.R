@@ -1091,7 +1091,7 @@ rduckhts_bgunzip <- function(
 #' @param path Path to the input BAM file
 #' @param chrom Optional chromosome name filter
 #' @param by Optional fixed-width window size as a string or a BED file path
-#' @param no_per_base Skip writing `{prefix}.per-base.bed.gz`
+#' @param no_per_base Skip writing `\{prefix\}.per-base.bed.gz`
 #' @param threads Number of BAM decompression threads
 #' @param flag Excluded SAM flag mask, matching mosdepth's `-F`
 #' @param include_flag Required SAM flag mask, matching mosdepth's `-i`
