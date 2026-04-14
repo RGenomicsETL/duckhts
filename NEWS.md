@@ -1,7 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.1.6.9000 Developement version
-
+- add `duckhts_mosdepth(...)`: an initial native mosdepth-compatible fast-mode rewrite for indexed BAM input that writes mosdepth-style `summary`, `global.dist`, `per-base.bed.gz` + `.csi`, and optional window/BED `regions.bed.gz` + `.csi` outputs, while erroring loudly for the not-yet-native default-mode/deferred features
 - expand the source READMEs with runnable compression/indexing examples covering `bgzip(...)`, `bgunzip(...)`, `bam_index(...)`, `bcf_index(...)`, and `tabix_index(...)`, and regenerate the rendered README outputs
 - make `read_bam(...)` htslib decompression workers configurable via `decompression_threads := 2`; the previous hardcoded thread count is now the documented default, and `decompression_threads := 0` disables per-file htslib worker threads
 - speed up zero-column `COUNT(*)` scans across the HTS readers: `read_bam(...)`, `read_bcf(...)`, `read_tabix(...)`, `read_gff(...)`, `read_gtf(...)`, and indexed `read_bed(...)` now use index metadata for full-file count-only scans when DuckDB projects no output columns; `read_fasta(...)` uses `faidx` sequence counts when an index is available and otherwise counts FASTA headers directly; `read_fastq(...)` continues to count raw FASTQ records directly when no projected columns are needed, while preserving paired/interleaved validation errors

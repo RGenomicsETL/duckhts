@@ -51,6 +51,7 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "hts_meta_reader.c",
     "quality_encoding.c",
     "quality_encoding_reader.c",
+    "mosdepth_table.c",
     "bcftools_filter.c",
     "bcftools_shim.c",
     "score_udf.c",
@@ -233,6 +234,7 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "hts_meta_reader.c",
       "quality_encoding.c",
       "quality_encoding_reader.c",
+      "mosdepth_table.c",
       "score_udf.c",
       "vep_parser.c"
     )

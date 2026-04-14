@@ -1,6 +1,6 @@
 
 # Rduckhts 1.1.6.9000-0.0.6 (Development version)
-
+- Add `rduckhts_mosdepth()` and bundled `duckhts_mosdepth(...)`: an initial native mosdepth-compatible fast-mode rewrite for indexed BAM input that writes mosdepth-style summary/distribution/per-base outputs and optional window/BED region outputs, while still erroring for the deferred non-fast-mode feature set.
 - Expand `README.Rmd` with runnable compression/indexing examples covering `rduckhts_bgzip()`, `rduckhts_bgunzip()`, `rduckhts_bam_index()`, `rduckhts_bcf_index()`, and `rduckhts_tabix_index()`, then regenerate the rendered package README outputs.
 - Add `decompression_threads` to `rduckhts_bam()` and `rduckhts_bam_multi()`, matching the bundled `read_bam(..., decompression_threads := 2)` SQL parameter. The previous hardcoded htslib worker-thread count is now the documented default, and `0` disables per-file worker threads.
 - Speed up bundled zero-column `COUNT(*)` queries across the HTS readers: `read_bam(...)`, `read_bcf(...)`, `read_tabix(...)`, `read_gff(...)`, `read_gtf(...)`, and indexed `read_bed(...)` now use index metadata for full-file count-only scans when DuckDB projects no output columns; `read_fasta(...)` uses `faidx` sequence counts when an index is available and otherwise counts FASTA headers directly; `read_fastq(...)` continues to count raw FASTQ records directly when no projected columns are needed, while preserving paired/interleaved validation errors.

@@ -51,6 +51,8 @@ extern void register_read_hts_index_spans_function(duckdb_connection connection)
 extern void register_detect_quality_encoding_function(duckdb_connection connection);
 /* score_udf.c */
 extern void register_bcftools_score_function(duckdb_connection connection);
+/* mosdepth_table.c */
+extern void register_duckhts_mosdepth_function(duckdb_connection connection);
 
 static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
     duckdb_result result;
@@ -126,6 +128,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_hts_index_spans_function(connection);
     register_detect_quality_encoding_function(connection);
     register_bcftools_score_function(connection);
+    register_duckhts_mosdepth_function(connection);
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
