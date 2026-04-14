@@ -75,6 +75,17 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf');
 ----
 15
 
+# --- projection pushdown: indexed COUNT(*) in tidy mode ---
+query I
+SELECT count(*)
+FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/vcf_file.bcf',
+  tidy_format := true,
+  index_path := '__WORKING_DIRECTORY__/test/data/vcf_file.bcf.csi'
+);
+----
+30
+
 # --- first three rows of the BCF ---
 query III
 SELECT CHROM, POS, REF FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf') LIMIT 3;
@@ -154,6 +165,29 @@ VARCHAR[]
 # --- record count ---
 query I
 SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam');
+----
+112
+
+# --- projection pushdown: indexed COUNT(*) with encoding options ---
+query I
+SELECT count(*)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+  sequence_encoding := 'nt16',
+  quality_representation := 'phred',
+  decompression_threads := 1
+);
+----
+112
+
+# --- decompression_threads := 0 disables htslib worker threads ---
+query I
+SELECT count(*)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  decompression_threads := 0
+);
 ----
 112
 
@@ -264,6 +298,17 @@ SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa');
 ----
 7
 
+# --- projection pushdown: indexed COUNT(*) with sequence encoding option ---
+query I
+SELECT count(*)
+FROM read_fasta(
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai',
+  sequence_encoding := 'nt16'
+);
+----
+7
+
 # --- first sequence name ---
 query I
 SELECT NAME FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa') LIMIT 1;
@@ -347,6 +392,15 @@ FROM read_bed(
 ----
 2
 
+query I
+SELECT count(*)
+FROM read_bed(
+  '__WORKING_DIRECTORY__/test_targets.bed.gz',
+  index_path := '__WORKING_DIRECTORY__/test_targets.bed.gz.tbi'
+);
+----
+4
+
 query RRIIIIIII
 SELECT pct_at, pct_gc, num_a, num_c, num_g, num_t, num_n, num_other, seq_len
 FROM fasta_nuc(
@@ -387,6 +441,16 @@ GCCTAAGCCT
 # --- record count ---
 query I
 SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq');
+----
+5
+
+# --- projection pushdown: COUNT(*) fast path ---
+query I
+SELECT count(*) FROM read_fastq(
+    '__WORKING_DIRECTORY__/test/data/r1.fq',
+    sequence_encoding := 'nt16',
+    quality_representation := 'phred'
+);
 ----
 5
 
@@ -497,6 +561,17 @@ query II
 SELECT chrom, pos FROM read_tabix('__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz', header := true) LIMIT 1;
 ----
 chr1	1
+
+# --- projection pushdown: indexed COUNT(*) with skipped header row ---
+query I
+SELECT count(*)
+FROM read_tabix(
+  '__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz',
+  header := true,
+  index_path := '__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz.tbi'
+);
+----
+2
 
 # --- override column names explicitly ---
 query II
@@ -915,6 +990,11 @@ statement error
 SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', sequence_encoding := 'invalid') LIMIT 1;
 ----
 sequence_encoding must be 'string' or 'nt16'
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', decompression_threads := -1) LIMIT 1;
+----
+decompression_threads must be between 0 and INT_MAX
 
 # --- read_fasta: nt16 returns UTINYINT list ---
 query T

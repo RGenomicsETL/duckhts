@@ -41,7 +41,7 @@ expect_identical(
   names(formals(rduckhts_bam)),
   c("con", "table_name", "path", "region", "index_path", "reference",
     "standard_tags", "auxiliary_tags", "sequence_encoding",
-    "quality_representation", "overwrite")
+    "quality_representation", "decompression_threads", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bam_index)),
@@ -214,6 +214,8 @@ expect_equal(unique(rduckhts_functions(category = "CIGAR Utils")$category), "CIG
 # Test parameter validation - these should fail gracefully without a connection
 expect_error(rduckhts_bcf(NULL, "test", "nonexistent.vcf"))
 expect_error(rduckhts_bam(NULL, "test", "nonexistent.bam"))
+expect_error(rduckhts_bam(NULL, "test", "nonexistent.bam", decompression_threads = -1))
+expect_error(rduckhts_bam(NULL, "test", "nonexistent.bam", decompression_threads = 1.5))
 expect_error(rduckhts_bam_index(NULL, "nonexistent.bam"))
 expect_error(rduckhts_bcf_index(NULL, "nonexistent.vcf.gz"))
 expect_error(rduckhts_bgzip(NULL, "nonexistent.txt"))
@@ -247,7 +249,7 @@ expect_identical(
   names(formals(rduckhts_bam_multi)),
   c("con", "table_name", "files", "region", "index_path", "reference",
     "standard_tags", "auxiliary_tags", "sequence_encoding",
-    "quality_representation", ".params", "overwrite")
+    "quality_representation", "decompression_threads", ".params", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bcf_multi)),
@@ -291,5 +293,6 @@ expect_identical(
 # Test .params validation (these should fail with bad input, no connection needed)
 expect_error(rduckhts_bam_multi(NULL, "t", "*.bam", .params = "not a data.frame"))
 expect_error(rduckhts_bam_multi(NULL, "t", "*.bam", .params = data.frame(x = 1)))
+expect_error(rduckhts_bam_multi(NULL, "t", "*.bam", decompression_threads = -1))
 
 message("All basic tests passed!")

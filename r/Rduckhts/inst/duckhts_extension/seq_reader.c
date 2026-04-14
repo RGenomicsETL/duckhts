@@ -26,10 +26,13 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <ctype.h>
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
 #include <htslib/faidx.h>
+#include <htslib/kseq.h>
+#include <htslib/kstring.h>
 
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
@@ -75,13 +78,23 @@ typedef struct {
     samFile *fp;
     sam_hdr_t *hdr;
     bam1_t *rec;
+    htsFile *count_fp;
+    kstring_t count_line;
+    kstring_t count_name;
     samFile *fp_mate;
     sam_hdr_t *hdr_mate;
     bam1_t *rec_mate;
+    htsFile *count_fp_mate;
+    kstring_t count_line_mate;
+    kstring_t count_name_mate;
     int done;
     int is_fastq;
     int interleaved;
     int paired;
+    int count_only;
+    int fastq_count_only;
+    int fasta_count_only;
+    uint64_t count_remaining;
     int pending_mate;
     int interleaved_mate;
     faidx_t *fai;
@@ -131,10 +144,16 @@ static void destroy_seq_init(void *data) {
     if (init->rec) bam_destroy1(init->rec);
     if (init->hdr) sam_hdr_destroy(init->hdr);
     if (init->fp) sam_close(init->fp);
+    if (init->count_fp) hts_close(init->count_fp);
     if (init->fai) fai_destroy(init->fai);
     if (init->rec_mate) bam_destroy1(init->rec_mate);
     if (init->hdr_mate) sam_hdr_destroy(init->hdr_mate);
     if (init->fp_mate) sam_close(init->fp_mate);
+    if (init->count_fp_mate) hts_close(init->count_fp_mate);
+    ks_free(&init->count_line);
+    ks_free(&init->count_name);
+    ks_free(&init->count_line_mate);
+    ks_free(&init->count_name_mate);
     if (init->column_ids) duckdb_free(init->column_ids);
     if (init->seq_buf) free(init->seq_buf);
     if (init->qual_buf) free(init->qual_buf);
@@ -231,6 +250,73 @@ static void parse_regions_duckdb(const char *region_str, char ***out_regions, un
     duckdb_free(dup);
     *out_regions = arr;
     *out_count = idx;
+}
+
+static int fastq_line_is_header(const kstring_t *line) {
+    return line && line->l > 0 && line->s && line->s[0] == '@';
+}
+
+static int fastq_line_is_plus(const kstring_t *line) {
+    return line && line->l > 0 && line->s && line->s[0] == '+';
+}
+
+static int fastq_extract_qname(const kstring_t *line, kstring_t *name) {
+    size_t start = 1;
+    size_t end = start;
+
+    if (!line || !name) return 0;
+    while (end < line->l && !isspace((unsigned char)line->s[end])) end++;
+    if (ks_resize(name, end - start + 1) < 0) return -1;
+    if (end > start) memcpy(name->s, line->s + start, end - start);
+    name->l = end - start;
+    name->s[name->l] = '\0';
+    return 0;
+}
+
+/*
+ * Skip one FASTQ record directly from the raw text stream.
+ * This avoids sam_read1() when COUNT(*) projects zero columns.
+ */
+static int fastq_skip_record(htsFile *fp, kstring_t *line, kstring_t *name,
+                             const char *path, char *errbuf, size_t errbuf_len) {
+    int ret;
+    size_t seq_len = 0;
+    size_t qual_len = 0;
+
+    ret = hts_getline(fp, KS_SEP_LINE, line);
+    if (ret == -1) return 0;
+    if (ret < -1 || !fastq_line_is_header(line)) {
+        snprintf(errbuf, errbuf_len, "read_fastq: invalid FASTQ header in %s", path ? path : "");
+        return -1;
+    }
+    if (name && fastq_extract_qname(line, name) != 0) {
+        snprintf(errbuf, errbuf_len, "read_fastq: out of memory parsing FASTQ header in %s", path ? path : "");
+        return -1;
+    }
+
+    for (;;) {
+        ret = hts_getline(fp, KS_SEP_LINE, line);
+        if (ret < 0) break;
+        if (fastq_line_is_plus(line)) break;
+        seq_len += line->l;
+    }
+    if (ret < 0) {
+        snprintf(errbuf, errbuf_len,
+                 "read_fastq: truncated FASTQ sequence block in %s", path ? path : "");
+        return -1;
+    }
+
+    while (qual_len < seq_len) {
+        ret = hts_getline(fp, KS_SEP_LINE, line);
+        if (ret < 0) break;
+        qual_len += line->l;
+    }
+    if (ret < 0 || qual_len != seq_len) {
+        snprintf(errbuf, errbuf_len,
+                 "read_fastq: truncated FASTQ quality block in %s", path ? path : "");
+        return -1;
+    }
+    return 1;
 }
 
 /* ================================================================
@@ -439,24 +525,14 @@ static void seq_read_init(duckdb_init_info info) {
     seq_init_data_t *init = (seq_init_data_t *)duckdb_malloc(sizeof(seq_init_data_t));
     memset(init, 0, sizeof(seq_init_data_t));
 
-    /* sam_open handles .gz / .bgzf transparently */
-    init->fp = sam_open(bind->file_path, "r");
-    if (!init->fp) {
-        duckdb_init_set_error(info, "Failed to open sequence file");
-        duckdb_free(init);
-        return;
+    /* Projection pushdown: record which columns DuckDB actually needs */
+    init->column_count = duckdb_init_get_column_count(info);
+    if (init->column_count > 0) {
+        init->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * init->column_count);
+        for (idx_t i = 0; i < init->column_count; i++)
+            init->column_ids[i] = duckdb_init_get_column_index(info, i);
     }
 
-    /* sam_hdr_read for FASTA/FASTQ returns a valid (possibly empty) header */
-    init->hdr = sam_hdr_read(init->fp);
-    if (!init->hdr) {
-        sam_close(init->fp); init->fp = NULL;
-        duckdb_init_set_error(info, "Failed to read header");
-        duckdb_free(init);
-        return;
-    }
-
-    init->rec = bam_init1();
     init->is_fastq = bind->is_fastq;
     init->paired = bind->paired;
     init->interleaved = bind->interleaved;
@@ -468,6 +544,84 @@ static void seq_read_init(duckdb_init_info info) {
     init->n_regions = bind->n_regions;
     init->next_region_idx = 0;
     init->regions = bind->regions;
+
+    if (init->column_count == 0 && bind->n_regions == 0) {
+        if (bind->is_fastq && !bind->paired && !bind->interleaved) {
+            faidx_t *fqi = fai_load3_format(bind->file_path, NULL, NULL, 0, FAI_FASTQ);
+            if (fqi) {
+                init->count_only = 1;
+                init->count_remaining = (uint64_t)faidx_nseq(fqi);
+                init->done = (init->count_remaining == 0);
+                fai_destroy(fqi);
+                duckdb_init_set_max_threads(info, 1);
+                duckdb_init_set_init_data(info, init, destroy_seq_init);
+                return;
+            }
+        } else if (!bind->is_fastq) {
+            faidx_t *fai_count = fai_load3_format(bind->file_path, bind->index_path, NULL, 0, FAI_FASTA);
+            if (fai_count) {
+                init->count_only = 1;
+                init->count_remaining = (uint64_t)faidx_nseq(fai_count);
+                init->done = (init->count_remaining == 0);
+                fai_destroy(fai_count);
+                duckdb_init_set_max_threads(info, 1);
+                duckdb_init_set_init_data(info, init, destroy_seq_init);
+                return;
+            }
+            init->fasta_count_only = 1;
+            init->count_fp = hts_open(bind->file_path, "r");
+            if (!init->count_fp) {
+                duckdb_init_set_error(info, "Failed to open FASTA file");
+                destroy_seq_init(init);
+                return;
+            }
+            init->done = 0;
+            duckdb_init_set_max_threads(info, 1);
+            duckdb_init_set_init_data(info, init, destroy_seq_init);
+            return;
+        }
+    }
+
+    if (bind->is_fastq && init->column_count == 0) {
+        init->fastq_count_only = 1;
+        init->count_fp = hts_open(bind->file_path, "r");
+        if (!init->count_fp) {
+            duckdb_init_set_error(info, "Failed to open FASTQ file");
+            destroy_seq_init(init);
+            return;
+        }
+        if (bind->paired) {
+            init->count_fp_mate = hts_open(bind->mate_path, "r");
+            if (!init->count_fp_mate) {
+                duckdb_init_set_error(info, "Failed to open mate FASTQ file");
+                destroy_seq_init(init);
+                return;
+            }
+        }
+        init->done = 0;
+        duckdb_init_set_max_threads(info, 1);
+        duckdb_init_set_init_data(info, init, destroy_seq_init);
+        return;
+    }
+
+    /* sam_open handles .gz / .bgzf transparently */
+    init->fp = sam_open(bind->file_path, "r");
+    if (!init->fp) {
+        duckdb_init_set_error(info, "Failed to open sequence file");
+        destroy_seq_init(init);
+        return;
+    }
+
+    /* sam_hdr_read for FASTA/FASTQ returns a valid (possibly empty) header */
+    init->hdr = sam_hdr_read(init->fp);
+    if (!init->hdr) {
+        sam_close(init->fp); init->fp = NULL;
+        duckdb_init_set_error(info, "Failed to read header");
+        destroy_seq_init(init);
+        return;
+    }
+
+    init->rec = bam_init1();
 
     if (bind->paired) {
         init->fp_mate = sam_open(bind->mate_path, "r");
@@ -496,14 +650,132 @@ static void seq_read_init(duckdb_init_info info) {
 
     init->done = 0;
 
-    /* Projection pushdown */
-    init->column_count = duckdb_init_get_column_count(info);
-    init->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * init->column_count);
-    for (idx_t i = 0; i < init->column_count; i++)
-        init->column_ids[i] = duckdb_init_get_column_index(info, i);
-
     duckdb_init_set_max_threads(info, 1);
     duckdb_init_set_init_data(info, init, destroy_seq_init);
+}
+
+static void seq_fastq_count_only_function(duckdb_function_info info,
+                                          duckdb_data_chunk output,
+                                          seq_init_data_t *init,
+                                          const seq_bind_data_t *bind) {
+    idx_t vector_size = duckdb_vector_size();
+    idx_t row_count = 0;
+    char err[512];
+
+    while (row_count < vector_size) {
+        if (init->paired) {
+            if (init->pending_mate) {
+                init->pending_mate = 0;
+                row_count++;
+                continue;
+            }
+
+            int r1 = fastq_skip_record(init->count_fp, &init->count_line, &init->count_name,
+                                       bind->file_path, err, sizeof(err));
+            if (r1 < 0) {
+                duckdb_function_set_error(info, err);
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+
+            int r2 = fastq_skip_record(init->count_fp_mate, &init->count_line_mate, &init->count_name_mate,
+                                       bind->mate_path, err, sizeof(err));
+            if (r2 < 0) {
+                duckdb_function_set_error(info, err);
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+
+            if (r1 == 0 || r2 == 0) {
+                if (r1 == 0 && r2 == 0) {
+                    init->done = 1;
+                    break;
+                }
+                duckdb_function_set_error(info,
+                    "read_fastq: mate files have different record counts");
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+
+            if (strcmp(init->count_name.s ? init->count_name.s : "",
+                       init->count_name_mate.s ? init->count_name_mate.s : "") != 0) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                    "read_fastq: mate files out of sync (QNAME mismatch: '%s' vs '%s')",
+                    init->count_name.s ? init->count_name.s : "",
+                    init->count_name_mate.s ? init->count_name_mate.s : "");
+                duckdb_function_set_error(info, msg);
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+
+            init->pending_mate = 1;
+            row_count++;
+            continue;
+        }
+
+        int ret = fastq_skip_record(init->count_fp, &init->count_line, NULL,
+                                    bind->file_path, err, sizeof(err));
+        if (ret < 0) {
+            duckdb_function_set_error(info, err);
+            init->done = 1;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+        if (ret == 0) {
+            if (init->interleaved && init->interleaved_mate == 2) {
+                duckdb_function_set_error(info,
+                    "read_fastq: interleaved file has an unpaired record");
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+            init->done = 1;
+            break;
+        }
+        if (init->interleaved) {
+            init->interleaved_mate = (init->interleaved_mate == 1) ? 2 : 1;
+        }
+        row_count++;
+    }
+
+    duckdb_data_chunk_set_size(output, row_count);
+}
+
+static void seq_fasta_count_only_function(duckdb_function_info info,
+                                          duckdb_data_chunk output,
+                                          seq_init_data_t *init,
+                                          const seq_bind_data_t *bind) {
+    idx_t vector_size = duckdb_vector_size();
+    idx_t row_count = 0;
+    int ret;
+
+    while (row_count < vector_size) {
+        ret = hts_getline(init->count_fp, KS_SEP_LINE, &init->count_line);
+        if (ret == -1) {
+            init->done = 1;
+            break;
+        }
+        if (ret < -1) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "read_fasta: failed while parsing %s",
+                     bind->file_path ? bind->file_path : "");
+            duckdb_function_set_error(info, msg);
+            init->done = 1;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+        if (init->count_line.l == 0) continue;
+        if (init->count_line.s[0] == '>') {
+            row_count++;
+        }
+    }
+
+    duckdb_data_chunk_set_size(output, row_count);
 }
 
 /* ================================================================
@@ -516,10 +788,33 @@ static void seq_read_init(duckdb_init_info info) {
  * ================================================================ */
 
 static void seq_read_function(duckdb_function_info info, duckdb_data_chunk output) {
+    seq_bind_data_t *bind = (seq_bind_data_t *)duckdb_function_get_bind_data(info);
     seq_init_data_t *init = (seq_init_data_t *)duckdb_function_get_init_data(info);
 
     if (!init || init->done) {
         duckdb_data_chunk_set_size(output, 0);
+        return;
+    }
+
+    if (init->count_only) {
+        idx_t row_count = (init->count_remaining > (uint64_t)duckdb_vector_size())
+            ? duckdb_vector_size()
+            : (idx_t)init->count_remaining;
+        init->count_remaining -= row_count;
+        if (init->count_remaining == 0) {
+            init->done = 1;
+        }
+        duckdb_data_chunk_set_size(output, row_count);
+        return;
+    }
+
+    if (init->fastq_count_only) {
+        seq_fastq_count_only_function(info, output, init, bind);
+        return;
+    }
+
+    if (init->fasta_count_only) {
+        seq_fasta_count_only_function(info, output, init, bind);
         return;
     }
 

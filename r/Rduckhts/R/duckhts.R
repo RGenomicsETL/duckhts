@@ -29,6 +29,20 @@ sql_quote_string <- function(x) {
   sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
 }
 
+.validate_nonnegative_integer_param <- function(value, name) {
+  if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
+      value < 0 || value > .Machine$integer.max || value != floor(value)) {
+    stop(
+      sprintf(
+        "%s must be a single whole number between 0 and %d",
+        name, .Machine$integer.max
+      ),
+      call. = FALSE
+    )
+  }
+  as.integer(value)
+}
+
 sql_map_literal <- function(x) {
   if (is.null(x) || length(x) == 0) {
     stop("column_map must be non-empty", call. = FALSE)
@@ -648,6 +662,9 @@ rduckhts_bcf <- function(
 #' @param quality_representation Character. Quality representation for the QUAL column:
 #'   \code{"string"} (default) returns canonical Phred+33 text;
 #'   \code{"phred"} returns raw Phred values as \code{UTINYINT[]}.
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads per file handle. Default \code{2}. Use \code{0} to disable worker
+#'   threads.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -675,6 +692,7 @@ rduckhts_bam <- function(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  decompression_threads = 2,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -711,6 +729,15 @@ rduckhts_bam <- function(
   }
   if (!is.null(quality_representation)) {
     params$quality_representation <- sprintf("'%s'", quality_representation)
+  }
+  if (!is.null(decompression_threads)) {
+    params$decompression_threads <- sprintf(
+      "%d",
+      .validate_nonnegative_integer_param(
+        decompression_threads,
+        "decompression_threads"
+      )
+    )
   }
 
   param_str <- build_param_str(params)
@@ -1937,6 +1964,10 @@ rduckhts_score <- function(
 # --------------------------------------------------------------------------
 
 .format_hts_param <- function(name, value) {
+  if (identical(name, "decompression_threads")) {
+    value <- .validate_nonnegative_integer_param(value, name)
+    return(sprintf("%s := %d", name, value))
+  }
 
   if (is.logical(value)) {
     return(sprintf("%s := %s", name, if (isTRUE(value)) "true" else "false"))
@@ -2078,6 +2109,9 @@ rduckhts_score <- function(
 #' @param auxiliary_tags Logical; include auxiliary tag map column.
 #' @param sequence_encoding Optional sequence encoding (e.g. \code{"twoBit"}).
 #' @param quality_representation Optional quality representation.
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads per file handle. Default \code{2}. Use \code{0} to disable worker
+#'   threads.
 #' @param .params Optional data.frame with per-file parameter overrides.
 #'   Must contain a \code{file} column; other columns override uniform parameters.
 #'   \code{NA} values use the uniform default.
@@ -2089,6 +2123,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
                                standard_tags = FALSE, auxiliary_tags = FALSE,
                                sequence_encoding = NULL,
                                quality_representation = NULL,
+                               decompression_threads = 2,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
@@ -2098,6 +2133,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
   params$auxiliary_tags <- auxiliary_tags
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   if (!is.null(quality_representation)) params$quality_representation <- quality_representation
+  if (!is.null(decompression_threads)) params$decompression_threads <- decompression_threads
   .hts_multi_read(con, table_name, "read_bam", files, params, .params, overwrite)
 }
 

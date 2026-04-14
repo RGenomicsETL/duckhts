@@ -79,6 +79,13 @@ test_interval_readers <- function() {
   expect_true(rduckhts_tabix_index(con, gz_path, preset = "bed", index_path = tbi_path, threads = 1)$success[1])
   expect_silent(rduckhts_bed(con, "targets_idx", gz_path, region = "CHROMOSOME_I:1-20", index_path = tbi_path, overwrite = TRUE))
   expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM targets_idx")$n[1], 2)
+
+  bed_count_only <- DBI::dbGetQuery(con, sprintf(
+    "SELECT COUNT(*) AS n FROM read_bed('%s', index_path := '%s')",
+    gz_path,
+    tbi_path
+  ))
+  expect_equal(bed_count_only$n[1], 4)
 }
 
 test_interval_readers()

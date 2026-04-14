@@ -75,6 +75,12 @@ test_seq_ops <- function() {
   bam_str_type <- DBI::dbGetQuery(con, "SELECT typeof(SEQ) AS t FROM bam_str LIMIT 1")
   expect_equal(bam_str_type$t[1], "VARCHAR")
 
+  # wrapper: configurable htslib decompression workers
+  rduckhts_bam(con, "bam_threads_off", bam_path,
+    decompression_threads = 0, overwrite = TRUE)
+  bam_threads_off_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM bam_threads_off")
+  expect_equal(bam_threads_off_n$n[1], 112)
+
   # wrapper: nt16 encoding returns UTINYINT[]
   rduckhts_bam(con, "bam_nt16", bam_path,
     sequence_encoding = "nt16", overwrite = TRUE)
@@ -98,9 +104,21 @@ test_seq_ops <- function() {
   bam_nt16_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM bam_nt16")
   expect_equal(bam_str_n$n[1], bam_nt16_n$n[1])
 
+  # direct SQL COUNT(*) should stay on the zero-column BAM fast path
+  bam_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_bam(",
+    "'%s', index_path := '%s', sequence_encoding := 'nt16', quality_representation := 'phred', decompression_threads := 1)"
+  ), bam_path, paste0(bam_path, ".bai")))
+  expect_equal(bam_count_only$n[1], bam_str_n$n[1])
+
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(
     "SELECT * FROM read_bam('%s', sequence_encoding := 'invalid') LIMIT 1",
+    bam_path)))
+
+  # direct SQL: invalid decompression thread count errors
+  expect_error(DBI::dbGetQuery(con, sprintf(
+    "SELECT * FROM read_bam('%s', decompression_threads := -1) LIMIT 1",
     bam_path)))
 
   # =========================================================================
@@ -136,6 +154,13 @@ test_seq_ops <- function() {
     "SELECT seq_decode_4bit(n.SEQUENCE) = s.SEQUENCE AS match",
     "FROM fa_nt16 n, fa_str s"))
   expect_true(fa_rt$match[1])
+
+  # direct SQL COUNT(*) should stay on the zero-column FASTA fast path
+  fa_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_fasta(",
+    "'%s', index_path := '%s', sequence_encoding := 'nt16')"
+  ), fasta_path, fasta_index_path))
+  expect_equal(fa_count_only$n[1], 7)
 
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(
@@ -174,6 +199,13 @@ test_seq_ops <- function() {
   fq_str_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM fq_str")
   fq_nt16_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM fq_nt16")
   expect_equal(fq_str_n$n[1], fq_nt16_n$n[1])
+
+  # direct SQL COUNT(*) should stay on the zero-column FASTQ fast path
+  fq_count_only <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT COUNT(*) AS n FROM read_fastq(",
+    "'%s', sequence_encoding := 'nt16', quality_representation := 'phred')"
+  ), fastq_r1))
+  expect_equal(fq_count_only$n[1], fq_str_n$n[1])
 
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(

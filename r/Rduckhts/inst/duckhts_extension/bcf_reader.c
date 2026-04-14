@@ -128,6 +128,8 @@ typedef struct {
     int has_index;             // Whether an index was found
     int n_contigs;             // Number of contigs for parallel scan
     char** contig_names;       // Contig names (owned)
+    uint64_t index_row_count;
+    int index_row_count_valid;
 } bcf_bind_data_t;
 
 // =============================================================================
@@ -165,6 +167,8 @@ typedef struct {
     idx_t* column_ids;
     int unpack_mask;
     int need_vep;
+    int count_only;
+    uint64_t count_remaining;
     
     // Parallel scan state
     int is_parallel;
@@ -382,6 +386,25 @@ static int bcf_projection_needs_vep(const bcf_bind_data_t* bind, const idx_t* co
     }
 
     return 0;
+}
+
+static int bcf_try_get_index_row_count(hts_idx_t *idx, uint64_t row_multiplier, uint64_t *out_total) {
+    if (!idx || !out_total || row_multiplier == 0) {
+        return 0;
+    }
+
+    int nseq = hts_idx_nseq(idx);
+    uint64_t total = hts_idx_get_n_no_coor(idx);
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0) {
+            return 0;
+        }
+        total += mapped + unmapped;
+    }
+
+    *out_total = total * row_multiplier;
+    return 1;
 }
 
 static inline void set_validity_bit(uint64_t* validity, idx_t row, int is_valid);
@@ -948,6 +971,15 @@ static void bcf_read_bind(duckdb_bind_info info) {
         
         if (idx || tbx) {
             bind->has_index = 1;
+            if (bind->tidy_format && bind->n_samples == 0) {
+                bind->index_row_count_valid = 1;
+                bind->index_row_count = 0;
+            } else {
+                uint64_t row_multiplier = bind->tidy_format ? (uint64_t)bind->n_samples : 1;
+                bind->index_row_count_valid = bcf_try_get_index_row_count(idx ? idx : tbx->idx,
+                                                                          row_multiplier,
+                                                                          &bind->index_row_count);
+            }
             
             // Get contig names from header for parallel scan
             int n_seqs = hdr->n[BCF_DT_CTG];
@@ -983,6 +1015,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
 
 static void bcf_read_global_init(duckdb_init_info info) {
     bcf_bind_data_t* bind = (bcf_bind_data_t*)duckdb_init_get_bind_data(info);
+    idx_t column_count = duckdb_init_get_column_count(info);
     
     bcf_global_init_data_t* global = (bcf_global_init_data_t*)duckdb_malloc(sizeof(bcf_global_init_data_t));
     memset(global, 0, sizeof(bcf_global_init_data_t));
@@ -994,7 +1027,11 @@ static void bcf_read_global_init(duckdb_init_info info) {
     // 1. Index exists
     // 2. Multiple contigs available
     // 3. No user-specified region (region queries are already filtered)
-    if (bind->has_index && bind->n_contigs > 1 && !global->has_region) {
+    if (column_count == 0 && bind->index_row_count_valid && !global->has_region) {
+        global->n_contigs = 0;
+        global->contig_names = NULL;
+        duckdb_init_set_max_threads(info, 1);
+    } else if (bind->has_index && bind->n_contigs > 1 && !global->has_region) {
         global->n_contigs = bind->n_contigs;
         global->contig_names = bind->contig_names;  // Reference only
         
@@ -1021,6 +1058,24 @@ static void bcf_read_local_init(duckdb_init_info info) {
     
     bcf_init_data_t* local = (bcf_init_data_t*)duckdb_malloc(sizeof(bcf_init_data_t));
     memset(local, 0, sizeof(bcf_init_data_t));
+
+    local->column_count = duckdb_init_get_column_count(info);
+    if (local->column_count > 0) {
+        local->column_ids = (idx_t*)duckdb_malloc(sizeof(idx_t) * local->column_count);
+        for (idx_t i = 0; i < local->column_count; i++) {
+            local->column_ids[i] = duckdb_init_get_column_index(info, i);
+        }
+        local->unpack_mask = bcf_projection_unpack_mask(bind, local->column_ids, local->column_count);
+        local->need_vep = bcf_projection_needs_vep(bind, local->column_ids, local->column_count);
+    }
+
+    if (local->column_count == 0 && bind->n_regions == 0 && bind->index_row_count_valid) {
+        local->count_only = 1;
+        local->count_remaining = bind->index_row_count;
+        local->done = (local->count_remaining == 0);
+        duckdb_init_set_init_data(info, local, destroy_init_data);
+        return;
+    }
     
     // Check if we're in parallel mode based on bind data
     int is_parallel = (bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
@@ -1115,15 +1170,6 @@ static void bcf_read_local_init(duckdb_init_info info) {
     memset(&local->batch_start_time, 0, sizeof(local->batch_start_time));
     memset(&local->last_progress_time, 0, sizeof(local->last_progress_time));
     local->timing_initialized = 0;
-    
-    // Get projection pushdown info
-    local->column_count = duckdb_init_get_column_count(info);
-    local->column_ids = (idx_t*)duckdb_malloc(sizeof(idx_t) * local->column_count);
-    for (idx_t i = 0; i < local->column_count; i++) {
-        local->column_ids[i] = duckdb_init_get_column_index(info, i);
-    }
-    local->unpack_mask = bcf_projection_unpack_mask(bind, local->column_ids, local->column_count);
-    local->need_vep = bcf_projection_needs_vep(bind, local->column_ids, local->column_count);
     
     // Store as local init data
     duckdb_init_set_init_data(info, local, destroy_init_data);
@@ -1319,6 +1365,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         return;
     }
 
+    if (init->count_only) {
+        idx_t row_count = (init->count_remaining > (uint64_t)duckdb_vector_size())
+            ? duckdb_vector_size()
+            : (idx_t)init->count_remaining;
+        init->count_remaining -= row_count;
+        if (init->count_remaining == 0) {
+            init->done = 1;
+        }
+        duckdb_data_chunk_set_size(output, row_count);
+        return;
+    }
+
     // For parallel scans, claim first/next contig if needed
     if (init->needs_next_contig) {
         if (!claim_next_contig(init, global)) {
@@ -1333,10 +1391,12 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     idx_t row_count = 0;
     
     // Cache vector pointers to reduce repeated calls
-    duckdb_vector* vectors = (duckdb_vector*)duckdb_malloc(init->column_count * sizeof(duckdb_vector));
-    
-    for (idx_t i = 0; i < init->column_count; i++) {
-        vectors[i] = duckdb_data_chunk_get_vector(output, i);
+    duckdb_vector* vectors = NULL;
+    if (init->column_count > 0) {
+        vectors = (duckdb_vector*)duckdb_malloc(init->column_count * sizeof(duckdb_vector));
+        for (idx_t i = 0; i < init->column_count; i++) {
+            vectors[i] = duckdb_data_chunk_get_vector(output, i);
+        }
     }
     
     // Tidy format variables

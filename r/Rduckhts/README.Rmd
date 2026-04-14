@@ -344,17 +344,62 @@ gwas_prs[, c("SAMPLE", "PRS_A", "PRS_B")]
 ### Compression + tabix round-trips
 
 ```{r}
+bed_src <- system.file("extdata", "targets.bed", package = "Rduckhts")
+bam_src <- system.file("extdata", "range.bam", package = "Rduckhts")
+bcf_src <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+
 tmp_bed <- tempfile("duckhts_targets_", fileext = ".bed")
 tmp_bgz <- paste0(tmp_bed, ".gz")
 tmp_tbi <- paste0(tmp_bgz, ".tbi")
-writeLines(c("chr1\t0\t10\ta", "chr1\t10\t20\tb"), tmp_bed)
+tmp_roundtrip <- tempfile("duckhts_targets_roundtrip_", fileext = ".bed")
+tmp_bai <- tempfile("duckhts_range_", fileext = ".bam.bai")
+tmp_csi <- tempfile("duckhts_variants_", fileext = ".bcf.csi")
+file.copy(bed_src, tmp_bed, overwrite = TRUE)
 
-rduckhts_bgzip(con, tmp_bed, output_path = tmp_bgz, keep = TRUE, overwrite = TRUE)
-rduckhts_tabix_index(con, tmp_bgz, preset = "bed", index_path = tmp_tbi, threads = 1)
-rduckhts_bed(con, "targets_idx", tmp_bgz, region = "chr1:1-20", index_path = tmp_tbi, overwrite = TRUE)
+bgzip_meta <- rduckhts_bgzip(
+  con, tmp_bed,
+  output_path = tmp_bgz,
+  threads = 1,
+  keep = TRUE,
+  overwrite = TRUE
+)
+bgzip_meta[, c("success", "output_path", "bytes_out")]
+
+bgunzip_meta <- rduckhts_bgunzip(
+  con, tmp_bgz,
+  output_path = tmp_roundtrip,
+  threads = 1,
+  keep = TRUE,
+  overwrite = TRUE
+)
+bgunzip_meta[, c("success", "output_path", "bytes_out")]
+
+bam_index_meta <- rduckhts_bam_index(
+  con, bam_src,
+  index_path = tmp_bai,
+  threads = 1
+)
+bam_index_meta
+
+bcf_index_meta <- rduckhts_bcf_index(
+  con, bcf_src,
+  index_path = tmp_csi,
+  threads = 1
+)
+bcf_index_meta
+
+tabix_meta <- rduckhts_tabix_index(
+  con, tmp_bgz,
+  preset = "bed",
+  index_path = tmp_tbi,
+  threads = 1
+)
+tabix_meta
+
+rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
 
-unlink(c(tmp_bed, tmp_bgz, tmp_tbi))
+unlink(c(tmp_bed, tmp_bgz, tmp_tbi, tmp_roundtrip, tmp_bai, tmp_csi))
 ```
 
 ## Sequence UDFs
