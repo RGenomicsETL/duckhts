@@ -94,6 +94,39 @@ SELECT chrom, start, "end", seq_len, pct_gc
 FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20');
 ```
 
+### Mosdepth-compatible coverage outputs
+
+`duckhts_mosdepth()` writes mosdepth-style output files directly from indexed
+BAM/CRAM input. The example below writes windowed fragment coverage and then
+reads back the generated BED.gz output.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT success, summary_path, regions_path
+FROM duckhts_mosdepth(
+  '/tmp/duckhts_readme_mosdepth',
+  'test/data/range.bam',
+  chrom := 'CHROMOSOME_II',
+  by := '1000',
+  no_per_base := TRUE,
+  fragment_mode := TRUE,
+  use_median := TRUE,
+  overwrite := TRUE
+);
+
+SELECT
+  column0 AS chrom,
+  CAST(column1 AS BIGINT) AS start,
+  CAST(column2 AS BIGINT) AS "end",
+  CAST(column3 AS DOUBLE) AS depth
+FROM read_csv(
+  '/tmp/duckhts_readme_mosdepth.regions.bed.gz',
+  delim := '\t',
+  header := FALSE,
+  compression := 'gzip'
+)
+LIMIT 3;
+```
+
 ### Polygenic risk scoring
 
 `bcftools_score` computes per-sample polygenic risk scores (PRS) from a VCF/BCF and a GWAS summary statistics file, mirroring the `bcftools +score` plugin API.

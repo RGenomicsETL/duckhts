@@ -274,6 +274,12 @@ This section is generated from `functions.yaml`.
 | `bcf_index`   | table | table   | `rduckhts_bcf_index`   | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.       |
 | `tabix_index` | table | table   | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
 
+### Coverage
+
+| Function           | Kind  | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+|--------------------|-------|---------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_mosdepth` | table | table   | `rduckhts_mosdepth` | Write native mosdepth-compatible coverage outputs for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, optional quantized BED.gz + CSI, and optional threshold counts for `by`; `fast_mode` defaults to FALSE to match upstream mosdepth, default mode performs CIGAR-aware coverage with mate-overlap correction, `fragment_mode` switches coverage to full-fragment insert spans for proper pairs, `use_median` switches `by` outputs from mean to median, `read_groups` filters by comma-separated RG IDs, `min_frag_len` and `max_frag_len` filter on absolute template length, `fasta` is required for CRAM when htslib needs a reference, and `precision_digits` controls decimal places in the text outputs. |
+
 ### Variants
 
 | Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -369,8 +375,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_readme_e1b684999d868.fai
+#>   success                                        index_path
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_readme_18767e1fac4630.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -401,6 +407,56 @@ rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20"
 unlink(fai_path)
 ```
 
+### Mosdepth-compatible coverage outputs
+
+`rduckhts_mosdepth()` writes mosdepth-style outputs to disk and returns
+the paths it created. This example writes windowed fragment coverage
+from the bundled BAM fixture and previews the generated regions BED.gz.
+
+``` r
+mos_prefix <- tempfile("duckhts_readme_mosdepth_")
+mos_out <- rduckhts_mosdepth(
+  con,
+  prefix = mos_prefix,
+  path = bam_path,
+  chrom = "CHROMOSOME_II",
+  by = "1000",
+  no_per_base = TRUE,
+  fragment_mode = TRUE,
+  use_median = TRUE,
+  overwrite = TRUE
+)
+
+mos_out[, c("summary_path", "regions_path")]
+#>                                                                  summary_path
+#> 1 /tmp/RtmpFfR1VK/duckhts_readme_mosdepth_18767e25634ba8.mosdepth.summary.txt
+#>                                                            regions_path
+#> 1 /tmp/RtmpFfR1VK/duckhts_readme_mosdepth_18767e25634ba8.regions.bed.gz
+
+utils::read.delim(
+  gzfile(mos_out$regions_path[[1]]),
+  header = FALSE,
+  sep = "\t",
+  nrows = 3,
+  col.names = c("chrom", "start", "end", "depth")
+)
+#>           chrom start  end depth
+#> 1 CHROMOSOME_II     0 1000     0
+#> 2 CHROMOSOME_II  1000 2000     5
+#> 3 CHROMOSOME_II  2000 3000     3
+
+unlink(
+  c(
+    paste0(mos_prefix, ".mosdepth.summary.txt"),
+    paste0(mos_prefix, ".mosdepth.global.dist.txt"),
+    paste0(mos_prefix, ".mosdepth.region.dist.txt"),
+    paste0(mos_prefix, ".regions.bed.gz"),
+    paste0(mos_prefix, ".regions.bed.gz.csi")
+  ),
+  force = TRUE
+)
+```
+
 ### Liftover score-style rows
 
 ``` r
@@ -429,11 +485,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_liftover_src_e1b683bcc2f25.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_liftover_src_18767e22a315b7.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_liftover_dst_e1b687353af04.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_liftover_dst_18767e17e43af2.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -478,7 +534,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                         index_path
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_munge_e1b6872fb4298.fa.fai
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_munge_18767e732abd1.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -565,8 +621,8 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                          output_path bytes_out
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_e1b6817f1e51f.bed.gz       169
+#>   success                                           output_path bytes_out
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_targets_18767e14c96974.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -576,8 +632,10 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_roundtrip_e1b6850a791ba.bed       194
+#>   success                                                  output_path
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_targets_roundtrip_18767e4d20ec9b.bed
+#>   bytes_out
+#> 1       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -585,8 +643,8 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                          index_path index_format
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_range_e1b6845e3f4e8.bam.bai          BAI
+#>   success                                           index_path index_format
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_range_18767e6ff4e2d9.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -594,8 +652,8 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                             index_path index_format
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_variants_e1b68573772ac.bcf.csi          CSI
+#>   success                                              index_path index_format
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_variants_18767e7a1c4eb5.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -604,8 +662,10 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                               index_path index_format
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_targets_e1b6817f1e51f.bed.gz.tbi          TBI
+#>   success                                                index_path
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_targets_18767e14c96974.bed.gz.tbi
+#>   index_format
+#> 1          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -670,8 +730,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                      index_path
-#> 1    TRUE /tmp/Rtmp4bzzYg/duckhts_readme_e1b68c317e8c.fai
+#>   success                                        index_path
+#> 1    TRUE /tmp/RtmpFfR1VK/duckhts_readme_18767e385e4daa.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

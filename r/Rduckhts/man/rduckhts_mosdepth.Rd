@@ -2,7 +2,7 @@
 % Please edit documentation in R/duckhts.R
 \name{rduckhts_mosdepth}
 \alias{rduckhts_mosdepth}
-\title{Native mosdepth-Compatible Fast-Mode Coverage Outputs}
+\title{Native mosdepth-Compatible Coverage Outputs}
 \usage{
 rduckhts_mosdepth(
   con,
@@ -10,12 +10,21 @@ rduckhts_mosdepth(
   path,
   chrom = NULL,
   by = NULL,
+  fasta = NULL,
+  read_groups = NULL,
   no_per_base = FALSE,
   threads = 0,
   flag = 1796,
   include_flag = 0,
-  fast_mode = TRUE,
+  fast_mode = FALSE,
+  fragment_mode = FALSE,
+  use_median = FALSE,
   mapq = 0,
+  min_frag_len = -1,
+  max_frag_len = -1,
+  precision_digits = 2,
+  quantize = NULL,
+  thresholds = NULL,
   index_path = NULL,
   overwrite = FALSE
 )
@@ -25,11 +34,15 @@ rduckhts_mosdepth(
 
 \item{prefix}{Output prefix for the mosdepth-style files}
 
-\item{path}{Path to the input BAM file}
+\item{path}{Path to the input BAM or CRAM file}
 
 \item{chrom}{Optional chromosome name filter}
 
 \item{by}{Optional fixed-width window size as a string or a BED file path}
+
+\item{fasta}{Optional reference FASTA path for CRAM input when required}
+
+\item{read_groups}{Optional comma-separated read-group IDs, matching mosdepth's `-R`}
 
 \item{no_per_base}{Skip writing `\{prefix\}.per-base.bed.gz`}
 
@@ -39,9 +52,29 @@ rduckhts_mosdepth(
 
 \item{include_flag}{Required SAM flag mask, matching mosdepth's `-i`}
 
-\item{fast_mode}{Must currently remain `TRUE`}
+\item{fast_mode}{Logical. If `TRUE`, use mosdepth fast mode. Defaults to
+`FALSE`, matching upstream mosdepth.}
+
+\item{fragment_mode}{Logical. If `TRUE`, count full fragment insert spans for
+proper pairs, matching mosdepth's `-a`. Cannot be combined with
+`fast_mode = TRUE`.}
+
+\item{use_median}{Logical. If `TRUE`, write `by` region values as medians
+instead of means, matching mosdepth's `-m`.}
 
 \item{mapq}{Minimum mapping quality threshold}
+
+\item{min_frag_len}{Minimum absolute template length to keep, matching
+mosdepth's `-l`}
+
+\item{max_frag_len}{Maximum absolute template length to keep, matching
+mosdepth's `-u`}
+
+\item{precision_digits}{Number of decimal places to write in the text outputs}
+
+\item{quantize}{Optional mosdepth-style quantize specification such as `":1:4:"`}
+
+\item{thresholds}{Optional comma-separated coverage thresholds for `by`, matching mosdepth's `-T`}
 
 \item{index_path}{Optional explicit BAM index path}
 
@@ -51,5 +84,5 @@ rduckhts_mosdepth(
 A data frame describing the written output paths
 }
 \description{
-Writes an initial native mosdepth-compatible fast-mode output set for an indexed BAM file.
+Writes native mosdepth-compatible coverage outputs for indexed BAM or CRAM input.
 }
