@@ -229,6 +229,31 @@ rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20"
 unlink(fai_path)
 ```
 
+### Fixed-bin native counting
+
+`rduckhts_bam_bin_counts()` exposes the native fixed-width read-start counting
+kernel. This is the primitive used for WisecondorX-style binning, and it can
+add one-pass GC and MAPQ summaries on the same scan.
+
+```{r}
+mixed_cram <- system.file("extdata", "fixture_mixed.cram", package = "Rduckhts")
+fixture_ref <- system.file("extdata", "fixture_ref.fa", package = "Rduckhts")
+
+bin_counts <- rduckhts_bam_bin_counts(
+  con,
+  mixed_cram,
+  5000,
+  reference = fixture_ref,
+  rmdup = "streaming",
+  stats = "gc,mq"
+)
+
+bin_counts[, c(
+  "bin_id", "count_total", "count_fwd", "count_rev",
+  "count_pre", "gc_perc_pre", "gc_perc_post", "mean_mapq_post"
+)]
+```
+
 ### Mosdepth-compatible coverage outputs
 
 `rduckhts_mosdepth()` writes mosdepth-style outputs to disk and returns the

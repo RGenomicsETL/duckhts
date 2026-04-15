@@ -94,6 +94,33 @@ SELECT chrom, start, "end", seq_len, pct_gc
 FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20');
 ```
 
+### Fixed-bin native counting
+
+`bam_bin_counts()` does fixed-width read-start binning directly in native code.
+This is the counting primitive used for WisecondorX-style workflows: duplicate
+handling is explicit via `rmdup`, and optional `stats := 'gc,mq'` adds one-pass
+GC and MAPQ summaries on the same scan.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT
+  bin_id,
+  count_total,
+  count_fwd,
+  count_rev,
+  count_pre,
+  printf('%.2f', gc_perc_pre) AS gc_pre,
+  printf('%.2f', gc_perc_post) AS gc_post,
+  printf('%.1f', mean_mapq_post) AS mean_mapq_post
+FROM bam_bin_counts(
+  'test/data/fixture_mixed.cram',
+  5000,
+  reference := 'test/data/fixture_ref.fa',
+  rmdup := 'streaming',
+  stats := 'gc,mq'
+)
+ORDER BY bin_id;
+```
+
 ### Mosdepth-compatible coverage outputs
 
 `duckhts_mosdepth()` writes mosdepth-style output files directly from indexed
