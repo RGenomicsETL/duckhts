@@ -12,6 +12,7 @@ expect_true(exists("rduckhts_bam_index"))
 expect_true(exists("rduckhts_bcf_index"))
 expect_true(exists("rduckhts_bgzip"))
 expect_true(exists("rduckhts_bgunzip"))
+expect_true(exists("rduckhts_bam_bin_counts"))
 expect_true(exists("rduckhts_mosdepth"))
 expect_true(exists("rduckhts_fasta"))
 expect_true(exists("rduckhts_fasta_index"))
@@ -59,6 +60,11 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_bgunzip)),
   c("con", "path", "output_path", "threads", "keep", "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_bam_bin_counts)),
+  c("con", "path", "bin_width", "chrom", "reference", "index_path",
+    "mapq", "require_flags", "exclude_flags", "rmdup", "stats")
 )
 expect_identical(
   names(formals(rduckhts_mosdepth)),

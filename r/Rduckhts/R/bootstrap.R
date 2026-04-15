@@ -52,6 +52,7 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "quality_encoding.c",
     "quality_encoding_reader.c",
     "mosdepth_table.c",
+    "bam_bin_counts.c",
     "bcftools_filter.c",
     "bcftools_shim.c",
     "score_udf.c",
@@ -235,8 +236,12 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "quality_encoding.c",
       "quality_encoding_reader.c",
       "mosdepth_table.c",
+      "bam_bin_counts.c",
+      "bcftools_filter.c",
+      "bcftools_shim.c",
       "score_udf.c",
-      "vep_parser.c"
+      "vep_parser.c",
+      "wasm_http_hfile.c"
     )
   )
   o_files <- file.path(build_dir, sub("\\.c$", ".o", basename(c_files)))
