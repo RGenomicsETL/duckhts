@@ -101,7 +101,7 @@ SELECT * FROM duckhts_mosdepth(
   overwrite := TRUE
 );
 
-query TIII
+query TIIT
 SELECT chrom, start_pos, end_pos, printf('%.2f', mean_depth)
 FROM read_csv(
   '__WORKING_DIRECTORY__/mosdepth_win_sqltest.regions.bed.gz',
@@ -228,6 +228,48 @@ CMV	0	1000	0.00
 CMV	1000	2000	0.00
 CMV	2000	3000	0.00
 
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_bed_sqltest',
+  '__WORKING_DIRECTORY__/test/data/empty-tids.bam',
+  by := '__WORKING_DIRECTORY__/test/data/empty-tids.bed',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIII
+SELECT chrom, start_pos, end_pos, printf('%.2f', mean_depth)
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_bed_sqltest.regions.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'mean_depth':'DOUBLE'},
+  delim = '\t',
+  header = false
+)
+WHERE chrom = 'HPV18';
+----
+HPV18	0	7857	226.12
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_quant_sqltest',
+  '__WORKING_DIRECTORY__/test/data/empty-tids.bam',
+  quantize := ':1:4:',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIIT
+SELECT chrom, start_pos, end_pos, bucket
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_quant_sqltest.quantized.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'bucket':'VARCHAR'},
+  delim = '\t',
+  header = false
+)
+WHERE chrom = 'CMV';
+----
+CMV	0	235646	0:1
+
 query TT
 SELECT
   CASE WHEN per_base_path IS NULL THEN 'NULL' ELSE 'SET' END,
@@ -282,3 +324,13 @@ SELECT * FROM duckhts_mosdepth(
 );
 ----
 duckhts_mosdepth: invalid thresholds string
+
+statement error
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_badquant_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  quantize := '1::4',
+  overwrite := TRUE
+);
+----
+duckhts_mosdepth: invalid quantize string

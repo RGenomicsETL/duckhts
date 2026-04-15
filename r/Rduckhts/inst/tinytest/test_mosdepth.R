@@ -195,6 +195,7 @@ test_mosdepth <- function() {
 
   empty_bam_path <- system.file("extdata", "empty-tids.bam", package = "Rduckhts")
   empty_index_path <- system.file("extdata", "empty-tids.bam.bai", package = "Rduckhts")
+  empty_bed_path <- system.file("extdata", "empty-tids.bed", package = "Rduckhts")
   prefix_empty <- file.path(tmp_dir, "empty_tids")
   out_empty <- rduckhts_mosdepth(
     con,
@@ -249,6 +250,83 @@ test_mosdepth <- function() {
       start_pos = c(0, 1000, 2000),
       end_pos = c(1000, 2000, 3000),
       mean_depth = c(0, 0, 0)
+    )
+  )
+
+  prefix_bed <- file.path(tmp_dir, "empty_bed")
+  out_bed <- rduckhts_mosdepth(
+    con,
+    prefix_bed,
+    empty_bam_path,
+    index_path = empty_index_path,
+    by = empty_bed_path,
+    no_per_base = TRUE,
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_bed$success[1]))
+  expect_true(file.exists(file.path(tmp_dir, "empty_bed.regions.bed.gz")))
+  expect_true(file.exists(file.path(tmp_dir, "empty_bed.regions.bed.gz.csi")))
+  bed_regions <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste(
+        "SELECT chrom, start_pos, end_pos, round(mean_depth, 2) AS mean_depth",
+        "FROM read_csv(%s,",
+        "  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'mean_depth':'DOUBLE'},",
+        "  delim = '\\t',",
+        "  header = FALSE",
+        ")",
+        "WHERE chrom = 'HPV18'"
+      ),
+      sprintf("'%s'", file.path(tmp_dir, "empty_bed.regions.bed.gz"))
+    )
+  )
+  expect_equal(
+    bed_regions,
+    data.frame(
+      chrom = "HPV18",
+      start_pos = 0,
+      end_pos = 7857,
+      mean_depth = 226.12
+    )
+  )
+
+  prefix_quant <- file.path(tmp_dir, "empty_quant")
+  out_quant <- rduckhts_mosdepth(
+    con,
+    prefix_quant,
+    empty_bam_path,
+    index_path = empty_index_path,
+    quantize = ":1:4:",
+    no_per_base = TRUE,
+    overwrite = TRUE
+  )
+  expect_true(isTRUE(out_quant$success[1]))
+  expect_true(file.exists(file.path(tmp_dir, "empty_quant.quantized.bed.gz")))
+  expect_true(file.exists(file.path(tmp_dir, "empty_quant.quantized.bed.gz.csi")))
+  expect_true(!is.na(out_quant$quantized_path[1]))
+  quant_rows <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste(
+        "SELECT chrom, start_pos, end_pos, bucket",
+        "FROM read_csv(%s,",
+        "  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'bucket':'VARCHAR'},",
+        "  delim = '\\t',",
+        "  header = FALSE",
+        ")",
+        "WHERE chrom = 'CMV'"
+      ),
+      sprintf("'%s'", file.path(tmp_dir, "empty_quant.quantized.bed.gz"))
+    )
+  )
+  expect_equal(
+    quant_rows,
+    data.frame(
+      chrom = "CMV",
+      start_pos = 0,
+      end_pos = 235646,
+      bucket = "0:1"
     )
   )
 
@@ -312,6 +390,18 @@ test_mosdepth <- function() {
       overwrite = TRUE
     ),
     pattern = "invalid thresholds string"
+  )
+
+  expect_error(
+    rduckhts_mosdepth(
+      con,
+      file.path(tmp_dir, "range_badquant"),
+      bam_path,
+      index_path = bam_index_path,
+      quantize = "1::4",
+      overwrite = TRUE
+    ),
+    pattern = "invalid quantize string"
   )
 }
 

@@ -1099,6 +1099,7 @@ rduckhts_bgunzip <- function(
 #' @param fast_mode Must currently remain `TRUE`
 #' @param mapq Minimum mapping quality threshold
 #' @param precision_digits Number of decimal places to write in the text outputs
+#' @param quantize Optional mosdepth-style quantize specification such as `":1:4:"`
 #' @param thresholds Optional comma-separated coverage thresholds for `by`, matching mosdepth's `-T`
 #' @param index_path Optional explicit BAM index path
 #' @param overwrite Overwrite existing output files
@@ -1120,6 +1121,7 @@ rduckhts_mosdepth <- function(
   fast_mode = TRUE,
   mapq = 0,
   precision_digits = 2,
+  quantize = NULL,
   thresholds = NULL,
   index_path = NULL,
   overwrite = FALSE
@@ -1136,6 +1138,7 @@ rduckhts_mosdepth <- function(
   if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
   if (!is.null(by)) params$by <- sql_quote_string(by)
   if (!is.null(fasta)) params$fasta <- sql_quote_string(fasta)
+  if (!is.null(quantize)) params$quantize <- sql_quote_string(quantize)
   if (!is.null(thresholds)) params$thresholds <- sql_quote_string(thresholds)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
   if (isTRUE(overwrite)) params$overwrite <- "true"

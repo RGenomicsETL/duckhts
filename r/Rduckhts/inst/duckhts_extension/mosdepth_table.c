@@ -6,6 +6,7 @@
  *   - fast_mode := TRUE only
  *   - summary/global distribution/per-base output
  *   - optional by := <window> or by := <bed>
+ *   - optional quantize and thresholds outputs
  *
  * Deferred options error loudly instead of silently diverging from mosdepth.
  */
@@ -59,6 +60,12 @@ typedef struct {
 } mosdepth_threshold_list_t;
 
 typedef struct {
+    int64_t *cuts;
+    char **labels;
+    size_t count;
+} mosdepth_quantize_t;
+
+typedef struct {
     uint64_t cum_depth;
     int64_t cum_length;
     uint32_t min_depth;
@@ -77,6 +84,7 @@ typedef struct {
     char *per_base_path;
     char *regions_path;
     char *region_dist_path;
+    char *quantized_path;
     char *thresholds_path;
     int64_t threads;
     int64_t flag;
@@ -84,6 +92,7 @@ typedef struct {
     int64_t mapq;
     int64_t precision;
     mosdepth_threshold_list_t thresholds;
+    mosdepth_quantize_t quantize;
     int no_per_base;
     int fast_mode;
     int overwrite;
@@ -256,6 +265,18 @@ static void threshold_list_destroy(mosdepth_threshold_list_t *thresholds) {
     thresholds->count = 0;
 }
 
+static void quantize_destroy(mosdepth_quantize_t *quantize) {
+    if (!quantize) return;
+    free(quantize->cuts);
+    if (quantize->labels) {
+        for (size_t i = 0; i + 1 < quantize->count; i++) free(quantize->labels[i]);
+    }
+    free(quantize->labels);
+    quantize->cuts = NULL;
+    quantize->labels = NULL;
+    quantize->count = 0;
+}
+
 static int parse_thresholds_string(const char *spec, mosdepth_threshold_list_t *out,
                                    char *err, size_t errlen) {
     char *copy = NULL;
@@ -307,6 +328,182 @@ static int parse_thresholds_string(const char *spec, mosdepth_threshold_list_t *
     out->count = count;
     free(copy);
     return 0;
+}
+
+static int int64_cmp(const void *a, const void *b) {
+    const int64_t aa = *(const int64_t *)a;
+    const int64_t bb = *(const int64_t *)b;
+    if (aa < bb) return -1;
+    if (aa > bb) return 1;
+    return 0;
+}
+
+static int append_literal(char **buf, size_t *len, size_t *cap, const char *src, size_t src_len) {
+    if (!buf || !len || !cap || (!src && src_len > 0)) return -1;
+    if (*len + src_len + 1 > *cap) {
+        size_t new_cap = *cap ? *cap : 32;
+        while (*len + src_len + 1 > new_cap) new_cap *= 2;
+        char *new_buf = (char *)realloc(*buf, new_cap);
+        if (!new_buf) return -1;
+        *buf = new_buf;
+        *cap = new_cap;
+    }
+    if (src_len > 0) memcpy(*buf + *len, src, src_len);
+    *len += src_len;
+    (*buf)[*len] = '\0';
+    return 0;
+}
+
+static int append_char(char **buf, size_t *len, size_t *cap, char ch) {
+    return append_literal(buf, len, cap, &ch, 1);
+}
+
+static int append_int64(char **buf, size_t *len, size_t *cap, int64_t value) {
+    char tmp[64];
+    int written = snprintf(tmp, sizeof(tmp), "%" PRId64, value);
+    if (written < 0) return -1;
+    return append_literal(buf, len, cap, tmp, (size_t)written);
+}
+
+static int parse_quantize_string(const char *spec, mosdepth_quantize_t *out,
+                                 char *err, size_t errlen) {
+    char *normalized = NULL;
+    char *copy = NULL;
+    char *saveptr = NULL;
+    char *token = NULL;
+    size_t normalized_len = 0;
+    size_t normalized_cap = 0;
+    size_t cut_count = 0;
+    size_t label_count = 0;
+    int64_t *cuts = NULL;
+    char **labels = NULL;
+
+    if (!spec || !*spec) return 0;
+
+    if (strchr(spec, ':') == NULL) {
+        if (append_char(&normalized, &normalized_len, &normalized_cap, ':') != 0 ||
+            append_literal(&normalized, &normalized_len, &normalized_cap, spec, strlen(spec)) != 0 ||
+            append_char(&normalized, &normalized_len, &normalized_cap, ':') != 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            goto fail;
+        }
+    } else if (append_literal(&normalized, &normalized_len, &normalized_cap, spec, strlen(spec)) != 0) {
+        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+        goto fail;
+    }
+
+    if (normalized[0] == ':') {
+        char *tmp = NULL;
+        size_t tmp_len = 0;
+        size_t tmp_cap = 0;
+        if (append_char(&tmp, &tmp_len, &tmp_cap, '0') != 0 ||
+            append_literal(&tmp, &tmp_len, &tmp_cap, normalized, normalized_len) != 0) {
+            free(tmp);
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            goto fail;
+        }
+        free(normalized);
+        normalized = tmp;
+        normalized_len = tmp_len;
+        normalized_cap = tmp_cap;
+    }
+    if (normalized[normalized_len - 1] == ':') {
+        if (append_int64(&normalized, &normalized_len, &normalized_cap, INT64_MAX) != 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            goto fail;
+        }
+    }
+    if (strstr(normalized, "::") != NULL) {
+        snprintf(err, errlen, "duckhts_mosdepth: invalid quantize string");
+        goto fail;
+    }
+
+    for (size_t i = 0; i < normalized_len; i++) {
+        if (normalized[i] == ':') cut_count++;
+    }
+    cut_count += 1;
+    cuts = (int64_t *)malloc(cut_count * sizeof(int64_t));
+    if (!cuts) {
+        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+        goto fail;
+    }
+
+    copy = strdup(normalized);
+    if (!copy) {
+        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+        goto fail;
+    }
+    token = strtok_r(copy, ":", &saveptr);
+    while (token) {
+        char *endptr = NULL;
+        long long value;
+        errno = 0;
+        value = strtoll(token, &endptr, 10);
+        if (errno != 0 || !endptr || *endptr != '\0') {
+            snprintf(err, errlen, "duckhts_mosdepth: invalid quantize string");
+            goto fail;
+        }
+        cuts[label_count++] = (int64_t)value;
+        token = strtok_r(NULL, ":", &saveptr);
+    }
+    if (label_count < 2) {
+        snprintf(err, errlen, "duckhts_mosdepth: invalid quantize string");
+        goto fail;
+    }
+    qsort(cuts, label_count, sizeof(int64_t), int64_cmp);
+
+    labels = (char **)calloc(label_count - 1, sizeof(char *));
+    if (!labels) {
+        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+        goto fail;
+    }
+    for (size_t i = 0; i + 1 < label_count; i++) {
+        char label[128];
+        int written;
+        if (cuts[i + 1] == INT64_MAX) {
+            written = snprintf(label, sizeof(label), "%" PRId64 ":inf", cuts[i]);
+        } else {
+            written = snprintf(label, sizeof(label), "%" PRId64 ":%" PRId64, cuts[i], cuts[i + 1]);
+        }
+        if (written < 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: invalid quantize string");
+            goto fail;
+        }
+        labels[i] = strdup(label);
+        if (!labels[i]) {
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            goto fail;
+        }
+    }
+
+    out->cuts = cuts;
+    out->labels = labels;
+    out->count = label_count;
+    free(copy);
+    free(normalized);
+    return 0;
+
+fail:
+    free(copy);
+    free(normalized);
+    free(cuts);
+    if (labels) {
+        for (size_t i = 0; i + 1 < label_count; i++) free(labels[i]);
+    }
+    free(labels);
+    return -1;
+}
+
+static inline int quantize_bucket(const mosdepth_quantize_t *quantize, int32_t depth) {
+    if (!quantize || !quantize->cuts || quantize->count < 2) return -1;
+    if ((int64_t)depth < quantize->cuts[0] || (int64_t)depth > quantize->cuts[quantize->count - 1]) {
+        return -1;
+    }
+    for (size_t i = 0; i < quantize->count; i++) {
+        if (quantize->cuts[i] > (int64_t)depth) return (int)i - 1;
+        if (quantize->cuts[i] == (int64_t)depth) return (int)i;
+    }
+    return (int)quantize->count - 1;
 }
 
 static int dist_add_count(mosdepth_dist_t *dist, int depth, int64_t count) {
@@ -623,6 +820,44 @@ static int write_per_base_rle(BGZF *fp, kstring_t *line, const char *chrom,
     return bgzf_write_line(fp, line);
 }
 
+static int write_quantized_rle(BGZF *fp, kstring_t *line, const char *chrom,
+                               const int32_t *coverage, int64_t len,
+                               const mosdepth_quantize_t *quantize) {
+    int last_bucket;
+    int64_t last_start;
+
+    if (!fp || !line || !chrom || !coverage || len <= 0 || !quantize || quantize->count < 2) {
+        return 0;
+    }
+
+    last_bucket = quantize_bucket(quantize, coverage[0]);
+    last_start = 0;
+    for (int64_t i = 1; i < len; i++) {
+        int bucket = quantize_bucket(quantize, coverage[i]);
+        if (bucket == last_bucket) continue;
+        if (last_bucket >= 0 && (size_t)last_bucket + 1 < quantize->count) {
+            line->l = 0;
+            if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s",
+                         chrom, last_start, i, quantize->labels[last_bucket]) < 0) {
+                return -1;
+            }
+            if (bgzf_write_line(fp, line) != 0) return -1;
+        }
+        last_bucket = bucket;
+        last_start = i;
+    }
+
+    if (last_bucket >= 0 && (size_t)last_bucket + 1 < quantize->count && last_start < len) {
+        line->l = 0;
+        if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s",
+                     chrom, last_start, len, quantize->labels[last_bucket]) < 0) {
+            return -1;
+        }
+        if (bgzf_write_line(fp, line) != 0) return -1;
+    }
+    return 0;
+}
+
 static int write_window_regions(BGZF *fp, kstring_t *line, const char *chrom,
                                 const int32_t *coverage, int64_t len, int64_t window,
                                 mosdepth_stat_t *region_stat,
@@ -752,6 +987,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     FILE *fh_region = NULL;
     BGZF *bgzf_per_base = NULL;
     BGZF *bgzf_regions = NULL;
+    BGZF *bgzf_quantized = NULL;
     BGZF *bgzf_thresholds = NULL;
     kstring_t line = {0, 0, NULL};
     mosdepth_region_list_t *region_lists = NULL;
@@ -842,6 +1078,10 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     if (bind->regions_path && open_bgzf_or_error(&bgzf_regions, bind->regions_path, err, errlen) != 0) {
         goto cleanup;
     }
+    if (bind->quantized_path &&
+        open_bgzf_or_error(&bgzf_quantized, bind->quantized_path, err, errlen) != 0) {
+        goto cleanup;
+    }
     if (bind->thresholds_path && open_bgzf_or_error(&bgzf_thresholds, bind->thresholds_path, err, errlen) != 0) {
         goto cleanup;
     }
@@ -915,6 +1155,15 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
                 snprintf(err, errlen, "duckhts_mosdepth: failed to write per-base output");
                 goto contig_cleanup;
             }
+            if (bgzf_quantized && bind->quantize.count > 1 && bind->quantize.cuts[0] == 0) {
+                line.l = 0;
+                if (ksprintf(&line, "%s\t0\t%" PRId64 "\t%s",
+                             chrom, chrom_len, bind->quantize.labels[0]) < 0 ||
+                    bgzf_write_line(bgzf_quantized, &line) != 0) {
+                    snprintf(err, errlen, "duckhts_mosdepth: failed to write quantized output");
+                    goto contig_cleanup;
+                }
+            }
             if (bgzf_regions) {
                 if (by_is_window) {
                     if (write_window_regions(bgzf_regions, &line, chrom, NULL, chrom_len, window,
@@ -964,6 +1213,11 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
 
         if (bgzf_per_base && write_per_base_rle(bgzf_per_base, &line, chrom, coverage, chrom_len) != 0) {
             snprintf(err, errlen, "duckhts_mosdepth: failed to write per-base output");
+            goto contig_cleanup;
+        }
+        if (bgzf_quantized &&
+            write_quantized_rle(bgzf_quantized, &line, chrom, coverage, chrom_len, &bind->quantize) != 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to write quantized output");
             goto contig_cleanup;
         }
 
@@ -1054,6 +1308,12 @@ cleanup:
             rc = -1;
         }
     }
+    if (bgzf_quantized) {
+        if (bgzf_close(bgzf_quantized) != 0 && rc == 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to close quantized output");
+            rc = -1;
+        }
+    }
     if (bgzf_thresholds) {
         if (bgzf_close(bgzf_thresholds) != 0 && rc == 0) {
             snprintf(err, errlen, "duckhts_mosdepth: failed to close thresholds output");
@@ -1086,6 +1346,7 @@ cleanup:
     if (rc == 0) {
         if (bind->per_base_path && build_bed_csi(bind->per_base_path, err, errlen) != 0) rc = -1;
         if (rc == 0 && bind->regions_path && build_bed_csi(bind->regions_path, err, errlen) != 0) rc = -1;
+        if (rc == 0 && bind->quantized_path && build_bed_csi(bind->quantized_path, err, errlen) != 0) rc = -1;
         if (rc == 0 && bind->thresholds_path && build_bed_csi(bind->thresholds_path, err, errlen) != 0) rc = -1;
     }
     return rc;
@@ -1105,8 +1366,10 @@ static void destroy_mosdepth_bind(void *data) {
     if (bind->per_base_path) duckdb_free(bind->per_base_path);
     if (bind->regions_path) duckdb_free(bind->regions_path);
     if (bind->region_dist_path) duckdb_free(bind->region_dist_path);
+    if (bind->quantized_path) duckdb_free(bind->quantized_path);
     if (bind->thresholds_path) duckdb_free(bind->thresholds_path);
     threshold_list_destroy(&bind->thresholds);
+    quantize_destroy(&bind->quantize);
     duckdb_free(bind);
 }
 
@@ -1120,6 +1383,7 @@ static void add_result_columns(duckdb_bind_info info) {
     duckdb_bind_add_result_column(info, "per_base_path", varchar_type);
     duckdb_bind_add_result_column(info, "regions_path", varchar_type);
     duckdb_bind_add_result_column(info, "region_dist_path", varchar_type);
+    duckdb_bind_add_result_column(info, "quantized_path", varchar_type);
     duckdb_bind_add_result_column(info, "thresholds_path", varchar_type);
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_logical_type(&varchar_type);
@@ -1223,6 +1487,22 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     }
     if (val) duckdb_destroy_value(&val);
 
+    val = duckdb_bind_get_named_parameter(info, "quantize");
+    if (val && !duckdb_is_null_value(val)) {
+        char *quantize = duckdb_get_varchar(val);
+        if (quantize) {
+            if (parse_quantize_string(quantize, &bind->quantize, err, sizeof(err)) != 0) {
+                duckdb_free(quantize);
+                duckdb_destroy_value(&val);
+                destroy_mosdepth_bind(bind);
+                duckdb_bind_set_error(info, err);
+                return;
+            }
+            duckdb_free(quantize);
+        }
+    }
+    if (val) duckdb_destroy_value(&val);
+
     val = duckdb_bind_get_named_parameter(info, "no_per_base");
     if (val && !duckdb_is_null_value(val)) bind->no_per_base = duckdb_get_bool(val) ? 1 : 0;
     if (val) duckdb_destroy_value(&val);
@@ -1278,10 +1558,12 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     bind->per_base_path = bind->no_per_base ? NULL : append_suffix(bind->prefix, ".per-base.bed.gz");
     bind->regions_path = (bind->by && bind->by[0] != '\0') ? append_suffix(bind->prefix, ".regions.bed.gz") : NULL;
     bind->region_dist_path = (bind->by && bind->by[0] != '\0') ? append_suffix(bind->prefix, ".mosdepth.region.dist.txt") : NULL;
+    bind->quantized_path = (bind->quantize.count > 0) ? append_suffix(bind->prefix, ".quantized.bed.gz") : NULL;
     bind->thresholds_path = (bind->thresholds.count > 0) ? append_suffix(bind->prefix, ".thresholds.bed.gz") : NULL;
     if (!bind->summary_path || !bind->global_dist_path ||
         (!bind->no_per_base && !bind->per_base_path) ||
         ((bind->by && bind->by[0] != '\0') && (!bind->regions_path || !bind->region_dist_path)) ||
+        (bind->quantize.count > 0 && !bind->quantized_path) ||
         (bind->thresholds.count > 0 && !bind->thresholds_path)) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, "duckhts_mosdepth: out of memory");
@@ -1293,6 +1575,7 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
         ensure_output_available(bind->per_base_path, bind->overwrite, err, sizeof(err)) != 0 ||
         ensure_output_available(bind->regions_path, bind->overwrite, err, sizeof(err)) != 0 ||
         ensure_output_available(bind->region_dist_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->quantized_path, bind->overwrite, err, sizeof(err)) != 0 ||
         ensure_output_available(bind->thresholds_path, bind->overwrite, err, sizeof(err)) != 0) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, err);
@@ -1329,7 +1612,8 @@ static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk o
     duckdb_vector per_base_vec = duckdb_data_chunk_get_vector(output, 4);
     duckdb_vector regions_vec = duckdb_data_chunk_get_vector(output, 5);
     duckdb_vector region_dist_vec = duckdb_data_chunk_get_vector(output, 6);
-    duckdb_vector thresholds_vec = duckdb_data_chunk_get_vector(output, 7);
+    duckdb_vector quantized_vec = duckdb_data_chunk_get_vector(output, 7);
+    duckdb_vector thresholds_vec = duckdb_data_chunk_get_vector(output, 8);
 
     bool *success = (bool *)duckdb_vector_get_data(success_vec);
     success[0] = true;
@@ -1342,6 +1626,8 @@ static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk o
     else set_null(regions_vec, 0);
     if (bind->region_dist_path) duckdb_vector_assign_string_element(region_dist_vec, 0, bind->region_dist_path);
     else set_null(region_dist_vec, 0);
+    if (bind->quantized_path) duckdb_vector_assign_string_element(quantized_vec, 0, bind->quantized_path);
+    else set_null(quantized_vec, 0);
     if (bind->thresholds_path) duckdb_vector_assign_string_element(thresholds_vec, 0, bind->thresholds_path);
     else set_null(thresholds_vec, 0);
 
@@ -1368,6 +1654,7 @@ void register_duckhts_mosdepth_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "fast_mode", bool_type);
     duckdb_table_function_add_named_parameter(tf, "mapq", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "precision_digits", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "quantize", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "thresholds", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "overwrite", bool_type);

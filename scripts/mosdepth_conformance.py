@@ -53,6 +53,7 @@ def duckdb_run_native(
     bam,
     chrom=None,
     by=None,
+    quantize=None,
     fasta=None,
     thresholds=None,
     threads=4,
@@ -70,6 +71,8 @@ def duckdb_run_native(
         args.append(f"by := {sql_quote_string(by)}")
     if fasta is not None:
         args.append(f"fasta := {sql_quote_string(fasta)}")
+    if quantize is not None:
+        args.append(f"quantize := {sql_quote_string(quantize)}")
     if thresholds is not None:
         args.append(f"thresholds := {sql_quote_string(thresholds)}")
     args.append(f"threads := {threads}")
@@ -171,6 +174,16 @@ def compare_windows(native_bed_gz, mosdepth_bed_gz, chrom):
     return False, len(native_rows), diffs
 
 
+def compare_tsv(native_path, mosdepth_path, chrom=None, skip_header=False):
+    native_rows = read_tsv_rows(native_path, chrom, skip_header=skip_header)
+    mosdepth_rows = read_tsv_rows(mosdepth_path, chrom, skip_header=skip_header)
+    if native_rows == mosdepth_rows:
+        return True, len(native_rows), 0
+    diffs = sum(1 for a, b in zip(native_rows, mosdepth_rows) if a != b)
+    diffs += abs(len(native_rows) - len(mosdepth_rows))
+    return False, len(native_rows), diffs
+
+
 def read_tsv_rows(path, chrom=None, skip_header=False):
     opener = gzip.open if str(path).endswith(".gz") else open
     rows = []
@@ -208,6 +221,11 @@ def main():
         help="Window size for region means (default: 10000)",
     )
     parser.add_argument(
+        "--by-bed",
+        default=None,
+        help="BED file for mosdepth --by comparisons; overrides --window-size when set",
+    )
+    parser.add_argument(
         "--threads",
         type=int,
         default=4,
@@ -217,6 +235,11 @@ def main():
         "--thresholds",
         default=None,
         help="Optional comma-separated threshold list for --by comparisons (e.g. 1,10,20)",
+    )
+    parser.add_argument(
+        "--quantize",
+        default=None,
+        help="Optional mosdepth quantize spec (e.g. :1:4:)",
     )
     parser.add_argument(
         "--keep-tmp", action="store_true", help="Keep temporary files for inspection"
@@ -248,10 +271,15 @@ def main():
     print(f"Alignment:  {bam}")
     print(f"Chromosome: {chrom} ({chrom_len:,} bp)")
     print(f"Extension:  {ext}")
-    print(f"Window:     {args.window_size:,} bp")
+    if args.by_bed:
+        print(f"By BED:     {os.path.abspath(args.by_bed)}")
+    else:
+        print(f"Window:     {args.window_size:,} bp")
     print(f"Threads:    {args.threads}")
     if args.thresholds:
         print(f"Thresholds: {args.thresholds}")
+    if args.quantize:
+        print(f"Quantize:   {args.quantize}")
     if fasta:
         print(f"Reference:  {fasta}")
     print()
@@ -262,15 +290,17 @@ def main():
     print("--- Running mosdepth (ground truth) ---")
     md_env = {"MOSDEPTH_PRECISION": "6"}
     fasta_flag = f" -f {fasta}" if fasta else ""
+    by_value = os.path.abspath(args.by_bed) if args.by_bed else str(args.window_size)
+    quantize_flag = f" --quantize {args.quantize}" if args.quantize else ""
     md_fast = os.path.join(tmpdir, "md_fast")
     md_windows = os.path.join(tmpdir, "md_fast_windows")
     run(
-        f"mosdepth --fast-mode -t {args.threads}{fasta_flag} {md_fast} {bam}",
+        f"mosdepth --fast-mode{quantize_flag} -t {args.threads}{fasta_flag} {md_fast} {bam}",
         env=md_env,
         timeout=3600,
     )
     run(
-        f"mosdepth --fast-mode --by {args.window_size}"
+        f"mosdepth --fast-mode --by {by_value}{quantize_flag}"
         f"{(' -T ' + args.thresholds) if args.thresholds else ''}"
         f" -t {args.threads}{fasta_flag} {md_windows} {bam}",
         env=md_env,
@@ -285,7 +315,8 @@ def main():
         prefix=native_prefix,
         bam=bam,
         chrom=chrom,
-        by=str(args.window_size),
+        by=by_value,
+        quantize=args.quantize,
         fasta=fasta,
         thresholds=args.thresholds,
         threads=args.threads,
@@ -299,6 +330,7 @@ def main():
     native_global = f"{native_prefix}.mosdepth.global.dist.txt"
     native_regions = f"{native_prefix}.regions.bed.gz"
     native_region_dist = f"{native_prefix}.mosdepth.region.dist.txt"
+    native_quantized = f"{native_prefix}.quantized.bed.gz"
     native_thresholds = f"{native_prefix}.thresholds.bed.gz"
 
     print("\n--- Test 1: Fast-mode per-base depth ---")
@@ -334,12 +366,18 @@ def main():
     results["fast_distribution"] = ok
     print(f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches")
 
-    print(f"\n--- Test 4: Fast-mode {args.window_size}-bp region means ---")
-    ok, n_rows, diffs = compare_windows(
-        native_regions, f"{md_windows}.regions.bed.gz", chrom
-    )
+    if args.by_bed:
+        print("\n--- Test 4: Fast-mode BED region means ---")
+        ok, n_rows, diffs = compare_tsv(native_regions, f"{md_windows}.regions.bed.gz", chrom)
+        region_label = "rows"
+    else:
+        print(f"\n--- Test 4: Fast-mode {args.window_size}-bp region means ---")
+        ok, n_rows, diffs = compare_windows(
+            native_regions, f"{md_windows}.regions.bed.gz", chrom
+        )
+        region_label = "non-zero windows"
     results["fast_windows"] = ok
-    print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} non-zero windows, {diffs} differences")
+    print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} {region_label}, {diffs} differences")
 
     print("\n--- Test 5: Fast-mode region distribution ---")
     ok, n_levels, mismatches = compare_distribution(
@@ -354,6 +392,14 @@ def main():
             native_thresholds, f"{md_windows}.thresholds.bed.gz", chrom
         )
         results["fast_thresholds"] = ok
+        print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} rows, {diffs} differences")
+
+    if args.quantize:
+        print("\n--- Test 7: Fast-mode quantized output ---")
+        ok, n_rows, diffs = compare_tsv(
+            native_quantized, f"{md_fast}.quantized.bed.gz", chrom
+        )
+        results["fast_quantize"] = ok
         print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} rows, {diffs} differences")
 
     print("\n" + "=" * 60)

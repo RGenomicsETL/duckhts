@@ -18,6 +18,7 @@ rduckhts_mosdepth(
   fast_mode = TRUE,
   mapq = 0,
   precision_digits = 2,
+  quantize = NULL,
   thresholds = NULL,
   index_path = NULL,
   overwrite = FALSE
@@ -49,6 +50,8 @@ rduckhts_mosdepth(
 \item{mapq}{Minimum mapping quality threshold}
 
 \item{precision_digits}{Number of decimal places to write in the text outputs}
+
+\item{quantize}{Optional mosdepth-style quantize specification such as `":1:4:"`}
 
 \item{thresholds}{Optional comma-separated coverage thresholds for `by`, matching mosdepth's `-T`}
 

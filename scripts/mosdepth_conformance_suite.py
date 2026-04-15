@@ -48,6 +48,14 @@ CASES = [
         "chrom": "1",
         "window_size": "1000",
     },
+    {
+        "name": "empty_tids_bed_quantize",
+        "bam": "test/data/empty-tids.bam",
+        "chrom": "HPV18",
+        "by_bed": "test/data/empty-tids.bed",
+        "thresholds": "1,10,100",
+        "quantize": ":1:4:",
+    },
 ]
 
 
@@ -58,15 +66,19 @@ def run_case(repo_root, extension, threads, case):
         os.path.join(repo_root, case["bam"]),
         "--chrom",
         case["chrom"],
-        "--window-size",
-        case["window_size"],
         "--threads",
         str(threads),
         "--extension",
         extension,
     ]
+    if "window_size" in case:
+        cmd.extend(["--window-size", case["window_size"]])
+    if "by_bed" in case:
+        cmd.extend(["--by-bed", os.path.join(repo_root, case["by_bed"])])
     if "thresholds" in case:
         cmd.extend(["--thresholds", case["thresholds"]])
+    if "quantize" in case:
+        cmd.extend(["--quantize", case["quantize"]])
     if "fasta" in case:
         cmd.extend(["--fasta", os.path.join(repo_root, case["fasta"])])
 

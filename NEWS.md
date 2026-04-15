@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.1.6.9000 Developement version
+- extend `duckhts_mosdepth(...)` fast-mode parity with `quantize := '...'`, writing mosdepth-style `.quantized.bed.gz` + CSI output, and add native/SQL/R conformance coverage for quantized output plus explicit `by := '<bed>'` validation against upstream mosdepth
 - extend `duckhts_mosdepth(...)` fast-mode parity with `thresholds := '...'` for `by := '<window|bed>'`, writing mosdepth-style `.thresholds.bed.gz` + CSI output; also align window/BED mean accumulation and window-region distribution bucketing with upstream mosdepth's current implementation behavior, and add SQL/R/native-conformance coverage for the new outputs
 - import upstream mosdepth edge-case fixtures (`big`, `empty-tids`, `overlapping-pairs`, `ovl`, `nanopore`, and related BED files) into `test/data/` and `r/Rduckhts/inst/extdata/`, add a native conformance-suite runner for them, and record Brent Pedersen as the original mosdepth author in the R package metadata/copyright bundle
 - switch `scripts/mosdepth_conformance.py` and `scripts/mosdepth_benchmark.py` to the native `duckhts_mosdepth(...)` table function only; the old pure-SQL mosdepth reconstruction path is removed from the validation/benchmark workflow, and larger WGS validation runs can now be driven directly from real BAM/CRAM inputs through the native writer
