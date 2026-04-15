@@ -1100,7 +1100,8 @@ rduckhts_bgunzip <- function(
 #' @param rmdup Duplicate handling mode: `"none"`, `"flag"`, or `"streaming"`
 #' @param stats Optional comma-separated subset of `"gc"` and `"mq"`
 #'
-#' @return A data frame of non-empty bins with total, forward, reverse, and
+#' @return A data frame with one row per fixed-width bin across the selected
+#'   contig span, including zero-count bins, plus total, forward, reverse, and
 #'   optional GC/MAPQ summary columns
 #'
 #' @export

@@ -839,26 +839,44 @@ static void apply_streaming_boundary_repairs(bam_bin_bind_t *bind) {
     }
 }
 
-static int count_rows_for_bind(const bam_bin_bind_t *bind) {
+static int64_t dense_bin_count_for_contig(const bam_bin_contig_t *contig, int64_t bin_width) {
+    if (!contig || bin_width <= 0 || contig->ref_length <= 0) return 0;
+    return (contig->ref_length + bin_width - 1) / bin_width;
+}
+
+static inline int64_t contig_count_at(const int64_t *values, const bam_bin_contig_t *contig, int64_t bin) {
+    if (!values || !contig || bin < 0 || bin > contig->max_bin) return 0;
+    return values[bin];
+}
+
+static inline uint64_t contig_u64_at(const uint64_t *values, const bam_bin_contig_t *contig, int64_t bin) {
+    if (!values || !contig || bin < 0 || bin > contig->max_bin) return 0;
+    return values[bin];
+}
+
+static int count_rows_for_bind(const bam_bin_bind_t *bind, size_t *rows_out) {
     size_t rows = 0;
-    if (!bind) return -1;
+    if (!bind || !rows_out) return -1;
     for (int i = 0; i < bind->n_contigs; i++) {
         const bam_bin_contig_t *contig = &bind->contigs[i];
-        for (int64_t bin = 0; bin <= contig->max_bin; bin++) {
-            int64_t pre = contig->count_pre ? contig->count_pre[bin] : 0;
-            if (contig->count_total[bin] > 0 || pre > 0) rows++;
-        }
+        int64_t n_bins = dense_bin_count_for_contig(contig, bind->bin_width);
+        if (n_bins < 0 || (size_t)n_bins > (SIZE_MAX - rows)) return -1;
+        rows += (size_t)n_bins;
     }
-    return rows > SIZE_MAX ? -1 : (int)rows;
+    *rows_out = rows;
+    return 0;
 }
 
 static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errlen) {
-    size_t rows_needed;
+    size_t rows_needed = 0;
     size_t row_idx = 0;
     faidx_t *fai = NULL;
 
     if (!bind) return -1;
-    rows_needed = (size_t)count_rows_for_bind(bind);
+    if (count_rows_for_bind(bind, &rows_needed) != 0) {
+        snprintf(err, errlen, "bam_bin_counts: row count overflow");
+        return -1;
+    }
     bind->rows = (bam_bin_row_t *)calloc(rows_needed ? rows_needed : 1, sizeof(bam_bin_row_t));
     if (!bind->rows) {
         snprintf(err, errlen, "bam_bin_counts: out of memory materializing rows");
@@ -876,8 +894,9 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
     for (int i = 0; i < bind->n_contigs; i++) {
         bam_bin_contig_t *contig = &bind->contigs[i];
         uint64_t *ref_gc_by_bin = NULL;
+        int64_t n_bins = dense_bin_count_for_contig(contig, bind->bin_width);
 
-        if (fai && contig->max_bin >= 0) {
+        if (fai && n_bins > 0) {
             hts_pos_t fetch_len = 0;
             char *seq = faidx_fetch_seq64(fai, contig->chrom_name, 0, contig->ref_length - 1, &fetch_len);
             if (!seq || fetch_len < 0) {
@@ -886,7 +905,7 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
                 free(seq);
                 return -1;
             }
-            ref_gc_by_bin = (uint64_t *)calloc((size_t)(contig->max_bin + 1), sizeof(uint64_t));
+            ref_gc_by_bin = (uint64_t *)calloc((size_t)n_bins, sizeof(uint64_t));
             if (!ref_gc_by_bin) {
                 fai_destroy(fai);
                 free(seq);
@@ -897,16 +916,15 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
                 unsigned char c = (unsigned char)toupper((unsigned char)seq[pos]);
                 if (c == 'C' || c == 'G') {
                     int64_t bin = (int64_t)pos / bind->bin_width;
-                    if (bin <= contig->max_bin) ref_gc_by_bin[bin]++;
+                    if (bin >= 0 && bin < n_bins) ref_gc_by_bin[bin]++;
                 }
             }
             free(seq);
         }
 
-        for (int64_t bin = 0; bin <= contig->max_bin; bin++) {
-            int64_t pre = contig->count_pre ? contig->count_pre[bin] : 0;
+        for (int64_t bin = 0; bin < n_bins; bin++) {
+            int64_t pre = contig_count_at(contig->count_pre, contig, bin);
             bam_bin_row_t *row;
-            if (contig->count_total[bin] <= 0 && pre <= 0) continue;
             row = &bind->rows[row_idx++];
             row->chrom = contig->chrom_name;
             row->bin_id = bin;
@@ -915,25 +933,25 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
             if (contig->ref_length > 0 && row->end > contig->ref_length) {
                 row->end = contig->ref_length;
             }
-            row->count_total = contig->count_total[bin];
-            row->count_fwd = contig->count_fwd[bin];
-            row->count_rev = contig->count_rev[bin];
+            row->count_total = contig_count_at(contig->count_total, contig, bin);
+            row->count_fwd = contig_count_at(contig->count_fwd, contig, bin);
+            row->count_rev = contig_count_at(contig->count_rev, contig, bin);
             row->count_pre = pre;
             if (bind->want_gc) {
-                row->gc_bases_pre = contig->gc_bases_pre[bin];
-                row->bases_pre = contig->bases_pre[bin];
-                row->gc_bases_post = contig->gc_bases_post[bin];
-                row->bases_post = contig->bases_post[bin];
+                row->gc_bases_pre = contig_u64_at(contig->gc_bases_pre, contig, bin);
+                row->bases_pre = contig_u64_at(contig->bases_pre, contig, bin);
+                row->gc_bases_post = contig_u64_at(contig->gc_bases_post, contig, bin);
+                row->bases_post = contig_u64_at(contig->bases_post, contig, bin);
                 if (ref_gc_by_bin) {
                     int64_t remaining = contig->ref_length - row->start;
                     row->ref_bases = remaining > bind->bin_width ? (uint64_t)bind->bin_width :
                         (remaining > 0 ? (uint64_t)remaining : 0);
-                    row->ref_gc_bases = ref_gc_by_bin[bin];
+                    row->ref_gc_bases = ref_gc_by_bin[(size_t)bin];
                 }
             }
             if (bind->want_mq) {
-                row->mapq_sum_pre = contig->mapq_sum_pre[bin];
-                row->mapq_sum_post = contig->mapq_sum_post[bin];
+                row->mapq_sum_pre = contig_u64_at(contig->mapq_sum_pre, contig, bin);
+                row->mapq_sum_post = contig_u64_at(contig->mapq_sum_post, contig, bin);
             }
         }
 
