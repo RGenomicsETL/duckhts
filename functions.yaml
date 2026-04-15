@@ -240,6 +240,18 @@
       ]
     },
     {
+      "name": "bam_bin_counts",
+      "kind": "table",
+      "category": "Coverage",
+      "signature": "bam_bin_counts(path, bin_width, chrom := NULL, reference := NULL, index_path := NULL, mapq := 0, require_flags := 0, exclude_flags := 0, rmdup := 'none', stats := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bam_bin_counts",
+      "description": "Count BAM or CRAM read starts into fixed-width bins. Returns non-empty bins with total, forward, and reverse counts; `rmdup := 'streaming'` applies the WisecondorX-style larp/larp2 consecutive-position deduplication, `rmdup := 'flag'` drops SAM duplicate-flagged reads, and `stats := 'gc'`, `'mq'`, or `'gc,mq'` adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when `reference` is provided.",
+      "examples": [
+        "SELECT * FROM bam_bin_counts('fixture_mixed.cram', 5000, reference := 'fixture_ref.fa', rmdup := 'streaming', stats := 'gc,mq');"
+      ]
+    },
+    {
       "name": "duckhts_mosdepth",
       "kind": "table",
       "category": "Coverage",

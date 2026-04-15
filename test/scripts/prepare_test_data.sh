@@ -58,6 +58,22 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  mosdepth upstream fixtures + indexes"
 
+# ---- WisecondorX fixed-bin counting fixtures (copy as-is) ----
+RWX_SRC="$REPO_ROOT/RWisecondorX/inst/extdata"
+for out_dir in "$DST" "$PKG_DST"; do
+  cp "$RWX_SRC/fixture_paired.bam" "$out_dir/fixture_paired.bam"
+  cp "$RWX_SRC/fixture_paired.bam.bai" "$out_dir/fixture_paired.bam.bai"
+  cp "$RWX_SRC/fixture_single.bam" "$out_dir/fixture_single.bam"
+  cp "$RWX_SRC/fixture_single.bam.bai" "$out_dir/fixture_single.bam.bai"
+  cp "$RWX_SRC/fixture_mixed.bam" "$out_dir/fixture_mixed.bam"
+  cp "$RWX_SRC/fixture_mixed.bam.bai" "$out_dir/fixture_mixed.bam.bai"
+  cp "$RWX_SRC/fixture_mixed.cram" "$out_dir/fixture_mixed.cram"
+  cp "$RWX_SRC/fixture_mixed.cram.crai" "$out_dir/fixture_mixed.cram.crai"
+  cp "$RWX_SRC/fixture_ref.fa" "$out_dir/fixture_ref.fa"
+  cp "$RWX_SRC/fixture_ref.fa.fai" "$out_dir/fixture_ref.fa.fai"
+done
+echo "  WisecondorX fixed-bin counting fixtures + indexes"
+
 # ---- VCF → bgzipped VCF + index ----
 bcftools view "$SRC/formatcols.vcf" -Oz -o "$DST/formatcols.vcf.gz"
 bcftools index "$DST/formatcols.vcf.gz"

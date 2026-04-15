@@ -1082,6 +1082,61 @@ rduckhts_bgunzip <- function(
   DBI::dbGetQuery(con, query)
 }
 
+#' Native Fixed-Width BAM/CRAM Bin Counts
+#'
+#' Count read starts into fixed-width genomic bins with optional duplicate
+#' handling and optional per-bin GC and MAPQ summary statistics.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the input BAM or CRAM file
+#' @param bin_width Positive fixed bin width in bases
+#' @param chrom Optional chromosome name filter
+#' @param reference Optional reference FASTA path for CRAM input when required,
+#'   and for reference-GC output when `stats` includes `"gc"`
+#' @param index_path Optional explicit BAM/CRAM index path
+#' @param mapq Minimum mapping quality threshold applied after duplicate logic
+#' @param require_flags Required SAM flag mask
+#' @param exclude_flags Excluded SAM flag mask
+#' @param rmdup Duplicate handling mode: `"none"`, `"flag"`, or `"streaming"`
+#' @param stats Optional comma-separated subset of `"gc"` and `"mq"`
+#'
+#' @return A data frame of non-empty bins with total, forward, reverse, and
+#'   optional GC/MAPQ summary columns
+#'
+#' @export
+rduckhts_bam_bin_counts <- function(
+  con,
+  path,
+  bin_width,
+  chrom = NULL,
+  reference = NULL,
+  index_path = NULL,
+  mapq = 0,
+  require_flags = 0,
+  exclude_flags = 0,
+  rmdup = "none",
+  stats = NULL
+) {
+  params <- list(
+    mapq = mapq,
+    require_flags = require_flags,
+    exclude_flags = exclude_flags,
+    rmdup = sql_quote_string(rmdup)
+  )
+  if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
+  if (!is.null(reference)) params$reference <- sql_quote_string(reference)
+  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
+  if (!is.null(stats)) params$stats <- sql_quote_string(stats)
+  param_str <- build_param_str(params)
+  query <- sprintf(
+    "SELECT * FROM bam_bin_counts(%s, %s%s)",
+    sql_quote_string(path),
+    as.character(bin_width),
+    param_str
+  )
+  DBI::dbGetQuery(con, query)
+}
+
 #' Native mosdepth-Compatible Coverage Outputs
 #'
 #' Writes native mosdepth-compatible coverage outputs for indexed BAM or CRAM input.

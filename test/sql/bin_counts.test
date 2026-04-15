@@ -1,0 +1,94 @@
+# name: test/sql/bin_counts.test
+# description: Test native bam_bin_counts fixed-width BAM/CRAM bin counting
+# group: [duckhts]
+
+require duckhts
+
+query TTIIIII
+SELECT rmdup, chrom, bin_id, count_total, count_fwd, count_rev, count_pre
+FROM (
+  SELECT 'none' AS rmdup, * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'none', stats := 'mq')
+  UNION ALL
+  SELECT 'streaming' AS rmdup, * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'streaming', stats := 'mq')
+  UNION ALL
+  SELECT 'flag' AS rmdup, * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'flag', stats := 'mq')
+)
+ORDER BY rmdup, bin_id;
+----
+flag	11	0	4	2	2	4
+flag	11	1	0	0	0	2
+flag	11	2	2	2	0	2
+flag	11	3	2	2	0	2
+none	11	0	4	2	2	4
+none	11	1	2	1	1	2
+none	11	2	2	2	0	2
+none	11	3	2	2	0	2
+streaming	11	0	2	1	1	4
+streaming	11	1	2	1	1	2
+streaming	11	2	1	1	0	2
+
+query II
+SELECT
+  (SELECT CAST(sum(count_total) AS BIGINT) FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, exclude_flags := 1024)),
+  (SELECT CAST(sum(count_total) AS BIGINT) FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, require_flags := 64));
+----
+8	4
+
+query IIIIIT
+SELECT bin_id, count_total, count_pre, mapq_sum_pre, mapq_sum_post, printf('%.1f', mean_mapq_pre)
+FROM bam_bin_counts(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  5000,
+  mapq := 61,
+  rmdup := 'none',
+  stats := 'mq'
+)
+ORDER BY bin_id;
+----
+0	0	4	240	0	60.0
+1	0	2	120	0	60.0
+2	0	2	120	0	60.0
+3	0	2	120	0	60.0
+
+query IIIIIIITIITIITITIT
+SELECT
+  bin_id,
+  count_total,
+  count_fwd,
+  count_rev,
+  count_pre,
+  gc_bases_pre,
+  bases_pre,
+  printf('%.2f', gc_perc_pre),
+  gc_bases_post,
+  bases_post,
+  printf('%.2f', gc_perc_post),
+  ref_gc_bases,
+  ref_bases,
+  printf('%.2f', gc_perc_ref),
+  mapq_sum_pre,
+  printf('%.1f', mean_mapq_pre),
+  mapq_sum_post,
+  printf('%.1f', mean_mapq_post)
+FROM bam_bin_counts(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.cram',
+  5000,
+  reference := '__WORKING_DIRECTORY__/test/data/fixture_ref.fa',
+  rmdup := 'streaming',
+  stats := 'gc,mq'
+)
+ORDER BY bin_id;
+----
+0	2	1	1	4	72	144	0.50	0	72	0.00	0	5000	0.00	240	60.0	120	60.0
+1	2	1	1	2	0	72	0.00	0	72	0.00	0	5000	0.00	120	60.0	120	60.0
+2	1	1	0	2	72	72	1.00	36	36	1.00	0	5000	0.00	120	60.0	60	60.0
+
+statement error
+SELECT * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'weird');
+----
+bam_bin_counts: rmdup must be 'none', 'flag', or 'streaming'
+
+statement error
+SELECT * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, stats := 'gc,wat');
+----
+bam_bin_counts: stats must be NULL, 'gc', 'mq', or 'gc,mq'

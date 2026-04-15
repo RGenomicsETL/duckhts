@@ -87,6 +87,7 @@ set(EXTENSION_SOURCES
         src/quality_encoding_reader.c
         src/score_udf.c
         src/mosdepth_table.c
+        src/bam_bin_counts.c
         src/bcftools_filter.c
         src/bcftools_shim.c
         src/wasm_http_hfile.c
