@@ -1,5 +1,5 @@
 # name: test/sql/mosdepth.test
-# description: Test native duckhts_mosdepth BAM/CRAM fast-mode outputs
+# description: Test native duckhts_mosdepth BAM/CRAM coverage outputs
 # group: [duckhts]
 
 require duckhts
@@ -8,6 +8,7 @@ statement ok
 SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/mosdepth_fast_sqltest',
   '__WORKING_DIRECTORY__/test/data/range.bam',
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -28,6 +29,7 @@ statement ok
 SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/mosdepth_prec_sqltest',
   '__WORKING_DIRECTORY__/test/data/range.bam',
+  fast_mode := TRUE,
   precision_digits := 4,
   overwrite := TRUE
 );
@@ -51,6 +53,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/test/data/range.cram',
   fasta := '__WORKING_DIRECTORY__/test/data/ce.fa',
   index_path := '__WORKING_DIRECTORY__/test/data/range.cram.crai',
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -98,6 +101,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/mosdepth_win_sqltest',
   '__WORKING_DIRECTORY__/test/data/range.bam',
   by := '1000',
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -140,6 +144,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/test/data/range.bam',
   by := '1000',
   thresholds := '1,2',
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -167,6 +172,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/mosdepth_big_sqltest',
   '__WORKING_DIRECTORY__/test/data/big.bam',
   index_path := '__WORKING_DIRECTORY__/test/data/big.bam.csi',
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -198,6 +204,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/test/data/empty-tids.bam',
   by := '1000',
   no_per_base := TRUE,
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -234,6 +241,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/test/data/empty-tids.bam',
   by := '__WORKING_DIRECTORY__/test/data/empty-tids.bed',
   no_per_base := TRUE,
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -255,6 +263,7 @@ SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/test/data/empty-tids.bam',
   quantize := ':1:4:',
   no_per_base := TRUE,
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 
@@ -279,20 +288,172 @@ FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/test/data/range.bam',
   by := '1000',
   no_per_base := TRUE,
+  fast_mode := TRUE,
   overwrite := TRUE
 );
 ----
 NULL	OK
 
-statement error
+statement ok
 SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/mosdepth_default_sqltest',
-  '__WORKING_DIRECTORY__/test/data/range.bam',
+  '__WORKING_DIRECTORY__/test/data/overlapping-pairs.bam',
+  chrom := '1',
+  by := '1000',
   fast_mode := FALSE,
   overwrite := TRUE
 );
+
+query TIITII
+SELECT chrom, length, bases, printf('%.2f', mean), min, max
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_default_sqltest.mosdepth.summary.txt',
+  delim = '\t',
+  header = true
+)
+WHERE chrom IN ('1', 'total')
+ORDER BY chrom;
 ----
-duckhts_mosdepth currently implements only fast_mode := TRUE
+1	249250621	80	0.00	0	1
+total	249250621	80	0.00	0	1
+
+query TIII
+SELECT chrom, start_pos, end_pos, depth
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_default_sqltest.per-base.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'depth':'INTEGER'},
+  delim = '\t',
+  header = false
+)
+LIMIT 3;
+----
+1	0	565173	0
+1	565173	565253	1
+1	565253	249250621	0
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_rg_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  chrom := 'CHROMOSOME_I',
+  read_groups := 'missing',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIITII
+SELECT chrom, length, bases, printf('%.2f', mean), min, max
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_rg_sqltest.mosdepth.summary.txt',
+  delim = '\t',
+  header = true
+)
+WHERE chrom IN ('CHROMOSOME_I', 'total')
+ORDER BY chrom;
+----
+CHROMOSOME_I	1009800	0	0.00	0	0
+total	1009800	0	0.00	0	0
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_median_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  chrom := 'CHROMOSOME_II',
+  by := '1000',
+  use_median := TRUE,
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIII
+SELECT chrom, start_pos, end_pos, printf('%.2f', value)
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_median_sqltest.regions.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'value':'DOUBLE'},
+  delim = '\t',
+  header = false
+)
+ORDER BY start_pos;
+----
+CHROMOSOME_II	0	1000	0.00
+CHROMOSOME_II	1000	2000	2.00
+CHROMOSOME_II	2000	3000	1.00
+CHROMOSOME_II	3000	4000	0.00
+CHROMOSOME_II	4000	5000	0.00
+
+query TIT
+SELECT chrom, depth, printf('%.2f', fraction)
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_median_sqltest.mosdepth.region.dist.txt',
+  columns = {'chrom':'VARCHAR', 'depth':'INTEGER', 'fraction':'DOUBLE'},
+  delim = '\t',
+  header = false
+)
+WHERE chrom = 'CHROMOSOME_II'
+ORDER BY depth DESC;
+----
+CHROMOSOME_II	2	0.20
+CHROMOSOME_II	1	0.40
+CHROMOSOME_II	0	1.00
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_fragment_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  chrom := 'CHROMOSOME_II',
+  by := '1000',
+  fragment_mode := TRUE,
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIITII
+SELECT chrom, length, bases, printf('%.2f', mean), min, max
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_fragment_sqltest.mosdepth.summary.txt',
+  delim = '\t',
+  header = true
+)
+WHERE chrom IN ('CHROMOSOME_II', 'CHROMOSOME_II_region', 'total', 'total_region')
+ORDER BY chrom;
+----
+CHROMOSOME_II	5000	8032	1.61	0	7
+CHROMOSOME_II_region	5000	8032	1.61	0	7
+total	5000	8032	1.61	0	7
+total_region	5000	8032	1.61	0	7
+
+query TIII
+SELECT chrom, start_pos, end_pos, printf('%.2f', value)
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_fragment_sqltest.regions.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'value':'DOUBLE'},
+  delim = '\t',
+  header = false
+)
+ORDER BY start_pos;
+----
+CHROMOSOME_II	0	1000	0.00
+CHROMOSOME_II	1000	2000	3.63
+CHROMOSOME_II	2000	3000	3.05
+CHROMOSOME_II	3000	4000	1.35
+CHROMOSOME_II	4000	5000	0.00
+
+query TIT
+SELECT chrom, depth, printf('%.2f', fraction)
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_fragment_sqltest.mosdepth.region.dist.txt',
+  columns = {'chrom':'VARCHAR', 'depth':'INTEGER', 'fraction':'DOUBLE'},
+  delim = '\t',
+  header = false
+)
+WHERE chrom = 'CHROMOSOME_II'
+ORDER BY depth DESC;
+----
+CHROMOSOME_II	4	0.20
+CHROMOSOME_II	3	0.40
+CHROMOSOME_II	2	0.40
+CHROMOSOME_II	1	0.60
+CHROMOSOME_II	0	1.00
 
 statement error
 SELECT * FROM duckhts_mosdepth(
@@ -324,6 +485,17 @@ SELECT * FROM duckhts_mosdepth(
 );
 ----
 duckhts_mosdepth: invalid thresholds string
+
+statement error
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_badmode_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  fast_mode := TRUE,
+  fragment_mode := TRUE,
+  overwrite := TRUE
+);
+----
+duckhts_mosdepth: only one of fast_mode and fragment_mode can be TRUE
 
 statement error
 SELECT * FROM duckhts_mosdepth(

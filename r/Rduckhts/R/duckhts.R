@@ -1082,9 +1082,9 @@ rduckhts_bgunzip <- function(
   DBI::dbGetQuery(con, query)
 }
 
-#' Native mosdepth-Compatible Fast-Mode Coverage Outputs
+#' Native mosdepth-Compatible Coverage Outputs
 #'
-#' Writes an initial native mosdepth-compatible fast-mode output set for an indexed BAM file.
+#' Writes native mosdepth-compatible coverage outputs for indexed BAM or CRAM input.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param prefix Output prefix for the mosdepth-style files
@@ -1092,12 +1092,23 @@ rduckhts_bgunzip <- function(
 #' @param chrom Optional chromosome name filter
 #' @param by Optional fixed-width window size as a string or a BED file path
 #' @param fasta Optional reference FASTA path for CRAM input when required
+#' @param read_groups Optional comma-separated read-group IDs, matching mosdepth's `-R`
 #' @param no_per_base Skip writing `\{prefix\}.per-base.bed.gz`
 #' @param threads Number of BAM decompression threads
 #' @param flag Excluded SAM flag mask, matching mosdepth's `-F`
 #' @param include_flag Required SAM flag mask, matching mosdepth's `-i`
-#' @param fast_mode Must currently remain `TRUE`
+#' @param fast_mode Logical. If `TRUE`, use mosdepth fast mode. Defaults to
+#'   `FALSE`, matching upstream mosdepth.
+#' @param fragment_mode Logical. If `TRUE`, count full fragment insert spans for
+#'   proper pairs, matching mosdepth's `-a`. Cannot be combined with
+#'   `fast_mode = TRUE`.
+#' @param use_median Logical. If `TRUE`, write `by` region values as medians
+#'   instead of means, matching mosdepth's `-m`.
 #' @param mapq Minimum mapping quality threshold
+#' @param min_frag_len Minimum absolute template length to keep, matching
+#'   mosdepth's `-l`
+#' @param max_frag_len Maximum absolute template length to keep, matching
+#'   mosdepth's `-u`
 #' @param precision_digits Number of decimal places to write in the text outputs
 #' @param quantize Optional mosdepth-style quantize specification such as `":1:4:"`
 #' @param thresholds Optional comma-separated coverage thresholds for `by`, matching mosdepth's `-T`
@@ -1114,12 +1125,17 @@ rduckhts_mosdepth <- function(
   chrom = NULL,
   by = NULL,
   fasta = NULL,
+  read_groups = NULL,
   no_per_base = FALSE,
   threads = 0,
   flag = 1796,
   include_flag = 0,
-  fast_mode = TRUE,
+  fast_mode = FALSE,
+  fragment_mode = FALSE,
+  use_median = FALSE,
   mapq = 0,
+  min_frag_len = -1,
+  max_frag_len = -1,
   precision_digits = 2,
   quantize = NULL,
   thresholds = NULL,
@@ -1132,12 +1148,17 @@ rduckhts_mosdepth <- function(
     flag = flag,
     include_flag = include_flag,
     fast_mode = if (isTRUE(fast_mode)) "true" else "false",
+    fragment_mode = if (isTRUE(fragment_mode)) "true" else "false",
+    use_median = if (isTRUE(use_median)) "true" else "false",
     mapq = mapq,
+    min_frag_len = min_frag_len,
+    max_frag_len = max_frag_len,
     precision_digits = precision_digits
   )
   if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
   if (!is.null(by)) params$by <- sql_quote_string(by)
   if (!is.null(fasta)) params$fasta <- sql_quote_string(fasta)
+  if (!is.null(read_groups)) params$read_groups <- sql_quote_string(read_groups)
   if (!is.null(quantize)) params$quantize <- sql_quote_string(quantize)
   if (!is.null(thresholds)) params$thresholds <- sql_quote_string(thresholds)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)

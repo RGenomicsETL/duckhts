@@ -21,20 +21,37 @@ functions, and validation steps that would be needed for an implementation.
 Target exact compatibility with:
 
 - upstream tool: `mosdepth`
-- validated runtime version: `0.3.9`
-- validation date in this repo: `2026-04-14`
+- validated runtime version: `0.3.13`
+- pinned upstream tag: `v0.3.13`
+- pinned upstream commit: `52813e08fe575c39a76556d1fc5c5399a6141e02`
+- validation date in this repo: `2026-04-15`
 
-Local verification commands run on `2026-04-14`:
+Local verification commands run on `2026-04-15`:
 
 ```bash
 mosdepth --version
+git -C .sync/mosdepth rev-parse HEAD
 python3 scripts/mosdepth_conformance.py \
   HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
   --extension build/release/duckhts.duckdb_extension
 python3 scripts/mosdepth_benchmark.py \
   HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
   --chrom 11 \
-  --modes fast,default \
+  --mode fast \
+  --extension build/release/duckhts.duckdb_extension \
+  --runs 1 \
+  --verify
+python3 scripts/mosdepth_benchmark.py \
+  HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
+  --chrom 11 \
+  --mode default \
+  --extension build/release/duckhts.duckdb_extension \
+  --runs 1 \
+  --verify
+python3 scripts/mosdepth_benchmark.py \
+  HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
+  --chrom 11 \
+  --mode fragment \
   --extension build/release/duckhts.duckdb_extension \
   --runs 1 \
   --verify
@@ -48,26 +65,15 @@ Observed local results on that date:
   now exercise only the native `duckhts_mosdepth(...)` table function
 - any remaining SQL-first coverage logic belongs to generic interval/depth
   primitives, not to the mosdepth rewrite workflow
+- the local `mosdepth` binary used by the validation scripts is now `0.3.13`
+  from the pinned tag above, installed at `/usr/local/bin/mosdepth`
 
 ### Important versioning warning
 
-The `.sync/mosdepth` mirror appears newer than the locally installed
-`mosdepth 0.3.9` binary. For example, [`.sync/mosdepth/mosdepth.nim`](/root/duckhts/.sync/mosdepth/mosdepth.nim)
-contains a usage string for `mosdepth 0.3.13`.
-
-That means:
-
-- do not claim exact compatibility to "mosdepth" in general
-- do not claim exact compatibility to the current `.sync/mosdepth` mirror
-- first pin the rewrite to one exact upstream version and record that choice in
-  repo docs
-
-Before implementation starts, do one of:
-
-1. replace `.sync/mosdepth` with the exact `0.3.9` source tree, or
-2. add a version-pinning note in a validation doc mapping:
-   - local binary version used for conformance
-   - upstream git tag / commit used as source reference
+The `.sync/mosdepth` checkout is now pinned to the exact upstream `v0.3.13`
+tag commit listed above. Do not claim exact compatibility to "mosdepth" in
+general or to arbitrary later upstream commits without re-running conformance
+and updating this pin.
 
 ## 2. What must match exactly
 
@@ -459,9 +465,7 @@ trust mosdepth default mode.
 
 ### 6.7 Fragment mode
 
-Implement later, after fast/default parity is complete.
-
-When added, mirror upstream:
+Mirror upstream:
 
 - count only read1 from proper pairs
 - compute fragment start as `min(start, matepos)`
@@ -591,7 +595,7 @@ Implement:
 
 Validation target:
 
-- exact match to mosdepth `0.3.9` for those features
+- exact match to mosdepth `0.3.13` for those features
 
 ### Phase 2: default mode exactness
 
@@ -607,7 +611,6 @@ competitive, while SQL default mode is still slower than mosdepth.
 
 Implement:
 
-- `fragment_mode`
 - `quantize`
 - `thresholds`
 - `use_median`

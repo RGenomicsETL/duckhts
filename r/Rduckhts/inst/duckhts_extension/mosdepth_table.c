@@ -1,14 +1,16 @@
 /**
- * DuckHTS native mosdepth-compatible fast-mode subset.
+ * DuckHTS native mosdepth-compatible rewrite subset.
  *
  * Current scope:
- *   - indexed BAM input
- *   - fast_mode := TRUE only
+ *   - indexed BAM/CRAM input
+ *   - fast mode, fragment mode, and default mode
  *   - summary/global distribution/per-base output
  *   - optional by := <window> or by := <bed>
  *   - optional quantize and thresholds outputs
+ *   - optional read-group and fragment-length filters
  *
- * Deferred options error loudly instead of silently diverging from mosdepth.
+ * Deferred options still error loudly instead of silently diverging from
+ * mosdepth.
  */
 
 #include "duckdb_extension.h"
@@ -28,6 +30,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <htslib/bgzf.h>
 #include <htslib/hts.h>
+#include <htslib/khash.h>
 #include <htslib/kstring.h>
 #include <htslib/sam.h>
 #include <htslib/tbx.h>
@@ -35,7 +38,13 @@ DUCKDB_EXTENSION_EXTERN
 #define MOSDEPTH_DEFAULT_PRECISION 2
 #define MOSDEPTH_MAX_COVERAGE 400000
 #define MOSDEPTH_CSI_MIN_SHIFT 14
+/* Upstream mosdepth uses 512 buckets for region/global distribution arrays. */
 #define MOSDEPTH_REGION_DIST_BUCKETS 512
+/* Upstream CountStat for --use-median is initialized with 65536 coverage bins. */
+#define MOSDEPTH_MEDIAN_COUNTS 65536
+
+KHASH_MAP_INIT_STR(mdmate, bam1_t *)
+KHASH_SET_INIT_STR(mdstr)
 
 typedef struct {
     int64_t start;
@@ -66,6 +75,17 @@ typedef struct {
 } mosdepth_quantize_t;
 
 typedef struct {
+    hts_pos_t start;
+    hts_pos_t stop;
+} mosdepth_span_t;
+
+typedef struct {
+    mosdepth_span_t *data;
+    size_t count;
+    size_t cap;
+} mosdepth_span_list_t;
+
+typedef struct {
     uint64_t cum_depth;
     int64_t cum_length;
     uint32_t min_depth;
@@ -73,11 +93,18 @@ typedef struct {
 } mosdepth_stat_t;
 
 typedef struct {
+    uint64_t *counts;
+    size_t len;
+    uint64_t n;
+} mosdepth_count_stat_t;
+
+typedef struct {
     char *prefix;
     char *path;
     char *chrom;
     char *by;
     char *fasta;
+    char *read_groups;
     char *index_path;
     char *summary_path;
     char *global_dist_path;
@@ -90,11 +117,15 @@ typedef struct {
     int64_t flag;
     int64_t include_flag;
     int64_t mapq;
+    int64_t min_frag_len;
+    int64_t max_frag_len;
     int64_t precision;
     mosdepth_threshold_list_t thresholds;
     mosdepth_quantize_t quantize;
     int no_per_base;
     int fast_mode;
+    int fragment_mode;
+    int use_median;
     int overwrite;
     int emitted;
 } mosdepth_bind_t;
@@ -211,10 +242,59 @@ static int depth_bucket_value(uint32_t depth) {
  * Keep this helper trivial and inline so the compiler can fold it directly
  * into the hot region loop.
  */
-static inline int mosdepth_window_mean_bucket(double mean_depth) {
-    int bucket = (int)(mean_depth + 0.5);
+static inline int mosdepth_window_region_bucket(double region_value) {
+    int bucket = (int)(region_value + 0.5);
     int max_bucket = MOSDEPTH_REGION_DIST_BUCKETS - 1;
     return bucket > max_bucket ? max_bucket : bucket;
+}
+
+static int count_stat_init(mosdepth_count_stat_t *stat, size_t len) {
+    if (!stat) return -1;
+    memset(stat, 0, sizeof(*stat));
+    if (len == 0) return 0;
+    stat->counts = (uint64_t *)calloc(len, sizeof(uint64_t));
+    if (!stat->counts) return -1;
+    stat->len = len;
+    return 0;
+}
+
+static void count_stat_destroy(mosdepth_count_stat_t *stat) {
+    if (!stat) return;
+    free(stat->counts);
+    stat->counts = NULL;
+    stat->len = 0;
+    stat->n = 0;
+}
+
+static void count_stat_clear(mosdepth_count_stat_t *stat) {
+    if (!stat || !stat->counts || stat->n == 0) {
+        if (stat) stat->n = 0;
+        return;
+    }
+    memset(stat->counts, 0, stat->len * sizeof(uint64_t));
+    stat->n = 0;
+}
+
+static inline void count_stat_add(mosdepth_count_stat_t *stat, uint32_t depth) {
+    size_t idx;
+    if (!stat || !stat->counts || stat->len == 0) return;
+    idx = (size_t)depth;
+    if (idx >= stat->len) idx = stat->len - 1;
+    stat->counts[idx] += 1;
+    stat->n += 1;
+}
+
+static uint32_t count_stat_median(const mosdepth_count_stat_t *stat) {
+    uint64_t stop_n;
+    uint64_t cum = 0;
+
+    if (!stat || !stat->counts || stat->len == 0 || stat->n == 0) return 0;
+    stop_n = (uint64_t)(0.5 + (double)stat->n * 0.5);
+    for (size_t i = 0; i < stat->len; i++) {
+        cum += stat->counts[i];
+        if (cum >= stop_n) return (uint32_t)i;
+    }
+    return 0;
 }
 
 static int dist_ensure(mosdepth_dist_t *dist, size_t idx) {
@@ -261,6 +341,304 @@ static void quantize_destroy(mosdepth_quantize_t *quantize) {
     quantize->cuts = NULL;
     quantize->labels = NULL;
     quantize->count = 0;
+}
+
+static int span_list_reserve(mosdepth_span_list_t *list, size_t need) {
+    if (!list) return -1;
+    if (need <= list->cap) return 0;
+    size_t new_cap = list->cap ? list->cap : 8;
+    while (new_cap < need) new_cap *= 2;
+    mosdepth_span_t *new_data =
+        (mosdepth_span_t *)realloc(list->data, new_cap * sizeof(mosdepth_span_t));
+    if (!new_data) return -1;
+    list->data = new_data;
+    list->cap = new_cap;
+    return 0;
+}
+
+static void span_list_destroy(mosdepth_span_list_t *list) {
+    if (!list) return;
+    free(list->data);
+    list->data = NULL;
+    list->count = 0;
+    list->cap = 0;
+}
+
+static int span_list_append(mosdepth_span_list_t *list, hts_pos_t start, hts_pos_t stop) {
+    if (!list || stop <= start) return 0;
+    if (span_list_reserve(list, list->count + 1) != 0) return -1;
+    list->data[list->count].start = start;
+    list->data[list->count].stop = stop;
+    list->count++;
+    return 0;
+}
+
+static void read_group_set_destroy(khash_t(mdstr) *set) {
+    if (!set) return;
+    for (khiter_t it = kh_begin(set); it != kh_end(set); ++it) {
+        if (kh_exist(set, it)) free((char *)kh_key(set, it));
+    }
+    kh_destroy(mdstr, set);
+}
+
+static int parse_read_group_set(const char *spec, khash_t(mdstr) **out,
+                                char *err, size_t errlen) {
+    khash_t(mdstr) *set = NULL;
+    char *copy = NULL;
+    char *saveptr = NULL;
+    char *token = NULL;
+
+    if (!spec || !*spec) return 0;
+
+    set = kh_init(mdstr);
+    copy = strdup(spec);
+    if (!set || !copy) {
+        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+        read_group_set_destroy(set);
+        free(copy);
+        return -1;
+    }
+
+    token = strtok_r(copy, ",", &saveptr);
+    while (token) {
+        int ret = 0;
+        char *key = NULL;
+        khiter_t it;
+        if (*token == '\0') {
+            snprintf(err, errlen, "duckhts_mosdepth: invalid read_groups string");
+            read_group_set_destroy(set);
+            free(copy);
+            return -1;
+        }
+        key = strdup(token);
+        if (!key) {
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            read_group_set_destroy(set);
+            free(copy);
+            return -1;
+        }
+        it = kh_put(mdstr, set, key, &ret);
+        if (ret < 0) {
+            free(key);
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            read_group_set_destroy(set);
+            free(copy);
+            return -1;
+        }
+        if (ret == 0) free(key);
+        token = strtok_r(NULL, ",", &saveptr);
+    }
+
+    free(copy);
+    *out = set;
+    return 0;
+}
+
+static int record_in_read_groups(const bam1_t *rec, khash_t(mdstr) *read_groups) {
+    uint8_t *aux;
+    const char *rg;
+
+    if (!read_groups) return 1;
+    aux = bam_aux_get(rec, "RG");
+    if (!aux) return 0;
+    rg = bam_aux2Z(aux);
+    if (!rg) return 0;
+    return kh_get(mdstr, read_groups, rg) != kh_end(read_groups);
+}
+
+static inline void add_coverage_delta(int32_t *coverage, int64_t chrom_len,
+                                      hts_pos_t start, hts_pos_t stop, int32_t delta) {
+    if (!coverage || delta == 0 || stop <= start) return;
+    if (start < 0) start = 0;
+    if (stop > chrom_len) stop = chrom_len;
+    if (start >= chrom_len || stop <= start) return;
+    coverage[start] += delta;
+    coverage[stop] -= delta;
+}
+
+static int collect_query_ref_spans(const bam1_t *rec, int64_t chrom_len,
+                                   mosdepth_span_list_t *spans) {
+    hts_pos_t pos;
+    hts_pos_t span_start = -1;
+    hts_pos_t last_stop = -1;
+    uint32_t *cigar;
+
+    if (!rec || !spans) return -1;
+    spans->count = 0;
+    if (rec->core.n_cigar == 0) return 0;
+    if (span_list_reserve(spans, rec->core.n_cigar) != 0) return -1;
+
+    pos = rec->core.pos;
+    cigar = bam_get_cigar(rec);
+    for (uint32_t i = 0; i < rec->core.n_cigar; i++) {
+        int op = bam_cigar_op(cigar[i]);
+        hts_pos_t oplen = (hts_pos_t)bam_cigar_oplen(cigar[i]);
+        int type = bam_cigar_type(op);
+
+        if (!(type & 2)) continue;
+        if (type & 1) {
+            if (span_start < 0 || pos != last_stop) {
+                if (span_start >= 0 &&
+                    span_list_append(spans, span_start, last_stop) != 0) {
+                    return -1;
+                }
+                span_start = pos;
+            }
+            last_stop = pos + oplen;
+        }
+        pos += oplen;
+    }
+
+    if (span_start >= 0 &&
+        span_list_append(spans, span_start, last_stop) != 0) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < spans->count; i++) {
+        if (spans->data[i].start < 0) spans->data[i].start = 0;
+        if (spans->data[i].stop > chrom_len) spans->data[i].stop = chrom_len;
+    }
+    return 0;
+}
+
+static void add_record_cigar_coverage(const bam1_t *rec, int32_t *coverage, int64_t chrom_len) {
+    hts_pos_t pos;
+    hts_pos_t span_start = -1;
+    hts_pos_t last_stop = -1;
+    uint32_t *cigar;
+
+    if (!rec || !coverage || rec->core.n_cigar == 0) return;
+
+    cigar = bam_get_cigar(rec);
+    if (rec->core.n_cigar == 1) {
+        int op = bam_cigar_op(cigar[0]);
+        if ((bam_cigar_type(op) & 3) == 3) {
+            add_coverage_delta(coverage, chrom_len, rec->core.pos,
+                               rec->core.pos + (hts_pos_t)bam_cigar_oplen(cigar[0]), 1);
+            return;
+        }
+    }
+
+    pos = rec->core.pos;
+    for (uint32_t i = 0; i < rec->core.n_cigar; i++) {
+        int op = bam_cigar_op(cigar[i]);
+        hts_pos_t oplen = (hts_pos_t)bam_cigar_oplen(cigar[i]);
+        int type = bam_cigar_type(op);
+
+        if (!(type & 2)) continue;
+        if (type & 1) {
+            if (span_start < 0 || pos != last_stop) {
+                if (span_start >= 0) add_coverage_delta(coverage, chrom_len, span_start, last_stop, 1);
+                span_start = pos;
+            }
+            last_stop = pos + oplen;
+        }
+        pos += oplen;
+    }
+    if (span_start >= 0) add_coverage_delta(coverage, chrom_len, span_start, last_stop, 1);
+}
+
+static int subtract_pair_overlap(const bam1_t *rec, const bam1_t *mate,
+                                 int32_t *coverage, int64_t chrom_len) {
+    mosdepth_span_list_t rec_spans = {0};
+    mosdepth_span_list_t mate_spans = {0};
+    int rc = -1;
+    size_t i = 0, j = 0;
+
+    if (!rec || !mate || !coverage) return 0;
+    if (rec->core.n_cigar == 1 && mate->core.n_cigar == 1) {
+        add_coverage_delta(coverage, chrom_len, rec->core.pos, bam_endpos(mate), -1);
+        return 0;
+    }
+
+    if (collect_query_ref_spans(rec, chrom_len, &rec_spans) != 0) goto cleanup;
+    if (collect_query_ref_spans(mate, chrom_len, &mate_spans) != 0) goto cleanup;
+
+    while (i < rec_spans.count && j < mate_spans.count) {
+        hts_pos_t rec_stop = rec_spans.data[i].stop;
+        hts_pos_t mate_stop = mate_spans.data[j].stop;
+        hts_pos_t start = rec_spans.data[i].start > mate_spans.data[j].start
+                              ? rec_spans.data[i].start
+                              : mate_spans.data[j].start;
+        hts_pos_t stop = rec_stop < mate_stop ? rec_stop : mate_stop;
+        if (stop > start) add_coverage_delta(coverage, chrom_len, start, stop, -1);
+        if (rec_stop <= mate_stop) i++;
+        if (mate_stop <= rec_stop) j++;
+    }
+
+    rc = 0;
+
+cleanup:
+    span_list_destroy(&rec_spans);
+    span_list_destroy(&mate_spans);
+    return rc;
+}
+
+static void seen_mates_destroy(khash_t(mdmate) *seen) {
+    if (!seen) return;
+    for (khiter_t it = kh_begin(seen); it != kh_end(seen); ++it) {
+        if (kh_exist(seen, it)) {
+            free((char *)kh_key(seen, it));
+            bam_destroy1(kh_val(seen, it));
+        }
+    }
+    kh_destroy(mdmate, seen);
+}
+
+static int handle_default_overlap(const bam1_t *rec, khash_t(mdmate) *seen,
+                                  int32_t *coverage, int64_t chrom_len) {
+    const char *qname;
+    hts_pos_t start;
+    hts_pos_t stop;
+    hts_pos_t matepos;
+
+    if (!rec || !seen) return 0;
+    if (!(rec->core.flag & BAM_FPROPER_PAIR) || (rec->core.flag & BAM_FSUPPLEMENTARY)) return 0;
+
+    qname = bam_get_qname(rec);
+    start = rec->core.pos;
+    stop = bam_endpos(rec);
+    matepos = rec->core.mpos;
+
+    if (rec->core.tid == rec->core.mtid && stop > matepos &&
+        (start < matepos ||
+         (start == matepos && kh_get(mdmate, seen, qname) == kh_end(seen)))) {
+        bam1_t *copy = bam_dup1(rec);
+        char *key = strdup(qname);
+        khiter_t it;
+        int ret = 0;
+        if (!copy || !key) {
+            free(key);
+            bam_destroy1(copy);
+            return -1;
+        }
+        it = kh_put(mdmate, seen, key, &ret);
+        if (ret < 0) {
+            free(key);
+            bam_destroy1(copy);
+            return -1;
+        }
+        if (ret == 0) {
+            free(key);
+            bam_destroy1(kh_val(seen, it));
+        }
+        kh_val(seen, it) = copy;
+        return 0;
+    }
+
+    {
+        khiter_t it = kh_get(mdmate, seen, qname);
+        if (it != kh_end(seen)) {
+            bam1_t *mate = kh_val(seen, it);
+            int rc = subtract_pair_overlap(rec, mate, coverage, chrom_len);
+            free((char *)kh_key(seen, it));
+            bam_destroy1(mate);
+            kh_del(mdmate, seen, it);
+            return rc;
+        }
+    }
+
+    return 0;
 }
 
 static int parse_thresholds_string(const char *spec, mosdepth_threshold_list_t *out,
@@ -835,22 +1213,29 @@ static int write_window_regions(BGZF *fp, kstring_t *line, const char *chrom,
                                 const int32_t *coverage, int64_t len, int64_t window,
                                 mosdepth_stat_t *region_stat,
                                 mosdepth_dist_t *region_dist, int precision,
-                                int has_reads, BGZF *thresholds_fp,
+                                int has_reads, int use_median,
+                                BGZF *thresholds_fp,
                                 const mosdepth_threshold_list_t *thresholds) {
     int64_t *threshold_counts = NULL;
+    mosdepth_count_stat_t median_stat = {0};
+    int rc = -1;
+
+    if (use_median && count_stat_init(&median_stat, MOSDEPTH_MEDIAN_COUNTS) != 0) return -1;
     if (thresholds_fp && thresholds && thresholds->count > 0) {
         threshold_counts = (int64_t *)calloc(thresholds->count, sizeof(int64_t));
-        if (!threshold_counts) return -1;
+        if (!threshold_counts) goto cleanup;
     }
     for (int64_t start = 0; start < len; start += window) {
         int64_t stop = start + window;
         if (stop > len) stop = len;
-        double mean = 0.0;
+        double region_value = 0.0;
         if (threshold_counts) memset(threshold_counts, 0, thresholds->count * sizeof(int64_t));
+        if (use_median) count_stat_clear(&median_stat);
         if (has_reads) {
             for (int64_t i = start; i < stop; i++) {
                 uint32_t depth = (uint32_t)coverage[i];
-                mean += (double)depth / (double)(stop - start);
+                if (use_median) count_stat_add(&median_stat, depth);
+                else region_value += (double)depth / (double)(stop - start);
                 stat_add_depth(region_stat, depth);
                 if (threshold_counts) {
                     for (size_t j = 0; j < thresholds->count; j++) {
@@ -859,30 +1244,23 @@ static int write_window_regions(BGZF *fp, kstring_t *line, const char *chrom,
                     }
                 }
             }
-            if (dist_add_count(region_dist, mosdepth_window_mean_bucket(mean), 1) != 0) {
-                free(threshold_counts);
-                return -1;
-            }
+            if (use_median) region_value = (double)count_stat_median(&median_stat);
+            if (dist_add_count(region_dist, mosdepth_window_region_bucket(region_value), 1) != 0) goto cleanup;
         }
         line->l = 0;
         if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%.*f",
-                     chrom, start, stop, precision, mean) < 0) {
-            free(threshold_counts);
-            return -1;
-        }
-        if (bgzf_write_line(fp, line) != 0) {
-            free(threshold_counts);
-            return -1;
-        }
+                     chrom, start, stop, precision, region_value) < 0) goto cleanup;
+        if (bgzf_write_line(fp, line) != 0) goto cleanup;
         if (threshold_counts &&
             write_thresholds_row(thresholds_fp, line, chrom, start, stop, NULL,
-                                 threshold_counts, thresholds) != 0) {
-            free(threshold_counts);
-            return -1;
-        }
+                                 threshold_counts, thresholds) != 0) goto cleanup;
     }
+    rc = 0;
+
+cleanup:
     free(threshold_counts);
-    return 0;
+    count_stat_destroy(&median_stat);
+    return rc;
 }
 
 static int write_bed_regions(BGZF *fp, kstring_t *line, const char *chrom,
@@ -890,28 +1268,34 @@ static int write_bed_regions(BGZF *fp, kstring_t *line, const char *chrom,
                              const mosdepth_region_list_t *regions,
                              mosdepth_stat_t *region_stat,
                              mosdepth_dist_t *region_dist, int precision,
-                             int has_reads, BGZF *thresholds_fp,
+                             int has_reads, int use_median,
+                             BGZF *thresholds_fp,
                              const mosdepth_threshold_list_t *thresholds) {
     int64_t *threshold_counts = NULL;
+    mosdepth_count_stat_t median_stat = {0};
+    int rc = -1;
+
     if (!regions) return 0;
+    if (use_median && count_stat_init(&median_stat, MOSDEPTH_MEDIAN_COUNTS) != 0) return -1;
     if (thresholds_fp && thresholds && thresholds->count > 0) {
         threshold_counts = (int64_t *)calloc(thresholds->count, sizeof(int64_t));
-        if (!threshold_counts) return -1;
+        if (!threshold_counts) goto cleanup;
     }
     for (size_t i = 0; i < regions->count; i++) {
         const mosdepth_region_t *r = &regions->data[i];
         int64_t in_start = r->start < 0 ? 0 : r->start;
         int64_t in_stop = r->stop > len ? len : r->stop;
-        double mean = 0.0;
+        double region_value = 0.0;
         if (threshold_counts) memset(threshold_counts, 0, thresholds->count * sizeof(int64_t));
+        if (use_median) count_stat_clear(&median_stat);
         if (has_reads && in_start < in_stop) {
             for (int64_t pos = in_start; pos < in_stop; pos++) {
                 uint32_t depth = (uint32_t)coverage[pos];
-                mean += (double)depth / (double)(r->stop - r->start);
+                if (use_median) count_stat_add(&median_stat, depth);
+                else region_value += (double)depth / (double)(r->stop - r->start);
                 stat_add_depth(region_stat, depth);
                 if (dist_add_count(region_dist, depth_bucket_value(depth), 1) != 0) {
-                    free(threshold_counts);
-                    return -1;
+                    goto cleanup;
                 }
                 if (threshold_counts) {
                     for (size_t j = 0; j < thresholds->count; j++) {
@@ -920,34 +1304,27 @@ static int write_bed_regions(BGZF *fp, kstring_t *line, const char *chrom,
                     }
                 }
             }
+            if (use_median) region_value = (double)count_stat_median(&median_stat);
         }
         line->l = 0;
         if (r->name && *r->name) {
             if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s\t%.*f",
-                         chrom, r->start, r->stop, r->name, precision, mean) < 0) {
-                free(threshold_counts);
-                return -1;
-            }
+                         chrom, r->start, r->stop, r->name, precision, region_value) < 0) goto cleanup;
         } else {
             if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%.*f",
-                         chrom, r->start, r->stop, precision, mean) < 0) {
-                free(threshold_counts);
-                return -1;
-            }
+                         chrom, r->start, r->stop, precision, region_value) < 0) goto cleanup;
         }
-        if (bgzf_write_line(fp, line) != 0) {
-            free(threshold_counts);
-            return -1;
-        }
+        if (bgzf_write_line(fp, line) != 0) goto cleanup;
         if (threshold_counts &&
             write_thresholds_row(thresholds_fp, line, chrom, r->start, r->stop, r->name,
-                                 threshold_counts, thresholds) != 0) {
-            free(threshold_counts);
-            return -1;
-        }
+                                 threshold_counts, thresholds) != 0) goto cleanup;
     }
+    rc = 0;
+
+cleanup:
     free(threshold_counts);
-    return 0;
+    count_stat_destroy(&median_stat);
+    return rc;
 }
 
 static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen) {
@@ -964,10 +1341,13 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     BGZF *bgzf_thresholds = NULL;
     kstring_t line = {0, 0, NULL};
     mosdepth_region_list_t *region_lists = NULL;
+    khash_t(mdstr) *read_group_set = NULL;
     mosdepth_dist_t total_global_dist = {0};
     mosdepth_dist_t total_region_dist = {0};
     mosdepth_stat_t total_stat;
     mosdepth_stat_t total_region_stat;
+    int32_t *coverage = NULL;
+    size_t coverage_cap = 0;
     int summary_header_written = 0;
     int precision = (int)bind->precision;
     int rc = -1;
@@ -1040,6 +1420,10 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         }
     }
 
+    if (parse_read_group_set(bind->read_groups, &read_group_set, err, errlen) != 0) {
+        goto cleanup;
+    }
+
     if (open_text_or_error(&fh_summary, bind->summary_path, err, errlen) != 0) goto cleanup;
     if (open_text_or_error(&fh_global, bind->global_dist_path, err, errlen) != 0) goto cleanup;
     if (bind->region_dist_path && open_text_or_error(&fh_region, bind->region_dist_path, err, errlen) != 0) {
@@ -1067,8 +1451,8 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         const char *chrom = sam_hdr_tid2name(hdr, tid);
         int64_t chrom_len = (int64_t)sam_hdr_tid2len(hdr, tid);
         hts_itr_t *itr = NULL;
-        int32_t *coverage = NULL;
-        int has_reads = 0;
+        khash_t(mdmate) *seen = NULL;
+        int saw_record = 0;
         int iter_rc = -1;
         mosdepth_dist_t chrom_global_dist = {0};
         mosdepth_dist_t chrom_region_dist = {0};
@@ -1085,10 +1469,24 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         stat_clear(&chrom_stat);
         stat_clear(&chrom_region_stat);
 
-        coverage = (int32_t *)calloc((size_t)chrom_len + 1, sizeof(int32_t));
-        if (!coverage) {
-            snprintf(err, errlen, "duckhts_mosdepth: failed to allocate coverage array for '%s'", chrom);
-            goto contig_cleanup;
+        if (coverage_cap < (size_t)chrom_len + 1) {
+            int32_t *new_coverage =
+                (int32_t *)realloc(coverage, ((size_t)chrom_len + 1) * sizeof(int32_t));
+            if (!new_coverage) {
+                snprintf(err, errlen, "duckhts_mosdepth: failed to allocate coverage array for '%s'", chrom);
+                goto contig_cleanup;
+            }
+            coverage = new_coverage;
+            coverage_cap = (size_t)chrom_len + 1;
+        }
+        memset(coverage, 0, ((size_t)chrom_len + 1) * sizeof(int32_t));
+
+        if (!bind->fast_mode && !bind->fragment_mode) {
+            seen = kh_init(mdmate);
+            if (!seen) {
+                snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+                goto contig_cleanup;
+            }
         }
 
         itr = sam_itr_queryi(idx, tid, 0, chrom_len);
@@ -1096,20 +1494,44 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             while ((iter_rc = sam_itr_next(fp, itr, rec)) >= 0) {
                 hts_pos_t start = rec->core.pos;
                 hts_pos_t stop = bam_endpos(rec);
+                int64_t abs_isize = rec->core.isize < 0 ? -(int64_t)rec->core.isize : (int64_t)rec->core.isize;
 
+                saw_record = 1;
                 if ((int64_t)rec->core.qual < bind->mapq) continue;
+                if (bind->min_frag_len >= 0 && abs_isize < bind->min_frag_len) continue;
+                if (bind->max_frag_len >= 0 && abs_isize > bind->max_frag_len) continue;
                 if (((uint16_t)rec->core.flag & (uint16_t)bind->flag) != 0) continue;
                 if (bind->include_flag != 0 &&
                     (((uint16_t)rec->core.flag & (uint16_t)bind->include_flag) == 0)) {
                     continue;
                 }
-                if (start < 0) start = 0;
-                if (stop < start) stop = start;
-                if (start >= chrom_len) continue;
-                if (stop > chrom_len) stop = chrom_len;
-                coverage[start] += 1;
-                coverage[stop] -= 1;
-                has_reads = 1;
+                if (!record_in_read_groups(rec, read_group_set)) continue;
+
+                if (bind->fragment_mode) {
+                    hts_pos_t fragment_start;
+                    hts_pos_t fragment_stop;
+
+                    if ((rec->core.flag & BAM_FREAD2) ||
+                        !(rec->core.flag & BAM_FPROPER_PAIR) ||
+                        (rec->core.flag & BAM_FSUPPLEMENTARY)) {
+                        continue;
+                    }
+                    fragment_start = start < rec->core.mpos ? start : rec->core.mpos;
+                    fragment_stop = fragment_start + abs_isize;
+                    add_coverage_delta(coverage, chrom_len, fragment_start, fragment_stop, 1);
+                    continue;
+                }
+
+                if (!bind->fast_mode) {
+                    if (handle_default_overlap(rec, seen, coverage, chrom_len) != 0) {
+                        snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+                        goto contig_cleanup;
+                    }
+                    add_record_cigar_coverage(rec, coverage, chrom_len);
+                    continue;
+                }
+
+                add_coverage_delta(coverage, chrom_len, start, stop, 1);
             }
             if (iter_rc < -1) {
                 if (fp->format.format == cram && !bind->fasta) {
@@ -1123,7 +1545,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             }
         }
 
-        if (!has_reads) {
+        if (!saw_record) {
             if (bgzf_per_base && write_zero_per_base(bgzf_per_base, &line, chrom, chrom_len) != 0) {
                 snprintf(err, errlen, "duckhts_mosdepth: failed to write per-base output");
                 goto contig_cleanup;
@@ -1141,7 +1563,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
                 if (by_is_window) {
                     if (write_window_regions(bgzf_regions, &line, chrom, NULL, chrom_len, window,
                                              &chrom_region_stat, &chrom_region_dist,
-                                             precision, 0, bgzf_thresholds,
+                                             precision, 0, bind->use_median, bgzf_thresholds,
                                              &bind->thresholds) != 0) {
                         snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                         goto contig_cleanup;
@@ -1149,7 +1571,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
                 } else if (region_lists) {
                     if (write_bed_regions(bgzf_regions, &line, chrom, NULL, chrom_len, &region_lists[tid],
                                           &chrom_region_stat, &chrom_region_dist,
-                                          precision, 0, bgzf_thresholds,
+                                          precision, 0, bind->use_median, bgzf_thresholds,
                                           &bind->thresholds) != 0) {
                         snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                         goto contig_cleanup;
@@ -1198,7 +1620,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             if (by_is_window) {
                 if (write_window_regions(bgzf_regions, &line, chrom, coverage, chrom_len, window,
                                          &chrom_region_stat, &chrom_region_dist,
-                                         precision, 1, bgzf_thresholds,
+                                         precision, 1, bind->use_median, bgzf_thresholds,
                                          &bind->thresholds) != 0) {
                     snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                     goto contig_cleanup;
@@ -1206,7 +1628,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             } else if (region_lists) {
                 if (write_bed_regions(bgzf_regions, &line, chrom, coverage, chrom_len, &region_lists[tid],
                                       &chrom_region_stat, &chrom_region_dist,
-                                      precision, 1, bgzf_thresholds,
+                                      precision, 1, bind->use_median, bgzf_thresholds,
                                       &bind->thresholds) != 0) {
                     snprintf(err, errlen, "duckhts_mosdepth: failed to write region output");
                     goto contig_cleanup;
@@ -1240,7 +1662,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
 
 contig_cleanup:
         if (itr) hts_itr_destroy(itr);
-        free(coverage);
+        if (seen) seen_mates_destroy(seen);
         dist_destroy(&chrom_global_dist);
         dist_destroy(&chrom_region_dist);
         if (rc != 0) goto cleanup;
@@ -1309,10 +1731,12 @@ cleanup:
     if (idx) hts_idx_destroy(idx);
     if (hdr) sam_hdr_destroy(hdr);
     if (fp) sam_close(fp);
+    free(coverage);
     if (region_lists) {
         for (int i = 0; i < n_targets; i++) region_list_destroy(&region_lists[i]);
         free(region_lists);
     }
+    read_group_set_destroy(read_group_set);
     dist_destroy(&total_global_dist);
     dist_destroy(&total_region_dist);
 
@@ -1333,6 +1757,7 @@ static void destroy_mosdepth_bind(void *data) {
     if (bind->chrom) duckdb_free(bind->chrom);
     if (bind->by) duckdb_free(bind->by);
     if (bind->fasta) duckdb_free(bind->fasta);
+    if (bind->read_groups) duckdb_free(bind->read_groups);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->summary_path) duckdb_free(bind->summary_path);
     if (bind->global_dist_path) duckdb_free(bind->global_dist_path);
@@ -1403,8 +1828,12 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     bind->flag = 1796;
     bind->include_flag = 0;
     bind->mapq = 0;
+    bind->min_frag_len = -1;
+    bind->max_frag_len = -1;
     bind->precision = MOSDEPTH_DEFAULT_PRECISION;
-    bind->fast_mode = 1;
+    bind->fast_mode = 0;
+    bind->fragment_mode = 0;
+    bind->use_median = 0;
     bind->no_per_base = 0;
     bind->overwrite = 0;
 
@@ -1418,6 +1847,10 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
 
     val = duckdb_bind_get_named_parameter(info, "fasta");
     if (val && !duckdb_is_null_value(val)) bind->fasta = duckdb_get_varchar(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "read_groups");
+    if (val && !duckdb_is_null_value(val)) bind->read_groups = duckdb_get_varchar(val);
     if (val) duckdb_destroy_value(&val);
 
     val = duckdb_bind_get_named_parameter(info, "index_path");
@@ -1438,6 +1871,14 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
 
     val = duckdb_bind_get_named_parameter(info, "mapq");
     if (val && !duckdb_is_null_value(val)) bind->mapq = duckdb_get_int64(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "min_frag_len");
+    if (val && !duckdb_is_null_value(val)) bind->min_frag_len = duckdb_get_int64(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "max_frag_len");
+    if (val && !duckdb_is_null_value(val)) bind->max_frag_len = duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
     val = duckdb_bind_get_named_parameter(info, "precision_digits");
@@ -1484,6 +1925,14 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) bind->fast_mode = duckdb_get_bool(val) ? 1 : 0;
     if (val) duckdb_destroy_value(&val);
 
+    val = duckdb_bind_get_named_parameter(info, "fragment_mode");
+    if (val && !duckdb_is_null_value(val)) bind->fragment_mode = duckdb_get_bool(val) ? 1 : 0;
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "use_median");
+    if (val && !duckdb_is_null_value(val)) bind->use_median = duckdb_get_bool(val) ? 1 : 0;
+    if (val) duckdb_destroy_value(&val);
+
     val = duckdb_bind_get_named_parameter(info, "overwrite");
     if (val && !duckdb_is_null_value(val)) bind->overwrite = duckdb_get_bool(val) ? 1 : 0;
     if (val) duckdb_destroy_value(&val);
@@ -1496,6 +1945,11 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     if (bind->fasta && bind->fasta[0] == '\0') {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, "duckhts_mosdepth: fasta must be non-empty when provided");
+        return;
+    }
+    if (bind->read_groups && bind->read_groups[0] == '\0') {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_mosdepth: read_groups must be non-empty when provided");
         return;
     }
     if (bind->flag < 0 || bind->flag > 65535 || bind->include_flag < 0 || bind->include_flag > 65535) {
@@ -1513,10 +1967,22 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckhts_mosdepth: precision_digits must be between 0 and 18");
         return;
     }
-    if (!bind->fast_mode) {
+    if (bind->fast_mode && bind->fragment_mode) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info,
-                              "duckhts_mosdepth currently implements only fast_mode := TRUE");
+                              "duckhts_mosdepth: only one of fast_mode and fragment_mode can be TRUE");
+        return;
+    }
+    if (bind->min_frag_len < -1 || bind->max_frag_len < -1) {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_mosdepth: min_frag_len and max_frag_len must be >= -1");
+        return;
+    }
+    if (bind->max_frag_len >= 0 && bind->min_frag_len >= 0 &&
+        bind->max_frag_len < bind->min_frag_len) {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info,
+                              "duckhts_mosdepth: max_frag_len must be >= min_frag_len");
         return;
     }
     if (bind->thresholds.count > 0 && (!bind->by || bind->by[0] == '\0')) {
@@ -1569,6 +2035,7 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
 static void duckhts_mosdepth_init(duckdb_init_info info) {
     mosdepth_bind_t *bind = (mosdepth_bind_t *)duckdb_init_get_bind_data(info);
     bind->emitted = 0;
+    duckdb_init_set_max_threads(info, 1);
 }
 
 static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk output) {
@@ -1620,12 +2087,17 @@ void register_duckhts_mosdepth_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "chrom", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "by", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "fasta", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "read_groups", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "no_per_base", bool_type);
     duckdb_table_function_add_named_parameter(tf, "threads", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "flag", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "include_flag", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "fast_mode", bool_type);
+    duckdb_table_function_add_named_parameter(tf, "fragment_mode", bool_type);
+    duckdb_table_function_add_named_parameter(tf, "use_median", bool_type);
     duckdb_table_function_add_named_parameter(tf, "mapq", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "min_frag_len", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "max_frag_len", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "precision_digits", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "quantize", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "thresholds", varchar_type);

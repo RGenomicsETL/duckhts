@@ -12,7 +12,8 @@ Usage:
 Examples:
     python3 scripts/mosdepth_benchmark.py NA12878.bam
     python3 scripts/mosdepth_benchmark.py my.bam --chrom 11 --verify
-    python3 scripts/mosdepth_benchmark.py my.cram --fasta ref.fa --window-size 1000
+    python3 scripts/mosdepth_benchmark.py my.cram --fasta ref.fa --window-size 1000 --mode default
+    python3 scripts/mosdepth_benchmark.py my.bam --mode fragment --chrom 11
 
 Requires: mosdepth, duckdb CLI, samtools
 """
@@ -54,6 +55,12 @@ def duckdb_run_native(
     fasta=None,
     by=None,
     no_per_base=False,
+    flag=1796,
+    include_flag=0,
+    fast_mode=False,
+    fragment_mode=False,
+    mapq=0,
+    use_median=False,
     threads=4,
     precision_digits=6,
     tmpdir,
@@ -71,6 +78,12 @@ def duckdb_run_native(
         args.append(f"fasta := {sql_quote_string(fasta)}")
     if no_per_base:
         args.append("no_per_base := TRUE")
+    args.append(f"flag := {flag}")
+    args.append(f"include_flag := {include_flag}")
+    args.append(f"fast_mode := {'TRUE' if fast_mode else 'FALSE'}")
+    args.append(f"fragment_mode := {'TRUE' if fragment_mode else 'FALSE'}")
+    args.append(f"mapq := {mapq}")
+    args.append(f"use_median := {'TRUE' if use_median else 'FALSE'}")
     args.append(f"threads := {threads}")
     args.append(f"precision_digits := {precision_digits}")
     args.append("overwrite := TRUE")
@@ -148,6 +161,12 @@ def compare_nonzero_bed(native_bed_gz, mosdepth_bed_gz, chrom):
 def main():
     parser = argparse.ArgumentParser(description="Mosdepth vs native DuckHTS benchmark")
     parser.add_argument("bam", help="Input BAM or CRAM file (indexed)")
+    parser.add_argument(
+        "--mode",
+        choices=("fast", "default", "fragment"),
+        default="fast",
+        help="Mosdepth mode to benchmark (default: fast)",
+    )
     parser.add_argument("--fasta", default=None, help="Reference FASTA for CRAM input when required")
     parser.add_argument("--chrom", default=None, help="Single chromosome to test (default: whole file)")
     parser.add_argument("--extension", default=None, help="Path to duckhts.duckdb_extension")
@@ -164,6 +183,24 @@ def main():
         help="Number of timing runs for each tool (default: 1)",
     )
     parser.add_argument(
+        "--flag",
+        type=int,
+        default=1796,
+        help="Exclude reads with any of these SAM flag bits set (default: 1796)",
+    )
+    parser.add_argument(
+        "--include-flag",
+        type=int,
+        default=0,
+        help="Only include reads with any of these SAM flag bits set (default: 0)",
+    )
+    parser.add_argument(
+        "--mapq",
+        type=int,
+        default=0,
+        help="Ignore reads with MAPQ less than this threshold (default: 0)",
+    )
+    parser.add_argument(
         "--window-size",
         type=int,
         default=None,
@@ -173,6 +210,11 @@ def main():
         "--no-per-base",
         action="store_true",
         help="Pass no_per_base := TRUE to duckhts_mosdepth and -n to mosdepth",
+    )
+    parser.add_argument(
+        "--use-median",
+        action="store_true",
+        help="Pass use_median := TRUE / -m when benchmarking region output",
     )
     parser.add_argument("--verify", action="store_true", help="Compare first-run outputs")
     parser.add_argument("--keep-tmp", action="store_true", help="Keep temporary files")
@@ -208,6 +250,7 @@ def main():
     print("Mosdepth vs native DuckHTS benchmark")
     print("=" * 70)
     print(f"Alignment:    {os.path.basename(bam)}")
+    print(f"Mode:         {args.mode}")
     print(f"Reads:        {total_reads:,}")
     print(f"Scope:        {args.chrom or 'whole file'} ({scope_bp:,} bp)")
     print(f"Threads:      {args.threads}")
@@ -219,6 +262,14 @@ def main():
         print(f"Window size:  {args.window_size:,}")
     if args.no_per_base:
         print("Per-base:     disabled")
+    if args.flag != 1796:
+        print(f"Flag:         {args.flag}")
+    if args.include_flag != 0:
+        print(f"Include flag: {args.include_flag}")
+    if args.mapq != 0:
+        print(f"MAPQ:         {args.mapq}")
+    if args.use_median:
+        print("Use median:   TRUE")
     print()
 
     tmpdir = tempfile.mkdtemp(prefix="mosdepth_bench_")
@@ -227,6 +278,16 @@ def main():
     chrom_flag = f" --chrom {args.chrom}" if args.chrom else ""
     window_flag = f" --by {args.window_size}" if args.window_size is not None else ""
     no_per_base_flag = " -n" if args.no_per_base else ""
+    flag_opt = f" -F {args.flag}" if args.flag != 1796 else ""
+    include_flag_opt = f" -i {args.include_flag}" if args.include_flag != 0 else ""
+    mapq_opt = f" -Q {args.mapq}" if args.mapq != 0 else ""
+    if args.mode == "fast":
+        mode_flag = " --fast-mode"
+    elif args.mode == "fragment":
+        mode_flag = " --fragment-mode"
+    else:
+        mode_flag = ""
+    median_flag = " -m" if args.use_median else ""
 
     mosdepth_times = []
     native_times = []
@@ -240,7 +301,7 @@ def main():
 
         print(f"mosdepth {label}...")
         _, md_time = run(
-            f"mosdepth --fast-mode -t {args.threads}{fasta_flag}{chrom_flag}{window_flag}{no_per_base_flag} {md_prefix} {bam}",
+            f"mosdepth{mode_flag}{median_flag}{flag_opt}{include_flag_opt}{mapq_opt} -t {args.threads}{fasta_flag}{chrom_flag}{window_flag}{no_per_base_flag} {md_prefix} {bam}",
             env=md_env,
             timeout=3600,
         )
@@ -256,6 +317,12 @@ def main():
             fasta=fasta,
             by=str(args.window_size) if args.window_size is not None else None,
             no_per_base=args.no_per_base,
+            flag=args.flag,
+            include_flag=args.include_flag,
+            fast_mode=args.mode == "fast",
+            fragment_mode=args.mode == "fragment",
+            mapq=args.mapq,
+            use_median=args.use_median,
             threads=args.threads,
             precision_digits=6,
             tmpdir=tmpdir,

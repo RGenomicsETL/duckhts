@@ -3,7 +3,7 @@
 Native mosdepth conformance test for DuckHTS.
 
 Validates that the native `duckhts_mosdepth(...)` table function reproduces the
-currently implemented mosdepth-compatible fast-mode output set:
+implemented mosdepth-compatible output set for the selected mode:
 
   1. per-base depth BED.gz
   2. summary.txt
@@ -16,7 +16,7 @@ All DuckHTS runs go through the native table function. There is no SQL
 reconstruction fallback in this script.
 
 Usage:
-    python3 scripts/mosdepth_conformance.py <alignment_path> [--chrom 11] [--fasta ref.fa] [--extension path]
+    python3 scripts/mosdepth_conformance.py <alignment_path> [--mode fast|default|fragment] [--chrom 11] [--fasta ref.fa] [--extension path]
 
 Requires: mosdepth, duckdb CLI, samtools
 """
@@ -56,6 +56,15 @@ def duckdb_run_native(
     quantize=None,
     fasta=None,
     thresholds=None,
+    read_groups=None,
+    flag=1796,
+    include_flag=0,
+    mapq=0,
+    min_frag_len=None,
+    max_frag_len=None,
+    fast_mode=False,
+    fragment_mode=False,
+    use_median=False,
     threads=4,
     precision_digits=6,
     tmpdir,
@@ -71,10 +80,22 @@ def duckdb_run_native(
         args.append(f"by := {sql_quote_string(by)}")
     if fasta is not None:
         args.append(f"fasta := {sql_quote_string(fasta)}")
+    if read_groups is not None:
+        args.append(f"read_groups := {sql_quote_string(read_groups)}")
+    args.append(f"flag := {flag}")
+    args.append(f"include_flag := {include_flag}")
+    args.append(f"mapq := {mapq}")
     if quantize is not None:
         args.append(f"quantize := {sql_quote_string(quantize)}")
     if thresholds is not None:
         args.append(f"thresholds := {sql_quote_string(thresholds)}")
+    if min_frag_len is not None:
+        args.append(f"min_frag_len := {min_frag_len}")
+    if max_frag_len is not None:
+        args.append(f"max_frag_len := {max_frag_len}")
+    args.append(f"fast_mode := {'TRUE' if fast_mode else 'FALSE'}")
+    args.append(f"fragment_mode := {'TRUE' if fragment_mode else 'FALSE'}")
+    args.append(f"use_median := {'TRUE' if use_median else 'FALSE'}")
     args.append(f"threads := {threads}")
     args.append(f"precision_digits := {precision_digits}")
     args.append("overwrite := TRUE")
@@ -211,6 +232,12 @@ def compare_thresholds(native_bed_gz, mosdepth_bed_gz, chrom):
 def main():
     parser = argparse.ArgumentParser(description="Native mosdepth conformance test")
     parser.add_argument("bam", help="Input BAM or CRAM file (indexed)")
+    parser.add_argument(
+        "--mode",
+        choices=("fast", "default", "fragment"),
+        default="fast",
+        help="Mosdepth mode to validate (default: fast)",
+    )
     parser.add_argument("--chrom", default="11", help="Chromosome to test (default: 11)")
     parser.add_argument("--fasta", default=None, help="Reference FASTA for CRAM input when required")
     parser.add_argument("--extension", default=None, help="Path to duckhts.duckdb_extension")
@@ -242,6 +269,46 @@ def main():
         help="Optional mosdepth quantize spec (e.g. :1:4:)",
     )
     parser.add_argument(
+        "--read-groups",
+        default=None,
+        help="Optional comma-separated RG filter",
+    )
+    parser.add_argument(
+        "--flag",
+        type=int,
+        default=1796,
+        help="Exclude reads with any of these SAM flag bits set (default: 1796)",
+    )
+    parser.add_argument(
+        "--include-flag",
+        type=int,
+        default=0,
+        help="Only include reads with any of these SAM flag bits set (default: 0)",
+    )
+    parser.add_argument(
+        "--mapq",
+        type=int,
+        default=0,
+        help="Ignore reads with MAPQ less than this threshold (default: 0)",
+    )
+    parser.add_argument(
+        "--min-frag-len",
+        type=int,
+        default=None,
+        help="Optional minimum absolute template length filter",
+    )
+    parser.add_argument(
+        "--max-frag-len",
+        type=int,
+        default=None,
+        help="Optional maximum absolute template length filter",
+    )
+    parser.add_argument(
+        "--use-median",
+        action="store_true",
+        help="Validate mosdepth -m / use_median region output",
+    )
+    parser.add_argument(
         "--keep-tmp", action="store_true", help="Keep temporary files for inspection"
     )
     args = parser.parse_args()
@@ -269,6 +336,7 @@ def main():
 
     chrom_len = get_chrom_length(bam, chrom)
     print(f"Alignment:  {bam}")
+    print(f"Mode:       {args.mode}")
     print(f"Chromosome: {chrom} ({chrom_len:,} bp)")
     print(f"Extension:  {ext}")
     if args.by_bed:
@@ -280,6 +348,20 @@ def main():
         print(f"Thresholds: {args.thresholds}")
     if args.quantize:
         print(f"Quantize:   {args.quantize}")
+    if args.read_groups:
+        print(f"ReadGroups: {args.read_groups}")
+    if args.flag != 1796:
+        print(f"Flag:       {args.flag}")
+    if args.include_flag != 0:
+        print(f"IncludeFlg: {args.include_flag}")
+    if args.mapq != 0:
+        print(f"MAPQ:       {args.mapq}")
+    if args.min_frag_len is not None:
+        print(f"MinFragLen: {args.min_frag_len}")
+    if args.max_frag_len is not None:
+        print(f"MaxFragLen: {args.max_frag_len}")
+    if args.use_median:
+        print("UseMedian:  TRUE")
     if fasta:
         print(f"Reference:  {fasta}")
     print()
@@ -290,26 +372,41 @@ def main():
     print("--- Running mosdepth (ground truth) ---")
     md_env = {"MOSDEPTH_PRECISION": "6"}
     fasta_flag = f" -f {fasta}" if fasta else ""
+    chrom_flag = f" --chrom {chrom}" if chrom else ""
     by_value = os.path.abspath(args.by_bed) if args.by_bed else str(args.window_size)
     quantize_flag = f" --quantize {args.quantize}" if args.quantize else ""
-    md_fast = os.path.join(tmpdir, "md_fast")
-    md_windows = os.path.join(tmpdir, "md_fast_windows")
+    if args.mode == "fast":
+        mode_flag = " --fast-mode"
+    elif args.mode == "fragment":
+        mode_flag = " --fragment-mode"
+    else:
+        mode_flag = ""
+    read_groups_flag = f" -R {args.read_groups}" if args.read_groups else ""
+    flag_opt = f" -F {args.flag}" if args.flag != 1796 else ""
+    include_flag_opt = f" -i {args.include_flag}" if args.include_flag != 0 else ""
+    mapq_opt = f" -Q {args.mapq}" if args.mapq != 0 else ""
+    min_frag_flag = f" -l {args.min_frag_len}" if args.min_frag_len is not None else ""
+    max_frag_flag = f" -u {args.max_frag_len}" if args.max_frag_len is not None else ""
+    median_flag = " -m" if args.use_median else ""
+    md_main = os.path.join(tmpdir, f"md_{args.mode}")
+    md_windows = os.path.join(tmpdir, f"md_{args.mode}_windows")
     run(
-        f"mosdepth --fast-mode{quantize_flag} -t {args.threads}{fasta_flag} {md_fast} {bam}",
+        f"mosdepth{mode_flag}{quantize_flag}{read_groups_flag}{flag_opt}{include_flag_opt}{mapq_opt}{min_frag_flag}{max_frag_flag}{median_flag}"
+        f" -t {args.threads}{fasta_flag}{chrom_flag} {md_main} {bam}",
         env=md_env,
         timeout=3600,
     )
     run(
-        f"mosdepth --fast-mode --by {by_value}{quantize_flag}"
-        f"{(' -T ' + args.thresholds) if args.thresholds else ''}"
-        f" -t {args.threads}{fasta_flag} {md_windows} {bam}",
+        f"mosdepth{mode_flag}{median_flag} --by {by_value}{quantize_flag}"
+        f"{(' -T ' + args.thresholds) if args.thresholds else ''}{read_groups_flag}{flag_opt}{include_flag_opt}{mapq_opt}"
+        f"{min_frag_flag}{max_frag_flag} -t {args.threads}{fasta_flag}{chrom_flag} {md_windows} {bam}",
         env=md_env,
         timeout=3600,
     )
     print("  mosdepth runs complete.")
 
     print("\n--- Running native duckhts_mosdepth(...) ---")
-    native_prefix = os.path.join(tmpdir, "native_fast")
+    native_prefix = os.path.join(tmpdir, f"native_{args.mode}")
     duckdb_run_native(
         ext=ext,
         prefix=native_prefix,
@@ -319,6 +416,15 @@ def main():
         quantize=args.quantize,
         fasta=fasta,
         thresholds=args.thresholds,
+        read_groups=args.read_groups,
+        flag=args.flag,
+        include_flag=args.include_flag,
+        mapq=args.mapq,
+        min_frag_len=args.min_frag_len,
+        max_frag_len=args.max_frag_len,
+        fast_mode=args.mode == "fast",
+        fragment_mode=args.mode == "fragment",
+        use_median=args.use_median,
         threads=args.threads,
         precision_digits=6,
         tmpdir=tmpdir,
@@ -333,19 +439,26 @@ def main():
     native_quantized = f"{native_prefix}.quantized.bed.gz"
     native_thresholds = f"{native_prefix}.thresholds.bed.gz"
 
-    print("\n--- Test 1: Fast-mode per-base depth ---")
-    ok, n_rows, diffs = compare_perbase(native_perbase, f"{md_fast}.per-base.bed.gz", chrom)
-    results["fast_perbase"] = ok
+    if args.mode == "fast":
+        mode_label = "Fast-mode"
+    elif args.mode == "fragment":
+        mode_label = "Fragment-mode"
+    else:
+        mode_label = "Default-mode"
+
+    print(f"\n--- Test 1: {mode_label} per-base depth ---")
+    ok, n_rows, diffs = compare_perbase(native_perbase, f"{md_main}.per-base.bed.gz", chrom)
+    results[f"{args.mode}_perbase"] = ok
     print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} non-zero intervals, {diffs} differences")
 
-    print("\n--- Test 2: Fast-mode summary ---")
+    print(f"\n--- Test 2: {mode_label} summary ---")
     native_summary_row = read_summary_row(native_summary, chrom)
-    mosdepth_summary_row = read_summary_row(f"{md_fast}.mosdepth.summary.txt", chrom)
+    mosdepth_summary_row = read_summary_row(f"{md_main}.mosdepth.summary.txt", chrom)
     ok_bases = native_summary_row["bases"] == mosdepth_summary_row["bases"]
     ok_mean = native_summary_row["mean"] == mosdepth_summary_row["mean"]
     ok_max = native_summary_row["max"] == mosdepth_summary_row["max"]
     ok = ok_bases and ok_mean and ok_max
-    results["fast_summary"] = ok
+    results[f"{args.mode}_summary"] = ok
     print(
         f"  bases: native={native_summary_row['bases']} mosdepth={mosdepth_summary_row['bases']} "
         f"{'PASS' if ok_bases else 'FAIL'}"
@@ -359,47 +472,47 @@ def main():
         f"{'PASS' if ok_max else 'FAIL'}"
     )
 
-    print("\n--- Test 3: Fast-mode global distribution ---")
+    print(f"\n--- Test 3: {mode_label} global distribution ---")
     ok, n_levels, mismatches = compare_distribution(
-        native_global, f"{md_fast}.mosdepth.global.dist.txt", chrom
+        native_global, f"{md_main}.mosdepth.global.dist.txt", chrom
     )
-    results["fast_distribution"] = ok
+    results[f"{args.mode}_distribution"] = ok
     print(f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches")
 
     if args.by_bed:
-        print("\n--- Test 4: Fast-mode BED region means ---")
+        print(f"\n--- Test 4: {mode_label} BED region means ---")
         ok, n_rows, diffs = compare_tsv(native_regions, f"{md_windows}.regions.bed.gz", chrom)
         region_label = "rows"
     else:
-        print(f"\n--- Test 4: Fast-mode {args.window_size}-bp region means ---")
+        print(f"\n--- Test 4: {mode_label} {args.window_size}-bp region means ---")
         ok, n_rows, diffs = compare_windows(
             native_regions, f"{md_windows}.regions.bed.gz", chrom
         )
         region_label = "non-zero windows"
-    results["fast_windows"] = ok
+    results[f"{args.mode}_windows"] = ok
     print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} {region_label}, {diffs} differences")
 
-    print("\n--- Test 5: Fast-mode region distribution ---")
+    print(f"\n--- Test 5: {mode_label} region distribution ---")
     ok, n_levels, mismatches = compare_distribution(
         native_region_dist, f"{md_windows}.mosdepth.region.dist.txt", chrom
     )
-    results["fast_region_distribution"] = ok
+    results[f"{args.mode}_region_distribution"] = ok
     print(f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches")
 
     if args.thresholds:
-        print("\n--- Test 6: Fast-mode thresholds ---")
+        print(f"\n--- Test 6: {mode_label} thresholds ---")
         ok, n_rows, diffs = compare_thresholds(
             native_thresholds, f"{md_windows}.thresholds.bed.gz", chrom
         )
-        results["fast_thresholds"] = ok
+        results[f"{args.mode}_thresholds"] = ok
         print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} rows, {diffs} differences")
 
     if args.quantize:
-        print("\n--- Test 7: Fast-mode quantized output ---")
+        print(f"\n--- Test 7: {mode_label} quantized output ---")
         ok, n_rows, diffs = compare_tsv(
-            native_quantized, f"{md_fast}.quantized.bed.gz", chrom
+            native_quantized, f"{md_main}.quantized.bed.gz", chrom
         )
-        results["fast_quantize"] = ok
+        results[f"{args.mode}_quantize"] = ok
         print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} rows, {diffs} differences")
 
     print("\n" + "=" * 60)
