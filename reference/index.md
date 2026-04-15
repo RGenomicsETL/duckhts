@@ -20,6 +20,8 @@
   : Normalize R Data Types to DuckDB Types for Tabix
 - [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam.md)
   : Create SAM/BAM/CRAM Table
+- [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.md)
+  : Native Fixed-Width BAM/CRAM Bin Counts
 - [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_index.md)
   : Build BAM or CRAM Index
 - [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_multi.md)

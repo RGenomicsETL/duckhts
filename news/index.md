@@ -1,7 +1,17 @@
 # Changelog
 
-## Rduckhts 1.1.6.9000-0.0.7 (Development version)
+## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- add
+  [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.md)
+  and bundle native `bam_bin_counts(...)` fixed-width BAM/CRAM binning
+  in the package. The new wrapper exposes `mapq`, `require_flags`,
+  `exclude_flags`, and `rmdup = "none"|"flag"|"streaming"` duplicate
+  handling, always returns per-bin forward/reverse totals, and can add
+  per-bin GC/MAPQ summaries via `stats = "gc"`, `"mq"`, or `"gc,mq"`;
+  bundled extdata now includes the tiny WisecondorX BAM/CRAM fixtures
+  used by the new SQL/R tests, and the package README now includes a
+  native bin-count example
 - add
   [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
   examples to the package README, including windowed fragment coverage

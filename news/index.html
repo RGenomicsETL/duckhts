@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.6.9000-0.0.7</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.7.9000-0.0.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,8 +33,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="1.1.6.9000-0.0.7" id="rduckhts-1169000-007-development-version">Rduckhts 1.1.6.9000-0.0.7 (Development version)<a class="anchor" aria-label="anchor" href="#rduckhts-1169000-007-development-version"></a></h2>
-<ul><li>add <code><a href="../reference/rduckhts_mosdepth.html">rduckhts_mosdepth()</a></code> examples to the package README, including windowed fragment coverage output and preview of the generated BED.gz regions file, and refresh the generated function-catalog text so the packaged mosdepth description matches the current v0.3.13 parity surface</li>
+<h2 class="pkg-version" data-toc-text="1.1.7.9000-0.0.1" id="rduckhts-1179000-001-development-version">Rduckhts 1.1.7.9000-0.0.1 (Development version)<a class="anchor" aria-label="anchor" href="#rduckhts-1179000-001-development-version"></a></h2>
+<ul><li>add <code><a href="../reference/rduckhts_bam_bin_counts.html">rduckhts_bam_bin_counts()</a></code> and bundle native <code>bam_bin_counts(...)</code> fixed-width BAM/CRAM binning in the package. The new wrapper exposes <code>mapq</code>, <code>require_flags</code>, <code>exclude_flags</code>, and <code>rmdup = "none"|"flag"|"streaming"</code> duplicate handling, always returns per-bin forward/reverse totals, and can add per-bin GC/MAPQ summaries via <code>stats = "gc"</code>, <code>"mq"</code>, or <code>"gc,mq"</code>; bundled extdata now includes the tiny WisecondorX BAM/CRAM fixtures used by the new SQL/R tests, and the package README now includes a native bin-count example</li>
+<li>add <code><a href="../reference/rduckhts_mosdepth.html">rduckhts_mosdepth()</a></code> examples to the package README, including windowed fragment coverage output and preview of the generated BED.gz regions file, and refresh the generated function-catalog text so the packaged mosdepth description matches the current v0.3.13 parity surface</li>
 <li>Expand <code><a href="../reference/rduckhts_mosdepth.html">rduckhts_mosdepth()</a></code> and bundled <code>duckhts_mosdepth(...)</code> to cover the pinned local <code>mosdepth 0.3.13</code> option surface for indexed BAM/CRAM input: <code>fragment_mode = TRUE</code> now matches upstream <code>--fragment-mode</code> full-fragment insert coverage for proper pairs, default mode is supported with CIGAR-aware coverage plus mate-overlap correction, <code>read_groups = "..."</code> filters RG tags, <code>min_frag_len</code> / <code>max_frag_len</code> filter absolute template length, and <code>use_median = TRUE</code> switches <code>by = "&lt;window|bed&gt;"</code> outputs from mean to median; add bundled SQL/R/conformance coverage for BAM and CRAM fast/fragment/default/median cases.</li>
 <li>Expand <code><a href="../reference/rduckhts_mosdepth.html">rduckhts_mosdepth()</a></code> and bundled <code>duckhts_mosdepth(...)</code> fast-mode parity with <code>quantize = "..."</code>, writing mosdepth-style <code>.quantized.bed.gz</code> + CSI output, and add bundled tests for quantized output plus explicit <code>by = "&lt;bed&gt;"</code> validation.</li>
 <li>Expand <code><a href="../reference/rduckhts_mosdepth.html">rduckhts_mosdepth()</a></code> and bundled <code>duckhts_mosdepth(...)</code> fast-mode parity with <code>thresholds = "..."</code> for <code>by = "&lt;window|bed&gt;"</code>, writing mosdepth-style <code>.thresholds.bed.gz</code> + CSI outputs; also align window/BED mean accumulation and window-region distribution bucketing with upstream mosdepth’s current implementation behavior, and add bundled SQL/R/native-conformance coverage for the new outputs.</li>
