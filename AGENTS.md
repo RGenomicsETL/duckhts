@@ -7,8 +7,11 @@ DuckDB extension that reads HTS file formats (VCF/BCF, BAM/CRAM, FASTA/FASTQ, BE
 - Extension sources: `src/` (C source), `src/include/` (headers)
 - SQL tests: `test/sql/`
 - R package: `r/Rduckhts/`
+- Benchmark notebooks and rendered benchmark reports: `benchmarks/`
+- Design notes and planning docs: `design/`
 - Vendor sources: `third_party/`
 - Upstream mirrors (read-only reference): `.sync/`
+- `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md` only.
 
 ## Agent Working Instructions
 1. Read relevant source files before making changes.
@@ -32,9 +35,10 @@ R package changelog scope is strict:
 - After adding/removing/renaming functions: update `functions.yaml`, run `python3 scripts/render_function_catalog.py`, bootstrap the R package, verify generated files in `r/Rduckhts/inst/function_catalog/` and `community-extensions/extensions/duckhts/description.yml` are in sync.
 - `community-extensions/` is a local sync copy only — do not commit it; copy `description.yml` manually to the community-extensions repo after regenerating.
 - `r/Rduckhts/README.Rmd` is wired to the generated function catalog; do not duplicate function lists by hand.
-- Scan-planning and deferred record-offset design work is tracked in `better_scans.md`. If a task touches weighted contig claiming or a future BCF/VCF offset column, read that file before changing reader code.
-- FASTQ reader throughput and remote-safe parser design notes are tracked in `fastq_throughput.md`. If a task touches `read_fastq(...)` performance, read that file before changing the reader path.
-- Native mosdepth rewrite planning is tracked in `duckhts_mosdepth.md`. If a task touches `duckhts_mosdepth(...)`, mosdepth compatibility, or native coverage rewrite work, read that file before implementing reader or coverage code.
+- Keep new benchmark `.Rmd` / `.md` files under `benchmarks/`, not the repo root.
+- Scan-planning and deferred record-offset design work is tracked in `design/better_scans.md`. If a task touches weighted contig claiming or a future BCF/VCF offset column, read that file before changing reader code.
+- FASTQ reader throughput and remote-safe parser design notes are tracked in `design/fastq_throughput.md`. If a task touches `read_fastq(...)` performance, read that file before changing the reader path.
+- Native mosdepth rewrite planning is tracked in `design/duckhts_mosdepth.md`. If a task touches `duckhts_mosdepth(...)`, mosdepth compatibility, or native coverage rewrite work, read that file before implementing reader or coverage code.
 
 ## Build & CI Rules
 - Build scripts must be deterministic and non-interactive.

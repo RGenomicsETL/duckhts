@@ -229,6 +229,48 @@ rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20"
 unlink(fai_path)
 ```
 
+### Mosdepth-compatible coverage outputs
+
+`rduckhts_mosdepth()` writes mosdepth-style outputs to disk and returns the
+paths it created. This example writes windowed fragment coverage from the
+bundled BAM fixture and previews the generated regions BED.gz.
+
+```{r}
+mos_prefix <- tempfile("duckhts_readme_mosdepth_")
+mos_out <- rduckhts_mosdepth(
+  con,
+  prefix = mos_prefix,
+  path = bam_path,
+  chrom = "CHROMOSOME_II",
+  by = "1000",
+  no_per_base = TRUE,
+  fragment_mode = TRUE,
+  use_median = TRUE,
+  overwrite = TRUE
+)
+
+mos_out[, c("summary_path", "regions_path")]
+
+utils::read.delim(
+  gzfile(mos_out$regions_path[[1]]),
+  header = FALSE,
+  sep = "\t",
+  nrows = 3,
+  col.names = c("chrom", "start", "end", "depth")
+)
+
+unlink(
+  c(
+    paste0(mos_prefix, ".mosdepth.summary.txt"),
+    paste0(mos_prefix, ".mosdepth.global.dist.txt"),
+    paste0(mos_prefix, ".mosdepth.region.dist.txt"),
+    paste0(mos_prefix, ".regions.bed.gz"),
+    paste0(mos_prefix, ".regions.bed.gz.csi")
+  ),
+  force = TRUE
+)
+```
+
 ### Liftover score-style rows
 
 ```{r}

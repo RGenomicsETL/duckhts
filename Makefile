@@ -83,15 +83,15 @@ function_catalog:
 rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
 bench:
-	Rscript -e "rmarkdown::render('Benchmark.Rmd', output_format = 'github_document')"
+	Rscript -e "rmarkdown::render('benchmarks/Benchmark.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 bench-lift:
-	Rscript -e "rmarkdown::render('benchmark_liftover.Rmd', output_format = 'github_document')"
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_liftover.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-score:
-	Rscript -e "rmarkdown::render('benchmark_score.Rmd', output_format = 'github_document')"
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_score.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-munge:
-	Rscript -e "rmarkdown::render('benchmark_munge.Rmd', output_format = 'github_document')"
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_munge.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-mosdepth:
-	Rscript -e "rmarkdown::render('Benchmarks_mosdepth.Rmd', output_format = 'github_document')"
+	Rscript -e "rmarkdown::render('benchmarks/Benchmarks_mosdepth.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"

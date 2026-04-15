@@ -81,9 +81,9 @@ This section is generated from `functions.yaml`.
 
 ### Coverage
 
-| Function           | Kind  | Returns | R helper            | Description                                                                                                                                                                                                                                        |
-|--------------------|-------|---------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `duckhts_mosdepth` | table | table   | `rduckhts_mosdepth` | Write an initial native mosdepth-compatible fast-mode output set for indexed BAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, and optional window/BED region outputs; fast_mode must currently remain TRUE. |
+| Function           | Kind  | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+|--------------------|-------|---------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_mosdepth` | table | table   | `rduckhts_mosdepth` | Write native mosdepth-compatible coverage outputs for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, optional quantized BED.gz + CSI, and optional threshold counts for `by`; `fast_mode` defaults to FALSE to match upstream mosdepth, default mode performs CIGAR-aware coverage with mate-overlap correction, `fragment_mode` switches coverage to full-fragment insert spans for proper pairs, `use_median` switches `by` outputs from mean to median, `read_groups` filters by comma-separated RG IDs, `min_frag_len` and `max_frag_len` filter on absolute template length, `fasta` is required for CRAM when htslib needs a reference, and `precision_digits` controls decimal places in the text outputs. |
 
 ### Variants
 
@@ -254,6 +254,55 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
     │ CHROMOSOME_I │     0 │    10 │      10 │    0.6 │
     │ CHROMOSOME_I │    10 │    20 │      10 │    0.5 │
     └──────────────┴───────┴───────┴─────────┴────────┘
+
+### Mosdepth-compatible coverage outputs
+
+`duckhts_mosdepth()` writes mosdepth-style output files directly from
+indexed BAM/CRAM input. The example below writes windowed fragment
+coverage and then reads back the generated BED.gz output.
+
+``` sql
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SELECT success, summary_path, regions_path
+FROM duckhts_mosdepth(
+  '/tmp/duckhts_readme_mosdepth',
+  'test/data/range.bam',
+  chrom := 'CHROMOSOME_II',
+  by := '1000',
+  no_per_base := TRUE,
+  fragment_mode := TRUE,
+  use_median := TRUE,
+  overwrite := TRUE
+);
+
+SELECT
+  column0 AS chrom,
+  CAST(column1 AS BIGINT) AS start,
+  CAST(column2 AS BIGINT) AS "end",
+  CAST(column3 AS DOUBLE) AS depth
+FROM read_csv(
+  '/tmp/duckhts_readme_mosdepth.regions.bed.gz',
+  delim := '\t',
+  header := FALSE,
+  compression := 'gzip'
+)
+LIMIT 3;
+```
+
+    ┌─────────┬───────────────────────────────────────────────────┬─────────────────────────────────────────────┐
+    │ success │                   summary_path                    │                regions_path                 │
+    │ boolean │                      varchar                      │                   varchar                   │
+    ├─────────┼───────────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ true    │ /tmp/duckhts_readme_mosdepth.mosdepth.summary.txt │ /tmp/duckhts_readme_mosdepth.regions.bed.gz │
+    └─────────┴───────────────────────────────────────────────────┴─────────────────────────────────────────────┘
+    ┌───────────────┬───────┬───────┬────────┐
+    │     chrom     │ start │  end  │ depth  │
+    │    varchar    │ int64 │ int64 │ double │
+    ├───────────────┼───────┼───────┼────────┤
+    │ CHROMOSOME_II │     0 │  1000 │    0.0 │
+    │ CHROMOSOME_II │  1000 │  2000 │    5.0 │
+    │ CHROMOSOME_II │  2000 │  3000 │    3.0 │
+    └───────────────┴───────┴───────┴────────┘
 
 ### Polygenic risk scoring
 
@@ -575,8 +624,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r1.fq │     5 │
     │ test/data/r2.fq │     5 │
+    │ test/data/r1.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):
