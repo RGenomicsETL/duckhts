@@ -1,14 +1,52 @@
 # Changelog
 
-## Rduckhts 1.1.6.9000-0.0.6 (Development version)
+## Rduckhts 1.1.6.9000-0.0.7 (Development version)
 
-- Add
+- add
   [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
-  and bundled `duckhts_mosdepth(...)`: an initial native
-  mosdepth-compatible fast-mode rewrite for indexed BAM input that
-  writes mosdepth-style summary/distribution/per-base outputs and
-  optional window/BED region outputs, while still erroring for the
-  deferred non-fast-mode feature set.
+  examples to the package README, including windowed fragment coverage
+  output and preview of the generated BED.gz regions file, and refresh
+  the generated function-catalog text so the packaged mosdepth
+  description matches the current v0.3.13 parity surface
+- Expand
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
+  and bundled `duckhts_mosdepth(...)` to cover the pinned local
+  `mosdepth 0.3.13` option surface for indexed BAM/CRAM input:
+  `fragment_mode = TRUE` now matches upstream `--fragment-mode`
+  full-fragment insert coverage for proper pairs, default mode is
+  supported with CIGAR-aware coverage plus mate-overlap correction,
+  `read_groups = "..."` filters RG tags, `min_frag_len` / `max_frag_len`
+  filter absolute template length, and `use_median = TRUE` switches
+  `by = "<window|bed>"` outputs from mean to median; add bundled
+  SQL/R/conformance coverage for BAM and CRAM
+  fast/fragment/default/median cases.
+- Expand
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
+  and bundled `duckhts_mosdepth(...)` fast-mode parity with
+  `quantize = "..."`, writing mosdepth-style `.quantized.bed.gz` + CSI
+  output, and add bundled tests for quantized output plus explicit
+  `by = "<bed>"` validation.
+- Expand
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
+  and bundled `duckhts_mosdepth(...)` fast-mode parity with
+  `thresholds = "..."` for `by = "<window|bed>"`, writing mosdepth-style
+  `.thresholds.bed.gz` + CSI outputs; also align window/BED mean
+  accumulation and window-region distribution bucketing with upstream
+  mosdepth’s current implementation behavior, and add bundled
+  SQL/R/native-conformance coverage for the new outputs.
+- Bundle upstream mosdepth edge-case fixtures (`big`, `empty-tids`,
+  `overlapping-pairs`, `ovl`, `nanopore`, and related BED files) in
+  `inst/extdata/` for stronger mosdepth parity testing, and record Brent
+  Pedersen as the original mosdepth author in the package
+  metadata/copyright bundle.
+- Expand
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
+  and bundled `duckhts_mosdepth(...)`: the native mosdepth-compatible
+  fast-mode rewrite now accepts indexed CRAM input via `fasta = ...`
+  when required by htslib, and exposes `precision_digits = 2` as an
+  explicit wrapper argument instead of relying on the
+  `MOSDEPTH_PRECISION` environment variable; add bundled BAM/CRAM tests
+  plus explicit precision validation.
 - Expand `README.Rmd` with runnable compression/indexing examples
   covering
   [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgzip.md),

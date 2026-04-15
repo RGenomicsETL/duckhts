@@ -75,7 +75,7 @@
 - [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
   : Load DuckHTS Extension
 - [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
-  : Native mosdepth-Compatible Fast-Mode Coverage Outputs
+  : Native mosdepth-Compatible Coverage Outputs
 - [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_munge.md)
   : Munge Summary Statistics Rows
 - [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
