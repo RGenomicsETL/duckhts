@@ -99,15 +99,6 @@ typedef struct {
     int emitted;
 } mosdepth_bind_t;
 
-static char *dup_string(const char *s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char *out = (char *)duckdb_malloc(len);
-    if (!out) return NULL;
-    memcpy(out, s, len);
-    return out;
-}
-
 static char *append_suffix(const char *prefix, const char *suffix) {
     size_t a = strlen(prefix);
     size_t b = strlen(suffix);
@@ -236,11 +227,6 @@ static int dist_ensure(mosdepth_dist_t *dist, size_t idx) {
     dist->data = new_data;
     dist->len = new_len;
     return 0;
-}
-
-static void dist_reset(mosdepth_dist_t *dist) {
-    if (!dist || !dist->data) return;
-    memset(dist->data, 0, dist->len * sizeof(int64_t));
 }
 
 static void dist_destroy(mosdepth_dist_t *dist) {
@@ -511,19 +497,6 @@ static int dist_add_count(mosdepth_dist_t *dist, int depth, int64_t count) {
     if (depth > MOSDEPTH_MAX_COVERAGE) depth = MOSDEPTH_MAX_COVERAGE - 10;
     if (dist_ensure(dist, (size_t)depth) != 0) return -1;
     dist->data[depth] += count;
-    return 0;
-}
-
-static int dist_add_span_coverage(mosdepth_dist_t *dist, const int32_t *coverage,
-                                  int64_t start, int64_t stop, int64_t len) {
-    if (!dist || !coverage || start >= stop) return 0;
-    if (start < 0) start = 0;
-    if (stop > len) stop = len;
-    for (int64_t i = start; i < stop; i++) {
-        if (dist_add_count(dist, depth_bucket_value((uint32_t)coverage[i]), 1) != 0) {
-            return -1;
-        }
-    }
     return 0;
 }
 
