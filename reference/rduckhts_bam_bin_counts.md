@@ -70,5 +70,6 @@ rduckhts_bam_bin_counts(
 
 ## Value
 
-A data frame of non-empty bins with total, forward, reverse, and
+A data frame with one row per fixed-width bin across the selected contig
+span, including zero-count bins, plus total, forward, reverse, and
 optional GC/MAPQ summary columns

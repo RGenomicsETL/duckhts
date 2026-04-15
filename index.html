@@ -485,7 +485,7 @@
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bam_bin_counts</code></td>
-<td>Count BAM or CRAM read starts into fixed-width bins. Returns non-empty bins with total, forward, and reverse counts; <code>rmdup := 'streaming'</code> applies the WisecondorX-style larp/larp2 consecutive-position deduplication, <code>rmdup := 'flag'</code> drops SAM duplicate-flagged reads, and <code>stats := 'gc'</code>, <code>'mq'</code>, or <code>'gc,mq'</code> adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when <code>reference</code> is provided.</td>
+<td>Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; <code>rmdup := 'streaming'</code> applies the WisecondorX-style larp/larp2 consecutive-position deduplication, <code>rmdup := 'flag'</code> drops SAM duplicate-flagged reads, and <code>stats := 'gc'</code>, <code>'mq'</code>, or <code>'gc,mq'</code> adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when <code>reference</code> is provided.</td>
 </tr>
 <tr class="even">
 <td><code>duckhts_mosdepth</code></td>
@@ -913,7 +913,7 @@
 <div class="section level3">
 <h3 id="fixed-bin-native-counting">Fixed-bin native counting<a class="anchor" aria-label="anchor" href="#fixed-bin-native-counting"></a>
 </h3>
-<p><code><a href="reference/rduckhts_bam_bin_counts.html">rduckhts_bam_bin_counts()</a></code> exposes the native fixed-width read-start counting kernel. This is the primitive used for WisecondorX-style binning, and it can add one-pass GC and MAPQ summaries on the same scan.</p>
+<p><code><a href="reference/rduckhts_bam_bin_counts.html">rduckhts_bam_bin_counts()</a></code> exposes the native fixed-width read-start counting kernel. It returns one row per bin across the selected contig span, including zero-count bins, which makes it suitable as a dense CNV binning primitive. It can also add one-pass GC and MAPQ summaries on the same scan.</p>
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">mixed_cram</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"fixture_mixed.cram"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fixture_ref</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"fixture_ref.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>

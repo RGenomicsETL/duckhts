@@ -2,6 +2,13 @@
 
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- change bundled `bam_bin_counts(...)` /
+  [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.md)
+  to return a dense fixed-bin layout across each selected contig span,
+  including zero-count bins up to the contig end instead of only
+  observed bins; this gives downstream CNV/sample serializers stable
+  per-contig bin shapes, and the package docs/tests now describe and
+  validate the dense contract
 - add
   [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.md)
   and bundle native `bam_bin_counts(...)` fixed-width BAM/CRAM binning
