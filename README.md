@@ -79,6 +79,12 @@ This section is generated from `functions.yaml`.
 | `bcf_index`   | table | table   | `rduckhts_bcf_index`   | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.       |
 | `tabix_index` | table | table   | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
 
+### Coverage
+
+| Function           | Kind  | Returns | R helper            | Description                                                                                                                                                                                                                                        |
+|--------------------|-------|---------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_mosdepth` | table | table   | `rduckhts_mosdepth` | Write an initial native mosdepth-compatible fast-mode output set for indexed BAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, and optional window/BED region outputs; fast_mode must currently remain TRUE. |
+
 ### Variants
 
 | Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -569,8 +575,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r2.fq │     5 │
     │ test/data/r1.fq │     5 │
+    │ test/data/r2.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):
