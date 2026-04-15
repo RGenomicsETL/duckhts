@@ -92,3 +92,6 @@ bench-score:
 
 bench-munge:
 	Rscript -e "rmarkdown::render('benchmark_munge.Rmd', output_format = 'github_document')"
+
+bench-mosdepth:
+	Rscript -e "rmarkdown::render('Benchmarks_mosdepth.Rmd', output_format = 'github_document')"
