@@ -15,7 +15,8 @@ rduckhts_mosdepth(
   fasta = NULL,
   read_groups = NULL,
   no_per_base = FALSE,
-  threads = 0,
+  threads = 2,
+  processing_threads = 2,
   flag = 1796,
   include_flag = 0,
   fast_mode = FALSE,
@@ -69,6 +70,10 @@ rduckhts_mosdepth(
 - threads:
 
   Number of BAM decompression threads
+
+- processing_threads:
+
+  Number of parallel contig processing threads (0 = sequential)
 
 - flag:
 

@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- improve package-source hygiene for local development: ignore generated
+  `README.html`, `.Rcheck`, staged `duckhts_extension/htslib` build
+  outputs, wasm/webR harness byproducts, and stray root-level index
+  files under `r/Rduckhts/`; add top-level `make clean_local` to purge
+  the reproducible package-side artifacts
 - add `processing_threads` parameter to
   [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
   and bundled `duckhts_mosdepth(...)` for parallel contig processing:

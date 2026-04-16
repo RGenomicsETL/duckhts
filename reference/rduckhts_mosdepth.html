@@ -48,7 +48,8 @@
 <span>  fasta <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  read_groups <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  no_per_base <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  threads <span class="op">=</span> <span class="fl">0</span>,</span>
+<span>  threads <span class="op">=</span> <span class="fl">2</span>,</span>
+<span>  processing_threads <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  flag <span class="op">=</span> <span class="fl">1796</span>,</span>
 <span>  include_flag <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  fast_mode <span class="op">=</span> <span class="cn">FALSE</span>,</span>
@@ -103,6 +104,10 @@
 
 <dt id="arg-threads">threads<a class="anchor" aria-label="anchor" href="#arg-threads"></a></dt>
 <dd><p>Number of BAM decompression threads</p></dd>
+
+
+<dt id="arg-processing-threads">processing_threads<a class="anchor" aria-label="anchor" href="#arg-processing-threads"></a></dt>
+<dd><p>Number of parallel contig processing threads (0 = sequential)</p></dd>
 
 
 <dt id="arg-flag">flag<a class="anchor" aria-label="anchor" href="#arg-flag"></a></dt>
