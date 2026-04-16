@@ -66,6 +66,7 @@ def duckdb_run_native(
     fragment_mode=False,
     use_median=False,
     threads=4,
+    processing_threads=None,
     precision_digits=6,
     tmpdir,
 ):
@@ -98,6 +99,8 @@ def duckdb_run_native(
     args.append(f"use_median := {'TRUE' if use_median else 'FALSE'}")
     args.append(f"threads := {threads}")
     args.append(f"precision_digits := {precision_digits}")
+    if processing_threads is not None and processing_threads > 0:
+        args.append(f"processing_threads := {processing_threads}")
     args.append("overwrite := TRUE")
     sql.append(f"SELECT * FROM duckhts_mosdepth({', '.join(args)});")
 
@@ -155,15 +158,9 @@ def read_summary_row(path, chrom):
 
 
 def compare_perbase(native_bed_gz, mosdepth_bed_gz, chrom):
-    """
-    Compare non-zero per-base BED intervals.
-
-    The current native fast-mode writer can still emit zero-depth runs more
-    explicitly than upstream mosdepth. Summary/distribution comparisons cover
-    the zero-depth accounting; this comparison checks the non-zero intervals.
-    """
-    native_rows = [row for row in read_bed(native_bed_gz, chrom) if row[3] != "0"]
-    mosdepth_rows = [row for row in read_bed(mosdepth_bed_gz, chrom) if row[3] != "0"]
+    """Compare per-base BED intervals (full comparison including zero-depth)."""
+    native_rows = read_bed(native_bed_gz, chrom)
+    mosdepth_rows = read_bed(mosdepth_bed_gz, chrom)
     if native_rows == mosdepth_rows:
         return True, len(native_rows), 0
     diffs = sum(1 for a, b in zip(native_rows, mosdepth_rows) if a != b)
@@ -182,12 +179,9 @@ def compare_distribution(native_dist, mosdepth_dist, chrom):
 
 
 def compare_windows(native_bed_gz, mosdepth_bed_gz, chrom):
-    native_rows = [
-        row for row in read_bed(native_bed_gz, chrom) if row[3] != "0.000000"
-    ]
-    mosdepth_rows = [
-        row for row in read_bed(mosdepth_bed_gz, chrom) if row[3] != "0.000000"
-    ]
+    """Compare windowed region BED intervals (full comparison including zero-depth)."""
+    native_rows = read_bed(native_bed_gz, chrom)
+    mosdepth_rows = read_bed(mosdepth_bed_gz, chrom)
     if native_rows == mosdepth_rows:
         return True, len(native_rows), 0
     diffs = sum(1 for a, b in zip(native_rows, mosdepth_rows) if a != b)
@@ -238,9 +232,15 @@ def main():
         default="fast",
         help="Mosdepth mode to validate (default: fast)",
     )
-    parser.add_argument("--chrom", default="11", help="Chromosome to test (default: 11)")
-    parser.add_argument("--fasta", default=None, help="Reference FASTA for CRAM input when required")
-    parser.add_argument("--extension", default=None, help="Path to duckhts.duckdb_extension")
+    parser.add_argument(
+        "--chrom", default="11", help="Chromosome to test (default: 11)"
+    )
+    parser.add_argument(
+        "--fasta", default=None, help="Reference FASTA for CRAM input when required"
+    )
+    parser.add_argument(
+        "--extension", default=None, help="Path to duckhts.duckdb_extension"
+    )
     parser.add_argument(
         "--window-size",
         type=int,
@@ -257,6 +257,12 @@ def main():
         type=int,
         default=4,
         help="Decompression threads for both mosdepth and duckhts_mosdepth (default: 4)",
+    )
+    parser.add_argument(
+        "--processing-threads",
+        type=int,
+        default=None,
+        help="Number of parallel contig processing threads for duckhts_mosdepth (default: 0 = sequential)",
     )
     parser.add_argument(
         "--thresholds",
@@ -426,6 +432,7 @@ def main():
         fragment_mode=args.mode == "fragment",
         use_median=args.use_median,
         threads=args.threads,
+        processing_threads=args.processing_threads,
         precision_digits=6,
         tmpdir=tmpdir,
     )
@@ -447,9 +454,11 @@ def main():
         mode_label = "Default-mode"
 
     print(f"\n--- Test 1: {mode_label} per-base depth ---")
-    ok, n_rows, diffs = compare_perbase(native_perbase, f"{md_main}.per-base.bed.gz", chrom)
+    ok, n_rows, diffs = compare_perbase(
+        native_perbase, f"{md_main}.per-base.bed.gz", chrom
+    )
     results[f"{args.mode}_perbase"] = ok
-    print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} non-zero intervals, {diffs} differences")
+    print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} intervals, {diffs} differences")
 
     print(f"\n--- Test 2: {mode_label} summary ---")
     native_summary_row = read_summary_row(native_summary, chrom)
@@ -477,27 +486,35 @@ def main():
         native_global, f"{md_main}.mosdepth.global.dist.txt", chrom
     )
     results[f"{args.mode}_distribution"] = ok
-    print(f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches")
+    print(
+        f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches"
+    )
 
     if args.by_bed:
         print(f"\n--- Test 4: {mode_label} BED region means ---")
-        ok, n_rows, diffs = compare_tsv(native_regions, f"{md_windows}.regions.bed.gz", chrom)
+        ok, n_rows, diffs = compare_tsv(
+            native_regions, f"{md_windows}.regions.bed.gz", chrom
+        )
         region_label = "rows"
     else:
         print(f"\n--- Test 4: {mode_label} {args.window_size}-bp region means ---")
         ok, n_rows, diffs = compare_windows(
             native_regions, f"{md_windows}.regions.bed.gz", chrom
         )
-        region_label = "non-zero windows"
+        region_label = "windows"
     results[f"{args.mode}_windows"] = ok
-    print(f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} {region_label}, {diffs} differences")
+    print(
+        f"  {'PASS' if ok else 'FAIL'}: {n_rows:,} {region_label}, {diffs} differences"
+    )
 
     print(f"\n--- Test 5: {mode_label} region distribution ---")
     ok, n_levels, mismatches = compare_distribution(
         native_region_dist, f"{md_windows}.mosdepth.region.dist.txt", chrom
     )
     results[f"{args.mode}_region_distribution"] = ok
-    print(f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches")
+    print(
+        f"  {'PASS' if ok else 'FAIL'}: {n_levels} depth levels, {mismatches} mismatches"
+    )
 
     if args.thresholds:
         print(f"\n--- Test 6: {mode_label} thresholds ---")

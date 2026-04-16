@@ -29,17 +29,37 @@ import time
 
 
 def run(cmd, *, env=None, timeout=3600, check=True):
-    """Run a shell command; return (stdout, elapsed_seconds)."""
+    """Run a shell command; return (stdout, elapsed_seconds, peak_rss_mb)."""
     merged = {**os.environ, **(env or {})}
     start = time.monotonic()
+    # Use GNU time to capture per-process peak RSS accurately
+    time_cmd = f"/usr/bin/time -v sh -c {subprocess.list2cmdline([cmd])} "
     result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True, env=merged, timeout=timeout
+        time_cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        env=merged,
+        timeout=timeout,
     )
     elapsed = time.monotonic() - start
+    # Parse peak RSS from GNU time stderr output
+    peak_rss_mb = 0.0
+    stderr_lines = result.stderr.split("\n")
+    actual_stderr = []
+    for line in stderr_lines:
+        if "Maximum resident set size" in line:
+            # Format: "Maximum resident set size (kbytes): 12345"
+            try:
+                peak_rss_mb = int(line.strip().split(":")[-1].strip()) / 1024.0
+            except (ValueError, IndexError):
+                pass
+        else:
+            actual_stderr.append(line)
     if check and result.returncode != 0:
-        print(f"FAIL: {cmd}\nstderr: {result.stderr}", file=sys.stderr)
+        print(f"FAIL: {cmd}\nstderr: {''.join(actual_stderr)}", file=sys.stderr)
         sys.exit(1)
-    return result.stdout.strip(), elapsed
+    return result.stdout.strip(), elapsed, peak_rss_mb
 
 
 def sql_quote_string(value):
@@ -62,6 +82,7 @@ def duckdb_run_native(
     mapq=0,
     use_median=False,
     threads=4,
+    processing_threads=None,
     precision_digits=6,
     tmpdir,
 ):
@@ -85,6 +106,8 @@ def duckdb_run_native(
     args.append(f"mapq := {mapq}")
     args.append(f"use_median := {'TRUE' if use_median else 'FALSE'}")
     args.append(f"threads := {threads}")
+    if processing_threads is not None and processing_threads > 0:
+        args.append(f"processing_threads := {processing_threads}")
     args.append(f"precision_digits := {precision_digits}")
     args.append("overwrite := TRUE")
     sql.append(f"SELECT * FROM duckhts_mosdepth({', '.join(args)});")
@@ -92,11 +115,12 @@ def duckdb_run_native(
     sqlfile = os.path.join(tmpdir, "query.sql")
     with open(sqlfile, "w", encoding="utf-8") as handle:
         handle.write("\n".join(sql) + "\n")
-    return run(f"duckdb -unsigned < {sqlfile}", timeout=3600)[1]
+    _, elapsed, peak_rss = run(f"duckdb -unsigned < {sqlfile}", timeout=3600)
+    return elapsed, peak_rss
 
 
 def get_chrom_lengths(bam):
-    out, _ = run(f"samtools idxstats {bam}")
+    out, _, _ = run(f"samtools idxstats {bam}")
     lengths = {}
     for line in out.splitlines():
         parts = line.split("\t")
@@ -106,7 +130,7 @@ def get_chrom_lengths(bam):
 
 
 def get_total_reads(bam):
-    out, _ = run(f"samtools idxstats {bam}")
+    out, _, _ = run(f"samtools idxstats {bam}")
     mapped = 0
     unmapped = 0
     for line in out.splitlines():
@@ -148,9 +172,9 @@ def read_bed(path, chrom=None):
     return rows
 
 
-def compare_nonzero_bed(native_bed_gz, mosdepth_bed_gz, chrom):
-    native_rows = [row for row in read_bed(native_bed_gz, chrom) if row[3] not in ("0", "0.000000")]
-    mosdepth_rows = [row for row in read_bed(mosdepth_bed_gz, chrom) if row[3] not in ("0", "0.000000")]
+def compare_bed(native_bed_gz, mosdepth_bed_gz, chrom):
+    native_rows = read_bed(native_bed_gz, chrom)
+    mosdepth_rows = read_bed(mosdepth_bed_gz, chrom)
     if native_rows == mosdepth_rows:
         return True, len(native_rows), 0
     diffs = sum(1 for a, b in zip(native_rows, mosdepth_rows) if a != b)
@@ -167,14 +191,26 @@ def main():
         default="fast",
         help="Mosdepth mode to benchmark (default: fast)",
     )
-    parser.add_argument("--fasta", default=None, help="Reference FASTA for CRAM input when required")
-    parser.add_argument("--chrom", default=None, help="Single chromosome to test (default: whole file)")
-    parser.add_argument("--extension", default=None, help="Path to duckhts.duckdb_extension")
+    parser.add_argument(
+        "--fasta", default=None, help="Reference FASTA for CRAM input when required"
+    )
+    parser.add_argument(
+        "--chrom", default=None, help="Single chromosome to test (default: whole file)"
+    )
+    parser.add_argument(
+        "--extension", default=None, help="Path to duckhts.duckdb_extension"
+    )
     parser.add_argument(
         "--threads",
         type=int,
         default=4,
         help="Decompression threads for both mosdepth and duckhts_mosdepth (default: 4)",
+    )
+    parser.add_argument(
+        "--processing-threads",
+        type=int,
+        default=None,
+        help="Number of parallel contig processing threads for duckhts_mosdepth (default: 0 = sequential)",
     )
     parser.add_argument(
         "--runs",
@@ -207,6 +243,11 @@ def main():
         help="If set, benchmark `--by <window-size>` region output instead of per-base output",
     )
     parser.add_argument(
+        "--by-bed",
+        default=None,
+        help="BED file for mosdepth --by comparisons; overrides --window-size when set",
+    )
+    parser.add_argument(
         "--no-per-base",
         action="store_true",
         help="Pass no_per_base := TRUE to duckhts_mosdepth and -n to mosdepth",
@@ -216,12 +257,15 @@ def main():
         action="store_true",
         help="Pass use_median := TRUE / -m when benchmarking region output",
     )
-    parser.add_argument("--verify", action="store_true", help="Compare first-run outputs")
+    parser.add_argument(
+        "--verify", action="store_true", help="Compare first-run outputs"
+    )
     parser.add_argument("--keep-tmp", action="store_true", help="Keep temporary files")
     args = parser.parse_args()
 
     bam = os.path.abspath(args.bam)
     fasta = os.path.abspath(args.fasta) if args.fasta else None
+    by_bed = os.path.abspath(args.by_bed) if args.by_bed else None
     if bam.endswith(".cram") and not fasta:
         sys.exit("--fasta is required for CRAM benchmarks")
 
@@ -258,7 +302,9 @@ def main():
     print(f"Extension:    {ext}")
     if fasta:
         print(f"Reference:    {fasta}")
-    if args.window_size is not None:
+    if by_bed:
+        print(f"By BED:       {by_bed}")
+    elif args.window_size is not None:
         print(f"Window size:  {args.window_size:,}")
     if args.no_per_base:
         print("Per-base:     disabled")
@@ -276,7 +322,14 @@ def main():
     md_env = {"MOSDEPTH_PRECISION": "6"}
     fasta_flag = f" -f {fasta}" if fasta else ""
     chrom_flag = f" --chrom {args.chrom}" if args.chrom else ""
-    window_flag = f" --by {args.window_size}" if args.window_size is not None else ""
+    # Determine the --by value for both mosdepth and duckhts_mosdepth
+    if by_bed:
+        by_value = by_bed
+    elif args.window_size is not None:
+        by_value = str(args.window_size)
+    else:
+        by_value = None
+    window_flag = f" --by {by_value}" if by_value is not None else ""
     no_per_base_flag = " -n" if args.no_per_base else ""
     flag_opt = f" -F {args.flag}" if args.flag != 1796 else ""
     include_flag_opt = f" -i {args.include_flag}" if args.include_flag != 0 else ""
@@ -291,6 +344,8 @@ def main():
 
     mosdepth_times = []
     native_times = []
+    mosdepth_rss_values = []
+    native_rss_values = []
     md_prefix_first = None
     native_prefix_first = None
 
@@ -300,22 +355,23 @@ def main():
         native_prefix = os.path.join(tmpdir, f"native_r{run_idx}")
 
         print(f"mosdepth {label}...")
-        _, md_time = run(
+        _, md_time, md_rss = run(
             f"mosdepth{mode_flag}{median_flag}{flag_opt}{include_flag_opt}{mapq_opt} -t {args.threads}{fasta_flag}{chrom_flag}{window_flag}{no_per_base_flag} {md_prefix} {bam}",
             env=md_env,
             timeout=3600,
         )
         mosdepth_times.append(md_time)
-        print(f"  {fmt_time(md_time)}")
+        mosdepth_rss_values.append(md_rss)
+        print(f"  {fmt_time(md_time)}  (peak RSS: {md_rss:.0f} MB)")
 
         print(f"duckhts_mosdepth {label}...")
-        native_time = duckdb_run_native(
+        native_time, native_rss = duckdb_run_native(
             ext=ext,
             prefix=native_prefix,
             bam=bam,
             chrom=args.chrom,
             fasta=fasta,
-            by=str(args.window_size) if args.window_size is not None else None,
+            by=by_value,
             no_per_base=args.no_per_base,
             flag=args.flag,
             include_flag=args.include_flag,
@@ -324,11 +380,13 @@ def main():
             mapq=args.mapq,
             use_median=args.use_median,
             threads=args.threads,
+            processing_threads=args.processing_threads,
             precision_digits=6,
             tmpdir=tmpdir,
         )
         native_times.append(native_time)
-        print(f"  {fmt_time(native_time)}")
+        native_rss_values.append(native_rss)
+        print(f"  {fmt_time(native_time)}  (peak RSS: {native_rss:.0f} MB)")
 
         if md_prefix_first is None:
             md_prefix_first = md_prefix
@@ -341,35 +399,40 @@ def main():
     print("\n" + "=" * 70)
     print("BENCHMARK SUMMARY")
     print("=" * 70)
-    print(f"{'Tool':<20} {'Average':>12} {'Best':>12}")
+    print(f"{'Tool':<20} {'Average':>12} {'Best':>12} {'Peak RSS':>12}")
     print("-" * 70)
-    print(f"{'mosdepth':<20} {fmt_time(mosdepth_avg):>12} {fmt_time(min(mosdepth_times)):>12}")
-    print(f"{'duckhts_mosdepth':<20} {fmt_time(native_avg):>12} {fmt_time(min(native_times)):>12}")
+    print(
+        f"{'mosdepth':<20} {fmt_time(mosdepth_avg):>12} {fmt_time(min(mosdepth_times)):>12} {max(mosdepth_rss_values):>9.0f} MB"
+    )
+    print(
+        f"{'duckhts_mosdepth':<20} {fmt_time(native_avg):>12} {fmt_time(min(native_times)):>12} {max(native_rss_values):>9.0f} MB"
+    )
     print("-" * 70)
     print(f"Ratio: DuckHTS is {fmt_ratio(mosdepth_avg, native_avg)} vs mosdepth")
 
     if args.verify and md_prefix_first and native_prefix_first:
         print("\nVerification:")
         verify_chrom = args.chrom or next(iter(chrom_lengths))
-        if args.window_size is None:
-            ok, n_rows, diffs = compare_nonzero_bed(
+        if by_value is None:
+            ok, n_rows, diffs = compare_bed(
                 f"{native_prefix_first}.per-base.bed.gz",
                 f"{md_prefix_first}.per-base.bed.gz",
                 verify_chrom,
             )
             print(
                 f"  per-base ({verify_chrom}): {'PASS' if ok else 'FAIL'} "
-                f"({n_rows:,} non-zero intervals, {diffs} diffs)"
+                f"({n_rows:,} intervals, {diffs} diffs)"
             )
         else:
-            ok, n_rows, diffs = compare_nonzero_bed(
+            ok, n_rows, diffs = compare_bed(
                 f"{native_prefix_first}.regions.bed.gz",
                 f"{md_prefix_first}.regions.bed.gz",
                 verify_chrom,
             )
+            by_label = os.path.basename(by_bed) if by_bed else f"{args.window_size}bp"
             print(
-                f"  regions ({verify_chrom}): {'PASS' if ok else 'FAIL'} "
-                f"({n_rows:,} non-zero rows, {diffs} diffs)"
+                f"  regions [{by_label}] ({verify_chrom}): {'PASS' if ok else 'FAIL'} "
+                f"({n_rows:,} rows, {diffs} diffs)"
             )
 
     if args.keep_tmp:

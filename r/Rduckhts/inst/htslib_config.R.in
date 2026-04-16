@@ -1,0 +1,57 @@
+## htslib_config.R.in -- template substituted by configure / configure.win
+##
+## Downstream R packages that need to compile against the htslib bundled in
+## Rduckhts can source this file (after installation) to obtain the correct
+## compiler and linker flags.
+##
+## Usage from another package's configure or Makevars:
+##   Rscript -e "source(system.file('htslib_config.R', package='Rduckhts')); cat(htslib_cflags())"
+##   Rscript -e "source(system.file('htslib_config.R', package='Rduckhts')); cat(htslib_libs())"
+
+htslib_cflags <- function() {
+    pkg_dir <- system.file(package = "Rduckhts")
+    include_dir <- file.path(pkg_dir, "duckhts_extension", "htslib", "include")
+    if (!dir.exists(include_dir)) {
+        stop("Rduckhts htslib headers not found at ", include_dir,
+             ". Was the package installed correctly?")
+    }
+    paste0("-I", shQuote(include_dir))
+}
+
+htslib_libs <- function(static = @HTSLIB_STATIC_DEFAULT@) {
+    pkg_dir <- system.file(package = "Rduckhts")
+    lib_dir <- file.path(pkg_dir, "duckhts_extension", "htslib", "lib")
+    if (!dir.exists(lib_dir)) {
+        stop("Rduckhts htslib libraries not found at ", lib_dir,
+             ". Was the package installed correctly?")
+    }
+    if (static) {
+        libhts_a <- file.path(lib_dir, "libhts.a")
+        if (!file.exists(libhts_a)) {
+            stop("Static libhts.a not found at ", libhts_a)
+        }
+        dep_libs <- "@HTSLIB_DEP_LIBS@"
+        paste(shQuote(libhts_a), dep_libs)
+    } else {
+        paste0("-L", shQuote(lib_dir), " -lhts @HTSLIB_DEP_LIBS@")
+    }
+}
+
+htslib_rpath <- function() {
+    pkg_dir <- system.file(package = "Rduckhts")
+    lib_dir <- file.path(pkg_dir, "duckhts_extension", "htslib", "lib")
+    if (.Platform$OS.type == "unix") {
+        if (Sys.info()[["sysname"]] == "Darwin") {
+            paste0("-Wl,-rpath,", shQuote(lib_dir))
+        } else {
+            paste0("-Wl,-rpath,", shQuote(lib_dir),
+                   " -Wl,--disable-new-dtags")
+        }
+    } else {
+        ""
+    }
+}
+
+htslib_version <- function() {
+    "@HTSLIB_VERSION@"
+}
