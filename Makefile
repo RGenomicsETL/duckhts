@@ -1,4 +1,4 @@
-.PHONY: clean clean_all function_catalog
+.PHONY: clean clean_all clean_local function_catalog
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -76,6 +76,15 @@ update_duckdb_headers_custom:
 
 clean: clean_build clean_cmake
 clean_all: clean clean_configure
+clean_local:
+	rm -rf .duckdb-wasm-local-artifacts .duckdb_wasm_docker_work .webr-local-artifacts duckdb-wasm-local-site .tmp_top_wasm
+	rm -rf Rduckhts.Rcheck r/Rduckhts.Rcheck scripts/mosdepth_conformance
+	rm -f README.html r/Rduckhts/README.html benchmarks/*.html benchmark_results.csv
+	rm -f *.tar.gz *.tgz *.tar.bz2 r/Rduckhts/*.tar.gz r/Rduckhts/*.tgz
+	rm -f mosdepth_*_sqltest*
+	rm -f test_bgzip_input.bed test_bgzip_input.bed.gz test_bgzip_input.bed.gz.tbi
+	rm -f test_bgzip_roundtrip.bed test_formatcols.vcf.gz.tbi test_range.bam.bai
+	rm -f test_targets.bed.gz test_targets.bed.gz.tbi
 
 # Render README.md from README.Rmd (GitHub-flavored markdown)
 function_catalog:
