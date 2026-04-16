@@ -27,6 +27,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <htslib/bgzf.h>
 #include <htslib/hts.h>
@@ -114,6 +115,7 @@ typedef struct {
     char *quantized_path;
     char *thresholds_path;
     int64_t threads;
+    int64_t processing_threads;
     int64_t flag;
     int64_t include_flag;
     int64_t mapq;
@@ -1111,9 +1113,27 @@ static int open_bgzf_or_error(BGZF **fp, const char *path, char *err, size_t err
     return 0;
 }
 
+/* Fast BED-line helpers using kstring.h direct formatters instead of ksprintf.
+ * kputs/kputc/kputll/kputw avoid printf format parsing overhead, which is
+ * significant when emitting hundreds of millions of BED lines. */
+static inline int bed_put_chrom_start_end(kstring_t *s, const char *chrom,
+                                          int64_t start, int64_t end) {
+    return (kputs(chrom, s) < 0 || kputc('\t', s) < 0 ||
+            kputll(start, s) < 0 || kputc('\t', s) < 0 ||
+            kputll(end, s) < 0) ? -1 : 0;
+}
+
+static inline int bed_put_precision_float(kstring_t *s, int precision, double val) {
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%.*f", precision, val);
+    if (n < 0) return -1;
+    return kputsn(buf, (size_t)n, s);
+}
+
 static int write_zero_per_base(BGZF *fp, kstring_t *line, const char *chrom, int64_t len) {
     line->l = 0;
-    if (ksprintf(line, "%s\t0\t%" PRId64 "\t0", chrom, len) < 0) return -1;
+    if (kputs(chrom, line) < 0 || kputsn("\t0\t", 3, line) < 0 ||
+        kputll(len, line) < 0 || kputsn("\t0", 2, line) < 0) return -1;
     return bgzf_write_line(fp, line);
 }
 
@@ -1136,12 +1156,13 @@ static int write_thresholds_row(BGZF *fp, kstring_t *line, const char *chrom,
                                 const mosdepth_threshold_list_t *thresholds) {
     if (!fp || !line || !chrom || !thresholds || thresholds->count == 0) return 0;
     line->l = 0;
-    if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s",
-                 chrom, start, stop, (name && *name) ? name : "unknown") < 0) {
+    if (bed_put_chrom_start_end(line, chrom, start, stop) < 0 ||
+        kputc('\t', line) < 0 ||
+        kputs((name && *name) ? name : "unknown", line) < 0) {
         return -1;
     }
     for (size_t i = 0; i < thresholds->count; i++) {
-        if (ksprintf(line, "\t%" PRId64, counts ? counts[i] : 0) < 0) return -1;
+        if (kputc('\t', line) < 0 || kputll(counts ? counts[i] : 0, line) < 0) return -1;
     }
     return bgzf_write_line(fp, line);
 }
@@ -1155,8 +1176,8 @@ static int write_per_base_rle(BGZF *fp, kstring_t *line, const char *chrom,
         int32_t depth = coverage[i];
         if (depth == last_depth) continue;
         line->l = 0;
-        if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%d",
-                     chrom, last_start, i, (int)last_depth) < 0) {
+        if (bed_put_chrom_start_end(line, chrom, last_start, i) < 0 ||
+            kputc('\t', line) < 0 || kputw((int)last_depth, line) < 0) {
             return -1;
         }
         if (bgzf_write_line(fp, line) != 0) return -1;
@@ -1164,8 +1185,8 @@ static int write_per_base_rle(BGZF *fp, kstring_t *line, const char *chrom,
         last_depth = depth;
     }
     line->l = 0;
-    if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%d",
-                 chrom, last_start, len, (int)last_depth) < 0) {
+    if (bed_put_chrom_start_end(line, chrom, last_start, len) < 0 ||
+        kputc('\t', line) < 0 || kputw((int)last_depth, line) < 0) {
         return -1;
     }
     return bgzf_write_line(fp, line);
@@ -1188,8 +1209,9 @@ static int write_quantized_rle(BGZF *fp, kstring_t *line, const char *chrom,
         if (bucket == last_bucket) continue;
         if (last_bucket >= 0 && (size_t)last_bucket + 1 < quantize->count) {
             line->l = 0;
-            if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s",
-                         chrom, last_start, i, quantize->labels[last_bucket]) < 0) {
+            if (bed_put_chrom_start_end(line, chrom, last_start, i) < 0 ||
+                kputc('\t', line) < 0 ||
+                kputs(quantize->labels[last_bucket], line) < 0) {
                 return -1;
             }
             if (bgzf_write_line(fp, line) != 0) return -1;
@@ -1200,8 +1222,9 @@ static int write_quantized_rle(BGZF *fp, kstring_t *line, const char *chrom,
 
     if (last_bucket >= 0 && (size_t)last_bucket + 1 < quantize->count && last_start < len) {
         line->l = 0;
-        if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s",
-                     chrom, last_start, len, quantize->labels[last_bucket]) < 0) {
+        if (bed_put_chrom_start_end(line, chrom, last_start, len) < 0 ||
+            kputc('\t', line) < 0 ||
+            kputs(quantize->labels[last_bucket], line) < 0) {
             return -1;
         }
         if (bgzf_write_line(fp, line) != 0) return -1;
@@ -1248,8 +1271,9 @@ static int write_window_regions(BGZF *fp, kstring_t *line, const char *chrom,
             if (dist_add_count(region_dist, mosdepth_window_region_bucket(region_value), 1) != 0) goto cleanup;
         }
         line->l = 0;
-        if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%.*f",
-                     chrom, start, stop, precision, region_value) < 0) goto cleanup;
+        if (bed_put_chrom_start_end(line, chrom, start, stop) < 0 ||
+            kputc('\t', line) < 0 ||
+            bed_put_precision_float(line, precision, region_value) < 0) goto cleanup;
         if (bgzf_write_line(fp, line) != 0) goto cleanup;
         if (threshold_counts &&
             write_thresholds_row(thresholds_fp, line, chrom, start, stop, NULL,
@@ -1308,11 +1332,14 @@ static int write_bed_regions(BGZF *fp, kstring_t *line, const char *chrom,
         }
         line->l = 0;
         if (r->name && *r->name) {
-            if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%s\t%.*f",
-                         chrom, r->start, r->stop, r->name, precision, region_value) < 0) goto cleanup;
+            if (bed_put_chrom_start_end(line, chrom, r->start, r->stop) < 0 ||
+                kputc('\t', line) < 0 || kputs(r->name, line) < 0 ||
+                kputc('\t', line) < 0 ||
+                bed_put_precision_float(line, precision, region_value) < 0) goto cleanup;
         } else {
-            if (ksprintf(line, "%s\t%" PRId64 "\t%" PRId64 "\t%.*f",
-                         chrom, r->start, r->stop, precision, region_value) < 0) goto cleanup;
+            if (bed_put_chrom_start_end(line, chrom, r->start, r->stop) < 0 ||
+                kputc('\t', line) < 0 ||
+                bed_put_precision_float(line, precision, region_value) < 0) goto cleanup;
         }
         if (bgzf_write_line(fp, line) != 0) goto cleanup;
         if (threshold_counts &&
@@ -1325,6 +1352,431 @@ cleanup:
     free(threshold_counts);
     count_stat_destroy(&median_stat);
     return rc;
+}
+
+/* ─── Parallel contig processing ─────────────────────────────────────── */
+
+typedef struct {
+    /* Shared read-only configuration */
+    const mosdepth_bind_t *bind;
+    sam_hdr_t *hdr;
+    mosdepth_region_list_t *region_lists;
+    khash_t(mdstr) *read_group_set;
+    int by_is_window;
+    int64_t window;
+    int n_targets;
+    int precision;
+
+    /* Work-stealing counter (atomic via __sync builtins) */
+    volatile int next_claim;
+
+    /* Ordered output assembly */
+    pthread_mutex_t write_mutex;
+    pthread_cond_t write_cond;
+    int next_write_tid;
+
+    /* Error state */
+    volatile int failed;
+    char error[512];
+
+    /* Output handles — written under write_mutex */
+    FILE *fh_summary;
+    FILE *fh_global;
+    FILE *fh_region;
+    BGZF *bgzf_per_base;
+    BGZF *bgzf_regions;
+    BGZF *bgzf_quantized;
+    BGZF *bgzf_thresholds;
+    int summary_header_written;
+
+    /* Accumulated totals — merged under write_mutex */
+    mosdepth_dist_t total_global_dist;
+    mosdepth_dist_t total_region_dist;
+    mosdepth_stat_t total_stat;
+    mosdepth_stat_t total_region_stat;
+} mosdepth_parallel_ctx_t;
+
+static void mosdepth_parallel_set_error(mosdepth_parallel_ctx_t *ctx, const char *msg) {
+    if (__sync_bool_compare_and_swap(&ctx->failed, 0, 1)) {
+        snprintf(ctx->error, sizeof(ctx->error), "%s", msg);
+    }
+}
+
+static void *mosdepth_parallel_worker(void *arg) {
+    mosdepth_parallel_ctx_t *ctx = (mosdepth_parallel_ctx_t *)arg;
+    const mosdepth_bind_t *bind = ctx->bind;
+    samFile *fp = NULL;
+    sam_hdr_t *hdr = NULL;
+    hts_idx_t *idx = NULL;
+    bam1_t *rec = NULL;
+    int32_t *coverage = NULL;
+    size_t coverage_cap = 0;
+    kstring_t line = {0, 0, NULL};
+
+    /* Each worker opens its own BAM file handle for independent I/O */
+    fp = sam_open(bind->path, "r");
+    if (!fp) {
+        mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to open alignment file");
+        goto worker_done;
+    }
+    if (bind->fasta && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->fasta) < 0) {
+        mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to set CRAM reference");
+        goto worker_done;
+    }
+    if (bind->threads > 0 && hts_set_threads(fp, (int)bind->threads) < 0) {
+        mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to set decompression threads");
+        goto worker_done;
+    }
+    hdr = sam_hdr_read(fp);
+    if (!hdr) {
+        mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to read header");
+        goto worker_done;
+    }
+    idx = sam_index_load3(fp, bind->path, bind->index_path,
+                          HTS_IDX_SILENT_FAIL | HTS_IDX_SAVE_REMOTE);
+    if (!idx) {
+        mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to load index");
+        goto worker_done;
+    }
+    rec = bam_init1();
+    if (!rec) {
+        mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker out of memory");
+        goto worker_done;
+    }
+
+    for (;;) {
+        int tid = __sync_fetch_and_add(&ctx->next_claim, 1);
+        const char *chrom;
+        int64_t chrom_len;
+        int skipped = 0;
+        int saw_record = 0;
+        int write_rc = 0;
+        hts_itr_t *itr = NULL;
+        khash_t(mdmate) *seen = NULL;
+        mosdepth_dist_t chrom_global_dist = {0};
+        mosdepth_dist_t chrom_region_dist = {0};
+        mosdepth_stat_t chrom_stat;
+        mosdepth_stat_t chrom_region_stat;
+        char local_err[512];
+
+        if (tid >= ctx->n_targets) break;
+        if (ctx->failed) break;
+
+        chrom = sam_hdr_tid2name(ctx->hdr, tid);
+        chrom_len = (int64_t)sam_hdr_tid2len(ctx->hdr, tid);
+        stat_clear(&chrom_stat);
+        stat_clear(&chrom_region_stat);
+
+        /* Skip checks — must match sequential path exactly */
+        if (bind->chrom && bind->chrom[0] != '\0' &&
+            strcmp(bind->chrom, chrom) != 0) {
+            skipped = 1;
+        } else if (bind->no_per_base && bind->regions_path &&
+                   !ctx->by_is_window &&
+                   (!ctx->region_lists ||
+                    ctx->region_lists[tid].count == 0)) {
+            skipped = 1;
+        } else if (chrom_len <= 0) {
+            skipped = 1;
+        }
+
+        if (!skipped) {
+            /* Allocate/reuse coverage array */
+            if (coverage_cap < (size_t)chrom_len + 1) {
+                int32_t *new_cov = (int32_t *)realloc(
+                    coverage, ((size_t)chrom_len + 1) * sizeof(int32_t));
+                if (!new_cov) {
+                    snprintf(local_err, sizeof(local_err),
+                             "duckhts_mosdepth: worker OOM for '%s'", chrom);
+                    mosdepth_parallel_set_error(ctx, local_err);
+                    goto contig_error;
+                }
+                coverage = new_cov;
+                coverage_cap = (size_t)chrom_len + 1;
+            }
+            memset(coverage, 0,
+                   ((size_t)chrom_len + 1) * sizeof(int32_t));
+
+            /* Mate tracking for default mode */
+            if (!bind->fast_mode && !bind->fragment_mode) {
+                seen = kh_init(mdmate);
+                if (!seen) {
+                    mosdepth_parallel_set_error(
+                        ctx, "duckhts_mosdepth: worker OOM");
+                    goto contig_error;
+                }
+            }
+
+            /* Read BAM records for this contig */
+            itr = sam_itr_queryi(idx, tid, 0, chrom_len);
+            if (itr) {
+                int iter_rc;
+                while ((iter_rc = sam_itr_next(fp, itr, rec)) >= 0) {
+                    hts_pos_t start = rec->core.pos;
+                    hts_pos_t stop = bam_endpos(rec);
+                    int64_t abs_isize = rec->core.isize < 0
+                                            ? -(int64_t)rec->core.isize
+                                            : (int64_t)rec->core.isize;
+
+                    saw_record = 1;
+                    if ((int64_t)rec->core.qual < bind->mapq) continue;
+                    if (bind->min_frag_len >= 0 &&
+                        abs_isize < bind->min_frag_len)
+                        continue;
+                    if (bind->max_frag_len >= 0 &&
+                        abs_isize > bind->max_frag_len)
+                        continue;
+                    if (((uint16_t)rec->core.flag &
+                         (uint16_t)bind->flag) != 0)
+                        continue;
+                    if (bind->include_flag != 0 &&
+                        (((uint16_t)rec->core.flag &
+                          (uint16_t)bind->include_flag) == 0))
+                        continue;
+                    if (!record_in_read_groups(rec, ctx->read_group_set))
+                        continue;
+
+                    if (bind->fragment_mode) {
+                        hts_pos_t fragment_start, fragment_stop;
+                        if ((rec->core.flag & BAM_FREAD2) ||
+                            !(rec->core.flag & BAM_FPROPER_PAIR) ||
+                            (rec->core.flag & BAM_FSUPPLEMENTARY))
+                            continue;
+                        fragment_start = start < rec->core.mpos
+                                             ? start
+                                             : rec->core.mpos;
+                        fragment_stop = fragment_start + abs_isize;
+                        add_coverage_delta(coverage, chrom_len,
+                                           fragment_start, fragment_stop,
+                                           1);
+                        continue;
+                    }
+
+                    if (!bind->fast_mode) {
+                        if (handle_default_overlap(rec, seen, coverage,
+                                                   chrom_len) != 0) {
+                            mosdepth_parallel_set_error(
+                                ctx,
+                                "duckhts_mosdepth: worker OOM in overlap");
+                            hts_itr_destroy(itr);
+                            if (seen) seen_mates_destroy(seen);
+                            goto contig_error;
+                        }
+                        add_record_cigar_coverage(rec, coverage, chrom_len);
+                        continue;
+                    }
+
+                    add_coverage_delta(coverage, chrom_len, start, stop, 1);
+                }
+                if (iter_rc < -1) {
+                    if (fp->format.format == cram && !bind->fasta) {
+                        snprintf(local_err, sizeof(local_err),
+                                 "duckhts_mosdepth: CRAM decode failed "
+                                 "scanning '%s'; provide fasta",
+                                 chrom);
+                    } else {
+                        snprintf(local_err, sizeof(local_err),
+                                 "duckhts_mosdepth: worker failed scanning "
+                                 "'%s'",
+                                 chrom);
+                    }
+                    mosdepth_parallel_set_error(ctx, local_err);
+                    hts_itr_destroy(itr);
+                    if (seen) seen_mates_destroy(seen);
+                    goto contig_error;
+                }
+                hts_itr_destroy(itr);
+                itr = NULL;
+            }
+            if (seen) {
+                seen_mates_destroy(seen);
+                seen = NULL;
+            }
+
+            /* Prefix-sum and stats (only when records were seen) */
+            if (saw_record) {
+                for (int64_t i = 1; i <= chrom_len; i++)
+                    coverage[i] += coverage[i - 1];
+                for (int64_t i = 0; i < chrom_len; i++) {
+                    uint32_t depth = (uint32_t)coverage[i];
+                    stat_add_depth(&chrom_stat, depth);
+                    if (dist_add_count(&chrom_global_dist,
+                                       depth_bucket_value(depth), 1) != 0) {
+                        mosdepth_parallel_set_error(
+                            ctx, "duckhts_mosdepth: worker OOM in dist");
+                        goto contig_error;
+                    }
+                }
+            }
+        }
+
+        /* ── Ordered write phase ────────────────────────────────── */
+        pthread_mutex_lock(&ctx->write_mutex);
+        while (ctx->next_write_tid < tid && !ctx->failed)
+            pthread_cond_wait(&ctx->write_cond, &ctx->write_mutex);
+
+        if (ctx->failed) {
+            pthread_mutex_unlock(&ctx->write_mutex);
+            dist_destroy(&chrom_global_dist);
+            dist_destroy(&chrom_region_dist);
+            break;
+        }
+
+        if (!skipped && !saw_record) {
+            /* Zero-coverage output for contigs with no reads */
+            if (ctx->bgzf_per_base &&
+                write_zero_per_base(ctx->bgzf_per_base, &line, chrom,
+                                    chrom_len) != 0) {
+                write_rc = -1;
+            }
+            if (!write_rc && ctx->bgzf_quantized &&
+                bind->quantize.count > 1 &&
+                bind->quantize.cuts[0] == 0) {
+                line.l = 0;
+                if (bed_put_chrom_start_end(&line, chrom, 0, chrom_len) <
+                        0 ||
+                    kputc('\t', &line) < 0 ||
+                    kputs(bind->quantize.labels[0], &line) < 0 ||
+                    bgzf_write_line(ctx->bgzf_quantized, &line) != 0) {
+                    write_rc = -1;
+                }
+            }
+            if (!write_rc && ctx->bgzf_regions) {
+                if (ctx->by_is_window) {
+                    if (write_window_regions(
+                            ctx->bgzf_regions, &line, chrom, NULL,
+                            chrom_len, ctx->window,
+                            &chrom_region_stat, &chrom_region_dist,
+                            ctx->precision, 0, bind->use_median,
+                            ctx->bgzf_thresholds,
+                            &bind->thresholds) != 0)
+                        write_rc = -1;
+                } else if (ctx->region_lists) {
+                    if (write_bed_regions(
+                            ctx->bgzf_regions, &line, chrom, NULL,
+                            chrom_len, &ctx->region_lists[tid],
+                            &chrom_region_stat, &chrom_region_dist,
+                            ctx->precision, 0, bind->use_median,
+                            ctx->bgzf_thresholds,
+                            &bind->thresholds) != 0)
+                        write_rc = -1;
+                }
+            }
+        } else if (!skipped && saw_record) {
+            /* Normal output for contigs with reads */
+            if (write_summary(ctx->fh_summary,
+                              &ctx->summary_header_written, chrom,
+                              &chrom_stat, ctx->precision) != 0)
+                write_rc = -1;
+            if (!write_rc &&
+                write_distribution(ctx->fh_global, chrom,
+                                   &chrom_global_dist,
+                                   ctx->precision) != 0)
+                write_rc = -1;
+            if (!write_rc &&
+                dist_sum_into(&chrom_global_dist,
+                              &ctx->total_global_dist) != 0)
+                write_rc = -1;
+            if (!write_rc) stat_merge(&ctx->total_stat, &chrom_stat);
+
+            if (!write_rc && ctx->bgzf_per_base &&
+                write_per_base_rle(ctx->bgzf_per_base, &line, chrom,
+                                   coverage, chrom_len) != 0)
+                write_rc = -1;
+            if (!write_rc && ctx->bgzf_quantized &&
+                write_quantized_rle(ctx->bgzf_quantized, &line, chrom,
+                                    coverage, chrom_len,
+                                    &bind->quantize) != 0)
+                write_rc = -1;
+
+            if (!write_rc && ctx->bgzf_regions) {
+                if (ctx->by_is_window) {
+                    if (write_window_regions(
+                            ctx->bgzf_regions, &line, chrom, coverage,
+                            chrom_len, ctx->window,
+                            &chrom_region_stat, &chrom_region_dist,
+                            ctx->precision, 1, bind->use_median,
+                            ctx->bgzf_thresholds,
+                            &bind->thresholds) != 0)
+                        write_rc = -1;
+                } else if (ctx->region_lists) {
+                    if (write_bed_regions(
+                            ctx->bgzf_regions, &line, chrom, coverage,
+                            chrom_len, &ctx->region_lists[tid],
+                            &chrom_region_stat, &chrom_region_dist,
+                            ctx->precision, 1, bind->use_median,
+                            ctx->bgzf_thresholds,
+                            &bind->thresholds) != 0)
+                        write_rc = -1;
+                }
+                if (!write_rc && chrom_region_stat.cum_length > 0) {
+                    char *label = append_suffix(chrom, "_region");
+                    if (!label) {
+                        write_rc = -1;
+                    } else {
+                        if (write_summary(
+                                ctx->fh_summary,
+                                &ctx->summary_header_written, label,
+                                &chrom_region_stat,
+                                ctx->precision) != 0)
+                            write_rc = -1;
+                        if (!write_rc) duckdb_free(label);
+                        else {
+                            duckdb_free(label);
+                            /* write_rc already -1 */
+                        }
+                    }
+                    if (!write_rc &&
+                        write_distribution(ctx->fh_region, chrom,
+                                           &chrom_region_dist,
+                                           ctx->precision) != 0)
+                        write_rc = -1;
+                    if (!write_rc &&
+                        dist_sum_into(&chrom_region_dist,
+                                      &ctx->total_region_dist) != 0)
+                        write_rc = -1;
+                    if (!write_rc)
+                        stat_merge(&ctx->total_region_stat,
+                                   &chrom_region_stat);
+                }
+            }
+        }
+
+        if (write_rc != 0) {
+            snprintf(local_err, sizeof(local_err),
+                     "duckhts_mosdepth: worker write failure for '%s'",
+                     chrom);
+            mosdepth_parallel_set_error(ctx, local_err);
+        }
+
+        ctx->next_write_tid = tid + 1;
+        pthread_cond_broadcast(&ctx->write_cond);
+        pthread_mutex_unlock(&ctx->write_mutex);
+
+        dist_destroy(&chrom_global_dist);
+        dist_destroy(&chrom_region_dist);
+        if (ctx->failed) break;
+        continue;
+
+    contig_error:
+        /* Error already set via mosdepth_parallel_set_error.
+         * Broadcast to unblock any workers waiting for their write turn. */
+        pthread_mutex_lock(&ctx->write_mutex);
+        pthread_cond_broadcast(&ctx->write_cond);
+        pthread_mutex_unlock(&ctx->write_mutex);
+        dist_destroy(&chrom_global_dist);
+        dist_destroy(&chrom_region_dist);
+        break;
+    }
+
+worker_done:
+    free(coverage);
+    free(line.s);
+    if (rec) bam_destroy1(rec);
+    if (idx) hts_idx_destroy(idx);
+    if (hdr) sam_hdr_destroy(hdr);
+    if (fp) sam_close(fp);
+    return NULL;
 }
 
 static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen) {
@@ -1447,6 +1899,80 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         goto cleanup;
     }
 
+    if (bind->processing_threads > 1) {
+        /* ── Parallel contig processing ─────────────────────────── */
+        mosdepth_parallel_ctx_t pctx;
+        pthread_t *threads_arr = NULL;
+        int n_workers = (int)bind->processing_threads;
+        int i;
+
+        memset(&pctx, 0, sizeof(pctx));
+        pctx.bind = bind;
+        pctx.hdr = hdr;
+        pctx.region_lists = region_lists;
+        pctx.read_group_set = read_group_set;
+        pctx.by_is_window = by_is_window;
+        pctx.window = window;
+        pctx.n_targets = n_targets;
+        pctx.precision = precision;
+        pctx.fh_summary = fh_summary;
+        pctx.fh_global = fh_global;
+        pctx.fh_region = fh_region;
+        pctx.bgzf_per_base = bgzf_per_base;
+        pctx.bgzf_regions = bgzf_regions;
+        pctx.bgzf_quantized = bgzf_quantized;
+        pctx.bgzf_thresholds = bgzf_thresholds;
+        stat_clear(&pctx.total_stat);
+        stat_clear(&pctx.total_region_stat);
+        pthread_mutex_init(&pctx.write_mutex, NULL);
+        pthread_cond_init(&pctx.write_cond, NULL);
+
+        threads_arr = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)n_workers);
+        if (!threads_arr) {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to allocate worker threads");
+            pthread_mutex_destroy(&pctx.write_mutex);
+            pthread_cond_destroy(&pctx.write_cond);
+            goto cleanup;
+        }
+
+        for (i = 0; i < n_workers; i++) {
+            if (pthread_create(&threads_arr[i], NULL,
+                               mosdepth_parallel_worker, &pctx) != 0) {
+                pctx.failed = 1;
+                snprintf(pctx.error, sizeof(pctx.error),
+                         "duckhts_mosdepth: failed to start worker thread");
+                n_workers = i;
+                break;
+            }
+        }
+        for (i = 0; i < n_workers; i++) {
+            pthread_join(threads_arr[i], NULL);
+        }
+        free(threads_arr);
+
+        /* Copy parallel results back to local variables */
+        total_global_dist = pctx.total_global_dist;
+        total_region_dist = pctx.total_region_dist;
+        total_stat = pctx.total_stat;
+        total_region_stat = pctx.total_region_stat;
+        summary_header_written = pctx.summary_header_written;
+
+        /* Zero out pctx dists so they aren't double-freed */
+        memset(&pctx.total_global_dist, 0, sizeof(mosdepth_dist_t));
+        memset(&pctx.total_region_dist, 0, sizeof(mosdepth_dist_t));
+
+        pthread_mutex_destroy(&pctx.write_mutex);
+        pthread_cond_destroy(&pctx.write_cond);
+
+        if (pctx.failed) {
+            snprintf(err, errlen, "%s",
+                     pctx.error[0] ? pctx.error
+                                   : "duckhts_mosdepth: parallel worker failure");
+            goto cleanup;
+        }
+    } else {
+    /* ── Sequential contig processing (original path) ───────── */
+
     for (int tid = 0; tid < n_targets; tid++) {
         const char *chrom = sam_hdr_tid2name(hdr, tid);
         int64_t chrom_len = (int64_t)sam_hdr_tid2len(hdr, tid);
@@ -1552,8 +2078,9 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             }
             if (bgzf_quantized && bind->quantize.count > 1 && bind->quantize.cuts[0] == 0) {
                 line.l = 0;
-                if (ksprintf(&line, "%s\t0\t%" PRId64 "\t%s",
-                             chrom, chrom_len, bind->quantize.labels[0]) < 0 ||
+                if (bed_put_chrom_start_end(&line, chrom, 0, chrom_len) < 0 ||
+                    kputc('\t', &line) < 0 ||
+                    kputs(bind->quantize.labels[0], &line) < 0 ||
                     bgzf_write_line(bgzf_quantized, &line) != 0) {
                     snprintf(err, errlen, "duckhts_mosdepth: failed to write quantized output");
                     goto contig_cleanup;
@@ -1667,6 +2194,8 @@ contig_cleanup:
         dist_destroy(&chrom_region_dist);
         if (rc != 0) goto cleanup;
     }
+
+    } /* end sequential else block */
 
     if (write_summary(fh_summary, &summary_header_written, "total", &total_stat, precision) != 0) {
         snprintf(err, errlen, "duckhts_mosdepth: failed to write total summary");
@@ -1824,7 +2353,8 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     memset(bind, 0, sizeof(mosdepth_bind_t));
     bind->prefix = prefix;
     bind->path = path;
-    bind->threads = 0;
+    bind->threads = 2;
+    bind->processing_threads = 2;
     bind->flag = 1796;
     bind->include_flag = 0;
     bind->mapq = 0;
@@ -1859,6 +2389,10 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
 
     val = duckdb_bind_get_named_parameter(info, "threads");
     if (val && !duckdb_is_null_value(val)) bind->threads = duckdb_get_int64(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "processing_threads");
+    if (val && !duckdb_is_null_value(val)) bind->processing_threads = duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
     val = duckdb_bind_get_named_parameter(info, "flag");
@@ -1940,6 +2474,11 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     if (bind->threads < 0) {
         destroy_mosdepth_bind(bind);
         duckdb_bind_set_error(info, "duckhts_mosdepth: threads must be >= 0");
+        return;
+    }
+    if (bind->processing_threads < 0) {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_mosdepth: processing_threads must be >= 0");
         return;
     }
     if (bind->fasta && bind->fasta[0] == '\0') {
@@ -2090,6 +2629,7 @@ void register_duckhts_mosdepth_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "read_groups", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "no_per_base", bool_type);
     duckdb_table_function_add_named_parameter(tf, "threads", bigint_type);
+    duckdb_table_function_add_named_parameter(tf, "processing_threads", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "flag", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "include_flag", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "fast_mode", bool_type);

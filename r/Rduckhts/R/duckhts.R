@@ -1151,6 +1151,7 @@ rduckhts_bam_bin_counts <- function(
 #' @param read_groups Optional comma-separated read-group IDs, matching mosdepth's `-R`
 #' @param no_per_base Skip writing `\{prefix\}.per-base.bed.gz`
 #' @param threads Number of BAM decompression threads
+#' @param processing_threads Number of parallel contig processing threads (0 = sequential)
 #' @param flag Excluded SAM flag mask, matching mosdepth's `-F`
 #' @param include_flag Required SAM flag mask, matching mosdepth's `-i`
 #' @param fast_mode Logical. If `TRUE`, use mosdepth fast mode. Defaults to
@@ -1183,7 +1184,8 @@ rduckhts_mosdepth <- function(
   fasta = NULL,
   read_groups = NULL,
   no_per_base = FALSE,
-  threads = 0,
+  threads = 2,
+  processing_threads = 2,
   flag = 1796,
   include_flag = 0,
   fast_mode = FALSE,
@@ -1201,6 +1203,7 @@ rduckhts_mosdepth <- function(
   params <- list(
     no_per_base = if (isTRUE(no_per_base)) "true" else "false",
     threads = threads,
+    processing_threads = processing_threads,
     flag = flag,
     include_flag = include_flag,
     fast_mode = if (isTRUE(fast_mode)) "true" else "false",

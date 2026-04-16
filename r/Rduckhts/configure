@@ -480,5 +480,28 @@ rm -f "${RAW_EXT_FILE}"
 find "${HTSLIB_DIR}" -name "*.o" -delete || true
 # only keep ${HTSLIB_DIR}/lib and ${HTSLIB_DIR}/include for the extension, remove everything else
 find "${HTSLIB_DIR}" -mindepth 1 -maxdepth 1 ! -name "libexec" ! -name "lib" ! -name "include" -exec rm -rf {} \; || true
+
+# ---------- Generate htslib_config.R from template ----------
+HTSLIB_CONFIG_IN="${THIS_DIR}/inst/htslib_config.R.in"
+HTSLIB_CONFIG_OUT="${THIS_DIR}/inst/htslib_config.R"
+if [ -f "${HTSLIB_CONFIG_IN}" ]; then
+  if [ "${WASM_BUILD}" = "yes" ]; then
+    HTSLIB_STATIC_DEFAULT="TRUE"
+  else
+    HTSLIB_STATIC_DEFAULT="FALSE"
+  fi
+  HTSLIB_DEP_LIBS_ESCAPED=`echo "${LIBS}" | sed 's/[&/\\\\]/\\\\&/g'`
+  HTSLIB_VERSION_STR=""
+  if [ -f "${HTSLIB_DIR}/include/htslib/hts.h" ]; then
+    HTSLIB_VERSION_STR=`awk -F'"' '/HTS_VERSION_TEXT/ {print $2; exit}' "${HTSLIB_DIR}/include/htslib/hts.h" 2>/dev/null || true`
+  fi
+  sed \
+    -e "s/@HTSLIB_STATIC_DEFAULT@/${HTSLIB_STATIC_DEFAULT}/g" \
+    -e "s/@HTSLIB_DEP_LIBS@/${HTSLIB_DEP_LIBS_ESCAPED}/g" \
+    -e "s/@HTSLIB_VERSION@/${HTSLIB_VERSION_STR}/g" \
+    "${HTSLIB_CONFIG_IN}" > "${HTSLIB_CONFIG_OUT}"
+  echo "Generated inst/htslib_config.R"
+fi
+
 cd "${THIS_DIR}"
 echo "Configure complete"
