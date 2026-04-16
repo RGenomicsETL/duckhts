@@ -243,6 +243,11 @@ def main():
         help="If set, benchmark `--by <window-size>` region output instead of per-base output",
     )
     parser.add_argument(
+        "--by-bed",
+        default=None,
+        help="BED file for mosdepth --by comparisons; overrides --window-size when set",
+    )
+    parser.add_argument(
         "--no-per-base",
         action="store_true",
         help="Pass no_per_base := TRUE to duckhts_mosdepth and -n to mosdepth",
@@ -260,6 +265,7 @@ def main():
 
     bam = os.path.abspath(args.bam)
     fasta = os.path.abspath(args.fasta) if args.fasta else None
+    by_bed = os.path.abspath(args.by_bed) if args.by_bed else None
     if bam.endswith(".cram") and not fasta:
         sys.exit("--fasta is required for CRAM benchmarks")
 
@@ -296,7 +302,9 @@ def main():
     print(f"Extension:    {ext}")
     if fasta:
         print(f"Reference:    {fasta}")
-    if args.window_size is not None:
+    if by_bed:
+        print(f"By BED:       {by_bed}")
+    elif args.window_size is not None:
         print(f"Window size:  {args.window_size:,}")
     if args.no_per_base:
         print("Per-base:     disabled")
@@ -314,7 +322,14 @@ def main():
     md_env = {"MOSDEPTH_PRECISION": "6"}
     fasta_flag = f" -f {fasta}" if fasta else ""
     chrom_flag = f" --chrom {args.chrom}" if args.chrom else ""
-    window_flag = f" --by {args.window_size}" if args.window_size is not None else ""
+    # Determine the --by value for both mosdepth and duckhts_mosdepth
+    if by_bed:
+        by_value = by_bed
+    elif args.window_size is not None:
+        by_value = str(args.window_size)
+    else:
+        by_value = None
+    window_flag = f" --by {by_value}" if by_value is not None else ""
     no_per_base_flag = " -n" if args.no_per_base else ""
     flag_opt = f" -F {args.flag}" if args.flag != 1796 else ""
     include_flag_opt = f" -i {args.include_flag}" if args.include_flag != 0 else ""
@@ -356,7 +371,7 @@ def main():
             bam=bam,
             chrom=args.chrom,
             fasta=fasta,
-            by=str(args.window_size) if args.window_size is not None else None,
+            by=by_value,
             no_per_base=args.no_per_base,
             flag=args.flag,
             include_flag=args.include_flag,
@@ -398,7 +413,7 @@ def main():
     if args.verify and md_prefix_first and native_prefix_first:
         print("\nVerification:")
         verify_chrom = args.chrom or next(iter(chrom_lengths))
-        if args.window_size is None:
+        if by_value is None:
             ok, n_rows, diffs = compare_bed(
                 f"{native_prefix_first}.per-base.bed.gz",
                 f"{md_prefix_first}.per-base.bed.gz",
@@ -414,8 +429,9 @@ def main():
                 f"{md_prefix_first}.regions.bed.gz",
                 verify_chrom,
             )
+            by_label = os.path.basename(by_bed) if by_bed else f"{args.window_size}bp"
             print(
-                f"  regions ({verify_chrom}): {'PASS' if ok else 'FAIL'} "
+                f"  regions [{by_label}] ({verify_chrom}): {'PASS' if ok else 'FAIL'} "
                 f"({n_rows:,} rows, {diffs} diffs)"
             )
 
