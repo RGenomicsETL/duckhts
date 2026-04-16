@@ -1091,6 +1091,9 @@ rduckhts_bgunzip <- function(
 #' @param path Path to the input BAM or CRAM file
 #' @param bin_width Positive fixed bin width in bases
 #' @param chrom Optional chromosome name filter
+#' @param include_unmapped Logical. If `TRUE`, append one synthetic row for
+#'   unmapped/no-coordinate records with `chrom = "*"`, and `start`, `end`, and
+#'   `bin_id` set to `NA`.
 #' @param reference Optional reference FASTA path for CRAM input when required,
 #'   and for reference-GC output when `stats` includes `"gc"`
 #' @param index_path Optional explicit BAM/CRAM index path
@@ -1110,6 +1113,7 @@ rduckhts_bam_bin_counts <- function(
   path,
   bin_width,
   chrom = NULL,
+  include_unmapped = FALSE,
   reference = NULL,
   index_path = NULL,
   mapq = 0,
@@ -1125,6 +1129,7 @@ rduckhts_bam_bin_counts <- function(
     rmdup = sql_quote_string(rmdup)
   )
   if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
+  if (isTRUE(include_unmapped)) params$include_unmapped <- "true"
   if (!is.null(reference)) params$reference <- sql_quote_string(reference)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
   if (!is.null(stats)) params$stats <- sql_quote_string(stats)

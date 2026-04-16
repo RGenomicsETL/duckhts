@@ -9,6 +9,7 @@ rduckhts_bam_bin_counts(
   path,
   bin_width,
   chrom = NULL,
+  include_unmapped = FALSE,
   reference = NULL,
   index_path = NULL,
   mapq = 0,
@@ -26,6 +27,10 @@ rduckhts_bam_bin_counts(
 \item{bin_width}{Positive fixed bin width in bases}
 
 \item{chrom}{Optional chromosome name filter}
+
+\item{include_unmapped}{Logical. If `TRUE`, append one synthetic row for
+unmapped/no-coordinate records with `chrom = "*"`, and `start`, `end`, and
+`bin_id` set to `NA`.}
 
 \item{reference}{Optional reference FASTA path for CRAM input when required,
 and for reference-GC output when `stats` includes `"gc"`}

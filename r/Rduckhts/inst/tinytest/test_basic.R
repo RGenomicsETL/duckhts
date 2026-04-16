@@ -63,7 +63,7 @@ expect_identical(
 )
 expect_identical(
   names(formals(rduckhts_bam_bin_counts)),
-  c("con", "path", "bin_width", "chrom", "reference", "index_path",
+  c("con", "path", "bin_width", "chrom", "include_unmapped", "reference", "index_path",
     "mapq", "require_flags", "exclude_flags", "rmdup", "stats")
 )
 expect_identical(

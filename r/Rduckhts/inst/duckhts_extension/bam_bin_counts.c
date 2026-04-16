@@ -82,6 +82,7 @@ typedef struct {
     int64_t start;
     int64_t end;
     int64_t bin_id;
+    int is_unmapped;
     int64_t count_total;
     int64_t count_fwd;
     int64_t count_rev;
@@ -109,8 +110,20 @@ typedef struct {
     int64_t decompression_threads;
 
     bam_bin_rmdup_mode_t rmdup;
+    int include_unmapped;
     int want_gc;
     int want_mq;
+
+    int64_t unmapped_count_total;
+    int64_t unmapped_count_fwd;
+    int64_t unmapped_count_rev;
+    int64_t unmapped_count_pre;
+    uint64_t unmapped_gc_bases_pre;
+    uint64_t unmapped_bases_pre;
+    uint64_t unmapped_gc_bases_post;
+    uint64_t unmapped_bases_post;
+    uint64_t unmapped_mapq_sum_pre;
+    uint64_t unmapped_mapq_sum_post;
 
     bam_bin_contig_t *contigs;
     int n_contigs;
@@ -516,6 +529,64 @@ static int process_record_into_contig(bam_bin_bind_t *bind,
     return 0;
 }
 
+static int process_unmapped_record(bam_bin_bind_t *bind, bam1_t *rec) {
+    int flag;
+    int pass_post;
+    int is_reverse;
+    uint64_t gc_bases = 0;
+    uint64_t read_bases = 0;
+
+    if (!bind || !rec) return -1;
+
+    flag = rec->core.flag;
+    if (bind->require_flags > 0 &&
+        (((int64_t)flag & bind->require_flags) != bind->require_flags)) {
+        return 0;
+    }
+    if (bind->exclude_flags > 0 &&
+        (((int64_t)flag & bind->exclude_flags) != 0)) {
+        return 0;
+    }
+
+    if (bind->want_gc || bind->want_mq) {
+        bind->unmapped_count_pre++;
+    }
+    if (bind->want_gc) {
+        read_bases = (uint64_t)rec->core.l_qseq;
+        gc_bases = count_read_gc_bases(rec);
+        bind->unmapped_gc_bases_pre += gc_bases;
+        bind->unmapped_bases_pre += read_bases;
+    }
+    if (bind->want_mq) {
+        bind->unmapped_mapq_sum_pre += (uint64_t)rec->core.qual;
+    }
+
+    pass_post = 1;
+    if (bind->rmdup == BAM_BIN_RMDUP_FLAG && (flag & BAM_FDUP)) {
+        pass_post = 0;
+    }
+    if ((int64_t)rec->core.qual < bind->mapq) {
+        pass_post = 0;
+    }
+
+    if (!pass_post) return 0;
+
+    bind->unmapped_count_total++;
+    is_reverse = (flag & BAM_FREVERSE) != 0;
+    if (is_reverse) bind->unmapped_count_rev++;
+    else bind->unmapped_count_fwd++;
+
+    if (bind->want_gc) {
+        bind->unmapped_gc_bases_post += gc_bases;
+        bind->unmapped_bases_post += read_bases;
+    }
+    if (bind->want_mq) {
+        bind->unmapped_mapq_sum_post += (uint64_t)rec->core.qual;
+    }
+
+    return 0;
+}
+
 static void worker_set_error(bam_bin_worker_shared_t *shared, const char *msg) {
     if (!shared || !msg) return;
     if (__sync_bool_compare_and_swap(&shared->failed, 0, 1)) {
@@ -747,7 +818,18 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
             snprintf(err, errlen, "bam_bin_counts: read failure while scanning input");
             return -1;
         }
-        if (rec->core.tid < 0 || rec->core.tid >= sam_hdr_nref(hdr)) continue;
+        if (rec->core.tid < 0 || rec->core.pos < 0) {
+            if (bind->include_unmapped && process_unmapped_record(bind, rec) != 0) {
+                free(tid_to_selected);
+                bam_destroy1(rec);
+                sam_hdr_destroy(hdr);
+                sam_close(fp);
+                snprintf(err, errlen, "bam_bin_counts: out of memory while accumulating unmapped reads");
+                return -1;
+            }
+            continue;
+        }
+        if (rec->core.tid >= sam_hdr_nref(hdr)) continue;
         if (tid_to_selected[rec->core.tid] < 0) continue;
 
         {
@@ -818,6 +900,95 @@ static int indexed_parallel_scan(bam_bin_bind_t *bind, char *err, size_t errlen)
     return 0;
 }
 
+static int indexed_unmapped_scan(bam_bin_bind_t *bind, char *err, size_t errlen) {
+    samFile *fp = NULL;
+    sam_hdr_t *hdr = NULL;
+    bam1_t *rec = NULL;
+    hts_idx_t *idx = NULL;
+    hts_itr_t *itr = NULL;
+
+    if (!bind || !bind->include_unmapped) return 0;
+
+    fp = sam_open(bind->path, "r");
+    if (!fp) {
+        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        return -1;
+    }
+    if (bind->reference) {
+        if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
+            sam_close(fp);
+            snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
+            return -1;
+        }
+    }
+    if (bind->decompression_threads > 0 &&
+        hts_set_threads(fp, (int)bind->decompression_threads) < 0) {
+        sam_close(fp);
+        snprintf(err, errlen, "bam_bin_counts: failed to configure decompression threads");
+        return -1;
+    }
+
+    hdr = sam_hdr_read(fp);
+    if (!hdr) {
+        sam_close(fp);
+        snprintf(err, errlen, "bam_bin_counts: failed to read alignment header");
+        return -1;
+    }
+    idx = sam_index_load3(fp, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
+    if (!idx) {
+        sam_hdr_destroy(hdr);
+        sam_close(fp);
+        snprintf(err, errlen, "bam_bin_counts: failed to open BAM/CRAM index");
+        return -1;
+    }
+    itr = sam_itr_queryi(idx, HTS_IDX_NOCOOR, 0, 0);
+    if (!itr) {
+        hts_idx_destroy(idx);
+        sam_hdr_destroy(hdr);
+        sam_close(fp);
+        return 0;
+    }
+    rec = bam_init1();
+    if (!rec) {
+        hts_itr_destroy(itr);
+        hts_idx_destroy(idx);
+        sam_hdr_destroy(hdr);
+        sam_close(fp);
+        snprintf(err, errlen, "bam_bin_counts: out of memory allocating BAM record");
+        return -1;
+    }
+
+    for (;;) {
+        int ret = sam_itr_next(fp, itr, rec);
+        if (ret == -1) break;
+        if (ret < -1) {
+            bam_destroy1(rec);
+            hts_itr_destroy(itr);
+            hts_idx_destroy(idx);
+            sam_hdr_destroy(hdr);
+            sam_close(fp);
+            snprintf(err, errlen, "bam_bin_counts: iterator failure on unmapped reads");
+            return -1;
+        }
+        if (process_unmapped_record(bind, rec) != 0) {
+            bam_destroy1(rec);
+            hts_itr_destroy(itr);
+            hts_idx_destroy(idx);
+            sam_hdr_destroy(hdr);
+            sam_close(fp);
+            snprintf(err, errlen, "bam_bin_counts: out of memory while accumulating unmapped reads");
+            return -1;
+        }
+    }
+
+    bam_destroy1(rec);
+    hts_itr_destroy(itr);
+    hts_idx_destroy(idx);
+    sam_hdr_destroy(hdr);
+    sam_close(fp);
+    return 0;
+}
+
 static void apply_streaming_boundary_repairs(bam_bin_bind_t *bind) {
     bam_bin_stream_state_t prev;
     if (!bind || bind->rmdup != BAM_BIN_RMDUP_STREAMING) return;
@@ -862,6 +1033,10 @@ static int count_rows_for_bind(const bam_bin_bind_t *bind, size_t *rows_out) {
         int64_t n_bins = dense_bin_count_for_contig(contig, bind->bin_width);
         if (n_bins < 0 || (size_t)n_bins > (SIZE_MAX - rows)) return -1;
         rows += (size_t)n_bins;
+    }
+    if (bind->include_unmapped) {
+        if (rows == SIZE_MAX) return -1;
+        rows += 1;
     }
     *rows_out = rows;
     return 0;
@@ -959,6 +1134,22 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
         free_contig_arrays(contig);
     }
 
+    if (bind->include_unmapped) {
+        bam_bin_row_t *row = &bind->rows[row_idx++];
+        row->chrom = "*";
+        row->is_unmapped = 1;
+        row->count_total = bind->unmapped_count_total;
+        row->count_fwd = bind->unmapped_count_fwd;
+        row->count_rev = bind->unmapped_count_rev;
+        row->count_pre = bind->unmapped_count_pre;
+        row->gc_bases_pre = bind->unmapped_gc_bases_pre;
+        row->bases_pre = bind->unmapped_bases_pre;
+        row->gc_bases_post = bind->unmapped_gc_bases_post;
+        row->bases_post = bind->unmapped_bases_post;
+        row->mapq_sum_pre = bind->unmapped_mapq_sum_pre;
+        row->mapq_sum_post = bind->unmapped_mapq_sum_post;
+    }
+
     if (fai) fai_destroy(fai);
     bind->row_count = row_idx;
     return 0;
@@ -1000,6 +1191,7 @@ static int run_bam_bin_counts(bam_bin_bind_t *bind, char *err, size_t errlen) {
         }
         if (indexed_parallel_scan(bind, err, errlen) != 0) goto cleanup;
         apply_streaming_boundary_repairs(bind);
+        if (indexed_unmapped_scan(bind, err, errlen) != 0) goto cleanup;
     } else {
         if (sequential_scan_no_index(bind, err, errlen) != 0) goto cleanup;
     }
@@ -1098,6 +1290,10 @@ static void bam_bin_counts_bind(duckdb_bind_info info) {
 
     val = duckdb_bind_get_named_parameter(info, "chrom");
     if (val && !duckdb_is_null_value(val)) bind->chrom = duckdb_get_varchar(val);
+    if (val) duckdb_destroy_value(&val);
+
+    val = duckdb_bind_get_named_parameter(info, "include_unmapped");
+    if (val && !duckdb_is_null_value(val)) bind->include_unmapped = duckdb_get_bool(val) ? 1 : 0;
     if (val) duckdb_destroy_value(&val);
 
     val = duckdb_bind_get_named_parameter(info, "reference");
@@ -1276,6 +1472,11 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
         start_data[i] = row->start;
         end_data[i] = row->end;
         bin_data[i] = row->bin_id;
+        if (row->is_unmapped) {
+            set_null(start_vec, i);
+            set_null(end_vec, i);
+            set_null(bin_vec, i);
+        }
         total_data[i] = row->count_total;
         fwd_data[i] = row->count_fwd;
         rev_data[i] = row->count_rev;
@@ -1296,8 +1497,15 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
             if (bind->reference) {
                 ref_gc_bases_data[i] = (int64_t)row->ref_gc_bases;
                 ref_bases_data[i] = (int64_t)row->ref_bases;
-                if (row->ref_bases > 0) gc_perc_ref_data[i] = (double)row->ref_gc_bases / (double)row->ref_bases;
-                else set_null(gc_perc_ref_vec, i);
+                if (row->is_unmapped) {
+                    set_null(ref_gc_bases_vec, i);
+                    set_null(ref_bases_vec, i);
+                    set_null(gc_perc_ref_vec, i);
+                } else if (row->ref_bases > 0) {
+                    gc_perc_ref_data[i] = (double)row->ref_gc_bases / (double)row->ref_bases;
+                } else {
+                    set_null(gc_perc_ref_vec, i);
+                }
             }
         }
 
@@ -1320,11 +1528,13 @@ void register_bam_bin_counts_function(duckdb_connection connection) {
     duckdb_table_function tf = duckdb_create_table_function();
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
 
     duckdb_table_function_set_name(tf, "bam_bin_counts");
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_parameter(tf, bigint_type);
     duckdb_table_function_add_named_parameter(tf, "chrom", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "include_unmapped", bool_type);
     duckdb_table_function_add_named_parameter(tf, "reference", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "rmdup", varchar_type);
@@ -1341,4 +1551,5 @@ void register_bam_bin_counts_function(duckdb_connection connection) {
     duckdb_destroy_table_function(&tf);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bigint_type);
+    duckdb_destroy_logical_type(&bool_type);
 }

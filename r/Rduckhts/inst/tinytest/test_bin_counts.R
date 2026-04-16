@@ -11,6 +11,7 @@ test_bin_counts <- function() {
   mixed_bam <- system.file("extdata", "fixture_mixed.bam", package = "Rduckhts")
   mixed_cram <- system.file("extdata", "fixture_mixed.cram", package = "Rduckhts")
   fixture_ref <- system.file("extdata", "fixture_ref.fa", package = "Rduckhts")
+  unmapped_sam <- system.file("extdata", "fixture_unmapped.sam", package = "Rduckhts")
 
   bins_none <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, rmdup = "none")
   bins_streaming <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, rmdup = "streaming")
@@ -75,6 +76,45 @@ test_bin_counts <- function() {
   expect_true(all(is.na(stats_cram$mean_mapq_pre[4:10])))
   expect_equal(stats_cram$mean_mapq_post[1:3], rep(60, 3))
   expect_true(all(is.na(stats_cram$mean_mapq_post[4:10])))
+
+  samtools <- Sys.which("samtools")
+  if (nzchar(samtools)) {
+    unmapped_bam <- tempfile("fixture_unmapped_", fileext = ".bam")
+    expect_equal(
+      system2(samtools, c("view", "-b", "-o", unmapped_bam, unmapped_sam)),
+      0L
+    )
+    expect_equal(system2(samtools, c("index", unmapped_bam)), 0L)
+
+    unmapped_bins <- rduckhts_bam_bin_counts(
+      con,
+      unmapped_bam,
+      5000,
+      include_unmapped = TRUE,
+      rmdup = "flag",
+      stats = "gc,mq"
+    )
+    unmapped_row <- unmapped_bins[unmapped_bins$chrom == "*", , drop = FALSE]
+
+    expect_equal(nrow(unmapped_row), 1)
+    expect_true(is.na(unmapped_row$start[[1]]))
+    expect_true(is.na(unmapped_row$end[[1]]))
+    expect_true(is.na(unmapped_row$bin_id[[1]]))
+    expect_equal(unmapped_row$count_total[[1]], 2)
+    expect_equal(unmapped_row$count_fwd[[1]], 1)
+    expect_equal(unmapped_row$count_rev[[1]], 1)
+    expect_equal(unmapped_row$count_pre[[1]], 3)
+    expect_equal(unmapped_row$gc_bases_pre[[1]], 72)
+    expect_equal(unmapped_row$bases_pre[[1]], 108)
+    expect_equal(unmapped_row$gc_perc_pre[[1]], 2 / 3)
+    expect_equal(unmapped_row$gc_bases_post[[1]], 72)
+    expect_equal(unmapped_row$bases_post[[1]], 72)
+    expect_equal(unmapped_row$gc_perc_post[[1]], 1)
+    expect_equal(unmapped_row$mapq_sum_pre[[1]], 180)
+    expect_equal(unmapped_row$mean_mapq_pre[[1]], 60)
+    expect_equal(unmapped_row$mapq_sum_post[[1]], 120)
+    expect_equal(unmapped_row$mean_mapq_post[[1]], 60)
+  }
 
   expect_error(
     rduckhts_bam_bin_counts(con, mixed_bam, 5000, rmdup = "weird")
