@@ -47,6 +47,7 @@ handling and optional per-bin GC and MAPQ summary statistics.</p>
 <span>  <span class="va">path</span>,</span>
 <span>  <span class="va">bin_width</span>,</span>
 <span>  chrom <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  include_unmapped <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  reference <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  mapq <span class="op">=</span> <span class="fl">0</span>,</span>
@@ -75,6 +76,12 @@ handling and optional per-bin GC and MAPQ summary statistics.</p>
 
 <dt id="arg-chrom">chrom<a class="anchor" aria-label="anchor" href="#arg-chrom"></a></dt>
 <dd><p>Optional chromosome name filter</p></dd>
+
+
+<dt id="arg-include-unmapped">include_unmapped<a class="anchor" aria-label="anchor" href="#arg-include-unmapped"></a></dt>
+<dd><p>Logical. If `TRUE`, append one synthetic row for
+unmapped/no-coordinate records with `chrom = "*"`, and `start`, `end`, and
+`bin_id` set to `NA`.</p></dd>
 
 
 <dt id="arg-reference">reference<a class="anchor" aria-label="anchor" href="#arg-reference"></a></dt>
