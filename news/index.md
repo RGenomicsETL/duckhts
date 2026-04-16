@@ -2,6 +2,26 @@
 
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- add `processing_threads` parameter to
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
+  and bundled `duckhts_mosdepth(...)` for parallel contig processing:
+  workers claim contigs atomically and write output in header order; on
+  the NA12878 WGS benchmark with 2 processing threads, fast mode is
+  1.38x faster, default mode 1.40x faster, and fragment mode 1.61x
+  faster than mosdepth v0.3.13, all byte-identical; new default is
+  `processing_threads = 2`
+- change
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.md)
+  defaults to `threads = 2` (decompression) and `processing_threads = 2`
+  (parallel contigs) for better out-of-the-box WGS performance
+- ship htslib public headers and static library in the installed package
+  under `duckhts_extension/htslib/{include,lib}/`; add
+  `inst/htslib_config.R` (generated from `htslib_config.R.in` at
+  configure time) providing `htslib_cflags()`, `htslib_libs()`,
+  `htslib_rpath()`, and `htslib_version()` for downstream R packages
+  that link against the bundled htslib
+- fix `configure.win` to stage htslib headers into `include/htslib/`
+  alongside `lib/`, matching Unix configure
 - change bundled `bam_bin_counts(...)` /
   [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.md)
   to return a dense fixed-bin layout across each selected contig span,
