@@ -13,7 +13,8 @@ rduckhts_mosdepth(
   fasta = NULL,
   read_groups = NULL,
   no_per_base = FALSE,
-  threads = 0,
+  threads = 2,
+  processing_threads = 2,
   flag = 1796,
   include_flag = 0,
   fast_mode = FALSE,
@@ -47,6 +48,8 @@ rduckhts_mosdepth(
 \item{no_per_base}{Skip writing `\{prefix\}.per-base.bed.gz`}
 
 \item{threads}{Number of BAM decompression threads}
+
+\item{processing_threads}{Number of parallel contig processing threads (0 = sequential)}
 
 \item{flag}{Excluded SAM flag mask, matching mosdepth's `-F`}
 
