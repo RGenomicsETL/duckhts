@@ -44,8 +44,8 @@ and for reference-GC output when `stats` includes `"gc"`}
 }
 \value{
 A data frame with one row per fixed-width bin across the selected
-contig span, including zero-count bins, plus total, forward, reverse, and
-optional GC/MAPQ summary columns
+  contig span, including zero-count bins, plus total, forward, reverse, and
+  optional GC/MAPQ summary columns
 }
 \description{
 Count read starts into fixed-width genomic bins with optional duplicate

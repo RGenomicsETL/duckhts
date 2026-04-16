@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.1.7.9000 Developement version
+- clean repo hygiene for local development: fix stale ignore rules that still referenced the old `duckdb_extension` package path, ignore documented wasm/webR harness outputs plus benchmark/conformance byproducts, and add `make clean_local` to purge the reproducible local spill files
 - add `processing_threads` parameter to `duckhts_mosdepth(...)` for parallel contig processing: each worker opens independent BAM file handles via index queries, claims contigs atomically, and writes output in header order using an ordered-completion pattern; on the NA12878 16 GB WGS benchmark (4 decompression threads, 2 processing threads), fast mode is 1.38x faster than mosdepth v0.3.13, default mode 1.40x faster, and fragment mode 1.61x faster, all with byte-identical output; default is now `processing_threads := 2`
 - change `duckhts_mosdepth(...)` defaults to `threads := 2` (decompression) and `processing_threads := 2` (parallel contigs) for better out-of-the-box WGS performance; previous defaults were `threads := 0, processing_threads := 0` (single-threaded)
 - ship htslib public headers (`htslib/*.h`) and `libhts.a` in the installed R package under `inst/duckhts_extension/htslib/{include,lib}/`; add `inst/htslib_config.R.in` template (substituted at configure time into `inst/htslib_config.R`) providing `htslib_cflags()`, `htslib_libs()`, `htslib_rpath()`, and `htslib_version()` helpers for downstream R packages that need to link against the bundled htslib

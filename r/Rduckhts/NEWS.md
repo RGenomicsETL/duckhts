@@ -1,5 +1,6 @@
 
 # Rduckhts 1.1.7.9000-0.0.1 (Development version)
+- improve package-source hygiene for local development: ignore generated `README.html`, `.Rcheck`, staged `duckhts_extension/htslib` build outputs, wasm/webR harness byproducts, and stray root-level index files under `r/Rduckhts/`; add top-level `make clean_local` to purge the reproducible package-side artifacts
 - add `processing_threads` parameter to `rduckhts_mosdepth()` and bundled `duckhts_mosdepth(...)` for parallel contig processing: workers claim contigs atomically and write output in header order; on the NA12878 WGS benchmark with 2 processing threads, fast mode is 1.38x faster, default mode 1.40x faster, and fragment mode 1.61x faster than mosdepth v0.3.13, all byte-identical; new default is `processing_threads = 2`
 - change `rduckhts_mosdepth()` defaults to `threads = 2` (decompression) and `processing_threads = 2` (parallel contigs) for better out-of-the-box WGS performance
 - ship htslib public headers and static library in the installed package under `duckhts_extension/htslib/{include,lib}/`; add `inst/htslib_config.R` (generated from `htslib_config.R.in` at configure time) providing `htslib_cflags()`, `htslib_libs()`, `htslib_rpath()`, and `htslib_version()` for downstream R packages that link against the bundled htslib
