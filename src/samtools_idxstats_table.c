@@ -79,8 +79,7 @@ static int prepare_output_path_idxstats(const char *path, int overwrite, char *e
     if (!file_exists_idxstats(path)) return 0;
     if (!overwrite) {
         snprintf(err, errlen,
-                 "duckhts_samtools_idxstats: output '%s' already exists (use overwrite := TRUE to replace)",
-                 path);
+                 "duckhts_samtools_idxstats: output already exists (use overwrite := TRUE to replace)");
         return -1;
     }
     if (remove(path) != 0) {

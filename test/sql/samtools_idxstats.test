@@ -76,4 +76,4 @@ SELECT * FROM duckhts_samtools_idxstats(
   output := '__WORKING_DIRECTORY__/fixture_mixed.idxstats.txt'
 );
 ----
-duckhts_samtools_idxstats: output '__WORKING_DIRECTORY__/fixture_mixed.idxstats.txt' already exists (use overwrite := TRUE to replace)
+output already exists

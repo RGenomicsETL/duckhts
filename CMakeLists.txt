@@ -89,6 +89,7 @@ set(EXTENSION_SOURCES
         src/mosdepth_table.c
         src/bam_bin_counts.c
         src/samtools_idxstats_table.c
+        src/bam_bed_coverage.c
         src/bcftools_filter.c
         src/bcftools_shim.c
         src/wasm_http_hfile.c

@@ -252,6 +252,18 @@
       ]
     },
     {
+      "name": "duckhts_bam_bed_coverage",
+      "kind": "table",
+      "category": "Coverage",
+      "signature": "duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, bed_index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, fragment_mode := FALSE, strand_outputs := TRUE, processing_threads := 0)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bam_bed_coverage",
+      "description": "Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation.",
+      "examples": [
+        "SELECT chrom, start, \"end\", numreads_post, covbases_post, coverage_post FROM duckhts_bam_bed_coverage('fixture_mixed.bam', 'fixture_mixed_regions.bed');"
+      ]
+    },
+    {
       "name": "duckhts_mosdepth",
       "kind": "table",
       "category": "Coverage",
