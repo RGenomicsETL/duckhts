@@ -17,7 +17,8 @@ rduckhts_bam_bed_coverage(
   require_flags = 0,
   exclude_flags = 1796,
   min_depth = 1,
-  max_depth = 1000000,
+  max_depth = 1e+06,
+  decompression_threads = 0,
   fragment_mode = FALSE,
   strand_outputs = TRUE,
   processing_threads = 0
@@ -50,6 +51,9 @@ rduckhts_bam_bed_coverage(
 \item{min_depth}{Minimum depth threshold for covered-base and mean-depth summaries}
 
 \item{max_depth}{Maximum per-position depth cap. Set `0` to remove the cap.}
+
+\item{decompression_threads}{Integer. Number of htslib decompression worker
+threads to use for BAM/CRAM input. `0` disables htslib worker threads.}
 
 \item{fragment_mode}{Logical. Reserved for future fragment-level semantics.}
 

@@ -1163,6 +1163,8 @@ rduckhts_bam_bin_counts <- function(
 #'   `UNMAP|SECONDARY|QCFAIL|DUP` mask.
 #' @param min_depth Minimum depth threshold for covered-base and mean-depth summaries
 #' @param max_depth Maximum per-position depth cap. Set `0` to remove the cap.
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads to use for BAM/CRAM input. `0` disables htslib worker threads.
 #' @param fragment_mode Logical. Reserved for future fragment-level semantics.
 #' @param strand_outputs Logical. Emit forward/reverse post-filter summary columns.
 #' @param processing_threads Reserved for future parallel interval processing.
@@ -1184,6 +1186,7 @@ rduckhts_bam_bed_coverage <- function(
   exclude_flags = 1796,
   min_depth = 1,
   max_depth = 1000000,
+  decompression_threads = 0,
   fragment_mode = FALSE,
   strand_outputs = TRUE,
   processing_threads = 0
@@ -1196,6 +1199,10 @@ rduckhts_bam_bed_coverage <- function(
     exclude_flags = exclude_flags,
     min_depth = min_depth,
     max_depth = max_depth,
+    decompression_threads = .validate_nonnegative_integer_param(
+      decompression_threads,
+      "decompression_threads"
+    ),
     fragment_mode = if (isTRUE(fragment_mode)) "true" else "false",
     strand_outputs = if (isTRUE(strand_outputs)) "true" else "false",
     processing_threads = processing_threads

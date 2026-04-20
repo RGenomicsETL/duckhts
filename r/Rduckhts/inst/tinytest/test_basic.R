@@ -72,7 +72,7 @@ expect_identical(
   names(formals(rduckhts_bam_bed_coverage)),
   c("con", "path", "bed_path", "reference", "index_path", "bed_index_path", "mapq",
     "min_baseq", "min_read_len", "require_flags", "exclude_flags", "min_depth",
-    "max_depth", "fragment_mode", "strand_outputs", "processing_threads")
+    "max_depth", "decompression_threads", "fragment_mode", "strand_outputs", "processing_threads")
 )
 expect_identical(
   names(formals(rduckhts_mosdepth)),

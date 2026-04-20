@@ -27,7 +27,8 @@ rduckhts_samtools_idxstats(
 \item{overwrite}{Overwrite an existing output file}
 }
 \value{
-A data frame with `success`, `path`, `output_path`, `used_index_fast_path`, and `error_message`
+A data frame with `success`, `path`, `output_path`,
+  `used_index_fast_path`, and `error_message`
 }
 \description{
 Writes samtools idxstats-compatible alignment summary output for BAM, CRAM,

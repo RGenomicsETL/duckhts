@@ -32,6 +32,52 @@ ORDER BY start;
 11	dup_only	6000	6200	2	36.00	0.36	60.0	37.0	0.00	0.00	0.0	0	0	0	0
 11	zero	20000	20100	0	0.00	0.00	0.0	0.0	0.00	0.00	0.0	0	0	0	0
 
+query IIIII
+SELECT
+  numreads_post,
+  covbases_post,
+  printf('%.2f', coverage_post),
+  printf('%.2f', meandepth_post),
+  covbases_fwd_post
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed_min_depth_regions.bed',
+  require_flags := 64,
+  min_depth := 2,
+  strand_outputs := FALSE,
+  decompression_threads := 1
+);
+----
+1	0	0.00	0.00	0
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed',
+  decompression_threads := -1
+);
+----
+duckhts_bam_bed_coverage: numeric parameters and thread counts must be non-negative
+
+query TIIII
+SELECT
+  name,
+  numreads_post,
+  covbases_post,
+  CAST(round(coverage_post, 2) AS BIGINT),
+  CAST(round(meandepth_post, 2) AS BIGINT)
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed',
+  min_depth := 100,
+  strand_outputs := FALSE
+)
+ORDER BY start;
+----
+cluster	4	0	0	0
+dup_only	0	0	0	0
+zero	0	0	0	0
+
 statement error
 SELECT * FROM duckhts_bam_bed_coverage(
   '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',

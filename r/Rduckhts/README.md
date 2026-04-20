@@ -277,10 +277,11 @@ This section is generated from `functions.yaml`.
 
 ### Coverage
 
-| Function           | Kind  | Returns | R helper                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-|--------------------|-------|---------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bam_bin_counts`   | table | table   | `rduckhts_bam_bin_counts` | Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; `rmdup := 'streaming'` applies the WisecondorX-style larp/larp2 consecutive-position deduplication, `rmdup := 'flag'` drops SAM duplicate-flagged reads, and `stats := 'gc'`, `'mq'`, or `'gc,mq'` adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when `reference` is provided.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `duckhts_mosdepth` | table | table   | `rduckhts_mosdepth`       | Write native mosdepth-compatible coverage outputs for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, optional quantized BED.gz + CSI, and optional threshold counts for `by`; `fast_mode` defaults to FALSE to match upstream mosdepth, default mode performs CIGAR-aware coverage with mate-overlap correction, `fragment_mode` switches coverage to full-fragment insert spans for proper pairs, `use_median` switches `by` outputs from mean to median, `read_groups` filters by comma-separated RG IDs, `min_frag_len` and `max_frag_len` filter on absolute template length, `fasta` is required for CRAM when htslib needs a reference, `precision_digits` controls decimal places in the text outputs, and `processing_threads` enables parallel contig processing (0 = sequential, \>0 = number of worker threads). |
+| Function                   | Kind  | Returns | R helper                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|----------------------------|-------|---------|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bam_bin_counts`           | table | table   | `rduckhts_bam_bin_counts`   | Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; `rmdup := 'streaming'` applies the WisecondorX-style larp/larp2 consecutive-position deduplication, `rmdup := 'flag'` drops SAM duplicate-flagged reads, and `stats := 'gc'`, `'mq'`, or `'gc,mq'` adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when `reference` is provided.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `duckhts_bam_bed_coverage` | table | table   | `rduckhts_bam_bed_coverage` | Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `duckhts_mosdepth`         | table | table   | `rduckhts_mosdepth`         | Write native mosdepth-compatible coverage outputs for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, optional quantized BED.gz + CSI, and optional threshold counts for `by`; `fast_mode` defaults to FALSE to match upstream mosdepth, default mode performs CIGAR-aware coverage with mate-overlap correction, `fragment_mode` switches coverage to full-fragment insert spans for proper pairs, `use_median` switches `by` outputs from mean to median, `read_groups` filters by comma-separated RG IDs, `min_frag_len` and `max_frag_len` filter on absolute template length, `fasta` is required for CRAM when htslib needs a reference, `precision_digits` controls decimal places in the text outputs, and `processing_threads` enables parallel contig processing (0 = sequential, \>0 = number of worker threads). |
 
 ### Variants
 
@@ -378,7 +379,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_readme_3cf3b5764e2d8e.fai
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_readme_3efe1f1aaf70f8.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -480,9 +481,9 @@ mos_out <- rduckhts_mosdepth(
 
 mos_out[, c("summary_path", "regions_path")]
 #>                                                                  summary_path
-#> 1 /tmp/RtmpX3r5EQ/duckhts_readme_mosdepth_3cf3b577a07763.mosdepth.summary.txt
+#> 1 /tmp/RtmpmHy9YT/duckhts_readme_mosdepth_3efe1f2970e116.mosdepth.summary.txt
 #>                                                            regions_path
-#> 1 /tmp/RtmpX3r5EQ/duckhts_readme_mosdepth_3cf3b577a07763.regions.bed.gz
+#> 1 /tmp/RtmpmHy9YT/duckhts_readme_mosdepth_3efe1f2970e116.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -537,10 +538,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_liftover_src_3cf3b52fdac450.fa.fai
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_liftover_src_3efe1f5ec1cab8.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_liftover_dst_3cf3b512bd8478.fa.fai
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_liftover_dst_3efe1f391a74fb.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -585,7 +586,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                          index_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_munge_3cf3b53c357d95.fa.fai
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_munge_3efe1f721a0922.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -673,7 +674,7 @@ bgzip_meta <- rduckhts_bgzip(
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                           output_path bytes_out
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_3cf3b54154d37d.bed.gz       169
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_targets_3efe1f57409efe.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -683,10 +684,8 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                  output_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_roundtrip_3cf3b57be12402.bed
-#>   bytes_out
-#> 1       194
+#>   success                                                 output_path bytes_out
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_targets_roundtrip_3efe1f44b26e3.bed       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -695,7 +694,7 @@ bam_index_meta <- rduckhts_bam_index(
 )
 bam_index_meta
 #>   success                                           index_path index_format
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_range_3cf3b529115d39.bam.bai          BAI
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_range_3efe1f1fe5b475.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -704,7 +703,7 @@ bcf_index_meta <- rduckhts_bcf_index(
 )
 bcf_index_meta
 #>   success                                              index_path index_format
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_variants_3cf3b57957106d.bcf.csi          CSI
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_variants_3efe1f22e1d97f.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -714,7 +713,7 @@ tabix_meta <- rduckhts_tabix_index(
 )
 tabix_meta
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_3cf3b54154d37d.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_targets_3efe1f57409efe.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 
@@ -782,7 +781,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_readme_3cf3b521ab0c18.fai
+#> 1    TRUE /tmp/RtmpmHy9YT/duckhts_readme_3efe1f49668e20.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
