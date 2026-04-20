@@ -885,7 +885,7 @@ brew install cmake htslib xz libdeflate
 ```
 
 This downloads and verifies [htslib](https://github.com/samtools/htslib)
-1.23 into `third_party/htslib/`.
+1.23.1 into `third_party/htslib/`.
 
 ### Build
 
@@ -1120,7 +1120,7 @@ dbDisconnect(con, shutdown = TRUE)
         vep_parser.h
         .....
     third_party/
-      htslib/            # Vendored htslib 1.23 (built automatically)
+      htslib/            # Vendored htslib 1.23.1 (built automatically)
     test/
       sql/               # SQL logic tests
     duckdb_capi/
