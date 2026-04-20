@@ -58,7 +58,8 @@ post-filter outputs.</p>
 <span>  require_flags <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  exclude_flags <span class="op">=</span> <span class="fl">1796</span>,</span>
 <span>  min_depth <span class="op">=</span> <span class="fl">1</span>,</span>
-<span>  max_depth <span class="op">=</span> <span class="fl">1000000</span>,</span>
+<span>  max_depth <span class="op">=</span> <span class="fl">1e+06</span>,</span>
+<span>  decompression_threads <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  fragment_mode <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  strand_outputs <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  processing_threads <span class="op">=</span> <span class="fl">0</span></span>
@@ -120,6 +121,11 @@ post-filter outputs.</p>
 
 <dt id="arg-max-depth">max_depth<a class="anchor" aria-label="anchor" href="#arg-max-depth"></a></dt>
 <dd><p>Maximum per-position depth cap. Set `0` to remove the cap.</p></dd>
+
+
+<dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>
+<dd><p>Integer. Number of htslib decompression worker
+threads to use for BAM/CRAM input. `0` disables htslib worker threads.</p></dd>
 
 
 <dt id="arg-fragment-mode">fragment_mode<a class="anchor" aria-label="anchor" href="#arg-fragment-mode"></a></dt>

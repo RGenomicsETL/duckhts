@@ -11,6 +11,16 @@
   outputs on the packaged mixed BAM fixture, and `fragment_mode` /
   `processing_threads` are exposed but currently reserved for later
   phases
+- reduce bundled
+  [`rduckhts_bam_bed_coverage()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bed_coverage.md)
+  / `duckhts_bam_bed_coverage(...)` peak memory by allocating and
+  freeing per-region working depth buffers during scan processing
+  instead of retaining them for the whole BED, tile large target
+  intervals internally when computing covered-base breadth, keep the
+  tiled implementation single-pass, align `min_depth > 1` mean-depth
+  behavior with `samtools coverage`, and expose `decompression_threads`
+  so package callers can set htslib BAM/CRAM decode worker counts
+  explicitly
 - add
   [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.md),
   bundling native `duckhts_samtools_idxstats(...)` for samtools
