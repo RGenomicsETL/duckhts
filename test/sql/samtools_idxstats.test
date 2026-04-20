@@ -24,15 +24,15 @@ ORDER BY 1;
 *	0	0	0
 11	50000	10	0
 
-query T
-SELECT output_path
+query I
+SELECT output_path = '__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt'
 FROM duckhts_samtools_idxstats(
   '__WORKING_DIRECTORY__/test/data/fixture_mixed.cram',
   output := '__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt',
   overwrite := TRUE
 );
 ----
-__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt
+1
 
 query TIII
 SELECT column0, column1, column2, column3
