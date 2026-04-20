@@ -47,15 +47,18 @@ ORDER BY 1;
 *	0	0	0
 11	50000	10	0
 
+statement ok
+SELECT * FROM duckhts_samtools_idxstats(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  output := '__WORKING_DIRECTORY__/range.idxstats.txt',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+  overwrite := TRUE
+);
+
 query TII
 SELECT column0, column1, column2
 FROM read_csv(
-  (SELECT output_path FROM duckhts_samtools_idxstats(
-    '__WORKING_DIRECTORY__/test/data/range.bam',
-    output := '__WORKING_DIRECTORY__/range.idxstats.txt',
-    index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
-    overwrite := TRUE
-  )),
+  '__WORKING_DIRECTORY__/range.idxstats.txt',
   delim = '\t',
   header = false,
   columns = {'column0':'VARCHAR', 'column1':'BIGINT', 'column2':'BIGINT', 'column3':'BIGINT'}
