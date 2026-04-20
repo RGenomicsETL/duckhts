@@ -351,7 +351,7 @@ Use `HTS_PATH` only when you want dynamic plugin discovery (for example, to poin
 
 Example (works in static-handler mode and plugin mode):
 
-```{sql, eval=FALSE, collapse=FALSE, comment=""}
+```{sql, eval=TRUE, collapse=FALSE, comment=""}
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')
