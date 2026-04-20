@@ -713,6 +713,13 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
 GROUP BY CHROM;
 ```
 
+    ┌─────────┬───────┐
+    │  CHROM  │   n   │
+    │ varchar │ int64 │
+    ├─────────┼───────┤
+    │ chr22   │    11 │
+    └─────────┴───────┘
+
 If you need dynamic plugin mode, set `HTS_PATH` before loading the
 extension, for example:
 

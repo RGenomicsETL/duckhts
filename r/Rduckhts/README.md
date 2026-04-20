@@ -377,8 +377,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_readme_3ce768e434dbe.fai
+#>   success                                        index_path
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_readme_3cf3b5764e2d8e.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -480,9 +480,9 @@ mos_out <- rduckhts_mosdepth(
 
 mos_out[, c("summary_path", "regions_path")]
 #>                                                                  summary_path
-#> 1 /tmp/RtmpJocJ2v/duckhts_readme_mosdepth_3ce7682e7276a6.mosdepth.summary.txt
+#> 1 /tmp/RtmpX3r5EQ/duckhts_readme_mosdepth_3cf3b577a07763.mosdepth.summary.txt
 #>                                                            regions_path
-#> 1 /tmp/RtmpJocJ2v/duckhts_readme_mosdepth_3ce7682e7276a6.regions.bed.gz
+#> 1 /tmp/RtmpX3r5EQ/duckhts_readme_mosdepth_3cf3b577a07763.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -536,11 +536,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_liftover_src_3ce768652859c.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_liftover_src_3cf3b52fdac450.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_liftover_dst_3ce7684dd9a289.fa.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_liftover_dst_3cf3b512bd8478.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -585,7 +585,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                          index_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_munge_3ce76820eac77c.fa.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_munge_3cf3b53c357d95.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -673,7 +673,7 @@ bgzip_meta <- rduckhts_bgzip(
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                           output_path bytes_out
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_targets_3ce768533dcddc.bed.gz       169
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_3cf3b54154d37d.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -684,7 +684,7 @@ bgunzip_meta <- rduckhts_bgunzip(
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                                  output_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_targets_roundtrip_3ce7681c29c3af.bed
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_roundtrip_3cf3b57be12402.bed
 #>   bytes_out
 #> 1       194
 
@@ -695,7 +695,7 @@ bam_index_meta <- rduckhts_bam_index(
 )
 bam_index_meta
 #>   success                                           index_path index_format
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_range_3ce7684858989a.bam.bai          BAI
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_range_3cf3b529115d39.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -704,7 +704,7 @@ bcf_index_meta <- rduckhts_bcf_index(
 )
 bcf_index_meta
 #>   success                                              index_path index_format
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_variants_3ce76819799aa3.bcf.csi          CSI
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_variants_3cf3b57957106d.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -714,7 +714,7 @@ tabix_meta <- rduckhts_tabix_index(
 )
 tabix_meta
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_targets_3ce768533dcddc.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_3cf3b54154d37d.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 
@@ -782,7 +782,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpJocJ2v/duckhts_readme_3ce7685af59abc.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_readme_3cf3b521ab0c18.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
