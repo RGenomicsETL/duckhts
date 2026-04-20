@@ -2,6 +2,13 @@
 
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- add
+  [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.md),
+  bundling native `duckhts_samtools_idxstats(...)` for samtools
+  idxstats-compatible BAM/CRAM/SAM summaries with indexed BAM fast-paths
+  and scan fallback; package SQL/tinytest coverage now checks BAM
+  fast-path output, CRAM fallback output, explicit `index_path`, and
+  overwrite errors
 - improve package-source hygiene for local development: ignore generated
   `README.html`, `.Rcheck`, staged `duckhts_extension/htslib` build
   outputs, wasm/webR harness byproducts, and stray root-level index

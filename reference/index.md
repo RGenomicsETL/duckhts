@@ -80,6 +80,8 @@
   : Native mosdepth-Compatible Coverage Outputs
 - [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_munge.md)
   : Munge Summary Statistics Rows
+- [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.md)
+  : samtools idxstats-Compatible Alignment Summary
 - [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
   : Compute Polygenic Scores
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)
