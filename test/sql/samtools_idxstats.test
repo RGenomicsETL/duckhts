@@ -1,0 +1,76 @@
+# name: test/sql/samtools_idxstats.test
+# description: Test native duckhts_samtools_idxstats samtools-compatible outputs
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SELECT * FROM duckhts_samtools_idxstats(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  output := '__WORKING_DIRECTORY__/fixture_mixed.idxstats.txt',
+  overwrite := TRUE
+);
+
+query TIII
+SELECT column0, column1, column2, column3
+FROM read_csv(
+  '__WORKING_DIRECTORY__/fixture_mixed.idxstats.txt',
+  delim = '\t',
+  header = false,
+  columns = {'column0':'VARCHAR', 'column1':'BIGINT', 'column2':'BIGINT', 'column3':'BIGINT'}
+)
+ORDER BY 1;
+----
+*\t0\t0\t0
+11\t50000\t10\t0
+
+query T
+SELECT output_path
+FROM duckhts_samtools_idxstats(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.cram',
+  output := '__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt',
+  overwrite := TRUE
+);
+----
+__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt
+
+query TIII
+SELECT column0, column1, column2, column3
+FROM read_csv(
+  '__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt',
+  delim = '\t',
+  header = false,
+  columns = {'column0':'VARCHAR', 'column1':'BIGINT', 'column2':'BIGINT', 'column3':'BIGINT'}
+)
+ORDER BY 1;
+----
+*\t0\t0\t0
+11\t50000\t10\t0
+
+query TII
+SELECT column0, column1, column2
+FROM read_csv(
+  (SELECT output_path FROM duckhts_samtools_idxstats(
+    '__WORKING_DIRECTORY__/test/data/range.bam',
+    output := '__WORKING_DIRECTORY__/range.idxstats.txt',
+    index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+    overwrite := TRUE
+  )),
+  delim = '\t',
+  header = false,
+  columns = {'column0':'VARCHAR', 'column1':'BIGINT', 'column2':'BIGINT', 'column3':'BIGINT'}
+)
+WHERE column0 IN ('CHROMOSOME_I', 'CHROMOSOME_III', '*')
+ORDER BY column0;
+----
+*\t0\t0
+CHROMOSOME_I\t1009800\t18
+CHROMOSOME_III\t5000\t41
+
+statement error
+SELECT * FROM duckhts_samtools_idxstats(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  output := '__WORKING_DIRECTORY__/fixture_mixed.idxstats.txt'
+);
+----
+duckhts_samtools_idxstats: output '__WORKING_DIRECTORY__/fixture_mixed.idxstats.txt' already exists (use overwrite := TRUE to replace)

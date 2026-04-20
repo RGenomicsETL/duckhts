@@ -14,6 +14,7 @@ expect_true(exists("rduckhts_bgzip"))
 expect_true(exists("rduckhts_bgunzip"))
 expect_true(exists("rduckhts_bam_bin_counts"))
 expect_true(exists("rduckhts_mosdepth"))
+expect_true(exists("rduckhts_samtools_idxstats"))
 expect_true(exists("rduckhts_fasta"))
 expect_true(exists("rduckhts_fasta_index"))
 expect_true(exists("rduckhts_fastq"))
@@ -72,6 +73,10 @@ expect_identical(
     "threads", "processing_threads", "flag", "include_flag", "fast_mode", "fragment_mode", "use_median", "mapq", "min_frag_len",
     "max_frag_len", "precision_digits", "quantize", "thresholds", "index_path",
     "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_samtools_idxstats)),
+  c("con", "path", "output", "index_path", "threads", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_fasta)),

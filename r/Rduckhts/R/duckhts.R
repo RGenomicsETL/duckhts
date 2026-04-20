@@ -1264,6 +1264,43 @@ rduckhts_bam_index <- function(
   DBI::dbGetQuery(con, query)
 }
 
+#' samtools idxstats-Compatible Alignment Summary
+#'
+#' Writes samtools idxstats-compatible alignment summary output for BAM, CRAM,
+#' or SAM input.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the input alignment file
+#' @param output Optional output path for the written idxstats text file
+#' @param index_path Optional explicit BAM/CRAM index path
+#' @param threads htslib decompression thread count for scan fallback
+#' @param overwrite Overwrite an existing output file
+#'
+#' @return A data frame with `success`, `path`, `output_path`,
+#'   `used_index_fast_path`, and `error_message`
+#'
+#' @export
+rduckhts_samtools_idxstats <- function(
+  con,
+  path,
+  output = NULL,
+  index_path = NULL,
+  threads = 0,
+  overwrite = FALSE
+) {
+  params <- list(threads = threads)
+  if (!is.null(output)) params$output <- sql_quote_string(output)
+  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
+  if (isTRUE(overwrite)) params$overwrite <- "true"
+  param_str <- build_param_str(params)
+  query <- sprintf(
+    "SELECT * FROM duckhts_samtools_idxstats(%s%s)",
+    sql_quote_string(path),
+    param_str
+  )
+  DBI::dbGetQuery(con, query)
+}
+
 #' Build VCF or BCF Index
 #'
 #' Builds a TBI or CSI index for a VCF/BCF file using the DuckHTS extension.

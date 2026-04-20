@@ -56,13 +56,14 @@ This section is generated from `functions.yaml`.
 
 ### Metadata
 
-| Function                  | Kind        | Returns | R helper                           | Description                                                                                                                   |
-|---------------------------|-------------|---------|------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `detect_quality_encoding` | table       | table   | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file’s observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding. |
-| `read_hts_header`         | table       | table   | `rduckhts_hts_header`              | Inspect HTS headers in parsed, raw, or combined form across supported formats.                                                |
-| `read_hts_index`          | table       | table   | `rduckhts_hts_index`               | Inspect high-level HTS index metadata such as sequence names and mapped counts.                                               |
-| `read_hts_index_spans`    | table       | table   | `rduckhts_hts_index_spans`         | Expand index metadata into span and chunk rows suitable for low-level index inspection.                                       |
-| `read_hts_index_raw`      | table_macro | table   | `rduckhts_hts_index_raw`           | Return the raw on-disk HTS index blob together with basic identifying metadata.                                               |
+| Function                    | Kind        | Returns | R helper                           | Description                                                                                                                                                                                                                                                                |
+|-----------------------------|-------------|---------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `detect_quality_encoding`   | table       | table   | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file’s observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding.                                                                                                                                              |
+| `duckhts_samtools_idxstats` | table       | table   | `rduckhts_samtools_idxstats`       | Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses `hts_idx_get_stat(...)` for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final `*` row. |
+| `read_hts_header`           | table       | table   | `rduckhts_hts_header`              | Inspect HTS headers in parsed, raw, or combined form across supported formats.                                                                                                                                                                                             |
+| `read_hts_index`            | table       | table   | `rduckhts_hts_index`               | Inspect high-level HTS index metadata such as sequence names and mapped counts.                                                                                                                                                                                            |
+| `read_hts_index_spans`      | table       | table   | `rduckhts_hts_index_spans`         | Expand index metadata into span and chunk rows suitable for low-level index inspection.                                                                                                                                                                                    |
+| `read_hts_index_raw`        | table_macro | table   | `rduckhts_hts_index_raw`           | Return the raw on-disk HTS index blob together with basic identifying metadata.                                                                                                                                                                                            |
 
 ### Compression
 
@@ -670,8 +671,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r2.fq │     5 │
     │ test/data/r1.fq │     5 │
+    │ test/data/r2.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):
@@ -711,13 +712,6 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
               region := 'chr22:16050000-16050500')
 GROUP BY CHROM;
 ```
-
-    ┌─────────┬───────┐
-    │  CHROM  │   n   │
-    │ varchar │ int64 │
-    ├─────────┼───────┤
-    │ chr22   │    11 │
-    └─────────┴───────┘
 
 If you need dynamic plugin mode, set `HTS_PATH` before loading the
 extension, for example:

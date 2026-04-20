@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.1.7.9000 Developement version
+- add native `duckhts_samtools_idxstats(...)`: writes samtools idxstats-compatible TAB-delimited output for BAM/CRAM/SAM inputs, uses BAM index metadata (`hts_idx_get_stat(...)`) on indexed BAM fast paths, falls back to a streaming scan for CRAM/SAM/unindexed BAM, supports explicit `output`, `index_path`, `threads`, and `overwrite`, and adds SQL/R conformance coverage for BAM fast-path, CRAM fallback, custom index paths, and overwrite errors
 - clean repo hygiene for local development: fix stale ignore rules that still referenced the old `duckdb_extension` package path, ignore documented wasm/webR harness outputs plus benchmark/conformance byproducts, and add `make clean_local` to purge the reproducible local spill files
 - add `processing_threads` parameter to `duckhts_mosdepth(...)` for parallel contig processing: each worker opens independent BAM file handles via index queries, claims contigs atomically, and writes output in header order using an ordered-completion pattern; on the NA12878 16 GB WGS benchmark (4 decompression threads, 2 processing threads), fast mode is 1.38x faster than mosdepth v0.3.13, default mode 1.40x faster, and fragment mode 1.61x faster, all with byte-identical output; default is now `processing_threads := 2`
 - change `duckhts_mosdepth(...)` defaults to `threads := 2` (decompression) and `processing_threads := 2` (parallel contigs) for better out-of-the-box WGS performance; previous defaults were `threads := 0, processing_threads := 0` (single-threaded)
