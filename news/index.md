@@ -3,6 +3,15 @@
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
 - add
+  [`rduckhts_bam_bed_coverage()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bed_coverage.md),
+  bundling native `duckhts_bam_bed_coverage(...)` for samtools
+  coverage-like regional summaries over BED targets with
+  DuckHTS-specific pre/post-filter columns and read-mode strand-specific
+  post summaries; bundled SQL/tinytest coverage now checks expected
+  outputs on the packaged mixed BAM fixture, and `fragment_mode` /
+  `processing_threads` are exposed but currently reserved for later
+  phases
+- add
   [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.md),
   bundling native `duckhts_samtools_idxstats(...)` for samtools
   idxstats-compatible BAM/CRAM/SAM summaries with indexed BAM fast-paths
