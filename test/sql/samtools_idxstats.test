@@ -21,8 +21,8 @@ FROM read_csv(
 )
 ORDER BY 1;
 ----
-*\t0\t0\t0
-11\t50000\t10\t0
+*	0	0	0
+11	50000	10	0
 
 query T
 SELECT output_path
@@ -44,8 +44,8 @@ FROM read_csv(
 )
 ORDER BY 1;
 ----
-*\t0\t0\t0
-11\t50000\t10\t0
+*	0	0	0
+11	50000	10	0
 
 query TII
 SELECT column0, column1, column2
@@ -63,9 +63,9 @@ FROM read_csv(
 WHERE column0 IN ('CHROMOSOME_I', 'CHROMOSOME_III', '*')
 ORDER BY column0;
 ----
-*\t0\t0
-CHROMOSOME_I\t1009800\t18
-CHROMOSOME_III\t5000\t41
+*	0	0
+CHROMOSOME_I	1009800	18
+CHROMOSOME_III	5000	41
 
 statement error
 SELECT * FROM duckhts_samtools_idxstats(
