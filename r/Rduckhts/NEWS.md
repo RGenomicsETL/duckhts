@@ -1,5 +1,6 @@
 
 # Rduckhts 1.1.7.9000-0.0.1 (Development version)
+- add `rduckhts_samtools_idxstats()`, bundling native `duckhts_samtools_idxstats(...)` for samtools idxstats-compatible BAM/CRAM/SAM summaries with indexed BAM fast-paths and scan fallback; package SQL/tinytest coverage now checks BAM fast-path output, CRAM fallback output, explicit `index_path`, and overwrite errors
 - improve package-source hygiene for local development: ignore generated `README.html`, `.Rcheck`, staged `duckhts_extension/htslib` build outputs, wasm/webR harness byproducts, and stray root-level index files under `r/Rduckhts/`; add top-level `make clean_local` to purge the reproducible package-side artifacts
 - add `processing_threads` parameter to `rduckhts_mosdepth()` and bundled `duckhts_mosdepth(...)` for parallel contig processing: workers claim contigs atomically and write output in header order; on the NA12878 WGS benchmark with 2 processing threads, fast mode is 1.38x faster, default mode 1.40x faster, and fragment mode 1.61x faster than mosdepth v0.3.13, all byte-identical; new default is `processing_threads = 2`
 - change `rduckhts_mosdepth()` defaults to `threads = 2` (decompression) and `processing_threads = 2` (parallel contigs) for better out-of-the-box WGS performance

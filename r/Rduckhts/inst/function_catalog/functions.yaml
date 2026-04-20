@@ -264,6 +264,18 @@
       ]
     },
     {
+      "name": "duckhts_samtools_idxstats",
+      "kind": "table",
+      "category": "Metadata",
+      "signature": "duckhts_samtools_idxstats(path, output := NULL, index_path := NULL, threads := 0, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_samtools_idxstats",
+      "description": "Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses `hts_idx_get_stat(...)` for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final `*` row.",
+      "examples": [
+        "SELECT * FROM duckhts_samtools_idxstats('range.bam', output := 'range.idxstats.txt', overwrite := TRUE);"
+      ]
+    },
+    {
       "name": "read_hts_header",
       "kind": "table",
       "category": "Metadata",
