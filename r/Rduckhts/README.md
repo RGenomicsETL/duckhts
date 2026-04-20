@@ -251,13 +251,14 @@ This section is generated from `functions.yaml`.
 
 ### Metadata
 
-| Function                  | Kind        | Returns | R helper                           | Description                                                                                                                   |
-|---------------------------|-------------|---------|------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `detect_quality_encoding` | table       | table   | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file’s observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding. |
-| `read_hts_header`         | table       | table   | `rduckhts_hts_header`              | Inspect HTS headers in parsed, raw, or combined form across supported formats.                                                |
-| `read_hts_index`          | table       | table   | `rduckhts_hts_index`               | Inspect high-level HTS index metadata such as sequence names and mapped counts.                                               |
-| `read_hts_index_spans`    | table       | table   | `rduckhts_hts_index_spans`         | Expand index metadata into span and chunk rows suitable for low-level index inspection.                                       |
-| `read_hts_index_raw`      | table_macro | table   | `rduckhts_hts_index_raw`           | Return the raw on-disk HTS index blob together with basic identifying metadata.                                               |
+| Function                    | Kind        | Returns | R helper                           | Description                                                                                                                                                                                                                                                                |
+|-----------------------------|-------------|---------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `detect_quality_encoding`   | table       | table   | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file’s observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding.                                                                                                                                              |
+| `duckhts_samtools_idxstats` | table       | table   | `rduckhts_samtools_idxstats`       | Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses `hts_idx_get_stat(...)` for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final `*` row. |
+| `read_hts_header`           | table       | table   | `rduckhts_hts_header`              | Inspect HTS headers in parsed, raw, or combined form across supported formats.                                                                                                                                                                                             |
+| `read_hts_index`            | table       | table   | `rduckhts_hts_index`               | Inspect high-level HTS index metadata such as sequence names and mapped counts.                                                                                                                                                                                            |
+| `read_hts_index_spans`      | table       | table   | `rduckhts_hts_index_spans`         | Expand index metadata into span and chunk rows suitable for low-level index inspection.                                                                                                                                                                                    |
+| `read_hts_index_raw`        | table_macro | table   | `rduckhts_hts_index_raw`           | Return the raw on-disk HTS index blob together with basic identifying metadata.                                                                                                                                                                                            |
 
 ### Compression
 
@@ -377,7 +378,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_readme_2ef3ed78981026.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_readme_3cf3b5764e2d8e.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -479,9 +480,9 @@ mos_out <- rduckhts_mosdepth(
 
 mos_out[, c("summary_path", "regions_path")]
 #>                                                                  summary_path
-#> 1 /tmp/Rtmp4EayxR/duckhts_readme_mosdepth_2ef3ed61f9ae82.mosdepth.summary.txt
+#> 1 /tmp/RtmpX3r5EQ/duckhts_readme_mosdepth_3cf3b577a07763.mosdepth.summary.txt
 #>                                                            regions_path
-#> 1 /tmp/Rtmp4EayxR/duckhts_readme_mosdepth_2ef3ed61f9ae82.regions.bed.gz
+#> 1 /tmp/RtmpX3r5EQ/duckhts_readme_mosdepth_3cf3b577a07763.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -536,10 +537,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_liftover_src_2ef3ed368c2a47.fa.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_liftover_src_3cf3b52fdac450.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_liftover_dst_2ef3ed291c64c8.fa.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_liftover_dst_3cf3b512bd8478.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -584,7 +585,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                          index_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_munge_2ef3ed55b185a3.fa.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_munge_3cf3b53c357d95.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -672,7 +673,7 @@ bgzip_meta <- rduckhts_bgzip(
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                           output_path bytes_out
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_targets_2ef3ed37c7422e.bed.gz       169
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_3cf3b54154d37d.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -683,7 +684,7 @@ bgunzip_meta <- rduckhts_bgunzip(
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                                  output_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_targets_roundtrip_2ef3ed749c409b.bed
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_roundtrip_3cf3b57be12402.bed
 #>   bytes_out
 #> 1       194
 
@@ -694,7 +695,7 @@ bam_index_meta <- rduckhts_bam_index(
 )
 bam_index_meta
 #>   success                                           index_path index_format
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_range_2ef3ed742d745f.bam.bai          BAI
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_range_3cf3b529115d39.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -703,7 +704,7 @@ bcf_index_meta <- rduckhts_bcf_index(
 )
 bcf_index_meta
 #>   success                                              index_path index_format
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_variants_2ef3ed3a8c550f.bcf.csi          CSI
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_variants_3cf3b57957106d.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -713,7 +714,7 @@ tabix_meta <- rduckhts_tabix_index(
 )
 tabix_meta
 #>   success                                                index_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_targets_2ef3ed37c7422e.bed.gz.tbi
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_targets_3cf3b54154d37d.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 
@@ -781,7 +782,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                        index_path
-#> 1    TRUE /tmp/Rtmp4EayxR/duckhts_readme_2ef3ed5ffc8eb7.fai
+#> 1    TRUE /tmp/RtmpX3r5EQ/duckhts_readme_3cf3b521ab0c18.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

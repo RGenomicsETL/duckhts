@@ -23,6 +23,7 @@ This section is generated from `functions.yaml`.
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
 | `detect_quality_encoding` | table | table | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file's observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding. |
+| `duckhts_samtools_idxstats` | table | table | `rduckhts_samtools_idxstats` | Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses `hts_idx_get_stat(...)` for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final `*` row. |
 | `read_hts_header` | table | table | `rduckhts_hts_header` | Inspect HTS headers in parsed, raw, or combined form across supported formats. |
 | `read_hts_index` | table | table | `rduckhts_hts_index` | Inspect high-level HTS index metadata such as sequence names and mapped counts. |
 | `read_hts_index_spans` | table | table | `rduckhts_hts_index_spans` | Expand index metadata into span and chunk rows suitable for low-level index inspection. |
