@@ -19,6 +19,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <string.h>
 
 #include <htslib/hts.h>
+#include <htslib/kstring.h>
 #include <htslib/sam.h>
 
 #define DUCKHTS_BEDCOV_DEFAULT_EXCLUDE_FLAGS 1796
@@ -210,22 +211,21 @@ static void destroy_bam_bed_cov_bind(void *data) {
 
 static int load_bed_regions(const char *path, bedcov_region_t **out_regions, size_t *out_count,
                             char *err, size_t errlen) {
-    FILE *fp = NULL;
-    char *line = NULL;
-    size_t linecap = 0;
-    ssize_t linelen;
+    htsFile *fp = NULL;
+    kstring_t line = {0, 0, NULL};
+    int linelen;
     size_t cap = 0;
     size_t n = 0;
     bedcov_region_t *regions = NULL;
 
     if (!path || !out_regions || !out_count) return -1;
-    fp = fopen(path, "rb");
+    fp = hts_open(path, "r");
     if (!fp) {
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open BED file '%s'", path);
         return -1;
     }
 
-    while ((linelen = getline(&line, &linecap, fp)) >= 0) {
+    while ((linelen = hts_getline(fp, '\n', &line)) >= 0) {
         const char *chrom;
         const char *name;
         int chrom_len = 0, start_len = 0, end_len = 0, name_len = 0;
@@ -233,33 +233,33 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
         int64_t start = 0, end = 0;
         bedcov_region_t *r;
 
-        while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r')) {
-            line[--linelen] = '\0';
+        while (linelen > 0 && (line.s[linelen - 1] == '\n' || line.s[linelen - 1] == '\r')) {
+            line.s[--linelen] = '\0';
         }
-        if (linelen == 0 || is_meta_bed_line_bedcov(line)) continue;
+        if (linelen == 0 || is_meta_bed_line_bedcov(line.s)) continue;
 
-        chrom = field_span(line, 0, &chrom_len);
-        (void)field_span(line, 1, &start_len);
-        (void)field_span(line, 2, &end_len);
+        chrom = field_span(line.s, 0, &chrom_len);
+        (void)field_span(line.s, 1, &start_len);
+        (void)field_span(line.s, 2, &end_len);
         if (!chrom || chrom_len <= 0 || start_len <= 0 || end_len <= 0) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: BED line has fewer than 3 tab-delimited fields");
-            fclose(fp);
-            free(line);
+            hts_close(fp);
+            free(line.s);
             return -1;
         }
 
-        start = parse_i64_field(field_span(line, 1, &start_len), start_len, &ok);
+        start = parse_i64_field(field_span(line.s, 1, &start_len), start_len, &ok);
         if (!ok) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: invalid BED start coordinate");
-            fclose(fp);
-            free(line);
+            hts_close(fp);
+            free(line.s);
             return -1;
         }
-        end = parse_i64_field(field_span(line, 2, &end_len), end_len, &ok);
+        end = parse_i64_field(field_span(line.s, 2, &end_len), end_len, &ok);
         if (!ok || end < start) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: invalid BED end coordinate");
-            fclose(fp);
-            free(line);
+            hts_close(fp);
+            free(line.s);
             return -1;
         }
 
@@ -268,8 +268,8 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
             bedcov_region_t *tmp = (bedcov_region_t *)realloc(regions, new_cap * sizeof(*regions));
             if (!tmp) {
                 snprintf(err, errlen, "duckhts_bam_bed_coverage: out of memory");
-                fclose(fp);
-                free(line);
+                hts_close(fp);
+                free(line.s);
                 return -1;
             }
             regions = tmp;
@@ -282,8 +282,8 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
         r->chrom = (char *)duckdb_malloc((size_t)chrom_len + 1);
         if (!r->chrom) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: out of memory");
-            fclose(fp);
-            free(line);
+            hts_close(fp);
+            free(line.s);
             return -1;
         }
         memcpy(r->chrom, chrom, (size_t)chrom_len);
@@ -293,13 +293,13 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
         r->len = end - start;
         r->tid = -1;
 
-        name = field_span(line, 3, &name_len);
+        name = field_span(line.s, 3, &name_len);
         if (name && name_len > 0) {
             r->name = (char *)duckdb_malloc((size_t)name_len + 1);
             if (!r->name) {
                 snprintf(err, errlen, "duckhts_bam_bed_coverage: out of memory");
-                fclose(fp);
-                free(line);
+                hts_close(fp);
+                free(line.s);
                 return -1;
             }
             memcpy(r->name, name, (size_t)name_len);
@@ -308,14 +308,14 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
 
         if (ensure_region_depth_arrays(r) != 0) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: out of memory");
-            fclose(fp);
-            free(line);
+            hts_close(fp);
+            free(line.s);
             return -1;
         }
     }
 
-    fclose(fp);
-    free(line);
+    hts_close(fp);
+    free(line.s);
     *out_regions = regions;
     *out_count = n;
     return 0;
