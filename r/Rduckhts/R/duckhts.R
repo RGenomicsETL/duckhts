@@ -1143,6 +1143,76 @@ rduckhts_bam_bin_counts <- function(
   DBI::dbGetQuery(con, query)
 }
 
+#' Native BAM/CRAM BED Regional Coverage Summary
+#'
+#' Computes samtools coverage-like regional summaries for BAM or CRAM input over
+#' a BED target set, with DuckHTS-specific pre/post-filter and strand-aware
+#' post-filter outputs.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the input BAM or CRAM file
+#' @param bed_path Path to the input BED file
+#' @param reference Optional reference FASTA path for CRAM input when required
+#' @param index_path Optional explicit BAM/CRAM index path
+#' @param bed_index_path Optional explicit BED index path (reserved for future use)
+#' @param mapq Minimum mapping quality threshold for post-filter summaries
+#' @param min_baseq Minimum base quality threshold for post-filter base-level summaries
+#' @param min_read_len Minimum read length threshold for post-filter summaries
+#' @param require_flags Required SAM flag mask
+#' @param exclude_flags Excluded SAM flag mask. Defaults to samtools coverage's
+#'   `UNMAP|SECONDARY|QCFAIL|DUP` mask.
+#' @param min_depth Minimum depth threshold for covered-base and mean-depth summaries
+#' @param max_depth Maximum per-position depth cap. Set `0` to remove the cap.
+#' @param fragment_mode Logical. Reserved for future fragment-level semantics.
+#' @param strand_outputs Logical. Emit forward/reverse post-filter summary columns.
+#' @param processing_threads Reserved for future parallel interval processing.
+#'
+#' @return A data frame with one row per BED interval and pre/post regional summaries
+#'
+#' @export
+rduckhts_bam_bed_coverage <- function(
+  con,
+  path,
+  bed_path,
+  reference = NULL,
+  index_path = NULL,
+  bed_index_path = NULL,
+  mapq = 0,
+  min_baseq = 0,
+  min_read_len = 0,
+  require_flags = 0,
+  exclude_flags = 1796,
+  min_depth = 1,
+  max_depth = 1000000,
+  fragment_mode = FALSE,
+  strand_outputs = TRUE,
+  processing_threads = 0
+) {
+  params <- list(
+    mapq = mapq,
+    min_baseq = min_baseq,
+    min_read_len = min_read_len,
+    require_flags = require_flags,
+    exclude_flags = exclude_flags,
+    min_depth = min_depth,
+    max_depth = max_depth,
+    fragment_mode = if (isTRUE(fragment_mode)) "true" else "false",
+    strand_outputs = if (isTRUE(strand_outputs)) "true" else "false",
+    processing_threads = processing_threads
+  )
+  if (!is.null(reference)) params$reference <- sql_quote_string(reference)
+  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
+  if (!is.null(bed_index_path)) params$bed_index_path <- sql_quote_string(bed_index_path)
+  param_str <- build_param_str(params)
+  query <- sprintf(
+    "SELECT * FROM duckhts_bam_bed_coverage(%s, %s%s)",
+    sql_quote_string(path),
+    sql_quote_string(bed_path),
+    param_str
+  )
+  DBI::dbGetQuery(con, query)
+}
+
 #' Native mosdepth-Compatible Coverage Outputs
 #'
 #' Writes native mosdepth-compatible coverage outputs for indexed BAM or CRAM input.

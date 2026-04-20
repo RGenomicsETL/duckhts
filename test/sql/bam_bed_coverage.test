@@ -1,0 +1,42 @@
+# name: test/sql/bam_bed_coverage.test
+# description: Test native duckhts_bam_bed_coverage BED regional summaries
+# group: [duckhts]
+
+require duckhts
+
+query TTIIITTTTTTIIIII
+SELECT
+  chrom,
+  name,
+  start,
+  "end",
+  numreads_pre,
+  printf('%.2f', coverage_pre),
+  printf('%.2f', meandepth_pre),
+  printf('%.1f', meanmapq_pre),
+  printf('%.1f', meanbaseq_pre),
+  printf('%.2f', coverage_post),
+  printf('%.2f', meandepth_post),
+  printf('%.1f', meanmapq_post),
+  numreads_fwd_post,
+  numreads_rev_post,
+  covbases_fwd_post,
+  covbases_rev_post
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed'
+)
+ORDER BY start;
+----
+11	cluster	1000	1200	4	36.00	0.72	60.0	37.0	36.00	0.72	60.0	2	2	36	36
+11	dup_only	6000	6200	2	36.00	0.36	60.0	37.0	0.00	0.00	0.0	0	0	0	0
+11	zero	20000	20100	0	0.00	0.00	0.0	0.0	0.00	0.00	0.0	0	0	0	0
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed',
+  fragment_mode := TRUE
+);
+----
+duckhts_bam_bed_coverage: fragment_mode is not implemented yet

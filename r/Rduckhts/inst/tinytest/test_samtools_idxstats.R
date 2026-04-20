@@ -54,7 +54,7 @@ test_samtools_idxstats <- function() {
 
   expect_error(
     rduckhts_samtools_idxstats(con, mixed_bam, output = bam_out),
-    pattern = "output '.+' already exists"
+    pattern = "output already exists"
   )
 }
 

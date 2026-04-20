@@ -13,6 +13,7 @@ expect_true(exists("rduckhts_bcf_index"))
 expect_true(exists("rduckhts_bgzip"))
 expect_true(exists("rduckhts_bgunzip"))
 expect_true(exists("rduckhts_bam_bin_counts"))
+expect_true(exists("rduckhts_bam_bed_coverage"))
 expect_true(exists("rduckhts_mosdepth"))
 expect_true(exists("rduckhts_samtools_idxstats"))
 expect_true(exists("rduckhts_fasta"))
@@ -66,6 +67,12 @@ expect_identical(
   names(formals(rduckhts_bam_bin_counts)),
   c("con", "path", "bin_width", "chrom", "include_unmapped", "reference", "index_path",
     "mapq", "require_flags", "exclude_flags", "rmdup", "stats")
+)
+expect_identical(
+  names(formals(rduckhts_bam_bed_coverage)),
+  c("con", "path", "bed_path", "reference", "index_path", "bed_index_path", "mapq",
+    "min_baseq", "min_read_len", "require_flags", "exclude_flags", "min_depth",
+    "max_depth", "fragment_mode", "strand_outputs", "processing_threads")
 )
 expect_identical(
   names(formals(rduckhts_mosdepth)),
