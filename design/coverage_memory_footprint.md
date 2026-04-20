@@ -101,21 +101,58 @@ Code-polish items (agreed, still to land):
   that the linear scan is safe because streaming eviction keeps the
   live tile list at ~1–2 entries.
 
-### `src/mosdepth_table.c` — same shape, larger blast radius
+### `src/mosdepth_table.c` — same per-base scratch family, but dominated by per-worker whole-contig coverage
 
 Reference: [`:1485-1498`](../src/mosdepth_table.c#L1485-L1498),
+[`:1998-2006`](../src/mosdepth_table.c#L1998-L2006),
 [`:96-100`](../src/mosdepth_table.c#L96-L100),
 [`:253-260`](../src/mosdepth_table.c#L253-L260),
-[`:1246`](../src/mosdepth_table.c#L1246).
+[`:1246`](../src/mosdepth_table.c#L1246),
+[`:1303`](../src/mosdepth_table.c#L1303).
 
 - Worker coverage buffer is `int32_t[chrom_len + 1]`, reused per contig
-  but not tiled (Pattern 2). chr1 (~249 Mbp) = ~1 GB per worker;
-  multiply by `processing_threads`.
-- `mosdepth_count_stat_t.counts` is `uint64_t[65536]` = 512 KB per
-  median stat, allocated per region (Pattern 3). `uint32_t` suffices.
+  but not tiled (Pattern 2). chr1 (~249 Mbp) ≈ 1 GB per worker;
+  scales with `processing_threads`. Same allocation shape in the
+  sequential path. **Empirical calibration** — whole-WGS `--by 50000`
+  default mode, `processing_threads = 0`, via
+  `scripts/mosdepth_benchmark.py`: upstream 1960 MB RSS, DuckHTS
+  1969 MB RSS (~0.5% higher, 1.33× faster on wall-clock). So in
+  sequential mode memory is at upstream parity; the "1 GB per
+  worker" cost is a *parallelism tax*, not a structural regression,
+  and tiling this buffer is primarily useful when
+  `processing_threads > 1`.
+- `mosdepth_count_stat_t.counts` is a `uint64_t[65536]` = 512 KB
+  scratch histogram, allocated once per `write_window_regions(...)` /
+  `write_bed_regions(...)` call when `use_median = TRUE`, then reused
+  across windows / BED regions within that call via
+  `count_stat_clear(...)`. Not retained one-per-region. `uint32_t`
+  suffices → 256 KB (Pattern 3). Worthwhile shrink but not a
+  multiplicative footprint like the contig coverage array.
 
-**Target after fix:** tiled worker scratch ≤ 4 MB/worker; median stat
-256 KB/region.
+This is *not* the same allocation shape as pre-fix
+`bam_bed_coverage.c`: the old bedcov problem was scratch retention
+scaling with Σ region_len across the whole BED. For mosdepth the
+footprint is instead `max(contig_len) × processing_threads`. That
+distinction changes fix priorities — tiling the worker coverage
+buffer is the only meaningful lever here.
+
+**Target after fix:** tiled worker scratch ≤ 4 MB/worker; median
+histogram 256 KB / call.
+
+#### Aside on `processing_threads` vs upstream `--threads`
+
+Upstream mosdepth's `--threads` is an htslib BGZF/decompression
+thread count — `open(bam, …, threads = threads, …)` at
+[`.sync/mosdepth/mosdepth.nim:961`](../.sync/mosdepth/mosdepth.nim#L961)
+— and `main(...)` iterates contigs sequentially. DuckHTS'
+`processing_threads` is different: contig-claiming parallelism that
+opens independent BAM handles per worker. The two knobs are
+orthogonal; the DuckHTS `duckhts_mosdepth(...)` API exposes both.
+Practical scaling of `processing_threads` is bounded by workload
+imbalance — one or two workers end up carrying the largest
+chromosomes while others go idle — which is the same reason
+single-contig workloads (e.g., chr11-only benchmarks) see little
+benefit past ~1–2 workers.
 
 ### `src/bam_bin_counts.c` — bigger refactor
 
