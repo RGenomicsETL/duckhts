@@ -1,0 +1,100 @@
+# name: test/sql/cgranges_api.test
+# description: Test native DuckHTS cgranges registry and overlap queries
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT duckhts_cgranges_create('x');
+----
+1
+
+query I
+SELECT duckhts_cgranges_add('x', 'chr1', 10, 20);
+----
+1
+
+query I
+SELECT duckhts_cgranges_add('x', 'chr1', 30, 40);
+----
+1
+
+statement error
+SELECT * FROM duckhts_cgranges_overlaps('x', 'chr1', 15, 18);
+----
+duckhts_cgranges_overlaps: index is not finalized; call duckhts_cgranges_index first
+
+query I
+SELECT duckhts_cgranges_index('x');
+----
+1
+
+query IIIII
+SELECT
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps('x', 'chr1', 15, 18);
+----
+0	0	chr1	10	20
+
+query IIIIII
+SELECT
+  query_row_id,
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps('x', 'chr1', 35, 36, query_row_id := 7);
+----
+7	1	1	chr1	30	40
+
+statement ok
+CREATE TABLE cgr_src AS
+SELECT * FROM (VALUES
+  ('chr2', 100, 110, 'alpha'),
+  ('chr2', 150, 170, 'beta')
+) AS t(chrom, start, "end", label);
+
+statement error
+SELECT duckhts_cgranges_from_table('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
+----
+duckhts_cgranges_from_table: not implemented; use duckhts_cgranges_from_query instead
+
+query I
+SELECT duckhts_cgranges_from_query(
+  'qry_idx',
+  'SELECT chrom, start, "end", label FROM cgr_src WHERE label = ''beta''',
+  'chrom', 'start', 'end', 'label'
+);
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('qry_idx');
+----
+1
+
+query IIIII
+SELECT
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps('qry_idx', 'chr2', 160, 161);
+----
+0	beta	chr2	150	170
+
+statement error
+SELECT duckhts_cgranges_destroy('missing');
+----
+duckhts_cgranges_destroy: unknown index name
+
+query I
+SELECT duckhts_cgranges_destroy('x');
+----
+1
