@@ -434,6 +434,23 @@ LIMIT 1;
 ----
 GCCTAAGCCT
 
+statement ok
+SELECT * FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/data/nuc_with_n.fa',
+  index_path := '__WORKING_DIRECTORY__/test/data/nuc_with_n.fa.fai'
+);
+
+query RRIIIII
+SELECT pct_at, pct_gc, num_a, num_c, num_g, num_t, num_n
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/nuc_with_n.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/nuc_with_n.bed',
+  index_path := '__WORKING_DIRECTORY__/test/data/nuc_with_n.fa.fai'
+)
+LIMIT 1;
+----
+0.3333333333333333	0.6666666666666666	1	2	2	1	4
+
 # ==============================================================
 # read_fastq – FASTQ reader
 # ==============================================================
