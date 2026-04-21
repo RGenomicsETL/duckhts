@@ -72,6 +72,14 @@ typedef struct {
     int64_t emitted;
 } duckhts_cgranges_overlaps_bind_t;
 
+static char *chunk_cell_strdup(duckdb_data_chunk input, idx_t col, idx_t row);
+static int64_t chunk_cell_to_int64(duckdb_vector vec, idx_t row, duckdb_type type_id);
+static duckhts_cgr_label_kind_t normalized_label_kind_from_type(duckdb_type type_id);
+static int append_interval_raw(duckhts_cgranges_entry_t *entry, const char *chrom, int64_t start, int64_t end,
+                               bool label_valid, duckhts_cgr_label_kind_t label_kind,
+                               int64_t label_i64, double label_f64, const char *label_str, bool label_bool,
+                               char *err, size_t errlen);
+
 static void set_null(duckdb_vector vec, idx_t row) {
     duckdb_vector_ensure_validity_writable(vec);
     uint64_t *validity = duckdb_vector_get_validity(vec);
@@ -611,60 +619,109 @@ static void cgranges_add_scalar(duckdb_function_info info, duckdb_data_chunk inp
     duckhts_cgranges_registry_t *reg = get_registry_from_function(info);
     idx_t n = duckdb_data_chunk_get_size(input), i;
     for (i = 0; i < n; i++) {
-        duckdb_value name_val = scalar_value_from_chunk(input, 0, i);
-        duckdb_value chrom_val = scalar_value_from_chunk(input, 1, i);
-        duckdb_value start_val = scalar_value_from_chunk(input, 2, i);
-        duckdb_value end_val = scalar_value_from_chunk(input, 3, i);
-        duckdb_value label_val = duckdb_data_chunk_get_column_count(input) > 4 ? scalar_value_from_chunk(input, 4, i) : NULL;
+        char *name = chunk_cell_strdup(input, 0, i);
+        char *chrom = chunk_cell_strdup(input, 1, i);
+        duckdb_vector start_vec = duckdb_data_chunk_get_vector(input, 2);
+        duckdb_vector end_vec = duckdb_data_chunk_get_vector(input, 3);
+        duckdb_type start_type = duckdb_get_type_id(duckdb_vector_get_column_type(start_vec));
+        duckdb_type end_type = duckdb_get_type_id(duckdb_vector_get_column_type(end_vec));
         duckhts_cgranges_entry_t *entry;
-        char *name = NULL, *chrom = NULL;
         int64_t start, end;
+        bool label_valid = false;
+        duckhts_cgr_label_kind_t label_kind = DUCKHTS_CGR_LABEL_ORDINAL;
+        int64_t label_i64 = 0;
+        double label_f64 = 0.0;
+        const char *label_str = NULL;
+        char *label_owned = NULL;
+        bool label_bool = false;
         char err[DUCKHTS_CGRANGES_ERRLEN];
         memset(err, 0, sizeof(err));
 
-        if (!name_val || !chrom_val || !start_val || !end_val) {
+        if (!name || !chrom || row_is_null(start_vec, i) || row_is_null(end_vec, i)) {
+            if (name) duckdb_free(name);
+            if (chrom) duckdb_free(chrom);
+            if (label_owned) duckdb_free(label_owned);
             duckdb_scalar_function_set_error(info, "duckhts_cgranges_add: name, chrom, start, and end must be non-null");
             return;
         }
-        name = duckdb_get_varchar(name_val);
-        chrom = duckdb_get_varchar(chrom_val);
-        start = duckdb_get_int64(start_val);
-        end = duckdb_get_int64(end_val);
-        duckdb_destroy_value(&name_val);
-        duckdb_destroy_value(&chrom_val);
-        duckdb_destroy_value(&start_val);
-        duckdb_destroy_value(&end_val);
+        start = chunk_cell_to_int64(start_vec, i, start_type);
+        end = chunk_cell_to_int64(end_vec, i, end_type);
+
+        if (duckdb_data_chunk_get_column_count(input) > 4) {
+            duckdb_vector label_vec = duckdb_data_chunk_get_vector(input, 4);
+            duckdb_type label_type = duckdb_get_type_id(duckdb_vector_get_column_type(label_vec));
+            if (!row_is_null(label_vec, i)) {
+                label_valid = true;
+                label_kind = normalized_label_kind_from_type(label_type);
+                switch (label_kind) {
+                    case DUCKHTS_CGR_LABEL_BIGINT:
+                        label_i64 = chunk_cell_to_int64(label_vec, i, label_type);
+                        break;
+                    case DUCKHTS_CGR_LABEL_DOUBLE:
+                        if (label_type == DUCKDB_TYPE_FLOAT) {
+                            label_f64 = (double)((float *)duckdb_vector_get_data(label_vec))[i];
+                        } else {
+                            label_f64 = ((double *)duckdb_vector_get_data(label_vec))[i];
+                        }
+                        break;
+                    case DUCKHTS_CGR_LABEL_VARCHAR:
+                        label_owned = chunk_cell_strdup(input, 4, i);
+                        if (!label_owned) {
+                            duckdb_free(name);
+                            duckdb_free(chrom);
+                            duckdb_scalar_function_set_error(info, "duckhts_cgranges_add: out of memory");
+                            return;
+                        }
+                        label_str = label_owned;
+                        break;
+                    case DUCKHTS_CGR_LABEL_BOOLEAN:
+                        label_bool = ((bool *)duckdb_vector_get_data(label_vec))[i];
+                        break;
+                    case DUCKHTS_CGR_LABEL_ORDINAL:
+                    default:
+                        duckdb_free(name);
+                        duckdb_free(chrom);
+                        if (label_owned) duckdb_free(label_owned);
+                        duckdb_scalar_function_set_error(
+                            info,
+                            "duckhts_cgranges: label type must be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN"
+                        );
+                        return;
+                }
+            }
+        }
 
         pthread_mutex_lock(&reg->mutex);
         entry = lookup_entry_locked(reg, name);
         if (!entry) {
             pthread_mutex_unlock(&reg->mutex);
-            if (label_val) duckdb_destroy_value(&label_val);
             duckdb_free(name);
             duckdb_free(chrom);
+            if (label_owned) duckdb_free(label_owned);
             duckdb_scalar_function_set_error(info, "duckhts_cgranges_add: unknown index name");
             return;
         }
         if (entry->building) {
             pthread_mutex_unlock(&reg->mutex);
-            if (label_val) duckdb_destroy_value(&label_val);
             duckdb_free(name);
             duckdb_free(chrom);
+            if (label_owned) duckdb_free(label_owned);
             duckdb_scalar_function_set_error(info, "duckhts_cgranges_add: index is still being constructed");
             return;
         }
-        if (append_interval(entry, chrom, start, end, label_val, err, sizeof(err)) != 0) {
+        if (append_interval_raw(entry, chrom, start, end, label_valid, label_kind, label_i64, label_f64,
+                                label_str, label_bool, err, sizeof(err)) != 0) {
             pthread_mutex_unlock(&reg->mutex);
-            if (label_val) duckdb_destroy_value(&label_val);
             duckdb_free(name);
             duckdb_free(chrom);
+            if (label_owned) duckdb_free(label_owned);
             duckdb_scalar_function_set_error(info, err);
             return;
         }
         pthread_mutex_unlock(&reg->mutex);
-        if (label_val) duckdb_destroy_value(&label_val);
         duckdb_free(name);
         duckdb_free(chrom);
+        if (label_owned) duckdb_free(label_owned);
         set_bool_output(output, i, true);
     }
 }

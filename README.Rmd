@@ -94,6 +94,36 @@ SELECT chrom, start, "end", seq_len, pct_gc
 FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20');
 ```
 
+### cgranges registry entry points
+
+`duckhts_cgranges_*` exposes a session-scoped immutable interval index for
+native overlap queries. You can either build it row-wise with
+`duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or bulk-load it
+from SQL with `duckhts_cgranges_from_query(...)`.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT duckhts_cgranges_create('readme_idx');
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a');
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b');
+SELECT duckhts_cgranges_index('readme_idx');
+
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
+
+SELECT duckhts_cgranges_from_query(
+  'readme_qry_idx',
+  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)',
+  'chrom', 'start', 'end', 'label'
+);
+SELECT duckhts_cgranges_index('readme_qry_idx');
+
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 160, 161, mode := 'contain');
+
+SELECT duckhts_cgranges_destroy('readme_idx');
+SELECT duckhts_cgranges_destroy('readme_qry_idx');
+```
+
 ### Fixed-bin native counting
 
 `bam_bin_counts()` does fixed-width read-start binning directly in native code.

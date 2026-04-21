@@ -56,7 +56,6 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "samtools_idxstats_table.c",
     "bam_bed_coverage.c",
     "cgranges_api.c",
-    "cgranges.c",
     "bcftools_filter.c",
     "bcftools_shim.c",
     "score_udf.c",

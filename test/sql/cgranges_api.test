@@ -89,6 +89,154 @@ FROM duckhts_cgranges_overlaps('qry_idx', 'chr2', 160, 161);
 ----
 0	beta	chr2	150	170
 
+query IIIII
+SELECT
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps('qry_idx', 'chr2', 150, 170, mode := 'contain');
+----
+0	beta	chr2	150	170
+
+statement ok
+CREATE TABLE cgr_num_src AS
+SELECT * FROM (VALUES
+  ('chr3', 5, 15, 11::BIGINT, 1.5::DOUBLE, TRUE),
+  ('chr3', 20, 35, NULL::BIGINT, NULL::DOUBLE, NULL::BOOLEAN),
+  ('chr3', 40, 50, 42::BIGINT, 3.25::DOUBLE, FALSE)
+) AS t(chrom, start, "end", label_i64, label_f64, label_bool);
+
+query I
+SELECT duckhts_cgranges_from_query(
+  'qry_i64',
+  'SELECT chrom, start, "end", label_i64 FROM cgr_num_src',
+  'chrom', 'start', 'end', 'label_i64'
+);
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('qry_i64');
+----
+1
+
+query IIIII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_i64', 'chr3', 10, 12);
+----
+0	11	chr3	5	15
+
+query IIIII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_i64', 'chr3', 22, 24);
+----
+1	NULL	chr3	20	35
+
+query I
+SELECT duckhts_cgranges_from_query(
+  'qry_f64',
+  'SELECT chrom, start, "end", label_f64 FROM cgr_num_src',
+  'chrom', 'start', 'end', 'label_f64'
+);
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('qry_f64');
+----
+1
+
+query IRTII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_f64', 'chr3', 10, 12);
+----
+0	1.5	chr3	5	15
+
+query I
+SELECT duckhts_cgranges_from_query(
+  'qry_bool',
+  'SELECT chrom, start, "end", label_bool FROM cgr_num_src',
+  'chrom', 'start', 'end', 'label_bool'
+);
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('qry_bool');
+----
+1
+
+query ITTII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_bool', 'chr3', 10, 12);
+----
+0	true	chr3	5	15
+
+query ITTII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_bool', 'chr3', 45, 46);
+----
+2	false	chr3	40	50
+
+query I
+SELECT duckhts_cgranges_from_query(
+  'qry_nolabel',
+  'SELECT chrom, start, "end" FROM cgr_num_src',
+  'chrom', 'start', 'end'
+);
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('qry_nolabel');
+----
+1
+
+query IIIII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_nolabel', 'chr3', 45, 46);
+----
+2	2	chr3	40	50
+
+query IIIII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('qry_nolabel', 'chr3', 100, 101);
+----
+
+statement error
+SELECT duckhts_cgranges_from_query(
+  'qry_bad_label',
+  'SELECT chrom, start, "end", [1,2] AS label FROM cgr_num_src LIMIT 1',
+  'chrom', 'start', 'end', 'label'
+);
+----
+duckhts_cgranges_from_query: label column type is unsupported
+
+statement error
+SELECT duckhts_cgranges_from_query(
+  'qry_missing_col',
+  'SELECT chrom, start, "end" FROM cgr_num_src',
+  'chrom', 'start', 'stop'
+);
+----
+duckhts_cgranges_from_query: required columns not found in query result
+
+statement error
+SELECT duckhts_cgranges_from_query(
+  'qry_null_coord',
+  'SELECT chrom, NULL::BIGINT AS start, "end" FROM cgr_num_src LIMIT 1',
+  'chrom', 'start', 'end'
+);
+----
+duckhts_cgranges_from_query: null chrom/start/end encountered at row 1
+
+statement error
+SELECT * FROM duckhts_cgranges_overlaps('qry_idx', 'chr2', 160, 161, mode := 'bad');
+----
+duckhts_cgranges_overlaps: mode must be 'overlap' or 'contain'
+
 statement error
 SELECT duckhts_cgranges_destroy('missing');
 ----

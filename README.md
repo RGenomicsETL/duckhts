@@ -54,6 +54,18 @@ This section is generated from `functions.yaml`.
 | `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
 
+### Intervals
+
+| Function                      | Kind   | Returns | R helper | Description                                                                                                                                                                                                                        |
+|-------------------------------|--------|---------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_cgranges_create`     | scalar | BOOLEAN |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                     |
+| `duckhts_cgranges_add`        | scalar | BOOLEAN |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                        |
+| `duckhts_cgranges_index`      | scalar | BOOLEAN |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                         |
+| `duckhts_cgranges_destroy`    | scalar | BOOLEAN |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                            |
+| `duckhts_cgranges_from_query` | scalar | BOOLEAN |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…). |
+| `duckhts_cgranges_from_table` | scalar | BOOLEAN |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                       |
+| `duckhts_cgranges_overlaps`   | table  | table   |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                           |
+
 ### Metadata
 
 | Function                    | Kind        | Returns | R helper                           | Description                                                                                                                                                                                                                                                                |
@@ -257,6 +269,97 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
     │ CHROMOSOME_I │     0 │    10 │      10 │    0.6 │
     │ CHROMOSOME_I │    10 │    20 │      10 │    0.5 │
     └──────────────┴───────┴───────┴─────────┴────────┘
+
+### cgranges registry entry points
+
+`duckhts_cgranges_*` exposes a session-scoped immutable interval index
+for native overlap queries. You can either build it row-wise with
+`duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or
+bulk-load it from SQL with `duckhts_cgranges_from_query(...)`.
+
+``` sql
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SELECT duckhts_cgranges_create('readme_idx');
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a');
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b');
+SELECT duckhts_cgranges_index('readme_idx');
+
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
+
+SELECT duckhts_cgranges_from_query(
+  'readme_qry_idx',
+  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)',
+  'chrom', 'start', 'end', 'label'
+);
+SELECT duckhts_cgranges_index('readme_qry_idx');
+
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 160, 161, mode := 'contain');
+
+SELECT duckhts_cgranges_destroy('readme_idx');
+SELECT duckhts_cgranges_destroy('readme_qry_idx');
+```
+
+    ┌───────────────────────────────────────┐
+    │ duckhts_cgranges_create('readme_idx') │
+    │                boolean                │
+    ├───────────────────────────────────────┤
+    │ true                                  │
+    └───────────────────────────────────────┘
+    ┌─────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') │
+    │                         boolean                         │
+    ├─────────────────────────────────────────────────────────┤
+    │ true                                                    │
+    └─────────────────────────────────────────────────────────┘
+    ┌─────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') │
+    │                         boolean                         │
+    ├─────────────────────────────────────────────────────────┤
+    │ true                                                    │
+    └─────────────────────────────────────────────────────────┘
+    ┌──────────────────────────────────────┐
+    │ duckhts_cgranges_index('readme_idx') │
+    │               boolean                │
+    ├──────────────────────────────────────┤
+    │ true                                 │
+    └──────────────────────────────────────┘
+    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │                1 │ b       │ chr1           │             30 │           40 │
+    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+    ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_from_query('readme_qry_idx', 'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)', 'chrom', 'start', 'end', 'label') │
+    │                                                                                                  boolean                                                                                                   │
+    ├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+    │ true                                                                                                                                                                                                       │
+    └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+    ┌──────────────────────────────────────────┐
+    │ duckhts_cgranges_index('readme_qry_idx') │
+    │                 boolean                  │
+    ├──────────────────────────────────────────┤
+    │ true                                     │
+    └──────────────────────────────────────────┘
+    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+                                        0 rows                                   
+    ┌────────────────────────────────────────┐
+    │ duckhts_cgranges_destroy('readme_idx') │
+    │                boolean                 │
+    ├────────────────────────────────────────┤
+    │ true                                   │
+    └────────────────────────────────────────┘
+    ┌────────────────────────────────────────────┐
+    │ duckhts_cgranges_destroy('readme_qry_idx') │
+    │                  boolean                   │
+    ├────────────────────────────────────────────┤
+    │ true                                       │
+    └────────────────────────────────────────────┘
 
 ### Fixed-bin native counting
 
@@ -672,8 +775,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r1.fq │     5 │
     │ test/data/r2.fq │     5 │
+    │ test/data/r1.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):

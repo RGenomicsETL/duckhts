@@ -1,5 +1,6 @@
 
 # Rduckhts 1.1.7.9000-0.0.1 (Development version)
+- document bundled `duckhts_cgranges_*` entry points in the generated function catalog and package README, add bundled DBI smoke coverage for the session-scoped cgranges registry API, and include a packaged overlap-conformance script reference for `bedtk`-style parity checks
 - fix bundled `rduckhts_fasta_nuc()` / `fasta_nuc(...)` GC and AT percentages for intervals containing `N`: `pct_gc` and `pct_at` now use only informative `A/C/G/T` bases in the denominator, so ambiguous bases no longer depress reported bin/interval composition percentages; add bundled regression coverage
 - add bundled C-built cgranges bulk-ingest support via `duckhts_cgranges_from_query(...)`, which runs the source query on an extension-owned DuckDB connection and builds the cgranges index in C before publishing it to the session registry; `duckhts_cgranges_from_table(...)` remains deferred for now
 - bundle htslib 1.23.1 in the package for the upstream CRAM decoder and GZI validation security fixes, including the wasm/browser-exposed parsing path shipped through `Rduckhts`
