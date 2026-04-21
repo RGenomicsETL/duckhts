@@ -238,8 +238,8 @@ There is no dedicated R wrapper yet, so use them through `DBI`.
 
 ```{r}
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('readme_idx') AS ok")
-DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20) AS ok")
-DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40) AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') AS ok")
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('readme_idx') AS ok")
 DBI::dbGetQuery(
   con,
@@ -264,7 +264,7 @@ DBI::dbGetQuery(
   con,
   paste(
     "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
-    "FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 160, 161, mode := 'contain')"
+    "FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain')"
   )
 )
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('readme_idx') AS ok")

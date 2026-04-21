@@ -295,7 +295,7 @@ SELECT duckhts_cgranges_from_query(
 SELECT duckhts_cgranges_index('readme_qry_idx');
 
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
-FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 160, 161, mode := 'contain');
+FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain');
 
 SELECT duckhts_cgranges_destroy('readme_idx');
 SELECT duckhts_cgranges_destroy('readme_qry_idx');
@@ -346,8 +346,9 @@ SELECT duckhts_cgranges_destroy('readme_qry_idx');
     ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
     │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
     │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │                1 │ beta    │ chr2           │            150 │          170 │
     └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
-                                        0 rows                                   
     ┌────────────────────────────────────────┐
     │ duckhts_cgranges_destroy('readme_idx') │
     │                boolean                 │

@@ -13,6 +13,11 @@ test_cgranges_api <- function() {
   expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_idx', 'chr1', 30, 40) AS ok")$ok[1], TRUE)
   expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('r_idx') AS ok")$ok[1], TRUE)
 
+  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('r_str_idx') AS ok")$ok[1], TRUE)
+  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_str_idx', 'chr1', 50, 60, 'alpha') AS ok")$ok[1], TRUE)
+  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_str_idx', 'chr1', 70, 80, 'beta') AS ok")$ok[1], TRUE)
+  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('r_str_idx') AS ok")$ok[1], TRUE)
+
   hits <- DBI::dbGetQuery(
     con,
     paste(
@@ -26,6 +31,20 @@ test_cgranges_api <- function() {
   expect_equal(hits$interval_chrom[1], "chr1")
   expect_equal(hits$interval_start[1], 30)
   expect_equal(hits$interval_end[1], 40)
+
+  str_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
+      "FROM duckhts_cgranges_overlaps('r_str_idx', 'chr1', 75, 76)"
+    )
+  )
+  expect_equal(nrow(str_hits), 1)
+  expect_equal(str_hits$interval_ordinal[1], 1)
+  expect_equal(str_hits$label[1], "beta")
+  expect_equal(str_hits$interval_chrom[1], "chr1")
+  expect_equal(str_hits$interval_start[1], 70)
+  expect_equal(str_hits$interval_end[1], 80)
 
   DBI::dbExecute(
     con,

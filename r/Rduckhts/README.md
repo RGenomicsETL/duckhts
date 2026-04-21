@@ -199,9 +199,9 @@ fq_files <- c(
 )
 rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
 dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL")
-#>                                          filename n
-#> 1 /tmp/rduckhts-readme-lib/Rduckhts/extdata/r2.fq 5
-#> 2 /tmp/rduckhts-readme-lib/Rduckhts/extdata/r1.fq 5
+#>                                               filename n
+#> 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5
+#> 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a
@@ -390,8 +390,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_readme_237ee31d713d0.fai
+#>   success                                      index_path
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_readme_28e6de711c55.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -434,10 +434,10 @@ so use them through `DBI`.
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('readme_idx') AS ok")
 #>     ok
 #> 1 TRUE
-DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20) AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') AS ok")
 #>     ok
 #> 1 TRUE
-DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40) AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') AS ok")
 #>     ok
 #> 1 TRUE
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('readme_idx') AS ok")
@@ -451,7 +451,7 @@ DBI::dbGetQuery(
   )
 )
 #>   interval_ordinal label interval_chrom interval_start interval_end
-#> 1                1     1           chr1             30           40
+#> 1                1     b           chr1             30           40
 
 DBI::dbGetQuery(
   con,
@@ -472,12 +472,11 @@ DBI::dbGetQuery(
   con,
   paste(
     "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
-    "FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 160, 161, mode := 'contain')"
+    "FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain')"
   )
 )
-#> [1] interval_ordinal label            interval_chrom   interval_start  
-#> [5] interval_end    
-#> <0 rows> (or 0-length row.names)
+#>   interval_ordinal label interval_chrom interval_start interval_end
+#> 1                1  beta           chr2            150          170
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('readme_idx') AS ok")
 #>     ok
 #> 1 TRUE
@@ -556,10 +555,10 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                 summary_path
-#> 1 /tmp/Rtmpto6UY5/duckhts_readme_mosdepth_237ee68084184.mosdepth.summary.txt
-#>                                                           regions_path
-#> 1 /tmp/Rtmpto6UY5/duckhts_readme_mosdepth_237ee68084184.regions.bed.gz
+#>                                                               summary_path
+#> 1 /tmp/RtmpOX0zjz/duckhts_readme_mosdepth_28e6d2e1eb1.mosdepth.summary.txt
+#>                                                         regions_path
+#> 1 /tmp/RtmpOX0zjz/duckhts_readme_mosdepth_28e6d2e1eb1.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -614,10 +613,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                index_path
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_liftover_src_237ee1c6859df.fa.fai
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_liftover_src_28e6d27ddd3b0.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_liftover_dst_237ee701d78e8.fa.fai
+#>   success                                               index_path
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_liftover_dst_28e6d1c70df9.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -662,7 +661,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                         index_path
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_munge_237ee668588c9.fa.fai
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_munge_28e6d72fea0d2.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -750,7 +749,7 @@ bgzip_meta <- rduckhts_bgzip(
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                          output_path bytes_out
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_targets_237ee67d395bf.bed.gz       169
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_targets_28e6d210f78dc.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -760,8 +759,8 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_targets_roundtrip_237ee24ffb20e.bed       194
+#>   success                                                output_path bytes_out
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_targets_roundtrip_28e6d6714cb2.bed       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -770,7 +769,7 @@ bam_index_meta <- rduckhts_bam_index(
 )
 bam_index_meta
 #>   success                                          index_path index_format
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_range_237ee3478d614.bam.bai          BAI
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_range_28e6d48ba49c2.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -779,7 +778,7 @@ bcf_index_meta <- rduckhts_bcf_index(
 )
 bcf_index_meta
 #>   success                                             index_path index_format
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_variants_237ee2ffcdf0a.bcf.csi          CSI
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_variants_28e6d54434abc.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -789,7 +788,7 @@ tabix_meta <- rduckhts_tabix_index(
 )
 tabix_meta
 #>   success                                               index_path index_format
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_targets_237ee67d395bf.bed.gz.tbi          TBI
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_targets_28e6d210f78dc.bed.gz.tbi          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -855,7 +854,7 @@ fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 #>   success                                       index_path
-#> 1    TRUE /tmp/Rtmpto6UY5/duckhts_readme_237ee700a5736.fai
+#> 1    TRUE /tmp/RtmpOX0zjz/duckhts_readme_28e6d781977fd.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
@@ -1190,9 +1189,9 @@ head(index_spans[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_
 
 index_raw <- rduckhts_hts_index_raw(con, bcf_path, index_path = bcf_index_path)
 head(index_raw, 1)
-#> [1] index_type                                                  
-#> [2] '/tmp/rduckhts-readme-lib/Rduckhts/extdata/vcf_file.bcf.csi'
-#> [3] raw                                                         
+#> [1] index_type                                                       
+#> [2] '/usr/local/lib/R/site-library/Rduckhts/extdata/vcf_file.bcf.csi'
+#> [3] raw                                                              
 #> <0 rows> (or 0-length row.names)
 ```
 
