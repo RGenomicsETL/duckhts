@@ -55,6 +55,8 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "bam_bin_counts.c",
     "samtools_idxstats_table.c",
     "bam_bed_coverage.c",
+    "cgranges_api.c",
+    "cgranges.c",
     "bcftools_filter.c",
     "bcftools_shim.c",
     "score_udf.c",
@@ -69,7 +71,13 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   dir.create(inc_dest, showWarnings = FALSE)
   inc_files <- list.files(file.path(src_dir, "include"), full.names = FALSE)
   file.copy(file.path(src_dir, "include", inc_files), inc_dest)
-  message("  Copied ", length(inc_files), " header files")
+  cgranges_dir <- file.path(repo_root, "third_party", "cgranges")
+  file.copy(file.path(cgranges_dir, c("cgranges.h", "khash.h")), inc_dest)
+  message("  Copied ", length(inc_files) + 2L, " header files")
+
+  # Vendored cgranges C source
+  file.copy(file.path(repo_root, "third_party", "cgranges", "cgranges.c"), dest)
+  message("  Copied vendored cgranges source")
 
   # DuckDB C API headers
   capi_dest <- file.path(dest, "duckdb_capi")
@@ -241,6 +249,8 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "bam_bin_counts.c",
       "samtools_idxstats_table.c",
       "bam_bed_coverage.c",
+      "cgranges_api.c",
+      "cgranges.c",
       "bcftools_filter.c",
       "bcftools_shim.c",
       "score_udf.c",
