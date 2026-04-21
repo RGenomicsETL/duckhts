@@ -1,0 +1,93 @@
+---
+title: "DuckHTS cgranges Benchmark"
+output: github_document
+---
+
+<!-- benchmark_cgranges.md is generated from benchmark_cgranges.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE)
+```
+
+# Benchmark
+
+This benchmark measures:
+
+- `duckhts_cgranges_from_query(...)` + `duckhts_cgranges_index(...)`
+- repeated bound overlap probes through `duckhts_cgranges_overlaps(...)`
+- upstream `bedtk flt` as the overlap-existence comparator
+- wall time and peak RSS for both engines
+
+It uses a deterministic synthetic interval set so the benchmark is stable and
+rerunnable.
+
+# Run
+
+```sh
+python3 scripts/cgranges_benchmark.py \
+  --extension build/release/duckhts.duckdb_extension \
+  --bedtk .sync/bedtk/bedtk \
+  --subjects 50000 \
+  --queries 5000 \
+  --passes 3 \
+  --out-dir .tmp/cgranges_benchmark
+```
+
+```{r setup, include = FALSE}
+library(readr)
+library(knitr)
+
+repo_root <- normalizePath(file.path(dirname(knitr::current_input()), ".."), mustWork = TRUE)
+out_dir <- file.path(repo_root, ".tmp", "cgranges_benchmark")
+summary_csv <- file.path(out_dir, "summary.csv")
+
+subjects <- as.integer(Sys.getenv("CGRANGES_BENCH_SUBJECTS", unset = "50000"))
+queries <- as.integer(Sys.getenv("CGRANGES_BENCH_QUERIES", unset = "5000"))
+passes <- as.integer(Sys.getenv("CGRANGES_BENCH_PASSES", unset = "3"))
+
+if (!file.exists(summary_csv)) {
+  cmd <- c(
+    file.path(repo_root, "scripts", "cgranges_benchmark.py"),
+    "--extension", file.path(repo_root, "build", "release", "duckhts.duckdb_extension"),
+    "--bedtk", file.path(repo_root, ".sync", "bedtk", "bedtk"),
+    "--subjects", as.character(subjects),
+    "--queries", as.character(queries),
+    "--passes", as.character(passes),
+    "--out-dir", out_dir
+  )
+  system2("python3", cmd, stdout = TRUE, stderr = TRUE)
+}
+
+bench <- readr::read_csv(summary_csv, show_col_types = FALSE)
+bench$time_per_query_ms <- (bench$query_total_sec / (bench$queries * bench$passes)) * 1000
+bench$peak_rss_mb <- round(bench$peak_rss_mb, 1)
+bench$build_index_sec <- round(bench$build_index_sec, 3)
+bench$query_total_sec <- round(bench$query_total_sec, 3)
+bench$query_pass_1_sec <- round(bench$query_pass_1_sec, 3)
+bench$total_elapsed_sec <- round(bench$total_elapsed_sec, 3)
+bench$time_per_query_ms <- round(bench$time_per_query_ms, 4)
+```
+
+# Configuration
+
+```{r, echo=FALSE}
+knitr::kable(
+  data.frame(
+    parameter = c("subjects", "queries", "passes"),
+    value = c(subjects, queries, passes)
+  )
+)
+```
+
+# Results
+
+```{r, echo=FALSE}
+knitr::kable(bench)
+```
+
+# Notes
+
+- `bedtk` reports overlap-existence for the whole query BED in one pass.
+- DuckHTS builds an immutable registry index once, then reuses it across probe passes.
+- `matched_query_intervals` should agree across both engines.
+- `build_index_sec` is only meaningful for DuckHTS because the public API exposes an explicit build/finalize step.
