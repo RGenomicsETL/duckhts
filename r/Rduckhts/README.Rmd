@@ -234,6 +234,10 @@ unlink(fai_path)
 The bundled extension also exposes SQL-first `duckhts_cgranges_*` entry points.
 These are session-scoped interval indexes that you can populate either row-wise
 or in bulk from a SQL query, then query through `duckhts_cgranges_overlaps(...)`.
+For larger probe sets, `duckhts_cgranges_overlaps_bulk(...)` streams a probe
+query through the finalized index in one table-function call. The probe query
+runs on the extension-owned helper connection, so use a regular table or view
+rather than a temp table.
 There is no dedicated R wrapper yet, so use them through `DBI`.
 
 ```{r}
@@ -265,6 +269,29 @@ DBI::dbGetQuery(
   paste(
     "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
     "FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain')"
+  )
+)
+DBI::dbExecute(
+  con,
+  paste(
+    "CREATE TABLE readme_probes AS SELECT * FROM (VALUES",
+    "(10, 'chr2', 100, 105),",
+    "(20, 'chr2', 160, 161),",
+    "(30, 'chr2', 500, 510)",
+    ") AS t(probe_id, chrom, start, \"end\")"
+  )
+)
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end",
+    "FROM duckhts_cgranges_overlaps_bulk(",
+    "  'readme_qry_idx',",
+    "  'SELECT probe_id, chrom, start, \"end\" FROM readme_probes',",
+    "  'chrom', 'start', 'end',",
+    "  query_row_id_col := 'probe_id'",
+    ")",
+    "ORDER BY query_row_id, interval_ordinal"
   )
 )
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('readme_idx') AS ok")

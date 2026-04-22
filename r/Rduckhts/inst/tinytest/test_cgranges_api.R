@@ -97,6 +97,71 @@ test_cgranges_api <- function() {
   expect_equal(null_hits$interval_start[1], 140)
   expect_equal(null_hits$interval_end[1], 170)
 
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE TABLE cgr_probe_src AS SELECT * FROM (VALUES",
+      "(10::BIGINT, 'chr2', 100, 105),",
+      "(20::BIGINT, 'chr2', 160, 161),",
+      "(30::BIGINT, 'chr2', 500, 510),",
+      "(40::BIGINT, 'chr2', 140, 170)",
+      ") AS t(qid, chrom, start, \"end\")"
+    )
+  )
+
+  bulk_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT query_row_id, interval_ordinal, label, interval_start, interval_end",
+      "FROM duckhts_cgranges_overlaps_bulk(",
+      "  'qry_idx',",
+      "  'SELECT qid, chrom, start, \"end\" FROM cgr_probe_src',",
+      "  'chrom', 'start', 'end',",
+      "  query_row_id_col := 'qid'",
+      ")",
+      "ORDER BY query_row_id, interval_ordinal"
+    )
+  )
+  expect_equal(nrow(bulk_hits), 3)
+  expect_equal(bulk_hits$query_row_id, c(10, 20, 40))
+  expect_equal(bulk_hits$interval_ordinal, c(0, 1, 1))
+  expect_equal(as.character(bulk_hits$label), c("11", NA_character_, NA_character_))
+  expect_equal(bulk_hits$interval_start, c(100, 140, 140))
+  expect_equal(bulk_hits$interval_end, c(120, 170, 170))
+
+  auto_qid_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT query_row_id, interval_ordinal, label, interval_start, interval_end",
+      "FROM duckhts_cgranges_overlaps_bulk(",
+      "  'qry_idx',",
+      "  'SELECT chrom, start, \"end\" FROM cgr_probe_src',",
+      "  'chrom', 'start', 'end'",
+      ")",
+      "ORDER BY query_row_id, interval_ordinal"
+    )
+  )
+  expect_equal(auto_qid_hits$query_row_id, c(1, 2, 4))
+  expect_equal(auto_qid_hits$interval_ordinal, c(0, 1, 1))
+
+  contain_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT query_row_id, interval_ordinal, label, interval_start, interval_end",
+      "FROM duckhts_cgranges_overlaps_bulk(",
+      "  'qry_idx',",
+      "  'SELECT qid, chrom, start, \"end\" FROM cgr_probe_src',",
+      "  'chrom', 'start', 'end',",
+      "  mode := 'contain',",
+      "  query_row_id_col := 'qid'",
+      ")",
+      "ORDER BY query_row_id, interval_ordinal"
+    )
+  )
+  expect_equal(contain_hits$query_row_id, 40)
+  expect_equal(contain_hits$interval_ordinal, 1)
+  expect_true(is.na(contain_hits$label[1]))
+
   expect_error(
     DBI::dbGetQuery(con, "SELECT * FROM duckhts_cgranges_overlaps('missing', 'chr1', 1, 2)"),
     pattern = "unknown index name"

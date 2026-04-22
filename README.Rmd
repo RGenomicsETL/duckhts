@@ -99,7 +99,11 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
 `duckhts_cgranges_*` exposes a session-scoped immutable interval index for
 native overlap queries. You can either build it row-wise with
 `duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or bulk-load it
-from SQL with `duckhts_cgranges_from_query(...)`.
+from SQL with `duckhts_cgranges_from_query(...)`. For many probe intervals,
+`duckhts_cgranges_overlaps_bulk(...)` streams a query of probes through the
+finalized index in one table-function call instead of paying bind overhead once
+per probe. The probe query runs on the extension-owned helper connection, so
+use a regular table or view rather than a temp table.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT duckhts_cgranges_create('readme_idx');
@@ -120,8 +124,25 @@ SELECT duckhts_cgranges_index('readme_qry_idx');
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain');
 
+CREATE TABLE readme_probes AS
+SELECT * FROM (VALUES
+  (10, 'chr2', 100, 105),
+  (20, 'chr2', 160, 161),
+  (30, 'chr2', 500, 510)
+) AS t(probe_id, chrom, start, "end");
+
+SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps_bulk(
+  'readme_qry_idx',
+  'SELECT probe_id, chrom, start, "end" FROM readme_probes',
+  'chrom', 'start', 'end',
+  query_row_id_col := 'probe_id'
+)
+ORDER BY query_row_id, interval_ordinal;
+
 SELECT duckhts_cgranges_destroy('readme_idx');
 SELECT duckhts_cgranges_destroy('readme_qry_idx');
+DROP TABLE readme_probes;
 ```
 
 ### Fixed-bin native counting

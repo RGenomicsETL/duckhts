@@ -101,6 +101,71 @@ FROM duckhts_cgranges_overlaps('qry_idx', 'chr2', 150, 170, mode := 'contain');
 0	beta	chr2	150	170
 
 statement ok
+CREATE TABLE cgr_probe_src AS
+SELECT * FROM (VALUES
+  (10::BIGINT, 'chr2', 100, 105),
+  (20::BIGINT, 'chr2', 160, 161),
+  (30::BIGINT, 'chr2', 500, 510),
+  (40::BIGINT, 'chr2', 150, 170)
+) AS t(qid, chrom, start, "end");
+
+query IIIIII
+SELECT
+  query_row_id,
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps_bulk(
+  'qry_idx',
+  'SELECT qid, chrom, start, "end" FROM cgr_probe_src',
+  'chrom', 'start', 'end',
+  query_row_id_col := 'qid'
+)
+ORDER BY query_row_id, interval_ordinal;
+----
+20	0	beta	chr2	150	170
+40	0	beta	chr2	150	170
+
+query IIIIII
+SELECT
+  query_row_id,
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps_bulk(
+  'qry_idx',
+  'SELECT chrom, start, "end" FROM cgr_probe_src',
+  'chrom', 'start', 'end'
+)
+ORDER BY query_row_id, interval_ordinal;
+----
+2	0	beta	chr2	150	170
+4	0	beta	chr2	150	170
+
+query IIIIII
+SELECT
+  query_row_id,
+  interval_ordinal,
+  label,
+  interval_chrom,
+  interval_start,
+  interval_end
+FROM duckhts_cgranges_overlaps_bulk(
+  'qry_idx',
+  'SELECT qid, chrom, start, "end" FROM cgr_probe_src',
+  'chrom', 'start', 'end',
+  mode := 'contain',
+  query_row_id_col := 'qid'
+)
+ORDER BY query_row_id, interval_ordinal;
+----
+40	0	beta	chr2	150	170
+
+statement ok
 CREATE TABLE cgr_num_src AS
 SELECT * FROM (VALUES
   ('chr3', 5, 15, 11::BIGINT, 1.5::DOUBLE, TRUE),

@@ -192,6 +192,18 @@
       ]
     },
     {
+      "name": "duckhts_cgranges_overlaps_bulk",
+      "kind": "table",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_overlaps_bulk(name, query, chrom_col, start_col, end_col, mode := 'overlap', query_row_id_col := NULL)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.",
+      "examples": [
+        "SELECT * FROM duckhts_cgranges_overlaps_bulk('targets_idx', 'SELECT probe_id, chrom, start, \"end\" FROM probes', 'chrom', 'start', 'end', query_row_id_col := 'probe_id');"
+      ]
+    },
+    {
       "name": "read_fastq",
       "kind": "table",
       "category": "Readers",

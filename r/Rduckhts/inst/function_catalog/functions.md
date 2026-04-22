@@ -29,6 +29,7 @@ This section is generated from `functions.yaml`.
 | `duckhts_cgranges_from_query` | scalar | BOOLEAN |  | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(...). |
 | `duckhts_cgranges_from_table` | scalar | BOOLEAN |  | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(...). |
 | `duckhts_cgranges_overlaps` | table | table |  | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates. |
+| `duckhts_cgranges_overlaps_bulk` | table | table |  | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal. |
 
 ### Metadata
 

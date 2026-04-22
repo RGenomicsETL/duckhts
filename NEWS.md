@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.1.7.9000 Developement version
+- add `duckhts_cgranges_overlaps_bulk(...)`: streams a SQL query of overlap probes through a finalized cgranges index in one table-function invocation, supports `mode := 'overlap'|'contain'`, accepts an optional `query_row_id_col`, and defaults `query_row_id` to the 1-based probe row ordinal when no id column is supplied; add SQL/R coverage for the new bulk path and its generated row ids
 - expand cgranges conformance and documentation: add typed/null/contain/error SQL coverage for `duckhts_cgranges_*`, add a `bedtk`-based overlap-existence parity script under `test/scripts/cgranges_bedtk_conformance.py`, publish the cgranges entry points in `functions.yaml`, and add root/package README examples for row-wise and `from_query(...)` construction
 - fix `fasta_nuc(...)` GC/AT percentage denominators for intervals containing `N`: `pct_gc` and `pct_at` now divide by informative `A/C/G/T` bases only instead of total sequence length, so ambiguous bases no longer dilute bin/interval composition percentages; add SQL and R regression coverage
 - add C-built bulk cgranges population through `duckhts_cgranges_from_query(...)`, executing the source query on an extension-owned DuckDB connection and building the cgranges index in C before publishing it to the session registry; keep `duckhts_cgranges_from_table(...)` deferred for now and add SQL coverage for the new query-ingest path plus overlap queries

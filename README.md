@@ -56,15 +56,16 @@ This section is generated from `functions.yaml`.
 
 ### Intervals
 
-| Function                      | Kind   | Returns | R helper | Description                                                                                                                                                                                                                        |
-|-------------------------------|--------|---------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `duckhts_cgranges_create`     | scalar | BOOLEAN |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                     |
-| `duckhts_cgranges_add`        | scalar | BOOLEAN |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                        |
-| `duckhts_cgranges_index`      | scalar | BOOLEAN |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                         |
-| `duckhts_cgranges_destroy`    | scalar | BOOLEAN |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                            |
-| `duckhts_cgranges_from_query` | scalar | BOOLEAN |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…). |
-| `duckhts_cgranges_from_table` | scalar | BOOLEAN |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                       |
-| `duckhts_cgranges_overlaps`   | table  | table   |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                           |
+| Function                         | Kind   | Returns | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                              |
+|----------------------------------|--------|---------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_cgranges_create`        | scalar | BOOLEAN |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                                                                                                                                                                                                           |
+| `duckhts_cgranges_add`           | scalar | BOOLEAN |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                                                                                                                                                                                                              |
+| `duckhts_cgranges_index`         | scalar | BOOLEAN |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                                                                                                                                                                                                               |
+| `duckhts_cgranges_destroy`       | scalar | BOOLEAN |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                                                                                                                                                                                                                  |
+| `duckhts_cgranges_from_query`    | scalar | BOOLEAN |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…).                                                                                                                                                                                       |
+| `duckhts_cgranges_from_table`    | scalar | BOOLEAN |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                                                                                                                                                                                                             |
+| `duckhts_cgranges_overlaps`      | table  | table   |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                                                                                                                                                                                                                 |
+| `duckhts_cgranges_overlaps_bulk` | table  | table   |          | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal. |
 
 ### Metadata
 
@@ -275,7 +276,12 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
 `duckhts_cgranges_*` exposes a session-scoped immutable interval index
 for native overlap queries. You can either build it row-wise with
 `duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or
-bulk-load it from SQL with `duckhts_cgranges_from_query(...)`.
+bulk-load it from SQL with `duckhts_cgranges_from_query(...)`. For many
+probe intervals, `duckhts_cgranges_overlaps_bulk(...)` streams a query
+of probes through the finalized index in one table-function call instead
+of paying bind overhead once per probe. The probe query runs on the
+extension-owned helper connection, so use a regular table or view rather
+than a temp table.
 
 ``` sql
 LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
@@ -297,8 +303,25 @@ SELECT duckhts_cgranges_index('readme_qry_idx');
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain');
 
+CREATE TABLE readme_probes AS
+SELECT * FROM (VALUES
+  (10, 'chr2', 100, 105),
+  (20, 'chr2', 160, 161),
+  (30, 'chr2', 500, 510)
+) AS t(probe_id, chrom, start, "end");
+
+SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps_bulk(
+  'readme_qry_idx',
+  'SELECT probe_id, chrom, start, "end" FROM readme_probes',
+  'chrom', 'start', 'end',
+  query_row_id_col := 'probe_id'
+)
+ORDER BY query_row_id, interval_ordinal;
+
 SELECT duckhts_cgranges_destroy('readme_idx');
 SELECT duckhts_cgranges_destroy('readme_qry_idx');
+DROP TABLE readme_probes;
 ```
 
     ┌───────────────────────────────────────┐
@@ -349,6 +372,13 @@ SELECT duckhts_cgranges_destroy('readme_qry_idx');
     ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
     │                1 │ beta    │ chr2           │            150 │          170 │
     └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+    ┌──────────────┬──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ query_row_id │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │    int64     │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────┼──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │           10 │                0 │ alpha   │ chr2           │            100 │          110 │
+    │           20 │                1 │ beta    │ chr2           │            150 │          170 │
+    └──────────────┴──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
     ┌────────────────────────────────────────┐
     │ duckhts_cgranges_destroy('readme_idx') │
     │                boolean                 │
@@ -776,8 +806,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r2.fq │     5 │
     │ test/data/r1.fq │     5 │
+    │ test/data/r2.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):
