@@ -140,6 +140,42 @@ SELECT COALESCE(CAST(duckhts_cgranges_has_overlap('qry_idx', NULL::VARCHAR, 1, 2
 ----
 NULL
 
+query IITTTII
+SELECT
+  p.qid,
+  hit.interval_ordinal,
+  hit.label,
+  hit.label_type,
+  hit.interval_chrom,
+  hit.interval_start,
+  hit.interval_end
+FROM cgr_probe_src AS p
+CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p."end")) AS u(hit)
+ORDER BY p.qid, hit.interval_ordinal;
+----
+20	0	beta	VARCHAR	chr2	150	170
+40	0	beta	VARCHAR	chr2	150	170
+
+query IITTTII
+SELECT
+  p.qid,
+  hit.interval_ordinal,
+  hit.label,
+  hit.label_type,
+  hit.interval_chrom,
+  hit.interval_start,
+  hit.interval_end
+FROM cgr_probe_src AS p
+CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p."end", 'contain')) AS u(hit)
+ORDER BY p.qid, hit.interval_ordinal;
+----
+40	0	beta	VARCHAR	chr2	150	170
+
+query I
+SELECT duckhts_cgranges_overlaps_list('qry_idx', NULL::VARCHAR, 1, 2) IS NULL;
+----
+1
+
 query I
 SELECT duckhts_cgranges_from_query(
   'bed_from_query_idx',
@@ -180,6 +216,23 @@ FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed')
 WHERE duckhts_cgranges_has_overlap('bed_provider_idx', chrom, start, "end");
 ----
 2	2
+
+query TIIITTII
+SELECT
+  q.chrom,
+  q.start,
+  q."end",
+  hit.interval_ordinal,
+  hit.label,
+  hit.label_type,
+  hit.interval_start,
+  hit.interval_end
+FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed') AS q
+CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('bed_provider_idx', q.chrom, q.start, q."end")) AS u(hit)
+ORDER BY q.chrom, q.start, hit.interval_ordinal;
+----
+CHROMOSOME_I	0	10	0	0	ORDINAL	5	15
+CHROMOSOME_I	10	20	0	0	ORDINAL	5	15
 
 query IIIIII
 SELECT
@@ -270,6 +323,18 @@ SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('qry_i64', 'chr3', 22, 24);
 ----
 1	NULL	chr3	20	35
+
+query ITTII
+SELECT hit.interval_ordinal, hit.label, hit.label_type, hit.interval_start, hit.interval_end
+FROM UNNEST(duckhts_cgranges_overlaps_list('qry_i64', 'chr3', 10, 12)) AS u(hit);
+----
+0	11	BIGINT	5	15
+
+query ITTII
+SELECT hit.interval_ordinal, hit.label, hit.label_type, hit.interval_start, hit.interval_end
+FROM UNNEST(duckhts_cgranges_overlaps_list('qry_i64', 'chr3', 22, 24)) AS u(hit);
+----
+1	NULL	BIGINT	20	35
 
 query I
 SELECT duckhts_cgranges_from_query(

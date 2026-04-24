@@ -237,11 +237,13 @@ or in bulk from a SQL query, then query through `duckhts_cgranges_overlaps(...)`
 For row-preserving filters or count annotations over provider rows, use the
 vectorized scalar helpers `duckhts_cgranges_has_overlap(...)` and
 `duckhts_cgranges_count_overlaps(...)` directly in queries over `read_bed(...)`,
-`read_bam(...)`, `read_bcf(...)`, or regular tables. For one-row-per-hit
-expansion over a larger probe set, `duckhts_cgranges_overlaps_bulk(...)` accepts
-a probe query and emits matching indexed intervals in one table-function call.
-That bulk query runs on the extension-owned helper connection, so use a regular
-table or view rather than a temp table.
+`read_bam(...)`, `read_bcf(...)`, or regular tables. For streaming
+one-row-per-hit expansion while keeping provider columns, use
+`duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)`. The older
+`duckhts_cgranges_overlaps_bulk(...)` table function still accepts a probe query
+and emits matching indexed intervals in one table-function call; that bulk query
+runs on the extension-owned helper connection, so use a regular table or view
+rather than a temp table.
 There is no dedicated R wrapper yet, so use them through `DBI`.
 
 ```{r}
@@ -283,6 +285,18 @@ DBI::dbExecute(
     "(20, 'chr2', 160, 161),",
     "(30, 'chr2', 500, 510)",
     ") AS t(probe_id, chrom, start, \"end\")"
+  )
+)
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT p.probe_id, hit.interval_ordinal, hit.label, hit.label_type,",
+    "  hit.interval_chrom, hit.interval_start, hit.interval_end",
+    "FROM readme_probes AS p",
+    "CROSS JOIN UNNEST(",
+    "  duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p.\"end\")",
+    ") AS u(hit)",
+    "ORDER BY p.probe_id, hit.interval_ordinal"
   )
 )
 DBI::dbGetQuery(

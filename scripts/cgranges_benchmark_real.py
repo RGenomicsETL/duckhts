@@ -5,7 +5,8 @@ This delegates to ``scripts/cgranges_benchmark.py`` and supplies the repo's
 DuckBedQC GRCh38 exon/clinical-region BED files by default. The delegated
 benchmark uses streaming ``read_bed(...)`` provider rows plus the vectorized
 ``duckhts_cgranges_has_overlap`` / ``duckhts_cgranges_count_overlaps`` scalar
-helpers; it does not generate giant UNION ALL bulk-query SQL.
+helpers and ``duckhts_cgranges_overlaps_list`` + ``UNNEST`` expansion; it does
+not generate giant UNION ALL bulk-query SQL.
 """
 from __future__ import annotations
 

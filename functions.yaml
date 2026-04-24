@@ -204,6 +204,18 @@
       ]
     },
     {
+      "name": "duckhts_cgranges_overlaps_list",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_overlaps_list(name, chrom, start, end[, mode])",
+      "returns": "STRUCT(interval_ordinal BIGINT, label VARCHAR, label_type VARCHAR, interval_chrom VARCHAR, interval_start INTEGER, interval_end INTEGER)[]",
+      "r_wrapper": "",
+      "description": "Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL.",
+      "examples": [
+        "SELECT q.*, hit.interval_chrom, hit.interval_start, hit.interval_end, hit.label FROM read_bed('queries.bed') AS q CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('targets_idx', q.chrom, q.start, q.\"end\")) AS u(hit);"
+      ]
+    },
+    {
       "name": "duckhts_cgranges_overlaps",
       "kind": "table",
       "category": "Intervals",

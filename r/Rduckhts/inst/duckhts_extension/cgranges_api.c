@@ -110,6 +110,8 @@ typedef struct {
     int64_t hits_cap;
     int64_t n_hits;
     int64_t emitted;
+    char *chrom_scratch;
+    size_t chrom_scratch_cap;
     bool done;
 } duckhts_cgranges_overlaps_bulk_init_t;
 
@@ -1573,6 +1575,265 @@ static void cgranges_count_overlaps_scalar(duckdb_function_info info, duckdb_dat
     cgranges_probe_scalar_common(info, input, output, true);
 }
 
+static const char *label_kind_name(duckhts_cgr_label_kind_t kind) {
+    switch (kind) {
+        case DUCKHTS_CGR_LABEL_BIGINT: return "BIGINT";
+        case DUCKHTS_CGR_LABEL_DOUBLE: return "DOUBLE";
+        case DUCKHTS_CGR_LABEL_VARCHAR: return "VARCHAR";
+        case DUCKHTS_CGR_LABEL_BOOLEAN: return "BOOLEAN";
+        case DUCKHTS_CGR_LABEL_ORDINAL:
+        default: return "ORDINAL";
+    }
+}
+
+static void assign_label_text_output(duckhts_cgranges_entry_t *entry, int32_t ordinal,
+                                     duckdb_vector label_vec, idx_t out_idx) {
+    char buf[64];
+    if (!entry || ordinal < 0 || (size_t)ordinal >= entry->payload.count) {
+        set_null(label_vec, out_idx);
+        return;
+    }
+    switch (entry->payload.kind) {
+        case DUCKHTS_CGR_LABEL_BIGINT:
+            if (!entry->payload.label_valid[ordinal]) {
+                set_null(label_vec, out_idx);
+            } else {
+                snprintf(buf, sizeof(buf), "%lld", (long long)entry->payload.labels.i64[ordinal]);
+                duckdb_vector_assign_string_element(label_vec, out_idx, buf);
+            }
+            break;
+        case DUCKHTS_CGR_LABEL_DOUBLE:
+            if (!entry->payload.label_valid[ordinal]) {
+                set_null(label_vec, out_idx);
+            } else {
+                snprintf(buf, sizeof(buf), "%.17g", entry->payload.labels.f64[ordinal]);
+                duckdb_vector_assign_string_element(label_vec, out_idx, buf);
+            }
+            break;
+        case DUCKHTS_CGR_LABEL_VARCHAR:
+            if (!entry->payload.label_valid[ordinal]) {
+                set_null(label_vec, out_idx);
+            } else {
+                duckdb_vector_assign_string_element(label_vec, out_idx,
+                                                    entry->payload.labels.str[ordinal]);
+            }
+            break;
+        case DUCKHTS_CGR_LABEL_BOOLEAN:
+            if (!entry->payload.label_valid[ordinal]) {
+                set_null(label_vec, out_idx);
+            } else {
+                duckdb_vector_assign_string_element(label_vec, out_idx,
+                                                    entry->payload.labels.b[ordinal] ? "true" : "false");
+            }
+            break;
+        case DUCKHTS_CGR_LABEL_ORDINAL:
+        default:
+            snprintf(buf, sizeof(buf), "%d", ordinal);
+            duckdb_vector_assign_string_element(label_vec, out_idx, buf);
+            break;
+    }
+}
+
+static void cgranges_overlaps_list_scalar(duckdb_function_info info, duckdb_data_chunk input,
+                                          duckdb_vector output) {
+    duckhts_cgranges_registry_t *reg = get_registry_from_function(info);
+    idx_t n = duckdb_data_chunk_get_size(input), i;
+    idx_t n_cols = duckdb_data_chunk_get_column_count(input);
+    duckdb_vector name_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector chrom_vec = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector start_vec = duckdb_data_chunk_get_vector(input, 2);
+    duckdb_vector end_vec = duckdb_data_chunk_get_vector(input, 3);
+    duckdb_vector mode_vec = n_cols > 4 ? duckdb_data_chunk_get_vector(input, 4) : NULL;
+    int64_t *start_data = (int64_t *)duckdb_vector_get_data(start_vec);
+    int64_t *end_data = (int64_t *)duckdb_vector_get_data(end_vec);
+    duckhts_cgranges_entry_t **row_entries = NULL;
+    int64_t *row_counts = NULL;
+    uint8_t *row_contain = NULL;
+    uint8_t *row_nulls = NULL;
+    char *chrom_buf = NULL;
+    size_t chrom_cap = 0;
+    int64_t *hits = NULL;
+    int64_t hits_cap = 0;
+    char err[DUCKHTS_CGRANGES_ERRLEN];
+    int failed = 0;
+    uint64_t total_hits = 0;
+    duckdb_list_entry *list_data;
+
+    memset(err, 0, sizeof(err));
+    if (n == 0) {
+        duckdb_list_vector_set_size(output, 0);
+        return;
+    }
+    row_entries = (duckhts_cgranges_entry_t **)calloc((size_t)n, sizeof(*row_entries));
+    row_counts = (int64_t *)calloc((size_t)n, sizeof(*row_counts));
+    row_contain = (uint8_t *)calloc((size_t)n, sizeof(*row_contain));
+    row_nulls = (uint8_t *)calloc((size_t)n, sizeof(*row_nulls));
+    if (!row_entries || !row_counts || !row_contain || !row_nulls) {
+        snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: out of memory");
+        failed = 1;
+        goto cleanup;
+    }
+
+    for (i = 0; i < n; i++) {
+        duckhts_cgr_string_view_t name_view;
+        duckhts_cgr_string_view_t chrom_view;
+        bool contain = false;
+        int64_t start;
+        int64_t end;
+        duckhts_cgranges_entry_t *entry;
+
+        if (row_is_null(name_vec, i) || row_is_null(chrom_vec, i) ||
+            row_is_null(start_vec, i) || row_is_null(end_vec, i) ||
+            (mode_vec && row_is_null(mode_vec, i))) {
+            row_nulls[i] = 1;
+            continue;
+        }
+
+        name_view = string_view_from_vector(name_vec, i);
+        chrom_view = string_view_from_vector(chrom_vec, i);
+        if (name_view.len == 0 || chrom_view.len == 0) {
+            snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: name and chrom must be non-empty");
+            failed = 1;
+            goto cleanup;
+        }
+
+        if (mode_vec) {
+            duckhts_cgr_string_view_t mode_view = string_view_from_vector(mode_vec, i);
+            if (mode_view.len == 7 && memcmp(mode_view.data, "overlap", 7) == 0) {
+                contain = false;
+            } else if (mode_view.len == 7 && memcmp(mode_view.data, "contain", 7) == 0) {
+                contain = true;
+            } else {
+                snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: mode must be 'overlap' or 'contain'");
+                failed = 1;
+                goto cleanup;
+            }
+        }
+
+        start = start_data[i];
+        end = end_data[i];
+        if (start < 0 || end < start || end > INT32_MAX) {
+            snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: invalid chrom/start/end");
+            failed = 1;
+            goto cleanup;
+        }
+
+        pthread_mutex_lock(&reg->mutex);
+        entry = lookup_entry_view_locked(reg, name_view);
+        if (!entry) {
+            pthread_mutex_unlock(&reg->mutex);
+            snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: unknown index name");
+            failed = 1;
+            goto cleanup;
+        }
+        if (entry->building) {
+            pthread_mutex_unlock(&reg->mutex);
+            snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: index is still being constructed");
+            failed = 1;
+            goto cleanup;
+        }
+        if (!entry->indexed) {
+            pthread_mutex_unlock(&reg->mutex);
+            snprintf(err, sizeof(err),
+                     "duckhts_cgranges_overlaps_list: index is not finalized; call duckhts_cgranges_index first");
+            failed = 1;
+            goto cleanup;
+        }
+        entry->ref_count++;
+        pthread_mutex_unlock(&reg->mutex);
+        row_entries[i] = entry;
+        row_contain[i] = contain ? 1 : 0;
+
+        if (ensure_cstr_scratch(&chrom_buf, &chrom_cap, chrom_view, err, sizeof(err)) != 0) {
+            failed = 1;
+            goto cleanup;
+        }
+        row_counts[i] = cgranges_match_count(entry->cr, chrom_buf, (int32_t)start, (int32_t)end,
+                                             contain, false);
+        total_hits += (uint64_t)row_counts[i];
+    }
+
+    if (duckdb_list_vector_reserve(output, (idx_t)total_hits) == DuckDBError ||
+        duckdb_list_vector_set_size(output, (idx_t)total_hits) == DuckDBError) {
+        snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: out of memory");
+        failed = 1;
+        goto cleanup;
+    }
+
+    list_data = (duckdb_list_entry *)duckdb_vector_get_data(output);
+    total_hits = 0;
+    for (i = 0; i < n; i++) {
+        list_data[i].offset = total_hits;
+        list_data[i].length = row_nulls[i] ? 0 : (uint64_t)row_counts[i];
+        if (row_nulls[i]) set_null(output, i);
+        total_hits += row_nulls[i] ? 0 : (uint64_t)row_counts[i];
+    }
+
+    if (total_hits > 0) {
+        duckdb_vector hit_vec = duckdb_list_vector_get_child(output);
+        duckdb_vector ord_vec = duckdb_struct_vector_get_child(hit_vec, 0);
+        duckdb_vector label_vec = duckdb_struct_vector_get_child(hit_vec, 1);
+        duckdb_vector label_type_vec = duckdb_struct_vector_get_child(hit_vec, 2);
+        duckdb_vector hit_chrom_vec = duckdb_struct_vector_get_child(hit_vec, 3);
+        duckdb_vector hit_start_vec = duckdb_struct_vector_get_child(hit_vec, 4);
+        duckdb_vector hit_end_vec = duckdb_struct_vector_get_child(hit_vec, 5);
+        int64_t *ord_data = (int64_t *)duckdb_vector_get_data(ord_vec);
+        int32_t *hit_start_data = (int32_t *)duckdb_vector_get_data(hit_start_vec);
+        int32_t *hit_end_data = (int32_t *)duckdb_vector_get_data(hit_end_vec);
+        idx_t out_idx = 0;
+
+        for (i = 0; i < n; i++) {
+            duckhts_cgranges_entry_t *entry = row_entries[i];
+            int64_t n_hits;
+            int64_t start;
+            int64_t end;
+            int64_t h;
+
+            if (!entry || row_counts[i] <= 0) continue;
+            if (ensure_cstr_scratch(&chrom_buf, &chrom_cap,
+                                    string_view_from_vector(chrom_vec, i), err, sizeof(err)) != 0) {
+                failed = 1;
+                goto cleanup;
+            }
+            start = start_data[i];
+            end = end_data[i];
+            n_hits = row_contain[i]
+                ? cr_contain(entry->cr, chrom_buf, (int32_t)start, (int32_t)end, &hits, &hits_cap)
+                : cr_overlap(entry->cr, chrom_buf, (int32_t)start, (int32_t)end, &hits, &hits_cap);
+            for (h = 0; h < n_hits; h++) {
+                int64_t ridx = hits[h];
+                int32_t ordinal = cr_label(entry->cr, ridx);
+                ord_data[out_idx] = (int64_t)ordinal;
+                assign_label_text_output(entry, ordinal, label_vec, out_idx);
+                duckdb_vector_assign_string_element(label_type_vec, out_idx, label_kind_name(entry->payload.kind));
+                duckdb_vector_assign_string_element(hit_chrom_vec, out_idx, entry->payload.chroms[ordinal]);
+                hit_start_data[out_idx] = entry->payload.starts[ordinal];
+                hit_end_data[out_idx] = entry->payload.ends[ordinal];
+                out_idx++;
+            }
+        }
+        if ((uint64_t)out_idx != total_hits) {
+            snprintf(err, sizeof(err), "duckhts_cgranges_overlaps_list: inconsistent overlap count");
+            failed = 1;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    if (row_entries) {
+        for (i = 0; i < n; i++) {
+            if (row_entries[i]) unpin_entry(reg, row_entries[i]);
+        }
+    }
+    free(row_entries);
+    free(row_counts);
+    free(row_contain);
+    free(row_nulls);
+    free(chrom_buf);
+    free(hits);
+    if (failed) duckdb_scalar_function_set_error(info, err[0] ? err : "duckhts_cgranges_overlaps_list failed");
+}
+
 static void add_overlaps_result_columns(duckdb_bind_info info, duckhts_cgranges_entry_t *entry) {
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -1787,6 +2048,7 @@ static void destroy_overlaps_bulk_init(void *ptr) {
     if (init->current_chunk) duckdb_destroy_data_chunk(&init->current_chunk);
     if (init->has_query_result) duckdb_destroy_result(&init->query_result);
     free(init->hits);
+    free(init->chrom_scratch);
     free(init);
 }
 
@@ -1980,7 +2242,7 @@ static int overlaps_bulk_prepare_next_probe(duckhts_cgranges_overlaps_bulk_bind_
             duckdb_vector qid_vec = init->query_row_id_idx >= 0
                 ? duckdb_data_chunk_get_vector(init->current_chunk, (idx_t)init->query_row_id_idx)
                 : NULL;
-            duckdb_string_t *chrom_data;
+            duckhts_cgr_string_view_t chrom_view;
             const char *chrom;
             int64_t start;
             int64_t end;
@@ -1993,8 +2255,12 @@ static int overlaps_bulk_prepare_next_probe(duckhts_cgranges_overlaps_bulk_bind_
                 return -1;
             }
 
-            chrom_data = (duckdb_string_t *)duckdb_vector_get_data(chrom_vec);
-            chrom = duckdb_string_t_data(&chrom_data[row]);
+            chrom_view = string_view_from_vector(chrom_vec, row);
+            if (ensure_cstr_scratch(&init->chrom_scratch, &init->chrom_scratch_cap,
+                                    chrom_view, err, errlen) != 0) {
+                return -1;
+            }
+            chrom = init->chrom_scratch;
             start = chunk_cell_to_int64(start_vec, row, init->start_type);
             end = chunk_cell_to_int64(end_vec, row, init->end_type);
             if (!chrom || !*chrom || start < 0 || end < start || end > INT32_MAX) {
@@ -2104,6 +2370,33 @@ static void overlaps_bulk_scan(duckdb_function_info info, duckdb_data_chunk outp
     }
 
     duckdb_data_chunk_set_size(output, out_idx);
+}
+
+static duckdb_logical_type create_cgranges_overlap_list_type(void) {
+    duckdb_logical_type member_types[6];
+    const char *member_names[6] = {
+        "interval_ordinal",
+        "label",
+        "label_type",
+        "interval_chrom",
+        "interval_start",
+        "interval_end"
+    };
+    duckdb_logical_type struct_type;
+    duckdb_logical_type list_type;
+    int i;
+
+    member_types[0] = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    member_types[1] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    member_types[2] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    member_types[3] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    member_types[4] = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
+    member_types[5] = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
+    struct_type = duckdb_create_struct_type(member_types, member_names, 6);
+    list_type = duckdb_create_list_type(struct_type);
+    for (i = 0; i < 6; i++) duckdb_destroy_logical_type(&member_types[i]);
+    duckdb_destroy_logical_type(&struct_type);
+    return list_type;
 }
 
 static void register_cgranges_probe_scalar(duckdb_connection connection, duckhts_cgranges_registry_t *reg,
@@ -2321,6 +2614,16 @@ void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_da
                                    cgranges_count_overlaps_scalar, bigint_type, varchar_type, bigint_type, 0);
     register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_count_overlaps",
                                    cgranges_count_overlaps_scalar, bigint_type, varchar_type, bigint_type, 1);
+    {
+        duckdb_logical_type overlaps_list_type = create_cgranges_overlap_list_type();
+        register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_overlaps_list",
+                                       cgranges_overlaps_list_scalar, overlaps_list_type,
+                                       varchar_type, bigint_type, 0);
+        register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_overlaps_list",
+                                       cgranges_overlaps_list_scalar, overlaps_list_type,
+                                       varchar_type, bigint_type, 1);
+        duckdb_destroy_logical_type(&overlaps_list_type);
+    }
 
     tf = duckdb_create_table_function();
     duckdb_table_function_set_name(tf, "duckhts_cgranges_overlaps");

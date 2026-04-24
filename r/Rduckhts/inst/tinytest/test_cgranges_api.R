@@ -142,6 +142,43 @@ test_cgranges_api <- function() {
   )
   expect_true(is.na(null_probe$hit[1]))
 
+  list_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT p.qid, hit.interval_ordinal, hit.label, hit.label_type,",
+      "  hit.interval_chrom, hit.interval_start, hit.interval_end",
+      "FROM cgr_probe_src AS p",
+      "CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p.\"end\")) AS u(hit)",
+      "ORDER BY p.qid, hit.interval_ordinal"
+    )
+  )
+  expect_equal(list_hits$qid, c(10, 20, 40))
+  expect_equal(list_hits$interval_ordinal, c(0, 1, 1))
+  expect_equal(list_hits$label, c("11", NA, NA))
+  expect_equal(list_hits$label_type, c("BIGINT", "BIGINT", "BIGINT"))
+  expect_equal(list_hits$interval_start, c(100, 140, 140))
+  expect_equal(list_hits$interval_end, c(120, 170, 170))
+
+  list_contain <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT p.qid, hit.interval_ordinal, hit.label, hit.label_type, hit.interval_start, hit.interval_end",
+      "FROM cgr_probe_src AS p",
+      "CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p.\"end\", 'contain')) AS u(hit)",
+      "ORDER BY p.qid, hit.interval_ordinal"
+    )
+  )
+  expect_equal(list_contain$qid, 40)
+  expect_equal(list_contain$interval_ordinal, 1)
+  expect_true(is.na(list_contain$label[1]))
+  expect_equal(list_contain$label_type, "BIGINT")
+
+  null_list_probe <- DBI::dbGetQuery(
+    con,
+    "SELECT duckhts_cgranges_overlaps_list('qry_idx', NULL::VARCHAR, 1, 2) IS NULL AS is_null"
+  )
+  expect_equal(null_list_probe$is_null[1], TRUE)
+
   bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
   bed_query <- paste0(
     "SELECT chrom, start, \"end\" FROM read_bed(",
@@ -188,6 +225,24 @@ test_cgranges_api <- function() {
   )
   expect_equal(bed_provider_hits$overlapping_rows[1], 2)
   expect_equal(bed_provider_hits$total_hits[1], 2)
+
+  bed_provider_list_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT q.chrom, q.start, q.\"end\", hit.interval_ordinal, hit.label, hit.label_type,",
+      "  hit.interval_start, hit.interval_end",
+      "FROM read_bed(", DBI::dbQuoteString(con, bed_path), ") AS q",
+      "CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('bed_provider_idx', q.chrom, q.start, q.\"end\")) AS u(hit)",
+      "ORDER BY q.chrom, q.start, hit.interval_ordinal"
+    )
+  )
+  expect_equal(nrow(bed_provider_list_hits), 2)
+  expect_equal(bed_provider_list_hits$chrom, c("CHROMOSOME_I", "CHROMOSOME_I"))
+  expect_equal(bed_provider_list_hits$start, c(0, 10))
+  expect_equal(bed_provider_list_hits$label, c("0", "0"))
+  expect_equal(bed_provider_list_hits$label_type, c("ORDINAL", "ORDINAL"))
+  expect_equal(bed_provider_list_hits$interval_start, c(5, 5))
+  expect_equal(bed_provider_list_hits$interval_end, c(15, 15))
 
   bulk_hits <- DBI::dbGetQuery(
     con,

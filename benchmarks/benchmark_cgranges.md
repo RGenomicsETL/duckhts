@@ -15,10 +15,12 @@ streaming:
   `duckhts_cgranges_has_overlap(...)`
 - annotate query rows with vectorized scalar counts via
   `duckhts_cgranges_count_overlaps(...)`
+- expand streaming provider rows to one row per hit with
+  `duckhts_cgranges_overlaps_list(...)` plus `UNNEST(...)`
 - compare overlap-existence against `bedtk flt`
-- compare overlap-existence and overlap counts against
-  `bedtools intersect -u` and `bedtools intersect -c` when `bedtools` is
-  installed
+- compare overlap-existence, overlap counts, and one-row-per-hit
+  expansion against `bedtools intersect -u`, `bedtools intersect -c`,
+  and `bedtools intersect -wa -wb` when `bedtools` is installed
 
 The old benchmark shape generated thousands of `UNION ALL` calls to
 `duckhts_cgranges_overlaps(...)`, or issued one SQL statement per probe.
@@ -69,20 +71,22 @@ scripts/cgranges_benchmark_cli.sh
 
 # Results
 
-| tool     | variant       | subject_intervals | query_intervals | passes | build_index_sec | query_total_sec | query_pass_1_sec | total_elapsed_sec | peak_rss_mb | matched_query_intervals | total_hits | time_per_query_ms |
-|:---------|:--------------|------------------:|----------------:|-------:|----------------:|----------------:|-----------------:|------------------:|------------:|------------------------:|-----------:|------------------:|
-| duckhts  | scalar_filter |             50000 |            5000 |      3 |           0.011 |           0.004 |            0.002 |             0.102 |        68.4 |                    2239 |         NA |            0.0003 |
-| duckhts  | scalar_count  |             50000 |            5000 |      3 |           0.013 |           0.005 |            0.002 |             0.105 |        68.0 |                    2239 |       3000 |            0.0003 |
-| bedtk    | flt           |             50000 |            5000 |      3 |           0.000 |           0.022 |            0.007 |             0.054 |        15.0 |                    2239 |         NA |            0.0015 |
-| bedtools | intersect_u   |             50000 |            5000 |      3 |           0.000 |           0.057 |            0.019 |             0.094 |        21.9 |                    2239 |         NA |            0.0038 |
-| bedtools | intersect_c   |             50000 |            5000 |      3 |           0.000 |           0.063 |            0.020 |             0.095 |        21.7 |                    2239 |       3000 |            0.0042 |
+| tool     | variant         | subject_intervals | query_intervals | passes | build_index_sec | query_total_sec | query_pass_1_sec | total_elapsed_sec | peak_rss_mb | matched_query_intervals | total_hits | time_per_query_ms |
+|:---------|:----------------|------------------:|----------------:|-------:|----------------:|----------------:|-----------------:|------------------:|------------:|------------------------:|-----------:|------------------:|
+| duckhts  | scalar_filter   |             50000 |            5000 |      3 |           0.011 |           0.005 |            0.001 |             0.107 |        68.6 |                    2239 |         NA |            0.0003 |
+| duckhts  | scalar_count    |             50000 |            5000 |      3 |           0.011 |           0.005 |            0.002 |             0.106 |        68.4 |                    2239 |       3000 |            0.0003 |
+| duckhts  | scalar_expand   |             50000 |            5000 |      3 |           0.011 |           0.021 |            0.008 |             0.118 |        93.4 |                    2239 |       3000 |            0.0014 |
+| bedtk    | flt             |             50000 |            5000 |      3 |           0.000 |           0.026 |            0.007 |             0.057 |        15.0 |                    2239 |         NA |            0.0017 |
+| bedtools | intersect_u     |             50000 |            5000 |      3 |           0.000 |           0.058 |            0.020 |             0.103 |        21.9 |                    2239 |         NA |            0.0039 |
+| bedtools | intersect_c     |             50000 |            5000 |      3 |           0.000 |           0.065 |            0.022 |             0.098 |        21.9 |                    2239 |       3000 |            0.0043 |
+| bedtools | intersect_wa_wb |             50000 |            5000 |      3 |           0.000 |           0.070 |            0.027 |             0.099 |        21.7 |                    2239 |       3000 |            0.0047 |
 
 # Semantic checks
 
-| check                                                                                            | result |
-|:-------------------------------------------------------------------------------------------------|:-------|
-| matched query intervals agree for DuckHTS scalar_filter, bedtk flt, and bedtools -u when present | TRUE   |
-| overlap counts agree for DuckHTS scalar_count and bedtools -c when present                       | TRUE   |
+| check                                                                                                        | result |
+|:-------------------------------------------------------------------------------------------------------------|:-------|
+| matched query intervals agree for DuckHTS scalar_filter, bedtk flt, and bedtools -u when present             | TRUE   |
+| overlap counts agree for DuckHTS scalar_count, scalar_expand, bedtools -c, and bedtools -wa -wb when present | TRUE   |
 
 # Notes
 
@@ -90,6 +94,9 @@ scripts/cgranges_benchmark_cli.sh
   predicate path.
 - `duckhts:scalar_count` computes one cgranges overlap count per
   streamed query row and is comparable to `bedtools intersect -c`.
+- `duckhts:scalar_expand` uses `duckhts_cgranges_overlaps_list(...)`
+  plus `UNNEST(...)` to emit one row per hit while preserving streamed
+  provider rows; it is comparable to `bedtools intersect -wa -wb`.
 - `bedtk flt` and `bedtools intersect -u` are overlap-existence
   comparators; they do not report total hit counts.
 - DuckHTS reports explicit target-index build time because the SQL API

@@ -10,9 +10,12 @@ The benchmark exercises the streaming-provider path, not the older
   scalar predicate.
 * ``duckhts_cgranges_count_overlaps(...)`` annotates query rows with overlap
   counts.
+* ``duckhts_cgranges_overlaps_list(...)`` plus ``UNNEST`` expands streaming
+  provider rows to one row per hit without generated bulk-probe SQL.
 * ``bedtk flt`` is used as the overlap-existence baseline.
-* ``bedtools intersect -u`` and ``bedtools intersect -c`` are included when a
-  bedtools executable is available.
+* ``bedtools intersect -u``, ``bedtools intersect -c``, and one-row-per-hit
+  ``bedtools intersect -wa -wb`` are included when a bedtools executable is
+  available.
 
 The default mode creates deterministic synthetic BED files so the rendered
 benchmark is reproducible and quick. Pass ``--subject-bed`` and ``--query-bed``
@@ -125,6 +128,14 @@ def count_bed_rows(path: Path) -> int:
     return n
 
 
+def first_bed_field_count(path: Path) -> int:
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip() and not line.startswith("#"):
+                return len(line.rstrip("\n").split("\t"))
+    return 3
+
+
 def _worker_duckhts(args: argparse.Namespace) -> None:
     import duckdb
 
@@ -167,6 +178,20 @@ def _worker_duckhts(args: argparse.Namespace) -> None:
                     f"  FROM read_bed('{query_path}') q"
                     ") "
                     "SELECT count(*) FILTER (WHERE n > 0)::BIGINT, COALESCE(sum(n), 0)::BIGINT FROM counts"
+                ).fetchone()
+                pass_matched = int(rows[0])
+                pass_hits = int(rows[1])
+            elif args.duckhts_mode == "expand":
+                rows = con.execute(
+                    "WITH q AS ("
+                    "  SELECT row_number() OVER () AS qid, chrom, start, \"end\" "
+                    f"  FROM read_bed('{query_path}')"
+                    "), hits AS ("
+                    "  SELECT qid "
+                    "  FROM q "
+                    "  CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('bench_idx', q.chrom, q.start, q.\"end\")) AS u(hit)"
+                    ") "
+                    "SELECT count(DISTINCT qid)::BIGINT, count(*)::BIGINT FROM hits"
                 ).fetchone()
                 pass_matched = int(rows[0])
                 pass_hits = int(rows[1])
@@ -269,6 +294,23 @@ def _worker_bedtools(args: argparse.Namespace) -> None:
                 if count > 0:
                     pass_matched += 1
                     pass_hits += count
+        elif args.bedtools_mode == "wa_wb":
+            query_fields = first_bed_field_count(Path(args.query_bed))
+            proc = subprocess.run(
+                [bedtools, "intersect", "-a", args.query_bed, "-b", args.subject_bed, "-wa", "-wb"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            pass_hits = 0
+            matched_queries = set()
+            for line in proc.stdout.splitlines():
+                if not line.strip():
+                    continue
+                fields = line.rstrip("\n").split("\t")
+                matched_queries.add(tuple(fields[:query_fields]))
+                pass_hits += 1
+            pass_matched = len(matched_queries)
         else:
             raise RuntimeError(f"unknown bedtools mode: {args.bedtools_mode}")
         pass_seconds.append(time.monotonic() - t0)
@@ -337,7 +379,7 @@ def bench_main(args: argparse.Namespace) -> None:
     results: list[dict] = []
 
     jobs: list[tuple[str, Path, list[str]]] = []
-    for mode in ("filter", "count"):
+    for mode in ("filter", "count", "expand"):
         json_out = out_dir / f"duckhts_scalar_{mode}.json"
         jobs.append((
             f"DuckHTS scalar {mode}",
@@ -375,10 +417,11 @@ def bench_main(args: argparse.Namespace) -> None:
 
     bedtools_path = command_exists(args.bedtools)
     if bedtools_path:
-        for mode in ("u", "c"):
+        for mode in ("u", "c", "wa_wb"):
             json_out = out_dir / f"bedtools_intersect_{mode}.json"
+            mode_label = "-wa -wb" if mode == "wa_wb" else f"-{mode}"
             jobs.append((
-                f"bedtools intersect -{mode}",
+                f"bedtools intersect {mode_label}",
                 json_out,
                 [
                     sys.executable, str(script_path),
@@ -415,7 +458,7 @@ def bench_main(args: argparse.Namespace) -> None:
                     "matched-query mismatch: "
                     + ", ".join(f"{r['tool']}:{r['variant']}={r['matched_query_intervals']}" for r in filter_rows)
                 )
-    count_rows = [r for r in results if r["variant"] in {"scalar_count", "intersect_c"}]
+    count_rows = [r for r in results if r["variant"] in {"scalar_count", "scalar_expand", "intersect_c", "intersect_wa_wb"}]
     if len(count_rows) > 1:
         expected_hits = count_rows[0].get("total_hits")
         for row in count_rows[1:]:
@@ -463,7 +506,7 @@ def bench_main(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Benchmark DuckHTS cgranges scalar probes against bedtk/bedtools")
+    parser = argparse.ArgumentParser(description="Benchmark DuckHTS cgranges streaming scalar probes against bedtk/bedtools")
     parser.add_argument("--extension", default="build/release/duckhts.duckdb_extension")
     parser.add_argument("--bedtk", default=".sync/bedtk/bedtk")
     parser.add_argument("--bedtools", default="bedtools")
@@ -482,8 +525,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--worker-duckhts", action="store_true")
     parser.add_argument("--worker-bedtk", action="store_true")
     parser.add_argument("--worker-bedtools", action="store_true")
-    parser.add_argument("--duckhts-mode", choices=["filter", "count"], default="filter")
-    parser.add_argument("--bedtools-mode", choices=["u", "c"], default="u")
+    parser.add_argument("--duckhts-mode", choices=["filter", "count", "expand"], default="filter")
+    parser.add_argument("--bedtools-mode", choices=["u", "c", "wa_wb"], default="u")
     parser.add_argument("--subject-intervals", type=int, default=0)
     parser.add_argument("--query-intervals", type=int, default=0)
     parser.add_argument("--json-out")

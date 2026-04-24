@@ -6,6 +6,7 @@
 # vectorized scalar helpers:
 #   * duckhts_cgranges_has_overlap(...)
 #   * duckhts_cgranges_count_overlaps(...)
+#   * duckhts_cgranges_overlaps_list(...) + UNNEST for one-row-per-hit expansion
 #
 # Baselines:
 #   * bedtk flt
@@ -92,6 +93,22 @@ COPY (
   FROM counts
 ) TO STDOUT (HEADER false, DELIMITER '\t');
 SQL
+  elif [[ "$variant" == "scalar_expand" ]]; then
+    cat >> "$sql" <<SQL
+COPY (
+  WITH q AS (
+    SELECT row_number() OVER () AS qid, chrom, start, "end"
+    FROM read_bed('$query_q')
+  ), hits AS (
+    SELECT qid
+    FROM q
+    CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('bench', q.chrom, q.start, q."end")) AS u(hit)
+  )
+  SELECT count(DISTINCT qid)::BIGINT AS matched_query_intervals,
+         count(*)::BIGINT AS total_hits
+  FROM hits
+) TO STDOUT (HEADER false, DELIMITER '\t');
+SQL
   else
     echo "unknown DuckHTS variant: $variant" >&2
     return 1
@@ -150,6 +167,7 @@ echo
 
 run_duckdb_variant scalar_filter
 run_duckdb_variant scalar_count
+run_duckdb_variant scalar_expand
 run_bedtk
 run_bedtools
 
