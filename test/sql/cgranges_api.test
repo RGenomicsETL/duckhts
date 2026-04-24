@@ -141,6 +141,23 @@ SELECT COALESCE(CAST(duckhts_cgranges_has_overlap('qry_idx', NULL::VARCHAR, 1, 2
 NULL
 
 query I
+SELECT duckhts_cgranges_from_query(
+  'bed_from_query_idx',
+  'SELECT chrom, start, "end" FROM read_bed(''__WORKING_DIRECTORY__/test/data/targets.bed'')',
+  'chrom', 'start', 'end'
+);
+----
+1
+
+query IIIII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('bed_from_query_idx', 'CHROMOSOME_I', 5, 15)
+ORDER BY interval_ordinal;
+----
+0	0	CHROMOSOME_I	0	10
+1	1	CHROMOSOME_I	10	20
+
+query I
 SELECT duckhts_cgranges_create('bed_provider_idx');
 ----
 1

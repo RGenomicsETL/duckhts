@@ -1199,6 +1199,10 @@ static int build_index_from_result(duckhts_cgranges_entry_t *entry, duckdb_resul
     duckdb_type label_type = label_idx >= 0 ? duckdb_column_type(res, (idx_t)label_idx) : DUCKDB_TYPE_INVALID;
     duckdb_data_chunk chunk;
     idx_t row_offset = 0;
+    char *chrom_scratch = NULL;
+    size_t chrom_scratch_cap = 0;
+    char *label_scratch = NULL;
+    size_t label_scratch_cap = 0;
 
     if (chrom_idx < 0 || start_idx < 0 || end_idx < 0) {
         snprintf(err, errlen, "duckhts_cgranges_from_query: required columns not found in query result");
@@ -1217,13 +1221,7 @@ static int build_index_from_result(duckhts_cgranges_entry_t *entry, duckdb_resul
         duckdb_vector label_vec = (label_idx >= 0) ? duckdb_data_chunk_get_vector(chunk, (idx_t)label_idx) : NULL;
         duckdb_type start_type = duckdb_get_type_id(duckdb_vector_get_column_type(start_vec));
         duckdb_type end_type = duckdb_get_type_id(duckdb_vector_get_column_type(end_vec));
-        duckdb_string_t *chrom_data = (duckdb_string_t *)duckdb_vector_get_data(chrom_vec);
-        duckdb_string_t *label_str_data = NULL;
         idx_t r;
-
-        if (label_vec && normalized_label_kind_from_type(label_type) == DUCKHTS_CGR_LABEL_VARCHAR) {
-            label_str_data = (duckdb_string_t *)duckdb_vector_get_data(label_vec);
-        }
 
         for (r = 0; r < rows; r++) {
             const char *chrom = NULL;
@@ -1241,10 +1239,19 @@ static int build_index_from_result(duckhts_cgranges_entry_t *entry, duckdb_resul
                 snprintf(err, errlen,
                          "duckhts_cgranges_from_query: null chrom/start/end encountered at row %llu",
                          (unsigned long long)(row_offset + r + 1ULL));
+                free(chrom_scratch);
+                free(label_scratch);
                 return -1;
             }
 
-            chrom = duckdb_string_t_data(&chrom_data[r]);
+            if (ensure_cstr_scratch(&chrom_scratch, &chrom_scratch_cap,
+                                    string_view_from_vector(chrom_vec, r), err, errlen) != 0) {
+                duckdb_destroy_data_chunk(&chunk);
+                free(chrom_scratch);
+                free(label_scratch);
+                return -1;
+            }
+            chrom = chrom_scratch;
             start = chunk_cell_to_int64(start_vec, r, start_type);
             end = chunk_cell_to_int64(end_vec, r, end_type);
 
@@ -1266,12 +1273,21 @@ static int build_index_from_result(duckhts_cgranges_entry_t *entry, duckdb_resul
                         label_bool = ((bool *)duckdb_vector_get_data(label_vec))[r];
                         break;
                     case DUCKHTS_CGR_LABEL_VARCHAR:
-                        label_str = duckdb_string_t_data(&label_str_data[r]);
+                        if (ensure_cstr_scratch(&label_scratch, &label_scratch_cap,
+                                                string_view_from_vector(label_vec, r), err, errlen) != 0) {
+                            duckdb_destroy_data_chunk(&chunk);
+                            free(chrom_scratch);
+                            free(label_scratch);
+                            return -1;
+                        }
+                        label_str = label_scratch;
                         break;
                     case DUCKHTS_CGR_LABEL_ORDINAL:
                     default:
                         duckdb_destroy_data_chunk(&chunk);
                         snprintf(err, errlen, "duckhts_cgranges_from_query: label column type is unsupported");
+                        free(chrom_scratch);
+                        free(label_scratch);
                         return -1;
                 }
             }
@@ -1279,12 +1295,16 @@ static int build_index_from_result(duckhts_cgranges_entry_t *entry, duckdb_resul
             if (append_interval_raw(entry, chrom, start, end, label_valid, label_kind, label_i64, label_f64,
                                     label_str, label_bool, err, errlen) != 0) {
                 duckdb_destroy_data_chunk(&chunk);
+                free(chrom_scratch);
+                free(label_scratch);
                 return -1;
             }
         }
         row_offset += rows;
         duckdb_destroy_data_chunk(&chunk);
     }
+    free(chrom_scratch);
+    free(label_scratch);
     return 0;
 }
 

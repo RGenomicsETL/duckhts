@@ -63,13 +63,10 @@ run_duckdb_variant() {
 
   cat > "$sql" <<SQL
 LOAD '$ext_q';
-CREATE TABLE cgr_subject AS
-  SELECT chrom, start, "end"
-  FROM read_bed('$subject_q');
 CREATE TABLE cgr_build AS
   SELECT duckhts_cgranges_from_query(
     'bench',
-    'SELECT chrom, start, "end" FROM cgr_subject',
+    'SELECT chrom, start, "end" FROM read_bed(''$subject_q'')',
     'chrom', 'start', 'end'
   ) AS ok;
 CREATE TABLE cgr_index AS SELECT duckhts_cgranges_index('bench') AS ok;

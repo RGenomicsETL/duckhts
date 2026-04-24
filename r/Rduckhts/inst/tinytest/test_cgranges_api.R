@@ -143,6 +143,34 @@ test_cgranges_api <- function() {
   expect_true(is.na(null_probe$hit[1]))
 
   bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
+  bed_query <- paste0(
+    "SELECT chrom, start, \"end\" FROM read_bed(",
+    DBI::dbQuoteString(con, bed_path),
+    ")"
+  )
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      paste0(
+        "SELECT duckhts_cgranges_from_query('bed_from_query_idx', ",
+        DBI::dbQuoteString(con, bed_query),
+        ", 'chrom', 'start', 'end') AS ok"
+      )
+    )$ok[1],
+    TRUE
+  )
+  bed_from_query_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
+      "FROM duckhts_cgranges_overlaps('bed_from_query_idx', 'CHROMOSOME_I', 5, 15)",
+      "ORDER BY interval_ordinal"
+    )
+  )
+  expect_equal(bed_from_query_hits$interval_ordinal, c(0, 1))
+  expect_equal(bed_from_query_hits$label, c(0, 1))
+  expect_equal(bed_from_query_hits$interval_chrom, c("CHROMOSOME_I", "CHROMOSOME_I"))
+
   expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('bed_provider_idx') AS ok")$ok[1], TRUE)
   expect_equal(
     DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('bed_provider_idx', 'CHROMOSOME_I', 5, 15) AS ok")$ok[1],

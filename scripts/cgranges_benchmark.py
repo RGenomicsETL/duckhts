@@ -136,14 +136,9 @@ def _worker_duckhts(args: argparse.Namespace) -> None:
 
         build_start = time.monotonic()
         con.execute(
-            "CREATE TABLE cgr_subject AS "
-            "SELECT chrom, start, \"end\" "
-            f"FROM read_bed('{subject_path}')"
-        )
-        con.execute(
             "SELECT duckhts_cgranges_from_query("
             "  'bench_idx', "
-            "  'SELECT chrom, start, \"end\" FROM cgr_subject', "
+            f"  'SELECT chrom, start, \"end\" FROM read_bed(''{subject_path}'')', "
             "  'chrom', 'start', 'end'"
             ")"
         )
