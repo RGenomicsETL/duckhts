@@ -1,6 +1,8 @@
 ---
-title: "DuckHTS cgranges Benchmark"
-output: github_document
+title: "DuckHTS cgranges Streaming-Provider Benchmark"
+output:
+  github_document:
+    html_preview: true
 ---
 
 <!-- benchmark_cgranges.md is generated from benchmark_cgranges.Rmd. -->
@@ -11,61 +13,108 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning 
 
 # Benchmark
 
-This benchmark measures:
+This benchmark measures the cgranges path that matters for provider streaming:
 
-- `duckhts_cgranges_from_query(...)` + `duckhts_cgranges_index(...)`
-- repeated bound overlap probes through `duckhts_cgranges_overlaps(...)`
-- upstream `bedtk flt` as the overlap-existence comparator
-- wall time and peak RSS for both engines
+- build one session-scoped cgranges target index with
+  `duckhts_cgranges_from_query(...)` / `duckhts_cgranges_index(...)`
+- stream query intervals from `read_bed(...)`
+- filter query rows with the vectorized scalar predicate
+  `duckhts_cgranges_has_overlap(...)`
+- annotate query rows with vectorized scalar counts via
+  `duckhts_cgranges_count_overlaps(...)`
+- compare overlap-existence against `bedtk flt`
+- compare overlap-existence and overlap counts against `bedtools intersect -u`
+  and `bedtools intersect -c` when `bedtools` is installed
 
-It uses a deterministic synthetic interval set so the benchmark is stable and
-rerunnable.
+The old benchmark shape generated thousands of `UNION ALL` calls to
+`duckhts_cgranges_overlaps(...)`, or issued one SQL statement per probe. That
+measured bind/SQL dispatch overhead rather than the desired streaming provider
+path. The current scripts avoid that pattern.
 
 # Run
+
+Synthetic, deterministic default used for the rendered table:
 
 ```sh
 python3 scripts/cgranges_benchmark.py \
   --extension build/release/duckhts.duckdb_extension \
   --bedtk .sync/bedtk/bedtk \
+  --bedtools bedtools \
   --subjects 50000 \
   --queries 5000 \
   --passes 3 \
   --out-dir .tmp/cgranges_benchmark
 ```
 
+Real DuckBedQC BED files can be benchmarked with:
+
+```sh
+python3 scripts/cgranges_benchmark_real.py \
+  --extension build/release/duckhts.duckdb_extension \
+  --passes 1 \
+  --out-dir .tmp/cgranges_benchmark_real
+```
+
+For a shell/CLI-only smoke path that still avoids generated bulk-query SQL:
+
+```sh
+scripts/cgranges_benchmark_cli.sh
+```
+
 ```{r setup, include = FALSE}
-library(readr)
 library(knitr)
 
-repo_root <- normalizePath(file.path(dirname(knitr::current_input()), ".."), mustWork = TRUE)
+repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
 out_dir <- file.path(repo_root, ".tmp", "cgranges_benchmark")
 summary_csv <- file.path(out_dir, "summary.csv")
+metadata_json <- file.path(out_dir, "metadata.json")
 
 subjects <- as.integer(Sys.getenv("CGRANGES_BENCH_SUBJECTS", unset = "50000"))
 queries <- as.integer(Sys.getenv("CGRANGES_BENCH_QUERIES", unset = "5000"))
 passes <- as.integer(Sys.getenv("CGRANGES_BENCH_PASSES", unset = "3"))
+force <- identical(Sys.getenv("CGRANGES_BENCH_FORCE", unset = "0"), "1")
 
-if (!file.exists(summary_csv)) {
+expected_cols <- c(
+  "tool", "variant", "subject_intervals", "query_intervals", "passes",
+  "build_index_sec", "query_total_sec", "query_pass_1_sec", "total_elapsed_sec",
+  "peak_rss_mb", "matched_query_intervals", "total_hits"
+)
+needs_run <- force || !file.exists(summary_csv) || !file.exists(metadata_json)
+if (!needs_run && file.exists(summary_csv)) {
+  existing_header <- names(utils::read.csv(summary_csv, nrows = 0, check.names = FALSE))
+  needs_run <- !all(expected_cols %in% existing_header)
+}
+
+if (needs_run) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   cmd <- c(
     file.path(repo_root, "scripts", "cgranges_benchmark.py"),
     "--extension", file.path(repo_root, "build", "release", "duckhts.duckdb_extension"),
     "--bedtk", file.path(repo_root, ".sync", "bedtk", "bedtk"),
+    "--bedtools", Sys.getenv("BEDTOOLS", unset = "bedtools"),
     "--subjects", as.character(subjects),
     "--queries", as.character(queries),
     "--passes", as.character(passes),
     "--out-dir", out_dir
   )
-  system2("python3", cmd, stdout = TRUE, stderr = TRUE)
+  out <- system2("python3", cmd, stdout = TRUE, stderr = TRUE)
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0) {
+    stop(paste(out, collapse = "\n"))
+  }
 }
 
-bench <- readr::read_csv(summary_csv, show_col_types = FALSE)
-bench$time_per_query_ms <- (bench$query_total_sec / (bench$queries * bench$passes)) * 1000
+bench_raw <- utils::read.csv(summary_csv, check.names = FALSE, na.strings = c("", "NA", "None"))
+bench <- bench_raw
+bench$time_per_query_ms <- (bench$query_total_sec / (bench$query_intervals * bench$passes)) * 1000
+num_cols <- c("build_index_sec", "query_total_sec", "query_pass_1_sec", "total_elapsed_sec", "peak_rss_mb", "time_per_query_ms")
+for (col in intersect(num_cols, names(bench))) bench[[col]] <- round(bench[[col]], if (col == "time_per_query_ms") 4 else 3)
 bench$peak_rss_mb <- round(bench$peak_rss_mb, 1)
-bench$build_index_sec <- round(bench$build_index_sec, 3)
-bench$query_total_sec <- round(bench$query_total_sec, 3)
-bench$query_pass_1_sec <- round(bench$query_pass_1_sec, 3)
-bench$total_elapsed_sec <- round(bench$total_elapsed_sec, 3)
-bench$time_per_query_ms <- round(bench$time_per_query_ms, 4)
+
+filter_rows <- bench_raw[bench_raw$variant %in% c("scalar_filter", "flt", "intersect_u"), ]
+filter_agree <- length(unique(filter_rows$matched_query_intervals)) == 1
+count_rows <- bench_raw[bench_raw$variant %in% c("scalar_count", "intersect_c") & !is.na(bench_raw$total_hits), ]
+count_agree <- nrow(count_rows) <= 1 || length(unique(count_rows$total_hits)) == 1
 ```
 
 # Configuration
@@ -73,8 +122,15 @@ bench$time_per_query_ms <- round(bench$time_per_query_ms, 4)
 ```{r, echo=FALSE}
 knitr::kable(
   data.frame(
-    parameter = c("subjects", "queries", "passes"),
-    value = c(subjects, queries, passes)
+    parameter = c("dataset", "subjects", "queries", "passes", "bedtk", "bedtools"),
+    value = c(
+      "synthetic deterministic BED4",
+      subjects,
+      queries,
+      passes,
+      if (file.exists(file.path(repo_root, ".sync", "bedtk", "bedtk"))) "available" else "missing",
+      if (nzchar(Sys.which(Sys.getenv("BEDTOOLS", unset = "bedtools")))) "available" else "missing"
+    )
   )
 )
 ```
@@ -85,9 +141,32 @@ knitr::kable(
 knitr::kable(bench)
 ```
 
+# Semantic checks
+
+```{r, echo=FALSE}
+knitr::kable(
+  data.frame(
+    check = c(
+      "matched query intervals agree for DuckHTS scalar_filter, bedtk flt, and bedtools -u when present",
+      "overlap counts agree for DuckHTS scalar_count and bedtools -c when present"
+    ),
+    result = c(filter_agree, count_agree)
+  )
+)
+```
+
 # Notes
 
-- `bedtk` reports overlap-existence for the whole query BED in one pass.
-- DuckHTS builds an immutable registry index once, then reuses it across probe passes.
-- `matched_query_intervals` should agree across both engines.
-- `build_index_sec` is only meaningful for DuckHTS because the public API exposes an explicit build/finalize step.
+- `duckhts:scalar_filter` is the row-preserving provider-streaming predicate
+  path.
+- `duckhts:scalar_count` computes one cgranges overlap count per streamed query
+  row and is comparable to `bedtools intersect -c`.
+- `bedtk flt` and `bedtools intersect -u` are overlap-existence comparators;
+  they do not report total hit counts.
+- DuckHTS reports explicit target-index build time because the SQL API exposes
+  index construction as a session-scoped operation. The external tools build any
+  internal structures inside their command runtime.
+- The rendered table is intentionally a modest synthetic run. Use
+  `scripts/cgranges_benchmark_real.py` for the larger DuckBedQC WGS/exome BED
+  workload, and optional `--limit-subjects` / `--limit-queries` for quick smoke
+  runs.

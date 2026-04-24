@@ -109,6 +109,61 @@ SELECT * FROM (VALUES
   (40::BIGINT, 'chr2', 150, 170)
 ) AS t(qid, chrom, start, "end");
 
+query ITI
+SELECT
+  qid,
+  CAST(duckhts_cgranges_has_overlap('qry_idx', chrom, start, "end") AS VARCHAR) AS has_overlap,
+  duckhts_cgranges_count_overlaps('qry_idx', chrom, start, "end") AS n_overlap
+FROM cgr_probe_src
+ORDER BY qid;
+----
+10	false	0
+20	true	1
+30	false	0
+40	true	1
+
+query ITI
+SELECT
+  qid,
+  CAST(duckhts_cgranges_has_overlap('qry_idx', chrom, start, "end", 'contain') AS VARCHAR) AS has_contained,
+  duckhts_cgranges_count_overlaps('qry_idx', chrom, start, "end", 'contain') AS n_contained
+FROM cgr_probe_src
+ORDER BY qid;
+----
+10	false	0
+20	false	0
+30	false	0
+40	true	1
+
+query T
+SELECT COALESCE(CAST(duckhts_cgranges_has_overlap('qry_idx', NULL::VARCHAR, 1, 2) AS VARCHAR), 'NULL');
+----
+NULL
+
+query I
+SELECT duckhts_cgranges_create('bed_provider_idx');
+----
+1
+
+query I
+SELECT duckhts_cgranges_add('bed_provider_idx', 'CHROMOSOME_I', 5, 15);
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('bed_provider_idx');
+----
+1
+
+query II
+SELECT
+  count(*) AS overlapping_rows,
+  sum(duckhts_cgranges_count_overlaps('bed_provider_idx', chrom, start, "end"))::BIGINT AS total_hits
+FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed')
+WHERE duckhts_cgranges_has_overlap('bed_provider_idx', chrom, start, "end");
+----
+2	2
+
 query IIIIII
 SELECT
   query_row_id,

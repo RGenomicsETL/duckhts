@@ -99,11 +99,15 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
 `duckhts_cgranges_*` exposes a session-scoped immutable interval index for
 native overlap queries. You can either build it row-wise with
 `duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or bulk-load it
-from SQL with `duckhts_cgranges_from_query(...)`. For many probe intervals,
-`duckhts_cgranges_overlaps_bulk(...)` streams a query of probes through the
-finalized index in one table-function call instead of paying bind overhead once
-per probe. The probe query runs on the extension-owned helper connection, so
-use a regular table or view rather than a temp table.
+from SQL with `duckhts_cgranges_from_query(...)`. For row-preserving filters or
+count annotations over provider rows, use the vectorized scalar helpers
+`duckhts_cgranges_has_overlap(...)` and
+`duckhts_cgranges_count_overlaps(...)` directly in queries over `read_bed(...)`,
+`read_bam(...)`, `read_bcf(...)`, or regular tables. For one-row-per-hit
+expansion over a larger probe set, `duckhts_cgranges_overlaps_bulk(...)` accepts
+a probe query and emits matching indexed intervals in one table-function call.
+That bulk query runs on the extension-owned helper connection, so use a regular
+table or view rather than a temp table.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT duckhts_cgranges_create('readme_idx');

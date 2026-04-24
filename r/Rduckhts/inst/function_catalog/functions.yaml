@@ -180,6 +180,30 @@
       ]
     },
     {
+      "name": "duckhts_cgranges_has_overlap",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_has_overlap(name, chrom, start, end[, mode])",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = 'contain' and it fully contains at least one indexed interval; NULL inputs return NULL.",
+      "examples": [
+        "SELECT * FROM read_bed('queries.bed') WHERE duckhts_cgranges_has_overlap('targets_idx', chrom, start, \"end\");"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_count_overlaps",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_count_overlaps(name, chrom, start, end[, mode])",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = 'contain' the number fully contained by it; NULL inputs return NULL.",
+      "examples": [
+        "SELECT chrom, start, \"end\", duckhts_cgranges_count_overlaps('targets_idx', chrom, start, \"end\") AS n_targets FROM read_bed('queries.bed');"
+      ]
+    },
+    {
       "name": "duckhts_cgranges_overlaps",
       "kind": "table",
       "category": "Intervals",

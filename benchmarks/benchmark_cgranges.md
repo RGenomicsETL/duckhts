@@ -1,52 +1,101 @@
-DuckHTS cgranges Benchmark
+DuckHTS cgranges Streaming-Provider Benchmark
 ================
 
 <!-- benchmark_cgranges.md is generated from benchmark_cgranges.Rmd. -->
 
 # Benchmark
 
-This benchmark measures:
+This benchmark measures the cgranges path that matters for provider
+streaming:
 
-- `duckhts_cgranges_from_query(...)` + `duckhts_cgranges_index(...)`
-- repeated bound overlap probes through `duckhts_cgranges_overlaps(...)`
-- upstream `bedtk flt` as the overlap-existence comparator
-- wall time and peak RSS for both engines
+- build one session-scoped cgranges target index with
+  `duckhts_cgranges_from_query(...)` / `duckhts_cgranges_index(...)`
+- stream query intervals from `read_bed(...)`
+- filter query rows with the vectorized scalar predicate
+  `duckhts_cgranges_has_overlap(...)`
+- annotate query rows with vectorized scalar counts via
+  `duckhts_cgranges_count_overlaps(...)`
+- compare overlap-existence against `bedtk flt`
+- compare overlap-existence and overlap counts against
+  `bedtools intersect -u` and `bedtools intersect -c` when `bedtools` is
+  installed
 
-It uses a deterministic synthetic interval set so the benchmark is
-stable and rerunnable.
+The old benchmark shape generated thousands of `UNION ALL` calls to
+`duckhts_cgranges_overlaps(...)`, or issued one SQL statement per probe.
+That measured bind/SQL dispatch overhead rather than the desired
+streaming provider path. The current scripts avoid that pattern.
 
 # Run
+
+Synthetic, deterministic default used for the rendered table:
 
 ``` sh
 python3 scripts/cgranges_benchmark.py \
   --extension build/release/duckhts.duckdb_extension \
   --bedtk .sync/bedtk/bedtk \
+  --bedtools bedtools \
   --subjects 50000 \
   --queries 5000 \
   --passes 3 \
   --out-dir .tmp/cgranges_benchmark
 ```
 
+Real DuckBedQC BED files can be benchmarked with:
+
+``` sh
+python3 scripts/cgranges_benchmark_real.py \
+  --extension build/release/duckhts.duckdb_extension \
+  --passes 1 \
+  --out-dir .tmp/cgranges_benchmark_real
+```
+
+For a shell/CLI-only smoke path that still avoids generated bulk-query
+SQL:
+
+``` sh
+scripts/cgranges_benchmark_cli.sh
+```
+
 # Configuration
 
-| parameter | value |
-|:----------|------:|
-| subjects  | 50000 |
-| queries   |  5000 |
-| passes    |     3 |
+| parameter | value                        |
+|:----------|:-----------------------------|
+| dataset   | synthetic deterministic BED4 |
+| subjects  | 50000                        |
+| queries   | 5000                         |
+| passes    | 3                            |
+| bedtk     | available                    |
+| bedtools  | available                    |
 
 # Results
 
-| tool             | subjects | queries | passes | build_index_sec | query_total_sec | query_pass_1_sec | total_elapsed_sec | peak_rss_mb | matched_query_intervals | total_hits | time_per_query_ms |
-|:-----------------|---------:|--------:|-------:|----------------:|----------------:|-----------------:|------------------:|------------:|------------------------:|-----------:|------------------:|
-| duckhts_cgranges |    50000 |    5000 |      3 |            0.03 |           1.733 |            0.660 |             1.873 |       125.4 |                    2239 |       3000 |            0.1156 |
-| bedtk            |    50000 |    5000 |      3 |            0.00 |           0.030 |            0.007 |             0.060 |        14.5 |                    2239 |         NA |            0.0020 |
+| tool     | variant       | subject_intervals | query_intervals | passes | build_index_sec | query_total_sec | query_pass_1_sec | total_elapsed_sec | peak_rss_mb | matched_query_intervals | total_hits | time_per_query_ms |
+|:---------|:--------------|------------------:|----------------:|-------:|----------------:|----------------:|-----------------:|------------------:|------------:|------------------------:|-----------:|------------------:|
+| duckhts  | scalar_filter |             50000 |            5000 |      3 |           0.013 |           0.004 |            0.001 |             0.098 |        70.9 |                    2239 |         NA |            0.0003 |
+| duckhts  | scalar_count  |             50000 |            5000 |      3 |           0.014 |           0.005 |            0.002 |             0.107 |        71.6 |                    2239 |       3000 |            0.0003 |
+| bedtk    | flt           |             50000 |            5000 |      3 |           0.000 |           0.035 |            0.010 |             0.075 |        14.7 |                    2239 |         NA |            0.0023 |
+| bedtools | intersect_u   |             50000 |            5000 |      3 |           0.000 |           0.057 |            0.019 |             0.100 |        21.7 |                    2239 |         NA |            0.0038 |
+| bedtools | intersect_c   |             50000 |            5000 |      3 |           0.000 |           0.064 |            0.022 |             0.096 |        21.9 |                    2239 |       3000 |            0.0043 |
+
+# Semantic checks
+
+| check                                                                                            | result |
+|:-------------------------------------------------------------------------------------------------|:-------|
+| matched query intervals agree for DuckHTS scalar_filter, bedtk flt, and bedtools -u when present | TRUE   |
+| overlap counts agree for DuckHTS scalar_count and bedtools -c when present                       | TRUE   |
 
 # Notes
 
-- `bedtk` reports overlap-existence for the whole query BED in one pass.
-- DuckHTS builds an immutable registry index once, then reuses it across
-  probe passes.
-- `matched_query_intervals` should agree across both engines.
-- `build_index_sec` is only meaningful for DuckHTS because the public
-  API exposes an explicit build/finalize step.
+- `duckhts:scalar_filter` is the row-preserving provider-streaming
+  predicate path.
+- `duckhts:scalar_count` computes one cgranges overlap count per
+  streamed query row and is comparable to `bedtools intersect -c`.
+- `bedtk flt` and `bedtools intersect -u` are overlap-existence
+  comparators; they do not report total hit counts.
+- DuckHTS reports explicit target-index build time because the SQL API
+  exposes index construction as a session-scoped operation. The external
+  tools build any internal structures inside their command runtime.
+- The rendered table is intentionally a modest synthetic run. Use
+  `scripts/cgranges_benchmark_real.py` for the larger DuckBedQC
+  WGS/exome BED workload, and optional `--limit-subjects` /
+  `--limit-queries` for quick smoke runs.

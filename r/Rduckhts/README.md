@@ -251,16 +251,18 @@ This section is generated from `functions.yaml`.
 
 ### Intervals
 
-| Function                         | Kind   | Returns | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                              |
-|----------------------------------|--------|---------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `duckhts_cgranges_create`        | scalar | BOOLEAN |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                                                                                                                                                                                                           |
-| `duckhts_cgranges_add`           | scalar | BOOLEAN |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                                                                                                                                                                                                              |
-| `duckhts_cgranges_index`         | scalar | BOOLEAN |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                                                                                                                                                                                                               |
-| `duckhts_cgranges_destroy`       | scalar | BOOLEAN |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                                                                                                                                                                                                                  |
-| `duckhts_cgranges_from_query`    | scalar | BOOLEAN |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…).                                                                                                                                                                                       |
-| `duckhts_cgranges_from_table`    | scalar | BOOLEAN |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                                                                                                                                                                                                             |
-| `duckhts_cgranges_overlaps`      | table  | table   |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                                                                                                                                                                                                                 |
-| `duckhts_cgranges_overlaps_bulk` | table  | table   |          | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal. |
+| Function                          | Kind   | Returns | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                              |
+|-----------------------------------|--------|---------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_cgranges_create`         | scalar | BOOLEAN |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                                                                                                                                                                                                           |
+| `duckhts_cgranges_add`            | scalar | BOOLEAN |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                                                                                                                                                                                                              |
+| `duckhts_cgranges_index`          | scalar | BOOLEAN |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                                                                                                                                                                                                               |
+| `duckhts_cgranges_destroy`        | scalar | BOOLEAN |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                                                                                                                                                                                                                  |
+| `duckhts_cgranges_from_query`     | scalar | BOOLEAN |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…).                                                                                                                                                                                       |
+| `duckhts_cgranges_from_table`     | scalar | BOOLEAN |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                                                                                                                                                                                                             |
+| `duckhts_cgranges_has_overlap`    | scalar | BOOLEAN |          | Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = ‘contain’ and it fully contains at least one indexed interval; NULL inputs return NULL.                                                                                                                           |
+| `duckhts_cgranges_count_overlaps` | scalar | BIGINT  |          | Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = ‘contain’ the number fully contained by it; NULL inputs return NULL.                                                                                                                                            |
+| `duckhts_cgranges_overlaps`       | table  | table   |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                                                                                                                                                                                                                 |
+| `duckhts_cgranges_overlaps_bulk`  | table  | table   |          | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal. |
 
 ### Metadata
 
@@ -391,8 +393,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_readme_8f3ff2c3d7c55.fai
+#>   success                                        index_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_readme_2e23505c8b0cd1.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -428,12 +430,17 @@ unlink(fai_path)
 The bundled extension also exposes SQL-first `duckhts_cgranges_*` entry
 points. These are session-scoped interval indexes that you can populate
 either row-wise or in bulk from a SQL query, then query through
-`duckhts_cgranges_overlaps(...)`. For larger probe sets,
-`duckhts_cgranges_overlaps_bulk(...)` streams a probe query through the
-finalized index in one table-function call. The probe query runs on the
-extension-owned helper connection, so use a regular table or view rather
-than a temp table. There is no dedicated R wrapper yet, so use them
-through `DBI`.
+`duckhts_cgranges_overlaps(...)`. For row-preserving filters or count
+annotations over provider rows, use the vectorized scalar helpers
+`duckhts_cgranges_has_overlap(...)` and
+`duckhts_cgranges_count_overlaps(...)` directly in queries over
+`read_bed(...)`, `read_bam(...)`, `read_bcf(...)`, or regular tables.
+For one-row-per-hit expansion over a larger probe set,
+`duckhts_cgranges_overlaps_bulk(...)` accepts a probe query and emits
+matching indexed intervals in one table-function call. That bulk query
+runs on the extension-owned helper connection, so use a regular table or
+view rather than a temp table. There is no dedicated R wrapper yet, so
+use them through `DBI`.
 
 ``` r
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('readme_idx') AS ok")
@@ -590,10 +597,10 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                 summary_path
-#> 1 /tmp/RtmplOiVew/duckhts_readme_mosdepth_8f3ff7da70ca7.mosdepth.summary.txt
-#>                                                           regions_path
-#> 1 /tmp/RtmplOiVew/duckhts_readme_mosdepth_8f3ff7da70ca7.regions.bed.gz
+#>                                                                  summary_path
+#> 1 /tmp/Rtmp0aG9WJ/duckhts_readme_mosdepth_2e23501a4aed83.mosdepth.summary.txt
+#>                                                            regions_path
+#> 1 /tmp/Rtmp0aG9WJ/duckhts_readme_mosdepth_2e23501a4aed83.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -647,11 +654,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_liftover_src_8f3ff2da953fe.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_liftover_src_2e235035b796ca.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_liftover_dst_8f3ff4188d8f9.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_liftover_dst_2e235024117237.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -695,8 +702,8 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                         index_path
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_munge_8f3ff2640f8fb.fa.fai
+#>   success                                          index_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_munge_2e23506fbd7344.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -783,8 +790,8 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                          output_path bytes_out
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_targets_8f3ff6b4fbdc0.bed.gz       169
+#>   success                                           output_path bytes_out
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_targets_2e23504730f552.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -794,8 +801,10 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_targets_roundtrip_8f3ff1d546c8d.bed       194
+#>   success                                                  output_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_targets_roundtrip_2e2350205f5ccb.bed
+#>   bytes_out
+#> 1       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -803,8 +812,8 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                          index_path index_format
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_range_8f3ff3def88e3.bam.bai          BAI
+#>   success                                           index_path index_format
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_range_2e2350289c9043.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -812,8 +821,8 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                             index_path index_format
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_variants_8f3ff41232867.bcf.csi          CSI
+#>   success                                              index_path index_format
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_variants_2e235075843fa5.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -822,8 +831,10 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                               index_path index_format
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_targets_8f3ff6b4fbdc0.bed.gz.tbi          TBI
+#>   success                                                index_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_targets_2e23504730f552.bed.gz.tbi
+#>   index_format
+#> 1          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -888,8 +899,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
-#> 1    TRUE /tmp/RtmplOiVew/duckhts_readme_8f3ff1765cf9b.fai
+#>   success                                        index_path
+#> 1    TRUE /tmp/Rtmp0aG9WJ/duckhts_readme_2e2350614c2452.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

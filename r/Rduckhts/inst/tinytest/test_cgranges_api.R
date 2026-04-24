@@ -109,6 +109,58 @@ test_cgranges_api <- function() {
     )
   )
 
+  scalar_probe <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT qid,",
+      "  duckhts_cgranges_has_overlap('qry_idx', chrom, start, \"end\") AS has_overlap,",
+      "  duckhts_cgranges_count_overlaps('qry_idx', chrom, start, \"end\") AS n_overlap",
+      "FROM cgr_probe_src",
+      "ORDER BY qid"
+    )
+  )
+  expect_equal(scalar_probe$qid, c(10, 20, 30, 40))
+  expect_equal(scalar_probe$has_overlap, c(TRUE, TRUE, FALSE, TRUE))
+  expect_equal(scalar_probe$n_overlap, c(1, 1, 0, 1))
+
+  scalar_contain <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT qid,",
+      "  duckhts_cgranges_has_overlap('qry_idx', chrom, start, \"end\", 'contain') AS has_contained,",
+      "  duckhts_cgranges_count_overlaps('qry_idx', chrom, start, \"end\", 'contain') AS n_contained",
+      "FROM cgr_probe_src",
+      "ORDER BY qid"
+    )
+  )
+  expect_equal(scalar_contain$has_contained, c(FALSE, FALSE, FALSE, TRUE))
+  expect_equal(scalar_contain$n_contained, c(0, 0, 0, 1))
+
+  null_probe <- DBI::dbGetQuery(
+    con,
+    "SELECT duckhts_cgranges_has_overlap('qry_idx', NULL::VARCHAR, 1, 2) AS hit"
+  )
+  expect_true(is.na(null_probe$hit[1]))
+
+  bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
+  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('bed_provider_idx') AS ok")$ok[1], TRUE)
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('bed_provider_idx', 'CHROMOSOME_I', 5, 15) AS ok")$ok[1],
+    TRUE
+  )
+  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('bed_provider_idx') AS ok")$ok[1], TRUE)
+  bed_provider_hits <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT count(*) AS overlapping_rows,",
+      "  sum(duckhts_cgranges_count_overlaps('bed_provider_idx', chrom, start, \"end\"))::BIGINT AS total_hits",
+      "FROM read_bed(", DBI::dbQuoteString(con, bed_path), ")",
+      "WHERE duckhts_cgranges_has_overlap('bed_provider_idx', chrom, start, \"end\")"
+    )
+  )
+  expect_equal(bed_provider_hits$overlapping_rows[1], 2)
+  expect_equal(bed_provider_hits$total_hits[1], 2)
+
   bulk_hits <- DBI::dbGetQuery(
     con,
     paste(
