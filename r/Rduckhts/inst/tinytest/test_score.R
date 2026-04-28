@@ -20,6 +20,7 @@ test_score <- function() {
   sumf_or <- file.path(extdata, "score_summary_or.tsv")
   sumf_plink2 <- file.path(extdata, "score_summary_plink2.tsv")
   sumf_na <- file.path(extdata, "score_summary_na.tsv")
+  sumf_cnt <- file.path(extdata, "score_summary_CNT.tsv")
   sumf_mismatch <- file.path(extdata, "score_summary_mismatch.tsv")
   sumf_custom <- file.path(extdata, "score_summary_custom.tsv")
   cols_file <- file.path(extdata, "score_columns.tsv")
@@ -38,6 +39,7 @@ test_score <- function() {
   expect_true(file.exists(sumf_or))
   expect_true(file.exists(sumf_plink2))
   expect_true(file.exists(sumf_na))
+  expect_true(file.exists(sumf_cnt))
   expect_true(file.exists(sumf_mismatch))
   expect_true(file.exists(sumf_custom))
   expect_true(file.exists(cols_file))
@@ -74,6 +76,11 @@ test_score <- function() {
   setwd(old_wd)
   expect_equal(round(out_bundled_list$score_summary, 3), c(1.8, 0.1))
   expect_equal(round(out_bundled_list$score_summary_na, 3), c(2.0, 0.5))
+
+  expect_error(
+    rduckhts_score(con, vcf, c(sumf, sumf_cnt), use = "GT", columns = "PLINK", counts = TRUE),
+    "duplicate generated output column name"
+  )
 
   log_path <- tempfile("duckhts_score_", fileext = ".log")
   out_log <- rduckhts_score(con, vcf, c(sumf, sumf_mismatch), use = "GT",

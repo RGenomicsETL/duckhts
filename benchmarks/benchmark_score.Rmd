@@ -25,7 +25,7 @@ scores the same way before checking cell-level equality.
 
 Useful overrides:
 
-- `SCORE_BENCH_ROWS`: synthetic VCF variants, default `100000`
+- `SCORE_BENCH_ROWS`: synthetic VCF variants, default `500000`
 - `SCORE_BENCH_SAMPLES`: genotype samples, default `100`
 - `SCORE_BENCH_PRS`: TSV summary files for the multi-PRS case, default `4`
 - `SCORE_BENCH_RUNS`: timed repeats, default `3`
@@ -51,7 +51,7 @@ if (!file.exists(file.path(score_plugin_dir, "score.so"))) {
 
 Sys.setenv(BCFTOOLS_PLUGINS = score_plugin_dir)
 
-bench_rows <- as.integer(Sys.getenv("SCORE_BENCH_ROWS", unset = "100000"))
+bench_rows <- as.integer(Sys.getenv("SCORE_BENCH_ROWS", unset = "500000"))
 bench_runs <- as.integer(Sys.getenv("SCORE_BENCH_RUNS", unset = "3"))
 n_samples <- as.integer(Sys.getenv("SCORE_BENCH_SAMPLES", unset = "100"))
 n_prs <- as.integer(Sys.getenv("SCORE_BENCH_PRS", unset = "4"))
@@ -107,7 +107,18 @@ write_score_fixture <- function(dir_path, n_variants, n_samples, n_prs) {
 
   alleles <- list(c("A", "T"), c("G", "C"), c("C", "A"), c("T", "G"))
 
-  vcf_lines <- vapply(seq_len(n_variants), function(i) {
+  write_chunked <- function(path, header, n, make_line, chunk_size = 50000L) {
+    con_out <- file(path, open = "wt")
+    on.exit(close(con_out), add = TRUE)
+    writeLines(header, con_out)
+    for (start in seq.int(1L, n, by = chunk_size)) {
+      end <- min(n, start + chunk_size - 1L)
+      idx <- seq.int(start, end)
+      writeLines(vapply(idx, make_line, character(1)), con_out)
+    }
+  }
+
+  write_chunked(vcf_path, header_lines, n_variants, function(i) {
     al <- alleles[[(i - 1L) %% length(alleles) + 1L]]
     pos <- i * 10L
     rsid <- sprintf("rs%d", i)
@@ -115,20 +126,18 @@ write_score_fixture <- function(dir_path, n_variants, n_samples, n_prs) {
                   prob = c(0.5, 0.35, 0.15))
     paste0("1\t", pos, "\t", rsid, "\t", al[1], "\t", al[2],
            "\t.\tPASS\t.\tGT\t", paste(gts, collapse = "\t"))
-  }, character(1))
-  writeLines(c(header_lines, vcf_lines), vcf_path)
+  })
 
   for (prs_i in seq_len(n_prs)) {
     set.seed(1000L + prs_i)
-    summary_lines <- vapply(seq_len(n_variants), function(i) {
+    write_chunked(summary_paths[[prs_i]], "CHR\tBP\tSNP\tA1\tBETA\tP", n_variants, function(i) {
       al <- alleles[[(i - 1L) %% length(alleles) + 1L]]
       pos <- i * 10L
       rsid <- sprintf("rs%d", i)
       beta <- round(rnorm(1, mean = 0, sd = 0.5), 4)
       p <- runif(1, 1e-8, 1)
       paste0("1\t", pos, "\t", rsid, "\t", al[2], "\t", beta, "\t", p)
-    }, character(1))
-    writeLines(c("CHR\tBP\tSNP\tA1\tBETA\tP", summary_lines), summary_paths[[prs_i]])
+    })
   }
 
   run_cmd(sprintf(

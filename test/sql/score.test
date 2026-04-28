@@ -59,7 +59,21 @@ FROM bcftools_score(
   columns := 'PLINK'
 )
 ----
-duplicate PRS output name
+duplicate generated output column name
+
+# --- Generated score/count column collisions are rejected before binding output schema ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  ['__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+   '__WORKING_DIRECTORY__/test/data/score_summary_CNT.tsv'],
+  use := 'GT',
+  columns := 'PLINK',
+  counts := true
+)
+----
+duplicate generated output column name
 
 # --- Matching/audit log: loaded, matched, allele-mismatch counts ---
 query TTT

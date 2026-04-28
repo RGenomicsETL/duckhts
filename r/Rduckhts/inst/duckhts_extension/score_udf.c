@@ -1579,22 +1579,87 @@ static const char *score_use_tag_label(int use_tag) {
     }
 }
 
+static int score_format_metric_name(const score_bind_t *bind,
+                                    const char *pname,
+                                    int threshold_idx,
+                                    int is_count,
+                                    char *out,
+                                    size_t out_sz) {
+    int n;
+    if (!out || out_sz == 0) return -1;
+    if (bind->q_thr_lp && bind->n_q_thr > 0) {
+        double p = pow(10.0, -bind->q_thr_lp[threshold_idx]);
+        n = snprintf(out, out_sz, is_count ? "%s_CNT_p%.6g" : "%s_p%.6g", pname, p);
+    } else {
+        n = snprintf(out, out_sz, is_count ? "%s_CNT" : "%s", pname);
+    }
+    return (n < 0 || (size_t)n >= out_sz) ? -1 : 0;
+}
+
 static int score_validate_prs_names(const score_bind_t *bind, char *err, size_t err_sz) {
-    int i, j;
+    char **seen = NULL;
+    int n_seen = 0;
+    int max_seen;
+    int i, j, k;
     if (!bind || !bind->prs_names) return 0;
+
+    max_seen = 1 + bind->n_prs * bind->n_q_thr * (bind->counts ? 2 : 1);
+    seen = (char **)duckdb_malloc(sizeof(char *) * (size_t)max_seen);
+    if (!seen) {
+        snprintf(err, err_sz, "bcftools_score: out of memory");
+        return -1;
+    }
+    memset(seen, 0, sizeof(char *) * (size_t)max_seen);
+    seen[n_seen++] = score_dup("SAMPLE");
+    if (!seen[0]) {
+        duckdb_free(seen);
+        snprintf(err, err_sz, "bcftools_score: out of memory");
+        return -1;
+    }
+
     for (i = 0; i < bind->n_prs; i++) {
         if (!bind->prs_names[i] || !bind->prs_names[i][0]) {
             snprintf(err, err_sz, "bcftools_score: summary PRS name must not be empty");
-            return -1;
+            goto fail;
         }
-        for (j = i + 1; j < bind->n_prs; j++) {
-            if (bind->prs_names[j] && strcmp(bind->prs_names[i], bind->prs_names[j]) == 0) {
-                snprintf(err, err_sz, "bcftools_score: duplicate PRS output name '%s'; use uniquely named summary files or GWAS-VCF samples", bind->prs_names[i]);
-                return -1;
+        for (j = 0; j < bind->n_q_thr; j++) {
+            for (k = 0; k < (bind->counts ? 2 : 1); k++) {
+                char metric_name[256];
+                int m;
+                if (score_format_metric_name(bind, bind->prs_names[i], j, k == 1, metric_name, sizeof(metric_name)) != 0) {
+                    snprintf(err, err_sz, "bcftools_score: generated output column name for PRS '%s' is too long", bind->prs_names[i]);
+                    goto fail;
+                }
+                if (!metric_name[0]) {
+                    snprintf(err, err_sz, "bcftools_score: generated output column name must not be empty");
+                    goto fail;
+                }
+                for (m = 0; m < n_seen; m++) {
+                    if (strcmp(seen[m], metric_name) == 0) {
+                        snprintf(err, err_sz, "bcftools_score: duplicate generated output column name '%s'; use unique summary filenames or GWAS-VCF samples", metric_name);
+                        goto fail;
+                    }
+                }
+                seen[n_seen] = score_dup(metric_name);
+                if (!seen[n_seen]) {
+                    snprintf(err, err_sz, "bcftools_score: out of memory");
+                    goto fail;
+                }
+                n_seen++;
             }
         }
     }
+
+    for (i = 0; i < n_seen; i++) duckdb_free(seen[i]);
+    duckdb_free(seen);
     return 0;
+
+fail:
+    for (i = 0; i < n_seen; i++) {
+        if (seen[i]) duckdb_free(seen[i]);
+    }
+    duckdb_free(seen);
+    return -1;
 }
 
 static int score_write_log(const score_bind_t *bind,
@@ -2043,21 +2108,11 @@ static void score_bind(duckdb_bind_info info) {
             const char *pname = bind->prs_names[pi];
             for (j = 0; j < bind->n_q_thr; j++) {
                 char name[256];
-                if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                    double p = pow(10.0, -bind->q_thr_lp[j]);
-                    snprintf(name, sizeof(name), "%s_p%.6g", pname, p);
-                } else {
-                    snprintf(name, sizeof(name), "%s", pname);
-                }
+                score_format_metric_name(bind, pname, j, 0, name, sizeof(name));
                 duckdb_bind_add_result_column(info, name, dbl_type);
                 if (bind->counts) {
                     char cnt_name[256];
-                    if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                        double p = pow(10.0, -bind->q_thr_lp[j]);
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", pname, p);
-                    } else {
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", pname);
-                    }
+                    score_format_metric_name(bind, pname, j, 1, cnt_name, sizeof(cnt_name));
                     duckdb_bind_add_result_column(info, cnt_name, bigint_type);
                 }
             }
@@ -2208,12 +2263,7 @@ static void score_init(duckdb_init_info info) {
             const char *pname = bind->prs_names[pi];
             for (j = 0; j < bind->n_q_thr; j++) {
                 char name[256];
-                if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                    double p = pow(10.0, -bind->q_thr_lp[j]);
-                    snprintf(name, sizeof(name), "%s_p%.6g", pname, p);
-                } else {
-                    snprintf(name, sizeof(name), "%s", pname);
-                }
+                score_format_metric_name(bind, pname, j, 0, name, sizeof(name));
                 init->metric_names[metric_idx] = score_dup(name);
                 init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
                 memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
@@ -2221,12 +2271,7 @@ static void score_init(duckdb_init_info info) {
                 metric_idx++;
                 if (bind->counts) {
                     char cnt_name[256];
-                    if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                        double p = pow(10.0, -bind->q_thr_lp[j]);
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", pname, p);
-                    } else {
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", pname);
-                    }
+                    score_format_metric_name(bind, pname, j, 1, cnt_name, sizeof(cnt_name));
                     init->metric_names[metric_idx] = score_dup(cnt_name);
                     init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
                     memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);

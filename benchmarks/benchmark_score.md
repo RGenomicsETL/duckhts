@@ -19,7 +19,7 @@ formats DuckHTS scores the same way before checking cell-level equality.
 
 Useful overrides:
 
-- `SCORE_BENCH_ROWS`: synthetic VCF variants, default `100000`
+- `SCORE_BENCH_ROWS`: synthetic VCF variants, default `500000`
 - `SCORE_BENCH_SAMPLES`: genotype samples, default `100`
 - `SCORE_BENCH_PRS`: TSV summary files for the multi-PRS case, default
   `4`
@@ -40,16 +40,16 @@ Useful overrides:
 ## Settings
 
     #>   variants samples multi_prs_files runs
-    #> 1    50000     100               4    3
+    #> 1   500000     100               4    3
 
 ## Synthetic Single-PRS Case
 
     #>               engine runs median_sec min_sec max_sec variants samples
-    #> 1            duckhts    3      0.097   0.096   0.098    50000     100
-    #> 2 bcftools_RBCFTools    3      0.116   0.114   0.119    50000     100
+    #> 1            duckhts    3      0.950   0.949   0.958   500000     100
+    #> 2 bcftools_RBCFTools    3      1.135   1.131   1.155   500000     100
     #>   genotype_cells output_samples score_columns score_cells
-    #> 1        5000000            100             1         100
-    #> 2        5000000            100             1         100
+    #> 1       50000000            100             1         100
+    #> 2       50000000            100             1         100
 
     #>   duck_samples bcf_samples score_columns compared_score_cells cell_matches
     #> 1          100         100             1                  100          100
@@ -63,11 +63,11 @@ Useful overrides:
 ## Synthetic Multi-PRS TSV Case
 
     #>               engine runs median_sec min_sec max_sec variants samples
-    #> 1            duckhts    3      0.149   0.148   0.153    50000     100
-    #> 2 bcftools_RBCFTools    3      0.159   0.156   0.159    50000     100
+    #> 1            duckhts    3      1.472   1.468   1.484   500000     100
+    #> 2 bcftools_RBCFTools    3      1.592   1.578   1.607   500000     100
     #>   genotype_cells output_samples score_columns score_cells
-    #> 1        5000000            100             4         400
-    #> 2        5000000            100             4         400
+    #> 1       50000000            100             4         400
+    #> 2       50000000            100             4         400
 
     #>   duck_samples bcf_samples score_columns compared_score_cells cell_matches
     #> 1          100         100             4                  400          400
