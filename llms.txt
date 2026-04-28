@@ -246,6 +246,8 @@ Use
 [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_functions.md)
 inside R to inspect the generated extension catalog.
 
+Show generated function catalog
+
 ## Extension Function Catalog
 
 This section is generated from `functions.yaml`.
@@ -318,14 +320,14 @@ This section is generated from `functions.yaml`.
 
 ### Variants
 
-| Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-|----------------------|-------------|---------|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bcftools_liftover`  | scalar      | STRUCT  | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors –no-left-align in bcftools +liftover).                                           |
-| `duckdb_liftover`    | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors –no-left-align in bcftools +liftover.                                                                                                                                                                                                                         |
-| `bcftools_score`     | table       | table   | `rduckhts_score`    | Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls.                                                                                                                                                                                                                                                                       |
-| `bcftools_munge_row` | scalar      | STRUCT  |                     | Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.                                                                                                                                                                 |
-| `duckdb_munge`       | table_macro | table   | `rduckhts_munge`    | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.                                                                             |
-| `duckdb_munge_metal` | table_macro | table   | `rduckhts_munge`    | Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran’s I² heterogeneity, from HET_I2), cq (Cochran’s Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map. |
+| Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|----------------------|-------------|---------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bcftools_liftover`  | scalar      | STRUCT  | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors –no-left-align in bcftools +liftover).                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `duckdb_liftover`    | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors –no-left-align in bcftools +liftover.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bcftools_score`     | table       | table   | `rduckhts_score`    | Compute polygenic scores from one genotype BCF/VCF and one or more summary-statistics files with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls. The second argument accepts a scalar path or a DuckDB LIST/array of paths; TSV/SSF summaries produce one PRS column per file in a single genotype scan, while GWAS-VCF summaries still produce one PRS column per FORMAT sample. Use summaries_list_file with a NULL second argument to read paths from a file or directory; list-file entries are interpreted as written, matching upstream `bcftools +score --summaries` behavior, while directory inputs scan supported regular summary files in lexicographic order and ignore index sidecars. Use log_path to write per-PRS loaded/matched/allele-mismatch/duplicate-marker audit counts. |
+| `bcftools_munge_row` | scalar      | STRUCT  |                     | Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `duckdb_munge`       | table_macro | table   | `rduckhts_munge`    | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `duckdb_munge_metal` | table_macro | table   | `rduckhts_munge`    | Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran’s I² heterogeneity, from HET_I2), cq (Cochran’s Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map.                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Sequence UDFs
 
@@ -412,7 +414,7 @@ bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 #>   success                                        index_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_readme_319aca5d7cbc54.fai
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_readme_1e0cfa330de451.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -636,9 +638,9 @@ mos_out <- rduckhts_mosdepth(
 
 mos_out[, c("summary_path", "regions_path")]
 #>                                                                  summary_path
-#> 1 /tmp/RtmpVvYZU4/duckhts_readme_mosdepth_319aca4f5abbe2.mosdepth.summary.txt
+#> 1 /tmp/Rtmpa5CDNu/duckhts_readme_mosdepth_1e0cfa25d8cab8.mosdepth.summary.txt
 #>                                                            regions_path
-#> 1 /tmp/RtmpVvYZU4/duckhts_readme_mosdepth_319aca4f5abbe2.regions.bed.gz
+#> 1 /tmp/Rtmpa5CDNu/duckhts_readme_mosdepth_1e0cfa25d8cab8.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -693,10 +695,10 @@ writeLines(c(
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_liftover_src_319aca108c3f9e.fa.fai
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_liftover_src_1e0cfa3de2a1d3.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                 index_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_liftover_dst_319aca3d5ed52a.fa.fai
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_liftover_dst_1e0cfa691662ca.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -741,7 +743,7 @@ writeLines(c(
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
 #>   success                                          index_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_munge_319aca11366f63.fa.fai
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_munge_1e0cfa3d0859ce.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -770,7 +772,8 @@ unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
 
 [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
 computes per-sample polygenic risk scores (PRS) from a genotype VCF/BCF
-and a GWAS summary statistics file, wrapping `bcftools_score`.
+and one or more GWAS summary statistics files, wrapping
+`bcftools_score`.
 
 ``` r
 vcf_path    <- system.file("extdata", "score_input.vcf",        package = "Rduckhts")
@@ -784,8 +787,28 @@ gwas_path   <- system.file("extdata", "score_gwas_summary.vcf", package = "Rduck
 gt_prs <- rduckhts_score(con, vcf_path, sumf_path, use = "GT", columns = "PLINK")
 gt_prs[, c("SAMPLE", "score_summary")]
 #>   SAMPLE score_summary
-#> 1     S1    1.80000000
+#> 1     S1    1.79999995
 #> 2     S2    0.09999999
+
+# Multiple TSV/SSF summary files are scored in one genotype scan
+sumf_na_path <- system.file("extdata", "score_summary_na.tsv", package = "Rduckhts")
+multi_prs <- rduckhts_score(con, vcf_path, c(sumf_path, sumf_na_path),
+                            use = "GT", columns = "PLINK")
+multi_prs[, c("SAMPLE", "score_summary", "score_summary_na")]
+#>   SAMPLE score_summary score_summary_na
+#> 1     S1    1.79999995              2.0
+#> 2     S2    0.09999999              0.5
+
+# Optional audit log records loaded/matched/allele-mismatch marker counts
+sumf_mismatch_path <- system.file("extdata", "score_summary_mismatch.tsv", package = "Rduckhts")
+score_log <- tempfile("duckhts_score_", fileext = ".log")
+invisible(rduckhts_score(con, vcf_path, c(sumf_path, sumf_mismatch_path),
+                         use = "GT", columns = "PLINK", log_path = score_log))
+read.delim(score_log, comment.char = "#")[, c("summary_name", "loaded_markers",
+                                                "matched_markers", "allele_mismatch_markers")]
+#>             summary_name loaded_markers matched_markers allele_mismatch_markers
+#> 1          score_summary              3               3                       0
+#> 2 score_summary_mismatch              3               0                       3
 
 # Dosage-based PRS (DS field) for imputed genotypes
 # S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
@@ -800,7 +823,7 @@ ds_prs[, c("SAMPLE", "score_summary")]
 gwas_prs <- rduckhts_score(con, vcf_path, gwas_path, use = "GT")
 gwas_prs[, c("SAMPLE", "PRS_A", "PRS_B")]
 #>   SAMPLE      PRS_A PRS_B
-#> 1     S1 1.80000000   1.0
+#> 1     S1 1.79999995   1.0
 #> 2     S2 0.09999999   0.3
 ```
 
@@ -829,7 +852,7 @@ bgzip_meta <- rduckhts_bgzip(
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                           output_path bytes_out
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_targets_319aca48760b69.bed.gz       169
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_targets_1e0cfa1d25cb8b.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -840,7 +863,7 @@ bgunzip_meta <- rduckhts_bgunzip(
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
 #>   success                                                  output_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_targets_roundtrip_319aca4bf73005.bed
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_targets_roundtrip_1e0cfa3ca4616f.bed
 #>   bytes_out
 #> 1       194
 
@@ -851,7 +874,7 @@ bam_index_meta <- rduckhts_bam_index(
 )
 bam_index_meta
 #>   success                                           index_path index_format
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_range_319aca68421eb9.bam.bai          BAI
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_range_1e0cfa767c49ad.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -860,7 +883,7 @@ bcf_index_meta <- rduckhts_bcf_index(
 )
 bcf_index_meta
 #>   success                                              index_path index_format
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_variants_319aca19010fd6.bcf.csi          CSI
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_variants_1e0cfa27760a12.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -870,7 +893,7 @@ tabix_meta <- rduckhts_tabix_index(
 )
 tabix_meta
 #>   success                                                index_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_targets_319aca48760b69.bed.gz.tbi
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_targets_1e0cfa1d25cb8b.bed.gz.tbi
 #>   index_format
 #> 1          TBI
 
@@ -937,8 +960,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
-#> 1    TRUE /tmp/RtmpVvYZU4/duckhts_readme_319aca5eb7362.fai
+#>   success                                        index_path
+#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_readme_1e0cfa79553d88.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

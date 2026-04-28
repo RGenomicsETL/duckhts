@@ -2,6 +2,19 @@
 
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- extend bundled
+  [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
+  / `bcftools_score(...)` so `summary_path` can be a character vector or
+  callers can use `summaries_list_file`; multiple TSV/SSF summaries are
+  scored in one genotype scan, `log_path` can write per-PRS
+  matching/audit counts for loaded, matched, allele-mismatch, and
+  duplicate markers, `summaries_list_file` directory scans are
+  deterministic and ignore index sidecars, generated score/count column
+  names are validated for uniqueness, and score accumulation now follows
+  upstream `bcftools +score` float32 summation more closely
+- collapse the generated package README function catalog behind a
+  disclosure widget so package users can jump to quick-start and
+  workflow examples more easily
 - add bundled `duckhts_cgranges_overlaps_list(...)`, a vectorized scalar
   overlap expander that returns LIST-of-STRUCT hit records so DBI
   queries can expand provider rows with `UNNEST(...)` without generated
