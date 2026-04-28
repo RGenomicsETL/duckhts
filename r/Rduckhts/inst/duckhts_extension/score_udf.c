@@ -2508,7 +2508,16 @@ static void score_init(duckdb_init_info info) {
                         if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
                         for (k = 0; k < n_samples; k++) {
                             if (missing[k]) continue;
-                            init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];
+                            {
+                                /* Upstream bcftools +score accumulates scores in float arrays
+                                 * and writes %#.6g text output. Preserve the float32 summation
+                                 * path before widening to DuckDB DOUBLE so large synthetic PRS
+                                 * benchmarks do not drift from the plugin by accumulated double
+                                 * precision differences. */
+                                float score_value = (float)init->metric_values[out_idx][k];
+                                score_value += es * aps[idx_allele * n_samples + k];
+                                init->metric_values[out_idx][k] = (double)score_value;
+                            }
                             if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
                         }
                     }

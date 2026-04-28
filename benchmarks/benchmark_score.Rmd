@@ -15,7 +15,9 @@ This benchmark validates and times DuckHTS `bcftools_score()` against the
 `bcftools +score` plugin bundled by
 [`RGenomicsETL/RBCFTools`](https://github.com/RGenomicsETL/RBCFTools).
 It covers both a single TSV/PLINK summary and multi-PRS TSV scoring where
-several summary files are scored in one genotype scan.
+several summary files are scored in one genotype scan. Because upstream
+`bcftools +score` writes scores with `%#.6g`, the comparison formats DuckHTS
+scores the same way before checking cell-level equality.
 
 # Run
 
@@ -24,7 +26,7 @@ several summary files are scored in one genotype scan.
 Useful overrides:
 
 - `SCORE_BENCH_ROWS`: synthetic VCF variants, default `100000`
-- `SCORE_BENCH_SAMPLES`: genotype samples, default `10`
+- `SCORE_BENCH_SAMPLES`: genotype samples, default `100`
 - `SCORE_BENCH_PRS`: TSV summary files for the multi-PRS case, default `4`
 - `SCORE_BENCH_RUNS`: timed repeats, default `3`
 - `BCFTOOLS_BIN`: optional override for the bcftools executable
@@ -51,7 +53,7 @@ Sys.setenv(BCFTOOLS_PLUGINS = score_plugin_dir)
 
 bench_rows <- as.integer(Sys.getenv("SCORE_BENCH_ROWS", unset = "100000"))
 bench_runs <- as.integer(Sys.getenv("SCORE_BENCH_RUNS", unset = "3"))
-n_samples <- as.integer(Sys.getenv("SCORE_BENCH_SAMPLES", unset = "10"))
+n_samples <- as.integer(Sys.getenv("SCORE_BENCH_SAMPLES", unset = "100"))
 n_prs <- as.integer(Sys.getenv("SCORE_BENCH_PRS", unset = "4"))
 
 if (is.na(bench_rows) || bench_rows < 1L) stop("SCORE_BENCH_ROWS must be positive")
@@ -158,7 +160,8 @@ duckdb_score_sql <- function(vcf_path, summary_paths) {
 run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L) {
   sql <- duckdb_score_sql(vcf_path, summary_paths)
   times <- numeric(n)
-  rows <- NA_integer_
+  output_samples <- NA_integer_
+  score_columns <- NA_integer_
   DBI::dbExecute(con, "PRAGMA threads=1")
   on.exit(DBI::dbExecute(con, "PRAGMA threads=4"), add = TRUE)
 
@@ -167,7 +170,8 @@ run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L) {
     t0 <- proc.time()[["elapsed"]]
     out <- DBI::dbGetQuery(con, sql)
     times[i] <- proc.time()[["elapsed"]] - t0
-    rows <- nrow(out)
+    output_samples <- nrow(out)
+    score_columns <- ncol(out) - 1L
   }
 
   data.frame(
@@ -176,7 +180,9 @@ run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L) {
     median_sec = stats::median(times),
     min_sec = min(times),
     max_sec = max(times),
-    output_rows = rows,
+    output_samples = output_samples,
+    score_columns = score_columns,
+    score_cells = output_samples * score_columns,
     stringsAsFactors = FALSE
   )
 }
@@ -210,7 +216,11 @@ run_bcftools_once <- function(vcf_gz, summary_paths, output_path) {
   )
 }
 
-compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
+bcftools_score_text <- function(x) {
+  ifelse(is.na(x), NA_character_, sprintf("%#.6g", as.numeric(x)))
+}
+
+compare_outputs <- function(duck_out, bcf_out) {
   common_cols <- intersect(names(duck_out), names(bcf_out))
   score_cols <- setdiff(common_cols, "SAMPLE")
 
@@ -229,12 +239,14 @@ compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
     duck_col <- paste0(col, "_duck")
     bcf_col <- paste0(col, "_bcf")
     if (duck_col %in% names(merged) && bcf_col %in% names(merged)) {
-      d <- as.numeric(merged[[duck_col]])
-      b <- as.numeric(merged[[bcf_col]])
+      d_text <- bcftools_score_text(merged[[duck_col]])
+      b_text <- bcftools_score_text(merged[[bcf_col]])
+      d <- as.numeric(d_text)
+      b <- as.numeric(b_text)
       abs_diff <- abs(d - b)
       denom <- pmax(abs(d), abs(b), 1.0)
       rel_diff <- abs_diff / denom
-      matches <- !is.na(rel_diff) & rel_diff <= rel_tol
+      matches <- !is.na(d_text) & !is.na(b_text) & d_text == b_text
       n_match <- n_match + sum(matches, na.rm = TRUE)
       n_mismatch <- n_mismatch + sum(!matches, na.rm = TRUE)
       max_abs_diff <- max(max_abs_diff, max(abs_diff, na.rm = TRUE))
@@ -246,12 +258,13 @@ compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
     duck_samples = nrow(duck_out),
     bcf_samples = nrow(bcf_out),
     score_columns = length(score_cols),
+    compared_score_cells = nrow(duck_out) * length(score_cols),
     cell_matches = n_match,
     cell_mismatches = n_mismatch,
     only_duck_samples = n_only_duck,
     only_bcftools_samples = n_only_bcf,
-    max_abs_diff = max_abs_diff,
-    max_rel_diff = max_rel_diff,
+    max_abs_diff_after_bcftools_text = max_abs_diff,
+    max_rel_diff_after_bcftools_text = max_rel_diff,
     outputs_match = (n_mismatch == 0L && n_only_duck == 0L && n_only_bcf == 0L),
     stringsAsFactors = FALSE
   )
@@ -263,29 +276,40 @@ run_benchmark_case <- function(fixture, summary_paths, n = 3L) {
 
   bcftools_times <- numeric(n)
   bcftools_out <- NULL
-  output_rows <- NA_integer_
+  output_samples <- NA_integer_
+  score_columns <- NA_integer_
   for (i in seq_len(n)) {
     out_tsv <- tempfile("bcftools_score_", fileext = ".tsv")
     run <- run_bcftools_once(fixture$vcf_gz, summary_paths, out_tsv)
     bcftools_times[i] <- run$elapsed
-    output_rows <- nrow(run$data)
+    output_samples <- nrow(run$data)
+    score_columns <- ncol(run$data) - 1L
     if (i == 1L) bcftools_out <- run$data
     unlink(out_tsv, force = TRUE)
   }
 
+  bench <- rbind(
+    duck,
+    data.frame(
+      engine = "bcftools_RBCFTools",
+      runs = n,
+      median_sec = stats::median(bcftools_times),
+      min_sec = min(bcftools_times),
+      max_sec = max(bcftools_times),
+      output_samples = output_samples,
+      score_columns = score_columns,
+      score_cells = output_samples * score_columns,
+      stringsAsFactors = FALSE
+    )
+  )
+  bench$variants <- fixture$n_variants
+  bench$samples <- fixture$n_samples
+  bench$genotype_cells <- fixture$n_variants * fixture$n_samples
+
   list(
-    bench = rbind(
-      duck,
-      data.frame(
-        engine = "bcftools_RBCFTools",
-        runs = n,
-        median_sec = stats::median(bcftools_times),
-        min_sec = min(bcftools_times),
-        max_sec = max(bcftools_times),
-        output_rows = output_rows,
-        stringsAsFactors = FALSE
-      )
-    ),
+    bench = bench[, c("engine", "runs", "median_sec", "min_sec", "max_sec",
+                      "variants", "samples", "genotype_cells",
+                      "output_samples", "score_columns", "score_cells")],
     compare = compare_outputs(duck_out, bcftools_out)
   )
 }
