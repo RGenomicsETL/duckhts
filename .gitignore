@@ -68,6 +68,7 @@ benchmark_results.csv
 *.tar.bz2
 
 # Root-level scratch HTS data and conformance outputs
+/*.idxstats.txt
 /*.bam
 /*.bai
 /*.bcf
@@ -90,6 +91,7 @@ review_*.md
 score_conformance.*
 score_out.tsv
 scripts/mosdepth_conformance/
+test/data/nuc_with_n.fa.fai
 
 # R package artifacts
 r/Rduckhts/.Rproj.user/

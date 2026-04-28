@@ -229,6 +229,93 @@ rduckhts_fasta_nuc(con, fasta_path, bin_width = 10, region = "CHROMOSOME_I:1-20"
 unlink(fai_path)
 ```
 
+### cgranges registry entry points
+
+The bundled extension also exposes SQL-first `duckhts_cgranges_*` entry points.
+These are session-scoped interval indexes that you can populate either row-wise
+or in bulk from a SQL query, then query through `duckhts_cgranges_overlaps(...)`.
+For row-preserving filters or count annotations over provider rows, use the
+vectorized scalar helpers `duckhts_cgranges_has_overlap(...)` and
+`duckhts_cgranges_count_overlaps(...)` directly in queries over `read_bed(...)`,
+`read_bam(...)`, `read_bcf(...)`, or regular tables. For streaming
+one-row-per-hit expansion while keeping provider columns, use
+`duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)`. The older
+`duckhts_cgranges_overlaps_bulk(...)` table function still accepts a probe query
+and emits matching indexed intervals in one table-function call; that bulk query
+runs on the extension-owned helper connection, so use a regular table or view
+rather than a temp table.
+There is no dedicated R wrapper yet, so use them through `DBI`.
+
+```{r}
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('readme_idx') AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('readme_idx') AS ok")
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
+    "FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7)"
+  )
+)
+
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT duckhts_cgranges_from_query(",
+    "  'readme_qry_idx',",
+    "  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, \"end\", label)',",
+    "  'chrom', 'start', 'end', 'label'",
+    ") AS ok"
+  )
+)
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('readme_qry_idx') AS ok")
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
+    "FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain')"
+  )
+)
+DBI::dbExecute(
+  con,
+  paste(
+    "CREATE TABLE readme_probes AS SELECT * FROM (VALUES",
+    "(10, 'chr2', 100, 105),",
+    "(20, 'chr2', 160, 161),",
+    "(30, 'chr2', 500, 510)",
+    ") AS t(probe_id, chrom, start, \"end\")"
+  )
+)
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT p.probe_id, hit.interval_ordinal, hit.label, hit.label_type,",
+    "  hit.interval_chrom, hit.interval_start, hit.interval_end",
+    "FROM readme_probes AS p",
+    "CROSS JOIN UNNEST(",
+    "  duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p.\"end\")",
+    ") AS u(hit)",
+    "ORDER BY p.probe_id, hit.interval_ordinal"
+  )
+)
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end",
+    "FROM duckhts_cgranges_overlaps_bulk(",
+    "  'readme_qry_idx',",
+    "  'SELECT probe_id, chrom, start, \"end\" FROM readme_probes',",
+    "  'chrom', 'start', 'end',",
+    "  query_row_id_col := 'probe_id'",
+    ")",
+    "ORDER BY query_row_id, interval_ordinal"
+  )
+)
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('readme_idx') AS ok")
+DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('readme_qry_idx') AS ok")
+```
+
 ### Fixed-bin native counting
 
 `rduckhts_bam_bin_counts()` exposes the native fixed-width read-start counting

@@ -54,6 +54,22 @@ This section is generated from `functions.yaml`.
 | `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
 
+### Intervals
+
+| Function                          | Kind   | Returns                                                                                                                                      | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-----------------------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_cgranges_create`         | scalar | BOOLEAN                                                                                                                                      |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                                                                                                                                                                                                               |
+| `duckhts_cgranges_add`            | scalar | BOOLEAN                                                                                                                                      |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                                                                                                                                                                                                                  |
+| `duckhts_cgranges_index`          | scalar | BOOLEAN                                                                                                                                      |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                                                                                                                                                                                                                   |
+| `duckhts_cgranges_destroy`        | scalar | BOOLEAN                                                                                                                                      |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                                                                                                                                                                                                                      |
+| `duckhts_cgranges_from_query`     | scalar | BOOLEAN                                                                                                                                      |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…).                                                                                                                                                                                           |
+| `duckhts_cgranges_from_table`     | scalar | BOOLEAN                                                                                                                                      |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                                                                                                                                                                                                                 |
+| `duckhts_cgranges_has_overlap`    | scalar | BOOLEAN                                                                                                                                      |          | Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = ‘contain’ and it fully contains at least one indexed interval; NULL inputs return NULL.                                                                                                                               |
+| `duckhts_cgranges_count_overlaps` | scalar | BIGINT                                                                                                                                       |          | Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = ‘contain’ the number fully contained by it; NULL inputs return NULL.                                                                                                                                                |
+| `duckhts_cgranges_overlaps_list`  | scalar | STRUCT(interval_ordinal BIGINT, label VARCHAR, label_type VARCHAR, interval_chrom VARCHAR, interval_start INTEGER, interval_end INTEGER)\[\] |          | Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL. |
+| `duckhts_cgranges_overlaps`       | table  | table                                                                                                                                        |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                                                                                                                                                                                                                     |
+| `duckhts_cgranges_overlaps_bulk`  | table  | table                                                                                                                                        |          | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.     |
+
 ### Metadata
 
 | Function                    | Kind        | Returns | R helper                           | Description                                                                                                                                                                                                                                                                |
@@ -257,6 +273,153 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
     │ CHROMOSOME_I │     0 │    10 │      10 │    0.6 │
     │ CHROMOSOME_I │    10 │    20 │      10 │    0.5 │
     └──────────────┴───────┴───────┴─────────┴────────┘
+
+### cgranges registry entry points
+
+`duckhts_cgranges_*` exposes a session-scoped immutable interval index
+for native overlap queries. You can either build it row-wise with
+`duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or
+bulk-load it from SQL with `duckhts_cgranges_from_query(...)`. For
+row-preserving filters or count annotations over provider rows, use the
+vectorized scalar helpers `duckhts_cgranges_has_overlap(...)` and
+`duckhts_cgranges_count_overlaps(...)` directly in queries over
+`read_bed(...)`, `read_bam(...)`, `read_bcf(...)`, or regular tables.
+For streaming one-row-per-hit expansion while keeping provider columns,
+use `duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)`. The older
+`duckhts_cgranges_overlaps_bulk(...)` table function still accepts a
+probe query and emits matching indexed intervals in one table-function
+call; that bulk query runs on the extension-owned helper connection, so
+use a regular table or view rather than a temp table.
+
+``` sql
+LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+SELECT duckhts_cgranges_create('readme_idx');
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a');
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b');
+SELECT duckhts_cgranges_index('readme_idx');
+
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
+
+SELECT duckhts_cgranges_from_query(
+  'readme_qry_idx',
+  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)',
+  'chrom', 'start', 'end', 'label'
+);
+SELECT duckhts_cgranges_index('readme_qry_idx');
+
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain');
+
+CREATE TABLE readme_probes AS
+SELECT * FROM (VALUES
+  (10, 'chr2', 100, 105),
+  (20, 'chr2', 160, 161),
+  (30, 'chr2', 500, 510)
+) AS t(probe_id, chrom, start, "end");
+
+SELECT
+  p.probe_id,
+  hit.interval_ordinal,
+  hit.label,
+  hit.label_type,
+  hit.interval_chrom,
+  hit.interval_start,
+  hit.interval_end
+FROM readme_probes AS p
+CROSS JOIN UNNEST(
+  duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p."end")
+) AS u(hit)
+ORDER BY p.probe_id, hit.interval_ordinal;
+
+SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps_bulk(
+  'readme_qry_idx',
+  'SELECT probe_id, chrom, start, "end" FROM readme_probes',
+  'chrom', 'start', 'end',
+  query_row_id_col := 'probe_id'
+)
+ORDER BY query_row_id, interval_ordinal;
+
+SELECT duckhts_cgranges_destroy('readme_idx');
+SELECT duckhts_cgranges_destroy('readme_qry_idx');
+DROP TABLE readme_probes;
+```
+
+    ┌───────────────────────────────────────┐
+    │ duckhts_cgranges_create('readme_idx') │
+    │                boolean                │
+    ├───────────────────────────────────────┤
+    │ true                                  │
+    └───────────────────────────────────────┘
+    ┌─────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') │
+    │                         boolean                         │
+    ├─────────────────────────────────────────────────────────┤
+    │ true                                                    │
+    └─────────────────────────────────────────────────────────┘
+    ┌─────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') │
+    │                         boolean                         │
+    ├─────────────────────────────────────────────────────────┤
+    │ true                                                    │
+    └─────────────────────────────────────────────────────────┘
+    ┌──────────────────────────────────────┐
+    │ duckhts_cgranges_index('readme_idx') │
+    │               boolean                │
+    ├──────────────────────────────────────┤
+    │ true                                 │
+    └──────────────────────────────────────┘
+    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │                1 │ b       │ chr1           │             30 │           40 │
+    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+    ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_from_query('readme_qry_idx', 'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)', 'chrom', 'start', 'end', 'label') │
+    │                                                                                                  boolean                                                                                                   │
+    ├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+    │ true                                                                                                                                                                                                       │
+    └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+    ┌──────────────────────────────────────────┐
+    │ duckhts_cgranges_index('readme_qry_idx') │
+    │                 boolean                  │
+    ├──────────────────────────────────────────┤
+    │ true                                     │
+    └──────────────────────────────────────────┘
+    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │                1 │ beta    │ chr2           │            150 │          170 │
+    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+    ┌──────────┬──────────────────┬─────────┬────────────┬────────────────┬────────────────┬──────────────┐
+    │ probe_id │ interval_ordinal │  label  │ label_type │ interval_chrom │ interval_start │ interval_end │
+    │  int32   │      int64       │ varchar │  varchar   │    varchar     │     int32      │    int32     │
+    ├──────────┼──────────────────┼─────────┼────────────┼────────────────┼────────────────┼──────────────┤
+    │       10 │                0 │ alpha   │ VARCHAR    │ chr2           │            100 │          110 │
+    │       20 │                1 │ beta    │ VARCHAR    │ chr2           │            150 │          170 │
+    └──────────┴──────────────────┴─────────┴────────────┴────────────────┴────────────────┴──────────────┘
+    ┌──────────────┬──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ query_row_id │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │    int64     │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────┼──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │           10 │                0 │ alpha   │ chr2           │            100 │          110 │
+    │           20 │                1 │ beta    │ chr2           │            150 │          170 │
+    └──────────────┴──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+    ┌────────────────────────────────────────┐
+    │ duckhts_cgranges_destroy('readme_idx') │
+    │                boolean                 │
+    ├────────────────────────────────────────┤
+    │ true                                   │
+    └────────────────────────────────────────┘
+    ┌────────────────────────────────────────────┐
+    │ duckhts_cgranges_destroy('readme_qry_idx') │
+    │                  boolean                   │
+    ├────────────────────────────────────────────┤
+    │ true                                       │
+    └────────────────────────────────────────────┘
 
 ### Fixed-bin native counting
 
@@ -885,7 +1048,7 @@ brew install cmake htslib xz libdeflate
 ```
 
 This downloads and verifies [htslib](https://github.com/samtools/htslib)
-1.23 into `third_party/htslib/`.
+1.23.1 into `third_party/htslib/`.
 
 ### Build
 
@@ -1120,7 +1283,7 @@ dbDisconnect(con, shutdown = TRUE)
         vep_parser.h
         .....
     third_party/
-      htslib/            # Vendored htslib 1.23 (built automatically)
+      htslib/            # Vendored htslib 1.23.1 (built automatically)
     test/
       sql/               # SQL logic tests
     duckdb_capi/

@@ -817,9 +817,10 @@ static void fasta_nuc_scan(duckdb_function_info info, duckdb_data_chunk output) 
             }
             seq_len = fetch_len;
             count_nucleotides(seq, seq_len, &num_a, &num_c, &num_g, &num_t, &num_n, &num_other);
-            if (seq_len > 0) {
-                pct_at = (double)(num_a + num_t) / (double)seq_len;
-                pct_gc = (double)(num_c + num_g) / (double)seq_len;
+            int64_t informative_bases = num_a + num_c + num_g + num_t;
+            if (informative_bases > 0) {
+                pct_at = (double)(num_a + num_t) / (double)informative_bases;
+                pct_gc = (double)(num_c + num_g) / (double)informative_bases;
             }
         }
 

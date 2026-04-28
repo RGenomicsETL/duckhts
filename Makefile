@@ -81,10 +81,12 @@ clean_local:
 	rm -rf Rduckhts.Rcheck r/Rduckhts.Rcheck scripts/mosdepth_conformance
 	rm -f README.html r/Rduckhts/README.html benchmarks/*.html benchmark_results.csv
 	rm -f *.tar.gz *.tgz *.tar.bz2 r/Rduckhts/*.tar.gz r/Rduckhts/*.tgz
+	rm -f *.idxstats.txt
 	rm -f mosdepth_*_sqltest*
 	rm -f test_bgzip_input.bed test_bgzip_input.bed.gz test_bgzip_input.bed.gz.tbi
 	rm -f test_bgzip_roundtrip.bed test_formatcols.vcf.gz.tbi test_range.bam.bai
 	rm -f test_targets.bed.gz test_targets.bed.gz.tbi
+	rm -f test/data/nuc_with_n.fa.fai
 
 # Render README.md from README.Rmd (GitHub-flavored markdown)
 function_catalog:

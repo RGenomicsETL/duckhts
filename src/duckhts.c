@@ -59,6 +59,8 @@ extern void register_bam_bin_counts_function(duckdb_connection connection);
 extern void register_duckhts_samtools_idxstats_function(duckdb_connection connection);
 /* bam_bed_coverage.c */
 extern void register_duckhts_bam_bed_coverage_function(duckdb_connection connection);
+/* cgranges_api.c */
+extern void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
 
 static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
     duckdb_result result;
@@ -138,6 +140,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_bam_bin_counts_function(connection);
     register_duckhts_samtools_idxstats_function(connection);
     register_duckhts_bam_bed_coverage_function(connection);
+    register_duckhts_cgranges_functions(connection, *access->get_database(info));
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {

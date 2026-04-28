@@ -108,6 +108,138 @@
       ]
     },
     {
+      "name": "duckhts_cgranges_create",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_create(name)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.",
+      "examples": [
+        "SELECT duckhts_cgranges_create('targets_idx');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_add",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_add(name, chrom, start, end[, label])",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.",
+      "examples": [
+        "SELECT duckhts_cgranges_add('targets_idx', 'chr1', 10, 20, 'exon1');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_index",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_index(name)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.",
+      "examples": [
+        "SELECT duckhts_cgranges_index('targets_idx');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_destroy",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_destroy(name)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.",
+      "examples": [
+        "SELECT duckhts_cgranges_destroy('targets_idx');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_from_query",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_from_query(name, query, chrom_col, start_col, end_col[, label_col])",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(...).",
+      "examples": [
+        "SELECT duckhts_cgranges_from_query('targets_idx', 'SELECT chrom, start, \"end\", name FROM targets', 'chrom', 'start', 'end', 'name');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_from_table",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(...).",
+      "examples": [
+        "SELECT duckhts_cgranges_from_table('targets_idx', 'targets', 'chrom', 'start', 'end', 'name');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_has_overlap",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_has_overlap(name, chrom, start, end[, mode])",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = 'contain' and it fully contains at least one indexed interval; NULL inputs return NULL.",
+      "examples": [
+        "SELECT * FROM read_bed('queries.bed') WHERE duckhts_cgranges_has_overlap('targets_idx', chrom, start, \"end\");"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_count_overlaps",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_count_overlaps(name, chrom, start, end[, mode])",
+      "returns": "BIGINT",
+      "r_wrapper": "",
+      "description": "Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = 'contain' the number fully contained by it; NULL inputs return NULL.",
+      "examples": [
+        "SELECT chrom, start, \"end\", duckhts_cgranges_count_overlaps('targets_idx', chrom, start, \"end\") AS n_targets FROM read_bed('queries.bed');"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_overlaps_list",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_overlaps_list(name, chrom, start, end[, mode])",
+      "returns": "STRUCT(interval_ordinal BIGINT, label VARCHAR, label_type VARCHAR, interval_chrom VARCHAR, interval_start INTEGER, interval_end INTEGER)[]",
+      "r_wrapper": "",
+      "description": "Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL.",
+      "examples": [
+        "SELECT q.*, hit.interval_chrom, hit.interval_start, hit.interval_end, hit.label FROM read_bed('queries.bed') AS q CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('targets_idx', q.chrom, q.start, q.\"end\")) AS u(hit);"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_overlaps",
+      "kind": "table",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_overlaps(name, chrom, start, end, mode := 'overlap', query_row_id := NULL)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.",
+      "examples": [
+        "SELECT * FROM duckhts_cgranges_overlaps('targets_idx', 'chr1', 100, 150);"
+      ]
+    },
+    {
+      "name": "duckhts_cgranges_overlaps_bulk",
+      "kind": "table",
+      "category": "Intervals",
+      "signature": "duckhts_cgranges_overlaps_bulk(name, query, chrom_col, start_col, end_col, mode := 'overlap', query_row_id_col := NULL)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.",
+      "examples": [
+        "SELECT * FROM duckhts_cgranges_overlaps_bulk('targets_idx', 'SELECT probe_id, chrom, start, \"end\" FROM probes', 'chrom', 'start', 'end', query_row_id_col := 'probe_id');"
+      ]
+    },
+    {
       "name": "read_fastq",
       "kind": "table",
       "category": "Readers",
