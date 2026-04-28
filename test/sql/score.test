@@ -18,6 +18,102 @@ ORDER BY SAMPLE
 S1	1.8
 S2	0.1
 
+# --- Multi-PRS TSV scoring: list/array input, one genotype scan ---
+query TTT
+SELECT SAMPLE, round(score_summary, 3), round(score_summary_na, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  ['__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+   '__WORKING_DIRECTORY__/test/data/score_summary_na.tsv'],
+  use := 'GT',
+  columns := 'PLINK'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	2.0
+S2	0.1	0.5
+
+# --- Multi-PRS TSV scoring: summaries_list_file relative paths ---
+query TTT
+SELECT SAMPLE, round(score_summary, 3), round(score_summary_na, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  NULL,
+  use := 'GT',
+  columns := 'PLINK',
+  summaries_list_file := '__WORKING_DIRECTORY__/test/data/score_summaries.list'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	2.0
+S2	0.1	0.5
+
+# --- Multi-PRS TSV scoring: summaries_list_file directory skips sidecars and is sorted ---
+query TTT
+SELECT SAMPLE, round(score_summary, 3), round(score_summary_na, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  NULL,
+  use := 'GT',
+  columns := 'PLINK',
+  summaries_list_file := '__WORKING_DIRECTORY__/test/data/score_summary_dir'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	2.0
+S2	0.1	0.5
+
+# --- Duplicate PRS names are rejected clearly because DuckDB result columns must be unique ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  ['__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+   '__WORKING_DIRECTORY__/test/data/score_summary.tsv'],
+  use := 'GT',
+  columns := 'PLINK'
+)
+----
+duplicate generated output column name
+
+# --- Generated score/count column collisions are rejected before binding output schema ---
+statement error
+SELECT *
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  ['__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+   '__WORKING_DIRECTORY__/test/data/score_summary_CNT.tsv'],
+  use := 'GT',
+  columns := 'PLINK',
+  counts := true
+)
+----
+duplicate generated output column name
+
+# --- Matching/audit log: loaded, matched, allele-mismatch counts ---
+query TTT
+SELECT SAMPLE, round(score_summary, 3), round(score_summary_mismatch, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  ['__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+   '__WORKING_DIRECTORY__/test/data/score_summary_mismatch.tsv'],
+  use := 'GT',
+  columns := 'PLINK',
+  log_path := '/tmp/duckhts_score_sqllogic.log'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	0.0
+S2	0.1	0.0
+
+query TIIII
+SELECT summary_name, loaded_markers, all_markers, matched_markers, allele_mismatch_markers
+FROM read_csv('/tmp/duckhts_score_sqllogic.log', delim := '\t', header := true, comment := '#')
+ORDER BY summary_name
+----
+score_summary	3	3	3	0
+score_summary_mismatch	3	3	0	3
+
 query TT
 SELECT SAMPLE, round(score_summary, 3)
 FROM bcftools_score(

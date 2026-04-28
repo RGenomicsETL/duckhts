@@ -113,4 +113,30 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  parallel_empty_contigs.vcf.gz + .tbi"
 
+# ---- bcftools_score multi-summary list / directory / generated-name collision fixtures ----
+# List entries intentionally use repo-root-relative paths to match upstream
+# bcftools +score --summaries list-file semantics (entries are not resolved
+# relative to the list file location).
+cp "$DST/score_summary.tsv" "$DST/score_summary_CNT.tsv"
+cp "$PKG_DST/score_summary.tsv" "$PKG_DST/score_summary_CNT.tsv"
+for out_dir in "$DST" "$PKG_DST"; do
+  rm -rf "$out_dir/score_summary_dir"
+  mkdir -p "$out_dir/score_summary_dir/nested.tsv"
+  cp "$out_dir/score_summary.tsv" "$out_dir/score_summary_dir/score_summary.tsv"
+  cp "$out_dir/score_summary_na.tsv" "$out_dir/score_summary_dir/score_summary_na.tsv"
+  printf 'sidecar\n' > "$out_dir/score_summary_dir/score_summary.tsv.tbi"
+  printf 'sidecar\n' > "$out_dir/score_summary_dir/score_summary_na.tsv.csi"
+  printf 'not a summary\n' > "$out_dir/score_summary_dir/README.md"
+  printf 'nested ignored\n' > "$out_dir/score_summary_dir/nested.tsv/ignored.txt"
+done
+cat > "$DST/score_summaries.list" <<'EOF'
+test/data/score_summary.tsv
+test/data/score_summary_na.tsv
+EOF
+cat > "$PKG_DST/score_summaries.list" <<'EOF'
+score_summary.tsv
+score_summary_na.tsv
+EOF
+echo "  score_summaries.list + score_summary_dir"
+
 echo "==> Done. $(ls "$DST" | wc -l) files in test/data/"

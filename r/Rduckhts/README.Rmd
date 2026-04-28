@@ -183,9 +183,14 @@ dbGetQuery(con, "SELECT count(*) AS n FROM bam_multi")
 
 Use `rduckhts_functions()` inside R to inspect the generated extension catalog.
 
+<details>
+<summary>Show generated function catalog</summary>
+
 ```{r function-catalog, echo=FALSE, results='asis'}
 cat(paste(readLines("inst/function_catalog/functions.md"), collapse = "\n"))
 ```
+
+</details>
 
 ## Common Workflows
 
@@ -471,7 +476,7 @@ unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))
 
 ### Polygenic risk scoring
 
-`rduckhts_score()` computes per-sample polygenic risk scores (PRS) from a genotype VCF/BCF and a GWAS summary statistics file, wrapping `bcftools_score`.
+`rduckhts_score()` computes per-sample polygenic risk scores (PRS) from a genotype VCF/BCF and one or more GWAS summary statistics files, wrapping `bcftools_score`.
 
 ```{r}
 vcf_path    <- system.file("extdata", "score_input.vcf",        package = "Rduckhts")
@@ -484,6 +489,20 @@ gwas_path   <- system.file("extdata", "score_gwas_summary.vcf", package = "Rduck
 # S2: 1×0.5 + 2×(−0.2) + 0×1.0 = 0.1
 gt_prs <- rduckhts_score(con, vcf_path, sumf_path, use = "GT", columns = "PLINK")
 gt_prs[, c("SAMPLE", "score_summary")]
+
+# Multiple TSV/SSF summary files are scored in one genotype scan
+sumf_na_path <- system.file("extdata", "score_summary_na.tsv", package = "Rduckhts")
+multi_prs <- rduckhts_score(con, vcf_path, c(sumf_path, sumf_na_path),
+                            use = "GT", columns = "PLINK")
+multi_prs[, c("SAMPLE", "score_summary", "score_summary_na")]
+
+# Optional audit log records loaded/matched/allele-mismatch marker counts
+sumf_mismatch_path <- system.file("extdata", "score_summary_mismatch.tsv", package = "Rduckhts")
+score_log <- tempfile("duckhts_score_", fileext = ".log")
+invisible(rduckhts_score(con, vcf_path, c(sumf_path, sumf_mismatch_path),
+                         use = "GT", columns = "PLINK", log_path = score_log))
+read.delim(score_log, comment.char = "#")[, c("summary_name", "loaded_markers",
+                                                "matched_markers", "allele_mismatch_markers")]
 
 # Dosage-based PRS (DS field) for imputed genotypes
 # S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69

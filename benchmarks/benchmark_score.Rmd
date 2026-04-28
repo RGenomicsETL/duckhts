@@ -11,21 +11,55 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning 
 
 # Benchmark
 
-This benchmark:
-
-- times DuckHTS `bcftools_score()` against `bcftools +score`
-- compares per-sample score outputs with numeric tolerance
+This benchmark validates and times DuckHTS `bcftools_score()` against the
+`bcftools +score` plugin bundled by
+[`RGenomicsETL/RBCFTools`](https://github.com/RGenomicsETL/RBCFTools).
+It covers both a single TSV/PLINK summary and multi-PRS TSV scoring where
+several summary files are scored in one genotype scan. Because upstream
+`bcftools +score` writes scores with `%#.6g`, the comparison formats DuckHTS
+scores the same way before checking cell-level equality.
 
 # Run
 
 `make bench-score`
 
-Override stress size with `SCORE_BENCH_ROWS` (number of VCF variants) and
-repeats with `SCORE_BENCH_RUNS`.
+Useful overrides:
+
+- `SCORE_BENCH_ROWS`: synthetic VCF variants, default `500000`
+- `SCORE_BENCH_SAMPLES`: genotype samples, default `100`
+- `SCORE_BENCH_PRS`: TSV summary files for the multi-PRS case, default `4`
+- `SCORE_BENCH_RUNS`: timed repeats, default `3`
+- `BCFTOOLS_BIN`: optional override for the bcftools executable
+- `SCORE_PLUGIN_DIR`: optional override for the bcftools plugin directory
 
 ```{r setup, include = FALSE}
 library(DBI)
 library(duckdb)
+
+if (!requireNamespace("RBCFTools", quietly = TRUE)) {
+  stop("RBCFTools is required for bcftools +score benchmarking", call. = FALSE)
+}
+
+RBCFTools::setup_hts_env()
+
+bcftools_bin <- Sys.getenv("BCFTOOLS_BIN", unset = RBCFTools::bcftools_path())
+score_plugin_dir <- Sys.getenv("SCORE_PLUGIN_DIR", unset = RBCFTools::bcftools_plugins_dir())
+if (!file.exists(bcftools_bin)) stop("bcftools binary not found: ", bcftools_bin, call. = FALSE)
+if (!file.exists(file.path(score_plugin_dir, "score.so"))) {
+  stop("bcftools score plugin not found under: ", score_plugin_dir, call. = FALSE)
+}
+
+Sys.setenv(BCFTOOLS_PLUGINS = score_plugin_dir)
+
+bench_rows <- as.integer(Sys.getenv("SCORE_BENCH_ROWS", unset = "500000"))
+bench_runs <- as.integer(Sys.getenv("SCORE_BENCH_RUNS", unset = "3"))
+n_samples <- as.integer(Sys.getenv("SCORE_BENCH_SAMPLES", unset = "100"))
+n_prs <- as.integer(Sys.getenv("SCORE_BENCH_PRS", unset = "4"))
+
+if (is.na(bench_rows) || bench_rows < 1L) stop("SCORE_BENCH_ROWS must be positive")
+if (is.na(bench_runs) || bench_runs < 1L) stop("SCORE_BENCH_RUNS must be positive")
+if (is.na(n_samples) || n_samples < 1L) stop("SCORE_BENCH_SAMPLES must be positive")
+if (is.na(n_prs) || n_prs < 1L) stop("SCORE_BENCH_PRS must be positive")
 
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
@@ -33,15 +67,6 @@ con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 DBI::dbExecute(con, sprintf("LOAD '%s';", gsub("\\\\", "/", ext_path)))
 DBI::dbExecute(con, "PRAGMA threads=4;")
-
-bcftools_bin <- Sys.getenv("BCFTOOLS_BIN", unset = Sys.which("bcftools"))
-score_plugin_zip <- Sys.getenv(
-  "SCORE_PLUGIN_ZIP",
-  unset = normalizePath("score_1.22-20250819.zip")
-)
-bench_rows <- as.integer(Sys.getenv("SCORE_BENCH_ROWS", unset = "100000"))
-bench_runs <- as.integer(Sys.getenv("SCORE_BENCH_RUNS", unset = "3"))
-n_samples <- as.integer(Sys.getenv("SCORE_BENCH_SAMPLES", unset = "10"))
 ```
 
 ```{r helpers, include = FALSE}
@@ -51,40 +76,27 @@ sql_string <- function(x) {
   sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
 }
 
-score_plugin_path <- function() {
-  out_dir <- file.path(tempdir(), "score_1.22-20250819")
-  if (!dir.exists(out_dir)) {
-    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+sql_summary_arg <- function(paths) {
+  if (length(paths) == 1L) {
+    sql_string(paths)
+  } else {
+    sprintf("[%s]", paste(sql_string(paths), collapse = ", "))
   }
-  candidates <- list.files(
-    out_dir,
-    pattern = "^score\\.(so|dylib|dll)$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
-  if (!length(candidates)) {
-    unzip(score_plugin_zip, exdir = out_dir)
-    candidates <- list.files(
-      out_dir,
-      pattern = "^score\\.(so|dylib|dll)$",
-      recursive = TRUE,
-      full.names = TRUE
-    )
-  }
-  normalizePath(candidates[[1]], mustWork = TRUE)
 }
 
-write_score_fixture <- function(dir_path, n_variants, n_samples) {
+run_cmd <- function(cmd) {
+  status <- system(cmd, ignore.stdout = FALSE, ignore.stderr = FALSE)
+  if (!identical(status, 0L)) stop("command failed: ", cmd, call. = FALSE)
+}
+
+write_score_fixture <- function(dir_path, n_variants, n_samples, n_prs) {
   dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 
   vcf_path <- file.path(dir_path, "score_input.vcf")
   vcf_gz <- paste0(vcf_path, ".gz")
-  summary_path <- file.path(dir_path, "score_summary.tsv")
+  summary_paths <- file.path(dir_path, sprintf("score_summary_%02d.tsv", seq_len(n_prs)))
 
-  # Generate sample names
   sample_names <- sprintf("SAMPLE_%04d", seq_len(n_samples))
-
-  # Generate VCF header
   header_lines <- c(
     "##fileformat=VCFv4.2",
     "##contig=<ID=1,length=250000000>",
@@ -93,76 +105,72 @@ write_score_fixture <- function(dir_path, n_variants, n_samples) {
            paste(sample_names, collapse = "\t"))
   )
 
-  # Alternate allele pairs
   alleles <- list(c("A", "T"), c("G", "C"), c("C", "A"), c("T", "G"))
 
-  # Generate variant lines
-  vcf_lines <- vapply(seq_len(n_variants), function(i) {
+  write_chunked <- function(path, header, n, make_line, chunk_size = 50000L) {
+    con_out <- file(path, open = "wt")
+    on.exit(close(con_out), add = TRUE)
+    writeLines(header, con_out)
+    for (start in seq.int(1L, n, by = chunk_size)) {
+      end <- min(n, start + chunk_size - 1L)
+      idx <- seq.int(start, end)
+      writeLines(vapply(idx, make_line, character(1)), con_out)
+    }
+  }
+
+  write_chunked(vcf_path, header_lines, n_variants, function(i) {
     al <- alleles[[(i - 1L) %% length(alleles) + 1L]]
     pos <- i * 10L
     rsid <- sprintf("rs%d", i)
-    # Generate random genotypes: 0/0, 0/1, 1/1
     gts <- sample(c("0/0", "0/1", "1/1"), n_samples, replace = TRUE,
                   prob = c(0.5, 0.35, 0.15))
     paste0("1\t", pos, "\t", rsid, "\t", al[1], "\t", al[2],
            "\t.\tPASS\t.\tGT\t", paste(gts, collapse = "\t"))
-  }, character(1))
+  })
 
-  writeLines(c(header_lines, vcf_lines), vcf_path)
+  for (prs_i in seq_len(n_prs)) {
+    set.seed(1000L + prs_i)
+    write_chunked(summary_paths[[prs_i]], "CHR\tBP\tSNP\tA1\tBETA\tP", n_variants, function(i) {
+      al <- alleles[[(i - 1L) %% length(alleles) + 1L]]
+      pos <- i * 10L
+      rsid <- sprintf("rs%d", i)
+      beta <- round(rnorm(1, mean = 0, sd = 0.5), 4)
+      p <- runif(1, 1e-8, 1)
+      paste0("1\t", pos, "\t", rsid, "\t", al[2], "\t", beta, "\t", p)
+    })
+  }
 
-  # Generate matching summary stats (PLINK format)
-  summary_lines <- vapply(seq_len(n_variants), function(i) {
-    al <- alleles[[(i - 1L) %% length(alleles) + 1L]]
-    pos <- i * 10L
-    rsid <- sprintf("rs%d", i)
-    beta <- round(rnorm(1, 0, 0.5), 4)
-    p <- runif(1, 1e-8, 1)
-    paste0("1\t", pos, "\t", rsid, "\t", al[2], "\t", beta, "\t", p)
-  }, character(1))
-
-  writeLines(c("CHR\tBP\tSNP\tA1\tBETA\tP", summary_lines), summary_path)
-
-  # bgzip + index for bcftools
-  DBI::dbGetQuery(
-    con,
-    sprintf(
-      "SELECT * FROM bgzip(%s, output_path := %s, keep := true, overwrite := true)",
-      sql_string(vcf_path),
-      sql_string(vcf_gz)
-    )
-  )
-  DBI::dbGetQuery(
-    con,
-    sprintf(
-      "SELECT * FROM bcf_index(%s, index_path := %s, threads := 1)",
-      sql_string(vcf_gz),
-      sql_string(paste0(vcf_gz, ".tbi"))
-    )
-  )
+  run_cmd(sprintf(
+    "%s view -Oz -o %s %s",
+    shell_quote(bcftools_bin), shell_quote(vcf_gz), shell_quote(vcf_path)
+  ))
+  run_cmd(sprintf("%s index -t %s", shell_quote(bcftools_bin), shell_quote(vcf_gz)))
 
   list(
     vcf_path = vcf_path,
     vcf_gz = vcf_gz,
-    summary_path = summary_path,
+    summary_paths = summary_paths,
     n_variants = n_variants,
-    n_samples = n_samples
+    n_samples = n_samples,
+    n_prs = n_prs
   )
 }
 
-duckdb_score_sql <- function(vcf_path, summary_path) {
+duckdb_score_sql <- function(vcf_path, summary_paths) {
   paste0(
     "SELECT * FROM bcftools_score(",
     sql_string(vcf_path), ", ",
-    sql_string(summary_path), ", ",
+    sql_summary_arg(summary_paths), ", ",
     "use := 'GT', columns := 'PLINK') ",
     "ORDER BY SAMPLE"
   )
 }
 
-run_duckdb_bench <- function(vcf_path, summary_path, n = 3L) {
-  sql <- duckdb_score_sql(vcf_path, summary_path)
+run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L) {
+  sql <- duckdb_score_sql(vcf_path, summary_paths)
   times <- numeric(n)
-  rows <- NA_integer_
+  output_samples <- NA_integer_
+  score_columns <- NA_integer_
   DBI::dbExecute(con, "PRAGMA threads=1")
   on.exit(DBI::dbExecute(con, "PRAGMA threads=4"), add = TRUE)
 
@@ -171,7 +179,8 @@ run_duckdb_bench <- function(vcf_path, summary_path, n = 3L) {
     t0 <- proc.time()[["elapsed"]]
     out <- DBI::dbGetQuery(con, sql)
     times[i] <- proc.time()[["elapsed"]] - t0
-    rows <- nrow(out)
+    output_samples <- nrow(out)
+    score_columns <- ncol(out) - 1L
   }
 
   data.frame(
@@ -180,27 +189,28 @@ run_duckdb_bench <- function(vcf_path, summary_path, n = 3L) {
     median_sec = stats::median(times),
     min_sec = min(times),
     max_sec = max(times),
-    output_rows = rows,
+    output_samples = output_samples,
+    score_columns = score_columns,
+    score_cells = output_samples * score_columns,
     stringsAsFactors = FALSE
   )
 }
 
-run_duckdb_output <- function(vcf_path, summary_path) {
+run_duckdb_output <- function(vcf_path, summary_paths) {
   DBI::dbExecute(con, "PRAGMA threads=1")
   on.exit(DBI::dbExecute(con, "PRAGMA threads=4"), add = TRUE)
-  DBI::dbGetQuery(con, duckdb_score_sql(vcf_path, summary_path))
+  DBI::dbGetQuery(con, duckdb_score_sql(vcf_path, summary_paths))
 }
 
-run_bcftools_once <- function(vcf_gz, summary_path, output_path) {
-  plugin <- score_plugin_path()
-  plugin_dir <- normalizePath(dirname(plugin), mustWork = TRUE)
+run_bcftools_once <- function(vcf_gz, summary_paths, output_path) {
+  summary_args <- paste(shell_quote(summary_paths), collapse = " ")
   cmd <- sprintf(
     "BCFTOOLS_PLUGINS=%s %s +score --use GT -c PLINK -o %s %s %s",
-    shell_quote(plugin_dir),
+    shell_quote(score_plugin_dir),
     shell_quote(bcftools_bin),
     shell_quote(output_path),
     shell_quote(vcf_gz),
-    shell_quote(summary_path)
+    summary_args
   )
   gc()
   t0 <- proc.time()[["elapsed"]]
@@ -208,24 +218,18 @@ run_bcftools_once <- function(vcf_gz, summary_path, output_path) {
   elapsed <- proc.time()[["elapsed"]] - t0
   if (!identical(status, 0L)) stop("bcftools +score failed", call. = FALSE)
 
-  # Read bcftools TSV output
-  bcf_out <- utils::read.delim(output_path, stringsAsFactors = FALSE)
-
   list(
     elapsed = elapsed,
     output = output_path,
-    data = bcf_out
+    data = utils::read.delim(output_path, stringsAsFactors = FALSE, check.names = FALSE)
   )
 }
 
-compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
-  # DuckHTS uses double precision; upstream bcftools uses float (32-bit).
-  # With large marker counts, accumulated float-vs-double drift is expected.
-  # rel_tol = 1e-2 (1%) catches real bugs while accepting float/double drift.
-  # Both engines derive PRS name from summary filename (basename minus extensions),
-  # so column names should already match. No normalization needed.
+bcftools_score_text <- function(x) {
+  ifelse(is.na(x), NA_character_, sprintf("%#.6g", as.numeric(x)))
+}
 
-  # Ensure same column ordering
+compare_outputs <- function(duck_out, bcf_out) {
   common_cols <- intersect(names(duck_out), names(bcf_out))
   score_cols <- setdiff(common_cols, "SAMPLE")
 
@@ -236,7 +240,7 @@ compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
   n_match <- 0L
   n_mismatch <- 0L
   n_only_duck <- sum(is.na(match(duck_out$SAMPLE, bcf_out$SAMPLE)))
-  n_only_bcf <- sum(is.na(match(bcf_out$SAMPLE, bcf_out$SAMPLE)))
+  n_only_bcf <- sum(is.na(match(bcf_out$SAMPLE, duck_out$SAMPLE)))
   max_abs_diff <- 0
   max_rel_diff <- 0
 
@@ -244,12 +248,14 @@ compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
     duck_col <- paste0(col, "_duck")
     bcf_col <- paste0(col, "_bcf")
     if (duck_col %in% names(merged) && bcf_col %in% names(merged)) {
-      d <- as.numeric(merged[[duck_col]])
-      b <- as.numeric(merged[[bcf_col]])
+      d_text <- bcftools_score_text(merged[[duck_col]])
+      b_text <- bcftools_score_text(merged[[bcf_col]])
+      d <- as.numeric(d_text)
+      b <- as.numeric(b_text)
       abs_diff <- abs(d - b)
       denom <- pmax(abs(d), abs(b), 1.0)
       rel_diff <- abs_diff / denom
-      matches <- !is.na(rel_diff) & rel_diff <= rel_tol
+      matches <- !is.na(d_text) & !is.na(b_text) & d_text == b_text
       n_match <- n_match + sum(matches, na.rm = TRUE)
       n_mismatch <- n_mismatch + sum(!matches, na.rm = TRUE)
       max_abs_diff <- max(max_abs_diff, max(abs_diff, na.rm = TRUE))
@@ -261,63 +267,107 @@ compare_outputs <- function(duck_out, bcf_out, rel_tol = 1e-2) {
     duck_samples = nrow(duck_out),
     bcf_samples = nrow(bcf_out),
     score_columns = length(score_cols),
+    compared_score_cells = nrow(duck_out) * length(score_cols),
     cell_matches = n_match,
     cell_mismatches = n_mismatch,
     only_duck_samples = n_only_duck,
-    max_abs_diff = max_abs_diff,
-    max_rel_diff = max_rel_diff,
-    outputs_match = (n_mismatch == 0L && n_only_duck == 0L),
+    only_bcftools_samples = n_only_bcf,
+    max_abs_diff_after_bcftools_text = max_abs_diff,
+    max_rel_diff_after_bcftools_text = max_rel_diff,
+    outputs_match = (n_mismatch == 0L && n_only_duck == 0L && n_only_bcf == 0L),
     stringsAsFactors = FALSE
   )
 }
 
-run_benchmark_case <- function(fixture, n = 3L) {
-  duck <- run_duckdb_bench(fixture$vcf_path, fixture$summary_path, n = n)
-  duck_out <- run_duckdb_output(fixture$vcf_path, fixture$summary_path)
+run_benchmark_case <- function(fixture, summary_paths, n = 3L) {
+  duck <- run_duckdb_bench(fixture$vcf_path, summary_paths, n = n)
+  duck_out <- run_duckdb_output(fixture$vcf_path, summary_paths)
 
   bcftools_times <- numeric(n)
   bcftools_out <- NULL
-  output_rows <- NA_integer_
+  output_samples <- NA_integer_
+  score_columns <- NA_integer_
   for (i in seq_len(n)) {
     out_tsv <- tempfile("bcftools_score_", fileext = ".tsv")
-    run <- run_bcftools_once(fixture$vcf_gz, fixture$summary_path, out_tsv)
+    run <- run_bcftools_once(fixture$vcf_gz, summary_paths, out_tsv)
     bcftools_times[i] <- run$elapsed
-    output_rows <- nrow(run$data)
-    if (i == 1L) {
-      bcftools_out <- run$data
-    }
+    output_samples <- nrow(run$data)
+    score_columns <- ncol(run$data) - 1L
+    if (i == 1L) bcftools_out <- run$data
     unlink(out_tsv, force = TRUE)
   }
 
+  bench <- rbind(
+    duck,
+    data.frame(
+      engine = "bcftools_RBCFTools",
+      runs = n,
+      median_sec = stats::median(bcftools_times),
+      min_sec = min(bcftools_times),
+      max_sec = max(bcftools_times),
+      output_samples = output_samples,
+      score_columns = score_columns,
+      score_cells = output_samples * score_columns,
+      stringsAsFactors = FALSE
+    )
+  )
+  bench$variants <- fixture$n_variants
+  bench$samples <- fixture$n_samples
+  bench$genotype_cells <- fixture$n_variants * fixture$n_samples
+
   list(
-    bench = rbind(
-      duck,
-      data.frame(
-        engine = "bcftools",
-        runs = n,
-        median_sec = stats::median(bcftools_times),
-        min_sec = min(bcftools_times),
-        max_sec = max(bcftools_times),
-        output_rows = output_rows,
-        stringsAsFactors = FALSE
-      )
-    ),
+    bench = bench[, c("engine", "runs", "median_sec", "min_sec", "max_sec",
+                      "variants", "samples", "genotype_cells",
+                      "output_samples", "score_columns", "score_cells")],
     compare = compare_outputs(duck_out, bcftools_out)
   )
 }
 ```
 
-## Synthetic Stress Case
+## Tools
 
-```{r synthetic, echo = FALSE}
-set.seed(42L)
-fixture_dir <- file.path(tempdir(), "duckhts_score_benchmark")
-fixture <- write_score_fixture(fixture_dir, n_variants = bench_rows, n_samples = n_samples)
-bench_case <- run_benchmark_case(fixture, n = bench_runs)
-
-bench_case$bench
+```{r tools, echo = FALSE}
+data.frame(
+  tool = c("bcftools", "bcftools_plugins"),
+  path = c(bcftools_bin, score_plugin_dir),
+  stringsAsFactors = FALSE
+)
 ```
 
-```{r synthetic-compare, echo = FALSE}
-bench_case$compare
+## Settings
+
+```{r settings, echo = FALSE}
+data.frame(
+  variants = bench_rows,
+  samples = n_samples,
+  multi_prs_files = n_prs,
+  runs = bench_runs,
+  stringsAsFactors = FALSE
+)
+```
+
+## Synthetic Single-PRS Case
+
+```{r synthetic-single, echo = FALSE}
+set.seed(42L)
+fixture_dir <- file.path(tempdir(), "duckhts_score_benchmark")
+fixture <- write_score_fixture(fixture_dir, n_variants = bench_rows,
+                               n_samples = n_samples, n_prs = n_prs)
+single_case <- run_benchmark_case(fixture, fixture$summary_paths[1], n = bench_runs)
+single_case$bench
+```
+
+```{r synthetic-single-compare, echo = FALSE}
+single_case$compare
+```
+
+## Synthetic Multi-PRS TSV Case
+
+```{r synthetic-multi, echo = FALSE}
+multi_case <- run_benchmark_case(fixture, fixture$summary_paths, n = bench_runs)
+multi_case$bench
+```
+
+```{r synthetic-multi-compare, echo = FALSE}
+multi_case$compare
 ```

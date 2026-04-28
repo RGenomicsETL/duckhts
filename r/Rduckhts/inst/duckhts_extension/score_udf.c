@@ -9,6 +9,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <htslib/hts.h>
 #include <htslib/khash_str2int.h>
@@ -60,7 +61,12 @@ typedef struct {
     int use_variant_id;
     int counts;
     char *bcf_path;
-    char *summary_path;
+    char **summary_paths;
+    int n_summary_paths;
+    int m_summary_paths;
+    int *summary_prs_counts;
+    char *summaries_list_file;
+    char *log_path;
     char *columns_preset;
     char *columns_file;
     char *samples;
@@ -76,10 +82,10 @@ typedef struct {
     int force_samples;
     double *q_thr_lp;
     int n_q_thr;
-    char *prs_name;       /* TSV mode: single PRS name from summary filename */
-    int gwas_vcf_mode;    /* 1 if summary is GWAS-VCF (FORMAT/ES+LP) */
-    int n_prs;            /* GWAS-VCF: number of PRS (= summary VCF samples) */
-    char **prs_names;     /* GWAS-VCF: PRS names (= summary VCF sample names) */
+    int gwas_vcf_mode;    /* 1 if summaries are GWAS-VCF (FORMAT/ES+LP), 0 for TSV summaries */
+    int n_prs;            /* number of PRS output tracks */
+    char **prs_names;     /* PRS output names (TSV basenames or GWAS-VCF sample names) */
+    char **prs_paths;     /* source summary path for each PRS output track */
 } score_bind_t;
 
 typedef struct {
@@ -111,6 +117,8 @@ typedef struct {
     score_marker_t *markers;
     int n_markers;
     int m_markers;
+    int64_t all_markers;
+    int64_t duplicate_markers;
 } score_summary_t;
 
 typedef struct {
@@ -340,6 +348,263 @@ static void score_strtoupper(char *s) {
     }
 }
 
+static char *score_prs_name_from_path(const char *path) {
+    static const char *ext_str[] = {"gz", "txt", "tsv", "vcf", "bcf"};
+    static const int n_ext = (int)(sizeof(ext_str) / sizeof(ext_str[0]));
+    char *tmp;
+    const char *base;
+    char *out;
+    int stripped = 1;
+    if (!path) return NULL;
+    base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    tmp = score_dup(base);
+    if (!tmp) return NULL;
+    while (stripped) {
+        char *ptr = strrchr(tmp, '.');
+        int j;
+        stripped = 0;
+        if (!ptr) break;
+        for (j = 0; j < n_ext; j++) {
+            if (strcmp(ptr + 1, ext_str[j]) == 0) {
+                *ptr = '\0';
+                stripped = 1;
+                break;
+            }
+        }
+    }
+    out = score_dup(tmp);
+    duckdb_free(tmp);
+    return out;
+}
+
+static int score_str_endswith(const char *s, const char *suffix) {
+    size_t n, m;
+    if (!s || !suffix) return 0;
+    n = strlen(s);
+    m = strlen(suffix);
+    return n >= m && strcmp(s + n - m, suffix) == 0;
+}
+
+static int score_summary_dir_entry_supported(const char *name) {
+    if (!name || !name[0]) return 0;
+    if (name[0] == '.') return 0;
+    /* Directory mode is a convenience for summary-statistic folders.  Restrict
+     * it to regular summary-like filenames so index sidecars (.tbi/.csi) and
+     * incidental files do not become PRS tracks. */
+    if (score_str_endswith(name, ".bcf")) return 1;
+    if (score_str_endswith(name, ".vcf") || score_str_endswith(name, ".vcf.gz") || score_str_endswith(name, ".vcf.bgz")) return 1;
+    if (score_str_endswith(name, ".tsv") || score_str_endswith(name, ".tsv.gz") || score_str_endswith(name, ".tsv.bgz")) return 1;
+    if (score_str_endswith(name, ".txt") || score_str_endswith(name, ".txt.gz") || score_str_endswith(name, ".txt.bgz")) return 1;
+    if (score_str_endswith(name, ".ssf") || score_str_endswith(name, ".ssf.gz") || score_str_endswith(name, ".ssf.bgz")) return 1;
+    return 0;
+}
+
+static int score_string_ptr_cmp(const void *a, const void *b) {
+    const char *sa = *(const char * const *)a;
+    const char *sb = *(const char * const *)b;
+    if (!sa && !sb) return 0;
+    if (!sa) return -1;
+    if (!sb) return 1;
+    return strcmp(sa, sb);
+}
+
+static int score_add_summary_path(score_bind_t *bind, const char *path, char *err, size_t err_sz) {
+    char **new_paths;
+    char *copy;
+    if (!path || !path[0]) return 0;
+    if (bind->n_summary_paths == bind->m_summary_paths) {
+        int new_m = bind->m_summary_paths ? bind->m_summary_paths * 2 : 4;
+        new_paths = (char **)realloc(bind->summary_paths, sizeof(char *) * (size_t)new_m);
+        if (!new_paths) {
+            snprintf(err, err_sz, "bcftools_score: out of memory");
+            return -1;
+        }
+        bind->summary_paths = new_paths;
+        bind->m_summary_paths = new_m;
+    }
+    copy = score_dup(path);
+    if (!copy) {
+        snprintf(err, err_sz, "bcftools_score: out of memory");
+        return -1;
+    }
+    bind->summary_paths[bind->n_summary_paths++] = copy;
+    return 0;
+}
+
+static int score_add_summary_paths_from_list_file(score_bind_t *bind, const char *path, char *err, size_t err_sz) {
+    DIR *d;
+    htsFile *fp;
+    kstring_t str = {0, 0, NULL};
+    int added = 0;
+    if (!path || !path[0]) return 0;
+
+    /* Directory mode intentionally uses only opendir/readdir/stat/qsort rather
+     * than scandir or dirent.d_type: those calls are available in Emscripten's
+     * virtual filesystem for webR/wasm, while remote URL list files fall through
+     * to hts_open() below and are handled by the wasm HTTP hFILE backend. */
+    d = opendir(path);
+    if (d) {
+        struct dirent *dir;
+        char **entries = NULL;
+        int n_entries = 0;
+        int m_entries = 0;
+        while ((dir = readdir(d))) {
+            char *joined;
+            char **new_entries;
+            struct stat st;
+            size_t p_len;
+            size_t q_len;
+            if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) continue;
+            if (!score_summary_dir_entry_supported(dir->d_name)) continue;
+            p_len = strlen(path);
+            q_len = strlen(dir->d_name);
+            joined = (char *)duckdb_malloc(p_len + 1 + q_len + 1);
+            if (!joined) {
+                int i;
+                closedir(d);
+                for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+                duckdb_free(entries);
+                snprintf(err, err_sz, "bcftools_score: out of memory");
+                return -1;
+            }
+            memcpy(joined, path, p_len);
+            joined[p_len] = '/';
+            memcpy(joined + p_len + 1, dir->d_name, q_len + 1);
+            if (stat(joined, &st) != 0 || !S_ISREG(st.st_mode)) {
+                duckdb_free(joined);
+                continue;
+            }
+            if (n_entries == m_entries) {
+                int new_m = m_entries ? m_entries * 2 : 8;
+                new_entries = (char **)realloc(entries, sizeof(char *) * (size_t)new_m);
+                if (!new_entries) {
+                    int i;
+                    duckdb_free(joined);
+                    closedir(d);
+                    for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+                    duckdb_free(entries);
+                    snprintf(err, err_sz, "bcftools_score: out of memory");
+                    return -1;
+                }
+                entries = new_entries;
+                m_entries = new_m;
+            }
+            entries[n_entries++] = joined;
+        }
+        closedir(d);
+        if (n_entries > 1) qsort(entries, (size_t)n_entries, sizeof(char *), score_string_ptr_cmp);
+        for (added = 0; added < n_entries; added++) {
+            if (score_add_summary_path(bind, entries[added], err, err_sz) != 0) {
+                int i;
+                for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+                duckdb_free(entries);
+                return -1;
+            }
+        }
+        {
+            int i;
+            for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+        }
+        duckdb_free(entries);
+        if (!added) {
+            snprintf(err, err_sz, "bcftools_score: no supported summary files found in '%s'", path);
+            return -1;
+        }
+        return 0;
+    }
+
+    fp = hts_open(path, "r");
+    if (!fp) {
+        snprintf(err, err_sz, "bcftools_score: failed to open summaries_list_file '%s'", path);
+        return -1;
+    }
+    while (hts_getline(fp, '\n', &str) >= 0) {
+        char *s = str.s;
+        char *e;
+        char *resolved;
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (!*s || *s == '#') continue;
+        e = s + strlen(s);
+        while (e > s && isspace((unsigned char)e[-1])) e--;
+        *e = '\0';
+        resolved = score_dup(s);
+        if (!resolved) {
+            if (str.s) free(str.s);
+            hts_close(fp);
+            snprintf(err, err_sz, "bcftools_score: out of memory");
+            return -1;
+        }
+        if (score_add_summary_path(bind, resolved, err, err_sz) != 0) {
+            duckdb_free(resolved);
+            if (str.s) free(str.s);
+            hts_close(fp);
+            return -1;
+        }
+        duckdb_free(resolved);
+        added++;
+    }
+    if (str.s) free(str.s);
+    hts_close(fp);
+    if (!added) {
+        snprintf(err, err_sz, "bcftools_score: no summary paths found in summaries_list_file '%s'", path);
+        return -1;
+    }
+    return 0;
+}
+
+static int score_add_summary_paths_from_value(score_bind_t *bind, duckdb_value val, char *err, size_t err_sz) {
+    duckdb_logical_type type;
+    duckdb_type type_id;
+    if (!val || duckdb_is_null_value(val)) return 0;
+    type = duckdb_get_value_type(val);
+    type_id = duckdb_get_type_id(type);
+    if (type_id == DUCKDB_TYPE_LIST || type_id == DUCKDB_TYPE_ARRAY) {
+        idx_t i;
+        idx_t n = duckdb_get_list_size(val);
+        if (n == 0) {
+            snprintf(err, err_sz, "bcftools_score: summary_path list must not be empty");
+            return -1;
+        }
+        for (i = 0; i < n; i++) {
+            duckdb_value child = duckdb_get_list_child(val, i);
+            char *path;
+            if (!child || duckdb_is_null_value(child)) {
+                if (child) duckdb_destroy_value(&child);
+                snprintf(err, err_sz, "bcftools_score: summary_path list must not contain NULL");
+                return -1;
+            }
+            path = duckdb_get_varchar(child);
+            if (!path || !path[0]) {
+                if (path) duckdb_free(path);
+                duckdb_destroy_value(&child);
+                snprintf(err, err_sz, "bcftools_score: summary_path list must contain non-empty paths");
+                return -1;
+            }
+            if (score_add_summary_path(bind, path, err, err_sz) != 0) {
+                duckdb_free(path);
+                duckdb_destroy_value(&child);
+                return -1;
+            }
+            duckdb_free(path);
+            duckdb_destroy_value(&child);
+        }
+        return 0;
+    } else {
+        char *path = duckdb_get_varchar(val);
+        if (!path || !path[0]) {
+            if (path) duckdb_free(path);
+            return 0;
+        }
+        if (score_add_summary_path(bind, path, err, err_sz) != 0) {
+            duckdb_free(path);
+            return -1;
+        }
+        duckdb_free(path);
+        return 0;
+    }
+}
+
 static score_mapping_t *score_mapping_preset(const char *preset, int *n) {
     if (!preset) return NULL;
     if (strcasecmp(preset, "PLINK") == 0) {
@@ -496,7 +761,15 @@ static void score_destroy_bind(void *data) {
     int i;
     if (!bind) return;
     if (bind->bcf_path) duckdb_free(bind->bcf_path);
-    if (bind->summary_path) duckdb_free(bind->summary_path);
+    if (bind->summary_paths) {
+        for (i = 0; i < bind->n_summary_paths; i++) {
+            if (bind->summary_paths[i]) duckdb_free(bind->summary_paths[i]);
+        }
+        duckdb_free(bind->summary_paths);
+    }
+    if (bind->summary_prs_counts) duckdb_free(bind->summary_prs_counts);
+    if (bind->summaries_list_file) duckdb_free(bind->summaries_list_file);
+    if (bind->log_path) duckdb_free(bind->log_path);
     if (bind->columns_preset) duckdb_free(bind->columns_preset);
     if (bind->columns_file) duckdb_free(bind->columns_file);
     if (bind->samples) duckdb_free(bind->samples);
@@ -508,12 +781,17 @@ static void score_destroy_bind(void *data) {
     if (bind->include_expr) duckdb_free(bind->include_expr);
     if (bind->exclude_expr) duckdb_free(bind->exclude_expr);
     if (bind->q_thr_lp) duckdb_free(bind->q_thr_lp);
-    if (bind->prs_name) duckdb_free(bind->prs_name);
     if (bind->prs_names) {
         for (i = 0; i < bind->n_prs; i++) {
             if (bind->prs_names[i]) duckdb_free(bind->prs_names[i]);
         }
         duckdb_free(bind->prs_names);
+    }
+    if (bind->prs_paths) {
+        for (i = 0; i < bind->n_prs; i++) {
+            if (bind->prs_paths[i]) duckdb_free(bind->prs_paths[i]);
+        }
+        duckdb_free(bind->prs_paths);
     }
     duckdb_free(bind);
 }
@@ -588,7 +866,7 @@ static int score_header_index(char **headers, int n_headers, const char *key) {
     return -1;
 }
 
-static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *bcf_hdr, char *err, size_t err_sz) {
+static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *bcf_hdr, const char *summary_path, char *err, size_t err_sz) {
     htsFile *fp = NULL;
     kstring_t str = {0, 0, NULL};
     char *fields[512];
@@ -617,9 +895,9 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
 
     /* Use hts_open for transparent .gz/.bgz decompression (S-C3).
      * Upstream: score.c:196. */
-    fp = hts_open(bind->summary_path, "r");
+    fp = hts_open(summary_path, "r");
     if (!fp) {
-        snprintf(err, err_sz, "bcftools_score: cannot open summary '%s': %s", bind->summary_path, strerror(errno));
+        snprintf(err, err_sz, "bcftools_score: cannot open summary '%s': %s", summary_path, strerror(errno));
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
@@ -629,7 +907,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         break;
     }
     if (!str.s || str.l == 0) {
-        snprintf(err, err_sz, "bcftools_score: empty summary file '%s'", bind->summary_path);
+        snprintf(err, err_sz, "bcftools_score: empty summary file '%s'", summary_path);
         hts_close(fp);
         free(str.s);
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
@@ -710,6 +988,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
 
         marker.a1 = NULL;
         if (str.s[0] == '#') continue;
+        summary->all_markers++;
         n_fields = score_split_fields(str.s, delimiter, fields, 512);
         if (n_fields == 0) continue;
 
@@ -730,7 +1009,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
                 es = logf(orv);
         }
         if (isnan(es)) {
-            free(marker.a1);
+            duckdb_free(marker.a1);
             continue;
         }
 
@@ -763,6 +1042,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             if (ret == size) {
                 summary->markers[summary->n_markers++] = marker;
             } else {
+                summary->duplicate_markers++;
                 duckdb_free(id);
                 if (marker.a1) duckdb_free(marker.a1);
             }
@@ -784,6 +1064,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
                 kh_val(hash, it) = summary->n_markers;
                 summary->markers[summary->n_markers++] = marker;
             } else {
+                summary->duplicate_markers++;
                 if (marker.a1) duckdb_free(marker.a1);
             }
         }
@@ -803,6 +1084,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
  * Returns array of n_prs summaries on success, NULL on error. */
 static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
                                                  bcf_hdr_t *geno_hdr,
+                                                 const char *summary_path,
                                                  int n_prs,
                                                  char *err, size_t err_sz) {
     htsFile *sfp = NULL;
@@ -813,14 +1095,14 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     int m_float = 0;
     int i, j;
 
-    sfp = hts_open(bind->summary_path, "r");
+    sfp = hts_open(summary_path, "r");
     if (!sfp) {
-        snprintf(err, err_sz, "bcftools_score: cannot open GWAS-VCF summary '%s'", bind->summary_path);
+        snprintf(err, err_sz, "bcftools_score: cannot open GWAS-VCF summary '%s'", summary_path);
         return NULL;
     }
     shdr = bcf_hdr_read(sfp);
     if (!shdr) {
-        snprintf(err, err_sz, "bcftools_score: cannot read GWAS-VCF header '%s'", bind->summary_path);
+        snprintf(err, err_sz, "bcftools_score: cannot read GWAS-VCF header '%s'", summary_path);
         hts_close(sfp);
         return NULL;
     }
@@ -829,7 +1111,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     {
         int es_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "ES");
         if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, es_id)) {
-            snprintf(err, err_sz, "bcftools_score: GWAS-VCF '%s' does not include the ES FORMAT field", bind->summary_path);
+            snprintf(err, err_sz, "bcftools_score: GWAS-VCF '%s' does not include the ES FORMAT field", summary_path);
             bcf_hdr_destroy(shdr);
             hts_close(sfp);
             return NULL;
@@ -839,7 +1121,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     if (bind->q_thr_lp) {
         int lp_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "LP");
         if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, lp_id)) {
-            snprintf(err, err_sz, "bcftools_score: GWAS-VCF '%s' does not include the LP FORMAT field", bind->summary_path);
+            snprintf(err, err_sz, "bcftools_score: GWAS-VCF '%s' does not include the LP FORMAT field", summary_path);
             bcf_hdr_destroy(shdr);
             hts_close(sfp);
             return NULL;
@@ -889,6 +1171,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
         const char *chrom;
 
         bcf_unpack(rec, BCF_UN_ALL);
+        for (i = 0; i < n_prs; i++) summaries[i]->all_markers++;
         if (rec->n_allele < 2) continue;
 
         chrom = bcf_hdr_id2name(shdr, rec->rid);
@@ -944,6 +1227,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
                 kh_val(hash, it) = summaries[i]->n_markers;
                 summaries[i]->markers[summaries[i]->n_markers++] = marker;
             } else {
+                summaries[i]->duplicate_markers++;
                 duckdb_free(marker.a1);
             }
         }
@@ -1355,6 +1639,142 @@ static void score_source_destroy(score_scan_source_t *src) {
     }
 }
 
+static const char *score_use_tag_label(int use_tag) {
+    switch (use_tag) {
+    case SCORE_USE_GT: return "genotypes (GT)";
+    case SCORE_USE_DS: return "genotype dosages (DS)";
+    case SCORE_USE_HDS: return "haploid alternate allele dosage (HDS)";
+    case SCORE_USE_AP: return "ALT haplotype probabilities (AP)";
+    case SCORE_USE_GP: return "genotype probabilities (GP)";
+    case SCORE_USE_AS: return "allelic shifts (AS)";
+    default: return "auto-detected";
+    }
+}
+
+static int score_format_metric_name(const score_bind_t *bind,
+                                    const char *pname,
+                                    int threshold_idx,
+                                    int is_count,
+                                    char *out,
+                                    size_t out_sz) {
+    int n;
+    if (!out || out_sz == 0) return -1;
+    if (bind->q_thr_lp && bind->n_q_thr > 0) {
+        double p = pow(10.0, -bind->q_thr_lp[threshold_idx]);
+        n = snprintf(out, out_sz, is_count ? "%s_CNT_p%.6g" : "%s_p%.6g", pname, p);
+    } else {
+        n = snprintf(out, out_sz, is_count ? "%s_CNT" : "%s", pname);
+    }
+    return (n < 0 || (size_t)n >= out_sz) ? -1 : 0;
+}
+
+static int score_validate_prs_names(const score_bind_t *bind, char *err, size_t err_sz) {
+    char **seen = NULL;
+    int n_seen = 0;
+    int max_seen;
+    int i, j, k;
+    if (!bind || !bind->prs_names) return 0;
+
+    max_seen = 1 + bind->n_prs * bind->n_q_thr * (bind->counts ? 2 : 1);
+    seen = (char **)duckdb_malloc(sizeof(char *) * (size_t)max_seen);
+    if (!seen) {
+        snprintf(err, err_sz, "bcftools_score: out of memory");
+        return -1;
+    }
+    memset(seen, 0, sizeof(char *) * (size_t)max_seen);
+    seen[n_seen++] = score_dup("SAMPLE");
+    if (!seen[0]) {
+        duckdb_free(seen);
+        snprintf(err, err_sz, "bcftools_score: out of memory");
+        return -1;
+    }
+
+    for (i = 0; i < bind->n_prs; i++) {
+        if (!bind->prs_names[i] || !bind->prs_names[i][0]) {
+            snprintf(err, err_sz, "bcftools_score: summary PRS name must not be empty");
+            goto fail;
+        }
+        for (j = 0; j < bind->n_q_thr; j++) {
+            for (k = 0; k < (bind->counts ? 2 : 1); k++) {
+                char metric_name[256];
+                int m;
+                if (score_format_metric_name(bind, bind->prs_names[i], j, k == 1, metric_name, sizeof(metric_name)) != 0) {
+                    snprintf(err, err_sz, "bcftools_score: generated output column name for PRS '%s' is too long", bind->prs_names[i]);
+                    goto fail;
+                }
+                if (!metric_name[0]) {
+                    snprintf(err, err_sz, "bcftools_score: generated output column name must not be empty");
+                    goto fail;
+                }
+                for (m = 0; m < n_seen; m++) {
+                    if (strcmp(seen[m], metric_name) == 0) {
+                        snprintf(err, err_sz, "bcftools_score: duplicate generated output column name '%s'; use unique summary filenames or GWAS-VCF samples", metric_name);
+                        goto fail;
+                    }
+                }
+                seen[n_seen] = score_dup(metric_name);
+                if (!seen[n_seen]) {
+                    snprintf(err, err_sz, "bcftools_score: out of memory");
+                    goto fail;
+                }
+                n_seen++;
+            }
+        }
+    }
+
+    for (i = 0; i < n_seen; i++) duckdb_free(seen[i]);
+    duckdb_free(seen);
+    return 0;
+
+fail:
+    for (i = 0; i < n_seen; i++) {
+        if (seen[i]) duckdb_free(seen[i]);
+    }
+    duckdb_free(seen);
+    return -1;
+}
+
+static int score_write_log(const score_bind_t *bind,
+                           score_summary_t **summaries,
+                           const int64_t *matched_markers,
+                           const int64_t *allele_mismatch_markers,
+                           int n_samples,
+                           char *err, size_t err_sz) {
+    FILE *fp;
+    int pi;
+    if (!bind->log_path || !bind->log_path[0]) return 0;
+    fp = fopen(bind->log_path, "w");
+    if (!fp) {
+        snprintf(err, err_sz, "bcftools_score: cannot write log_path '%s': %s", bind->log_path, strerror(errno));
+        return -1;
+    }
+    fprintf(fp, "# DuckHTS bcftools_score summary\n");
+    fprintf(fp, "# mode\t%s\n", bind->gwas_vcf_mode ? "GWAS-VCF" : "TSV");
+    fprintf(fp, "# genotype_path\t%s\n", bind->bcf_path ? bind->bcf_path : "");
+    fprintf(fp, "# use\t%s\n", score_use_tag_label(bind->use_tag));
+    fprintf(fp, "# samples\t%d\n", n_samples);
+    fprintf(fp, "# allele_flipping\tnot_performed_by_bcftools_score; use duckdb_munge/bcftools_munge_row outputs to audit REF/ALT swaps before scoring\n");
+    fprintf(fp, "summary_name\tsummary_path\tsummary_mode\tmatching_by\tloaded_markers\tall_markers\tmatched_markers\tallele_mismatch_markers\tduplicate_markers\n");
+    for (pi = 0; pi < bind->n_prs; pi++) {
+        const score_summary_t *summary = summaries[pi];
+        fprintf(fp, "%s\t%s\t%s\t%s\t%d\t%lld\t%lld\t%lld\t%lld\n",
+                bind->prs_names && bind->prs_names[pi] ? bind->prs_names[pi] : "",
+                bind->prs_paths && bind->prs_paths[pi] ? bind->prs_paths[pi] : "",
+                bind->gwas_vcf_mode ? "GWAS-VCF" : "TSV",
+                (summary && summary->use_snp) ? "marker name" : "chromosome position",
+                summary ? summary->n_markers : 0,
+                (long long)(summary ? summary->all_markers : 0),
+                (long long)(matched_markers ? matched_markers[pi] : 0),
+                (long long)(allele_mismatch_markers ? allele_mismatch_markers[pi] : 0),
+                (long long)(summary ? summary->duplicate_markers : 0));
+    }
+    if (fclose(fp) != 0) {
+        snprintf(err, err_sz, "bcftools_score: failed closing log_path '%s': %s", bind->log_path, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 static void score_bind(duckdb_bind_info info) {
     duckdb_value bcf_val = duckdb_bind_get_parameter(info, 0);
     duckdb_value summary_val = duckdb_bind_get_parameter(info, 1);
@@ -1381,20 +1801,29 @@ static void score_bind(duckdb_bind_info info) {
 
     memset(bind, 0, sizeof(*bind));
     bind->bcf_path = duckdb_get_varchar(bcf_val);
-    bind->summary_path = duckdb_get_varchar(summary_val);
     bind->n_q_thr = 1;
     bind->regions_overlap = -1;
     bind->targets_overlap = -1;
     bind->columns_preset = score_dup("PLINK");
 
     duckdb_destroy_value(&bcf_val);
-    duckdb_destroy_value(&summary_val);
 
-    if (!bind->bcf_path || !bind->summary_path || bind->bcf_path[0] == '\0' || bind->summary_path[0] == '\0') {
-        duckdb_bind_set_error(info, "bcftools_score: bcf_path and summary_path are required");
+    if (!bind->bcf_path || bind->bcf_path[0] == '\0') {
+        duckdb_bind_set_error(info, "bcftools_score: bcf_path is required");
+        if (summary_val) duckdb_destroy_value(&summary_val);
         score_destroy_bind(bind);
         return;
     }
+    {
+        char err[512] = {0};
+        if (score_add_summary_paths_from_value(bind, summary_val, err, sizeof(err)) != 0) {
+            duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: failed to parse summary_path");
+            if (summary_val) duckdb_destroy_value(&summary_val);
+            score_destroy_bind(bind);
+            return;
+        }
+    }
+    if (summary_val) duckdb_destroy_value(&summary_val);
 
     use_val = duckdb_bind_get_named_parameter(info, "use");
     if (use_val && !duckdb_is_null_value(use_val)) {
@@ -1525,6 +1954,21 @@ static void score_bind(duckdb_bind_info info) {
     if (exclude_val && !duckdb_is_null_value(exclude_val)) bind->exclude_expr = duckdb_get_varchar(exclude_val);
     if (exclude_val) duckdb_destroy_value(&exclude_val);
 
+    {
+        duckdb_value summaries_list_file_val = duckdb_bind_get_named_parameter(info, "summaries_list_file");
+        if (summaries_list_file_val && !duckdb_is_null_value(summaries_list_file_val)) {
+            bind->summaries_list_file = duckdb_get_varchar(summaries_list_file_val);
+        }
+        if (summaries_list_file_val) duckdb_destroy_value(&summaries_list_file_val);
+    }
+    {
+        duckdb_value log_path_val = duckdb_bind_get_named_parameter(info, "log_path");
+        if (log_path_val && !duckdb_is_null_value(log_path_val)) {
+            bind->log_path = duckdb_get_varchar(log_path_val);
+        }
+        if (log_path_val) duckdb_destroy_value(&log_path_val);
+    }
+
     if (bind->include_expr && bind->exclude_expr) {
         duckdb_bind_set_error(info, "bcftools_score: only one of include or exclude may be set");
         score_destroy_bind(bind);
@@ -1560,106 +2004,169 @@ static void score_bind(duckdb_bind_info info) {
         }
         bind->targets = parsed;
     }
-    /* Detect GWAS-VCF mode: if the summary file is VCF/BCF format and no
-     * columns/columns_file was explicitly provided (default PLINK doesn't count
-     * when VCF is detected), use GWAS-VCF mode per upstream score.c:681-710.
-     * In this mode, each sample in the GWAS-VCF is a separate PRS, and
-     * FORMAT/ES provides effect sizes, FORMAT/LP provides -log10(p). */
-    if (score_is_vcf_summary(bind->summary_path) && !bind->columns_file) {
-        htsFile *sfp = hts_open(bind->summary_path, "r");
-        if (!sfp) {
-            duckdb_bind_set_error(info, "bcftools_score: cannot open GWAS-VCF summary for header probe");
+    if (bind->summaries_list_file && bind->summaries_list_file[0]) {
+        char err[512] = {0};
+        if (bind->n_summary_paths > 0) {
+            duckdb_bind_set_error(info, "bcftools_score: provide either summary_path(s) or summaries_list_file, not both");
             score_destroy_bind(bind);
             return;
         }
-        bcf_hdr_t *shdr = bcf_hdr_read(sfp);
-        if (!shdr) {
-            hts_close(sfp);
-            duckdb_bind_set_error(info, "bcftools_score: cannot read GWAS-VCF header");
+        if (score_add_summary_paths_from_list_file(bind, bind->summaries_list_file, err, sizeof(err)) != 0) {
+            duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: failed to parse summaries_list_file");
             score_destroy_bind(bind);
             return;
         }
-        {
-            int es_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "ES");
-            if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, es_id)) {
-                bcf_hdr_destroy(shdr);
-                hts_close(sfp);
-                duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary does not include the ES FORMAT field");
-                score_destroy_bind(bind);
-                return;
-            }
+    }
+    if (bind->n_summary_paths == 0) {
+        duckdb_bind_set_error(info, "bcftools_score: summary_path(s) or summaries_list_file are required");
+        score_destroy_bind(bind);
+        return;
+    }
+    /* Detect GWAS-VCF mode if all summary files are VCF/BCF and no columns_file
+     * was provided. Otherwise use TSV mode, where each summary file is one PRS,
+     * matching upstream bcftools +score -c/--columns behavior. */
+    {
+        int si;
+        int n_vcf = 0;
+        for (si = 0; si < bind->n_summary_paths; si++) {
+            if (score_is_vcf_summary(bind->summary_paths[si])) n_vcf++;
         }
-        if (bind->q_thr_lp) {
-            int lp_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "LP");
-            if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, lp_id)) {
-                bcf_hdr_destroy(shdr);
-                hts_close(sfp);
-                duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary does not include the LP FORMAT field (required by q_score_thr)");
-                score_destroy_bind(bind);
-                return;
-            }
-        }
-        bind->gwas_vcf_mode = 1;
-        bind->n_prs = bcf_hdr_nsamples(shdr);
-        if (bind->n_prs == 0) {
-            bcf_hdr_destroy(shdr);
-            hts_close(sfp);
-            duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary has no samples");
+        if (n_vcf > 0 && n_vcf != bind->n_summary_paths) {
+            duckdb_bind_set_error(info, "bcftools_score: cannot mix GWAS-VCF and TSV summary files in one call");
             score_destroy_bind(bind);
             return;
         }
-        bind->prs_names = (char **)duckdb_malloc(sizeof(char *) * (size_t)bind->n_prs);
-        if (!bind->prs_names) {
-            bcf_hdr_destroy(shdr);
-            hts_close(sfp);
-            duckdb_bind_set_error(info, "bcftools_score: out of memory");
-            score_destroy_bind(bind);
-            return;
-        }
-        {
-            int pi;
-            for (pi = 0; pi < bind->n_prs; pi++) {
-                bind->prs_names[pi] = score_dup(shdr->samples[pi]);
-            }
-        }
-        bcf_hdr_destroy(shdr);
-        hts_close(sfp);
-    } else {
-        /* TSV mode: single PRS name derived from summary filename.
-         * Port of upstream multi-extension stripping (score.c:729-737):
-         * Loop stripping known extensions {gz,txt,tsv,vcf,bcf} from the end,
-         * then take the basename. So "PGS000001.txt.gz" -> "PGS000001". */
-        char *tmp = duckdb_malloc(strlen(bind->summary_path) + 1);
-        if (!tmp) {
-            duckdb_bind_set_error(info, "bcftools_score: out of memory");
-            score_destroy_bind(bind);
-            return;
-        }
-        strcpy(tmp, bind->summary_path);
-        static const char *ext_str[] = {"gz", "txt", "tsv", "vcf", "bcf"};
-        static const int n_ext = (int)(sizeof(ext_str) / sizeof(ext_str[0]));
-        char *ptr;
-        int j = 0;
-        while (j < n_ext && (ptr = strrchr(tmp, '.'))) {
-            for (j = 0; j < n_ext; j++)
-                if (strcmp(ptr + 1, ext_str[j]) == 0) { *ptr = '\0'; break; }
-        }
-        const char *slash = strrchr(tmp, '/');
-        const char *base = slash ? slash + 1 : tmp;
-        size_t len = strlen(base);
-        bind->prs_name = (char *)duckdb_malloc(len + 1);
-        if (!bind->prs_name) {
-            duckdb_free(tmp);
-            duckdb_bind_set_error(info, "bcftools_score: out of memory");
-            score_destroy_bind(bind);
-            return;
-        }
-        memcpy(bind->prs_name, base, len);
-        bind->prs_name[len] = '\0';
-        duckdb_free(tmp);
+        bind->gwas_vcf_mode = (n_vcf == bind->n_summary_paths && !bind->columns_file) ? 1 : 0;
+    }
 
-        bind->gwas_vcf_mode = 0;
-        bind->n_prs = 1;
+    if (bind->gwas_vcf_mode) {
+        int si;
+        int offset = 0;
+        bind->summary_prs_counts = (int *)duckdb_malloc(sizeof(int) * (size_t)bind->n_summary_paths);
+        if (!bind->summary_prs_counts) {
+            duckdb_bind_set_error(info, "bcftools_score: out of memory");
+            score_destroy_bind(bind);
+            return;
+        }
+        for (si = 0; si < bind->n_summary_paths; si++) {
+            htsFile *sfp = hts_open(bind->summary_paths[si], "r");
+            bcf_hdr_t *shdr;
+            int n_file_prs;
+            int pi;
+            if (!sfp) {
+                duckdb_bind_set_error(info, "bcftools_score: cannot open GWAS-VCF summary for header probe");
+                score_destroy_bind(bind);
+                return;
+            }
+            shdr = bcf_hdr_read(sfp);
+            if (!shdr) {
+                hts_close(sfp);
+                duckdb_bind_set_error(info, "bcftools_score: cannot read GWAS-VCF header");
+                score_destroy_bind(bind);
+                return;
+            }
+            {
+                int es_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "ES");
+                if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, es_id)) {
+                    bcf_hdr_destroy(shdr);
+                    hts_close(sfp);
+                    duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary does not include the ES FORMAT field");
+                    score_destroy_bind(bind);
+                    return;
+                }
+            }
+            if (bind->q_thr_lp) {
+                int lp_id = bcf_hdr_id2int(shdr, BCF_DT_ID, "LP");
+                if (!bcf_hdr_idinfo_exists(shdr, BCF_HL_FMT, lp_id)) {
+                    bcf_hdr_destroy(shdr);
+                    hts_close(sfp);
+                    duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary does not include the LP FORMAT field (required by q_score_thr)");
+                    score_destroy_bind(bind);
+                    return;
+                }
+            }
+            n_file_prs = bcf_hdr_nsamples(shdr);
+            if (n_file_prs == 0) {
+                bcf_hdr_destroy(shdr);
+                hts_close(sfp);
+                duckdb_bind_set_error(info, "bcftools_score: GWAS-VCF summary has no samples");
+                score_destroy_bind(bind);
+                return;
+            }
+            {
+                int old_n_prs = bind->n_prs;
+                int new_n_prs = old_n_prs + n_file_prs;
+                char **new_names = (char **)realloc(bind->prs_names, sizeof(char *) * (size_t)new_n_prs);
+                char **new_paths;
+                if (!new_names) {
+                    bcf_hdr_destroy(shdr);
+                    hts_close(sfp);
+                    duckdb_bind_set_error(info, "bcftools_score: out of memory");
+                    score_destroy_bind(bind);
+                    return;
+                }
+                bind->prs_names = new_names;
+                new_paths = (char **)realloc(bind->prs_paths, sizeof(char *) * (size_t)new_n_prs);
+                if (!new_paths) {
+                    bcf_hdr_destroy(shdr);
+                    hts_close(sfp);
+                    duckdb_bind_set_error(info, "bcftools_score: out of memory");
+                    score_destroy_bind(bind);
+                    return;
+                }
+                bind->prs_paths = new_paths;
+                memset(bind->prs_names + old_n_prs, 0, sizeof(char *) * (size_t)n_file_prs);
+                memset(bind->prs_paths + old_n_prs, 0, sizeof(char *) * (size_t)n_file_prs);
+                bind->summary_prs_counts[si] = n_file_prs;
+                bind->n_prs = new_n_prs;
+                offset = old_n_prs;
+            }
+            for (pi = 0; pi < n_file_prs; pi++) {
+                bind->prs_names[offset + pi] = score_dup(shdr->samples[pi]);
+                bind->prs_paths[offset + pi] = score_dup(bind->summary_paths[si]);
+                if (!bind->prs_names[offset + pi] || !bind->prs_paths[offset + pi]) {
+                    bcf_hdr_destroy(shdr);
+                    hts_close(sfp);
+                    duckdb_bind_set_error(info, "bcftools_score: out of memory");
+                    score_destroy_bind(bind);
+                    return;
+                }
+            }
+            bcf_hdr_destroy(shdr);
+            hts_close(sfp);
+        }
+    } else {
+        int si;
+        bind->n_prs = bind->n_summary_paths;
+        bind->prs_names = (char **)duckdb_malloc(sizeof(char *) * (size_t)bind->n_prs);
+        bind->prs_paths = (char **)duckdb_malloc(sizeof(char *) * (size_t)bind->n_prs);
+        bind->summary_prs_counts = (int *)duckdb_malloc(sizeof(int) * (size_t)bind->n_summary_paths);
+        if (!bind->prs_names || !bind->prs_paths || !bind->summary_prs_counts) {
+            duckdb_bind_set_error(info, "bcftools_score: out of memory");
+            score_destroy_bind(bind);
+            return;
+        }
+        memset(bind->prs_names, 0, sizeof(char *) * (size_t)bind->n_prs);
+        memset(bind->prs_paths, 0, sizeof(char *) * (size_t)bind->n_prs);
+        for (si = 0; si < bind->n_summary_paths; si++) {
+            bind->summary_prs_counts[si] = 1;
+            bind->prs_names[si] = score_prs_name_from_path(bind->summary_paths[si]);
+            bind->prs_paths[si] = score_dup(bind->summary_paths[si]);
+            if (!bind->prs_names[si] || !bind->prs_paths[si]) {
+                duckdb_bind_set_error(info, "bcftools_score: out of memory");
+                score_destroy_bind(bind);
+                return;
+            }
+        }
+    }
+
+    {
+        char err[512] = {0};
+        if (score_validate_prs_names(bind, err, sizeof(err)) != 0) {
+            duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: invalid PRS output names");
+            score_destroy_bind(bind);
+            return;
+        }
     }
 
     varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -1670,24 +2177,14 @@ static void score_bind(duckdb_bind_info info) {
     {
         int pi, j;
         for (pi = 0; pi < bind->n_prs; pi++) {
-            const char *pname = bind->gwas_vcf_mode ? bind->prs_names[pi] : bind->prs_name;
+            const char *pname = bind->prs_names[pi];
             for (j = 0; j < bind->n_q_thr; j++) {
                 char name[256];
-                if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                    double p = pow(10.0, -bind->q_thr_lp[j]);
-                    snprintf(name, sizeof(name), "%s_p%.6g", pname, p);
-                } else {
-                    snprintf(name, sizeof(name), "%s", pname);
-                }
+                score_format_metric_name(bind, pname, j, 0, name, sizeof(name));
                 duckdb_bind_add_result_column(info, name, dbl_type);
                 if (bind->counts) {
                     char cnt_name[256];
-                    if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                        double p = pow(10.0, -bind->q_thr_lp[j]);
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", pname, p);
-                    } else {
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", pname);
-                    }
+                    score_format_metric_name(bind, pname, j, 1, cnt_name, sizeof(cnt_name));
                     duckdb_bind_add_result_column(info, cnt_name, bigint_type);
                 }
             }
@@ -1706,8 +2203,9 @@ static void score_init(duckdb_init_info info) {
     score_init_t *init = (score_init_t *)duckdb_malloc(sizeof(score_init_t));
     score_scan_source_t src = {0};
     bcf_hdr_t *hdr = NULL;
-    score_summary_t *summary = NULL;       /* TSV mode: single summary */
-    score_summary_t **summaries = NULL;    /* GWAS-VCF mode: per-PRS summaries */
+    score_summary_t **summaries = NULL;    /* one summary index per PRS */
+    int64_t *matched_markers = NULL;
+    int64_t *allele_mismatch_markers = NULL;
     void *unused_alleles = NULL;
     float *aps = NULL;
     int m_aps = 0;
@@ -1762,23 +2260,48 @@ static void score_init(duckdb_init_info info) {
         return;
     }
 
-    /* Load summary data: TSV mode or GWAS-VCF mode */
+    /* Load summary data: TSV mode has one PRS per summary file; GWAS-VCF mode
+     * has one PRS per FORMAT sample across all summary VCF/BCF files. */
     n_prs = bind->n_prs;
+    summaries = (score_summary_t **)duckdb_malloc(sizeof(score_summary_t *) * (size_t)n_prs);
+    if (!summaries) {
+        score_source_destroy(&src);
+        duckdb_init_set_error(info, "bcftools_score: out of memory");
+        duckdb_free(init);
+        return;
+    }
+    memset(summaries, 0, sizeof(score_summary_t *) * (size_t)n_prs);
     if (bind->gwas_vcf_mode) {
-        summaries = score_load_summary_vcf(bind, hdr, n_prs, err, sizeof(err));
-        if (!summaries) {
-            score_source_destroy(&src);
-            duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load GWAS-VCF summary");
-            duckdb_free(init);
-            return;
+        int si;
+        int offset = 0;
+        for (si = 0; si < bind->n_summary_paths; si++) {
+            int file_n = bind->summary_prs_counts[si];
+            score_summary_t **tmp = score_load_summary_vcf(bind, hdr, bind->summary_paths[si], file_n, err, sizeof(err));
+            int pi;
+            if (!tmp) {
+                score_source_destroy(&src);
+                for (i = 0; i < n_prs; i++) if (summaries[i]) score_destroy_summary(summaries[i]);
+                duckdb_free(summaries);
+                duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load GWAS-VCF summary");
+                duckdb_free(init);
+                return;
+            }
+            for (pi = 0; pi < file_n; pi++) summaries[offset + pi] = tmp[pi];
+            duckdb_free(tmp);
+            offset += file_n;
         }
     } else {
-        summary = score_load_summary(bind, hdr, err, sizeof(err));
-        if (!summary) {
-            score_source_destroy(&src);
-            duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load summary file");
-            duckdb_free(init);
-            return;
+        int pi;
+        for (pi = 0; pi < n_prs; pi++) {
+            summaries[pi] = score_load_summary(bind, hdr, bind->summary_paths[pi], err, sizeof(err));
+            if (!summaries[pi]) {
+                score_source_destroy(&src);
+                for (i = 0; i < n_prs; i++) if (summaries[i]) score_destroy_summary(summaries[i]);
+                duckdb_free(summaries);
+                duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to load summary file");
+                duckdb_free(init);
+                return;
+            }
         }
     }
 
@@ -1791,7 +2314,6 @@ static void score_init(duckdb_init_info info) {
     init->metric_values = (double **)duckdb_malloc(sizeof(double *) * (size_t)n_metrics);
     init->metric_is_count = (uint8_t *)duckdb_malloc((size_t)n_metrics);
     if (!init->sample_names || !init->metric_names || !init->metric_values || !init->metric_is_count) {
-        if (summary) score_destroy_summary(summary);
         if (summaries) {
             for (i = 0; i < n_prs; i++) if (summaries[i]) score_destroy_summary(summaries[i]);
             duckdb_free(summaries);
@@ -1810,15 +2332,10 @@ static void score_init(duckdb_init_info info) {
         int metric_idx = 0;
         memset(init->metric_is_count, 0, (size_t)n_metrics);
         for (pi = 0; pi < n_prs; pi++) {
-            const char *pname = bind->gwas_vcf_mode ? bind->prs_names[pi] : bind->prs_name;
+            const char *pname = bind->prs_names[pi];
             for (j = 0; j < bind->n_q_thr; j++) {
                 char name[256];
-                if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                    double p = pow(10.0, -bind->q_thr_lp[j]);
-                    snprintf(name, sizeof(name), "%s_p%.6g", pname, p);
-                } else {
-                    snprintf(name, sizeof(name), "%s", pname);
-                }
+                score_format_metric_name(bind, pname, j, 0, name, sizeof(name));
                 init->metric_names[metric_idx] = score_dup(name);
                 init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
                 memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
@@ -1826,12 +2343,7 @@ static void score_init(duckdb_init_info info) {
                 metric_idx++;
                 if (bind->counts) {
                     char cnt_name[256];
-                    if (bind->q_thr_lp && bind->n_q_thr > 0) {
-                        double p = pow(10.0, -bind->q_thr_lp[j]);
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT_p%.6g", pname, p);
-                    } else {
-                        snprintf(cnt_name, sizeof(cnt_name), "%s_CNT", pname);
-                    }
+                    score_format_metric_name(bind, pname, j, 1, cnt_name, sizeof(cnt_name));
                     init->metric_names[metric_idx] = score_dup(cnt_name);
                     init->metric_values[metric_idx] = (double *)duckdb_malloc(sizeof(double) * (size_t)n_samples);
                     memset(init->metric_values[metric_idx], 0, sizeof(double) * (size_t)n_samples);
@@ -1844,13 +2356,36 @@ static void score_init(duckdb_init_info info) {
 
     (void)unused_alleles;
     missing = (float *)duckdb_malloc(sizeof(float) * (size_t)n_samples);
+    matched_markers = (int64_t *)duckdb_malloc(sizeof(int64_t) * (size_t)n_prs);
+    allele_mismatch_markers = (int64_t *)duckdb_malloc(sizeof(int64_t) * (size_t)n_prs);
+    if (!missing || !matched_markers || !allele_mismatch_markers) {
+        if (missing) duckdb_free(missing);
+        if (matched_markers) duckdb_free(matched_markers);
+        if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
+        score_source_destroy(&src);
+        for (i = 0; i < n_prs; i++) if (summaries[i]) score_destroy_summary(summaries[i]);
+        duckdb_free(summaries);
+        score_destroy_init(init);
+        duckdb_init_set_error(info, "bcftools_score: out of memory");
+        return;
+    }
+    memset(matched_markers, 0, sizeof(int64_t) * (size_t)n_prs);
+    memset(allele_mismatch_markers, 0, sizeof(int64_t) * (size_t)n_prs);
 
-    /* For GWAS-VCF multi-PRS mode, we need per-PRS marker indices.
-     * For TSV single-PRS mode, n_prs == 1 and summaries is not used. */
+    /* Per-PRS marker indices: TSV mode has one summary per file; GWAS-VCF mode
+     * has one preloaded summary per FORMAT sample across summary VCF files. */
     {
-        int *idxs = NULL;
-        if (bind->gwas_vcf_mode) {
-            idxs = (int *)duckdb_malloc(sizeof(int) * (size_t)n_prs);
+        int *idxs = (int *)duckdb_malloc(sizeof(int) * (size_t)n_prs);
+        if (!idxs) {
+            if (matched_markers) duckdb_free(matched_markers);
+            if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
+            if (missing) duckdb_free(missing);
+            score_source_destroy(&src);
+            for (i = 0; i < n_prs; i++) if (summaries[i]) score_destroy_summary(summaries[i]);
+            duckdb_free(summaries);
+            score_destroy_init(init);
+            duckdb_init_set_error(info, "bcftools_score: out of memory");
+            return;
         }
 
         bcf1_t *rec = NULL;
@@ -1871,8 +2406,9 @@ static void score_init(duckdb_init_info info) {
                     if (float_arr) free(float_arr);
                     if (aps) duckdb_free(aps);
                     if (missing) duckdb_free(missing);
+                    if (matched_markers) duckdb_free(matched_markers);
+                    if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
                     score_source_destroy(&src);
-                    if (summary) score_destroy_summary(summary);
                     if (summaries) {
                         for (i = 0; i < n_prs; i++) {
                             if (summaries[i]) score_destroy_summary(summaries[i]);
@@ -1885,10 +2421,8 @@ static void score_init(duckdb_init_info info) {
                 }
                 if (expr_keep == 0) continue;
             }
-            /* Phase 1: Look up marker index in each PRS summary.
-             * For TSV mode (n_prs==1), use single summary.
-             * For GWAS-VCF mode, check each PRS summary. */
-            if (bind->gwas_vcf_mode) {
+            /* Phase 1: Look up marker index in each PRS summary. */
+            {
                 int pi;
                 for (pi = 0; pi < n_prs; pi++) {
                     idxs[pi] = -1;
@@ -1904,25 +2438,6 @@ static void score_init(duckdb_init_info info) {
                     }
                     if (idxs[pi] >= 0 && idxs[pi] < summaries[pi]->n_markers) skip_line = 0;
                 }
-            } else {
-                int marker_idx = -1;
-                if (summary->use_snp) {
-                    if (rec->d.id && rec->d.id[0] != '\0') {
-                        khash_str2int_get(summary->id2idx, rec->d.id, &marker_idx);
-                    }
-                } else {
-                    khash_t(score64) *hash = (khash_t(score64) *)summary->rid_pos2idx;
-                    uint64_t key = (((uint64_t)(uint32_t)rec->rid) << 44) | (uint64_t)rec->pos;
-                    khiter_t it = kh_get(score64, hash, key);
-                    if (it != kh_end(hash)) marker_idx = kh_val(hash, it);
-                }
-                if (marker_idx >= 0 && marker_idx < summary->n_markers) {
-                    skip_line = 0;
-                    /* Store in idxs-like fashion: for TSV mode we use a local
-                     * variable below in the accumulation block. */
-                }
-                /* Stash marker_idx for TSV accumulation below */
-                if (idxs) idxs[0] = marker_idx; /* won't happen; idxs is NULL in TSV mode */
             }
             if (skip_line) continue;
 
@@ -2080,10 +2595,8 @@ static void score_init(duckdb_init_info info) {
                 continue;
             }
 
-            /* Phase 3: Accumulate scores for each PRS.
-             * For GWAS-VCF mode, iterate over all n_prs summaries.
-             * For TSV mode, use the single summary (n_prs == 1). */
-            if (bind->gwas_vcf_mode) {
+            /* Phase 3: Accumulate scores for each PRS. */
+            {
                 int pi;
                 for (pi = 0; pi < n_prs; pi++) {
                     const score_marker_t *marker;
@@ -2099,8 +2612,12 @@ static void score_init(duckdb_init_info info) {
                     for (idx_allele = 0; idx_allele < rec->n_allele; idx_allele++) {
                         if (strcmp(a1, rec->d.allele[idx_allele]) == 0) break;
                     }
-                    if (idx_allele == rec->n_allele) continue;
+                    if (idx_allele == rec->n_allele) {
+                        allele_mismatch_markers[pi]++;
+                        continue;
+                    }
 
+                    matched_markers[pi]++;
                     es = marker->es;
                     lp = marker->lp;
                     for (j = 0; j < bind->n_q_thr; j++) {
@@ -2108,46 +2625,17 @@ static void score_init(duckdb_init_info info) {
                         if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
                         for (k = 0; k < n_samples; k++) {
                             if (missing[k]) continue;
-                            init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];
-                            if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
-                        }
-                    }
-                }
-            } else {
-                /* TSV single-PRS mode — re-lookup marker_idx (already validated above) */
-                int marker_idx = -1;
-                if (summary->use_snp) {
-                    if (rec->d.id && rec->d.id[0] != '\0') {
-                        khash_str2int_get(summary->id2idx, rec->d.id, &marker_idx);
-                    }
-                } else {
-                    khash_t(score64) *hash = (khash_t(score64) *)summary->rid_pos2idx;
-                    uint64_t key = (((uint64_t)(uint32_t)rec->rid) << 44) | (uint64_t)rec->pos;
-                    khiter_t it = kh_get(score64, hash, key);
-                    if (it != kh_end(hash)) marker_idx = kh_val(hash, it);
-                }
-                if (marker_idx >= 0 && marker_idx < summary->n_markers) {
-                    const score_marker_t *marker = &summary->markers[marker_idx];
-                    const char *a1 = marker->a1;
-                    int j;
-                    if (a1) {
-                        int idx_allele;
-                        float es, lp;
-                        for (idx_allele = 0; idx_allele < rec->n_allele; idx_allele++) {
-                            if (strcmp(a1, rec->d.allele[idx_allele]) == 0) break;
-                        }
-                        if (idx_allele < rec->n_allele) {
-                            es = marker->es;
-                            lp = marker->lp;
-                            for (j = 0; j < bind->n_q_thr; j++) {
-                                int out_idx = j * (bind->counts ? 2 : 1);
-                                if (bind->q_thr_lp && !isnan(lp) && lp < bind->q_thr_lp[j]) continue;
-                                for (k = 0; k < n_samples; k++) {
-                                    if (missing[k]) continue;
-                                    init->metric_values[out_idx][k] += (double)es * (double)aps[idx_allele * n_samples + k];
-                                    if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
-                                }
+                            {
+                                /* Upstream bcftools +score accumulates scores in float arrays
+                                 * and writes %#.6g text output. Preserve the float32 summation
+                                 * path before widening to DuckDB DOUBLE so large synthetic PRS
+                                 * benchmarks do not drift from the plugin by accumulated double
+                                 * precision differences. */
+                                float score_value = (float)init->metric_values[out_idx][k];
+                                score_value += es * aps[idx_allele * n_samples + k];
+                                init->metric_values[out_idx][k] = (double)score_value;
                             }
+                            if (bind->counts) init->metric_values[out_idx + 1][k] += 1.0;
                         }
                     }
                 }
@@ -2157,12 +2645,34 @@ static void score_init(duckdb_init_info info) {
         if (idxs) duckdb_free(idxs);
     }
 
+    if (bind->log_path && bind->log_path[0]) {
+        if (score_write_log(bind, summaries, matched_markers, allele_mismatch_markers, n_samples, err, sizeof(err)) != 0) {
+            if (int32_arr) free(int32_arr);
+            if (float_arr) free(float_arr);
+            if (aps) duckdb_free(aps);
+            if (missing) duckdb_free(missing);
+            if (matched_markers) duckdb_free(matched_markers);
+            if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
+            score_source_destroy(&src);
+            if (summaries) {
+                for (i = 0; i < n_prs; i++) {
+                    if (summaries[i]) score_destroy_summary(summaries[i]);
+                }
+                duckdb_free(summaries);
+            }
+            score_destroy_init(init);
+            duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to write log_path");
+            return;
+        }
+    }
+
     if (int32_arr) free(int32_arr);
     if (float_arr) free(float_arr);
     if (aps) duckdb_free(aps);
     if (missing) duckdb_free(missing);
+    if (matched_markers) duckdb_free(matched_markers);
+    if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
     score_source_destroy(&src);
-    if (summary) score_destroy_summary(summary);
     if (summaries) {
         for (i = 0; i < n_prs; i++) {
             if (summaries[i]) score_destroy_summary(summaries[i]);
@@ -2218,16 +2728,19 @@ static void score_scan(duckdb_function_info info, duckdb_data_chunk output) {
 void register_bcftools_score_function(duckdb_connection connection) {
     duckdb_table_function tf = duckdb_create_table_function();
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type any_type = duckdb_create_logical_type(DUCKDB_TYPE_ANY);
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
 
     duckdb_table_function_set_name(tf, "bcftools_score");
     duckdb_table_function_add_parameter(tf, varchar_type);
-    duckdb_table_function_add_parameter(tf, varchar_type);
+    duckdb_table_function_add_parameter(tf, any_type);
     duckdb_table_function_add_named_parameter(tf, "use", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "columns", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "columns_file", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "q_score_thr", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "summaries_list_file", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "log_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "use_variant_id", bool_type);
     duckdb_table_function_add_named_parameter(tf, "counts", bool_type);
     duckdb_table_function_add_named_parameter(tf, "samples", varchar_type);
@@ -2243,6 +2756,7 @@ void register_bcftools_score_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "exclude", varchar_type);
 
     duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&any_type);
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_logical_type(&bigint_type);
 

@@ -20,12 +20,15 @@ test_score <- function() {
   sumf_or <- file.path(extdata, "score_summary_or.tsv")
   sumf_plink2 <- file.path(extdata, "score_summary_plink2.tsv")
   sumf_na <- file.path(extdata, "score_summary_na.tsv")
+  sumf_cnt <- file.path(extdata, "score_summary_CNT.tsv")
   sumf_mismatch <- file.path(extdata, "score_summary_mismatch.tsv")
   sumf_custom <- file.path(extdata, "score_summary_custom.tsv")
   cols_file <- file.path(extdata, "score_columns.tsv")
   sumf_smallp <- file.path(extdata, "score_summary_smallp.tsv")
   regions_file <- file.path(extdata, "score_regions.txt")
   targets_file <- file.path(extdata, "score_targets.txt")
+  summaries_list_file <- file.path(extdata, "score_summaries.list")
+  summaries_dir <- file.path(extdata, "score_summary_dir")
 
   expect_true(file.exists(vcf))
   expect_true(file.exists(vcf_dosage))
@@ -37,18 +40,68 @@ test_score <- function() {
   expect_true(file.exists(sumf_or))
   expect_true(file.exists(sumf_plink2))
   expect_true(file.exists(sumf_na))
+  expect_true(file.exists(sumf_cnt))
   expect_true(file.exists(sumf_mismatch))
   expect_true(file.exists(sumf_custom))
   expect_true(file.exists(cols_file))
   expect_true(file.exists(sumf_smallp))
   expect_true(file.exists(regions_file))
   expect_true(file.exists(targets_file))
+  expect_true(file.exists(summaries_list_file))
+  expect_true(dir.exists(summaries_dir))
 
   # --- Basic GT scoring ---
   out_gt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK")
   expect_true(all(c("SAMPLE", "score_summary") %in% names(out_gt)))
   expect_equal(out_gt$SAMPLE, c("S1", "S2"))
   expect_equal(round(out_gt$score_summary, 3), c(1.8, 0.1))
+
+  # --- Multi-PRS TSV scoring: character vector and summaries_list_file ---
+  out_multi <- rduckhts_score(con, vcf, c(sumf, sumf_na), use = "GT", columns = "PLINK")
+  expect_true(all(c("score_summary", "score_summary_na") %in% names(out_multi)))
+  expect_equal(round(out_multi$score_summary, 3), c(1.8, 0.1))
+  expect_equal(round(out_multi$score_summary_na, 3), c(2.0, 0.5))
+
+  tmp_summaries_list <- tempfile("duckhts_score_summaries_", fileext = ".list")
+  writeLines(c(sumf, sumf_na), tmp_summaries_list)
+  out_multi_list <- rduckhts_score(con, vcf, summary_path = NULL,
+                                   summaries_list_file = tmp_summaries_list,
+                                   use = "GT", columns = "PLINK")
+  expect_equal(round(out_multi_list$score_summary, 3), c(1.8, 0.1))
+  expect_equal(round(out_multi_list$score_summary_na, 3), c(2.0, 0.5))
+
+  old_wd <- setwd(extdata)
+  on.exit(setwd(old_wd), add = TRUE)
+  out_bundled_list <- rduckhts_score(con, vcf, summary_path = NULL,
+                                     summaries_list_file = "score_summaries.list",
+                                     use = "GT", columns = "PLINK")
+  setwd(old_wd)
+  expect_equal(round(out_bundled_list$score_summary, 3), c(1.8, 0.1))
+  expect_equal(round(out_bundled_list$score_summary_na, 3), c(2.0, 0.5))
+
+  out_dir_list <- rduckhts_score(con, vcf, summary_path = NULL,
+                                 summaries_list_file = summaries_dir,
+                                 use = "GT", columns = "PLINK")
+  expect_equal(round(out_dir_list$score_summary, 3), c(1.8, 0.1))
+  expect_equal(round(out_dir_list$score_summary_na, 3), c(2.0, 0.5))
+
+  expect_error(
+    rduckhts_score(con, vcf, c(sumf, sumf_cnt), use = "GT", columns = "PLINK", counts = TRUE),
+    "duplicate generated output column name"
+  )
+
+  log_path <- tempfile("duckhts_score_", fileext = ".log")
+  out_log <- rduckhts_score(con, vcf, c(sumf, sumf_mismatch), use = "GT",
+                            columns = "PLINK", log_path = log_path)
+  expect_true(file.exists(log_path))
+  expect_equal(round(out_log$score_summary_mismatch, 3), c(0, 0))
+  log_tbl <- utils::read.delim(log_path, comment.char = "#", check.names = FALSE)
+  expect_true(all(c("summary_name", "loaded_markers", "matched_markers",
+                    "allele_mismatch_markers") %in% names(log_tbl)))
+  mismatch_row <- log_tbl[log_tbl$summary_name == "score_summary_mismatch", , drop = FALSE]
+  expect_equal(mismatch_row$loaded_markers[1], 3L)
+  expect_equal(mismatch_row$matched_markers[1], 0L)
+  expect_equal(mismatch_row$allele_mismatch_markers[1], 3L)
 
   # --- q_score_thr with counts ---
   # Column naming follows upstream: <prs>_CNT_p<thr> (not <prs>_p<thr>_CNT)

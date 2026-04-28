@@ -2139,16 +2139,22 @@ rduckhts_munge <- function(
 #' Compute Polygenic Scores
 #'
 #' Calls the DuckHTS `bcftools_score(...)` table function to compute sample-level
-#' polygenic scores from one genotype VCF/BCF file and one summary-statistics file.
+#' polygenic scores from one genotype VCF/BCF file and one or more summary-statistics files.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param bcf_path Path to genotype VCF/BCF file
-#' @param summary_path Path to summary-statistics file
+#' @param summary_path Path(s) to summary-statistics file(s). A character vector
+#'   computes multiple TSV/SSF PRS columns in one genotype scan. Use `NULL`
+#'   with `summaries_list_file` to read paths from a file.
 #' @param use Optional dosage source (`"GT"`, `"DS"`, `"HDS"`, `"AP"`, `"GP"`, `"AS"`)
 #' @param columns Optional summary preset (`"PLINK"`, `"PLINK2"`, `"REGENIE"`, `"SAIGE"`,
 #'   `"BOLT"`, `"METAL"`, `"PGS"`, `"SSF"`, `"GWAS-SSF"`)
 #' @param columns_file Optional two-column summary header mapping file
 #' @param q_score_thr Optional comma-separated p-value thresholds (e.g. `"1e-8,1e-6,1e-4"`)
+#' @param summaries_list_file Optional path to a file (one summary path per line)
+#'   or directory of summary files, matching upstream `bcftools +score --summaries`.
+#' @param log_path Optional path for a matching/audit log with loaded, matched,
+#'   allele-mismatch, and duplicate-marker counts per PRS.
 #' @param use_variant_id Logical; if TRUE, match variants by ID instead of CHR+BP
 #' @param counts Logical; if TRUE, include per-threshold matched-variant counts
 #' @param samples Optional comma-separated list of sample names to subset (e.g. `"SAMP1,SAMP2"`)
@@ -2169,11 +2175,13 @@ rduckhts_munge <- function(
 rduckhts_score <- function(
   con,
   bcf_path,
-  summary_path,
+  summary_path = NULL,
   use = NULL,
   columns = "PLINK",
   columns_file = NULL,
   q_score_thr = NULL,
+  summaries_list_file = NULL,
+  log_path = NULL,
   use_variant_id = FALSE,
   counts = FALSE,
   samples = NULL,
@@ -2200,14 +2208,35 @@ rduckhts_score <- function(
       stop("columns must be one of PLINK, PLINK2, REGENIE, SAIGE, BOLT, METAL, PGS, SSF, GWAS-SSF", call. = FALSE)
     }
   }
+  if (is.null(summary_path) && is.null(summaries_list_file)) {
+    stop("summary_path or summaries_list_file must be supplied", call. = FALSE)
+  }
+  if (!is.null(summary_path) && !is.character(summary_path)) {
+    stop("summary_path must be a character vector or NULL", call. = FALSE)
+  }
+  if (!is.null(summary_path) && !length(summary_path)) {
+    stop("summary_path must not be empty", call. = FALSE)
+  }
+  if (!is.null(summary_path) && anyNA(summary_path)) {
+    stop("summary_path must not contain NA", call. = FALSE)
+  }
+  summary_sql <- if (is.null(summary_path)) {
+    "NULL"
+  } else if (length(summary_path) == 1L) {
+    sql_quote_string(summary_path)
+  } else {
+    sprintf("[%s]", paste(sql_quote_string(summary_path), collapse = ", "))
+  }
   params <- list(
     sql_quote_string(bcf_path),
-    sql_quote_string(summary_path)
+    summary_sql
   )
   if (!is.null(use)) params <- c(params, sprintf("use := '%s'", use))
   if (!is.null(columns)) params <- c(params, sprintf("columns := '%s'", columns))
-  if (!is.null(columns_file)) params <- c(params, sprintf("columns_file := '%s'", columns_file))
+  if (!is.null(columns_file)) params <- c(params, sprintf("columns_file := %s", sql_quote_string(columns_file)))
   if (!is.null(q_score_thr)) params <- c(params, sprintf("q_score_thr := '%s'", q_score_thr))
+  if (!is.null(summaries_list_file)) params <- c(params, sprintf("summaries_list_file := %s", sql_quote_string(summaries_list_file)))
+  if (!is.null(log_path)) params <- c(params, sprintf("log_path := %s", sql_quote_string(log_path)))
   if (!is.null(samples)) params <- c(params, sprintf("samples := '%s'", samples))
   if (!is.null(regions)) params <- c(params, sprintf("regions := '%s'", regions))
   if (!is.null(regions_file)) params <- c(params, sprintf("regions_file := '%s'", regions_file))
