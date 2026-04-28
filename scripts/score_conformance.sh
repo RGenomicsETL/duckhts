@@ -15,11 +15,12 @@ set -euo pipefail
 #
 # Environment variables:
 #   DUCKHTS_EXT          path to duckhts.duckdb_extension
-#   BCFTOOLS_BIN         path to bcftools binary
-#   SCORE_PLUGIN_DIR     directory containing score.so
+#   BCFTOOLS_BIN         path to bcftools binary (defaults to RBCFTools::bcftools_path())
+#   SCORE_PLUGIN_DIR     directory containing score.so (defaults to RBCFTools::bcftools_plugins_dir())
 #   USE_TAG              GT / DS / HDS / AP / GP  (default: GT)
 #   COLUMNS_PRESET       PLINK / PLINK2 / METAL / SSF / … (default: PLINK)
 #   Q_SCORE_THR          comma-separated p-value thresholds (default: empty)
+#   SUMMARY_LIST_FILE    optional bcftools --summaries file/directory; when set, positional SUMMARY_PATH is ignored
 #   USE_VARIANT_ID       1 to match on rsID (default: 0)
 #   COUNTS               1 to include CNT columns (default: 0)
 #   NUM_TOL              absolute numeric tolerance (default: 1e-4)
@@ -30,11 +31,22 @@ VCF_PATH="${1:-test/data/score_input.vcf}"
 SUMMARY_PATH="${2:-test/data/score_summary.tsv}"
 OUT_PREFIX="${3:-score_conformance}"
 DUCKHTS_EXT="${DUCKHTS_EXT:-build/release/duckhts.duckdb_extension}"
-BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
-SCORE_PLUGIN_DIR="${SCORE_PLUGIN_DIR:-}"
+if [[ -z "${BCFTOOLS_BIN:-}" ]]; then
+  BCFTOOLS_BIN="$(Rscript -e "if (!requireNamespace('RBCFTools', quietly=TRUE)) quit(status=1); cat(RBCFTools::bcftools_path())")" || {
+    echo "RBCFTools is required to resolve the bundled bcftools binary; set BCFTOOLS_BIN to override" >&2
+    exit 1
+  }
+fi
+if [[ -z "${SCORE_PLUGIN_DIR:-}" ]]; then
+  SCORE_PLUGIN_DIR="$(Rscript -e "if (!requireNamespace('RBCFTools', quietly=TRUE)) quit(status=1); cat(RBCFTools::bcftools_plugins_dir())")" || {
+    echo "RBCFTools is required to resolve the bundled bcftools plugin directory; set SCORE_PLUGIN_DIR to override" >&2
+    exit 1
+  }
+fi
 USE_TAG="${USE_TAG:-GT}"
 COLUMNS_PRESET="${COLUMNS_PRESET:-PLINK}"
 Q_SCORE_THR="${Q_SCORE_THR:-}"
+SUMMARY_LIST_FILE="${SUMMARY_LIST_FILE:-}"
 USE_VARIANT_ID="${USE_VARIANT_ID:-0}"
 COUNTS="${COUNTS:-0}"
 NUM_TOL="${NUM_TOL:-1e-4}"
@@ -49,8 +61,14 @@ COMPARE_TSV="${OUT_PREFIX}.compare.tsv"
 if [[ ! -f "$VCF_PATH" ]]; then
   echo "Input VCF not found: $VCF_PATH" >&2; exit 1
 fi
-if [[ ! -f "$SUMMARY_PATH" ]]; then
-  echo "Summary file not found: $SUMMARY_PATH" >&2; exit 1
+if [[ -n "$SUMMARY_LIST_FILE" ]]; then
+  if [[ ! -e "$SUMMARY_LIST_FILE" ]]; then
+    echo "SUMMARY_LIST_FILE not found: $SUMMARY_LIST_FILE" >&2; exit 1
+  fi
+else
+  if [[ ! -f "$SUMMARY_PATH" ]]; then
+    echo "Summary file not found: $SUMMARY_PATH" >&2; exit 1
+  fi
 fi
 if [[ ! -f "$DUCKHTS_EXT" ]]; then
   echo "DuckHTS extension not found: $DUCKHTS_EXT" >&2; exit 1
@@ -59,20 +77,7 @@ if ! command -v "$BCFTOOLS_BIN" >/dev/null 2>&1; then
   echo "bcftools not found: $BCFTOOLS_BIN" >&2; exit 1
 fi
 
-# --- Resolve score plugin ---
-
-if [[ -z "$SCORE_PLUGIN_DIR" ]]; then
-  if [[ -f "score_1.22-20250819.zip" ]]; then
-    mkdir -p .tmp/score-plugin
-    if [[ ! -f .tmp/score-plugin/score.so ]]; then
-      unzip -oq score_1.22-20250819.zip -d .tmp/score-plugin
-    fi
-    SCORE_PLUGIN_DIR="$(realpath .tmp/score-plugin)"
-  else
-    echo "Set SCORE_PLUGIN_DIR or provide score_1.22-20250819.zip" >&2
-    exit 1
-  fi
-fi
+# --- Resolve score plugin from RBCFTools (or explicit override) ---
 
 if [[ ! -f "$SCORE_PLUGIN_DIR/score.so" ]]; then
   echo "score.so not found under SCORE_PLUGIN_DIR: $SCORE_PLUGIN_DIR" >&2
@@ -137,7 +142,16 @@ fi
 
 # Resolve to absolute paths for SQL
 VCF_ABS="$(realpath "$VCF_PATH")"
-SUMMARY_ABS="$(realpath "$SUMMARY_PATH")"
+if [[ -n "$SUMMARY_LIST_FILE" ]]; then
+  SUMMARY_LIST_ABS="$(realpath "$SUMMARY_LIST_FILE")"
+  SUMMARY_SQL="NULL"
+  DUCK_OPTS="${DUCK_OPTS}, summaries_list_file := '${SUMMARY_LIST_ABS}'"
+  BCF_SUMMARY_ARGS=(--summaries "$SUMMARY_LIST_FILE")
+else
+  SUMMARY_ABS="$(realpath "$SUMMARY_PATH")"
+  SUMMARY_SQL="'${SUMMARY_ABS}'"
+  BCF_SUMMARY_ARGS=("$SUMMARY_ABS")
+fi
 
 # --- [1/4] Run DuckHTS bcftools_score ---
 
@@ -149,7 +163,7 @@ COPY (
   SELECT *
   FROM bcftools_score(
     '${VCF_ABS}',
-    '${SUMMARY_ABS}',
+    ${SUMMARY_SQL},
     ${DUCK_OPTS}
   )
   ORDER BY SAMPLE
@@ -161,7 +175,7 @@ SQL
 
 echo "[2/4] bcftools +score -> $BCF_TSV"
 BCFTOOLS_PLUGINS="$SCORE_PLUGIN_DIR" \
-  "$BCFTOOLS_BIN" +score "${BCF_ARGS[@]}" -o "$BCF_TSV" "$VCF_GZ" "$SUMMARY_ABS"
+  "$BCFTOOLS_BIN" +score "${BCF_ARGS[@]}" -o "$BCF_TSV" "$VCF_GZ" "${BCF_SUMMARY_ARGS[@]}"
 
 # --- [3/4] Normalize and compare ---
 # Both produce TSV: rows = samples, columns = SAMPLE + score metrics.
@@ -234,6 +248,9 @@ echo "Settings:"
 echo "  use_tag:          ${USE_TAG}"
 echo "  columns_preset:   ${COLUMNS_PRESET}"
 echo "  q_score_thr:      ${Q_SCORE_THR:-none}"
+echo "  summaries_list:   ${SUMMARY_LIST_FILE:-none}"
+echo "  bcftools_bin:     ${BCFTOOLS_BIN}"
+echo "  score_plugin_dir: ${SCORE_PLUGIN_DIR}"
 echo "  use_variant_id:   ${USE_VARIANT_ID}"
 echo "  counts:           ${COUNTS}"
 echo "  numeric_tolerance: ${NUM_TOL}"

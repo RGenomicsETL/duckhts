@@ -496,12 +496,14 @@
       "name": "bcftools_score",
       "kind": "table",
       "category": "Variants",
-      "signature": "bcftools_score(bcf_path, summary_path, use := NULL, columns := 'PLINK', columns_file := NULL, q_score_thr := NULL, use_variant_id := FALSE, counts := FALSE, samples := NULL, force_samples := FALSE, regions := NULL, regions_file := NULL, regions_overlap := 1, targets := NULL, targets_file := NULL, targets_overlap := 0, apply_filters := NULL, include := NULL, exclude := NULL)",
+      "signature": "bcftools_score(bcf_path, summary_path_or_list, use := NULL, columns := 'PLINK', columns_file := NULL, q_score_thr := NULL, summaries_list_file := NULL, log_path := NULL, use_variant_id := FALSE, counts := FALSE, samples := NULL, force_samples := FALSE, regions := NULL, regions_file := NULL, regions_overlap := 1, targets := NULL, targets_file := NULL, targets_overlap := 0, apply_filters := NULL, include := NULL, exclude := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_score",
-      "description": "Compute polygenic scores from one genotype BCF/VCF and one summary-statistics file with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls.",
+      "description": "Compute polygenic scores from one genotype BCF/VCF and one or more summary-statistics files with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls. The second argument accepts a scalar path or a DuckDB LIST/array of paths; TSV/SSF summaries produce one PRS column per file in a single genotype scan, while GWAS-VCF summaries still produce one PRS column per FORMAT sample. Use summaries_list_file with a NULL second argument to read paths from a file or directory; list-file entries are interpreted as written, matching upstream `bcftools +score --summaries` behavior. Use log_path to write per-PRS loaded/matched/allele-mismatch/duplicate-marker audit counts.",
       "examples": [
-        "SELECT * FROM bcftools_score('cohort.bcf', 'gwas.tsv.gz', columns := 'PLINK') LIMIT 5;"
+        "SELECT * FROM bcftools_score('cohort.bcf', 'gwas.tsv.gz', columns := 'PLINK') LIMIT 5;",
+        "SELECT * FROM bcftools_score('cohort.bcf', ['score1.tsv.gz', 'score2.tsv.gz'], columns := 'GWAS-SSF') LIMIT 5;",
+        "SELECT * FROM bcftools_score('cohort.bcf', NULL, columns := 'GWAS-SSF', summaries_list_file := 'scores.list', log_path := 'score.log') LIMIT 5;"
       ]
     },
     {

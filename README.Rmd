@@ -49,9 +49,14 @@ This extention does not support MSVC builds (windows_amd64/windows_arm64). Use M
 
 ## Functions
 
+<details>
+<summary>Show generated function catalog</summary>
+
 ```{r function-catalog, echo=FALSE, results='asis'}
 cat(paste(readLines("r/Rduckhts/inst/function_catalog/functions.md"), collapse = "\n"))
 ```
+
+</details>
 
 `read_fastq` with `mate_path` requires exact QNAME pairing. `read_bam` supports typed `standard_tags` and `auxiliary_tags` maps. `read_tabix` supports header-aware parsing (`header`, `header_names`) and optional type inference (`auto_detect`, `column_types`). Region lists in comma-separated form are supported by `read_bam`, `read_bcf`, `read_fasta`, `read_gff`, `read_gtf`, and `read_tabix`. `read_bam` multi-region queries are deduplicated by htslib, while `read_bcf`/`read_fasta`/`read_gff`/`read_gtf`/`read_tabix` chain regions and can return duplicates for overlaps.
 
@@ -227,7 +232,7 @@ LIMIT 3;
 
 ### Polygenic risk scoring
 
-`bcftools_score` computes per-sample polygenic risk scores (PRS) from a VCF/BCF and a GWAS summary statistics file, mirroring the `bcftools +score` plugin API.
+`bcftools_score` computes per-sample polygenic risk scores (PRS) from a VCF/BCF and one or more GWAS summary statistics files, mirroring the `bcftools +score` plugin API.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 -- Hard-call (GT) PRS — PLINK summary format
@@ -237,6 +242,17 @@ SELECT SAMPLE, round(score_summary, 3) AS prs
 FROM bcftools_score(
   'test/data/score_input.vcf',
   'test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK'
+);
+
+-- Multi-PRS TSV/SSF scoring: multiple summary files in one genotype scan
+SELECT SAMPLE,
+       round(score_summary, 3) AS prs_a,
+       round(score_summary_na, 3) AS prs_b
+FROM bcftools_score(
+  'test/data/score_input.vcf',
+  ['test/data/score_summary.tsv', 'test/data/score_summary_na.tsv'],
   use := 'GT',
   columns := 'PLINK'
 );

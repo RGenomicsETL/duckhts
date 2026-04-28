@@ -113,4 +113,18 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  parallel_empty_contigs.vcf.gz + .tbi"
 
+# ---- bcftools_score multi-summary list fixture ----
+# List entries intentionally use repo-root-relative paths to match upstream
+# bcftools +score --summaries list-file semantics (entries are not resolved
+# relative to the list file location).
+cat > "$DST/score_summaries.list" <<'EOF'
+test/data/score_summary.tsv
+test/data/score_summary_na.tsv
+EOF
+cat > "$PKG_DST/score_summaries.list" <<'EOF'
+score_summary.tsv
+score_summary_na.tsv
+EOF
+echo "  score_summaries.list"
+
 echo "==> Done. $(ls "$DST" | wc -l) files in test/data/"
