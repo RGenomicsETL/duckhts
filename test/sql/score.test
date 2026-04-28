@@ -48,6 +48,21 @@ ORDER BY SAMPLE
 S1	1.8	2.0
 S2	0.1	0.5
 
+# --- Multi-PRS TSV scoring: summaries_list_file directory skips sidecars and is sorted ---
+query TTT
+SELECT SAMPLE, round(score_summary, 3), round(score_summary_na, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  NULL,
+  use := 'GT',
+  columns := 'PLINK',
+  summaries_list_file := '__WORKING_DIRECTORY__/test/data/score_summary_dir'
+)
+ORDER BY SAMPLE
+----
+S1	1.8	2.0
+S2	0.1	0.5
+
 # --- Duplicate PRS names are rejected clearly because DuckDB result columns must be unique ---
 statement error
 SELECT *

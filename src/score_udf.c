@@ -9,6 +9,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <htslib/hts.h>
 #include <htslib/khash_str2int.h>
@@ -377,6 +378,37 @@ static char *score_prs_name_from_path(const char *path) {
     return out;
 }
 
+static int score_str_endswith(const char *s, const char *suffix) {
+    size_t n, m;
+    if (!s || !suffix) return 0;
+    n = strlen(s);
+    m = strlen(suffix);
+    return n >= m && strcmp(s + n - m, suffix) == 0;
+}
+
+static int score_summary_dir_entry_supported(const char *name) {
+    if (!name || !name[0]) return 0;
+    if (name[0] == '.') return 0;
+    /* Directory mode is a convenience for summary-statistic folders.  Restrict
+     * it to regular summary-like filenames so index sidecars (.tbi/.csi) and
+     * incidental files do not become PRS tracks. */
+    if (score_str_endswith(name, ".bcf")) return 1;
+    if (score_str_endswith(name, ".vcf") || score_str_endswith(name, ".vcf.gz") || score_str_endswith(name, ".vcf.bgz")) return 1;
+    if (score_str_endswith(name, ".tsv") || score_str_endswith(name, ".tsv.gz") || score_str_endswith(name, ".tsv.bgz")) return 1;
+    if (score_str_endswith(name, ".txt") || score_str_endswith(name, ".txt.gz") || score_str_endswith(name, ".txt.bgz")) return 1;
+    if (score_str_endswith(name, ".ssf") || score_str_endswith(name, ".ssf.gz") || score_str_endswith(name, ".ssf.bgz")) return 1;
+    return 0;
+}
+
+static int score_string_ptr_cmp(const void *a, const void *b) {
+    const char *sa = *(const char * const *)a;
+    const char *sb = *(const char * const *)b;
+    if (!sa && !sb) return 0;
+    if (!sa) return -1;
+    if (!sb) return 1;
+    return strcmp(sa, sb);
+}
+
 static int score_add_summary_path(score_bind_t *bind, const char *path, char *err, size_t err_sz) {
     char **new_paths;
     char *copy;
@@ -407,36 +439,76 @@ static int score_add_summary_paths_from_list_file(score_bind_t *bind, const char
     int added = 0;
     if (!path || !path[0]) return 0;
 
+    /* Directory mode intentionally uses only opendir/readdir/stat/qsort rather
+     * than scandir or dirent.d_type: those calls are available in Emscripten's
+     * virtual filesystem for webR/wasm, while remote URL list files fall through
+     * to hts_open() below and are handled by the wasm HTTP hFILE backend. */
     d = opendir(path);
     if (d) {
         struct dirent *dir;
+        char **entries = NULL;
+        int n_entries = 0;
+        int m_entries = 0;
         while ((dir = readdir(d))) {
             char *joined;
+            char **new_entries;
+            struct stat st;
             size_t p_len;
             size_t q_len;
             if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) continue;
+            if (!score_summary_dir_entry_supported(dir->d_name)) continue;
             p_len = strlen(path);
             q_len = strlen(dir->d_name);
             joined = (char *)duckdb_malloc(p_len + 1 + q_len + 1);
             if (!joined) {
+                int i;
                 closedir(d);
+                for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+                duckdb_free(entries);
                 snprintf(err, err_sz, "bcftools_score: out of memory");
                 return -1;
             }
             memcpy(joined, path, p_len);
             joined[p_len] = '/';
             memcpy(joined + p_len + 1, dir->d_name, q_len + 1);
-            if (score_add_summary_path(bind, joined, err, err_sz) != 0) {
+            if (stat(joined, &st) != 0 || !S_ISREG(st.st_mode)) {
                 duckdb_free(joined);
-                closedir(d);
-                return -1;
+                continue;
             }
-            duckdb_free(joined);
-            added++;
+            if (n_entries == m_entries) {
+                int new_m = m_entries ? m_entries * 2 : 8;
+                new_entries = (char **)realloc(entries, sizeof(char *) * (size_t)new_m);
+                if (!new_entries) {
+                    int i;
+                    duckdb_free(joined);
+                    closedir(d);
+                    for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+                    duckdb_free(entries);
+                    snprintf(err, err_sz, "bcftools_score: out of memory");
+                    return -1;
+                }
+                entries = new_entries;
+                m_entries = new_m;
+            }
+            entries[n_entries++] = joined;
         }
         closedir(d);
+        if (n_entries > 1) qsort(entries, (size_t)n_entries, sizeof(char *), score_string_ptr_cmp);
+        for (added = 0; added < n_entries; added++) {
+            if (score_add_summary_path(bind, entries[added], err, err_sz) != 0) {
+                int i;
+                for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+                duckdb_free(entries);
+                return -1;
+            }
+        }
+        {
+            int i;
+            for (i = 0; i < n_entries; i++) duckdb_free(entries[i]);
+        }
+        duckdb_free(entries);
         if (!added) {
-            snprintf(err, err_sz, "bcftools_score: no summary files found in '%s'", path);
+            snprintf(err, err_sz, "bcftools_score: no supported summary files found in '%s'", path);
             return -1;
         }
         return 0;

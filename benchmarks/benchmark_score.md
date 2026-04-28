@@ -45,8 +45,8 @@ Useful overrides:
 ## Synthetic Single-PRS Case
 
     #>               engine runs median_sec min_sec max_sec variants samples
-    #> 1            duckhts    3      0.950   0.949   0.958   500000     100
-    #> 2 bcftools_RBCFTools    3      1.135   1.131   1.155   500000     100
+    #> 1            duckhts    3      0.967   0.961   0.968   500000     100
+    #> 2 bcftools_RBCFTools    3      1.132   1.132   1.132   500000     100
     #>   genotype_cells output_samples score_columns score_cells
     #> 1       50000000            100             1         100
     #> 2       50000000            100             1         100
@@ -63,8 +63,8 @@ Useful overrides:
 ## Synthetic Multi-PRS TSV Case
 
     #>               engine runs median_sec min_sec max_sec variants samples
-    #> 1            duckhts    3      1.472   1.468   1.484   500000     100
-    #> 2 bcftools_RBCFTools    3      1.592   1.578   1.607   500000     100
+    #> 1            duckhts    3      1.493   1.492   1.511   500000     100
+    #> 2 bcftools_RBCFTools    3      1.588   1.587   1.599   500000     100
     #>   genotype_cells output_samples score_columns score_cells
     #> 1       50000000            100             4         400
     #> 2       50000000            100             4         400

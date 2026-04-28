@@ -28,6 +28,7 @@ test_score <- function() {
   regions_file <- file.path(extdata, "score_regions.txt")
   targets_file <- file.path(extdata, "score_targets.txt")
   summaries_list_file <- file.path(extdata, "score_summaries.list")
+  summaries_dir <- file.path(extdata, "score_summary_dir")
 
   expect_true(file.exists(vcf))
   expect_true(file.exists(vcf_dosage))
@@ -47,6 +48,7 @@ test_score <- function() {
   expect_true(file.exists(regions_file))
   expect_true(file.exists(targets_file))
   expect_true(file.exists(summaries_list_file))
+  expect_true(dir.exists(summaries_dir))
 
   # --- Basic GT scoring ---
   out_gt <- rduckhts_score(con, vcf, sumf, use = "GT", columns = "PLINK")
@@ -76,6 +78,12 @@ test_score <- function() {
   setwd(old_wd)
   expect_equal(round(out_bundled_list$score_summary, 3), c(1.8, 0.1))
   expect_equal(round(out_bundled_list$score_summary_na, 3), c(2.0, 0.5))
+
+  out_dir_list <- rduckhts_score(con, vcf, summary_path = NULL,
+                                 summaries_list_file = summaries_dir,
+                                 use = "GT", columns = "PLINK")
+  expect_equal(round(out_dir_list$score_summary, 3), c(1.8, 0.1))
+  expect_equal(round(out_dir_list$score_summary_na, 3), c(2.0, 0.5))
 
   expect_error(
     rduckhts_score(con, vcf, c(sumf, sumf_cnt), use = "GT", columns = "PLINK", counts = TRUE),
