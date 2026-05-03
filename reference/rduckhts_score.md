@@ -1,8 +1,8 @@
 # Compute Polygenic Scores
 
 Calls the DuckHTS \`bcftools_score(...)\` table function to compute
-sample-level polygenic scores from one genotype VCF/BCF file and one
-summary-statistics file.
+sample-level polygenic scores from one genotype VCF/BCF file and one or
+more summary-statistics files.
 
 ## Usage
 
@@ -10,11 +10,13 @@ summary-statistics file.
 rduckhts_score(
   con,
   bcf_path,
-  summary_path,
+  summary_path = NULL,
   use = NULL,
   columns = "PLINK",
   columns_file = NULL,
   q_score_thr = NULL,
+  summaries_list_file = NULL,
+  log_path = NULL,
   use_variant_id = FALSE,
   counts = FALSE,
   samples = NULL,
@@ -43,7 +45,9 @@ rduckhts_score(
 
 - summary_path:
 
-  Path to summary-statistics file
+  Path(s) to summary-statistics file(s). A character vector computes
+  multiple TSV/SSF PRS columns in one genotype scan. Use \`NULL\` with
+  \`summaries_list_file\` to read paths from a file.
 
 - use:
 
@@ -64,6 +68,16 @@ rduckhts_score(
 
   Optional comma-separated p-value thresholds (e.g.
   \`"1e-8,1e-6,1e-4"\`)
+
+- summaries_list_file:
+
+  Optional path to a file (one summary path per line) or directory of
+  summary files, matching upstream \`bcftools +score –summaries\`.
+
+- log_path:
+
+  Optional path for a matching/audit log with loaded, matched,
+  allele-mismatch, and duplicate-marker counts per PRS.
 
 - use_variant_id:
 
