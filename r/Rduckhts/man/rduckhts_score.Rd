@@ -7,11 +7,13 @@
 rduckhts_score(
   con,
   bcf_path,
-  summary_path,
+  summary_path = NULL,
   use = NULL,
   columns = "PLINK",
   columns_file = NULL,
   q_score_thr = NULL,
+  summaries_list_file = NULL,
+  log_path = NULL,
   use_variant_id = FALSE,
   counts = FALSE,
   samples = NULL,
@@ -32,7 +34,9 @@ rduckhts_score(
 
 \item{bcf_path}{Path to genotype VCF/BCF file}
 
-\item{summary_path}{Path to summary-statistics file}
+\item{summary_path}{Path(s) to summary-statistics file(s). A character vector
+computes multiple TSV/SSF PRS columns in one genotype scan. Use `NULL`
+with `summaries_list_file` to read paths from a file.}
 
 \item{use}{Optional dosage source (`"GT"`, `"DS"`, `"HDS"`, `"AP"`, `"GP"`, `"AS"`)}
 
@@ -42,6 +46,12 @@ rduckhts_score(
 \item{columns_file}{Optional two-column summary header mapping file}
 
 \item{q_score_thr}{Optional comma-separated p-value thresholds (e.g. `"1e-8,1e-6,1e-4"`)}
+
+\item{summaries_list_file}{Optional path to a file (one summary path per line)
+or directory of summary files, matching upstream `bcftools +score --summaries`.}
+
+\item{log_path}{Optional path for a matching/audit log with loaded, matched,
+allele-mismatch, and duplicate-marker counts per PRS.}
 
 \item{use_variant_id}{Logical; if TRUE, match variants by ID instead of CHR+BP}
 
@@ -74,5 +84,5 @@ A data frame with one row per sample and score/count columns.
 }
 \description{
 Calls the DuckHTS `bcftools_score(...)` table function to compute sample-level
-polygenic scores from one genotype VCF/BCF file and one summary-statistics file.
+polygenic scores from one genotype VCF/BCF file and one or more summary-statistics files.
 }
