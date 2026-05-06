@@ -41,7 +41,7 @@ rduckhts_gff_multi(
 
 \item{column_types}{Character vector of column type names.}
 
-\item{attributes_map}{Logical; return attributes as a scalar MAP.}
+\item{attributes_map}{Logical; return raw attributes as a scalar MAP.}
 
 \item{attributes_list}{Logical; return attributes as MAP(VARCHAR, VARCHAR[]).}
 

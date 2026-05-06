@@ -648,6 +648,24 @@ SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invali
 ----
 InvalidCoordinate
 
+# --- strict GFF3 validation rejects partially malformed attribute segments ---
+statement error
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid_attr.gff3', strict := true);
+----
+InvalidAttribute
+
+# --- strict GFF3 validation rejects extra columns ---
+statement error
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_extra_field.gff3', strict := true);
+----
+TooManyFields
+
+# --- strict GFF3 validation rejects nonpositive end coordinates even with unknown start ---
+statement error
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid_end.gff3', strict := true);
+----
+InvalidCoordinate
+
 # --- default GFF3 reading remains permissive for existing ingestion workflows ---
 query I
 SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid.gff3');

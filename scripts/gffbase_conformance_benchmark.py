@@ -231,6 +231,23 @@ def git_rev(path: Path) -> str:
         return ""
 
 
+def git_dirty(path: Path) -> bool:
+    try:
+        subprocess.check_call(
+            ["git", "-C", str(path), "diff", "--quiet", "--ignore-submodules", "--"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.check_call(
+            ["git", "-C", str(path), "diff", "--cached", "--quiet", "--ignore-submodules", "--"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return False
+    except Exception:
+        return True
+
+
 def collect_system_specs() -> dict[str, Any]:
     specs: dict[str, Any] = {
         "hostname": platform.node(),
@@ -894,6 +911,7 @@ def main(argv: list[str] | None = None) -> int:
     gffbase_sync = repo_root / ".sync" / "gffbase"
     metadata = {
         "duckhts_git_rev": git_rev(repo_root),
+        "duckhts_git_dirty": git_dirty(repo_root),
         "duckhts_extension": str(args.extension.resolve()),
         "duckhts_extension_size": args.extension.stat().st_size,
         "gffbase_version": getattr(gffbase, "__version__", ""),

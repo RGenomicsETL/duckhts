@@ -696,9 +696,9 @@ dbGetQuery(con, "
 
 DuckHTS reads GFF3 with `read_gff(...)`, GTF with `read_gtf(...)`, and generic
 GFF/GTF-like tabix text with `read_tabix(...)`. `read_gff(..., strict := true)`
-performs GFF3 structural validation. Attribute decoding can be scalar
-(`attributes_map`), grouped and lossless for multi-values (`attributes_list` as
-`MAP(VARCHAR, VARCHAR[])`), or exact parser-style pairs (`attributes_pairs` as
+performs GFF3 structural validation. Attribute decoding can be scalar and raw
+for legacy convenience (`attributes_map`), grouped and lossless for multi-values
+(`attributes_list` as `MAP(VARCHAR, VARCHAR[])`), or exact parser-style pairs (`attributes_pairs` as
 `LIST<STRUCT(key, value, idx)>`).
 
 The GFF3 implementation is audited against [GFFBase](https://github.com/Kuanhao-Chao/gffbase)

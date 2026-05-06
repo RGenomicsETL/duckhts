@@ -24,6 +24,9 @@ test_table_creation <- function() {
   gff_index_path <- system.file("extdata", "gff_file.gff.gz.tbi", package = "Rduckhts")
   gff_strict_valid_path <- system.file("extdata", "gff_strict_valid.gff3", package = "Rduckhts")
   gff_strict_invalid_path <- system.file("extdata", "gff_strict_invalid.gff3", package = "Rduckhts")
+  gff_strict_invalid_attr_path <- system.file("extdata", "gff_strict_invalid_attr.gff3", package = "Rduckhts")
+  gff_strict_extra_field_path <- system.file("extdata", "gff_strict_extra_field.gff3", package = "Rduckhts")
+  gff_strict_invalid_end_path <- system.file("extdata", "gff_strict_invalid_end.gff3", package = "Rduckhts")
   gff_attrs_path <- system.file("extdata", "gff_attrs.gff3", package = "Rduckhts")
   gtf_attrs_path <- system.file("extdata", "gtf_attrs.gtf", package = "Rduckhts")
   tabix_path <- system.file("extdata", "rg.sam.gz", package = "Rduckhts")
@@ -57,6 +60,9 @@ test_table_creation <- function() {
   expect_true(file.exists(gff_index_path))
   expect_true(file.exists(gff_strict_valid_path))
   expect_true(file.exists(gff_strict_invalid_path))
+  expect_true(file.exists(gff_strict_invalid_attr_path))
+  expect_true(file.exists(gff_strict_extra_field_path))
+  expect_true(file.exists(gff_strict_invalid_end_path))
   expect_true(file.exists(gff_attrs_path))
   expect_true(file.exists(gtf_attrs_path))
   expect_true(file.exists(tabix_path))
@@ -133,6 +139,27 @@ test_table_creation <- function() {
     con,
     "annotations_strict_bad",
     gff_strict_invalid_path,
+    strict = TRUE,
+    overwrite = TRUE
+  ), pattern = "InvalidCoordinate")
+  expect_error(rduckhts_gff(
+    con,
+    "annotations_strict_bad_attr",
+    gff_strict_invalid_attr_path,
+    strict = TRUE,
+    overwrite = TRUE
+  ), pattern = "InvalidAttribute")
+  expect_error(rduckhts_gff(
+    con,
+    "annotations_strict_extra_field",
+    gff_strict_extra_field_path,
+    strict = TRUE,
+    overwrite = TRUE
+  ), pattern = "TooManyFields")
+  expect_error(rduckhts_gff(
+    con,
+    "annotations_strict_bad_end",
+    gff_strict_invalid_end_path,
     strict = TRUE,
     overwrite = TRUE
   ), pattern = "InvalidCoordinate")

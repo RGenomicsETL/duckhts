@@ -732,8 +732,8 @@ quality_hist
 
 GFF3 files are read with `rduckhts_gff()` / SQL `read_gff(...)`; GTF files are
 read with `rduckhts_gtf()` / SQL `read_gtf(...)`. `strict = TRUE` enables GFF3
-structural validation. Attribute decoding can be scalar (`attributes_map`),
-grouped and lossless for multi-values (`attributes_list`, a DuckDB
+structural validation. Attribute decoding can be scalar and raw for legacy
+convenience (`attributes_map`), grouped and lossless for multi-values (`attributes_list`, a DuckDB
 `MAP(VARCHAR, VARCHAR[])`), or exact parser-style pairs (`attributes_pairs`, a
 DuckDB `LIST<STRUCT(key, value, idx)>`).
 

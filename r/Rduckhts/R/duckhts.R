@@ -1573,7 +1573,7 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
-#' @param attributes_map Logical. If TRUE, returns attributes as a scalar MAP column
+#' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param strict Logical. If TRUE, enforce GFF3 structural validation while scanning
@@ -1690,7 +1690,7 @@ rduckhts_gff <- function(
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
-#' @param attributes_map Logical. If TRUE, returns attributes as a scalar MAP column
+#' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param overwrite Logical. If TRUE, overwrites existing table
@@ -2628,7 +2628,7 @@ rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
-#' @param attributes_map Logical; return attributes as a scalar MAP.
+#' @param attributes_map Logical; return raw attributes as a scalar MAP.
 #' @param attributes_list Logical; return attributes as MAP(VARCHAR, VARCHAR[]).
 #' @param attributes_pairs Logical; return attributes as a LIST of key/value/index structs.
 #' @param strict Logical; enforce GFF3 structural validation while scanning.
@@ -2678,7 +2678,7 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
-#' @param attributes_map Logical; return attributes as a scalar MAP.
+#' @param attributes_map Logical; return raw attributes as a scalar MAP.
 #' @param attributes_list Logical; return attributes as MAP(VARCHAR, VARCHAR[]).
 #' @param attributes_pairs Logical; return attributes as a LIST of key/value/index structs.
 #' @param .params Optional data.frame with per-file parameter overrides.

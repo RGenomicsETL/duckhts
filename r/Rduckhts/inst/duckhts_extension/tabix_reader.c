@@ -292,27 +292,35 @@ static int span_has_whitespace(const char *s, int len) {
     return 0;
 }
 
-static int gff3_attr_has_pair(const char *s, int len) {
+static int gff3_attr_segments_valid(const char *s, int len) {
     if (!s || len <= 0) return 0;
     const char *p = s;
     const char *end = s + len;
+    int saw_pair = 0;
     while (p < end) {
         while (p < end && (*p == ';' || *p == ' ' || *p == '\t')) p++;
         if (p >= end) break;
-        const char *key = p;
-        while (p < end && *p != '=' && *p != ';') p++;
-        if (p >= end || *p != '=') {
-            while (p < end && *p != ';') p++;
+
+        const char *seg = p;
+        while (p < end && *p != ';') p++;
+        int seg_len = (int)(p - seg);
+        trim_span(&seg, &seg_len);
+        if (seg_len <= 0) {
             if (p < end && *p == ';') p++;
             continue;
         }
-        int key_len = (int)(p - key);
+
+        const char *eq = memchr(seg, '=', (size_t)seg_len);
+        if (!eq) return 0;
+        const char *key = seg;
+        int key_len = (int)(eq - seg);
         trim_span(&key, &key_len);
-        if (key_len > 0) return 1;
-        while (p < end && *p != ';') p++;
+        if (key_len <= 0) return 0;
+        saw_pair = 1;
+
         if (p < end && *p == ';') p++;
     }
-    return 0;
+    return saw_pair;
 }
 
 static int hex_value(char c) {
@@ -511,8 +519,12 @@ static int parse_attr_pairs(const char *s, bool is_gff, gxf_attr_pair_t **out_pa
 
 static int validate_gff3_line_strict(const char *line, char *err, size_t err_len) {
     int n_fields = count_fields(line);
-    if (n_fields < 9) {
-        snprintf(err, err_len, "TooFewFields: expected at least 9 tab-separated fields, found %d", n_fields);
+    if (n_fields != 9) {
+        if (n_fields < 9) {
+            snprintf(err, err_len, "TooFewFields: expected exactly 9 tab-separated fields, found %d", n_fields);
+        } else {
+            snprintf(err, err_len, "TooManyFields: expected exactly 9 tab-separated fields, found %d", n_fields);
+        }
         return 0;
     }
 
@@ -554,6 +566,10 @@ static int validate_gff3_line_strict(const char *line, char *err, size_t err_len
             snprintf(err, err_len, "InvalidCoordinate: end coordinate is not an integer");
             return 0;
         }
+        if (endv < 1) {
+            snprintf(err, err_len, "InvalidCoordinate: end coordinate must be >= 1");
+            return 0;
+        }
     }
     if (have_start && have_end && endv < start) {
         snprintf(err, err_len, "InvalidCoordinate: end coordinate is less than start coordinate");
@@ -592,8 +608,8 @@ static int validate_gff3_line_strict(const char *line, char *err, size_t err_len
     const char *attrs = get_field(line, GXF_COL_ATTRIBUTES, &attr_len);
     if (attrs) trim_span(&attrs, &attr_len);
     if (attrs && attr_len > 0 && !(attr_len == 1 && attrs[0] == '.')) {
-        if (!gff3_attr_has_pair(attrs, attr_len)) {
-            snprintf(err, err_len, "InvalidAttribute: attribute string did not parse into key=value pairs");
+        if (!gff3_attr_segments_valid(attrs, attr_len)) {
+            snprintf(err, err_len, "InvalidAttribute: every non-empty attribute segment must be key=value");
             return 0;
         }
     }
@@ -1518,7 +1534,9 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             char err[256];
             if (!validate_gff3_line_strict(id->line.s, err, sizeof(err))) {
                 char msg[384];
-                if (id->line_number > 0) {
+                if (id->itr) {
+                    snprintf(msg, sizeof(msg), "read_gff strict validation failed during indexed region scan: %s", err);
+                } else if (id->line_number > 0) {
                     snprintf(msg, sizeof(msg), "read_gff strict validation failed at line %llu: %s",
                              (unsigned long long)id->line_number, err);
                 } else {

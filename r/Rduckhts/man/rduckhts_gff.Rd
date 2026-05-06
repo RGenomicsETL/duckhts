@@ -40,7 +40,7 @@ rduckhts_gff(
 
 \item{column_types}{Character vector of column types (e.g. "BIGINT", "VARCHAR")}
 
-\item{attributes_map}{Logical. If TRUE, returns attributes as a scalar MAP column}
+\item{attributes_map}{Logical. If TRUE, returns raw attributes as a scalar MAP column}
 
 \item{attributes_list}{Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])}
 

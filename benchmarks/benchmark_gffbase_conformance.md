@@ -51,7 +51,7 @@ for real human-scale files.
 
 | parameter               | value                                                |
 |:------------------------|:-----------------------------------------------------|
-| DuckHTS git rev         | 78532b859c12                                         |
+| DuckHTS git rev         | a490a1945d9e+dirty                                   |
 | DuckHTS extension       | /root/duckhts/build/release/duckhts.duckdb_extension |
 | GFFBase version         | 0.1.0                                                |
 | GFFBase native parser   | TRUE                                                 |
@@ -98,22 +98,22 @@ for real human-scale files.
 
 | dataset                              | tool    | variant                            | rows      | passes | median_sec | rows_per_sec | mb_per_sec | vs_gffbase_parse |
 |:-------------------------------------|:--------|:-----------------------------------|:----------|-------:|-----------:|-------------:|-----------:|-----------------:|
-| synthetic_200000.gff3                | DuckHTS | read_gff COUNT(\*)                 | 200,000   |      3 |     0.0117 |   17090326.8 |     2372.4 |            46.44 |
-| synthetic_200000.gff3                | DuckHTS | read_gff strict COUNT(\*)          | 200,000   |      3 |     0.0637 |    3139960.5 |      435.9 |             8.53 |
-| synthetic_200000.gff3                | DuckHTS | read_gff projected filter/sum      | 200,000   |      3 |     0.0329 |    6075425.0 |      843.4 |            16.51 |
-| synthetic_200000.gff3                | DuckHTS | read_gff attributes_map            | 200,000   |      3 |     0.1367 |    1462720.5 |      203.1 |             3.98 |
-| synthetic_200000.gff3                | DuckHTS | read_gff attributes_list           | 200,000   |      3 |     0.1851 |    1080222.0 |      150.0 |             2.94 |
-| synthetic_200000.gff3                | DuckHTS | read_gff attributes_pairs          | 200,000   |      3 |     0.1207 |    1657507.5 |      230.1 |             4.50 |
-| synthetic_200000.gff3                | DuckHTS | read_gff attributes_map+list+pairs | 200,000   |      3 |     0.3930 |     508842.8 |       70.6 |             1.38 |
-| synthetic_200000.gff3                | GFFBase | parse_gff strict (rust)            | 200,000   |      3 |     0.5435 |     367972.6 |       51.1 |             1.00 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff COUNT(\*)                 | 5,866,158 |      3 |     2.0129 |    2914263.7 |       40.7 |            19.98 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff strict COUNT(\*)          | 5,866,158 |      3 |     4.4549 |    1316797.3 |       18.4 |             9.03 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff projected filter/sum      | 5,866,158 |      3 |     2.9410 |    1994602.0 |       27.9 |            13.68 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_map            | 5,866,158 |      3 |    10.0948 |     581105.6 |        8.1 |             3.98 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_list           | 5,866,158 |      3 |    16.9759 |     345558.7 |        4.8 |             2.37 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_pairs          | 5,866,158 |      3 |    14.2517 |     411611.4 |        5.8 |             2.82 |
-| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_map+list+pairs | 5,866,158 |      3 |    37.5871 |     156068.4 |        2.2 |             1.07 |
-| gencode.v49.basic.annotation.gff3.gz | GFFBase | parse_gff strict (rust)            | 5,866,158 |      3 |    40.2213 |     145846.9 |        2.0 |             1.00 |
+| synthetic_200000.gff3                | DuckHTS | read_gff COUNT(\*)                 | 200,000   |      3 |     0.0109 |   18297703.7 |     2540.1 |            50.69 |
+| synthetic_200000.gff3                | DuckHTS | read_gff strict COUNT(\*)          | 200,000   |      3 |     0.0672 |    2977991.4 |      413.4 |             8.25 |
+| synthetic_200000.gff3                | DuckHTS | read_gff projected filter/sum      | 200,000   |      3 |     0.0357 |    5606109.4 |      778.2 |            15.53 |
+| synthetic_200000.gff3                | DuckHTS | read_gff attributes_map            | 200,000   |      3 |     0.1050 |    1904227.8 |      264.3 |             5.28 |
+| synthetic_200000.gff3                | DuckHTS | read_gff attributes_list           | 200,000   |      3 |     0.1790 |    1117129.6 |      155.1 |             3.09 |
+| synthetic_200000.gff3                | DuckHTS | read_gff attributes_pairs          | 200,000   |      3 |     0.1246 |    1605661.4 |      222.9 |             4.45 |
+| synthetic_200000.gff3                | DuckHTS | read_gff attributes_map+list+pairs | 200,000   |      3 |     0.3943 |     507229.9 |       70.4 |             1.41 |
+| synthetic_200000.gff3                | GFFBase | parse_gff strict (rust)            | 200,000   |      3 |     0.5540 |     360986.9 |       50.1 |             1.00 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff COUNT(\*)                 | 5,866,158 |      3 |     1.9906 |    2946870.9 |       41.2 |            20.51 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff strict COUNT(\*)          | 5,866,158 |      3 |     5.1975 |    1128642.6 |       15.8 |             7.86 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff projected filter/sum      | 5,866,158 |      3 |     2.9470 |    1990558.2 |       27.8 |            13.86 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_map            | 5,866,158 |      3 |    10.1395 |     578543.4 |        8.1 |             4.03 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_list           | 5,866,158 |      3 |    17.2256 |     340549.4 |        4.8 |             2.37 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_pairs          | 5,866,158 |      3 |    13.7290 |     427282.2 |        6.0 |             2.97 |
+| gencode.v49.basic.annotation.gff3.gz | DuckHTS | read_gff attributes_map+list+pairs | 5,866,158 |      3 |    38.2677 |     153292.5 |        2.1 |             1.07 |
+| gencode.v49.basic.annotation.gff3.gz | GFFBase | parse_gff strict (rust)            | 5,866,158 |      3 |    40.8327 |     143663.2 |        2.0 |             1.00 |
 
 # Interpretation
 

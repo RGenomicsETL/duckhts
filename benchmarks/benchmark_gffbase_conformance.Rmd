@@ -115,6 +115,10 @@ server_specs <- meta$server_specs
 spec <- function(name, default = "") {
   if (is.null(server_specs) || is.null(server_specs[[name]])) default else as.character(server_specs[[name]])
 }
+duckhts_rev <- substr(meta$duckhts_git_rev, 1, 12)
+if (!is.null(meta$duckhts_git_dirty) && isTRUE(meta$duckhts_git_dirty)) {
+  duckhts_rev <- paste0(duckhts_rev, "+dirty")
+}
 knitr::kable(
   data.frame(
     parameter = c(
@@ -135,7 +139,7 @@ knitr::kable(
       "timed passes"
     ),
     value = c(
-      substr(meta$duckhts_git_rev, 1, 12),
+      duckhts_rev,
       meta$duckhts_extension,
       meta$gffbase_version,
       as.character(meta$gffbase_native_available),
