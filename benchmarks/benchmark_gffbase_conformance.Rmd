@@ -1,0 +1,244 @@
+---
+title: "DuckHTS vs GFFBase GFF3 Conformance Benchmark"
+output:
+  github_document:
+    html_preview: true
+---
+
+<!-- benchmark_gffbase_conformance.md is generated from benchmark_gffbase_conformance.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE)
+```
+
+# Benchmark
+
+This benchmark compares DuckHTS `read_gff(...)` with
+[GFFBase](https://github.com/Kuanhao-Chao/gffbase) around two related but
+different workload shapes:
+
+1. **GFFBase audit:** record whether GFFBase is using its Rust parser or Python
+   fallback, check Rust/Python parser parity when both are available, and verify
+   basic GFF3/GTF dialect detection. We do not treat marketing claims as proof.
+2. **GFF3 conformance:** compare DuckHTS default permissive `read_gff(...)` and
+   `read_gff(..., strict := true)` against observed GFFBase strict-parser
+   behavior. The cases are adapted from GFFBase's NCBI/GFF3 compliance tests at
+   commit `78714cf30a9d799eab544e00a79a4da9754987ca`.
+3. **Direct scan/parser throughput:** DuckHTS scans the same GFF3 files through
+   `read_gff(...)`; GFFBase parses them with `parse_gff(strict = TRUE)`.
+
+DuckHTS supports GFF3 through `read_gff(...)`, GTF through `read_gtf(...)`, and
+plain tabix-style GFF/GTF-like rows through `read_tabix(...)`. The new
+`strict := true` option is specifically GFF3 structural validation for
+`read_gff(...)`; it is not a full feature-database hierarchy validator.
+
+# Run
+
+Install GFFBase into a local target directory, then render this report:
+
+```sh
+python3 -m pip install --target .tmp/gffbase_site gffbase==0.1.0
+PYTHONPATH=.tmp/gffbase_site python3 scripts/gffbase_conformance_benchmark.py \
+  --extension build/release/duckhts.duckdb_extension \
+  --rows 200000 \
+  --passes 3 \
+  --out-dir .tmp/gffbase_conformance
+make bench-gffbase
+```
+
+Override defaults with `GFFBASE_BENCH_ROWS`, `GFFBASE_BENCH_PASSES`,
+`GFFBASE_BENCH_FORCE=1`, `GFFBASE_BENCH_INCLUDE_CREATE_DB=1`, or
+`GFFBASE_HUMAN_GFF=/path/to/gencode.gff3.gz[,/path/to/refseq.gff3.gz]` for
+real human-scale files.
+
+```{r setup, include = FALSE}
+library(knitr)
+library(jsonlite)
+
+repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
+out_dir <- file.path(repo_root, ".tmp", "gffbase_conformance")
+audit_csv <- file.path(out_dir, "gffbase_audit.csv")
+conformance_csv <- file.path(out_dir, "conformance.csv")
+performance_csv <- file.path(out_dir, "performance.csv")
+metadata_json <- file.path(out_dir, "metadata.json")
+
+rows <- as.integer(Sys.getenv("GFFBASE_BENCH_ROWS", unset = "200000"))
+passes <- as.integer(Sys.getenv("GFFBASE_BENCH_PASSES", unset = "3"))
+warmup <- as.integer(Sys.getenv("GFFBASE_BENCH_WARMUP", unset = "1"))
+force <- identical(Sys.getenv("GFFBASE_BENCH_FORCE", unset = "0"), "1")
+include_create_db <- identical(Sys.getenv("GFFBASE_BENCH_INCLUDE_CREATE_DB", unset = "0"), "1")
+human_gff <- strsplit(Sys.getenv("GFFBASE_HUMAN_GFF", unset = ""), ",", fixed = TRUE)[[1]]
+human_gff <- human_gff[nzchar(human_gff)]
+
+needs_run <- force || !file.exists(audit_csv) || !file.exists(conformance_csv) || !file.exists(performance_csv) || !file.exists(metadata_json)
+if (!needs_run && file.exists(metadata_json)) {
+  old_meta <- tryCatch(jsonlite::fromJSON(metadata_json), error = function(e) list())
+  needs_run <- !identical(as.integer(old_meta$rows), rows) || !identical(as.integer(old_meta$passes), passes)
+}
+
+if (needs_run) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  cmd <- c(
+    file.path(repo_root, "scripts", "gffbase_conformance_benchmark.py"),
+    "--extension", file.path(repo_root, "build", "release", "duckhts.duckdb_extension"),
+    "--rows", as.character(rows),
+    "--passes", as.character(passes),
+    "--warmup", as.character(warmup),
+    "--out-dir", out_dir
+  )
+  for (p in human_gff) cmd <- c(cmd, "--human-gff", p)
+  if (include_create_db) cmd <- c(cmd, "--include-create-db")
+
+  gffbase_site <- file.path(repo_root, ".tmp", "gffbase_site")
+  pythonpath <- Sys.getenv("PYTHONPATH", unset = "")
+  if (dir.exists(gffbase_site)) {
+    pythonpath <- paste(c(gffbase_site, pythonpath[nzchar(pythonpath)]), collapse = .Platform$path.sep)
+  }
+  out <- system2("python3", cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0) {
+    stop(paste(out, collapse = "\n"))
+  }
+}
+
+audit <- utils::read.csv(audit_csv, check.names = FALSE, stringsAsFactors = FALSE)
+conf <- utils::read.csv(conformance_csv, check.names = FALSE, stringsAsFactors = FALSE)
+conf$gffbase_expectation_ok <- tolower(as.character(conf$gffbase_expectation_ok)) == "true"
+perf <- utils::read.csv(performance_csv, check.names = FALSE, stringsAsFactors = FALSE)
+meta <- jsonlite::fromJSON(metadata_json)
+```
+
+# Configuration
+
+```{r configuration, echo=FALSE}
+server_specs <- meta$server_specs
+spec <- function(name, default = "") {
+  if (is.null(server_specs) || is.null(server_specs[[name]])) default else as.character(server_specs[[name]])
+}
+knitr::kable(
+  data.frame(
+    parameter = c(
+      "DuckHTS git rev",
+      "DuckHTS extension",
+      "GFFBase version",
+      "GFFBase native parser",
+      "GFFBase upstream commit",
+      "DuckDB Python",
+      "server hostname",
+      "server OS",
+      "kernel / machine",
+      "CPU model",
+      "CPU logical / affinity",
+      "memory",
+      "DuckDB threads",
+      "synthetic rows",
+      "timed passes"
+    ),
+    value = c(
+      substr(meta$duckhts_git_rev, 1, 12),
+      meta$duckhts_extension,
+      meta$gffbase_version,
+      as.character(meta$gffbase_native_available),
+      substr(meta$gffbase_upstream_commit, 1, 12),
+      meta$duckdb_python_version,
+      spec("hostname"),
+      spec("os_pretty_name", spec("platform")),
+      paste(spec("release"), spec("machine"), sep = " / "),
+      spec("cpu_model"),
+      paste(spec("cpu_logical"), spec("cpu_affinity"), sep = " / "),
+      paste0(spec("mem_total_gib"), " GiB"),
+      meta$duckdb_threads,
+      format(meta$rows, big.mark = ","),
+      meta$passes
+    )
+  )
+)
+```
+
+# GFFBase audit
+
+```{r audit, echo=FALSE}
+knitr::kable(audit, row.names = FALSE)
+```
+
+# GFF3 conformance summary
+
+```{r conformance-summary, echo=FALSE}
+summary_tbl <- data.frame(
+  metric = c(
+    "cases",
+    "GFFBase matched expected strict behavior",
+    "DuckHTS default matched GFFBase strict behavior",
+    "DuckHTS default gaps vs GFFBase strict behavior",
+    "DuckHTS strict matched GFFBase strict behavior",
+    "DuckHTS strict gaps vs GFFBase strict behavior"
+  ),
+  value = c(
+    nrow(conf),
+    sum(conf$gffbase_expectation_ok),
+    sum(conf$duckhts_default_vs_gffbase == "match"),
+    sum(conf$duckhts_default_vs_gffbase == "gap"),
+    sum(conf$duckhts_strict_vs_gffbase == "match"),
+    sum(conf$duckhts_strict_vs_gffbase == "gap")
+  )
+)
+knitr::kable(summary_tbl)
+```
+
+## Remaining DuckHTS strict gaps
+
+```{r conformance-gaps, echo=FALSE}
+gaps <- conf[conf$duckhts_strict_vs_gffbase == "gap", c(
+  "case", "focus", "expected_gffbase_kind", "duckhts_strict_detail"
+)]
+if (nrow(gaps) == 0) {
+  gaps <- data.frame(note = "No remaining gaps in the local strict-conformance cases when DuckHTS uses attributes_list / attributes_pairs.")
+}
+knitr::kable(gaps, row.names = FALSE)
+```
+
+# Direct scan/parser throughput
+
+```{r performance, echo=FALSE}
+perf_show <- perf
+num_cols <- c("min_sec", "median_sec", "mean_sec", "max_sec", "rows_per_sec", "mb_per_sec")
+for (col in intersect(num_cols, names(perf_show))) {
+  perf_show[[col]] <- round(perf_show[[col]], if (col %in% c("rows_per_sec", "mb_per_sec")) 1 else 4)
+}
+perf_show$vs_gffbase_parse <- NA_real_
+if ("dataset" %in% names(perf)) {
+  for (ds in unique(perf$dataset)) {
+    idx <- perf$dataset == ds
+    base <- perf$median_sec[idx & perf$tool == "GFFBase" & grepl("parse_gff", perf$variant)][1]
+    perf_show$vs_gffbase_parse[idx] <- round(base / perf$median_sec[idx], 2)
+  }
+} else {
+  base <- perf$median_sec[perf$tool == "GFFBase" & grepl("parse_gff", perf$variant)][1]
+  perf_show$vs_gffbase_parse <- round(base / perf$median_sec, 2)
+}
+perf_show$rows <- format(perf_show$rows, big.mark = ",", scientific = FALSE)
+show_cols <- c("dataset", "tool", "variant", "rows", "passes", "median_sec", "rows_per_sec", "mb_per_sec", "vs_gffbase_parse")
+show_cols <- intersect(show_cols, names(perf_show))
+knitr::kable(perf_show[, show_cols], row.names = FALSE)
+```
+
+# Interpretation
+
+- GFFBase should be read as a comparison implementation, not an unquestioned
+  oracle. The audit table exposes whether `auto` used Rust or Python and whether
+  the two parsers agree on the local strict cases.
+- DuckHTS default reading remains permissive for existing ingestion workflows.
+  `strict := true` now rejects the structural GFF3 failures covered here.
+- `attributes_list := true` and `attributes_pairs := true` close the local
+  strict-conformance attribute gaps by representing repeated/comma-split GFF3
+  values and URL-decoded values. The older `attributes_map := true` remains a
+  backward-compatible scalar convenience column and intentionally cannot express
+  duplicate keys or multi-valued attributes losslessly.
+- Requesting `attributes_map`, `attributes_list`, and `attributes_pairs` together
+  materializes three nested representations independently. That is useful as a
+  stress test and compatibility escape hatch, but callers should normally choose
+  the one representation their query needs.
+- The timing table compares direct scans/parsing, not GFFBase's full persistent
+  feature database API. Set `GFFBASE_HUMAN_GFF` to real GENCODE/RefSeq/MANE files
+  for human-scale rows, and enable `GFFBASE_BENCH_INCLUDE_CREATE_DB=1` when the
+  workload of interest is database materialization plus hierarchy indexing.

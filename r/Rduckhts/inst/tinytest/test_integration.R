@@ -22,6 +22,10 @@ test_table_creation <- function() {
   fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
   gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
   gff_index_path <- system.file("extdata", "gff_file.gff.gz.tbi", package = "Rduckhts")
+  gff_strict_valid_path <- system.file("extdata", "gff_strict_valid.gff3", package = "Rduckhts")
+  gff_strict_invalid_path <- system.file("extdata", "gff_strict_invalid.gff3", package = "Rduckhts")
+  gff_attrs_path <- system.file("extdata", "gff_attrs.gff3", package = "Rduckhts")
+  gtf_attrs_path <- system.file("extdata", "gtf_attrs.gtf", package = "Rduckhts")
   tabix_path <- system.file("extdata", "rg.sam.gz", package = "Rduckhts")
   header_tabix_path <- system.file(
     "extdata",
@@ -51,6 +55,10 @@ test_table_creation <- function() {
   expect_true(file.exists(fastq_r2))
   expect_true(file.exists(gff_path))
   expect_true(file.exists(gff_index_path))
+  expect_true(file.exists(gff_strict_valid_path))
+  expect_true(file.exists(gff_strict_invalid_path))
+  expect_true(file.exists(gff_attrs_path))
+  expect_true(file.exists(gtf_attrs_path))
   expect_true(file.exists(tabix_path))
   expect_true(file.exists(header_tabix_path))
   expect_true(file.exists(header_tabix_index_path))
@@ -110,6 +118,55 @@ test_table_creation <- function() {
     index_path = gff_index_path,
     overwrite = TRUE
   ))
+  expect_silent(rduckhts_gff(
+    con,
+    "annotations_strict",
+    gff_strict_valid_path,
+    strict = TRUE,
+    overwrite = TRUE
+  ))
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT count(*) AS n, count(start) AS n_start, count(\"end\") AS n_end FROM annotations_strict"),
+    data.frame(n = 3, n_start = 2, n_end = 2)
+  )
+  expect_error(rduckhts_gff(
+    con,
+    "annotations_strict_bad",
+    gff_strict_invalid_path,
+    strict = TRUE,
+    overwrite = TRUE
+  ), pattern = "InvalidCoordinate")
+  expect_silent(rduckhts_gff(
+    con,
+    "annotations_attrs",
+    gff_attrs_path,
+    attributes_list = TRUE,
+    attributes_pairs = TRUE,
+    overwrite = TRUE
+  ))
+  expect_equal(
+    DBI::dbGetQuery(con, paste(
+      "SELECT list_count(map_extract_value(attributes_list, 'Dbxref')) AS n_dbxref,",
+      "list_extract(map_extract_value(attributes_list, 'Note'), 1) AS note,",
+      "list_count(attributes_pairs) AS n_pairs FROM annotations_attrs"
+    )),
+    data.frame(n_dbxref = 2, note = "hello world", n_pairs = 6)
+  )
+  expect_silent(rduckhts_gtf(
+    con,
+    "gtf_attrs",
+    gtf_attrs_path,
+    attributes_list = TRUE,
+    attributes_pairs = TRUE,
+    overwrite = TRUE
+  ))
+  expect_equal(
+    DBI::dbGetQuery(con, paste(
+      "SELECT list_extract(map_extract_value(attributes_list, 'note'), 1) AS note,",
+      "list_count(attributes_pairs) AS n_pairs FROM gtf_attrs"
+    )),
+    data.frame(note = "weird; semi", n_pairs = 3)
+  )
   expect_silent(rduckhts_tabix(con, "tabix_data", tabix_path, overwrite = TRUE))
   expect_silent(rduckhts_tabix(
     con,

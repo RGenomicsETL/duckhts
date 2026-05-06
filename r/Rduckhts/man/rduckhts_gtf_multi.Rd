@@ -15,6 +15,8 @@ rduckhts_gtf_multi(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
   .params = NULL,
   overwrite = FALSE
 )
@@ -38,7 +40,11 @@ rduckhts_gtf_multi(
 
 \item{column_types}{Character vector of column type names.}
 
-\item{attributes_map}{Logical; return attributes as a parsed MAP.}
+\item{attributes_map}{Logical; return attributes as a scalar MAP.}
+
+\item{attributes_list}{Logical; return attributes as MAP(VARCHAR, VARCHAR[]).}
+
+\item{attributes_pairs}{Logical; return attributes as a LIST of key/value/index structs.}
 
 \item{.params}{Optional data.frame with per-file parameter overrides.}
 

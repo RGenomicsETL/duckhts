@@ -690,14 +690,54 @@ dbGetQuery(con, "
   FROM read_bam('test/data/aux_tags.sam.gz', standard_tags := true, auxiliary_tags := true)
   LIMIT 1
 ")
+```
 
+### GFF/GTF annotation attributes
+
+DuckHTS reads GFF3 with `read_gff(...)`, GTF with `read_gtf(...)`, and generic
+GFF/GTF-like tabix text with `read_tabix(...)`. `read_gff(..., strict := true)`
+performs GFF3 structural validation. Attribute decoding can be scalar
+(`attributes_map`), grouped and lossless for multi-values (`attributes_list` as
+`MAP(VARCHAR, VARCHAR[])`), or exact parser-style pairs (`attributes_pairs` as
+`LIST<STRUCT(key, value, idx)>`).
+
+The GFF3 implementation is audited against [GFFBase](https://github.com/Kuanhao-Chao/gffbase)
+in [`benchmarks/benchmark_gffbase_conformance.md`](benchmarks/benchmark_gffbase_conformance.md),
+including Rust/Python parser parity checks, local conformance cases, server
+specs, and human-scale GENCODE timing.
+
+```{r eval=TRUE}
 dbGetQuery(con, "
-  SELECT seqname, feature, start, \"end\", attributes_map
-  FROM read_gff('test/data/gff_file.gff.gz', attributes_map := true)
-  WHERE feature = 'gene'
-  LIMIT 5
+  SELECT
+    seqname,
+    feature,
+    start,
+    \"end\",
+    list_extract(map_extract_value(attributes_list, 'Dbxref'), 1) AS first_dbxref,
+    list_count(attributes_pairs) AS n_attr_pairs
+  FROM read_gff('test/data/gff_attrs.gff3',
+                strict := true,
+                attributes_list := true,
+                attributes_pairs := true)
 ")
 
+dbGetQuery(con, "
+  SELECT p.key, p.value, p.idx
+  FROM read_gff('test/data/gff_attrs.gff3', attributes_pairs := true),
+       UNNEST(attributes_pairs) AS u(p)
+  WHERE p.key IN ('Alias', 'Note')
+  ORDER BY p.key, p.idx
+")
+
+dbGetQuery(con, "
+  SELECT list_extract(map_extract_value(attributes_list, 'note'), 1) AS note
+  FROM read_gtf('test/data/gtf_attrs.gtf', attributes_list := true)
+")
+```
+
+### Tabix text files
+
+```{r eval=TRUE}
 dbGetQuery(con, "
   SELECT column0, column1
   FROM read_tabix('test/data/meta_tabix.tsv.gz')

@@ -636,6 +636,63 @@ SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz',
 ----
 62
 
+# --- strict GFF3 validation accepts valid rows and preserves unknown coordinates as NULL ---
+query III
+SELECT count(*), count(start), count("end") FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_valid.gff3', strict := true);
+----
+3	2	2
+
+# --- strict GFF3 validation still works for zero-column COUNT(*) scans ---
+statement error
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid.gff3', strict := true);
+----
+InvalidCoordinate
+
+# --- default GFF3 reading remains permissive for existing ingestion workflows ---
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid.gff3');
+----
+2
+
+# --- GFF3 attributes_list: grouped multi-values, URL-decoded values ---
+query III
+SELECT
+  list_count(map_extract_value(attributes_list, 'Dbxref')),
+  list_extract(map_extract_value(attributes_list, 'Dbxref'), 1),
+  list_extract(map_extract_value(attributes_list, 'Note'), 1)
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_attrs.gff3', attributes_list := true);
+----
+2	GeneID:1	hello world
+
+# --- GFF3 attributes_pairs: exact key/value/index rows ---
+query I
+SELECT count(*)
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_attrs.gff3', attributes_pairs := true),
+     UNNEST(attributes_pairs) AS u(p)
+WHERE p.key = 'Alias' AND p.idx IN (0, 1);
+----
+2
+
+# --- GFF3 optional derived attribute columns keep correct projection ordinals together ---
+query III
+SELECT
+  map_extract_value(attributes_map, 'Alias'),
+  list_count(map_extract_value(attributes_list, 'Alias')),
+  list_count(attributes_pairs)
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_attrs.gff3', attributes_map := true, attributes_list := true, attributes_pairs := true);
+----
+a	2	6
+
+# --- GTF attributes_list and attributes_pairs preserve quoted semicolons ---
+query III
+SELECT
+  list_extract(map_extract_value(attributes_list, 'note'), 1),
+  list_count(attributes_pairs),
+  list_count(map_extract_value(attributes_list, 'transcript_id'))
+FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_attrs.gtf', attributes_list := true, attributes_pairs := true);
+----
+weird; semi	3	1
+
 # ==============================================================
 # read_tabix – generic tabix reader (bgzipped + tabix indexed)
 # ==============================================================
