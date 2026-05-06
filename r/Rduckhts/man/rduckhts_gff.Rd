@@ -15,6 +15,9 @@ rduckhts_gff(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
+  strict = FALSE,
   overwrite = FALSE
 )
 }
@@ -37,7 +40,13 @@ rduckhts_gff(
 
 \item{column_types}{Character vector of column types (e.g. "BIGINT", "VARCHAR")}
 
-\item{attributes_map}{Logical. If TRUE, returns attributes as a MAP column}
+\item{attributes_map}{Logical. If TRUE, returns raw attributes as a scalar MAP column}
+
+\item{attributes_list}{Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])}
+
+\item{attributes_pairs}{Logical. If TRUE, returns attributes as a LIST of key/value/index structs}
+
+\item{strict}{Logical. If TRUE, enforce GFF3 structural validation while scanning}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

@@ -36,6 +36,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdbool.h>
 #include <math.h>
 #include <strings.h>
+#include <ctype.h>
+#include <errno.h>
 
 #include <htslib/hts.h>
 #include <htslib/tbx.h>
@@ -61,8 +63,9 @@ static int parse_int64_span(const char *s, int len, int64_t *out) {
     memcpy(buf, s, (size_t)len);
     buf[len] = '\0';
     char *end = NULL;
+    errno = 0;
     int64_t v = strtoll(buf, &end, 10);
-    if (!end || *end != '\0') return 0;
+    if (errno == ERANGE || !end || *end != '\0') return 0;
     *out = v;
     return 1;
 }
@@ -90,8 +93,7 @@ enum {
     GXF_COL_STRAND,
     GXF_COL_FRAME,
     GXF_COL_ATTRIBUTES,
-    GXF_COL_ATTRIBUTES_MAP,
-    GXF_COL_COUNT
+    GXF_BASE_COL_COUNT
 };
 
 /* Reader mode */
@@ -114,6 +116,12 @@ typedef struct {
     tabix_mode_t mode;
     int  n_cols;           /* detected or fixed (9 for GTF/GFF) */
     int  include_attr_map;
+    int  include_attr_list;
+    int  include_attr_pairs;
+    int  attr_map_col;
+    int  attr_list_col;
+    int  attr_pairs_col;
+    int  strict;
     int  header;
     int  skip_header_line;
     int  header_names_count;
@@ -167,6 +175,7 @@ typedef struct {
     unsigned int next_region_idx;
     int        skip_remaining;
     int        skipped_header;
+    uint64_t   line_number;
 } tabix_init_data_t;
 
 static void tabix_init_data_destroy(void *data) {
@@ -269,6 +278,343 @@ static void trim_span(const char **start, int *len) {
     }
     *start = s;
     *len = l;
+}
+
+static int span_equals_lit(const char *s, int len, const char *lit) {
+    size_t lit_len = strlen(lit);
+    return len == (int)lit_len && memcmp(s, lit, lit_len) == 0;
+}
+
+static int span_has_whitespace(const char *s, int len) {
+    for (int i = 0; i < len; i++) {
+        if (isspace((unsigned char)s[i])) return 1;
+    }
+    return 0;
+}
+
+static int gff3_attr_segments_valid(const char *s, int len) {
+    if (!s || len <= 0) return 0;
+    const char *p = s;
+    const char *end = s + len;
+    int saw_pair = 0;
+    while (p < end) {
+        while (p < end && (*p == ';' || *p == ' ' || *p == '\t')) p++;
+        if (p >= end) break;
+
+        const char *seg = p;
+        while (p < end && *p != ';') p++;
+        int seg_len = (int)(p - seg);
+        trim_span(&seg, &seg_len);
+        if (seg_len <= 0) {
+            if (p < end && *p == ';') p++;
+            continue;
+        }
+
+        const char *eq = memchr(seg, '=', (size_t)seg_len);
+        if (!eq) return 0;
+        const char *key = seg;
+        int key_len = (int)(eq - seg);
+        trim_span(&key, &key_len);
+        if (key_len <= 0) return 0;
+        saw_pair = 1;
+
+        if (p < end && *p == ';') p++;
+    }
+    return saw_pair;
+}
+
+static int hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static char *dup_trimmed_span(const char *s, int len, int *out_len) {
+    if (!s || len < 0) return NULL;
+    trim_span(&s, &len);
+    char *out = (char *)malloc((size_t)len + 1);
+    if (!out) return NULL;
+    if (len > 0) memcpy(out, s, (size_t)len);
+    out[len] = '\0';
+    if (out_len) *out_len = len;
+    return out;
+}
+
+static char *percent_decode_span(const char *s, int len, int *out_len) {
+    if (!s || len < 0) return NULL;
+    trim_span(&s, &len);
+    char *out = (char *)malloc((size_t)len + 1);
+    if (!out) return NULL;
+    int w = 0;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '%' && i + 2 < len) {
+            int hi = hex_value(s[i + 1]);
+            int lo = hex_value(s[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out[w++] = (char)((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        out[w++] = s[i];
+    }
+    out[w] = '\0';
+    if (out_len) *out_len = w;
+    return out;
+}
+
+typedef struct {
+    char *key;
+    int key_len;
+    char *value;
+    int value_len;
+    int idx;
+} gxf_attr_pair_t;
+
+static void free_attr_pairs(gxf_attr_pair_t *pairs, int n_pairs) {
+    if (!pairs) return;
+    for (int i = 0; i < n_pairs; i++) {
+        free(pairs[i].key);
+        free(pairs[i].value);
+    }
+    free(pairs);
+}
+
+static int attr_pair_next_idx(gxf_attr_pair_t *pairs, int n_pairs, const char *key, int key_len) {
+    int idx = 0;
+    for (int i = 0; i < n_pairs; i++) {
+        if (pairs[i].key_len == key_len && memcmp(pairs[i].key, key, (size_t)key_len) == 0) idx++;
+    }
+    return idx;
+}
+
+static int append_attr_pair(gxf_attr_pair_t **pairs, int *n_pairs, int *cap,
+                            const char *key, int key_len,
+                            char *value, int value_len) {
+    if (key_len <= 0) {
+        free(value);
+        return 1;
+    }
+    if (*n_pairs >= *cap) {
+        int new_cap = *cap ? (*cap * 2) : 8;
+        gxf_attr_pair_t *tmp = (gxf_attr_pair_t *)realloc(*pairs, sizeof(gxf_attr_pair_t) * (size_t)new_cap);
+        if (!tmp) {
+            free(value);
+            return 0;
+        }
+        *pairs = tmp;
+        *cap = new_cap;
+    }
+    int stored_key_len = 0;
+    char *stored_key = dup_trimmed_span(key, key_len, &stored_key_len);
+    if (!stored_key) {
+        free(value);
+        return 0;
+    }
+    int idx = attr_pair_next_idx(*pairs, *n_pairs, stored_key, stored_key_len);
+    (*pairs)[*n_pairs].key = stored_key;
+    (*pairs)[*n_pairs].key_len = stored_key_len;
+    (*pairs)[*n_pairs].value = value;
+    (*pairs)[*n_pairs].value_len = value_len;
+    (*pairs)[*n_pairs].idx = idx;
+    (*n_pairs)++;
+    return 1;
+}
+
+static int parse_gff3_attr_pairs(const char *s, gxf_attr_pair_t **out_pairs, int *out_count) {
+    *out_pairs = NULL;
+    *out_count = 0;
+    if (!s || s[0] == '\0' || (s[0] == '.' && s[1] == '\0')) return 1;
+
+    gxf_attr_pair_t *pairs = NULL;
+    int n_pairs = 0, cap = 0;
+    const char *p = s;
+    while (*p) {
+        while (*p == ';' || *p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        const char *key = p;
+        while (*p && *p != '=' && *p != ';') p++;
+        if (*p != '=') {
+            while (*p && *p != ';') p++;
+            if (*p == ';') p++;
+            continue;
+        }
+        int key_len = (int)(p - key);
+        const char *key_trim = key;
+        trim_span(&key_trim, &key_len);
+        p++;
+        const char *val = p;
+        while (*p && *p != ';') p++;
+        int val_len = (int)(p - val);
+        const char *seg = val;
+        const char *seg_end = val + val_len;
+        while (seg <= seg_end) {
+            const char *comma = seg;
+            while (comma < seg_end && *comma != ',') comma++;
+            int part_len = (int)(comma - seg);
+            int decoded_len = 0;
+            char *decoded = percent_decode_span(seg, part_len, &decoded_len);
+            if (!decoded || !append_attr_pair(&pairs, &n_pairs, &cap, key_trim, key_len, decoded, decoded_len)) {
+                free_attr_pairs(pairs, n_pairs);
+                return 0;
+            }
+            if (comma >= seg_end) break;
+            seg = comma + 1;
+        }
+        if (*p == ';') p++;
+    }
+    *out_pairs = pairs;
+    *out_count = n_pairs;
+    return 1;
+}
+
+static int parse_gtf_attr_pairs(const char *s, gxf_attr_pair_t **out_pairs, int *out_count) {
+    *out_pairs = NULL;
+    *out_count = 0;
+    if (!s || s[0] == '\0' || (s[0] == '.' && s[1] == '\0')) return 1;
+
+    gxf_attr_pair_t *pairs = NULL;
+    int n_pairs = 0, cap = 0;
+    const char *p = s;
+    while (*p) {
+        while (*p == ';' || *p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        const char *key = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != ';') p++;
+        int key_len = (int)(p - key);
+        const char *key_trim = key;
+        trim_span(&key_trim, &key_len);
+        while (*p == ' ' || *p == '\t') p++;
+        const char *val = p;
+        int val_len = 0;
+        if (*p == '"') {
+            p++;
+            val = p;
+            while (*p && *p != '"') p++;
+            val_len = (int)(p - val);
+            if (*p == '"') p++;
+        } else {
+            while (*p && *p != ';') p++;
+            val_len = (int)(p - val);
+        }
+        int stored_len = 0;
+        char *stored = dup_trimmed_span(val, val_len, &stored_len);
+        if (!stored || !append_attr_pair(&pairs, &n_pairs, &cap, key_trim, key_len, stored, stored_len)) {
+            free_attr_pairs(pairs, n_pairs);
+            return 0;
+        }
+        while (*p && *p != ';') p++;
+        if (*p == ';') p++;
+    }
+    *out_pairs = pairs;
+    *out_count = n_pairs;
+    return 1;
+}
+
+static int parse_attr_pairs(const char *s, bool is_gff, gxf_attr_pair_t **out_pairs, int *out_count) {
+    return is_gff ? parse_gff3_attr_pairs(s, out_pairs, out_count)
+                  : parse_gtf_attr_pairs(s, out_pairs, out_count);
+}
+
+static int validate_gff3_line_strict(const char *line, char *err, size_t err_len) {
+    int n_fields = count_fields(line);
+    if (n_fields != 9) {
+        if (n_fields < 9) {
+            snprintf(err, err_len, "TooFewFields: expected exactly 9 tab-separated fields, found %d", n_fields);
+        } else {
+            snprintf(err, err_len, "TooManyFields: expected exactly 9 tab-separated fields, found %d", n_fields);
+        }
+        return 0;
+    }
+
+    int len = 0;
+    const char *seqid = get_field(line, GXF_COL_SEQNAME, &len);
+    if (!seqid || len == 0) {
+        snprintf(err, err_len, "EmptySeqid: seqid (column 1) is empty");
+        return 0;
+    }
+
+    const char *feature = get_field(line, GXF_COL_FEATURE, &len);
+    if (!feature || len == 0) {
+        snprintf(err, err_len, "EmptyFeaturetype: feature type (column 3) is empty");
+        return 0;
+    }
+    if (span_has_whitespace(feature, len)) {
+        snprintf(err, err_len, "InvalidFeaturetype: feature type contains whitespace");
+        return 0;
+    }
+
+    int start_len = 0, end_len = 0;
+    const char *start_s = get_field(line, GXF_COL_START, &start_len);
+    const char *end_s = get_field(line, GXF_COL_END, &end_len);
+    int64_t start = 0, endv = 0;
+    int have_start = start_s && start_len > 0 && !(start_len == 1 && start_s[0] == '.');
+    int have_end = end_s && end_len > 0 && !(end_len == 1 && end_s[0] == '.');
+    if (have_start) {
+        if (!parse_int64_span(start_s, start_len, &start)) {
+            snprintf(err, err_len, "InvalidCoordinate: start coordinate is not an integer");
+            return 0;
+        }
+        if (start < 1) {
+            snprintf(err, err_len, "InvalidCoordinate: start coordinate must be >= 1");
+            return 0;
+        }
+    }
+    if (have_end) {
+        if (!parse_int64_span(end_s, end_len, &endv)) {
+            snprintf(err, err_len, "InvalidCoordinate: end coordinate is not an integer");
+            return 0;
+        }
+        if (endv < 1) {
+            snprintf(err, err_len, "InvalidCoordinate: end coordinate must be >= 1");
+            return 0;
+        }
+    }
+    if (have_start && have_end && endv < start) {
+        snprintf(err, err_len, "InvalidCoordinate: end coordinate is less than start coordinate");
+        return 0;
+    }
+
+    const char *score = get_field(line, GXF_COL_SCORE, &len);
+    if (score && len > 0 && !(len == 1 && score[0] == '.')) {
+        double d = 0.0;
+        if (!parse_double_span(score, len, &d)) {
+            snprintf(err, err_len, "InvalidScore: score must be a float or '.'");
+            return 0;
+        }
+    }
+
+    const char *strand = get_field(line, GXF_COL_STRAND, &len);
+    if (!strand || len != 1 || !(strand[0] == '+' || strand[0] == '-' || strand[0] == '?' || strand[0] == '.')) {
+        snprintf(err, err_len, "InvalidStrand: strand must be one of '+', '-', '?', '.'");
+        return 0;
+    }
+
+    int frame_len = 0;
+    const char *frame = get_field(line, GXF_COL_FRAME, &frame_len);
+    if (!frame || frame_len != 1 || !(frame[0] == '.' || frame[0] == '0' || frame[0] == '1' || frame[0] == '2')) {
+        snprintf(err, err_len, "InvalidPhase: phase must be 0, 1, 2, or '.'");
+        return 0;
+    }
+    int feature_len = 0;
+    const char *feature_check = get_field(line, GXF_COL_FEATURE, &feature_len);
+    if (feature_check && span_equals_lit(feature_check, feature_len, "CDS") && frame[0] == '.') {
+        snprintf(err, err_len, "InvalidPhase: CDS row missing required phase");
+        return 0;
+    }
+
+    int attr_len = 0;
+    const char *attrs = get_field(line, GXF_COL_ATTRIBUTES, &attr_len);
+    if (attrs) trim_span(&attrs, &attr_len);
+    if (attrs && attr_len > 0 && !(attr_len == 1 && attrs[0] == '.')) {
+        if (!gff3_attr_segments_valid(attrs, attr_len)) {
+            snprintf(err, err_len, "InvalidAttribute: every non-empty attribute segment must be key=value");
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 static char *dup_field_name(const char *start, int len) {
@@ -432,7 +778,9 @@ static int count_gtf_pairs(const char *s) {
     return count;
 }
 
-static void fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gff) {
+static int attr_group_index(char **keys, int *key_lens, int n_keys, const char *key, int key_len);
+
+static int fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gff) {
     if (!s || s[0] == '\0' || (s[0] == '.' && s[1] == '\0')) {
         duckdb_vector_ensure_validity_writable(vec);
         uint64_t *validity = duckdb_vector_get_validity(vec);
@@ -440,7 +788,7 @@ static void fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_g
         duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
         duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
         list_data[row] = entry;
-        return;
+        return 1;
     }
 
     int pair_count = is_gff ? count_gff_pairs(s) : count_gtf_pairs(s);
@@ -451,18 +799,28 @@ static void fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_g
     if (pair_count == 0) {
         duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
         list_data[row] = entry;
-        return;
+        return 1;
     }
 
-    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+    if (duckdb_list_vector_reserve(vec, entry.offset + entry.length) == DuckDBError ||
+        duckdb_list_vector_set_size(vec, entry.offset + entry.length) == DuckDBError) {
+        return 0;
+    }
 
     duckdb_vector child = duckdb_list_vector_get_child(vec);
     duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
     duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+    char **seen_keys = (char **)calloc((size_t)pair_count, sizeof(char *));
+    int *seen_lens = (int *)calloc((size_t)pair_count, sizeof(int));
+    if (!seen_keys || !seen_lens) {
+        free(seen_keys);
+        free(seen_lens);
+        return 0;
+    }
 
     const char *p = s;
     int write_idx = 0;
+    int seen_count = 0;
     while (*p && write_idx < pair_count) {
         while (*p == ';' || *p == ' ' || *p == '\t') p++;
         if (!*p) break;
@@ -502,7 +860,18 @@ static void fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_g
 
         trim_span(&key, &key_len);
         trim_span(&val, &val_len);
-        if (key_len > 0) {
+        if (key_len > 0 && attr_group_index(seen_keys, seen_lens, seen_count, key, key_len) < 0) {
+            int stored_key_len = 0;
+            char *stored_key = dup_trimmed_span(key, key_len, &stored_key_len);
+            if (!stored_key) {
+                for (int i = 0; i < seen_count; i++) free(seen_keys[i]);
+                free(seen_keys);
+                free(seen_lens);
+                return 0;
+            }
+            seen_keys[seen_count] = stored_key;
+            seen_lens[seen_count] = stored_key_len;
+            seen_count++;
             duckdb_vector_assign_string_element_len(key_vec, entry.offset + write_idx, key, key_len);
             duckdb_vector_assign_string_element_len(val_vec, entry.offset + write_idx, val, val_len);
             write_idx++;
@@ -514,6 +883,167 @@ static void fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_g
     entry.length = write_idx;
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
     list_data[row] = entry;
+    for (int i = 0; i < seen_count; i++) free(seen_keys[i]);
+    free(seen_keys);
+    free(seen_lens);
+    return 1;
+}
+
+static void set_null_list_like(duckdb_vector vec, idx_t row) {
+    duckdb_vector_ensure_validity_writable(vec);
+    uint64_t *validity = duckdb_vector_get_validity(vec);
+    duckdb_validity_set_row_invalid(validity, row);
+    duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+}
+
+static int attr_group_index(char **keys, int *key_lens, int n_keys, const char *key, int key_len) {
+    for (int i = 0; i < n_keys; i++) {
+        if (key_lens[i] == key_len && memcmp(keys[i], key, (size_t)key_len) == 0) return i;
+    }
+    return -1;
+}
+
+static int fill_attr_list_map(duckdb_vector vec, idx_t row, const char *s, bool is_gff) {
+    gxf_attr_pair_t *pairs = NULL;
+    int n_pairs = 0;
+    if (!parse_attr_pairs(s, is_gff, &pairs, &n_pairs)) return 0;
+    if (n_pairs == 0) {
+        set_null_list_like(vec, row);
+        free_attr_pairs(pairs, n_pairs);
+        return 1;
+    }
+
+    char **keys = (char **)calloc((size_t)n_pairs, sizeof(char *));
+    int *key_lens = (int *)calloc((size_t)n_pairs, sizeof(int));
+    int *counts = (int *)calloc((size_t)n_pairs, sizeof(int));
+    if (!keys || !key_lens || !counts) {
+        free(keys); free(key_lens); free(counts);
+        free_attr_pairs(pairs, n_pairs);
+        return 0;
+    }
+
+    int n_keys = 0;
+    for (int i = 0; i < n_pairs; i++) {
+        int g = attr_group_index(keys, key_lens, n_keys, pairs[i].key, pairs[i].key_len);
+        if (g < 0) {
+            keys[n_keys] = pairs[i].key;
+            key_lens[n_keys] = pairs[i].key_len;
+            counts[n_keys] = 1;
+            n_keys++;
+        } else {
+            counts[g]++;
+        }
+    }
+
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = (idx_t)n_keys;
+    if (duckdb_list_vector_reserve(vec, entry.offset + entry.length) == DuckDBError ||
+        duckdb_list_vector_set_size(vec, entry.offset + entry.length) == DuckDBError) {
+        free(keys); free(key_lens); free(counts);
+        free_attr_pairs(pairs, n_pairs);
+        return 0;
+    }
+
+    duckdb_vector child = duckdb_list_vector_get_child(vec);
+    duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
+    duckdb_vector val_list_vec = duckdb_struct_vector_get_child(child, 1);
+
+    for (int g = 0; g < n_keys; g++) {
+        idx_t child_row = entry.offset + (idx_t)g;
+        duckdb_vector_assign_string_element_len(key_vec, child_row, keys[g], key_lens[g]);
+
+        duckdb_list_entry value_entry;
+        value_entry.offset = duckdb_list_vector_get_size(val_list_vec);
+        value_entry.length = (idx_t)counts[g];
+        if (duckdb_list_vector_reserve(val_list_vec, value_entry.offset + value_entry.length) == DuckDBError ||
+            duckdb_list_vector_set_size(val_list_vec, value_entry.offset + value_entry.length) == DuckDBError) {
+            free(keys); free(key_lens); free(counts);
+            free_attr_pairs(pairs, n_pairs);
+            return 0;
+        }
+        duckdb_list_entry *value_entries = (duckdb_list_entry *)duckdb_vector_get_data(val_list_vec);
+        duckdb_vector value_child = duckdb_list_vector_get_child(val_list_vec);
+        idx_t out_idx = 0;
+        for (int i = 0; i < n_pairs; i++) {
+            if (pairs[i].key_len == key_lens[g] && memcmp(pairs[i].key, keys[g], (size_t)key_lens[g]) == 0) {
+                duckdb_vector_assign_string_element_len(value_child, value_entry.offset + out_idx,
+                                                        pairs[i].value, pairs[i].value_len);
+                out_idx++;
+            }
+        }
+        value_entries[child_row] = value_entry;
+    }
+
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+    free(keys); free(key_lens); free(counts);
+    free_attr_pairs(pairs, n_pairs);
+    return 1;
+}
+
+static int fill_attr_pairs_list(duckdb_vector vec, idx_t row, const char *s, bool is_gff) {
+    gxf_attr_pair_t *pairs = NULL;
+    int n_pairs = 0;
+    if (!parse_attr_pairs(s, is_gff, &pairs, &n_pairs)) return 0;
+    if (n_pairs == 0) {
+        set_null_list_like(vec, row);
+        free_attr_pairs(pairs, n_pairs);
+        return 1;
+    }
+
+    duckdb_list_entry entry;
+    entry.offset = duckdb_list_vector_get_size(vec);
+    entry.length = (idx_t)n_pairs;
+    if (duckdb_list_vector_reserve(vec, entry.offset + entry.length) == DuckDBError ||
+        duckdb_list_vector_set_size(vec, entry.offset + entry.length) == DuckDBError) {
+        free_attr_pairs(pairs, n_pairs);
+        return 0;
+    }
+
+    duckdb_vector child = duckdb_list_vector_get_child(vec);
+    duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
+    duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+    duckdb_vector idx_vec = duckdb_struct_vector_get_child(child, 2);
+    int32_t *idx_data = (int32_t *)duckdb_vector_get_data(idx_vec);
+
+    for (int i = 0; i < n_pairs; i++) {
+        idx_t child_row = entry.offset + (idx_t)i;
+        duckdb_vector_assign_string_element_len(key_vec, child_row, pairs[i].key, pairs[i].key_len);
+        duckdb_vector_assign_string_element_len(val_vec, child_row, pairs[i].value, pairs[i].value_len);
+        idx_data[child_row] = (int32_t)pairs[i].idx;
+    }
+
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
+    list_data[row] = entry;
+    free_attr_pairs(pairs, n_pairs);
+    return 1;
+}
+
+static duckdb_logical_type create_attr_pairs_type(void) {
+    duckdb_logical_type member_types[3];
+    const char *member_names[3] = {"key", "value", "idx"};
+    member_types[0] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    member_types[1] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    member_types[2] = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
+    duckdb_logical_type struct_type = duckdb_create_struct_type(member_types, member_names, 3);
+    duckdb_logical_type list_type = duckdb_create_list_type(struct_type);
+    for (int i = 0; i < 3; i++) duckdb_destroy_logical_type(&member_types[i]);
+    duckdb_destroy_logical_type(&struct_type);
+    return list_type;
+}
+
+static duckdb_logical_type create_attr_list_map_type(void) {
+    duckdb_logical_type key_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type val_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type val_list_type = duckdb_create_list_type(val_type);
+    duckdb_logical_type map_type = duckdb_create_map_type(key_type, val_list_type);
+    duckdb_destroy_logical_type(&key_type);
+    duckdb_destroy_logical_type(&val_type);
+    duckdb_destroy_logical_type(&val_list_type);
+    return map_type;
 }
 
 /* ================================================================
@@ -530,6 +1060,9 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
     bd->meta_char = '#';
     bd->line_skip = 0;
     bd->col_types_provided = 0;
+    bd->attr_map_col = -1;
+    bd->attr_list_col = -1;
+    bd->attr_pairs_col = -1;
 
     /* positional param: file path */
     duckdb_value val = duckdb_bind_get_parameter(info, 0);
@@ -576,13 +1109,33 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
 
     /* Schema: GTF/GFF have fixed 9 columns; generic auto-detects */
     if (mode == TABIX_MODE_GTF || mode == TABIX_MODE_GFF) {
-        /* File has 9 fixed columns; attributes_map is a derived column. */
-        bd->n_cols = GXF_COL_COUNT - 1;
+        /* File has 9 fixed columns; attributes_* columns are derived. */
+        bd->n_cols = GXF_BASE_COL_COUNT;
         duckdb_value attr_map_val = duckdb_bind_get_named_parameter(info, "attributes_map");
         if (attr_map_val && !duckdb_is_null_value(attr_map_val)) {
             bd->include_attr_map = duckdb_get_bool(attr_map_val) ? 1 : 0;
         }
         if (attr_map_val) duckdb_destroy_value(&attr_map_val);
+
+        duckdb_value attr_list_val = duckdb_bind_get_named_parameter(info, "attributes_list");
+        if (attr_list_val && !duckdb_is_null_value(attr_list_val)) {
+            bd->include_attr_list = duckdb_get_bool(attr_list_val) ? 1 : 0;
+        }
+        if (attr_list_val) duckdb_destroy_value(&attr_list_val);
+
+        duckdb_value attr_pairs_val = duckdb_bind_get_named_parameter(info, "attributes_pairs");
+        if (attr_pairs_val && !duckdb_is_null_value(attr_pairs_val)) {
+            bd->include_attr_pairs = duckdb_get_bool(attr_pairs_val) ? 1 : 0;
+        }
+        if (attr_pairs_val) duckdb_destroy_value(&attr_pairs_val);
+
+        if (mode == TABIX_MODE_GFF) {
+            duckdb_value strict_val = duckdb_bind_get_named_parameter(info, "strict");
+            if (strict_val && !duckdb_is_null_value(strict_val)) {
+                bd->strict = duckdb_get_bool(strict_val) ? 1 : 0;
+            }
+            if (strict_val) duckdb_destroy_value(&strict_val);
+        }
 
         duckdb_logical_type gxf_varchar = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
         duckdb_logical_type gxf_bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -599,14 +1152,28 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_destroy_logical_type(&gxf_varchar);
         duckdb_destroy_logical_type(&gxf_bigint);
         duckdb_destroy_logical_type(&gxf_double);
+        int next_attr_col = GXF_BASE_COL_COUNT;
         if (bd->include_attr_map) {
             duckdb_logical_type key_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
             duckdb_logical_type val_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
             duckdb_logical_type map_type = duckdb_create_map_type(key_type, val_type);
+            bd->attr_map_col = next_attr_col++;
             duckdb_bind_add_result_column(info, "attributes_map", map_type);
             duckdb_destroy_logical_type(&key_type);
             duckdb_destroy_logical_type(&val_type);
             duckdb_destroy_logical_type(&map_type);
+        }
+        if (bd->include_attr_list) {
+            duckdb_logical_type attr_list_type = create_attr_list_map_type();
+            bd->attr_list_col = next_attr_col++;
+            duckdb_bind_add_result_column(info, "attributes_list", attr_list_type);
+            duckdb_destroy_logical_type(&attr_list_type);
+        }
+        if (bd->include_attr_pairs) {
+            duckdb_logical_type attr_pairs_type = create_attr_pairs_type();
+            bd->attr_pairs_col = next_attr_col++;
+            duckdb_bind_add_result_column(info, "attributes_pairs", attr_pairs_type);
+            duckdb_destroy_logical_type(&attr_pairs_type);
         }
     } else {
         /* Optional header handling for generic tabix */
@@ -836,7 +1403,7 @@ static void tabix_init(duckdb_init_info info) {
         id->column_ids = NULL;
     }
 
-    if (id->n_projected_cols == 0 && bd->n_regions == 0 && bd->index_row_count_valid) {
+    if (id->n_projected_cols == 0 && bd->n_regions == 0 && bd->index_row_count_valid && !bd->strict) {
         id->count_only = 1;
         id->count_remaining = bd->index_row_count;
         id->finished = (id->count_remaining == 0);
@@ -849,7 +1416,7 @@ static void tabix_init(duckdb_init_info info) {
         char msg[512];
         snprintf(msg, sizeof(msg), "Cannot open file: %s", bd->file_path);
         duckdb_init_set_error(info, msg);
-        free(id);
+        tabix_init_data_destroy(id);
         return;
     }
 
@@ -863,8 +1430,7 @@ static void tabix_init(duckdb_init_info info) {
                      "Region query requested but no tabix index found for: %s",
                      bd->file_path);
             duckdb_init_set_error(info, msg);
-            hts_close(id->fp);
-            free(id);
+            tabix_init_data_destroy(id);
             return;
         }
         if (bd->n_regions > 1) {
@@ -946,6 +1512,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             id->finished = true;
             break;
         }
+        id->line_number++;
 
         /* Skip comment/header lines */
         if (id->line.l == 0) continue;
@@ -953,10 +1520,34 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             id->skip_remaining--;
             continue;
         }
+        if (bd->mode == TABIX_MODE_GFF && strncmp(id->line.s, "##FASTA", 7) == 0) {
+            id->finished = true;
+            break;
+        }
         if (bd->meta_char && id->line.s[0] == bd->meta_char) continue;
         if (!id->itr && bd->skip_header_line && !id->skipped_header) {
             id->skipped_header = 1;
             continue;
+        }
+
+        if (bd->strict && bd->mode == TABIX_MODE_GFF) {
+            char err[256];
+            if (!validate_gff3_line_strict(id->line.s, err, sizeof(err))) {
+                char msg[384];
+                if (id->itr) {
+                    snprintf(msg, sizeof(msg), "read_gff strict validation failed during indexed region scan: %s", err);
+                } else if (id->line_number > 0) {
+                    snprintf(msg, sizeof(msg), "read_gff strict validation failed at line %llu: %s",
+                             (unsigned long long)id->line_number, err);
+                } else {
+                    snprintf(msg, sizeof(msg), "read_gff strict validation failed: %s", err);
+                }
+                duckdb_function_set_error(info, msg);
+                id->finished = true;
+                if (vectors) free(vectors);
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
         }
 
         if (chunk_col_count > 0) {
@@ -966,7 +1557,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
              * which is the field index in the TSV line. */
             for (idx_t c = 0; c < chunk_col_count; c++) {
                 int logical_col = (int)id->column_ids[c];
-                if (logical_col == GXF_COL_ATTRIBUTES_MAP && bd->include_attr_map) {
+                if (logical_col == bd->attr_map_col && bd->include_attr_map) {
                     const char *fld = NULL;
                     int flen = 0;
                     fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
@@ -983,11 +1574,78 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                             memcpy(tmp, fld, (size_t)flen);
                             tmp[flen] = '\0';
                         }
-                        fill_attr_map(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF);
+                        if (!fill_attr_map(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF)) {
+                            if (tmp) free(tmp);
+                            duckdb_function_set_error(info, "tabix_scan: out of memory parsing attributes_map");
+                            id->finished = true;
+                            if (vectors) free(vectors);
+                            duckdb_data_chunk_set_size(output, 0);
+                            return;
+                        }
                         if (tmp) free(tmp);
                         continue;
                     }
-                if (logical_col >= GXF_COL_COUNT - 1) continue;
+                if (logical_col == bd->attr_list_col && bd->include_attr_list) {
+                    int flen = 0;
+                    const char *fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
+                    char *tmp = NULL;
+                    if (fld && flen > 0) {
+                        tmp = (char *)malloc((size_t)flen + 1);
+                        if (!tmp) {
+                            duckdb_function_set_error(info, "tabix_scan: out of memory parsing attributes_list");
+                            id->finished = true;
+                            if (vectors) free(vectors);
+                            duckdb_data_chunk_set_size(output, 0);
+                            return;
+                        }
+                        memcpy(tmp, fld, (size_t)flen);
+                        tmp[flen] = '\0';
+                    }
+                    if (!fill_attr_list_map(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF)) {
+                        if (tmp) free(tmp);
+                        duckdb_function_set_error(info, "tabix_scan: out of memory parsing attributes_list");
+                        id->finished = true;
+                        if (vectors) free(vectors);
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
+                    if (tmp) free(tmp);
+                    continue;
+                }
+                if (logical_col == bd->attr_pairs_col && bd->include_attr_pairs) {
+                    int flen = 0;
+                    const char *fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
+                    char *tmp = NULL;
+                    if (fld && flen > 0) {
+                        tmp = (char *)malloc((size_t)flen + 1);
+                        if (!tmp) {
+                            duckdb_function_set_error(info, "tabix_scan: out of memory parsing attributes_pairs");
+                            id->finished = true;
+                            if (vectors) free(vectors);
+                            duckdb_data_chunk_set_size(output, 0);
+                            return;
+                        }
+                        memcpy(tmp, fld, (size_t)flen);
+                        tmp[flen] = '\0';
+                    }
+                    if (!fill_attr_pairs_list(vectors[c], row_count, tmp ? tmp : ".", bd->mode == TABIX_MODE_GFF)) {
+                        if (tmp) free(tmp);
+                        duckdb_function_set_error(info, "tabix_scan: out of memory parsing attributes_pairs");
+                        id->finished = true;
+                        if (vectors) free(vectors);
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
+                    if (tmp) free(tmp);
+                    continue;
+                }
+                if (logical_col >= GXF_BASE_COL_COUNT) {
+                    duckdb_function_set_error(info, "tabix_scan: internal derived-column projection mismatch");
+                    id->finished = true;
+                    if (vectors) free(vectors);
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
 
                 int flen = 0;
                 const char *fld = get_field(id->line.s, logical_col, &flen);
@@ -997,8 +1655,12 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                     switch (logical_col) {
                         case GXF_COL_START:
                         case GXF_COL_END: {
-                            int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
-                            data[row_count] = 0;
+                            if (bd->strict && bd->mode == TABIX_MODE_GFF) {
+                                set_null(vectors[c], row_count);
+                            } else {
+                                int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
+                                data[row_count] = 0;
+                            }
                             break;
                         }
                         case GXF_COL_SCORE: {
@@ -1058,8 +1720,13 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 if (t == DUCKDB_TYPE_INTEGER || t == DUCKDB_TYPE_BIGINT) {
                     int64_t v = 0;
                     if (parse_int64_span(fld, flen, &v)) {
-                        int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
-                        data[row_count] = v;
+                        if (t == DUCKDB_TYPE_INTEGER) {
+                            int32_t *data = (int32_t *)duckdb_vector_get_data(vectors[c]);
+                            data[row_count] = (int32_t)v;
+                        } else {
+                            int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
+                            data[row_count] = v;
+                        }
                     } else {
                         set_null(vectors[c], row_count);
                     }
@@ -1091,7 +1758,8 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
 static duckdb_table_function create_tabix_tf(const char *name,
                                               void (*bind_fn)(duckdb_bind_info),
-                                              int include_attributes_map) {
+                                              int include_attributes_map,
+                                              int include_strict) {
     duckdb_table_function tf = duckdb_create_table_function();
     duckdb_table_function_set_name(tf, name);
 
@@ -1104,7 +1772,15 @@ static duckdb_table_function create_tabix_tf(const char *name,
     if (include_attributes_map) {
         duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
         duckdb_table_function_add_named_parameter(tf, "attributes_map", bool_type);
+        duckdb_table_function_add_named_parameter(tf, "attributes_list", bool_type);
+        duckdb_table_function_add_named_parameter(tf, "attributes_pairs", bool_type);
         duckdb_destroy_logical_type(&bool_type);
+    }
+
+    if (include_strict) {
+        duckdb_logical_type strict_bool = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+        duckdb_table_function_add_named_parameter(tf, "strict", strict_bool);
+        duckdb_destroy_logical_type(&strict_bool);
     }
 
     duckdb_logical_type header_bool = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
@@ -1136,19 +1812,19 @@ static duckdb_table_function create_tabix_tf(const char *name,
 }
 
 void register_read_tabix_function(duckdb_connection connection) {
-    duckdb_table_function tf = create_tabix_tf("read_tabix", read_tabix_bind, 0);
+    duckdb_table_function tf = create_tabix_tf("read_tabix", read_tabix_bind, 0, 0);
     duckdb_register_table_function(connection, tf);
     duckdb_destroy_table_function(&tf);
 }
 
 void register_read_gtf_function(duckdb_connection connection) {
-    duckdb_table_function tf = create_tabix_tf("read_gtf", read_gtf_bind, 1);
+    duckdb_table_function tf = create_tabix_tf("read_gtf", read_gtf_bind, 1, 0);
     duckdb_register_table_function(connection, tf);
     duckdb_destroy_table_function(&tf);
 }
 
 void register_read_gff_function(duckdb_connection connection) {
-    duckdb_table_function tf = create_tabix_tf("read_gff", read_gff_bind, 1);
+    duckdb_table_function tf = create_tabix_tf("read_gff", read_gff_bind, 1, 1);
     duckdb_register_table_function(connection, tf);
     duckdb_destroy_table_function(&tf);
 }

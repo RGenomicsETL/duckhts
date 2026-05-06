@@ -107,12 +107,14 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_gff)),
   c("con", "table_name", "path", "region", "index_path", "header",
-    "header_names", "auto_detect", "column_types", "attributes_map", "overwrite")
+    "header_names", "auto_detect", "column_types", "attributes_map",
+    "attributes_list", "attributes_pairs", "strict", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_gtf)),
   c("con", "table_name", "path", "region", "index_path", "header",
-    "header_names", "auto_detect", "column_types", "attributes_map", "overwrite")
+    "header_names", "auto_detect", "column_types", "attributes_map",
+    "attributes_list", "attributes_pairs", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_tabix)),
@@ -311,13 +313,13 @@ expect_identical(
   names(formals(rduckhts_gff_multi)),
   c("con", "table_name", "files", "region", "index_path", "header",
     "header_names", "auto_detect", "column_types", "attributes_map",
-    ".params", "overwrite")
+    "attributes_list", "attributes_pairs", "strict", ".params", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_gtf_multi)),
   c("con", "table_name", "files", "region", "index_path", "header",
     "header_names", "auto_detect", "column_types", "attributes_map",
-    ".params", "overwrite")
+    "attributes_list", "attributes_pairs", ".params", "overwrite")
 )
 
 # Test .params validation (these should fail with bad input, no connection needed)

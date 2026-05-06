@@ -102,6 +102,41 @@ bgzip -c "$SRC/tabix/gff_file.gff" > "$DST/gff_file.gff.gz"
 tabix -p gff "$DST/gff_file.gff.gz"
 echo "  gff_file.gff.gz + .tbi"
 
+# ---- GFF3 strict-validation fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/gff_strict_valid.gff3" <<'EOF'
+##gff-version 3
+chr1	src	region	.	.	.	.	.	ID=r
+chr1	src	exon	1	10	.	?	.	ID=e;Note=hello%20world
+chr1	src	CDS	1	9	.	+	0	ID=cds
+EOF
+  cat > "$out_dir/gff_strict_invalid.gff3" <<'EOF'
+##gff-version 3
+chr1	src	exon	1	10	.	+	.	ID=ok
+chr1	src	exon	0	10	.	+	.	ID=bad
+EOF
+  cat > "$out_dir/gff_strict_invalid_attr.gff3" <<'EOF'
+##gff-version 3
+chr1	src	exon	1	10	.	+	.	ID=ok;broken
+EOF
+  cat > "$out_dir/gff_strict_extra_field.gff3" <<'EOF'
+##gff-version 3
+chr1	src	exon	1	10	.	+	.	ID=ok	extra
+EOF
+  cat > "$out_dir/gff_strict_invalid_end.gff3" <<'EOF'
+##gff-version 3
+chr1	src	region	.	0	.	.	.	ID=bad_end
+EOF
+  cat > "$out_dir/gff_attrs.gff3" <<'EOF'
+##gff-version 3
+chr1	src	gene	1	10	.	+	.	ID=g;Dbxref=GeneID:1,HGNC:HGNC:1;Alias=a;Alias=b;Note=hello%20world
+EOF
+  cat > "$out_dir/gtf_attrs.gtf" <<'EOF'
+chr1	src	exon	1	10	.	+	.	gene_id "G1"; transcript_id "T1"; note "weird; semi";
+EOF
+done
+echo "  GFF/GTF strict-validation and attribute fixtures"
+
 # ---- vcfppR-generated VCF compliance fixtures ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping fixtures + manifest"

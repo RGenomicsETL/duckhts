@@ -15,6 +15,8 @@ rduckhts_gtf(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
   overwrite = FALSE
 )
 }
@@ -37,7 +39,11 @@ rduckhts_gtf(
 
 \item{column_types}{Character vector of column types (e.g. "BIGINT", "VARCHAR")}
 
-\item{attributes_map}{Logical. If TRUE, returns attributes as a MAP column}
+\item{attributes_map}{Logical. If TRUE, returns raw attributes as a scalar MAP column}
+
+\item{attributes_list}{Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])}
+
+\item{attributes_pairs}{Logical. If TRUE, returns attributes as a LIST of key/value/index structs}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

@@ -53,8 +53,8 @@ This section is generated from `functions.yaml`.
 | `read_bed`        | table        | table   | `rduckhts_bed`                                                                                                                                                         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                                                                                                                           |
 | `read_fastq`      | table        | table   | `rduckhts_fastq`                                                                                                                                                       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’.                                                                                              |
-| `read_gff`        | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `read_gtf`        | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `read_gff`        | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                |
+| `read_gtf`        | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `read_tabix`      | table        | table   | `rduckhts_tabix`                                                                                                                                                       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
@@ -860,8 +860,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r2.fq │     5 │
     │ test/data/r1.fq │     5 │
+    │ test/data/r2.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):
@@ -1135,7 +1135,6 @@ files. See its README for R-specific usage:
 ``` r
 library(DBI)
 library(duckdb)
-#> Warning: package 'duckdb' was built under R version 4.5.3
 
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
@@ -1243,18 +1242,64 @@ dbGetQuery(con, "
 ")
 #>   RG NM  XZ
 #> 1 x1  2 foo
+```
+
+### GFF/GTF annotation attributes
+
+DuckHTS reads GFF3 with `read_gff(...)`, GTF with `read_gtf(...)`, and
+generic GFF/GTF-like tabix text with `read_tabix(...)`.
+`read_gff(..., strict := true)` performs GFF3 structural validation.
+Attribute decoding can be scalar and raw for legacy convenience
+(`attributes_map`), grouped and lossless for multi-values
+(`attributes_list` as `MAP(VARCHAR, VARCHAR[])`), or exact parser-style
+pairs (`attributes_pairs` as `LIST<STRUCT(key, value, idx)>`).
+
+The GFF3 implementation is audited against
+[GFFBase](https://github.com/Kuanhao-Chao/gffbase) in
+[`benchmarks/benchmark_gffbase_conformance.md`](benchmarks/benchmark_gffbase_conformance.md),
+including Rust/Python parser parity checks, local conformance cases,
+server specs, and human-scale GENCODE timing.
+
+``` r
+dbGetQuery(con, "
+  SELECT
+    seqname,
+    feature,
+    start,
+    \"end\",
+    list_extract(map_extract_value(attributes_list, 'Dbxref'), 1) AS first_dbxref,
+    list_count(attributes_pairs) AS n_attr_pairs
+  FROM read_gff('test/data/gff_attrs.gff3',
+                strict := true,
+                attributes_list := true,
+                attributes_pairs := true)
+")
+#>   seqname feature start end first_dbxref n_attr_pairs
+#> 1    chr1    gene     1  10     GeneID:1            6
 
 dbGetQuery(con, "
-  SELECT seqname, feature, start, \"end\", attributes_map
-  FROM read_gff('test/data/gff_file.gff.gz', attributes_map := true)
-  WHERE feature = 'gene'
-  LIMIT 5
+  SELECT p.key, p.value, p.idx
+  FROM read_gff('test/data/gff_attrs.gff3', attributes_pairs := true),
+       UNNEST(attributes_pairs) AS u(p)
+  WHERE p.key IN ('Alias', 'Note')
+  ORDER BY p.key, p.idx
 ")
-#>   seqname feature   start     end
-#> 1       X    gene 2934816 2964270
-#>                                                              attributes_map
-#> 1 ID, Name, biotype, OTTHUMG00000137358, OTTHUMG00000137358, protein_coding
+#>     key       value idx
+#> 1 Alias           a   0
+#> 2 Alias           b   1
+#> 3  Note hello world   0
 
+dbGetQuery(con, "
+  SELECT list_extract(map_extract_value(attributes_list, 'note'), 1) AS note
+  FROM read_gtf('test/data/gtf_attrs.gtf', attributes_list := true)
+")
+#>          note
+#> 1 weird; semi
+```
+
+### Tabix text files
+
+``` r
 dbGetQuery(con, "
   SELECT column0, column1
   FROM read_tabix('test/data/meta_tabix.tsv.gz')

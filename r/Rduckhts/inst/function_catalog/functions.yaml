@@ -267,10 +267,10 @@
       "name": "read_gff",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, region := NULL, index_path := NULL)",
+      "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, region := NULL, index_path := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_gff",
-      "description": "Read GFF annotations with optional parsed attribute maps and indexed region filtering.",
+      "description": "Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering.",
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gff('gff_file.gff.gz') LIMIT 5;"
       ]
@@ -279,10 +279,10 @@
       "name": "read_gtf",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, region := NULL, index_path := NULL)",
+      "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, region := NULL, index_path := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_gtf",
-      "description": "Read GTF annotations with optional parsed attribute maps and indexed region filtering.",
+      "description": "Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering.",
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gtf('annotations.gtf.gz') LIMIT 5;"
       ]

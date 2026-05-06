@@ -728,15 +728,43 @@ quality_hist <- dbGetQuery(
 quality_hist
 ```
 
-### GFF files
+### GFF/GTF annotation attributes
 
-These can be open with or with attributes maps
+GFF3 files are read with `rduckhts_gff()` / SQL `read_gff(...)`; GTF files are
+read with `rduckhts_gtf()` / SQL `read_gtf(...)`. `strict = TRUE` enables GFF3
+structural validation. Attribute decoding can be scalar and raw for legacy
+convenience (`attributes_map`), grouped and lossless for multi-values (`attributes_list`, a DuckDB
+`MAP(VARCHAR, VARCHAR[])`), or exact parser-style pairs (`attributes_pairs`, a
+DuckDB `LIST<STRUCT(key, value, idx)>`).
+
+The extension-level GFF3 implementation is benchmarked and audited against
+[GFFBase](https://github.com/Kuanhao-Chao/gffbase) in the DuckHTS repo:
+<https://github.com/RGenomicsETL/duckhts/blob/develop/benchmarks/benchmark_gffbase_conformance.md>.
 
 ```{r}
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
 rduckhts_gff(con, "genes", gff_path, attributes_map = TRUE, overwrite = TRUE)
-gene_annotations <- dbGetQuery(con, "SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5")
-gene_annotations
+dbGetQuery(con, "SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5")
+
+gff_attrs_path <- system.file("extdata", "gff_attrs.gff3", package = "Rduckhts")
+rduckhts_gff(
+  con,
+  "gff_attrs",
+  gff_attrs_path,
+  strict = TRUE,
+  attributes_list = TRUE,
+  attributes_pairs = TRUE,
+  overwrite = TRUE
+)
+dbGetQuery(con, paste(
+  "SELECT seqname, feature,",
+  "list_extract(map_extract_value(attributes_list, 'Dbxref'), 1) AS first_dbxref,",
+  "list_count(attributes_pairs) AS n_attr_pairs FROM gff_attrs"
+))
+
+gtf_attrs_path <- system.file("extdata", "gtf_attrs.gtf", package = "Rduckhts")
+rduckhts_gtf(con, "gtf_attrs", gtf_attrs_path, attributes_list = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT list_extract(map_extract_value(attributes_list, 'note'), 1) AS note FROM gtf_attrs")
 ```
 
 ### BAM/CRAM

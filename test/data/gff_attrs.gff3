@@ -1,0 +1,2 @@
+##gff-version 3
+chr1	src	gene	1	10	.	+	.	ID=g;Dbxref=GeneID:1,HGNC:HGNC:1;Alias=a;Alias=b;Note=hello%20world

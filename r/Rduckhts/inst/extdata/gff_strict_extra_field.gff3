@@ -1,0 +1,2 @@
+##gff-version 3
+chr1	src	exon	1	10	.	+	.	ID=ok	extra

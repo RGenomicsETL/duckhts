@@ -1,0 +1,4 @@
+##gff-version 3
+chr1	src	region	.	.	.	.	.	ID=r
+chr1	src	exon	1	10	.	?	.	ID=e;Note=hello%20world
+chr1	src	CDS	1	9	.	+	0	ID=cds

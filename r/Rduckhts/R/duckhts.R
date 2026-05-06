@@ -1573,7 +1573,10 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
-#' @param attributes_map Logical. If TRUE, returns attributes as a MAP column
+#' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
+#' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
+#' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
+#' @param strict Logical. If TRUE, enforce GFF3 structural validation while scanning
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -1590,6 +1593,9 @@ rduckhts_gff <- function(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
+  strict = FALSE,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -1639,6 +1645,15 @@ rduckhts_gff <- function(
   }
   if (attributes_map) {
     params$attributes_map <- "true"
+  }
+  if (attributes_list) {
+    params$attributes_list <- "true"
+  }
+  if (attributes_pairs) {
+    params$attributes_pairs <- "true"
+  }
+  if (strict) {
+    params$strict <- "true"
   }
 
   param_str <- build_param_str(params)
@@ -1675,7 +1690,9 @@ rduckhts_gff <- function(
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
-#' @param attributes_map Logical. If TRUE, returns attributes as a MAP column
+#' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
+#' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
+#' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -1692,6 +1709,8 @@ rduckhts_gtf <- function(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -1741,6 +1760,12 @@ rduckhts_gtf <- function(
   }
   if (attributes_map) {
     params$attributes_map <- "true"
+  }
+  if (attributes_list) {
+    params$attributes_list <- "true"
+  }
+  if (attributes_pairs) {
+    params$attributes_pairs <- "true"
   }
 
   param_str <- build_param_str(params)
@@ -2603,7 +2628,10 @@ rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
-#' @param attributes_map Logical; return attributes as a parsed MAP.
+#' @param attributes_map Logical; return raw attributes as a scalar MAP.
+#' @param attributes_list Logical; return attributes as MAP(VARCHAR, VARCHAR[]).
+#' @param attributes_pairs Logical; return attributes as a LIST of key/value/index structs.
+#' @param strict Logical; enforce GFF3 structural validation while scanning.
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2612,6 +2640,8 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, header = NULL,
                                header_names = NULL, auto_detect = NULL,
                                column_types = NULL, attributes_map = FALSE,
+                               attributes_list = FALSE, attributes_pairs = FALSE,
+                               strict = FALSE,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
@@ -2627,6 +2657,9 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
     params$column_types <- normalize_tabix_types(column_types)
   }
   if (isTRUE(attributes_map)) params$attributes_map <- TRUE
+  if (isTRUE(attributes_list)) params$attributes_list <- TRUE
+  if (isTRUE(attributes_pairs)) params$attributes_pairs <- TRUE
+  if (isTRUE(strict)) params$strict <- TRUE
   .hts_multi_read(con, table_name, "read_gff", files, params, .params, overwrite)
 }
 
@@ -2645,7 +2678,9 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
-#' @param attributes_map Logical; return attributes as a parsed MAP.
+#' @param attributes_map Logical; return raw attributes as a scalar MAP.
+#' @param attributes_list Logical; return attributes as MAP(VARCHAR, VARCHAR[]).
+#' @param attributes_pairs Logical; return attributes as a LIST of key/value/index structs.
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2654,6 +2689,7 @@ rduckhts_gtf_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, header = NULL,
                                header_names = NULL, auto_detect = NULL,
                                column_types = NULL, attributes_map = FALSE,
+                               attributes_list = FALSE, attributes_pairs = FALSE,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
@@ -2669,5 +2705,7 @@ rduckhts_gtf_multi <- function(con, table_name, files, region = NULL,
     params$column_types <- normalize_tabix_types(column_types)
   }
   if (isTRUE(attributes_map)) params$attributes_map <- TRUE
+  if (isTRUE(attributes_list)) params$attributes_list <- TRUE
+  if (isTRUE(attributes_pairs)) params$attributes_pairs <- TRUE
   .hts_multi_read(con, table_name, "read_gtf", files, params, .params, overwrite)
 }
