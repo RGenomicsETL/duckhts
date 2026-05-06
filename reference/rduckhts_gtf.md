@@ -16,6 +16,8 @@ rduckhts_gtf(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
   overwrite = FALSE
 )
 ```
@@ -60,7 +62,16 @@ rduckhts_gtf(
 
 - attributes_map:
 
-  Logical. If TRUE, returns attributes as a MAP column
+  Logical. If TRUE, returns raw attributes as a scalar MAP column
+
+- attributes_list:
+
+  Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR\[\])
+
+- attributes_pairs:
+
+  Logical. If TRUE, returns attributes as a LIST of key/value/index
+  structs
 
 - overwrite:
 

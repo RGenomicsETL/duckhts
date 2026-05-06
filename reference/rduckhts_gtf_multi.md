@@ -18,6 +18,8 @@ rduckhts_gtf_multi(
   auto_detect = NULL,
   column_types = NULL,
   attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
   .params = NULL,
   overwrite = FALSE
 )
@@ -63,7 +65,15 @@ rduckhts_gtf_multi(
 
 - attributes_map:
 
-  Logical; return attributes as a parsed MAP.
+  Logical; return raw attributes as a scalar MAP.
+
+- attributes_list:
+
+  Logical; return attributes as MAP(VARCHAR, VARCHAR\[\]).
+
+- attributes_pairs:
+
+  Logical; return attributes as a LIST of key/value/index structs.
 
 - .params:
 

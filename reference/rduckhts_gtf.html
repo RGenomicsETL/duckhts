@@ -50,6 +50,8 @@
 <span>  auto_detect <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  column_types <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  attributes_map <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  attributes_list <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  attributes_pairs <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -95,7 +97,15 @@
 
 
 <dt id="arg-attributes-map">attributes_map<a class="anchor" aria-label="anchor" href="#arg-attributes-map"></a></dt>
-<dd><p>Logical. If TRUE, returns attributes as a MAP column</p></dd>
+<dd><p>Logical. If TRUE, returns raw attributes as a scalar MAP column</p></dd>
+
+
+<dt id="arg-attributes-list">attributes_list<a class="anchor" aria-label="anchor" href="#arg-attributes-list"></a></dt>
+<dd><p>Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])</p></dd>
+
+
+<dt id="arg-attributes-pairs">attributes_pairs<a class="anchor" aria-label="anchor" href="#arg-attributes-pairs"></a></dt>
+<dd><p>Logical. If TRUE, returns attributes as a LIST of key/value/index structs</p></dd>
 
 
 <dt id="arg-overwrite">overwrite<a class="anchor" aria-label="anchor" href="#arg-overwrite"></a></dt>

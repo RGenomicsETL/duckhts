@@ -56,6 +56,9 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 <span>  auto_detect <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  column_types <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  attributes_map <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  attributes_list <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  attributes_pairs <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  strict <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  .params <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -102,7 +105,19 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 
 
 <dt id="arg-attributes-map">attributes_map<a class="anchor" aria-label="anchor" href="#arg-attributes-map"></a></dt>
-<dd><p>Logical; return attributes as a parsed MAP.</p></dd>
+<dd><p>Logical; return raw attributes as a scalar MAP.</p></dd>
+
+
+<dt id="arg-attributes-list">attributes_list<a class="anchor" aria-label="anchor" href="#arg-attributes-list"></a></dt>
+<dd><p>Logical; return attributes as MAP(VARCHAR, VARCHAR[]).</p></dd>
+
+
+<dt id="arg-attributes-pairs">attributes_pairs<a class="anchor" aria-label="anchor" href="#arg-attributes-pairs"></a></dt>
+<dd><p>Logical; return attributes as a LIST of key/value/index structs.</p></dd>
+
+
+<dt id="arg-strict">strict<a class="anchor" aria-label="anchor" href="#arg-strict"></a></dt>
+<dd><p>Logical; enforce GFF3 structural validation while scanning.</p></dd>
 
 
 <dt id="arg--params">.params<a class="anchor" aria-label="anchor" href="#arg--params"></a></dt>

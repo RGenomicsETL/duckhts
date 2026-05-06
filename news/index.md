@@ -2,6 +2,21 @@
 
 ## Rduckhts 1.1.7.9000-0.0.1 (Development version)
 
+- expose richer bundled GFF/GTF parsed attribute outputs through
+  [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
+  /
+  [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md)
+  and multi-file wrappers: `attributes_list = TRUE` returns
+  `MAP(VARCHAR, VARCHAR[])` with grouped multi-values and GFF3
+  percent-decoding, while `attributes_pairs = TRUE` returns
+  `LIST<STRUCT(key VARCHAR, value VARCHAR, idx INTEGER)>` for exact
+  key/value/index records; `attributes_map = TRUE` remains the
+  backward-compatible raw scalar map
+- expose bundled `read_gff(..., strict := true)` through
+  `rduckhts_gff(strict = TRUE)` and `rduckhts_gff_multi(strict = TRUE)`,
+  enabling GFF3 structural validation from R/DBI workflows, including
+  wrong field counts and malformed attribute segments, while keeping the
+  default GFF reader permissive for existing ingestion pipelines
 - extend bundled
   [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
   / `bcftools_score(...)` so `summary_path` can be a character vector or

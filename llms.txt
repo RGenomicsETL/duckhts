@@ -262,8 +262,8 @@ This section is generated from `functions.yaml`.
 | `read_bed`        | table        | table   | `rduckhts_bed`                                                                                                                                                         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                                                                                                                           |
 | `read_fastq`      | table        | table   | `rduckhts_fastq`                                                                                                                                                       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’.                                                                                              |
-| `read_gff`        | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `read_gtf`        | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional parsed attribute maps and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `read_gff`        | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                |
+| `read_gtf`        | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `read_tabix`      | table        | table   | `rduckhts_tabix`                                                                                                                                                       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
@@ -413,8 +413,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                        index_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_readme_1e0cfa330de451.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_readme_dac29794e56ba.fai
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -637,10 +637,10 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                  summary_path
-#> 1 /tmp/Rtmpa5CDNu/duckhts_readme_mosdepth_1e0cfa25d8cab8.mosdepth.summary.txt
-#>                                                            regions_path
-#> 1 /tmp/Rtmpa5CDNu/duckhts_readme_mosdepth_1e0cfa25d8cab8.regions.bed.gz
+#>                                                                 summary_path
+#> 1 /tmp/Rtmpk611yA/duckhts_readme_mosdepth_dac29651ce03a.mosdepth.summary.txt
+#>                                                           regions_path
+#> 1 /tmp/Rtmpk611yA/duckhts_readme_mosdepth_dac29651ce03a.regions.bed.gz
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -694,11 +694,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_liftover_src_1e0cfa3de2a1d3.fa.fai
+#>   success                                                index_path
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_liftover_src_dac2963ac5ef4.fa.fai
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                 index_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_liftover_dst_1e0cfa691662ca.fa.fai
+#>   success                                                index_path
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_liftover_dst_dac292bc795e3.fa.fai
 
 lifted <- rduckhts_liftover(
   con,
@@ -742,8 +742,8 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                          index_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_munge_1e0cfa3d0859ce.fa.fai
+#>   success                                         index_path
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_munge_dac2969494bef.fa.fai
 
 munge_out <- rduckhts_munge(
   con,
@@ -851,8 +851,8 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                           output_path bytes_out
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_targets_1e0cfa1d25cb8b.bed.gz       169
+#>   success                                          output_path bytes_out
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_dac296ea2c634.bed.gz       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -862,10 +862,8 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                  output_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_targets_roundtrip_1e0cfa3ca4616f.bed
-#>   bytes_out
-#> 1       194
+#>   success                                                 output_path bytes_out
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_roundtrip_dac2935370dfe.bed       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -873,8 +871,8 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                           index_path index_format
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_range_1e0cfa767c49ad.bam.bai          BAI
+#>   success                                          index_path index_format
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_range_dac29321d7d2d.bam.bai          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -882,8 +880,8 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                              index_path index_format
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_variants_1e0cfa27760a12.bcf.csi          CSI
+#>   success                                             index_path index_format
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_variants_dac296dc63c6a.bcf.csi          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -892,10 +890,8 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                                index_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_targets_1e0cfa1d25cb8b.bed.gz.tbi
-#>   index_format
-#> 1          TBI
+#>   success                                               index_path index_format
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_dac296ea2c634.bed.gz.tbi          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -960,8 +956,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                        index_path
-#> 1    TRUE /tmp/Rtmpa5CDNu/duckhts_readme_1e0cfa79553d88.fai
+#>   success                                       index_path
+#> 1    TRUE /tmp/Rtmpk611yA/duckhts_readme_dac29216b81db.fai
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,
@@ -1159,17 +1155,54 @@ quality_hist
 #> 12   7    35       1
 ```
 
-### GFF files
+### GFF/GTF annotation attributes
 
-These can be open with or with attributes maps
+GFF3 files are read with
+[`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
+/ SQL `read_gff(...)`; GTF files are read with
+[`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md)
+/ SQL `read_gtf(...)`. `strict = TRUE` enables GFF3 structural
+validation. Attribute decoding can be scalar and raw for legacy
+convenience (`attributes_map`), grouped and lossless for multi-values
+(`attributes_list`, a DuckDB `MAP(VARCHAR, VARCHAR[])`), or exact
+parser-style pairs (`attributes_pairs`, a DuckDB
+`LIST<STRUCT(key, value, idx)>`).
+
+The extension-level GFF3 implementation is benchmarked and audited
+against [GFFBase](https://github.com/Kuanhao-Chao/gffbase) in the
+DuckHTS repo:
+<https://github.com/RGenomicsETL/duckhts/blob/develop/benchmarks/benchmark_gffbase_conformance.md>.
 
 ``` r
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
 rduckhts_gff(con, "genes", gff_path, attributes_map = TRUE, overwrite = TRUE)
-gene_annotations <- dbGetQuery(con, "SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5")
-gene_annotations
+dbGetQuery(con, "SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5")
 #>   seqname   start     end
 #> 1       X 2934816 2964270
+
+gff_attrs_path <- system.file("extdata", "gff_attrs.gff3", package = "Rduckhts")
+rduckhts_gff(
+  con,
+  "gff_attrs",
+  gff_attrs_path,
+  strict = TRUE,
+  attributes_list = TRUE,
+  attributes_pairs = TRUE,
+  overwrite = TRUE
+)
+dbGetQuery(con, paste(
+  "SELECT seqname, feature,",
+  "list_extract(map_extract_value(attributes_list, 'Dbxref'), 1) AS first_dbxref,",
+  "list_count(attributes_pairs) AS n_attr_pairs FROM gff_attrs"
+))
+#>   seqname feature first_dbxref n_attr_pairs
+#> 1    chr1    gene     GeneID:1            6
+
+gtf_attrs_path <- system.file("extdata", "gtf_attrs.gtf", package = "Rduckhts")
+rduckhts_gtf(con, "gtf_attrs", gtf_attrs_path, attributes_list = TRUE, overwrite = TRUE)
+dbGetQuery(con, "SELECT list_extract(map_extract_value(attributes_list, 'note'), 1) AS note FROM gtf_attrs")
+#>          note
+#> 1 weird; semi
 ```
 
 ### BAM/CRAM
