@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0-0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.1-0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,12 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.2.1-0.1.0" id="rduckhts-121-010-2026-05-07">Rduckhts 1.2.1-0.1.0 (2026-05-07)<a class="anchor" aria-label="anchor" href="#rduckhts-121-010-2026-05-07"></a></h2>
+<ul><li>compile bundled DuckHTS extension sources with <code>-Wpedantic</code> during Unix and Windows package builds while leaving vendored <code>htslib</code> on its upstream warning flags</li>
+<li>fix the bundled non-Emscripten <code>wasm_http_hfile.c</code> translation unit so native package builds do not warn about an empty source file under pedantic C diagnostics</li>
+<li>harden Windows <code>configure.win</code> libcurl detection: the package now requires a successful <code>curl_easy_init</code> link using the detected <code>pkg-config</code> libcurl dependency closure before enabling htslib remote URL support, and otherwise disables libcurl/S3/GCS cleanly</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.2.0-0.1.0" id="rduckhts-120-010-2026-05-07">Rduckhts 1.2.0-0.1.0 (2026-05-07)<a class="anchor" aria-label="anchor" href="#rduckhts-120-010-2026-05-07"></a></h2>
 <ul><li>expose richer bundled GFF/GTF parsed attribute outputs through <code><a href="../reference/rduckhts_gff.html">rduckhts_gff()</a></code> / <code><a href="../reference/rduckhts_gtf.html">rduckhts_gtf()</a></code> and multi-file wrappers: <code>attributes_list = TRUE</code> returns <code>MAP(VARCHAR, VARCHAR[])</code> with grouped multi-values and GFF3 percent-decoding, while <code>attributes_pairs = TRUE</code> returns <code>LIST&lt;STRUCT(key VARCHAR, value VARCHAR, idx INTEGER)&gt;</code> for exact key/value/index records; <code>attributes_map = TRUE</code> remains the backward-compatible raw scalar map</li>

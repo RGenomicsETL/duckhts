@@ -1,5 +1,18 @@
 # Changelog
 
+## Rduckhts 1.2.1-0.1.0 (2026-05-07)
+
+- compile bundled DuckHTS extension sources with `-Wpedantic` during
+  Unix and Windows package builds while leaving vendored `htslib` on its
+  upstream warning flags
+- fix the bundled non-Emscripten `wasm_http_hfile.c` translation unit so
+  native package builds do not warn about an empty source file under
+  pedantic C diagnostics
+- harden Windows `configure.win` libcurl detection: the package now
+  requires a successful `curl_easy_init` link using the detected
+  `pkg-config` libcurl dependency closure before enabling htslib remote
+  URL support, and otherwise disables libcurl/S3/GCS cleanly
+
 ## Rduckhts 1.2.0-0.1.0 (2026-05-07)
 
 - expose richer bundled GFF/GTF parsed attribute outputs through
