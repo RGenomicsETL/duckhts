@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.7.9000-0.0.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0-0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -54,7 +54,7 @@
 <div class="section level2">
 <h2 id="how-it-works">How it works<a class="anchor" aria-label="anchor" href="#how-it-works"></a>
 </h2>
-<p>Following <a href="https://github.com/RGenomicsETL/RBCFTools" class="external-link">RBCFTools</a>, tables are created and returned instead of data frames. <code>VCF</code>/<code>BCF</code>, <code>SAM</code>/<code>BAM</code>/<code>CRAM</code>, <code>FASTA</code>, <code>FASTQ</code>, <code>GFF</code>, <code>GTF</code>, and <code>tabix</code> formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. <a href="https://github.com/samtools/htslib" class="external-link"><code>htslib</code></a> 1.23 is bundled so build dependencies stay minimal. The extensnion is built by adapting the generic extension infracstructure by using only makefiles unlike the submitted communtity extension <a href="https://github.com/RGenomicsETL/duckhts" class="external-link"><code>duckhts</code></a>.</p>
+<p>Following <a href="https://github.com/RGenomicsETL/RBCFTools" class="external-link">RBCFTools</a>, tables are created and returned instead of data frames. <code>VCF</code>/<code>BCF</code>, <code>SAM</code>/<code>BAM</code>/<code>CRAM</code>, <code>FASTA</code>, <code>FASTQ</code>, <code>GFF</code>, <code>GTF</code>, and <code>tabix</code> formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. <a href="https://github.com/samtools/htslib" class="external-link"><code>htslib</code></a> 1.23.1 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted <a href="https://github.com/RGenomicsETL/duckhts" class="external-link"><code>duckhts</code></a> build path.</p>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -69,7 +69,7 @@
 <div class="section level2">
 <h2 id="system-requirements">System Requirements<a class="anchor" aria-label="anchor" href="#system-requirements"></a>
 </h2>
-<p>Installation requires <code>htslib</code> dependencies such ad zlib and libbz2, and optionally for full functionally liblzma, libcurl, and openssl. The package requires GNU make. On Windows’s Rtools, <code>htslib</code> plugins are not enabled.</p>
+<p>Installation requires <code>htslib</code> dependencies such as zlib and libbz2, and optionally liblzma, libcurl, and OpenSSL for full functionality. The package requires GNU make. On Windows Rtools builds, <code>htslib</code> plugins are not enabled.</p>
 </div>
 <div class="section level2">
 <h2 id="browser-wasmwebr-networking-and-setup">Browser wasm/webR networking and setup<a class="anchor" aria-label="anchor" href="#browser-wasmwebr-networking-and-setup"></a>
@@ -995,8 +995,8 @@ Show generated function catalog
 <code class="sourceCode R"><span><span class="va">bed_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                       index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_readme_dac29794e56ba.fai</span></span>
+<span><span class="co">#&gt;   success                                        index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets"</span>, <span class="va">bed_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT chrom, start, \"end\", name, block_count FROM targets"</span><span class="op">)</span></span>
@@ -1195,10 +1195,10 @@ Show generated function catalog
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">mos_out</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"summary_path"</span>, <span class="st">"regions_path"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;                                                                 summary_path</span></span>
-<span><span class="co">#&gt; 1 /tmp/Rtmpk611yA/duckhts_readme_mosdepth_dac29651ce03a.mosdepth.summary.txt</span></span>
-<span><span class="co">#&gt;                                                           regions_path</span></span>
-<span><span class="co">#&gt; 1 /tmp/Rtmpk611yA/duckhts_readme_mosdepth_dac29651ce03a.regions.bed.gz</span></span>
+<span><span class="co">#&gt;                                                                  summary_path</span></span>
+<span><span class="co">#&gt; 1 &lt;tempfile&gt;</span></span>
+<span><span class="co">#&gt;                                                            regions_path</span></span>
+<span><span class="co">#&gt; 1 &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu">utils</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/r/utils/read.table.html" class="external-link">read.delim</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/connections.html" class="external-link">gzfile</a></span><span class="op">(</span><span class="va">mos_out</span><span class="op">$</span><span class="va">regions_path</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">)</span>,</span>
@@ -1252,11 +1252,11 @@ Show generated function catalog
 <span><span class="op">)</span>, <span class="va">lift_chain</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_src</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_src</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_liftover_src_dac2963ac5ef4.fa.fai</span></span>
+<span><span class="co">#&gt;   success                                                 index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_dst</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_dst</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_liftover_dst_dac292bc795e3.fa.fai</span></span>
+<span><span class="co">#&gt;   success                                                 index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">lifted</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_liftover.html">rduckhts_liftover</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -1300,8 +1300,8 @@ Show generated function catalog
 <span>  <span class="st">"ACGTACGTAA"</span></span>
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                         index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_munge_dac2969494bef.fa.fai</span></span>
+<span><span class="co">#&gt;   success                                          index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -1405,8 +1405,8 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_dac296ea2c634.bed.gz       169</span></span>
+<span><span class="co">#&gt;   success                                           output_path bytes_out</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="va">tmp_bgz</span>,</span>
@@ -1416,8 +1416,10 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgunzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                                 output_path bytes_out</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_roundtrip_dac2935370dfe.bed       194</span></span>
+<span><span class="co">#&gt;   success                                                  output_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
+<span><span class="co">#&gt;   bytes_out</span></span>
+<span><span class="co">#&gt; 1       194</span></span>
 <span></span>
 <span><span class="va">bam_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bam_index.html">rduckhts_bam_index</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="va">bam_src</span>,</span>
@@ -1425,8 +1427,8 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bam_index_meta</span></span>
-<span><span class="co">#&gt;   success                                          index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_range_dac29321d7d2d.bam.bai          BAI</span></span>
+<span><span class="co">#&gt;   success                                           index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          BAI</span></span>
 <span></span>
 <span><span class="va">bcf_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bcf_index.html">rduckhts_bcf_index</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="va">bcf_src</span>,</span>
@@ -1434,8 +1436,8 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bcf_index_meta</span></span>
-<span><span class="co">#&gt;   success                                             index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_variants_dac296dc63c6a.bcf.csi          CSI</span></span>
+<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          CSI</span></span>
 <span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="va">tmp_bgz</span>,</span>
@@ -1444,8 +1446,10 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_dac296ea2c634.bed.gz.tbi          TBI</span></span>
+<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
+<span><span class="co">#&gt;   index_format</span></span>
+<span><span class="co">#&gt; 1          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>
@@ -1505,8 +1509,8 @@ Show generated function catalog
 <code class="sourceCode R"><span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span></span>
-<span><span class="co">#&gt;   success                                       index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE /tmp/Rtmpk611yA/duckhts_readme_dac29216b81db.fai</span></span>
+<span><span class="co">#&gt;   success                                        index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="st">"fasta_region"</span>, <span class="va">fasta_path</span>,</span>

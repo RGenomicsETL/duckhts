@@ -1,6 +1,6 @@
 # Changelog
 
-## Rduckhts 1.1.7.9000-0.0.1 (Development version)
+## Rduckhts 1.2.0-0.1.0 (2026-05-07)
 
 - expose richer bundled GFF/GTF parsed attribute outputs through
   [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
@@ -30,6 +30,10 @@
 - collapse the generated package README function catalog behind a
   disclosure widget so package users can jump to quick-start and
   workflow examples more easily
+- refresh the package README release docs: clarify the bundled `htslib`
+  1.23.1/system-requirements wording and redact transient temp-file
+  paths in rendered example output so regenerated README diffs stay
+  deterministic
 - add bundled `duckhts_cgranges_overlaps_list(...)`, a vectorized scalar
   overlap expander that returns LIST-of-STRUCT hit records so DBI
   queries can expand provider rows with `UNNEST(...)` without generated
