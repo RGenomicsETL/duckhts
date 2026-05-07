@@ -7,6 +7,7 @@
 ^.*\.Rcheck$
 ^README\.md$
 ^README\.Rmd$
+^cran-comments\.md$
 ^LICENSE\.md$
 ^LICENSE$
 ^\.gitignore$
