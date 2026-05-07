@@ -40,6 +40,9 @@ fi
 HTSLIB_DIR="${EXT_DIR}/htslib"
 DUCKDB_CAPI_HEADER="${EXT_DIR}/duckdb_capi/duckdb_extension.h"
 CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
+# Keep stricter diagnostics on DuckHTS extension sources without applying them
+# to the vendored htslib build.
+EXT_CFLAGS="${CFLAGS} -Wpedantic"
 CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
 LDFLAGS="${R_LDFLAGS}"
 
@@ -87,15 +90,15 @@ try_compile() {
     lib_name=$1
     lib_flag=$2
     required=$3
-    
+
     echo "Checking for ${lib_name}..."
-    
+
     cat > conftest.c << EOF
 #include <stdio.h>
 int main() { return 0; }
 EOF
 
-    if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} ${lib_flag} -o conftest conftest.c 2>/dev/null; then
+    if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} conftest.c ${lib_flag} -o conftest 2>/dev/null; then
         echo "  ${lib_name}: found"
         rm -f conftest conftest.c
         return 0
@@ -123,7 +126,7 @@ try_compile_header_lib() {
 int main() { return 0; }
 EOF
 
-    if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} ${lib_flag} -o conftest conftest.c 2>/dev/null; then
+    if ${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} conftest.c ${lib_flag} -o conftest 2>/dev/null; then
         echo "  ${lib_name}: found"
         rm -f conftest conftest.c
         return 0
@@ -134,6 +137,32 @@ EOF
             echo "ERROR: ${lib_name} is required but not found"
             exit 1
         fi
+        return 1
+    fi
+}
+
+try_compile_curl() {
+    lib_flags=$1
+    extra_cppflags=$2
+
+    echo "Checking for curl (curl/curl.h, ${lib_flags})..."
+
+    cat > conftest.c << EOF
+#include <curl/curl.h>
+int main() {
+    CURL *handle = curl_easy_init();
+    if (handle) curl_easy_cleanup(handle);
+    return 0;
+}
+EOF
+
+    if ${CC} ${CFLAGS} ${CPPFLAGS} ${extra_cppflags} ${LDFLAGS} conftest.c ${lib_flags} -o conftest 2>/dev/null; then
+        echo "  curl: found"
+        rm -f conftest conftest.c
+        return 0
+    else
+        echo "  curl: not found"
+        rm -f conftest conftest.c
         return 1
     fi
 }
@@ -167,10 +196,23 @@ if try_compile "lzma" "-llzma" "no"; then
     echo "INFO: liblzma found - XZ support enabled in htslib"
 fi
 
-if try_compile "curl" "-lcurl" "no"; then
+CURL_CFLAGS=""
+CURL_LIBS=""
+if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libcurl 2>/dev/null; then
+    CURL_CFLAGS=`pkg-config --cflags libcurl 2>/dev/null || true`
+    CURL_LIBS=`pkg-config --libs libcurl 2>/dev/null || true`
+fi
+CURL_TEST_LIBS="${CURL_LIBS}"
+if [ -z "${CURL_TEST_LIBS}" ]; then
+    CURL_TEST_LIBS="-lcurl"
+fi
+if try_compile_curl "${CURL_TEST_LIBS}" "${CURL_CFLAGS}"; then
     HAS_CURL=yes
-    LIBS="$LIBS -lcurl"
+    CPPFLAGS="${CPPFLAGS} ${CURL_CFLAGS}"
+    LIBS="$LIBS ${CURL_TEST_LIBS}"
     echo "INFO: libcurl found - remote URL support enabled in htslib"
+else
+    echo "INFO: libcurl link probe failed - remote URL support disabled in htslib"
 fi
 
 if try_compile "ssl" "-lssl" "no"; then
@@ -316,7 +358,7 @@ OBJECT_FILES=""
 for src_file in $C_SOURCES; do
     obj_file="${src_file%.c}.o"
     echo "  Compiling $src_file -> $obj_file"
-    ${CC} ${CFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
+    ${CC} ${EXT_CFLAGS} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
     if [ $? -ne 0 ]; then
         echo "ERROR: Failed to compile $src_file"
         exit 1

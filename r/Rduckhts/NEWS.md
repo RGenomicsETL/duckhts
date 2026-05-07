@@ -1,4 +1,9 @@
 
+# Rduckhts 1.2.1-0.1.0 (2026-05-07)
+- compile bundled DuckHTS extension sources with `-Wpedantic` during Unix and Windows package builds while leaving vendored `htslib` on its upstream warning flags
+- fix the bundled non-Emscripten `wasm_http_hfile.c` translation unit so native package builds do not warn about an empty source file under pedantic C diagnostics
+- harden Windows `configure.win` libcurl detection: the package now requires a successful `curl_easy_init` link using the detected `pkg-config` libcurl dependency closure before enabling htslib remote URL support, and otherwise disables libcurl/S3/GCS cleanly
+
 # Rduckhts 1.2.0-0.1.0 (2026-05-07)
 - expose richer bundled GFF/GTF parsed attribute outputs through `rduckhts_gff()` / `rduckhts_gtf()` and multi-file wrappers: `attributes_list = TRUE` returns `MAP(VARCHAR, VARCHAR[])` with grouped multi-values and GFF3 percent-decoding, while `attributes_pairs = TRUE` returns `LIST<STRUCT(key VARCHAR, value VARCHAR, idx INTEGER)>` for exact key/value/index records; `attributes_map = TRUE` remains the backward-compatible raw scalar map
 - expose bundled `read_gff(..., strict := true)` through `rduckhts_gff(strict = TRUE)` and `rduckhts_gff_multi(strict = TRUE)`, enabling GFF3 structural validation from R/DBI workflows, including wrong field counts and malformed attribute segments, while keeping the default GFF reader permissive for existing ingestion pipelines

@@ -548,4 +548,9 @@ void register_wasm_http_hfile_backend(void)
     registered = 1;
 }
 
+#else
+
+/* Keep non-Emscripten builds non-empty under -Wpedantic. */
+extern int duckhts_wasm_http_hfile_non_emscripten_anchor;
+
 #endif /* __EMSCRIPTEN__ */

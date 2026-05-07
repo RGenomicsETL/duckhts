@@ -1,5 +1,10 @@
 # DuckHTS Extension News
 
+# duckhts 1.2.1 (2026-05-07)
+- compile DuckHTS extension sources with `-Wpedantic` in the CMake and R-package build paths while keeping vendored `htslib` on its own upstream warning flags
+- keep the non-Emscripten `wasm_http_hfile.c` translation unit non-empty so native pedantic builds do not warn about an empty source file
+- harden Windows R-package `libcurl` probing so htslib remote URL support is enabled only when `curl_easy_init` links successfully with the detected `pkg-config` dependency closure; otherwise the configure path disables libcurl/S3/GCS cleanly instead of passing a false-positive `-lcurl`
+
 # duckhts 1.2.0 (2026-05-07)
 - add richer parsed attribute outputs for `read_gff(...)` and `read_gtf(...)`: `attributes_list := true` returns `MAP(VARCHAR, VARCHAR[])` with grouped multi-values and GFF3 percent-decoding, while `attributes_pairs := true` returns `LIST<STRUCT(key VARCHAR, value VARCHAR, idx INTEGER)>` for exact key/value/index records; keep `attributes_map := true` as the backward-compatible raw scalar map and make it skip duplicate keys instead of constructing invalid DuckDB maps
 - add `read_gff(..., strict := true)` for GFF3 structural validation during scans: strict mode rejects malformed rows with the wrong number of fields, invalid coordinates (including nonpositive concrete end coordinates), invalid strand/phase/CDS phase, invalid scores, empty seqids/features, whitespace-containing feature types, and malformed attribute segments; strict count-only scans validate records instead of using index metadata, while default `read_gff(...)` remains permissive for existing ingestion workflows

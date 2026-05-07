@@ -73,6 +73,10 @@ if [ "${WASM_BUILD}" = "yes" ]; then
   LDFLAGS="${LDFLAGS} ${EM_PORT_FLAGS}"
 fi
 
+# Keep stricter diagnostics on DuckHTS extension sources without applying them
+# to the vendored htslib build.
+EXT_CFLAGS="${CFLAGS} -Wpedantic"
+
 add_prefix_if_header() {
   header=$1
   shift
@@ -409,7 +413,7 @@ OBJECT_FILES=""
 for src_file in $C_SOURCES; do
     obj_file="${src_file%.c}.o"
     echo "  Compiling $src_file -> $obj_file"
-  ${CC} ${CFLAGS} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
+  ${CC} ${EXT_CFLAGS} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
     if [ $? -ne 0 ]; then
         echo "ERROR: Failed to compile $src_file"
         exit 1
