@@ -21,11 +21,11 @@ are created and returned instead of data frames. `VCF`/`BCF`,
 `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats
 can be queried. We support region queries for indexed files, and we
 target Linux, macOS, and RTools.
-[`htslib`](https://github.com/samtools/htslib) 1.23 is bundled so build
-dependencies stay minimal. The extensnion is built by adapting the
-generic extension infracstructure by using only makefiles unlike the
-submitted communtity extension
-[`duckhts`](https://github.com/RGenomicsETL/duckhts).
+[`htslib`](https://github.com/samtools/htslib) 1.23.1 is bundled so
+build dependencies stay minimal. The package build adapts the generic
+extension infrastructure to a GNU make-based R package workflow, while
+the standalone community extension uses the submitted
+[`duckhts`](https://github.com/RGenomicsETL/duckhts) build path.
 
 ## Installation
 
@@ -40,10 +40,10 @@ install.packages("Rduckhts")
 
 ## System Requirements
 
-Installation requires `htslib` dependencies such ad zlib and libbz2, and
-optionally for full functionally liblzma, libcurl, and openssl. The
-package requires GNU make. On Windows’s Rtools, `htslib` plugins are not
-enabled.
+Installation requires `htslib` dependencies such as zlib and libbz2, and
+optionally liblzma, libcurl, and OpenSSL for full functionality. The
+package requires GNU make. On Windows Rtools builds, `htslib` plugins
+are not enabled.
 
 ## Browser wasm/webR networking and setup
 
@@ -401,8 +401,8 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_readme_dac29794e56ba.fai
+#>   success                                        index_path
+#> 1    TRUE <tempfile>
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT chrom, start, \"end\", name, block_count FROM targets")
@@ -624,10 +624,10 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                 summary_path
-#> 1 /tmp/Rtmpk611yA/duckhts_readme_mosdepth_dac29651ce03a.mosdepth.summary.txt
-#>                                                           regions_path
-#> 1 /tmp/Rtmpk611yA/duckhts_readme_mosdepth_dac29651ce03a.regions.bed.gz
+#>                                                                  summary_path
+#> 1 <tempfile>
+#>                                                            regions_path
+#> 1 <tempfile>
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -681,11 +681,11 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_liftover_src_dac2963ac5ef4.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE <tempfile>
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_liftover_dst_dac292bc795e3.fa.fai
+#>   success                                                 index_path
+#> 1    TRUE <tempfile>
 
 lifted <- rduckhts_liftover(
   con,
@@ -729,8 +729,8 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                         index_path
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_munge_dac2969494bef.fa.fai
+#>   success                                          index_path
+#> 1    TRUE <tempfile>
 
 munge_out <- rduckhts_munge(
   con,
@@ -837,8 +837,8 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                          output_path bytes_out
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_dac296ea2c634.bed.gz       169
+#>   success                                           output_path bytes_out
+#> 1    TRUE <tempfile>       169
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -848,8 +848,10 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_roundtrip_dac2935370dfe.bed       194
+#>   success                                                  output_path
+#> 1    TRUE <tempfile>
+#>   bytes_out
+#> 1       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -857,8 +859,8 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                          index_path index_format
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_range_dac29321d7d2d.bam.bai          BAI
+#>   success                                           index_path index_format
+#> 1    TRUE <tempfile>          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
@@ -866,8 +868,8 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                             index_path index_format
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_variants_dac296dc63c6a.bcf.csi          CSI
+#>   success                                              index_path index_format
+#> 1    TRUE <tempfile>          CSI
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -876,8 +878,10 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                               index_path index_format
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_targets_dac296ea2c634.bed.gz.tbi          TBI
+#>   success                                                index_path
+#> 1    TRUE <tempfile>
+#>   index_format
+#> 1          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -942,8 +946,8 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
-#> 1    TRUE /tmp/Rtmpk611yA/duckhts_readme_dac29216b81db.fai
+#>   success                                        index_path
+#> 1    TRUE <tempfile>
 
 rduckhts_fasta(
   con, "fasta_region", fasta_path,

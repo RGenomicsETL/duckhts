@@ -29,7 +29,7 @@ coverage, CNV, QC, and downstream export workflows.
 > and composable local workflows. After all, most of Genomics File
 > Formats are Tables/Arrays in disguise.
 
-This extention does not support MSVC builds
+This extension does not support MSVC builds
 (windows_amd64/windows_arm64). Use MinGW/RTools for Windows.
 
 ## Functions
@@ -186,7 +186,7 @@ the DuckDB CLI and load the built extension from
 ### Core readers
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT CHROM, POS, REF, ALT, SAMPLE_ID
 FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
 LIMIT 3;
@@ -243,7 +243,7 @@ LIMIT 3;
 ### Interval + reference helpers
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT chrom, start, "end", name, block_count
 FROM read_bed('test/data/targets.bed');
 
@@ -299,7 +299,7 @@ call; that bulk query runs on the extension-owned helper connection, so
 use a regular table or view rather than a temp table.
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT duckhts_cgranges_create('readme_idx');
 SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a');
 SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b');
@@ -436,7 +436,7 @@ workflows: duplicate handling is explicit via `rmdup`, and optional
 `stats := 'gc,mq'` adds one-pass GC and MAPQ summaries on the same scan.
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT
   bin_id,
   count_total,
@@ -480,7 +480,7 @@ indexed BAM/CRAM input. The example below writes windowed fragment
 coverage and then reads back the generated BED.gz output.
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT success, summary_path, regions_path
 FROM duckhts_mosdepth(
   '/tmp/duckhts_readme_mosdepth',
@@ -529,7 +529,7 @@ VCF/BCF and one or more GWAS summary statistics files, mirroring the
 `bcftools +score` plugin API.
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 -- Hard-call (GT) PRS — PLINK summary format
 -- S1: 0×0.5  + 1×(−0.2) + 2×1.0 = 1.8
 -- S2: 1×0.5  + 2×(−0.2) + 0×1.0 = 0.1
@@ -604,7 +604,7 @@ FROM bcftools_score(
 ### Liftover score-style rows
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
        mapped, reverse_complemented, reject_reason, note
 FROM duckdb_liftover(
@@ -635,7 +635,7 @@ FROM duckdb_liftover(
 ### Sequence utilities
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT
   NAME,
   seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
@@ -693,7 +693,7 @@ For BAM/CRAM, qualities are already stored as numeric values, so there
 is no FASTQ text-encoding ambiguity on input.
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT *
 FROM detect_quality_encoding('test/data/legacy_phred64.fq');
 
@@ -746,7 +746,7 @@ LIMIT 12;
 ### Metadata + export/index helpers
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT idx, raw
 FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
 LIMIT 3;
@@ -849,7 +849,7 @@ glob pattern. Because DuckDB’s `query()` cannot accept subquery
 expressions, use the `SET VARIABLE` + `getvariable()` pattern:
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SET VARIABLE q = hts_union_query('read_fastq', 'test/data/r*.fq');
 SELECT filename, count(*) AS n
 FROM query(getvariable('q'))
@@ -867,7 +867,7 @@ GROUP BY ALL;
 Per-file parameters can be passed as the third argument (SQL literal):
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SET VARIABLE q = hts_union_query('read_bam', 'test/data/range.bam',
                                   'region := ''CHROMOSOME_I:1-1000''');
 SELECT count(*) AS n FROM query(getvariable('q'));
@@ -895,7 +895,7 @@ to point at an external htslib plugin directory).
 Example (works in static-handler mode and plugin mode):
 
 ``` sql
-LOAD '/root/duckhts/build/release/duckhts.duckdb_extension';
+LOAD 'build/release/duckhts.duckdb_extension';
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')

@@ -16,7 +16,7 @@ knitr::knit_engines$set(sql = function(options) {
   code <- paste(options$code, collapse = "\n")
   load_extension <- is.null(options$load_extension) || isTRUE(options$load_extension)
   if (load_extension) {
-    extension_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
+    extension_path <- "build/release/duckhts.duckdb_extension"
     extension_path <- gsub("'", "''", extension_path, fixed = TRUE)
     code <- paste(sprintf("LOAD '%s';", extension_path), code, sep = "\n")
   }
@@ -45,7 +45,7 @@ It covers the sequencing side of the stack: raw/reference data access, annotatio
 > DuckHTS covers sequencing and reference-oriented formats. [PlinkingDuck](https://github.com/teaguesterling/plinking_duck) extends the same idea to PLINK genotype workflows and explicitly builds on DuckHTS for the sequencing side of the stack. See also its documentation: https://plinking-duck.readthedocs.io . Together, these tools are pushing DuckDB toward a broader genomics analysis environment built around portable file readers, SQL-native analytics, and composable local workflows. After all, most of Genomics File Formats are Tables/Arrays in disguise.
 
 
-This extention does not support MSVC builds (windows_amd64/windows_arm64). Use MinGW/RTools for Windows.
+This extension does not support MSVC builds (windows_amd64/windows_arm64). Use MinGW/RTools for Windows.
 
 ## Functions
 

@@ -15,6 +15,13 @@ knitr::opts_chunk$set(
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+.readme_tempdir <- tempdir()
+.readme_output_hook <- knitr::knit_hooks$get("output")
+knitr::knit_hooks$set(output = function(x, options) {
+  x <- gsub(.readme_tempdir, "<tempdir>", x, fixed = TRUE)
+  x <- gsub("<tempdir>/[^[:space:]]+", "<tempfile>", x)
+  .readme_output_hook(x, options)
+})
 ```
 
 # Rduckhts: DuckDB HTS File Reader Extension for R
@@ -25,7 +32,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ## How it works
 
-Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.23 is bundled so build dependencies stay minimal. The extensnion is built by adapting the generic extension infracstructure by using only makefiles unlike  the submitted communtity extension [`duckhts`](https://github.com/RGenomicsETL/duckhts).
+Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.23.1 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted [`duckhts`](https://github.com/RGenomicsETL/duckhts) build path.
 
 ## Installation
 
@@ -40,7 +47,7 @@ install.packages("Rduckhts")
 
 ## System Requirements
 
-Installation requires `htslib` dependencies such ad zlib and libbz2, and  optionally for full functionally liblzma, libcurl, and openssl. The package requires GNU make. On Windows's Rtools, `htslib` plugins are not enabled. 
+Installation requires `htslib` dependencies such as zlib and libbz2, and optionally liblzma, libcurl, and OpenSSL for full functionality. The package requires GNU make. On Windows Rtools builds, `htslib` plugins are not enabled.
 
 ## Browser wasm/webR networking and setup
 
