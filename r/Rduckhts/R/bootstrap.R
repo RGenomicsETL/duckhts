@@ -265,7 +265,7 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
   )
 
   for (i in seq_along(c_files)) {
-    cmd <- paste(cc, "-O2 -fPIC", includes, "-c", c_files[i], "-o", o_files[i])
+    cmd <- paste(cc, "-O2 -fPIC -Wpedantic", includes, "-c", c_files[i], "-o", o_files[i])
     if (verbose) {
       message("  ", basename(c_files[i]))
     }

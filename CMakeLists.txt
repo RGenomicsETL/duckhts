@@ -121,6 +121,10 @@ if(NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(${EXTENSION_NAME} PRIVATE -Wpedantic)
+endif()
+
 # Include own headers
 target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/cgranges)
