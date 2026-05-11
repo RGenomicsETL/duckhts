@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.2.1 (2026-05-07)
+- fix `read_bcf` scanner crash on certain VCF/BCF files where `FILTER` list elements were written without reserving list-vector capacity (`duckdb_list_vector_reserve` was missing before `duckdb_list_vector_set_size`), which could corrupt allocator state and abort with `double free`/`invalid pointer`; `FILTER` now reserves space before writing list entries and is stable for full-table scans including PASS and explicit filter tags
 - compile DuckHTS extension sources with `-Wpedantic` in the CMake and R-package build paths while keeping vendored `htslib` on its own upstream warning flags
 - keep the non-Emscripten `wasm_http_hfile.c` translation unit non-empty so native pedantic builds do not warn about an empty source file
 - harden Windows R-package `libcurl` probing so htslib remote URL support is enabled only when `curl_easy_init` links successfully with the detected `pkg-config` dependency closure; otherwise the configure path disables libcurl/S3/GCS cleanly instead of passing a false-positive `-lcurl`

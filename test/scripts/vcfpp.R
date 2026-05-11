@@ -48,10 +48,15 @@ tag_def <- function(id, number, type, description) {
   list(id = id, number = number, type = type, description = description)
 }
 
+filter_def <- function(id, description) {
+  list(id = id, description = description)
+}
+
 write_fixture <- function(path,
                           contigs,
                           info_defs = list(),
                           format_defs = list(),
+                          filter_defs = list(),
                           samples = character(),
                           records,
                           extra_lines = character()) {
@@ -71,6 +76,9 @@ write_fixture <- function(path,
   for (def in format_defs) {
     writer$addFORMAT(def$id, def$number, def$type, def$description)
   }
+  for (def in filter_defs) {
+    writer$addFILTER(def$id, def$description)
+  }
   for (sample in samples) {
     writer$addSample(sample)
   }
@@ -88,6 +96,7 @@ render_fixture <- function(filename,
                            contigs,
                            info_defs = list(),
                            format_defs = list(),
+                           filter_defs = list(),
                            samples = character(),
                            records,
                            extra_lines = character()) {
@@ -99,6 +108,7 @@ render_fixture <- function(filename,
       contigs = contigs,
       info_defs = info_defs,
       format_defs = format_defs,
+      filter_defs = filter_defs,
       samples = samples,
       records = records,
       extra_lines = extra_lines
@@ -223,7 +233,44 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 # ---------------------------------------------------------------------------
-# Section 4. Spec-Compliance Fixtures
+# Section 4. Regression Fixtures
+# ---------------------------------------------------------------------------
+
+manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "bcf_filter_list_regression.vcf",
+  section = "regression",
+  purpose = "read_bcf FILTER list-materialization regression for multi-entry and PASS values",
+  contigs = c("chr1"),
+  filter_defs = list(
+    filter_def("PASS", "All filters passed"),
+    filter_def("q10", "Low quality"),
+    filter_def("q20", "Bad mapping quality")
+  ),
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype")
+  ),
+  samples = c("S1"),
+  records = vapply(
+    seq_len(5000L),
+    function(pos) {
+      filter_value <- if (pos %% 13L == 0L) {
+        "q10;q20"
+      } else if (pos %% 7L == 0L) {
+        "q20"
+      } else if (pos %% 5L == 0L) {
+        "q10"
+      } else {
+        "PASS"
+      }
+      sprintf("chr1\t%s\t.\tA\tC\t50\t%s\t.\tGT\t0/1", pos, filter_value)
+    },
+    character(1L)
+  ),
+  extra_lines = c("##duckhts_fixture_section=read_bcf_filter_regression")
+)
+
+# ---------------------------------------------------------------------------
+# Section 5. Spec-Compliance Fixtures
 # ---------------------------------------------------------------------------
 
 manifest[[length(manifest) + 1]] <- render_fixture(
@@ -248,7 +295,7 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 # ---------------------------------------------------------------------------
-# Section 5. Manifest and Summary
+# Section 6. Manifest and Summary
 # ---------------------------------------------------------------------------
 
 manifest_df <- do.call(rbind, manifest)

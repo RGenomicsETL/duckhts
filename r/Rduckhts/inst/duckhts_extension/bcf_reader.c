@@ -1654,11 +1654,13 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 if (init->rec->d.n_flt == 0) {
                     // No filters means PASS
                     entry.length = 1;
-                    duckdb_list_vector_set_size(vec, entry.offset + 1);
+                    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
+                    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
                     duckdb_vector_assign_string_element(child_vec, entry.offset, "PASS");
                 } else {
                     entry.length = init->rec->d.n_flt;
                     // Reserve space for all filters at once
+                    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
                     duckdb_list_vector_set_size(vec, entry.offset + entry.length);
                     for (int f = 0; f < init->rec->d.n_flt; f++) {
                         const char* flt_name = bcf_hdr_int2id(init->hdr, BCF_DT_ID, 
