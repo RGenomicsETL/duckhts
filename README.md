@@ -1,5 +1,5 @@
 
-<!-- README.md is generated from README.Rmd. Please edit that file -->
+<!-- README.md is generated from README.Rmd using [duckknit](https://github.com/rundel/duckknit). Please edit that file. -->
 
 # DuckHTS
 
@@ -186,22 +186,8 @@ the DuckDB CLI and load the built extension from
 ### Core readers
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT CHROM, POS, REF, ALT, SAMPLE_ID
 FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
-LIMIT 3;
-
-SELECT count(*) AS n
-FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
-
-SELECT *
-FROM fasta_index('test/data/ce.fa');
-
-SELECT NAME, length(SEQUENCE) AS seq_length
-FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25');
-
-SELECT NAME, MATE, PAIR_ID
-FROM read_fastq('test/data/interleaved.fq', interleaved := true)
 LIMIT 3;
 ```
 
@@ -213,24 +199,49 @@ LIMIT 3;
     │ 1       │   100 │ A       │ [T]       │ S²        │
     │ 1       │   100 │ A       │ [T]       │ S3        │
     └─────────┴───────┴─────────┴───────────┴───────────┘
+
+``` sql
+SELECT count(*) AS n
+FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1-1000');
+```
+
     ┌───────┐
     │   n   │
     │ int64 │
     ├───────┤
     │     2 │
     └───────┘
+
+``` sql
+SELECT *
+FROM fasta_index('test/data/ce.fa');
+```
+
     ┌─────────┬────────────┐
     │ success │ index_path │
     │ boolean │  varchar   │
     ├─────────┼────────────┤
     │ true    │            │
     └─────────┴────────────┘
+
+``` sql
+SELECT NAME, length(SEQUENCE) AS seq_length
+FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-25');
+```
+
     ┌──────────────┬────────────┐
     │     NAME     │ seq_length │
     │   varchar    │   int64    │
     ├──────────────┼────────────┤
     │ CHROMOSOME_I │         25 │
     └──────────────┴────────────┘
+
+``` sql
+SELECT NAME, MATE, PAIR_ID
+FROM read_fastq('test/data/interleaved.fq', interleaved := true)
+LIMIT 3;
+```
+
     ┌─────────────────────────────────┬────────┬─────────────────────────────────┐
     │              NAME               │  MATE  │             PAIR_ID             │
     │             varchar             │ uint16 │             varchar             │
@@ -243,16 +254,8 @@ LIMIT 3;
 ### Interval + reference helpers
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT chrom, start, "end", name, block_count
 FROM read_bed('test/data/targets.bed');
-
-SELECT chrom, start, "end", pct_gc, num_a, num_c, num_g, num_t
-FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
-ORDER BY chrom, start;
-
-SELECT chrom, start, "end", seq_len, pct_gc
-FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20');
 ```
 
     ┌────────────────┬───────┬───────┬─────────┬─────────────┐
@@ -264,6 +267,13 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
     │ CHROMOSOME_II  │     0 │     8 │ target3 │        NULL │
     │ CHROMOSOME_III │     0 │     6 │ target4 │           1 │
     └────────────────┴───────┴───────┴─────────┴─────────────┘
+
+``` sql
+SELECT chrom, start, "end", pct_gc, num_a, num_c, num_g, num_t
+FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
+ORDER BY chrom, start;
+```
+
     ┌────────────────┬───────┬───────┬────────┬───────┬───────┬───────┬───────┐
     │     chrom      │ start │  end  │ pct_gc │ num_a │ num_c │ num_g │ num_t │
     │    varchar     │ int64 │ int64 │ double │ int64 │ int64 │ int64 │ int64 │
@@ -273,6 +283,12 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
     │ CHROMOSOME_II  │     0 │     8 │  0.625 │     2 │     4 │     1 │     1 │
     │ CHROMOSOME_III │     0 │     6 │    0.5 │     2 │     2 │     1 │     1 │
     └────────────────┴───────┴───────┴────────┴───────┴───────┴───────┴───────┘
+
+``` sql
+SELECT chrom, start, "end", seq_len, pct_gc
+FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20');
+```
+
     ┌──────────────┬───────┬───────┬─────────┬────────┐
     │    chrom     │ start │  end  │ seq_len │ pct_gc │
     │   varchar    │ int64 │ int64 │  int64  │ double │
@@ -299,32 +315,109 @@ call; that bulk query runs on the extension-owned helper connection, so
 use a regular table or view rather than a temp table.
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT duckhts_cgranges_create('readme_idx');
-SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a');
-SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b');
-SELECT duckhts_cgranges_index('readme_idx');
+```
 
+    ┌───────────────────────────────────────┐
+    │ duckhts_cgranges_create('readme_idx') │
+    │                boolean                │
+    ├───────────────────────────────────────┤
+    │ true                                  │
+    └───────────────────────────────────────┘
+
+``` sql
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a');
+```
+
+    ┌─────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') │
+    │                         boolean                         │
+    ├─────────────────────────────────────────────────────────┤
+    │ true                                                    │
+    └─────────────────────────────────────────────────────────┘
+
+``` sql
+SELECT duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b');
+```
+
+    ┌─────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') │
+    │                         boolean                         │
+    ├─────────────────────────────────────────────────────────┤
+    │ true                                                    │
+    └─────────────────────────────────────────────────────────┘
+
+``` sql
+SELECT duckhts_cgranges_index('readme_idx');
+```
+
+    ┌──────────────────────────────────────┐
+    │ duckhts_cgranges_index('readme_idx') │
+    │               boolean                │
+    ├──────────────────────────────────────┤
+    │ true                                 │
+    └──────────────────────────────────────┘
+
+``` sql
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
+```
 
+    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │                1 │ b       │ chr1           │             30 │           40 │
+    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+
+``` sql
 SELECT duckhts_cgranges_from_query(
   'readme_qry_idx',
   'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)',
   'chrom', 'start', 'end', 'label'
 );
-SELECT duckhts_cgranges_index('readme_qry_idx');
+```
 
+    ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ duckhts_cgranges_from_query('readme_qry_idx', 'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)', 'chrom', 'start', 'end', 'label') │
+    │                                                                                                  boolean                                                                                                   │
+    ├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+    │ true                                                                                                                                                                                                       │
+    └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+``` sql
+SELECT duckhts_cgranges_index('readme_qry_idx');
+```
+
+    ┌──────────────────────────────────────────┐
+    │ duckhts_cgranges_index('readme_qry_idx') │
+    │                 boolean                  │
+    ├──────────────────────────────────────────┤
+    │ true                                     │
+    └──────────────────────────────────────────┘
+
+``` sql
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain');
+```
 
+    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
+    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
+    │      int64       │ varchar │    varchar     │     int32      │    int32     │
+    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
+    │                1 │ beta    │ chr2           │            150 │          170 │
+    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+
+``` sql
 CREATE TABLE readme_probes AS
 SELECT * FROM (VALUES
   (10, 'chr2', 100, 105),
   (20, 'chr2', 160, 161),
   (30, 'chr2', 500, 510)
 ) AS t(probe_id, chrom, start, "end");
+```
 
+``` sql
 SELECT
   p.probe_id,
   hit.interval_ordinal,
@@ -338,7 +431,17 @@ CROSS JOIN UNNEST(
   duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p."end")
 ) AS u(hit)
 ORDER BY p.probe_id, hit.interval_ordinal;
+```
 
+    ┌──────────┬──────────────────┬─────────┬────────────┬────────────────┬────────────────┬──────────────┐
+    │ probe_id │ interval_ordinal │  label  │ label_type │ interval_chrom │ interval_start │ interval_end │
+    │  int32   │      int64       │ varchar │  varchar   │    varchar     │     int32      │    int32     │
+    ├──────────┼──────────────────┼─────────┼────────────┼────────────────┼────────────────┼──────────────┤
+    │       10 │                0 │ alpha   │ VARCHAR    │ chr2           │            100 │          110 │
+    │       20 │                1 │ beta    │ VARCHAR    │ chr2           │            150 │          170 │
+    └──────────┴──────────────────┴─────────┴────────────┴────────────────┴────────────────┴──────────────┘
+
+``` sql
 SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps_bulk(
   'readme_qry_idx',
@@ -347,67 +450,8 @@ FROM duckhts_cgranges_overlaps_bulk(
   query_row_id_col := 'probe_id'
 )
 ORDER BY query_row_id, interval_ordinal;
-
-SELECT duckhts_cgranges_destroy('readme_idx');
-SELECT duckhts_cgranges_destroy('readme_qry_idx');
-DROP TABLE readme_probes;
 ```
 
-    ┌───────────────────────────────────────┐
-    │ duckhts_cgranges_create('readme_idx') │
-    │                boolean                │
-    ├───────────────────────────────────────┤
-    │ true                                  │
-    └───────────────────────────────────────┘
-    ┌─────────────────────────────────────────────────────────┐
-    │ duckhts_cgranges_add('readme_idx', 'chr1', 10, 20, 'a') │
-    │                         boolean                         │
-    ├─────────────────────────────────────────────────────────┤
-    │ true                                                    │
-    └─────────────────────────────────────────────────────────┘
-    ┌─────────────────────────────────────────────────────────┐
-    │ duckhts_cgranges_add('readme_idx', 'chr1', 30, 40, 'b') │
-    │                         boolean                         │
-    ├─────────────────────────────────────────────────────────┤
-    │ true                                                    │
-    └─────────────────────────────────────────────────────────┘
-    ┌──────────────────────────────────────┐
-    │ duckhts_cgranges_index('readme_idx') │
-    │               boolean                │
-    ├──────────────────────────────────────┤
-    │ true                                 │
-    └──────────────────────────────────────┘
-    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
-    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
-    │      int64       │ varchar │    varchar     │     int32      │    int32     │
-    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
-    │                1 │ b       │ chr1           │             30 │           40 │
-    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
-    ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-    │ duckhts_cgranges_from_query('readme_qry_idx', 'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)', 'chrom', 'start', 'end', 'label') │
-    │                                                                                                  boolean                                                                                                   │
-    ├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-    │ true                                                                                                                                                                                                       │
-    └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-    ┌──────────────────────────────────────────┐
-    │ duckhts_cgranges_index('readme_qry_idx') │
-    │                 boolean                  │
-    ├──────────────────────────────────────────┤
-    │ true                                     │
-    └──────────────────────────────────────────┘
-    ┌──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
-    │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
-    │      int64       │ varchar │    varchar     │     int32      │    int32     │
-    ├──────────────────┼─────────┼────────────────┼────────────────┼──────────────┤
-    │                1 │ beta    │ chr2           │            150 │          170 │
-    └──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
-    ┌──────────┬──────────────────┬─────────┬────────────┬────────────────┬────────────────┬──────────────┐
-    │ probe_id │ interval_ordinal │  label  │ label_type │ interval_chrom │ interval_start │ interval_end │
-    │  int32   │      int64       │ varchar │  varchar   │    varchar     │     int32      │    int32     │
-    ├──────────┼──────────────────┼─────────┼────────────┼────────────────┼────────────────┼──────────────┤
-    │       10 │                0 │ alpha   │ VARCHAR    │ chr2           │            100 │          110 │
-    │       20 │                1 │ beta    │ VARCHAR    │ chr2           │            150 │          170 │
-    └──────────┴──────────────────┴─────────┴────────────┴────────────────┴────────────────┴──────────────┘
     ┌──────────────┬──────────────────┬─────────┬────────────────┬────────────────┬──────────────┐
     │ query_row_id │ interval_ordinal │  label  │ interval_chrom │ interval_start │ interval_end │
     │    int64     │      int64       │ varchar │    varchar     │     int32      │    int32     │
@@ -415,18 +459,32 @@ DROP TABLE readme_probes;
     │           10 │                0 │ alpha   │ chr2           │            100 │          110 │
     │           20 │                1 │ beta    │ chr2           │            150 │          170 │
     └──────────────┴──────────────────┴─────────┴────────────────┴────────────────┴──────────────┘
+
+``` sql
+SELECT duckhts_cgranges_destroy('readme_idx');
+```
+
     ┌────────────────────────────────────────┐
     │ duckhts_cgranges_destroy('readme_idx') │
     │                boolean                 │
     ├────────────────────────────────────────┤
     │ true                                   │
     └────────────────────────────────────────┘
+
+``` sql
+SELECT duckhts_cgranges_destroy('readme_qry_idx');
+```
+
     ┌────────────────────────────────────────────┐
     │ duckhts_cgranges_destroy('readme_qry_idx') │
     │                  boolean                   │
     ├────────────────────────────────────────────┤
     │ true                                       │
     └────────────────────────────────────────────┘
+
+``` sql
+DROP TABLE readme_probes;
+```
 
 ### Fixed-bin native counting
 
@@ -436,7 +494,6 @@ workflows: duplicate handling is explicit via `rmdup`, and optional
 `stats := 'gc,mq'` adds one-pass GC and MAPQ summaries on the same scan.
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT
   bin_id,
   count_total,
@@ -480,7 +537,6 @@ indexed BAM/CRAM input. The example below writes windowed fragment
 coverage and then reads back the generated BED.gz output.
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT success, summary_path, regions_path
 FROM duckhts_mosdepth(
   '/tmp/duckhts_readme_mosdepth',
@@ -492,7 +548,16 @@ FROM duckhts_mosdepth(
   use_median := TRUE,
   overwrite := TRUE
 );
+```
 
+    ┌─────────┬───────────────────────────────────────────────────┬─────────────────────────────────────────────┐
+    │ success │                   summary_path                    │                regions_path                 │
+    │ boolean │                      varchar                      │                   varchar                   │
+    ├─────────┼───────────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ true    │ /tmp/duckhts_readme_mosdepth.mosdepth.summary.txt │ /tmp/duckhts_readme_mosdepth.regions.bed.gz │
+    └─────────┴───────────────────────────────────────────────────┴─────────────────────────────────────────────┘
+
+``` sql
 SELECT
   column0 AS chrom,
   CAST(column1 AS BIGINT) AS start,
@@ -507,12 +572,6 @@ FROM read_csv(
 LIMIT 3;
 ```
 
-    ┌─────────┬───────────────────────────────────────────────────┬─────────────────────────────────────────────┐
-    │ success │                   summary_path                    │                regions_path                 │
-    │ boolean │                      varchar                      │                   varchar                   │
-    ├─────────┼───────────────────────────────────────────────────┼─────────────────────────────────────────────┤
-    │ true    │ /tmp/duckhts_readme_mosdepth.mosdepth.summary.txt │ /tmp/duckhts_readme_mosdepth.regions.bed.gz │
-    └─────────┴───────────────────────────────────────────────────┴─────────────────────────────────────────────┘
     ┌───────────────┬───────┬───────┬────────┐
     │     chrom     │ start │  end  │ depth  │
     │    varchar    │ int64 │ int64 │ double │
@@ -529,7 +588,6 @@ VCF/BCF and one or more GWAS summary statistics files, mirroring the
 `bcftools +score` plugin API.
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 -- Hard-call (GT) PRS — PLINK summary format
 -- S1: 0×0.5  + 1×(−0.2) + 2×1.0 = 1.8
 -- S2: 1×0.5  + 2×(−0.2) + 0×1.0 = 0.1
@@ -540,7 +598,17 @@ FROM bcftools_score(
   use := 'GT',
   columns := 'PLINK'
 );
+```
 
+    ┌─────────┬────────┐
+    │ SAMPLE  │  prs   │
+    │ varchar │ double │
+    ├─────────┼────────┤
+    │ S1      │    1.8 │
+    │ S2      │    0.1 │
+    └─────────┴────────┘
+
+``` sql
 -- Multi-PRS TSV/SSF scoring: multiple summary files in one genotype scan
 SELECT SAMPLE,
        round(score_summary, 3) AS prs_a,
@@ -551,7 +619,17 @@ FROM bcftools_score(
   use := 'GT',
   columns := 'PLINK'
 );
+```
 
+    ┌─────────┬────────┬────────┐
+    │ SAMPLE  │ prs_a  │ prs_b  │
+    │ varchar │ double │ double │
+    ├─────────┼────────┼────────┤
+    │ S1      │    1.8 │    2.0 │
+    │ S2      │    0.1 │    0.5 │
+    └─────────┴────────┴────────┘
+
+``` sql
 -- Dosage-based PRS (DS field) — fractional allele dosages from imputed data
 -- S1: 0.1×0.5 + 0.8×(−0.2) + 1.8×1.0 = 1.69
 -- S2: 1.0×0.5 + 1.9×(−0.2) + 0.2×1.0 = 0.32
@@ -562,7 +640,17 @@ FROM bcftools_score(
   use := 'DS',
   columns := 'PLINK'
 );
+```
 
+    ┌─────────┬────────┐
+    │ SAMPLE  │ prs_ds │
+    │ varchar │ double │
+    ├─────────┼────────┤
+    │ S1      │   1.69 │
+    │ S2      │   0.32 │
+    └─────────┴────────┘
+
+``` sql
 -- GWAS-VCF multi-PRS: each FORMAT sample column becomes a separate PRS track
 SELECT SAMPLE, round(PRS_A, 3) AS prs_a, round(PRS_B, 3) AS prs_b
 FROM bcftools_score(
@@ -572,27 +660,6 @@ FROM bcftools_score(
 );
 ```
 
-    ┌─────────┬────────┐
-    │ SAMPLE  │  prs   │
-    │ varchar │ double │
-    ├─────────┼────────┤
-    │ S1      │    1.8 │
-    │ S2      │    0.1 │
-    └─────────┴────────┘
-    ┌─────────┬────────┬────────┐
-    │ SAMPLE  │ prs_a  │ prs_b  │
-    │ varchar │ double │ double │
-    ├─────────┼────────┼────────┤
-    │ S1      │    1.8 │    2.0 │
-    │ S2      │    0.1 │    0.5 │
-    └─────────┴────────┴────────┘
-    ┌─────────┬────────┐
-    │ SAMPLE  │ prs_ds │
-    │ varchar │ double │
-    ├─────────┼────────┤
-    │ S1      │   1.69 │
-    │ S2      │   0.32 │
-    └─────────┴────────┘
     ┌─────────┬────────┬────────┐
     │ SAMPLE  │ prs_a  │ prs_b  │
     │ varchar │ double │ double │
@@ -604,7 +671,6 @@ FROM bcftools_score(
 ### Liftover score-style rows
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
        mapped, reverse_complemented, reject_reason, note
 FROM duckdb_liftover(
@@ -635,21 +701,12 @@ FROM duckdb_liftover(
 ### Sequence utilities
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT
   NAME,
   seq_hash_2bit(substr(SEQUENCE, 1, 12)) AS hash_2bit_prefix,
   seq_encode_4bit(substr(SEQUENCE, 1, 16)) AS codes,
   seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 16))) AS roundtrip
 FROM read_fasta('test/data/ce.fa')
-LIMIT 2;
-
-SELECT
-  NAME,
-  MATE,
-  seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
-  seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
-FROM read_fastq('test/data/interleaved.fq', interleaved := true)
 LIMIT 2;
 ```
 
@@ -660,6 +717,17 @@ LIMIT 2;
     │ CHROMOSOME_I  │          9898352 │ [4, 2, 2, 8, 1, 1, 4, 2, 2, 8, 1, 1, 4, 2, 2, 8] │ GCCTAAGCCTAAGCCT │
     │ CHROMOSOME_II │          6038978 │ [2, 2, 8, 1, 1, 4, 2, 2, 8, 1, 1, 4, 2, 2, 8, 1] │ CCTAAGCCTAAGCCTA │
     └───────────────┴──────────────────┴──────────────────────────────────────────────────┴──────────────────┘
+
+``` sql
+SELECT
+  NAME,
+  MATE,
+  seq_encode_4bit(substr(SEQUENCE, 1, 12)) AS codes,
+  seq_decode_4bit(seq_encode_4bit(substr(SEQUENCE, 1, 12))) AS roundtrip
+FROM read_fastq('test/data/interleaved.fq', interleaved := true)
+LIMIT 2;
+```
+
     ┌─────────────────────────────────┬────────┬──────────────────────────────────────┬──────────────┐
     │              NAME               │  MATE  │                codes                 │  roundtrip   │
     │             varchar             │ uint16 │               uint8[]                │   varchar    │
@@ -693,10 +761,18 @@ For BAM/CRAM, qualities are already stored as numeric values, so there
 is no FASTQ text-encoding ambiguity on input.
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT *
 FROM detect_quality_encoding('test/data/legacy_phred64.fq');
+```
 
+    ┌─────────┬────────────────────┬────────────────────┬─────────────────┬──────────────────────────┬──────────────────┬──────────────┐
+    │ format  │ observed_ascii_min │ observed_ascii_max │ records_sampled │   compatible_encodings   │ guessed_encoding │ is_ambiguous │
+    │ varchar │       int64        │       int64        │      int64      │         varchar          │     varchar      │   boolean    │
+    ├─────────┼────────────────────┼────────────────────┼─────────────────┼──────────────────────────┼──────────────────┼──────────────┤
+    │ fastq   │                104 │                104 │               1 │ phred33,phred64,solexa64 │ phred64          │ true         │
+    └─────────┴────────────────────┴────────────────────┴─────────────────┴──────────────────────────┴──────────────────┴──────────────┘
+
+``` sql
 WITH q AS (
   SELECT NAME, QUALITY
   FROM read_fastq(
@@ -718,12 +794,6 @@ ORDER BY pos, phred
 LIMIT 12;
 ```
 
-    ┌─────────┬────────────────────┬────────────────────┬─────────────────┬──────────────────────────┬──────────────────┬──────────────┐
-    │ format  │ observed_ascii_min │ observed_ascii_max │ records_sampled │   compatible_encodings   │ guessed_encoding │ is_ambiguous │
-    │ varchar │       int64        │       int64        │      int64      │         varchar          │     varchar      │   boolean    │
-    ├─────────┼────────────────────┼────────────────────┼─────────────────┼──────────────────────────┼──────────────────┼──────────────┤
-    │ fastq   │                104 │                104 │               1 │ phred33,phred64,solexa64 │ phred64          │ true         │
-    └─────────┴────────────────────┴────────────────────┴─────────────────┴──────────────────────────┴──────────────────┴──────────────┘
     ┌───────┬───────┬─────────┐
     │  pos  │ phred │ n_reads │
     │ int64 │ uint8 │  int64  │
@@ -746,49 +816,9 @@ LIMIT 12;
 ### Metadata + export/index helpers
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT idx, raw
 FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
 LIMIT 3;
-
-SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
-FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
-LIMIT 3;
-
-SELECT index_type, octet_length(raw) AS raw_bytes
-FROM read_hts_index_raw('test/data/formatcols.vcf.gz');
-
-COPY (
-  SELECT chrom, start, "end", name
-  FROM read_bed('test/data/targets.bed')
-) TO '/tmp/duckhts_readme_targets.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE);
-
-SELECT success, output_path, bytes_out
-FROM bgzip('/tmp/duckhts_readme_targets.bed',
-           output_path := '/tmp/duckhts_readme_targets.bed.gz',
-           keep := TRUE,
-           overwrite := TRUE);
-
-SELECT success, output_path, bytes_out
-FROM bgunzip('/tmp/duckhts_readme_targets.bed.gz',
-             output_path := '/tmp/duckhts_readme_targets.roundtrip.bed',
-             keep := TRUE,
-             overwrite := TRUE);
-
-SELECT success, index_format, index_path
-FROM bam_index('test/data/range.bam',
-               index_path := '/tmp/duckhts_readme_range.bam.bai',
-               threads := 1);
-
-SELECT success, index_format, index_path
-FROM bcf_index('test/data/vcf_file.bcf',
-               index_path := '/tmp/duckhts_readme_vcf_file.bcf.csi',
-               threads := 1);
-
-SELECT success, index_format, index_path
-FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
-                 preset := 'bed',
-                 index_path := '/tmp/duckhts_readme_targets.bed.gz.tbi');
 ```
 
     ┌───────┬─────────────────────────────────────────────────────┐
@@ -799,42 +829,104 @@ FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
     │     1 │ ##FILTER=<ID=PASS,Description="All filters passed"> │
     │     2 │ ##contig=<ID=1>                                     │
     └───────┴─────────────────────────────────────────────────────┘
+
+``` sql
+SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
+FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
+LIMIT 3;
+```
+
     ┌─────────┬───────┬────────────┬──────────────┬──────────────┐
     │ seqname │  tid  │ index_type │ chunk_beg_vo │ chunk_end_vo │
     │ varchar │ int64 │  varchar   │    uint64    │    uint64    │
     ├─────────┼───────┼────────────┼──────────────┼──────────────┤
     │ 1       │     0 │ CSI        │     20381696 │     23789568 │
     └─────────┴───────┴────────────┴──────────────┴──────────────┘
+
+``` sql
+SELECT index_type, octet_length(raw) AS raw_bytes
+FROM read_hts_index_raw('test/data/formatcols.vcf.gz');
+```
+
     ┌────────────┬───────────┐
     │ index_type │ raw_bytes │
     │  varchar   │   int64   │
     ├────────────┼───────────┤
     │ CSI        │        30 │
     └────────────┴───────────┘
+
+``` sql
+COPY (
+  SELECT chrom, start, "end", name
+  FROM read_bed('test/data/targets.bed')
+) TO '/tmp/duckhts_readme_targets.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE);
+```
+
+``` sql
+SELECT success, output_path, bytes_out
+FROM bgzip('/tmp/duckhts_readme_targets.bed',
+           output_path := '/tmp/duckhts_readme_targets.bed.gz',
+           keep := TRUE,
+           overwrite := TRUE);
+```
+
     ┌─────────┬────────────────────────────────────┬───────────┐
     │ success │            output_path             │ bytes_out │
     │ boolean │              varchar               │   int64   │
     ├─────────┼────────────────────────────────────┼───────────┤
     │ true    │ /tmp/duckhts_readme_targets.bed.gz │       107 │
     └─────────┴────────────────────────────────────┴───────────┘
+
+``` sql
+SELECT success, output_path, bytes_out
+FROM bgunzip('/tmp/duckhts_readme_targets.bed.gz',
+             output_path := '/tmp/duckhts_readme_targets.roundtrip.bed',
+             keep := TRUE,
+             overwrite := TRUE);
+```
+
     ┌─────────┬───────────────────────────────────────────┬───────────┐
     │ success │                output_path                │ bytes_out │
     │ boolean │                  varchar                  │   int64   │
     ├─────────┼───────────────────────────────────────────┼───────────┤
     │ true    │ /tmp/duckhts_readme_targets.roundtrip.bed │       106 │
     └─────────┴───────────────────────────────────────────┴───────────┘
+
+``` sql
+SELECT success, index_format, index_path
+FROM bam_index('test/data/range.bam',
+               index_path := '/tmp/duckhts_readme_range.bam.bai',
+               threads := 1);
+```
+
     ┌─────────┬──────────────┬───────────────────────────────────┐
     │ success │ index_format │            index_path             │
     │ boolean │   varchar    │              varchar              │
     ├─────────┼──────────────┼───────────────────────────────────┤
     │ true    │ BAI          │ /tmp/duckhts_readme_range.bam.bai │
     └─────────┴──────────────┴───────────────────────────────────┘
+
+``` sql
+SELECT success, index_format, index_path
+FROM bcf_index('test/data/vcf_file.bcf',
+               index_path := '/tmp/duckhts_readme_vcf_file.bcf.csi',
+               threads := 1);
+```
+
     ┌─────────┬──────────────┬──────────────────────────────────────┐
     │ success │ index_format │              index_path              │
     │ boolean │   varchar    │               varchar                │
     ├─────────┼──────────────┼──────────────────────────────────────┤
     │ true    │ CSI          │ /tmp/duckhts_readme_vcf_file.bcf.csi │
     └─────────┴──────────────┴──────────────────────────────────────┘
+
+``` sql
+SELECT success, index_format, index_path
+FROM tabix_index('/tmp/duckhts_readme_targets.bed.gz',
+                 preset := 'bed',
+                 index_path := '/tmp/duckhts_readme_targets.bed.gz.tbi');
+```
+
     ┌─────────┬──────────────┬────────────────────────────────────────┐
     │ success │ index_format │               index_path               │
     │ boolean │   varchar    │                varchar                 │
@@ -849,8 +941,10 @@ glob pattern. Because DuckDB’s `query()` cannot accept subquery
 expressions, use the `SET VARIABLE` + `getvariable()` pattern:
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SET VARIABLE q = hts_union_query('read_fastq', 'test/data/r*.fq');
+```
+
+``` sql
 SELECT filename, count(*) AS n
 FROM query(getvariable('q'))
 GROUP BY ALL;
@@ -867,9 +961,11 @@ GROUP BY ALL;
 Per-file parameters can be passed as the third argument (SQL literal):
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SET VARIABLE q = hts_union_query('read_bam', 'test/data/range.bam',
                                   'region := ''CHROMOSOME_I:1-1000''');
+```
+
+``` sql
 SELECT count(*) AS n FROM query(getvariable('q'));
 ```
 
@@ -895,7 +991,6 @@ to point at an external htslib plugin directory).
 Example (works in static-handler mode and plugin mode):
 
 ``` sql
-LOAD 'build/release/duckhts.duckdb_extension';
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')
@@ -1029,7 +1124,11 @@ See the htslib S3 plugin documentation for full details, URL syntax, and
 short‑lived credentials support:
 <https://www.htslib.org/doc/htslib-s3-plugin.html>
 
-## Building
+## Development
+
+This README is rendered with
+[`duckknit`](https://github.com/rundel/duckknit) to execute SQL snippets
+in a persistent DuckDB session.
 
 ### Environment setup
 
@@ -1049,6 +1148,8 @@ MinGW/RTools for Windows.
 - CMake ≥ 3.5
 - Make
 - Python 3 + venv
+- R with the `rmarkdown` and
+  [`duckknit`](https://github.com/rundel/duckknit) packages.
 - Git
 - [htslib](https://github.com/samtools/htslib) build dependencies: zlib,
   libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
@@ -1370,6 +1471,7 @@ dbDisconnect(con, shutdown = TRUE)
   <https://github.com/duckdb/extension-template-c>
 - htslib: <https://github.com/samtools/htslib>
 - RBCFTools: <https://github.com/RGenomicsETL/RBCFTools>
+- duckknit: <https://github.com/rundel/duckknit>
 
 ## License
 
