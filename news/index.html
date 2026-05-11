@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.1-0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.1.9000-0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,7 +33,7 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="1.2.1-0.1.0" id="rduckhts-121-010-2026-05-07">Rduckhts 1.2.1-0.1.0 (2026-05-07)<a class="anchor" aria-label="anchor" href="#rduckhts-121-010-2026-05-07"></a></h2>
+<h2 class="pkg-version" data-toc-text="1.2.1-0.1.0" id="rduckhts-121-010-2026-05-07">Rduckhts 1.2.1-0.1.0 (2026-05-07)<a class="anchor" aria-label="anchor" href="#rduckhts-121-010-2026-05-07"></a></h2><p class="text-muted">CRAN release: 2026-05-07</p>
 <ul><li>compile bundled DuckHTS extension sources with <code>-Wpedantic</code> during Unix and Windows package builds while leaving vendored <code>htslib</code> on its upstream warning flags</li>
 <li>fix the bundled non-Emscripten <code>wasm_http_hfile.c</code> translation unit so native package builds do not warn about an empty source file under pedantic C diagnostics</li>
 <li>harden Windows <code>configure.win</code> libcurl detection: the package now requires a successful <code>curl_easy_init</code> link using the detected <code>pkg-config</code> libcurl dependency closure before enabling htslib remote URL support, and otherwise disables libcurl/S3/GCS cleanly</li>

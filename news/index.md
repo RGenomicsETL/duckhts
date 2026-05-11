@@ -2,6 +2,8 @@
 
 ## Rduckhts 1.2.1-0.1.0 (2026-05-07)
 
+CRAN release: 2026-05-07
+
 - compile bundled DuckHTS extension sources with `-Wpedantic` during
   Unix and Windows package builds while leaving vendored `htslib` on its
   upstream warning flags
