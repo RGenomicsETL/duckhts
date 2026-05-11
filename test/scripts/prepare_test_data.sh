@@ -137,9 +137,9 @@ EOF
 done
 echo "  GFF/GTF strict-validation and attribute fixtures"
 
-# ---- vcfppR-generated VCF compliance fixtures ----
+# ---- vcfppR-generated VCF fixtures (spec/mapping/regression) + manifest ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
-echo "  vcfppR-generated VCF spec/mapping fixtures + manifest"
+echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"
 
 # ---- Parallel empty-contig VCF regression fixture (bgzip + tabix) ----
 for out_dir in "$DST" "$PKG_DST"; do

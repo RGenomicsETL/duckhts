@@ -3,4 +3,5 @@ mapping	format_string_list.vcf	FORMAT string list example for Number=. fields su
 mapping	fixed_count_arrays.vcf	Exact fixed-cardinality INFO/FORMAT arrays for Number=2 and Number=4
 mapping	mapping_number_families.vcf	Representative Number=1/A/R/G/. mappings across INFO and FORMAT fields
 mapping	parallel_empty_contigs.vcf	Indexed parallel-scan regression with leading empty contigs before live records
+regression	bcf_filter_list_regression.vcf	read_bcf FILTER list-materialization regression for multi-entry and PASS values
 spec	spec_standard_corrections.vcf	Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic
