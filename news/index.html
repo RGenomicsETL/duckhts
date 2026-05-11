@@ -34,7 +34,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.2.1-0.1.0" id="rduckhts-121-010-2026-05-07">Rduckhts 1.2.1-0.1.0 (2026-05-07)<a class="anchor" aria-label="anchor" href="#rduckhts-121-010-2026-05-07"></a></h2><p class="text-muted">CRAN release: 2026-05-07</p>
-<ul><li>compile bundled DuckHTS extension sources with <code>-Wpedantic</code> during Unix and Windows package builds while leaving vendored <code>htslib</code> on its upstream warning flags</li>
+<ul><li>fix bundled <code><a href="../reference/rduckhts_bcf.html">rduckhts_bcf()</a></code> / <code>read_bcf(...)</code> scanning stability for records where <code>FILTER</code> lists were emitted without reserving list-vector capacity, which could crash with allocator corruption (<code>double free</code>/<code>invalid pointer</code>) during full-table reads; <code>FILTER</code> entries now reserve child-list space before writes and scans are stable on files previously triggering crashes</li>
+<li>compile bundled DuckHTS extension sources with <code>-Wpedantic</code> during Unix and Windows package builds while leaving vendored <code>htslib</code> on its upstream warning flags</li>
 <li>fix the bundled non-Emscripten <code>wasm_http_hfile.c</code> translation unit so native package builds do not warn about an empty source file under pedantic C diagnostics</li>
 <li>harden Windows <code>configure.win</code> libcurl detection: the package now requires a successful <code>curl_easy_init</code> link using the detected <code>pkg-config</code> libcurl dependency closure before enabling htslib remote URL support, and otherwise disables libcurl/S3/GCS cleanly</li>
 </ul></div>

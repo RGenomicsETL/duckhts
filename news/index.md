@@ -4,6 +4,13 @@
 
 CRAN release: 2026-05-07
 
+- fix bundled
+  [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
+  / `read_bcf(...)` scanning stability for records where `FILTER` lists
+  were emitted without reserving list-vector capacity, which could crash
+  with allocator corruption (`double free`/`invalid pointer`) during
+  full-table reads; `FILTER` entries now reserve child-list space before
+  writes and scans are stable on files previously triggering crashes
 - compile bundled DuckHTS extension sources with `-Wpedantic` during
   Unix and Windows package builds while leaving vendored `htslib` on its
   upstream warning flags
