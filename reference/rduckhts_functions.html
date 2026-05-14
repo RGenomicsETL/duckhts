@@ -70,50 +70,51 @@ functions.yaml manifest in the duckhts repository."></head><body>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">catalog</span> <span class="op">&lt;-</span> <span class="fu">rduckhts_functions</span><span class="op">(</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="va">catalog</span>, <span class="va">category</span> <span class="op">==</span> <span class="st">"Sequence UDFs"</span>, select <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"name"</span>, <span class="st">"description"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>               name</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 43     seq_revcomp</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 44   seq_canonical</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 45   seq_hash_2bit</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 46 seq_encode_4bit</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 47 seq_decode_4bit</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 48  seq_gc_content</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 49       seq_kmers</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 44     seq_revcomp</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 45   seq_canonical</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 46   seq_hash_2bit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 47 seq_encode_4bit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 48 seq_decode_4bit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 49  seq_gc_content</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 50       seq_kmers</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>                                                                                              description</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 43                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 44                        Return the lexicographically smaller of a sequence and its reverse complement.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 45                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 46 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 47                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 48                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 49                              Expand a sequence into positional k-mers with optional canonicalization.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 44                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 45                        Return the lexicographically smaller of a sequence and its reverse complement.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 46                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 47 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 48                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 49                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 50                              Expand a sequence into positional k-mers with optional canonicalization.</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="fu">rduckhts_functions</span><span class="op">(</span>kind <span class="op">=</span> <span class="st">"table"</span><span class="op">)</span>, select <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"name"</span>, <span class="st">"r_wrapper"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>                              name                        r_wrapper</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 1                        read_bcf                     rduckhts_bcf</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 2                        read_bam                     rduckhts_bam</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 3                      read_fasta                   rduckhts_fasta</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 4                        read_bed                     rduckhts_bed</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 5                       fasta_nuc               rduckhts_fasta_nuc</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 6       duckhts_cgranges_overlaps                                 </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 7  duckhts_cgranges_overlaps_bulk                                 </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 8                      read_fastq                   rduckhts_fastq</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 9         detect_quality_encoding rduckhts_detect_quality_encoding</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 10                       read_gff                     rduckhts_gff</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 11                       read_gtf                     rduckhts_gtf</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 12                     read_tabix                   rduckhts_tabix</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 13                    fasta_index             rduckhts_fasta_index</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 14                          bgzip                   rduckhts_bgzip</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 15                        bgunzip                 rduckhts_bgunzip</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 16                      bam_index               rduckhts_bam_index</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 17                      bcf_index               rduckhts_bcf_index</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 18                    tabix_index             rduckhts_tabix_index</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 19                 bam_bin_counts          rduckhts_bam_bin_counts</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 20       duckhts_bam_bed_coverage        rduckhts_bam_bed_coverage</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 21               duckhts_mosdepth                rduckhts_mosdepth</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 22      duckhts_samtools_idxstats       rduckhts_samtools_idxstats</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 23                read_hts_header              rduckhts_hts_header</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 24                 read_hts_index               rduckhts_hts_index</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 25           read_hts_index_spans         rduckhts_hts_index_spans</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 26                 bcftools_score                   rduckhts_score</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 27                      seq_kmers                                 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3                     read_pileup                  rduckhts_pileup</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4                      read_fasta                   rduckhts_fasta</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5                        read_bed                     rduckhts_bed</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6                       fasta_nuc               rduckhts_fasta_nuc</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7       duckhts_cgranges_overlaps                                 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8  duckhts_cgranges_overlaps_bulk                                 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 9                      read_fastq                   rduckhts_fastq</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 10        detect_quality_encoding rduckhts_detect_quality_encoding</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 11                       read_gff                     rduckhts_gff</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 12                       read_gtf                     rduckhts_gtf</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 13                     read_tabix                   rduckhts_tabix</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 14                    fasta_index             rduckhts_fasta_index</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 15                          bgzip                   rduckhts_bgzip</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 16                        bgunzip                 rduckhts_bgunzip</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 17                      bam_index               rduckhts_bam_index</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 18                      bcf_index               rduckhts_bcf_index</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 19                    tabix_index             rduckhts_tabix_index</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 20                 bam_bin_counts          rduckhts_bam_bin_counts</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 21       duckhts_bam_bed_coverage        rduckhts_bam_bed_coverage</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 22               duckhts_mosdepth                rduckhts_mosdepth</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 23      duckhts_samtools_idxstats       rduckhts_samtools_idxstats</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 24                read_hts_header              rduckhts_hts_header</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 25                 read_hts_index               rduckhts_hts_index</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 26           read_hts_index_spans         rduckhts_hts_index_spans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 27                 bcftools_score                   rduckhts_score</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 28                      seq_kmers                                 </span>
 <span class="r-in"><span></span></span>
 </code></pre></div>
     </div>

@@ -13,6 +13,7 @@ rduckhts_fasta_multi(
   files,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   sequence_encoding = NULL,
   .params = NULL,
   overwrite = FALSE
@@ -40,6 +41,10 @@ rduckhts_fasta_multi(
 - index_path:
 
   Optional index file path.
+
+- gzi_path:
+
+  Optional explicit BGZF FASTA block index path (.gzi).
 
 - sequence_encoding:
 

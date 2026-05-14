@@ -56,6 +56,7 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 <span>  auxiliary_tags <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  sequence_encoding <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  quality_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  cigar_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  .params <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
@@ -99,11 +100,16 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 
 
 <dt id="arg-sequence-encoding">sequence_encoding<a class="anchor" aria-label="anchor" href="#arg-sequence-encoding"></a></dt>
-<dd><p>Optional sequence encoding (e.g. <code>"twoBit"</code>).</p></dd>
+<dd><p>Optional sequence encoding (e.g. <code>"nt16"</code>).</p></dd>
 
 
 <dt id="arg-quality-representation">quality_representation<a class="anchor" aria-label="anchor" href="#arg-quality-representation"></a></dt>
 <dd><p>Optional quality representation.</p></dd>
+
+
+<dt id="arg-cigar-representation">cigar_representation<a class="anchor" aria-label="anchor" href="#arg-cigar-representation"></a></dt>
+<dd><p>Optional CIGAR representation; use
+<code>"binary"</code> for packed BAM operations.</p></dd>
 
 
 <dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>

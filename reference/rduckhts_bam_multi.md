@@ -18,6 +18,7 @@ rduckhts_bam_multi(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  cigar_representation = NULL,
   decompression_threads = 2,
   .params = NULL,
   overwrite = FALSE
@@ -60,11 +61,16 @@ rduckhts_bam_multi(
 
 - sequence_encoding:
 
-  Optional sequence encoding (e.g. `"twoBit"`).
+  Optional sequence encoding (e.g. `"nt16"`).
 
 - quality_representation:
 
   Optional quality representation.
+
+- cigar_representation:
+
+  Optional CIGAR representation; use `"binary"` for packed BAM
+  operations.
 
 - decompression_threads:
 

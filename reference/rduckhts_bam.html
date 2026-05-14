@@ -50,6 +50,7 @@
 <span>  auxiliary_tags <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  sequence_encoding <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  quality_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  cigar_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -101,6 +102,13 @@
 <dd><p>Character. Quality representation for the QUAL column:
 <code>"string"</code> (default) returns canonical Phred+33 text;
 <code>"phred"</code> returns raw Phred values as <code>UTINYINT[]</code>.</p></dd>
+
+
+<dt id="arg-cigar-representation">cigar_representation<a class="anchor" aria-label="anchor" href="#arg-cigar-representation"></a></dt>
+<dd><p>Character. CIGAR representation for the CIGAR column:
+<code>"string"</code> (default) returns SAM text such as <code>"36M"</code>;
+<code>"binary"</code> returns packed BAM operations as <code>UINTEGER[]</code> where each
+element is <code>(len &lt;&lt; 4) | op</code>.</p></dd>
 
 
 <dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>

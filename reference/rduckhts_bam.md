@@ -17,6 +17,7 @@ rduckhts_bam(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  cigar_representation = NULL,
   decompression_threads = 2,
   overwrite = FALSE
 )
@@ -69,6 +70,13 @@ rduckhts_bam(
   Character. Quality representation for the QUAL column: `"string"`
   (default) returns canonical Phred+33 text; `"phred"` returns raw Phred
   values as `UTINYINT[]`.
+
+- cigar_representation:
+
+  Character. CIGAR representation for the CIGAR column: `"string"`
+  (default) returns SAM text such as `"36M"`; `"binary"` returns packed
+  BAM operations as `UINTEGER[]` where each element is
+  `(len << 4) | op`.
 
 - decompression_threads:
 

@@ -82,6 +82,8 @@
   : Native mosdepth-Compatible Coverage Outputs
 - [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_munge.md)
   : Munge Summary Statistics Rows
+- [`rduckhts_pileup()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_pileup.md)
+  : Create BAM Pileup Table
 - [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.md)
   : samtools idxstats-Compatible Alignment Summary
 - [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)

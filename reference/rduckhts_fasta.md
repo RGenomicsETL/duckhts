@@ -11,6 +11,7 @@ rduckhts_fasta(
   path,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   sequence_encoding = NULL,
   overwrite = FALSE
 )
@@ -38,6 +39,11 @@ rduckhts_fasta(
 - index_path:
 
   Optional explicit path to FASTA index file (.fai)
+
+- gzi_path:
+
+  Optional explicit BGZF FASTA block index path (.gzi) for bgzipped
+  FASTA inputs when the sidecar is not colocated with the FASTA.
 
 - sequence_encoding:
 

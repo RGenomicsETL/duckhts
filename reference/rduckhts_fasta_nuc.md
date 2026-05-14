@@ -13,6 +13,7 @@ rduckhts_fasta_nuc(
   bin_width = NULL,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   bed_index_path = NULL,
   include_seq = FALSE
 )
@@ -44,6 +45,11 @@ rduckhts_fasta_nuc(
 - index_path:
 
   Optional explicit FASTA index path
+
+- gzi_path:
+
+  Optional explicit BGZF FASTA block index path (.gzi) for bgzipped
+  FASTA inputs when the sidecar is not colocated with the FASTA.
 
 - bed_index_path:
 

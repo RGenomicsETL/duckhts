@@ -4,6 +4,24 @@
 
 CRAN release: 2026-05-07
 
+- add
+  [`rduckhts_pileup()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_pileup.md)
+  and bundle native `read_pileup(...)` for region-scoped BAM pileups
+  with per-position `chrom`, `pos`, `depth`, `bases`, and `quals`;
+  expose bundled `read_bam(..., cigar_representation := 'binary')`
+  through `rduckhts_bam(..., cigar_representation = "binary")` and
+  multi-file BAM wrappers, returning packed BAM CIGAR ops as
+  `UINTEGER[]`; and expose explicit `gzi_path` arguments in
+  [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta.md),
+  [`rduckhts_fasta_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_multi.md),
+  and
+  [`rduckhts_fasta_nuc()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_nuc.md)
+  so packaged bgzipped FASTA workflows can use relocated `.gzi` sidecars
+- speed up bundled
+  [`rduckhts_fasta_nuc()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_nuc.md)
+  / `fasta_nuc(...)` nucleotide counting on capable x86_64 hosts with an
+  AVX2+popcnt fast path selected via htslib-style runtime dispatch,
+  while preserving the scalar fallback everywhere else
 - fix bundled
   [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
   / `read_bcf(...)` scanning stability for records where `FILTER` lists

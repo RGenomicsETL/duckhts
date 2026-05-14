@@ -49,6 +49,7 @@ generated fixed-width bins.</p>
 <span>  bin_width <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  region <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  gzi_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  bed_index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  include_seq <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -80,6 +81,11 @@ generated fixed-width bins.</p>
 
 <dt id="arg-index-path">index_path<a class="anchor" aria-label="anchor" href="#arg-index-path"></a></dt>
 <dd><p>Optional explicit FASTA index path</p></dd>
+
+
+<dt id="arg-gzi-path">gzi_path<a class="anchor" aria-label="anchor" href="#arg-gzi-path"></a></dt>
+<dd><p>Optional explicit BGZF FASTA block index path (.gzi) for
+bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.</p></dd>
 
 
 <dt id="arg-bed-index-path">bed_index_path<a class="anchor" aria-label="anchor" href="#arg-bed-index-path"></a></dt>
