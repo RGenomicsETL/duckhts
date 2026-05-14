@@ -11,6 +11,7 @@ rduckhts_fasta_nuc(
   bin_width = NULL,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   bed_index_path = NULL,
   include_seq = FALSE
 )
@@ -27,6 +28,9 @@ rduckhts_fasta_nuc(
 \item{region}{Optional FASTA region filter}
 
 \item{index_path}{Optional explicit FASTA index path}
+
+\item{gzi_path}{Optional explicit BGZF FASTA block index path (.gzi) for
+bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.}
 
 \item{bed_index_path}{Optional explicit BED tabix index path}
 

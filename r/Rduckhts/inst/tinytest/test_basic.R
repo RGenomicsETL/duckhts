@@ -8,6 +8,7 @@ expect_true(requireNamespace("Rduckhts", quietly = TRUE))
 expect_true(exists("rduckhts_load"))
 expect_true(exists("rduckhts_bcf"))
 expect_true(exists("rduckhts_bam"))
+expect_true(exists("rduckhts_pileup"))
 expect_true(exists("rduckhts_bam_index"))
 expect_true(exists("rduckhts_bcf_index"))
 expect_true(exists("rduckhts_bgzip"))
@@ -45,7 +46,11 @@ expect_identical(
   names(formals(rduckhts_bam)),
   c("con", "table_name", "path", "region", "index_path", "reference",
     "standard_tags", "auxiliary_tags", "sequence_encoding",
-    "quality_representation", "decompression_threads", "overwrite")
+    "quality_representation", "cigar_representation", "decompression_threads", "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_pileup)),
+  c("con", "table_name", "path", "region", "index_path", "min_mapq", "flag_mask", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bam_index)),
@@ -88,7 +93,7 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_fasta)),
   c("con", "table_name", "path", "region", "index_path",
-    "sequence_encoding", "overwrite")
+    "gzi_path", "sequence_encoding", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_fasta_index)),
@@ -281,7 +286,7 @@ expect_identical(
   names(formals(rduckhts_bam_multi)),
   c("con", "table_name", "files", "region", "index_path", "reference",
     "standard_tags", "auxiliary_tags", "sequence_encoding",
-    "quality_representation", "decompression_threads", ".params", "overwrite")
+    "quality_representation", "cigar_representation", "decompression_threads", ".params", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bcf_multi)),
@@ -297,7 +302,7 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_fasta_multi)),
   c("con", "table_name", "files", "region", "index_path",
-    "sequence_encoding", ".params", "overwrite")
+    "gzi_path", "sequence_encoding", ".params", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bed_multi)),

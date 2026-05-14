@@ -1,0 +1,85 @@
+# name: test/sql/read_pileup.test
+# description: Region-scoped BAM pileup rows via htslib pileup engine
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT count(*)
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:900-1100',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+);
+----
+133
+
+query T
+SELECT typeof(chrom) || ',' || typeof(pos) || ',' || typeof(depth) || ',' || typeof(bases) || ',' || typeof(quals)
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:900-1100',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+)
+LIMIT 1;
+----
+VARCHAR,BIGINT,INTEGER,VARCHAR,VARCHAR
+
+query TTTTT
+SELECT chrom, pos::VARCHAR, depth::VARCHAR, bases, quals
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:900-1100',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+)
+ORDER BY pos
+LIMIT 5;
+----
+CHROMOSOME_I	914	1	a	G
+CHROMOSOME_I	915	1	g	G
+CHROMOSOME_I	916	1	c	G
+CHROMOSOME_I	917	1	t	F
+CHROMOSOME_I	918	1	a	G
+
+query II
+SELECT count(*) FILTER (WHERE depth = length(bases) AND depth = length(quals)),
+       max(depth)
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:900-1100',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+);
+----
+133	2
+
+query I
+SELECT count(*)
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:900-1100',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+  min_mapq := 255
+);
+----
+0
+
+query III
+SELECT count(*), min(pos), max(pos)
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:930-980',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+  min_mapq := 20
+);
+----
+51	930	980
+
+statement error
+SELECT *
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'bad region',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+);
+----
+failed to parse region

@@ -1,0 +1,47 @@
+# name: test/sql/bam_cigar_binary.test
+# description: read_bam binary CIGAR representation
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT count(*)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  cigar_representation := 'binary'
+);
+----
+112
+
+query T
+SELECT typeof(CIGAR)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  cigar_representation := 'binary'
+)
+LIMIT 1;
+----
+UINTEGER[]
+
+query T
+SELECT CIGAR::VARCHAR
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  cigar_representation := 'binary'
+)
+ORDER BY POS
+LIMIT 3;
+----
+[1248, 18, 352]
+[1600]
+[928, 18, 672]
+
+statement error
+SELECT *
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  cigar_representation := 'invalid'
+)
+LIMIT 1;
+----
+cigar_representation must be 'string' or 'binary'

@@ -73,6 +73,7 @@ set(EXTENSION_SOURCES
         src/duckhts.c
         src/bcf_reader.c
         src/bam_reader.c
+        src/bam_pileup.c
         src/bgzip.c
         src/hts_index_builder.c
         src/liftover_udf.c

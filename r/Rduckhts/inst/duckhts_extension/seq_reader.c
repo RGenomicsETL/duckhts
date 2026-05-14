@@ -15,6 +15,11 @@
  *   read_fasta(path) → (NAME VARCHAR, DESCRIPTION VARCHAR, SEQUENCE VARCHAR)
  *   read_fastq(path) → (NAME VARCHAR, DESCRIPTION VARCHAR, SEQUENCE VARCHAR, QUALITY VARCHAR)
  *
+ * read_fasta named parameters:
+ *   - region := 'chr:start-end[,chr2:...]' for indexed faidx fetches
+ *   - index_path := explicit .fai path
+ *   - gzi_path := explicit BGZF .gzi path for bgzipped FASTA
+ *
  * Note: htslib's FASTA/FASTQ reader stores the comment/description in
  * bam_get_l_aux(b) area as a "CO" aux tag when present.
  */
@@ -59,6 +64,7 @@ typedef struct {
     char *file_path;
     char *mate_path;
     char *index_path;
+    char *gzi_path;
     char *region;
     char **regions;
     unsigned int n_regions;
@@ -128,6 +134,7 @@ static void destroy_seq_bind(void *data) {
     if (b->file_path) duckdb_free(b->file_path);
     if (b->mate_path) duckdb_free(b->mate_path);
     if (b->index_path) duckdb_free(b->index_path);
+    if (b->gzi_path) duckdb_free(b->gzi_path);
     if (b->region) duckdb_free(b->region);
     if (b->regions) {
         for (unsigned int i = 0; i < b->n_regions; i++) {
@@ -395,6 +402,12 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
             bind->index_path = duckdb_get_varchar(index_val);
         }
         if (index_val) duckdb_destroy_value(&index_val);
+
+        duckdb_value gzi_val = duckdb_bind_get_named_parameter(info, "gzi_path");
+        if (gzi_val && !duckdb_is_null_value(gzi_val)) {
+            bind->gzi_path = duckdb_get_varchar(gzi_val);
+        }
+        if (gzi_val) duckdb_destroy_value(&gzi_val);
     }
 
     /* sequence_encoding — shared by both FASTA and FASTQ */
@@ -558,7 +571,8 @@ static void seq_read_init(duckdb_init_info info) {
                 return;
             }
         } else if (!bind->is_fastq) {
-            faidx_t *fai_count = fai_load3_format(bind->file_path, bind->index_path, NULL, 0, FAI_FASTA);
+            faidx_t *fai_count = fai_load3_format(bind->file_path, bind->index_path,
+                                                  bind->gzi_path, 0, FAI_FASTA);
             if (fai_count) {
                 init->count_only = 1;
                 init->count_remaining = (uint64_t)faidx_nseq(fai_count);
@@ -640,7 +654,8 @@ static void seq_read_init(duckdb_init_info info) {
     }
 
     if (!bind->is_fastq && bind->n_regions > 0) {
-        init->fai = fai_load3_format(bind->file_path, bind->index_path, NULL, 0, FAI_FASTA);
+        init->fai = fai_load3_format(bind->file_path, bind->index_path,
+                                     bind->gzi_path, 0, FAI_FASTA);
         if (!init->fai) {
             duckdb_init_set_error(info, "read_fasta: region query requires a FASTA index (.fai); run fasta_index(path) first");
             destroy_seq_init(init);
@@ -1112,6 +1127,7 @@ void register_read_fasta_function(duckdb_connection connection) {
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "gzi_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "sequence_encoding", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 

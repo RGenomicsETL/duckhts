@@ -99,6 +99,16 @@ test_seq_ops <- function() {
     "     (SELECT SEQ FROM bam_str LIMIT 1) s"))
   expect_true(bam_rt$match[1])
 
+  # wrapper: binary CIGAR representation returns packed BAM ops
+  rduckhts_bam(con, "bam_cigar_bin", bam_path,
+    cigar_representation = "binary", overwrite = TRUE)
+  bam_cigar_bin_type <- DBI::dbGetQuery(con,
+    "SELECT typeof(CIGAR) AS t FROM bam_cigar_bin LIMIT 1")
+  expect_equal(bam_cigar_bin_type$t[1], "UINTEGER[]")
+  bam_cigar_bin_txt <- DBI::dbGetQuery(con,
+    "SELECT CIGAR::VARCHAR AS cigar FROM bam_cigar_bin ORDER BY POS LIMIT 1")
+  expect_equal(bam_cigar_bin_txt$cigar[1], "[1248, 18, 352]")
+
   # row counts match between encodings
   bam_str_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM bam_str")
   bam_nt16_n <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM bam_nt16")
@@ -114,6 +124,9 @@ test_seq_ops <- function() {
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(
     "SELECT * FROM read_bam('%s', sequence_encoding := 'invalid') LIMIT 1",
+    bam_path)))
+  expect_error(DBI::dbGetQuery(con, sprintf(
+    "SELECT * FROM read_bam('%s', cigar_representation := 'invalid') LIMIT 1",
     bam_path)))
 
   # direct SQL: invalid decompression thread count errors
@@ -161,6 +174,44 @@ test_seq_ops <- function() {
     "'%s', index_path := '%s', sequence_encoding := 'nt16')"
   ), fasta_path, fasta_index_path))
   expect_equal(fa_count_only$n[1], 7)
+
+  # bgzipped FASTA can use an explicit relocated .gzi sidecar
+  gz_fasta_path <- tempfile("duckhts_ce_bgz_", fileext = ".fa.gz")
+  gz_fasta_index_path <- tempfile("duckhts_ce_bgz_", fileext = ".fa.gz.fai")
+  custom_gzi_path <- tempfile("duckhts_ce_bgz_", fileext = ".gzi")
+  on.exit(unlink(c(gz_fasta_path, gz_fasta_index_path, custom_gzi_path), force = TRUE), add = TRUE)
+  expect_true(rduckhts_bgzip(
+    con,
+    fasta_path,
+    output_path = gz_fasta_path,
+    keep = TRUE,
+    overwrite = TRUE
+  )$success[1])
+  expect_true(rduckhts_fasta_index(con, gz_fasta_path, index_path = gz_fasta_index_path)$success[1])
+  default_gzi_path <- paste0(gz_fasta_path, ".gzi")
+  expect_true(file.rename(default_gzi_path, custom_gzi_path))
+  expect_error(DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT * FROM read_fasta(",
+    "'%s', region := 'CHROMOSOME_I:1-10', index_path := '%s')"
+  ), gz_fasta_path, gz_fasta_index_path)))
+  rduckhts_fasta(con, "fa_bgz_gzi", gz_fasta_path,
+    region = "CHROMOSOME_I:1-10",
+    index_path = gz_fasta_index_path,
+    gzi_path = custom_gzi_path,
+    overwrite = TRUE)
+  fa_bgz_gzi <- DBI::dbGetQuery(con,
+    "SELECT NAME, length(SEQUENCE) AS len FROM fa_bgz_gzi")
+  expect_equal(fa_bgz_gzi$NAME[1], "CHROMOSOME_I")
+  expect_equal(fa_bgz_gzi$len[1], 10)
+  fa_bgz_nuc <- rduckhts_fasta_nuc(
+    con,
+    gz_fasta_path,
+    bin_width = 10,
+    region = "CHROMOSOME_I:1-20",
+    index_path = gz_fasta_index_path,
+    gzi_path = custom_gzi_path
+  )
+  expect_equal(sum(fa_bgz_nuc$seq_len), 20)
 
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(
