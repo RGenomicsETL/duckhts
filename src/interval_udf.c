@@ -5,7 +5,8 @@
  *   -> BED3-BED12 reader with canonical typed columns and trailing extras.
  *
  * fasta_nuc(fasta_path, bed_path := NULL, bin_width := NULL, region := NULL,
- *           index_path := NULL, bed_index_path := NULL, include_seq := FALSE)
+ *           index_path := NULL, gzi_path := NULL, bed_index_path := NULL,
+ *           include_seq := FALSE)
  *   -> bedtools nuc-style interval composition metrics over either supplied
  *      BED intervals or generated fixed-width bins.
  */
@@ -13,12 +14,18 @@
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
 
+#include <config.h>
+
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H
+#include <x86intrin.h>
+#endif
 
 #include <htslib/faidx.h>
 #include <htslib/hts.h>
@@ -89,6 +96,7 @@ typedef enum {
 typedef struct {
     char *fasta_path;
     char *index_path;
+    char *gzi_path;
     char *bed_path;
     char *bed_index_path;
     char *region;
@@ -485,6 +493,7 @@ static void destroy_fasta_nuc_bind(void *data) {
     if (!bind) return;
     if (bind->fasta_path) duckdb_free(bind->fasta_path);
     if (bind->index_path) duckdb_free(bind->index_path);
+    if (bind->gzi_path) duckdb_free(bind->gzi_path);
     if (bind->bed_path) duckdb_free(bind->bed_path);
     if (bind->bed_index_path) duckdb_free(bind->bed_index_path);
     if (bind->region) duckdb_free(bind->region);
@@ -574,6 +583,11 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
     if (index_val && !duckdb_is_null_value(index_val)) index_path = duckdb_get_varchar(index_val);
     if (index_val) duckdb_destroy_value(&index_val);
 
+    char *gzi_path = NULL;
+    duckdb_value gzi_val = duckdb_bind_get_named_parameter(info, "gzi_path");
+    if (gzi_val && !duckdb_is_null_value(gzi_val)) gzi_path = duckdb_get_varchar(gzi_val);
+    if (gzi_val) duckdb_destroy_value(&gzi_val);
+
     char *bed_index_path = NULL;
     duckdb_value bed_index_val = duckdb_bind_get_named_parameter(info, "bed_index_path");
     if (bed_index_val && !duckdb_is_null_value(bed_index_val)) bed_index_path = duckdb_get_varchar(bed_index_val);
@@ -584,13 +598,14 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
     if (include_seq_val && !duckdb_is_null_value(include_seq_val)) include_seq = duckdb_get_bool(include_seq_val);
     if (include_seq_val) duckdb_destroy_value(&include_seq_val);
 
-    faidx_t *fai = fai_load3_format(fasta_path, index_path, NULL, 0, FAI_FASTA);
+    faidx_t *fai = fai_load3_format(fasta_path, index_path, gzi_path, 0, FAI_FASTA);
     if (!fai) {
         duckdb_bind_set_error(info, "fasta_nuc: failed to open FASTA index");
         duckdb_free(fasta_path);
         if (bed_path) duckdb_free(bed_path);
         if (region) duckdb_free(region);
         if (index_path) duckdb_free(index_path);
+        if (gzi_path) duckdb_free(gzi_path);
         if (bed_index_path) duckdb_free(bed_index_path);
         return;
     }
@@ -601,6 +616,7 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
     fasta_nuc_bind_data_t *bind = (fasta_nuc_bind_data_t *)duckdb_malloc(sizeof(fasta_nuc_bind_data_t));
     bind->fasta_path = fasta_path;
     bind->index_path = index_path;
+    bind->gzi_path = gzi_path;
     bind->bed_path = bed_path;
     bind->bed_index_path = bed_index_path;
     bind->region = region;
@@ -630,7 +646,8 @@ static void fasta_nuc_init(duckdb_init_info info) {
     fasta_nuc_init_data_t *init = (fasta_nuc_init_data_t *)duckdb_malloc(sizeof(fasta_nuc_init_data_t));
     memset(init, 0, sizeof(*init));
     init->bind = bind;
-    init->fai = fai_load3_format(bind->fasta_path, bind->index_path, NULL, 0, FAI_FASTA);
+    init->fai = fai_load3_format(bind->fasta_path, bind->index_path,
+                                 bind->gzi_path, 0, FAI_FASTA);
     if (!init->fai) {
         duckdb_init_set_error(info, "fasta_nuc: failed to load FASTA index");
         destroy_fasta_nuc_init(init);
@@ -681,20 +698,92 @@ static void fasta_nuc_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, init, destroy_fasta_nuc_init);
 }
 
+static void count_nucleotides_scalar(const char *seq, hts_pos_t len,
+                                     int64_t *a, int64_t *c, int64_t *g,
+                                     int64_t *t, int64_t *n,
+                                     int64_t *other) {
+    *a = *c = *g = *t = *n = *other = 0;
+    for (hts_pos_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)seq[i] & 0xDF;
+        if      (ch == 'A') (*a)++;
+        else if (ch == 'C') (*c)++;
+        else if (ch == 'G') (*g)++;
+        else if (ch == 'T') (*t)++;
+        else if (ch == 'N') (*n)++;
+        else                (*other)++;
+    }
+}
+
+/* Match htslib's SIMD pattern: compile a target-specific implementation, then
+ * select it once at startup after a runtime CPU probe. That keeps generic x86
+ * builds safe on hosts without AVX2 while still letting capable machines use a
+ * wide compare+movemask+popcnt loop. */
+#if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H && \
+    defined(HAVE_ATTRIBUTE_CONSTRUCTOR) && HAVE_ATTRIBUTE_CONSTRUCTOR && \
+    defined(HAVE_ATTRIBUTE_TARGET_SSSE3) && HAVE_ATTRIBUTE_TARGET_SSSE3 && \
+    defined(HAVE_BUILTIN_CPU_SUPPORT_SSSE3) && HAVE_BUILTIN_CPU_SUPPORT_SSSE3 && \
+    defined(HAVE_AVX2) && HAVE_AVX2 && defined(HAVE_POPCNT) && HAVE_POPCNT && \
+    !defined(DUCKDB_WASM_EXTENSION)
+__attribute__((target("avx2,popcnt")))
+static void count_nucleotides_avx2(const char *seq, hts_pos_t len,
+                                   int64_t *a, int64_t *c, int64_t *g,
+                                   int64_t *t, int64_t *n,
+                                   int64_t *other) {
+    const __m256i case_mask = _mm256_set1_epi8((char)0xDF);
+    const __m256i v_a = _mm256_set1_epi8('A');
+    const __m256i v_c = _mm256_set1_epi8('C');
+    const __m256i v_g = _mm256_set1_epi8('G');
+    const __m256i v_t = _mm256_set1_epi8('T');
+    const __m256i v_n = _mm256_set1_epi8('N');
+    int64_t ca = 0, cc = 0, cg = 0, ct = 0, cn = 0;
+    hts_pos_t i = 0;
+
+    for (; i + 32 <= len; i += 32) {
+        __m256i bytes = _mm256_loadu_si256((const __m256i *)(seq + i));
+        __m256i up = _mm256_and_si256(bytes, case_mask);
+        ca += __builtin_popcount((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(up, v_a)));
+        cc += __builtin_popcount((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(up, v_c)));
+        cg += __builtin_popcount((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(up, v_g)));
+        ct += __builtin_popcount((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(up, v_t)));
+        cn += __builtin_popcount((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(up, v_n)));
+    }
+
+    for (; i < len; i++) {
+        unsigned char ch = (unsigned char)seq[i] & 0xDF;
+        if      (ch == 'A') ca++;
+        else if (ch == 'C') cc++;
+        else if (ch == 'G') cg++;
+        else if (ch == 'T') ct++;
+        else if (ch == 'N') cn++;
+    }
+
+    *a = ca;
+    *c = cc;
+    *g = cg;
+    *t = ct;
+    *n = cn;
+    *other = (int64_t)len - (ca + cc + cg + ct + cn);
+}
+
+typedef void (*count_nucleotides_fn_t)(const char *, hts_pos_t,
+                                       int64_t *, int64_t *, int64_t *,
+                                       int64_t *, int64_t *, int64_t *);
+static count_nucleotides_fn_t duckhts_count_nucleotides_impl = count_nucleotides_scalar;
+
+__attribute__((constructor))
+static void resolve_count_nucleotides_impl(void) {
+    if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("popcnt")) {
+        duckhts_count_nucleotides_impl = count_nucleotides_avx2;
+    }
+}
+#else
+#define duckhts_count_nucleotides_impl count_nucleotides_scalar
+#endif
+
 static void count_nucleotides(const char *seq, hts_pos_t len,
                               int64_t *a, int64_t *c, int64_t *g, int64_t *t,
                               int64_t *n, int64_t *other) {
-    *a = *c = *g = *t = *n = *other = 0;
-    for (hts_pos_t i = 0; i < len; i++) {
-        switch (toupper((unsigned char)seq[i])) {
-            case 'A': (*a)++; break;
-            case 'C': (*c)++; break;
-            case 'G': (*g)++; break;
-            case 'T': (*t)++; break;
-            case 'N': (*n)++; break;
-            default: (*other)++; break;
-        }
-    }
+    duckhts_count_nucleotides_impl(seq, len, a, c, g, t, n, other);
 }
 
 static bool bed_overlap_region(const fasta_nuc_init_data_t *init, const char *chrom, int64_t start, int64_t end) {
@@ -918,6 +1007,7 @@ void register_fasta_nuc_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "bin_width", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "gzi_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "bed_index_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "include_seq", bool_type);
     duckdb_destroy_logical_type(&varchar_type);

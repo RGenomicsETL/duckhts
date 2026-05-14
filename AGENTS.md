@@ -1,5 +1,6 @@
 # DuckHTS Agent Guidelines
-
+write C as a BSD kernel programmer rather than a Java programmer that failed upwards
+write R as a r-lib programmer rather than a Python programmer that failed upwards
 ## Project Goal
 DuckDB extension that reads HTS file formats (VCF/BCF, BAM/CRAM, FASTA/FASTQ, BED, GTF/GFF, tabix) via htslib, with coverage/interval analytics for CNV and QC workflows. The R package (`Rduckhts`) is on CRAN.
 

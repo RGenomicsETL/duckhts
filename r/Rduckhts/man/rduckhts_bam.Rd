@@ -15,6 +15,7 @@ rduckhts_bam(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  cigar_representation = NULL,
   decompression_threads = 2,
   overwrite = FALSE
 )
@@ -43,6 +44,11 @@ rduckhts_bam(
 \item{quality_representation}{Character. Quality representation for the QUAL column:
 \code{"string"} (default) returns canonical Phred+33 text;
 \code{"phred"} returns raw Phred values as \code{UTINYINT[]}.}
+
+\item{cigar_representation}{Character. CIGAR representation for the CIGAR column:
+\code{"string"} (default) returns SAM text such as \code{"36M"};
+\code{"binary"} returns packed BAM operations as \code{UINTEGER[]} where each
+element is \code{(len << 4) | op}.}
 
 \item{decompression_threads}{Integer. Number of htslib decompression worker
 threads per file handle. Default \code{2}. Use \code{0} to disable worker

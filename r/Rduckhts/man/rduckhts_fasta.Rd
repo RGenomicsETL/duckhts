@@ -10,6 +10,7 @@ rduckhts_fasta(
   path,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   sequence_encoding = NULL,
   overwrite = FALSE
 )
@@ -24,6 +25,9 @@ rduckhts_fasta(
 \item{region}{Optional genomic region (e.g., "chr1:1000-2000" or "chr1:1-10,chr2:5-20")}
 
 \item{index_path}{Optional explicit path to FASTA index file (.fai)}
+
+\item{gzi_path}{Optional explicit BGZF FASTA block index path (.gzi) for
+bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.}
 
 \item{sequence_encoding}{Character. Sequence encoding for the SEQUENCE column:
 \code{"string"} (default) returns decoded bases as \code{VARCHAR};

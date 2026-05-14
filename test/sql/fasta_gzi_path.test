@@ -1,0 +1,44 @@
+# name: test/sql/fasta_gzi_path.test
+# description: Explicit gzi_path for bgzipped FASTA readers
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SELECT *
+FROM bgzip(
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz',
+  keep := TRUE,
+  overwrite := TRUE
+);
+
+statement ok
+SELECT *
+FROM fasta_index(
+  '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz',
+  index_path := '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz.fai'
+);
+
+query II
+SELECT NAME, length(SEQUENCE)
+FROM read_fasta(
+  '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz',
+  region := 'CHROMOSOME_I:1-10',
+  index_path := '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz.fai',
+  gzi_path := '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz.gzi'
+);
+----
+CHROMOSOME_I	10
+
+query I
+SELECT sum(seq_len)
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz',
+  bin_width := 10,
+  region := 'CHROMOSOME_I:1-20',
+  index_path := '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz.fai',
+  gzi_path := '__WORKING_DIRECTORY__/test/tmp_ce.fa.gz.gzi'
+);
+----
+20

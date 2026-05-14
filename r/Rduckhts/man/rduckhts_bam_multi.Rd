@@ -15,6 +15,7 @@ rduckhts_bam_multi(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  cigar_representation = NULL,
   decompression_threads = 2,
   .params = NULL,
   overwrite = FALSE
@@ -37,9 +38,12 @@ rduckhts_bam_multi(
 
 \item{auxiliary_tags}{Logical; include auxiliary tag map column.}
 
-\item{sequence_encoding}{Optional sequence encoding (e.g. \code{"twoBit"}).}
+\item{sequence_encoding}{Optional sequence encoding (e.g. \code{"nt16"}).}
 
 \item{quality_representation}{Optional quality representation.}
+
+\item{cigar_representation}{Optional CIGAR representation; use
+\code{"binary"} for packed BAM operations.}
 
 \item{decompression_threads}{Integer. Number of htslib decompression worker
 threads per file handle. Default \code{2}. Use \code{0} to disable worker

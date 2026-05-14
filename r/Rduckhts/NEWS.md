@@ -1,5 +1,7 @@
 
 # Rduckhts 1.2.1-0.1.0 (2026-05-07)
+- add `rduckhts_pileup()` and bundle native `read_pileup(...)` for region-scoped BAM pileups with per-position `chrom`, `pos`, `depth`, `bases`, and `quals`; expose bundled `read_bam(..., cigar_representation := 'binary')` through `rduckhts_bam(..., cigar_representation = "binary")` and multi-file BAM wrappers, returning packed BAM CIGAR ops as `UINTEGER[]`; and expose explicit `gzi_path` arguments in `rduckhts_fasta()`, `rduckhts_fasta_multi()`, and `rduckhts_fasta_nuc()` so packaged bgzipped FASTA workflows can use relocated `.gzi` sidecars
+- speed up bundled `rduckhts_fasta_nuc()` / `fasta_nuc(...)` nucleotide counting on capable x86_64 hosts with an AVX2+popcnt fast path selected via htslib-style runtime dispatch, while preserving the scalar fallback everywhere else
 - fix bundled `rduckhts_bcf()` / `read_bcf(...)` scanning stability for records where `FILTER` lists were emitted without reserving list-vector capacity, which could crash with allocator corruption (`double free`/`invalid pointer`) during full-table reads; `FILTER` entries now reserve child-list space before writes and scans are stable on files previously triggering crashes
 - compile bundled DuckHTS extension sources with `-Wpedantic` during Unix and Windows package builds while leaving vendored `htslib` on its upstream warning flags
 - fix the bundled non-Emscripten `wasm_http_hfile.c` translation unit so native package builds do not warn about an empty source file under pedantic C diagnostics

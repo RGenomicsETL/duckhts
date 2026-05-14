@@ -662,6 +662,10 @@ rduckhts_bcf <- function(
 #' @param quality_representation Character. Quality representation for the QUAL column:
 #'   \code{"string"} (default) returns canonical Phred+33 text;
 #'   \code{"phred"} returns raw Phred values as \code{UTINYINT[]}.
+#' @param cigar_representation Character. CIGAR representation for the CIGAR column:
+#'   \code{"string"} (default) returns SAM text such as \code{"36M"};
+#'   \code{"binary"} returns packed BAM operations as \code{UINTEGER[]} where each
+#'   element is \code{(len << 4) | op}.
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default \code{2}. Use \code{0} to disable worker
 #'   threads.
@@ -692,6 +696,7 @@ rduckhts_bam <- function(
   auxiliary_tags = FALSE,
   sequence_encoding = NULL,
   quality_representation = NULL,
+  cigar_representation = NULL,
   decompression_threads = 2,
   overwrite = FALSE
 ) {
@@ -730,6 +735,9 @@ rduckhts_bam <- function(
   if (!is.null(quality_representation)) {
     params$quality_representation <- sprintf("'%s'", quality_representation)
   }
+  if (!is.null(cigar_representation)) {
+    params$cigar_representation <- sprintf("'%s'", cigar_representation)
+  }
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- sprintf(
       "%d",
@@ -752,6 +760,91 @@ rduckhts_bam <- function(
   } else {
     create_query <- sprintf(
       "CREATE VIEW bam_data AS SELECT * FROM read_bam('%s'%s)",
+      path,
+      param_str
+    )
+  }
+
+  DBI::dbExecute(con, create_query)
+  invisible(TRUE)
+}
+
+#' Create BAM Pileup Table
+#'
+#' Creates a DuckDB table from a region-scoped BAM pileup using the DuckHTS
+#' extension. This is a compact base/quality pileup view backed by htslib's
+#' pileup engine; it is not samtools mpileup text parity.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param table_name Name for the created table
+#' @param path Path to the BAM file
+#' @param region Required genomic region (e.g., "chr1:1000-2000")
+#' @param index_path Optional explicit path to the BAM index (.bai/.csi)
+#' @param min_mapq Minimum mapping quality to include in the pileup
+#' @param flag_mask Bitmask of SAM flags to exclude before pileup construction.
+#'   The default \code{1796} matches samtools depth-style filtering of
+#'   unmapped, secondary, QC-fail, and duplicate reads.
+#' @param overwrite Logical. If TRUE, overwrites existing table
+#'
+#' @return Invisible TRUE on success
+#'
+#' @export
+rduckhts_pileup <- function(
+  con,
+  table_name,
+  path,
+  region,
+  index_path = NULL,
+  min_mapq = 0,
+  flag_mask = 1796,
+  overwrite = FALSE
+) {
+  if (!missing(table_name) && !is.null(table_name)) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+      stop(
+        "Table '",
+        table_name,
+        "' already exists. Use overwrite = TRUE to replace it."
+      )
+    }
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
+    }
+  }
+
+  if (is.null(region) || length(region) != 1L || is.na(region) || !nzchar(region)) {
+    stop("region must be a single non-empty string", call. = FALSE)
+  }
+
+  params <- list(region = sprintf("'%s'", region))
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  if (!is.null(min_mapq)) {
+    params$min_mapq <- sprintf(
+      "%d",
+      .validate_nonnegative_integer_param(min_mapq, "min_mapq")
+    )
+  }
+  if (!is.null(flag_mask)) {
+    flag_mask <- .validate_nonnegative_integer_param(flag_mask, "flag_mask")
+    if (flag_mask > 65535L) {
+      stop("flag_mask must be between 0 and 65535", call. = FALSE)
+    }
+    params$flag_mask <- sprintf("%d", flag_mask)
+  }
+  param_str <- build_param_str(params)
+
+  if (!is.null(table_name)) {
+    create_query <- sprintf(
+      "CREATE TABLE %s AS SELECT * FROM read_pileup('%s'%s)",
+      table_name,
+      path,
+      param_str
+    )
+  } else {
+    create_query <- sprintf(
+      "CREATE VIEW pileup_data AS SELECT * FROM read_pileup('%s'%s)",
       path,
       param_str
     )
@@ -830,6 +923,8 @@ normalize_tabix_types <- function(types) {
 #' @param path Path to the FASTA file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000" or "chr1:1-10,chr2:5-20")
 #' @param index_path Optional explicit path to FASTA index file (.fai)
+#' @param gzi_path Optional explicit BGZF FASTA block index path (.gzi) for
+#'   bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.
 #' @param sequence_encoding Character. Sequence encoding for the SEQUENCE column:
 #'   \code{"string"} (default) returns decoded bases as \code{VARCHAR};
 #'   \code{"nt16"} returns raw htslib nt16 4-bit codes as \code{UTINYINT[]}.
@@ -844,6 +939,7 @@ rduckhts_fasta <- function(
   path,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   sequence_encoding = NULL,
   overwrite = FALSE
 ) {
@@ -866,6 +962,9 @@ rduckhts_fasta <- function(
   }
   if (!is.null(index_path)) {
     params$index_path <- sprintf("'%s'", index_path)
+  }
+  if (!is.null(gzi_path)) {
+    params$gzi_path <- sprintf("'%s'", gzi_path)
   }
   if (!is.null(sequence_encoding)) {
     params$sequence_encoding <- sprintf("'%s'", sequence_encoding)
@@ -965,6 +1064,8 @@ rduckhts_bed <- function(
 #' @param bin_width Optional fixed bin width in base pairs
 #' @param region Optional FASTA region filter
 #' @param index_path Optional explicit FASTA index path
+#' @param gzi_path Optional explicit BGZF FASTA block index path (.gzi) for
+#'   bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.
 #' @param bed_index_path Optional explicit BED tabix index path
 #' @param include_seq Include the fetched interval sequence
 #'
@@ -978,6 +1079,7 @@ rduckhts_fasta_nuc <- function(
   bin_width = NULL,
   region = NULL,
   index_path = NULL,
+  gzi_path = NULL,
   bed_index_path = NULL,
   include_seq = FALSE
 ) {
@@ -986,6 +1088,7 @@ rduckhts_fasta_nuc <- function(
   if (!is.null(bin_width)) params$bin_width <- bin_width
   if (!is.null(region)) params$region <- sprintf("'%s'", region)
   if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
+  if (!is.null(gzi_path)) params$gzi_path <- sprintf("'%s'", gzi_path)
   if (!is.null(bed_index_path)) params$bed_index_path <- sprintf("'%s'", bed_index_path)
   if (include_seq) params$include_seq <- "true"
   param_str <- build_param_str(params)
@@ -2430,8 +2533,10 @@ rduckhts_score <- function(
 #' @param reference Optional reference FASTA path (for CRAM).
 #' @param standard_tags Logical; include standard SAM tag columns.
 #' @param auxiliary_tags Logical; include auxiliary tag map column.
-#' @param sequence_encoding Optional sequence encoding (e.g. \code{"twoBit"}).
+#' @param sequence_encoding Optional sequence encoding (e.g. \code{"nt16"}).
 #' @param quality_representation Optional quality representation.
+#' @param cigar_representation Optional CIGAR representation; use
+#'   \code{"binary"} for packed BAM operations.
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default \code{2}. Use \code{0} to disable worker
 #'   threads.
@@ -2446,6 +2551,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
                                standard_tags = FALSE, auxiliary_tags = FALSE,
                                sequence_encoding = NULL,
                                quality_representation = NULL,
+                               cigar_representation = NULL,
                                decompression_threads = 2,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
@@ -2456,6 +2562,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
   params$auxiliary_tags <- auxiliary_tags
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   if (!is.null(quality_representation)) params$quality_representation <- quality_representation
+  if (!is.null(cigar_representation)) params$cigar_representation <- cigar_representation
   if (!is.null(decompression_threads)) params$decompression_threads <- decompression_threads
   .hts_multi_read(con, table_name, "read_bam", files, params, .params, overwrite)
 }
@@ -2534,17 +2641,20 @@ rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
+#' @param gzi_path Optional explicit BGZF FASTA block index path (.gzi).
 #' @param sequence_encoding Optional sequence encoding.
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
 rduckhts_fasta_multi <- function(con, table_name, files, region = NULL,
-                                 index_path = NULL, sequence_encoding = NULL,
+                                 index_path = NULL, gzi_path = NULL,
+                                 sequence_encoding = NULL,
                                  .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(gzi_path)) params$gzi_path <- gzi_path
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   .hts_multi_read(con, table_name, "read_fasta", files, params, .params, overwrite)
 }
