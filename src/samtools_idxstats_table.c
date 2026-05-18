@@ -25,6 +25,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 
+#include "include/hts_io_tuning.h"
+
 #ifndef SAM_RNAME
 #define SAM_RNAME SAM_POS
 #endif
@@ -237,6 +239,8 @@ static int run_samtools_idxstats(samtools_idxstats_bind_t *bind, char *err, size
         snprintf(err, errlen, "duckhts_samtools_idxstats: failed to open alignment file '%s'", bind->path);
         return -1;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
 
     header = sam_hdr_read(fp);
     if (!header) {

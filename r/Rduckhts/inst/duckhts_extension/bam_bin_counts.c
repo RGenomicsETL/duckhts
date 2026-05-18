@@ -25,6 +25,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 
+#include "include/hts_io_tuning.h"
+
 #define DUCKHTS_DEFAULT_BINCOUNT_DECOMPRESSION_THREADS 2
 #define DUCKHTS_MAX_BINCOUNT_THREADS 16
 
@@ -611,6 +613,8 @@ static void *bam_bin_worker_main(void *arg) {
         worker_set_error(shared, "bam_bin_counts: failed to open alignment file");
         return NULL;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (bind->reference) {
         if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
             worker_set_error(shared, "bam_bin_counts: failed to set CRAM reference");
@@ -767,6 +771,8 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
         snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
         return -1;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (bind->reference) {
         if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
             sam_close(fp);
@@ -914,6 +920,8 @@ static int indexed_unmapped_scan(bam_bin_bind_t *bind, char *err, size_t errlen)
         snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
         return -1;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (bind->reference) {
         if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
             sam_close(fp);

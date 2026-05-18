@@ -439,6 +439,7 @@ HTSLIB_1.4 {
     probaln_glocal;
     sam_cap_mapq;
     sam_index_build3;
+    sam_index_build4;
     sam_prob_realn;
     tbx_index_build3;
 } HTSLIB_1.3;

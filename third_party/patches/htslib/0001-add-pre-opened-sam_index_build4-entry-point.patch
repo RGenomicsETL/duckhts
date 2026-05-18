@@ -1,0 +1,76 @@
+diff --git a/htslib.map b/htslib.map
+index e3cb96c..e47f4a8 100644
+--- a/htslib.map
++++ b/htslib.map
+@@ -439,6 +439,7 @@ HTSLIB_1.4 {
+     probaln_glocal;
+     sam_cap_mapq;
+     sam_index_build3;
++    sam_index_build4;
+     sam_prob_realn;
+     tbx_index_build3;
+ } HTSLIB_1.3;
+diff --git a/htslib/sam.h b/htslib/sam.h
+index 53d0059..7fb7a7c 100644
+--- a/htslib/sam.h
++++ b/htslib/sam.h
+@@ -1253,6 +1253,22 @@ int sam_index_build2(const char *fn, const char *fnidx, int min_shift) HTS_RESUL
+ HTSLIB_EXPORT
+ int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthreads) HTS_RESULT_USED;
+ 
++/** @param fp        Already-opened input htsFile* (caller-owned; not closed by
++                     this function)
++    @param fn        Input BAM/CRAM/etc filename
++    @param fnidx     Output filename, or NULL to add .bai/.csi/etc to @a fn
++    @param min_shift Positive to generate CSI, or 0 to generate BAI
++    @param nthreads  Number of threads to use when building the index
++    @return  0 if successful, or negative if an error occurred (see
++             sam_index_build for error codes)
++
++    This variant exists for callers that need to apply hts_set_opt() before the
++    sequential index build starts, e.g. to tune remote-I/O buffering on S3,
++    HTTPS, or browser-backed transports.
++*/
++HTSLIB_EXPORT
++int sam_index_build4(htsFile *fp, const char *fn, const char *fnidx, int min_shift, int nthreads) HTS_RESULT_USED;
++
+ /// Free a SAM iterator
+ /// @param iter     Iterator to free
+ #define sam_itr_destroy(iter) hts_itr_destroy(iter)
+diff --git a/sam.c b/sam.c
+index 37d404b..e7b872b 100644
+--- a/sam.c
++++ b/sam.c
+@@ -1028,11 +1028,22 @@ err:
+ 
+ int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthreads)
+ {
+-    hts_idx_t *idx;
+     htsFile *fp;
+-    int ret = 0;
++    int ret;
+ 
+     if ((fp = hts_open(fn, "r")) == 0) return -2;
++    ret = sam_index_build4(fp, fn, fnidx, min_shift, nthreads);
++    hts_close(fp);
++
++    return ret;
++}
++
++int sam_index_build4(htsFile *fp, const char *fn, const char *fnidx, int min_shift, int nthreads)
++{
++    hts_idx_t *idx;
++    int ret = 0;
++
++    if (!fp) return -2;
+     if (nthreads)
+         hts_set_threads(fp, nthreads);
+ 
+@@ -1063,7 +1074,6 @@ int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthre
+         ret = -3;
+         break;
+     }
+-    hts_close(fp);
+ 
+     return ret;
+ }

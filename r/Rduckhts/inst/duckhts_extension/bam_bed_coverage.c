@@ -22,6 +22,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/sam.h>
 
+#include "include/hts_io_tuning.h"
+
 #define DUCKHTS_BEDCOV_DEFAULT_EXCLUDE_FLAGS 1796
 #define DUCKHTS_BEDCOV_DEFAULT_MAX_DEPTH 1000000
 #define DUCKHTS_BEDCOV_TILE_SIZE 1000000
@@ -622,6 +624,8 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open alignment file '%s'", bind->path);
         return -1;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (bind->decompression_threads > 0 &&
         hts_set_threads(fp, (int)bind->decompression_threads) < 0) {
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to configure decompression threads");

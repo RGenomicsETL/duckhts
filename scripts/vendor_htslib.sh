@@ -20,6 +20,7 @@ extract_tar_bz2 "$archive_path" "$TP_DIR"
 mv "$TP_DIR/htslib-${VERSION}" "$TP_DIR/htslib"
 echo "$VERSION" > "$TP_DIR/htslib/VERSION"
 
+apply_patches "$TP_DIR/htslib" "htslib"
 capture_licenses "$TP_DIR/htslib" "htslib"
 
 echo "Vendored HTSlib ${VERSION} into $TP_DIR/htslib"
