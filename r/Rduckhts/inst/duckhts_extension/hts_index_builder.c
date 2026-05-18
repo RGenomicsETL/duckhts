@@ -13,6 +13,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/vcf.h>
 
+#include "include/hts_io_tuning.h"
+
 typedef struct {
     char *index_path;
     char *index_format;
@@ -117,6 +119,7 @@ static void bind_bam_index(duckdb_bind_info info) {
     int threads = 4;
     int ret;
     char err[512];
+    htsFile *fp = NULL;
 
     duckdb_destroy_value(&path_val);
     if (!path || path[0] == '\0') {
@@ -137,7 +140,17 @@ static void bind_bam_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
-    ret = sam_index_build3(path, index_path, min_shift, threads);
+    fp = hts_open(path, "r");
+    if (!fp) {
+        snprintf(err, sizeof(err), "bam_index: failed to open %s", path);
+        duckdb_bind_set_error(info, err);
+        duckdb_free(path);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
+    duckhts_apply_remote_hts_tuning(fp, path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
+    ret = sam_index_build4(fp, path, index_path, min_shift, threads);
+    hts_close(fp);
     if (ret != 0) {
         snprintf(err, sizeof(err), "bam_index: failed to build index for %s (error %d)", path, ret);
         duckdb_bind_set_error(info, err);

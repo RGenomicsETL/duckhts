@@ -47,6 +47,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/kstring.h>
 
+#include "include/hts_io_tuning.h"
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -1093,6 +1095,13 @@ static void bcf_read_local_init(duckdb_init_info info) {
         duckdb_free(local);
         return;
     }
+    duckhts_apply_remote_hts_tuning(
+        local->fp,
+        bind->file_path,
+        (is_parallel || bind->n_regions > 0)
+            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+            : DUCKHTS_HTS_IO_PROFILE_STREAMING
+    );
     
     // Read header
     local->hdr = bcf_hdr_read(local->fp);

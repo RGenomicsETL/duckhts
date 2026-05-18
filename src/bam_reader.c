@@ -33,6 +33,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/bgzf.h>
 #include <htslib/kstring.h>
 
+#include "include/hts_io_tuning.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
 
@@ -752,6 +753,13 @@ static void bam_read_local_init(duckdb_init_info info) {
         duckdb_free(local);
         return;
     }
+    duckhts_apply_remote_hts_tuning(
+        local->fp,
+        bind->file_path,
+        (bind->n_regions > 0 || is_parallel)
+            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+            : DUCKHTS_HTS_IO_PROFILE_STREAMING
+    );
 
     if (bind->reference) {
         if (hts_set_opt(local->fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {

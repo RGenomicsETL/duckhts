@@ -32,6 +32,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/tbx.h>
 
+#include "include/hts_io_tuning.h"
+
 #define INTERVAL_BATCH_SIZE 2048
 
 enum {
@@ -360,6 +362,10 @@ static void read_bed_init(duckdb_init_info info) {
         destroy_bed_init(init);
         return;
     }
+    duckhts_apply_remote_hts_tuning(init->fp, bind->file_path,
+                                    bind->region
+                                        ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                        : DUCKHTS_HTS_IO_PROFILE_STREAMING);
 
     if (bind->region) {
         init->tbx = tbx_index_load3(bind->file_path, bind->index_path, HTS_IDX_SILENT_FAIL);
@@ -653,6 +659,8 @@ static void fasta_nuc_init(duckdb_init_info info) {
         destroy_fasta_nuc_init(init);
         return;
     }
+    duckhts_apply_remote_faidx_tuning(init->fai, bind->fasta_path,
+                                      DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (!init_fasta_region(init, bind->region)) {
         duckdb_init_set_error(info, "fasta_nuc: invalid FASTA region");
         destroy_fasta_nuc_init(init);
@@ -666,6 +674,10 @@ static void fasta_nuc_init(duckdb_init_info info) {
             destroy_fasta_nuc_init(init);
             return;
         }
+        duckhts_apply_remote_hts_tuning(init->bed_fp, bind->bed_path,
+                                        bind->region
+                                            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                            : DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (bind->region) {
             init->bed_tbx = tbx_index_load3(bind->bed_path, bind->bed_index_path, HTS_IDX_SILENT_FAIL);
             if (init->bed_tbx) {

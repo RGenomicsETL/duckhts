@@ -1028,11 +1028,22 @@ err:
 
 int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthreads)
 {
-    hts_idx_t *idx;
     htsFile *fp;
-    int ret = 0;
+    int ret;
 
     if ((fp = hts_open(fn, "r")) == 0) return -2;
+    ret = sam_index_build4(fp, fn, fnidx, min_shift, nthreads);
+    hts_close(fp);
+
+    return ret;
+}
+
+int sam_index_build4(htsFile *fp, const char *fn, const char *fnidx, int min_shift, int nthreads)
+{
+    hts_idx_t *idx;
+    int ret = 0;
+
+    if (!fp) return -2;
     if (nthreads)
         hts_set_threads(fp, nthreads);
 
@@ -1063,7 +1074,6 @@ int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthre
         ret = -3;
         break;
     }
-    hts_close(fp);
 
     return ret;
 }

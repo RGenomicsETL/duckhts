@@ -43,6 +43,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/kstring.h>
 
+#include "include/hts_io_tuning.h"
+
 /* ================================================================
  * Constants
  * ================================================================ */
@@ -1419,6 +1421,13 @@ static void tabix_init(duckdb_init_info info) {
         tabix_init_data_destroy(id);
         return;
     }
+    duckhts_apply_remote_hts_tuning(
+        id->fp,
+        bd->file_path,
+        bd->n_regions > 0
+            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+            : DUCKHTS_HTS_IO_PROFILE_STREAMING
+    );
 
     /* Try to load tabix index */
     id->tbx = tbx_index_load2(bd->file_path, bd->index_path);

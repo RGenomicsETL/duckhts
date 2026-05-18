@@ -1253,6 +1253,22 @@ int sam_index_build2(const char *fn, const char *fnidx, int min_shift) HTS_RESUL
 HTSLIB_EXPORT
 int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthreads) HTS_RESULT_USED;
 
+/** @param fp        Already-opened input htsFile* (caller-owned; not closed by
+                     this function)
+    @param fn        Input BAM/CRAM/etc filename
+    @param fnidx     Output filename, or NULL to add .bai/.csi/etc to @a fn
+    @param min_shift Positive to generate CSI, or 0 to generate BAI
+    @param nthreads  Number of threads to use when building the index
+    @return  0 if successful, or negative if an error occurred (see
+             sam_index_build for error codes)
+
+    This variant exists for callers that need to apply hts_set_opt() before the
+    sequential index build starts, e.g. to tune remote-I/O buffering on S3,
+    HTTPS, or browser-backed transports.
+*/
+HTSLIB_EXPORT
+int sam_index_build4(htsFile *fp, const char *fn, const char *fnidx, int min_shift, int nthreads) HTS_RESULT_USED;
+
 /// Free a SAM iterator
 /// @param iter     Iterator to free
 #define sam_itr_destroy(iter) hts_itr_destroy(iter)

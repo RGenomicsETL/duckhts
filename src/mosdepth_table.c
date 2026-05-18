@@ -36,6 +36,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 #include <htslib/tbx.h>
 
+#include "include/hts_io_tuning.h"
+
 #define MOSDEPTH_DEFAULT_PRECISION 2
 #define MOSDEPTH_MAX_COVERAGE 400000
 #define MOSDEPTH_CSI_MIN_SHIFT 14
@@ -1419,6 +1421,8 @@ static void *mosdepth_parallel_worker(void *arg) {
         mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to open alignment file");
         goto worker_done;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (bind->fasta && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->fasta) < 0) {
         mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to set CRAM reference");
         goto worker_done;
@@ -1815,6 +1819,8 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         snprintf(err, errlen, "duckhts_mosdepth: failed to open alignment file '%s'", bind->path);
         goto cleanup;
     }
+    duckhts_apply_remote_hts_tuning(fp, bind->path,
+                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (bind->fasta && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->fasta) < 0) {
         snprintf(err, errlen, "duckhts_mosdepth: failed to set CRAM reference '%s'", bind->fasta);
         goto cleanup;

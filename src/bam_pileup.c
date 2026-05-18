@@ -23,6 +23,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/sam.h>
 
+#include "include/hts_io_tuning.h"
+
 typedef struct {
     char *file_path;
     char *index_path;
@@ -177,6 +179,8 @@ static void bam_pileup_local_init(duckdb_init_info info) {
         destroy_bam_pileup_local(local);
         return;
     }
+    duckhts_apply_remote_hts_tuning(local->fp, bind->file_path,
+                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     (void)hts_set_threads(local->fp, 2);
 
     local->hdr = sam_hdr_read(local->fp);
