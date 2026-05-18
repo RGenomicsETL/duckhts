@@ -22,6 +22,14 @@ CRAN release: 2026-05-07
   / `fasta_nuc(...)` nucleotide counting on capable x86_64 hosts with an
   AVX2+popcnt fast path selected via htslib-style runtime dispatch,
   while preserving the scalar fallback everywhere else
+- improve bundled remote HTS performance for long-running scans and
+  [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_index.md):
+  native remote BAM/BCF/tabix/FASTA/BED reads now apply htslib
+  block/cache tuning by access pattern, while wasm/browser builds use
+  the same policy with smaller budgets appropriate for the XHR-backed
+  worker runtime; the bundled vendored htslib also now exposes a
+  pre-opened `sam_index_build4(...)` entry point so `bam_index(...)` can
+  be tuned before remote index construction begins
 - fix bundled
   [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
   / `read_bcf(...)` scanning stability for records where `FILTER` lists
