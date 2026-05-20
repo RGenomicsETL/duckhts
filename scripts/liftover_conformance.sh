@@ -159,14 +159,19 @@ BCFTOOLS_PLUGINS="$BCFTOOLS_PLUGIN_DIR" \
   --write-src \
   --write-reject
 
-"$BCFTOOLS_BIN" query -f '%CHROM\t%POS\t%REF\t%ALT\n' "$BCF_OUT" \
-  | sort | uniq -c \
-  | awk 'BEGIN{OFS="\t"} {print $2,$3,$4,$5,$1}' > "$BCF_TSV"
+{
+  printf 'dest_chrom\tdest_pos\tdest_ref\tdest_alt\tbcf_n\n'
+  "$BCFTOOLS_BIN" query -f '%CHROM\t%POS\t%REF\t%ALT\n' "$BCF_OUT" \
+    | sort | uniq -c \
+    | awk 'BEGIN{OFS="\t"} {print $2,$3,$4,$5,$1}'
+} > "$BCF_TSV"
 
-grep -v '^#' "$BCF_REJECT" \
-  | cut -f7 \
-  | sort | uniq -c \
-  | awk 'BEGIN{OFS="\t"} {print $2,$1}' > "$BCF_REJECT_TSV"
+{
+  printf 'reject_reason\tbcf_n\n'
+  awk '!/^#/ {print $7}' "$BCF_REJECT" \
+    | sort | uniq -c \
+    | awk 'BEGIN{OFS="\t"} {print $2,$1}'
+} > "$BCF_REJECT_TSV"
 
 echo "[4/5] Compare mapped outputs -> $COMPARE_TSV"
 duckdb -unsigned <<SQL
@@ -174,7 +179,7 @@ CREATE TEMP TABLE duck AS
   SELECT * FROM read_csv('${DUCK_TSV}', delim := '\t', header := true,
     columns = {'dest_chrom':'VARCHAR','dest_pos':'BIGINT','dest_ref':'VARCHAR','dest_alt':'VARCHAR','duck_n':'BIGINT'});
 CREATE TEMP TABLE bcf AS
-  SELECT * FROM read_csv('${BCF_TSV}', delim := '\t', header := false,
+  SELECT * FROM read_csv('${BCF_TSV}', delim := '\t', header := true,
     columns = {'dest_chrom':'VARCHAR','dest_pos':'BIGINT','dest_ref':'VARCHAR','dest_alt':'VARCHAR','bcf_n':'BIGINT'});
 
 COPY (
@@ -203,7 +208,7 @@ CREATE TEMP TABLE duck AS
   SELECT * FROM read_csv('${DUCK_REJECT_TSV}', delim := '\t', header := true,
     columns = {'reject_reason':'VARCHAR','duck_n':'BIGINT'});
 CREATE TEMP TABLE bcf AS
-  SELECT * FROM read_csv('${BCF_REJECT_TSV}', delim := '\t', header := false,
+  SELECT * FROM read_csv('${BCF_REJECT_TSV}', delim := '\t', header := true,
     columns = {'reject_reason':'VARCHAR','bcf_n':'BIGINT'});
 
 COPY (
