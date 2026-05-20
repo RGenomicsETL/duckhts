@@ -4,6 +4,26 @@
 
 CRAN release: 2026-05-07
 
+- fix bundled
+  [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
+  / `bcftools_liftover(...)` indel parity in two exact upstream rewrite
+  points: repeat-run source extension now keeps extending across the
+  cached source-reference window boundary when needed, and the bundled
+  clip-pad `Needleman-Wunsch` path now keeps the best shift even when
+  candidate alignment scores are negative instead of leaving padded
+  intervals unshifted; bundled SQL/tinytest coverage now includes
+  dedicated repeat-run and clip-pad regression fixtures, and the
+  real-data conformance workflow reaches exact parity with installed
+  `bcftools +liftover` on GIAB HG001 chr20 plus the full HG006 GRCh37
+  benchmark VCF
+- fix bundled
+  [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
+  / `bcftools_liftover(...)` row rejection for invalid source-reference
+  indel and difficult-SNP inputs: rows that fail the source-FASTA
+  validation path now stay in the result with `mapped = FALSE` and
+  `reject_reason = 'SourceRefMismatch'` instead of fabricating padded
+  lifted alleles or aborting the query; bundled tests and README
+  examples now reflect the reject-row behavior
 - add
   [`rduckhts_pileup()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_pileup.md)
   and bundle native `read_pileup(...)` for region-scoped BAM pileups
