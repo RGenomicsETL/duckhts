@@ -306,6 +306,40 @@ FROM (
 ----
 chrD	1	GTTTTTC	GTTTTC	1	OK
 
+# Clip-pad should still choose the best shift even when Needleman-Wunsch scores are negative
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', 7, 'TC', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_src.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+) s;
+----
+chrD	7	T	TC	1	Padded
+
+# no_left_align exposes the pre-left-align clip-pad result for the negative-score case
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', 7, 'TC', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_src.fa',
+    1, 250, false, NULL::BIGINT, true
+  ) AS lo
+) s;
+----
+chrD	7	TT	TCT	1	Padded
+
 # End-of-contig deletion with an invalid source reference should reject
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,

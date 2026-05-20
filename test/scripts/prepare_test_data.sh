@@ -157,6 +157,26 @@ EOF
 done
 echo "  liftover repeat-run indel swap fixtures + .fai"
 
+# ---- Liftover clip-pad negative-score regression fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/liftover_clip_pad_src.fa" <<'EOF'
+>chrS
+TCCGTCTCAAAAA
+EOF
+  cat > "$out_dir/liftover_clip_pad_dst.fa" <<'EOF'
+>chrD
+TCCGTCTTAAAAA
+EOF
+  cat > "$out_dir/liftover_clip_pad.chain" <<'EOF'
+chain 100 chrS 13 + 0 13 chrD 13 + 0 12 1
+8 1 0
+4
+EOF
+  samtools faidx "$out_dir/liftover_clip_pad_src.fa"
+  samtools faidx "$out_dir/liftover_clip_pad_dst.fa"
+done
+echo "  liftover clip-pad negative-score fixtures + .fai"
+
 # ---- vcfppR-generated VCF fixtures (spec/mapping/regression) + manifest ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"

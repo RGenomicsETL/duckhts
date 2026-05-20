@@ -517,6 +517,51 @@ test_liftover <- function() {
   expect_equal(repeat_nla$dest_alt[1], "GTTTTC")
   expect_equal(repeat_nla$swap[1], 1)
 
+  ## ---- clip-pad negative-score regression ----
+  clip_chain <- system.file("extdata", "liftover_clip_pad.chain", package = "Rduckhts")
+  clip_src_fa <- system.file("extdata", "liftover_clip_pad_src.fa", package = "Rduckhts")
+  clip_dst_fa <- system.file("extdata", "liftover_clip_pad_dst.fa", package = "Rduckhts")
+  expect_true(nzchar(clip_chain))
+  expect_true(nzchar(clip_src_fa))
+  expect_true(nzchar(clip_dst_fa))
+
+  clip_default <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrS', 7, 'TC', 'T')) AS t(chrom, pos, ref, alt)",
+    chain_path = clip_chain,
+    dst_fasta_ref = clip_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = clip_src_fa
+  )
+  expect_equal(nrow(clip_default), 1)
+  expect_true(clip_default$mapped[1])
+  expect_equal(clip_default$dest_chrom[1], "chrD")
+  expect_equal(clip_default$dest_pos[1], 7)
+  expect_equal(clip_default$dest_ref[1], "T")
+  expect_equal(clip_default$dest_alt[1], "TC")
+  expect_equal(clip_default$swap[1], 1)
+  expect_equal(clip_default$note[1], "Padded")
+
+  clip_nla <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrS', 7, 'TC', 'T')) AS t(chrom, pos, ref, alt)",
+    chain_path = clip_chain,
+    dst_fasta_ref = clip_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = clip_src_fa,
+    no_left_align = TRUE
+  )
+  expect_equal(nrow(clip_nla), 1)
+  expect_true(clip_nla$mapped[1])
+  expect_equal(clip_nla$dest_chrom[1], "chrD")
+  expect_equal(clip_nla$dest_pos[1], 7)
+  expect_equal(clip_nla$dest_ref[1], "TT")
+  expect_equal(clip_nla$dest_alt[1], "TCT")
+  expect_equal(clip_nla$swap[1], 1)
+  expect_equal(clip_nla$note[1], "Padded")
+
   ## ---- mixed context cache reuse / eviction ----
   chain_copies <- character(12)
   src_copies <- character(12)

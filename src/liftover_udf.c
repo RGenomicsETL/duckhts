@@ -1249,7 +1249,6 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
     if (!path) return -1;
     path->l = 0;
     if (path->s) path->s[0] = '\0';
-    if (s_l == 0 || t_l == 0) return -1;
     if (s_l > (size_t)(INT_MAX - 1) || t_l > (size_t)(INT_MAX - 1)) return -1;
     int a = 1;   /* score for a sequence match */
     int b = -4;  /* penalty for a mismatch */
@@ -1382,12 +1381,13 @@ static void scalar_clip_pad(char **alleles, int n_allele,
     kstring_t path = {0, 0, NULL};
     kstring_t src_seq = {0, 0, NULL};
     for (int i = 0; i < n_allele; i++) {
+        int new_score;
         if (!alleles[i] || alleles[i][0] == '*') continue;
 
         /* Generate source reference sequence: pad + allele or allele + pad */
         src_seq.l = 0;
         if (npad < 0) {
-            kputsn_(&pad[0], (size_t)(-npad), &src_seq);
+            kputsn_(pad, (size_t)(-npad), &src_seq);
             kputs(alleles[i], &src_seq);
         } else {
             kputsn_(alleles[i], strlen(alleles[i]), &src_seq);
@@ -1395,9 +1395,8 @@ static void scalar_clip_pad(char **alleles, int n_allele,
         }
 
         /* Pairwise align source and destination sequences excluding the anchors */
-        int new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
-                                  src_seq.s + 1, src_seq.l - 2, &path);
-        if (new_score < 0 || !path.s || path.s[0] == '\0') continue;
+        new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
+                              src_seq.s + 1, src_seq.l - 2, &path);
         if (new_score > best_score) {
             best_score = new_score;
             best_shift = scalar_get_shift(path.s, npad);
