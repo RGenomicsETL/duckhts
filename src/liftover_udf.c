@@ -564,6 +564,46 @@ static char *fetch_sequence_flexible(faidx_t *fai, const char *chrom, hts_pos_t 
     return NULL;
 }
 
+static int source_ref_matches_flexible(faidx_t *fai, const char *chrom, hts_pos_t pos0, const char *ref) {
+    char *src_ref = NULL;
+    size_t ref_len;
+    int match = 0;
+
+    if (!fai || !chrom || !ref || !*ref || pos0 < 0) return 1;
+
+    ref_len = strlen(ref);
+    src_ref = fetch_sequence_flexible(fai, chrom, pos0 + 1, pos0 + (hts_pos_t)ref_len);
+    if (src_ref && strncasecmp(src_ref, ref, ref_len) == 0) match = 1;
+    free(src_ref);
+    return match;
+}
+
+static char *resolve_fasta_contig_name(faidx_t *fai, const char *chrom) {
+    static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
+    char with_chr[512];
+    const char *aliases[8];
+    int idx = 0;
+
+    if (!fai || !chrom || !*chrom) return NULL;
+
+    aliases[idx++] = chrom;
+    if (strncasecmp(chrom, "chr", 3) != 0) {
+        snprintf(with_chr, sizeof(with_chr), "chr%s", chrom);
+        aliases[idx++] = with_chr;
+    } else if (chrom[3] != '\0') {
+        aliases[idx++] = chrom + 3;
+    }
+    if (strcasecmp(chrom, "MT") == 0 || strcasecmp(chrom, "M") == 0 || strcasecmp(chrom, "chrM") == 0) {
+        for (int i = 0; mt_aliases[i]; i++) aliases[idx++] = mt_aliases[i];
+    }
+    aliases[idx] = NULL;
+
+    for (int i = 0; aliases[i]; i++) {
+        if (faidx_has_seq(fai, aliases[i]) > 0) return dup_cstr(aliases[i]);
+    }
+    return dup_cstr(chrom);
+}
+
 static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_block_t **blocks, char **errbuf) {
     int n_chains = 0, n_blocks = 0, m_chains = 0, m_blocks = 0;
     int moff = 0, *off = NULL;
@@ -973,16 +1013,18 @@ typedef struct {
  * Uses chrom string directly instead of bcf_seqname(hdr, rec).
  * Clamps beg/end to valid range and fetches via fetch_sequence_flexible(). */
 static void scalar_safe_fetch_sequence(scalar_realign_t *ra) {
-    int seq_len = faidx_seq_len64(ra->fai, ra->chrom);
+    char *fai_chrom = resolve_fasta_contig_name(ra->fai, ra->chrom);
+    const char *fetch_chrom = fai_chrom ? fai_chrom : ra->chrom;
+    int seq_len = faidx_seq_len64(ra->fai, fetch_chrom);
     if (seq_len < 0) {
-        /* Try alias probing — fetch_sequence_flexible handles this */
         seq_len = 0;
     }
     if (ra->beg + 1 < 1) ra->beg = 0;
     if (ra->end + 1 > seq_len) ra->end = seq_len - 1;
     free(ra->ref);
     /* fetch_sequence_flexible uses 1-based inclusive coords */
-    ra->ref = fetch_sequence_flexible(ra->fai, ra->chrom, ra->beg + 1, ra->end + 1);
+    ra->ref = fetch_sequence_flexible(ra->fai, fetch_chrom, ra->beg + 1, ra->end + 1);
+    free(fai_chrom);
 }
 
 /* Adapted from upstream initialize_alleles().
@@ -1004,8 +1046,9 @@ static int scalar_initialize_alleles(scalar_realign_t *ra, char **alleles, int n
     ra->ref = NULL;
     scalar_safe_fetch_sequence(ra);
 
-    /* Upstream validates ref matches reference — we skip fatal error in scalar UDF,
-       but the mismatch will be caught downstream by find_reference. */
+    /* Upstream validates ref matches reference here. The scalar UDF keeps this
+       helper non-fatal; callers that need row-level rejection must pre-validate
+       before invoking the realignment path. */
     return 1;
 }
 
@@ -1053,8 +1096,6 @@ static void scalar_pad_right(scalar_realign_t *ra, int npad) {
 static void scalar_pad_from_right(scalar_realign_t *ra, const char *s_ptr, int d) {
     int npad = 0;
     hts_pos_t ref_offset = ra->pos - ra->beg + (hts_pos_t)ra->als[0].l;
-    hts_pos_t ref_available = ra->end - ra->beg + 1;
-    if (ref_offset >= ref_available) return; /* no reference available to pad from */
     const char *l_ptr = &ra->ref[ref_offset];
     while (1) {
         if (ra->pos + (hts_pos_t)ra->als[0].l + npad > ra->end) {
@@ -1063,12 +1104,9 @@ static void scalar_pad_from_right(scalar_realign_t *ra, const char *s_ptr, int d
             ra->ref = NULL;
             scalar_safe_fetch_sequence(ra);
             if (!ra->ref) break;
-            ref_available = ra->end - ra->beg + 1;
             l_ptr = &ra->ref[ra->pos - ra->beg + (hts_pos_t)ra->als[0].l + npad];
             if (npad >= d) s_ptr = &ra->ref[ra->pos - ra->beg + (hts_pos_t)ra->als[0].l + npad - d];
         }
-        /* Bounds check */
-        if (ra->pos - ra->beg + (hts_pos_t)ra->als[0].l + npad >= ref_available) break;
         if (npad == d) s_ptr = &ra->ref[ra->pos - ra->beg + (hts_pos_t)ra->als[0].l];
         npad++;
         if (*l_ptr != *s_ptr) break;
@@ -1077,8 +1115,6 @@ static void scalar_pad_from_right(scalar_realign_t *ra, const char *s_ptr, int d
     }
     if (!ra->ref || npad == 0) return;
     ref_offset = ra->pos - ra->beg + (hts_pos_t)ra->als[0].l;
-    if (ref_offset + npad > ref_available) npad = (int)(ref_available - ref_offset);
-    if (npad <= 0) return;
     const char *ptr = &ra->ref[ref_offset];
     for (int i = 0; i < ra->n_allele; i++) {
         if (ra->als[i].s[0] == '*') continue;
@@ -1213,7 +1249,6 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
     if (!path) return -1;
     path->l = 0;
     if (path->s) path->s[0] = '\0';
-    if (s_l == 0 || t_l == 0) return -1;
     if (s_l > (size_t)(INT_MAX - 1) || t_l > (size_t)(INT_MAX - 1)) return -1;
     int a = 1;   /* score for a sequence match */
     int b = -4;  /* penalty for a mismatch */
@@ -1346,12 +1381,13 @@ static void scalar_clip_pad(char **alleles, int n_allele,
     kstring_t path = {0, 0, NULL};
     kstring_t src_seq = {0, 0, NULL};
     for (int i = 0; i < n_allele; i++) {
+        int new_score;
         if (!alleles[i] || alleles[i][0] == '*') continue;
 
         /* Generate source reference sequence: pad + allele or allele + pad */
         src_seq.l = 0;
         if (npad < 0) {
-            kputsn_(&pad[0], (size_t)(-npad), &src_seq);
+            kputsn_(pad, (size_t)(-npad), &src_seq);
             kputs(alleles[i], &src_seq);
         } else {
             kputsn_(alleles[i], strlen(alleles[i]), &src_seq);
@@ -1359,9 +1395,8 @@ static void scalar_clip_pad(char **alleles, int n_allele,
         }
 
         /* Pairwise align source and destination sequences excluding the anchors */
-        int new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
-                                  src_seq.s + 1, src_seq.l - 2, &path);
-        if (new_score < 0 || !path.s || path.s[0] == '\0') continue;
+        new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
+                              src_seq.s + 1, src_seq.l - 2, &path);
         if (new_score > best_score) {
             best_score = new_score;
             best_shift = scalar_get_shift(path.s, npad);
@@ -1965,8 +2000,17 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
                 }
             }
 
+            /* Step 2: For non-SNPs or difficult SNPs, upstream initialize_alleles()
+             * would abort on a source-reference mismatch. Preserve the row schema in
+             * the scalar UDF by rejecting the row instead of raising a query error. */
+            if ((!is_snp || is_difficult_snp) && !is_symbolic && work_alleles && work_n_allele > 0
+                && bind->src_fai
+                && !source_ref_matches_flexible(bind->src_fai, chrom, work_pos, work_alleles[0])) {
+                tag_append(reject_reason, sizeof(reject_reason), "SourceRefMismatch");
+            }
+
             /* Step 2: For non-SNPs or difficult SNPs, extend alleles if needed */
-            if ((!is_snp || is_difficult_snp) && !is_symbolic && work_alleles && work_n_allele > 1) {
+            if ((!is_snp || is_difficult_snp) && !is_symbolic && work_alleles && work_n_allele > 1 && !reject_reason[0]) {
                 if (bind->src_fai) {
                     if (scalar_is_extension_needed(work_alleles, work_n_allele)) {
                         scalar_realign_t ra = {0};
@@ -1992,7 +2036,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             }
 
             /* Step 3: For non-SNPs or difficult SNPs, call liftover_indel() */
-            if ((!is_snp || is_difficult_snp) && !is_symbolic && work_alleles && work_n_allele > 0) {
+            if ((!is_snp || is_difficult_snp) && !is_symbolic && work_alleles && work_n_allele > 0 && !reject_reason[0]) {
                 hts_pos_t src_pos5 = work_pos + 1; /* 1-based */
                 hts_pos_t src_pos3 = work_pos + (hts_pos_t)strlen(work_alleles[0]); /* 1-based */
                 ret = liftover_indel(bind, chrom, src_pos5, src_pos3,
@@ -2165,7 +2209,11 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             continue;
         }
 
-        duckdb_vector_assign_string_element(child_vecs[OUT_DEST_CHROM], row, dst_chr);
+        {
+            char *emit_dst_chr = resolve_fasta_contig_name(bind->dst_fai, dst_chr);
+            duckdb_vector_assign_string_element(child_vecs[OUT_DEST_CHROM], row, emit_dst_chr ? emit_dst_chr : dst_chr);
+            free(emit_dst_chr);
+        }
         dest_pos_data[row] = dst_pos5;
 
         if (has_end_pos && dest_end >= 0) dest_end_data[row] = dest_end;

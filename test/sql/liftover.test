@@ -219,6 +219,7 @@ FROM duckdb_liftover(
 ----
 chrLiftF	2	5	OK
 
+# Source positions beyond the contig bounds reject before unmapped-anchor handling
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
        coalesce(lo.reject_reason, 'NULL'),
@@ -234,10 +235,9 @@ FROM (
   ) AS lo
 ) s;
 ----
-0	UnmappedAnchors	-1	NULL
+0	SourceRefMismatch	-1	NULL
 
-# Tier 3: Difficult SNP at edge of chain rescued by indel retry path
-# (position 11 is 1bp beyond the 10bp chain, extension pulls it into range)
+# Difficult SNP beyond the source contig should reject without aborting the query
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
        coalesce(lo.reject_reason, 'NULL'),
@@ -253,13 +253,99 @@ FROM (
   ) AS lo
 ) s;
 ----
-1	NULL	10	Padded
+0	SourceRefMismatch	-1	NULL
 
-# Padded indel near chain edge should stay stable through clip-pad / left-align handling
+# Valid mid-contig deletion should stay stable through indel liftover handling
 query TIIITT
 SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
        CASE WHEN lo.mapped THEN 1 ELSE 0 END,
        coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrF', 2, 'CG', 'C',
+    '__WORKING_DIRECTORY__/test/data/liftover.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+) s;
+----
+chrLiftF	2	CG	C	1	OK
+
+# Repeat-run insertion should extend and swap like upstream liftover
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', 1, 'G', 'GT',
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+) s;
+----
+chrD	1	GT	G	1	OK
+
+# Repeat-run insertion with no_left_align should preserve the pre-left-align extended alleles
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', 1, 'G', 'GT',
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+    1, 250, false, NULL::BIGINT, true
+  ) AS lo
+) s;
+----
+chrD	1	GTTTTTC	GTTTTC	1	OK
+
+# Clip-pad should still choose the best shift even when Needleman-Wunsch scores are negative
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', 7, 'TC', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_src.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+) s;
+----
+chrD	7	T	TC	1	Padded
+
+# no_left_align exposes the pre-left-align clip-pad result for the negative-score case
+query TIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       lo.swap,
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', 7, 'TC', 'T',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_clip_pad_src.fa',
+    1, 250, false, NULL::BIGINT, true
+  ) AS lo
+) s;
+----
+chrD	7	TT	TCT	1	Padded
+
+# End-of-contig deletion with an invalid source reference should reject
+query ITIT
+SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       coalesce(lo.reject_reason, 'NULL'),
+       CASE WHEN lo.dest_pos IS NULL THEN -1 ELSE lo.dest_pos END,
+       coalesce(lo.note, 'NULL')
 FROM (
   SELECT bcftools_liftover(
     'chrF', 10, 'AA', 'A',
@@ -270,7 +356,7 @@ FROM (
   ) AS lo
 ) s;
 ----
-chrLiftF	8	T	TA	1	Padded
+0	SourceRefMismatch	-1	NULL
 
 query ITIT
 SELECT CASE WHEN lo.mapped THEN 1 ELSE 0 END,

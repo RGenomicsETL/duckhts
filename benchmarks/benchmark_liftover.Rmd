@@ -20,12 +20,51 @@ This benchmark:
 
 `make bench-lift`
 
-Override stress size with `LIFTOVER_BENCH_ROWS` and repeats with
-`LIFTOVER_BENCH_RUNS`.
+Useful overrides:
+
+- `LIFTOVER_BENCH_ROWS`: synthetic VCF records, default `1000000`
+- `LIFTOVER_BENCH_RUNS`: timed repeats, default `3`
+- `BCFTOOLS_BIN`: optional override for the bcftools executable
+- `BCFTOOLS_PLUGIN_DIR`: optional override for the bcftools plugin directory
+- `LIFTOVER_REAL_VCF`, `LIFTOVER_REAL_REGION`, `LIFTOVER_REAL_CHAIN`, `LIFTOVER_REAL_SRC_FASTA`, `LIFTOVER_REAL_DST_FASTA`: optional real-callset conformance case (for example GIAB HG001 GRCh37 chr20)
+
+For a shell-first real-callset comparison, see
+`bash scripts/liftover_conformance.sh ...`.
+
+For curated GIAB benchmark slices, see `scripts/conformance_case_table.tsv`
+and run them in batch with `bash scripts/liftover_conformance_batch.sh`.
 
 ```{r setup, include = FALSE}
 library(DBI)
 library(duckdb)
+
+if (!requireNamespace("RBCFTools", quietly = TRUE)) {
+  stop("RBCFTools is required for bcftools +liftover benchmarking", call. = FALSE)
+}
+
+RBCFTools::setup_hts_env()
+
+bcftools_bin <- Sys.getenv("BCFTOOLS_BIN", unset = RBCFTools::bcftools_path())
+bcftools_plugin_dir <- Sys.getenv(
+  "BCFTOOLS_PLUGIN_DIR",
+  unset = Sys.getenv("SCORE_PLUGIN_DIR", unset = RBCFTools::bcftools_plugins_dir())
+)
+if (!file.exists(bcftools_bin)) stop("bcftools binary not found: ", bcftools_bin, call. = FALSE)
+if (!file.exists(file.path(bcftools_plugin_dir, "liftover.so"))) {
+  stop("bcftools liftover plugin not found under: ", bcftools_plugin_dir, call. = FALSE)
+}
+Sys.setenv(BCFTOOLS_PLUGINS = bcftools_plugin_dir)
+
+bench_rows <- as.integer(Sys.getenv("LIFTOVER_BENCH_ROWS", unset = "1000000"))
+bench_runs <- as.integer(Sys.getenv("LIFTOVER_BENCH_RUNS", unset = "3"))
+real_input_path <- Sys.getenv("LIFTOVER_REAL_VCF", unset = "")
+real_region <- Sys.getenv("LIFTOVER_REAL_REGION", unset = "")
+real_chain_path <- Sys.getenv("LIFTOVER_REAL_CHAIN", unset = "")
+real_src_fasta <- Sys.getenv("LIFTOVER_REAL_SRC_FASTA", unset = "")
+real_dst_fasta <- Sys.getenv("LIFTOVER_REAL_DST_FASTA", unset = "")
+
+if (is.na(bench_rows) || bench_rows < 1L) stop("LIFTOVER_BENCH_ROWS must be positive")
+if (is.na(bench_runs) || bench_runs < 1L) stop("LIFTOVER_BENCH_RUNS must be positive")
 
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
@@ -33,14 +72,6 @@ con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 DBI::dbExecute(con, sprintf("LOAD '%s';", gsub("\\\\", "/", ext_path)))
 DBI::dbExecute(con, "PRAGMA threads=4;")
-
-bcftools_bin <- Sys.getenv("BCFTOOLS_BIN", unset = Sys.which("bcftools"))
-score_plugin_zip <- Sys.getenv(
-  "SCORE_PLUGIN_ZIP",
-  unset = normalizePath("score_1.22-20250819.zip")
-)
-bench_rows <- as.integer(Sys.getenv("LIFTOVER_BENCH_ROWS", unset = "1000000"))
-bench_runs <- as.integer(Sys.getenv("LIFTOVER_BENCH_RUNS", unset = "3"))
 ```
 
 ```{r helpers, include = FALSE}
@@ -50,27 +81,9 @@ sql_string <- function(x) {
   sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
 }
 
-score_plugin_path <- function() {
-  out_dir <- file.path(tempdir(), "score_1.22-20250819")
-  if (!dir.exists(out_dir)) {
-    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  }
-  candidates <- list.files(
-    out_dir,
-    pattern = "^liftover\\.(so|dylib|dll)$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
-  if (!length(candidates)) {
-    unzip(score_plugin_zip, exdir = out_dir)
-    candidates <- list.files(
-      out_dir,
-      pattern = "^liftover\\.(so|dylib|dll)$",
-      recursive = TRUE,
-      full.names = TRUE
-    )
-  }
-  normalizePath(candidates[[1]], mustWork = TRUE)
+run_cmd <- function(cmd) {
+  status <- system(cmd, ignore.stdout = FALSE, ignore.stderr = FALSE)
+  if (!identical(status, 0L)) stop("command failed: ", cmd, call. = FALSE)
 }
 
 normalize_warning <- function(x) {
@@ -171,13 +184,41 @@ write_large_fixture <- function(dir_path, n_rows) {
   )
 }
 
+prepare_real_fixture <- function(input_path, chain_path, src_fasta, dst_fasta, region = "") {
+  if (!file.exists(chain_path)) stop("Chain file not found: ", chain_path, call. = FALSE)
+  if (!file.exists(src_fasta)) stop("Source FASTA not found: ", src_fasta, call. = FALSE)
+  if (!file.exists(dst_fasta)) stop("Destination FASTA not found: ", dst_fasta, call. = FALSE)
+
+  out_dir <- file.path(tempdir(), "duckhts_liftover_real")
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  input_local <- file.path(out_dir, "real_input.vcf.gz")
+
+  region_arg <- if (nzchar(region)) sprintf("-r %s ", shell_quote(region)) else ""
+  run_cmd(sprintf(
+    "%s view %s-Oz -o %s %s",
+    shell_quote(bcftools_bin),
+    region_arg,
+    shell_quote(input_local),
+    shell_quote(input_path)
+  ))
+  run_cmd(sprintf("%s index -f -t %s", shell_quote(bcftools_bin), shell_quote(input_local)))
+
+  list(
+    input_path = input_local,
+    chain_path = chain_path,
+    src_fasta = src_fasta,
+    dst_fasta = dst_fasta,
+    region = region
+  )
+}
+
 prepare_duckdb_input_table <- function(input_path) {
   DBI::dbExecute(con, "DROP TABLE IF EXISTS bench_input")
   DBI::dbExecute(
     con,
     paste0(
       "CREATE TEMP TABLE bench_input AS ",
-      "SELECT CHROM AS chrom, POS AS pos, REF AS ref, ALT[1] AS alt ",
+      "SELECT CHROM AS chrom, POS AS pos, REF AS ref, array_to_string(ALT, ',') AS alt ",
       "FROM read_bcf(", sql_string(input_path), ")"
     )
   )
@@ -185,10 +226,7 @@ prepare_duckdb_input_table <- function(input_path) {
 
 duckdb_liftover_sql <- function(chain_path, src_fasta, dst_fasta) {
   paste0(
-    "SELECT dest_chrom, dest_pos, dest_ref, dest_alt, ",
-    "COALESCE(NULLIF(reject_reason, ''), 'PASS') AS reject_reason, ",
-    "COALESCE(NULLIF(note, ''), 'PASS') AS note, ",
-    "COUNT(*) AS n ",
+    "SELECT dest_chrom, dest_pos, dest_ref, dest_alt, COUNT(*) AS n ",
     "FROM duckdb_liftover(",
     "'bench_input', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', ",
     "chain_path := ", sql_string(chain_path), ", ",
@@ -198,7 +236,7 @@ duckdb_liftover_sql <- function(chain_path, src_fasta, dst_fasta) {
     ") lifted ",
     "WHERE mapped ",
     "GROUP BY ALL ",
-    "ORDER BY dest_chrom, dest_pos, dest_ref, dest_alt, reject_reason, note"
+    "ORDER BY dest_chrom, dest_pos, dest_ref, dest_alt"
   )
 }
 
@@ -233,11 +271,9 @@ run_duckdb_output <- function(input_path, chain_path, src_fasta, dst_fasta) {
 }
 
 run_bcftools_once <- function(input_path, chain_path, src_fasta, dst_fasta, output_path) {
-  plugin <- score_plugin_path()
-  plugin_dir <- normalizePath(dirname(plugin), mustWork = TRUE)
   cmd <- sprintf(
     "BCFTOOLS_PLUGINS=%s %s +liftover --no-version -Ob -o %s %s -- -s %s -f %s -c %s",
-    shell_quote(plugin_dir),
+    shell_quote(bcftools_plugin_dir),
     shell_quote(bcftools_bin),
     shell_quote(output_path),
     shell_quote(input_path),
@@ -259,13 +295,11 @@ run_bcftools_once <- function(input_path, chain_path, src_fasta, dst_fasta, outp
 
 bcftools_output_sql <- function(output_path) {
   paste0(
-    "SELECT CHROM AS dest_chrom, POS AS dest_pos, REF AS dest_ref, ALT[1] AS dest_alt, ",
-    "'PASS' AS reject_reason, ",
-    "'PASS' AS note, ",
+    "SELECT CHROM AS dest_chrom, POS AS dest_pos, REF AS dest_ref, array_to_string(ALT, ',') AS dest_alt, ",
     "COUNT(*) AS bcftools_n ",
     "FROM read_bcf(", sql_string(output_path), ") ",
     "GROUP BY ALL ",
-    "ORDER BY dest_chrom, dest_pos, dest_ref, dest_alt, reject_reason, note"
+    "ORDER BY dest_chrom, dest_pos, dest_ref, dest_alt"
   )
 }
 
@@ -291,7 +325,7 @@ run_benchmark_case <- function(input_path, chain_path, src_fasta, dst_fasta, n =
     bench = rbind(
       duck,
       data.frame(
-        engine = "bcftools",
+        engine = "bcftools_RBCFTools",
         runs = n,
         median_sec = stats::median(bcftools_times),
         min_sec = min(bcftools_times),
@@ -300,7 +334,8 @@ run_benchmark_case <- function(input_path, chain_path, src_fasta, dst_fasta, n =
         stringsAsFactors = FALSE
       )
     ),
-    compare = compare_outputs(duck_out, bcftools_out)
+    compare = compare_outputs(duck_out, bcftools_out),
+    compare_examples = compare_examples(duck_out, bcftools_out)
   )
 }
 
@@ -309,7 +344,7 @@ compare_outputs <- function(duck_out, bcf_out) {
   merged <- merge(
     duck_out,
     bcf_out,
-    by = c("dest_chrom", "dest_pos", "dest_ref", "dest_alt", "reject_reason", "note"),
+    by = c("dest_chrom", "dest_pos", "dest_ref", "dest_alt"),
     all = TRUE
   )
   merged$duck_n[is.na(merged$duck_n)] <- 0L
@@ -329,6 +364,40 @@ compare_outputs <- function(duck_out, bcf_out) {
     stringsAsFactors = FALSE
   )
 }
+
+compare_examples <- function(duck_out, bcf_out, n = 20L) {
+  names(duck_out)[names(duck_out) == "n"] <- "duck_n"
+  merged <- merge(
+    duck_out,
+    bcf_out,
+    by = c("dest_chrom", "dest_pos", "dest_ref", "dest_alt"),
+    all = TRUE
+  )
+  merged$duck_n[is.na(merged$duck_n)] <- 0L
+  merged$bcftools_n[is.na(merged$bcftools_n)] <- 0L
+  head(merged[merged$duck_n != merged$bcftools_n, , drop = FALSE], n)
+}
+```
+
+## Tools
+
+```{r tools, echo = FALSE}
+data.frame(
+  tool = c("bcftools", "bcftools_plugins"),
+  path = c(bcftools_bin, bcftools_plugin_dir),
+  stringsAsFactors = FALSE
+)
+```
+
+## Settings
+
+```{r settings, echo = FALSE}
+data.frame(
+  synthetic_rows = bench_rows,
+  runs = bench_runs,
+  real_region = if (nzchar(real_region)) real_region else NA_character_,
+  stringsAsFactors = FALSE
+)
 ```
 
 ## Synthetic Stress Case
@@ -349,4 +418,59 @@ bench_case$bench
 
 ```{r synthetic-compare, echo = FALSE}
 bench_case$compare
+```
+
+```{r real-case-setup, include = FALSE}
+have_real_case <- nzchar(real_input_path) && nzchar(real_chain_path) &&
+  nzchar(real_src_fasta) && nzchar(real_dst_fasta)
+real_case <- NULL
+real_fixture <- NULL
+if (have_real_case) {
+  real_fixture <- prepare_real_fixture(
+    real_input_path,
+    real_chain_path,
+    real_src_fasta,
+    real_dst_fasta,
+    region = real_region
+  )
+  real_case <- run_benchmark_case(
+    real_fixture$input_path,
+    real_fixture$chain_path,
+    real_fixture$src_fasta,
+    real_fixture$dst_fasta,
+    n = bench_runs
+  )
+}
+```
+
+## Optional Real-Callset Case
+
+```{r real-case-config, echo = FALSE}
+if (have_real_case) {
+  data.frame(
+    input_vcf = real_input_path,
+    region = if (nzchar(real_region)) real_region else "full_input",
+    chain = real_chain_path,
+    src_fasta = real_src_fasta,
+    dst_fasta = real_dst_fasta,
+    stringsAsFactors = FALSE
+  )
+} else {
+  data.frame(
+    note = "Set LIFTOVER_REAL_VCF, LIFTOVER_REAL_CHAIN, LIFTOVER_REAL_SRC_FASTA, and LIFTOVER_REAL_DST_FASTA to run a real-callset case.",
+    stringsAsFactors = FALSE
+  )
+}
+```
+
+```{r real-case-bench, echo = FALSE}
+if (have_real_case) real_case$bench
+```
+
+```{r real-case-compare, echo = FALSE}
+if (have_real_case) real_case$compare
+```
+
+```{r real-case-examples, echo = FALSE}
+if (have_real_case && nrow(real_case$compare_examples)) real_case$compare_examples
 ```
