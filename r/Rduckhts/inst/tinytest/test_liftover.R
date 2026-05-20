@@ -104,10 +104,8 @@ test_liftover <- function() {
   expect_equal(row_multi_r$dest_alt[1], "C,A")
   expect_equal(row_multi_r$swap[1], 0)
 
-  # Tier 3: difficult SNP at edge of chain rescued by indel retry path
-
-  # pos=11 is 1bp beyond the 10bp chain; allele extension pulls it into range
-  rescued <- rduckhts_liftover(
+  # Difficult SNP beyond the source contig should reject without aborting
+  rejected_edge_snp <- rduckhts_liftover(
     con,
     query = "SELECT * FROM (VALUES ('chrF', 11, 'A', 'T')) AS t(chrom, pos, ref, alt)",
     chain_path = chain_path,
@@ -116,13 +114,30 @@ test_liftover <- function() {
     alt_col = "alt",
     src_fasta_ref = src_fa
   )
-  expect_equal(nrow(rescued), 1)
-  expect_true(rescued$mapped[1])
-  expect_true(is.na(rescued$reject_reason[1]))
-  expect_equal(rescued$note[1], "Padded")
-  expect_equal(rescued$dest_pos[1], 10)
+  expect_equal(nrow(rejected_edge_snp), 1)
+  expect_false(rejected_edge_snp$mapped[1])
+  expect_equal(rejected_edge_snp$reject_reason[1], "SourceRefMismatch")
+  expect_true(is.na(rejected_edge_snp$note[1]))
+  expect_true(is.na(rejected_edge_snp$dest_pos[1]))
 
-  padded_indel <- rduckhts_liftover(
+  mid_indel <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrF', 2, 'CG', 'C')) AS t(chrom, pos, ref, alt)",
+    chain_path = chain_path,
+    dst_fasta_ref = dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = src_fa
+  )
+  expect_equal(nrow(mid_indel), 1)
+  expect_true(mid_indel$mapped[1])
+  expect_equal(mid_indel$dest_chrom[1], "chrLiftF")
+  expect_equal(mid_indel$dest_pos[1], 2)
+  expect_equal(mid_indel$dest_ref[1], "CG")
+  expect_equal(mid_indel$dest_alt[1], "C")
+  expect_true(is.na(mid_indel$note[1]))
+
+  rejected_edge_indel <- rduckhts_liftover(
     con,
     query = "SELECT * FROM (VALUES ('chrF', 10, 'AA', 'A')) AS t(chrom, pos, ref, alt)",
     chain_path = chain_path,
@@ -131,15 +146,13 @@ test_liftover <- function() {
     alt_col = "alt",
     src_fasta_ref = src_fa
   )
-  expect_equal(nrow(padded_indel), 1)
-  expect_true(padded_indel$mapped[1])
-  expect_equal(padded_indel$dest_chrom[1], "chrLiftF")
-  expect_equal(padded_indel$dest_pos[1], 8)
-  expect_equal(padded_indel$dest_ref[1], "T")
-  expect_equal(padded_indel$dest_alt[1], "TA")
-  expect_equal(padded_indel$note[1], "Padded")
+  expect_equal(nrow(rejected_edge_indel), 1)
+  expect_false(rejected_edge_indel$mapped[1])
+  expect_equal(rejected_edge_indel$reject_reason[1], "SourceRefMismatch")
+  expect_true(is.na(rejected_edge_indel$note[1]))
+  expect_true(is.na(rejected_edge_indel$dest_pos[1]))
 
-  # pos=20 is truly beyond the chain — no rescue possible
+  # Positions beyond the source contig bounds reject before unmapped-anchor handling
   unmapped <- rduckhts_liftover(
     con,
     query = "SELECT * FROM (VALUES ('chrF', 20, 'A', 'T')) AS t(chrom, pos, ref, alt)",
@@ -151,7 +164,7 @@ test_liftover <- function() {
   )
   expect_equal(nrow(unmapped), 1)
   expect_false(unmapped$mapped[1])
-  expect_equal(unmapped$reject_reason[1], "UnmappedAnchors")
+  expect_equal(unmapped$reject_reason[1], "SourceRefMismatch")
   expect_true(is.na(unmapped$note[1]))
   expect_true(is.na(unmapped$dest_pos[1]))
 
@@ -460,6 +473,49 @@ test_liftover <- function() {
   expect_equal(out_nla$dest_pos[1], 2)
   expect_equal(out_nla$dest_ref[1], "C")
   expect_equal(out_nla$dest_alt[1], "T")
+
+  ## ---- repeat-run indel extension / swap regression ----
+  repeat_chain <- system.file("extdata", "liftover_repeat.chain", package = "Rduckhts")
+  repeat_src_fa <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts")
+  repeat_dst_fa <- system.file("extdata", "liftover_repeat_dst.fa", package = "Rduckhts")
+  expect_true(nzchar(repeat_chain))
+  expect_true(nzchar(repeat_src_fa))
+  expect_true(nzchar(repeat_dst_fa))
+
+  repeat_default <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrS', 1, 'G', 'GT')) AS t(chrom, pos, ref, alt)",
+    chain_path = repeat_chain,
+    dst_fasta_ref = repeat_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = repeat_src_fa
+  )
+  expect_equal(nrow(repeat_default), 1)
+  expect_true(repeat_default$mapped[1])
+  expect_equal(repeat_default$dest_chrom[1], "chrD")
+  expect_equal(repeat_default$dest_pos[1], 1)
+  expect_equal(repeat_default$dest_ref[1], "GT")
+  expect_equal(repeat_default$dest_alt[1], "G")
+  expect_equal(repeat_default$swap[1], 1)
+
+  repeat_nla <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrS', 1, 'G', 'GT')) AS t(chrom, pos, ref, alt)",
+    chain_path = repeat_chain,
+    dst_fasta_ref = repeat_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = repeat_src_fa,
+    no_left_align = TRUE
+  )
+  expect_equal(nrow(repeat_nla), 1)
+  expect_true(repeat_nla$mapped[1])
+  expect_equal(repeat_nla$dest_chrom[1], "chrD")
+  expect_equal(repeat_nla$dest_pos[1], 1)
+  expect_equal(repeat_nla$dest_ref[1], "GTTTTTC")
+  expect_equal(repeat_nla$dest_alt[1], "GTTTTC")
+  expect_equal(repeat_nla$swap[1], 1)
 
   ## ---- mixed context cache reuse / eviction ----
   chain_copies <- character(12)

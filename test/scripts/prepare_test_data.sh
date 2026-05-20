@@ -137,6 +137,26 @@ EOF
 done
 echo "  GFF/GTF strict-validation and attribute fixtures"
 
+# ---- Liftover repeat-run indel swap regression fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/liftover_repeat_src.fa" <<'EOF'
+>chrS
+GTTTTCT
+EOF
+  cat > "$out_dir/liftover_repeat_dst.fa" <<'EOF'
+>chrD
+GTTTTTCT
+EOF
+  cat > "$out_dir/liftover_repeat.chain" <<'EOF'
+chain 100 chrS 7 + 0 7 chrD 8 + 0 8 1
+1 0 1
+6
+EOF
+  samtools faidx "$out_dir/liftover_repeat_src.fa"
+  samtools faidx "$out_dir/liftover_repeat_dst.fa"
+done
+echo "  liftover repeat-run indel swap fixtures + .fai"
+
 # ---- vcfppR-generated VCF fixtures (spec/mapping/regression) + manifest ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"
