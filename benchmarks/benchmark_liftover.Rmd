@@ -31,6 +31,9 @@ Useful overrides:
 For a shell-first real-callset comparison, see
 `bash scripts/liftover_conformance.sh ...`.
 
+For curated GIAB benchmark slices, see `scripts/conformance_case_table.tsv`
+and run them in batch with `bash scripts/liftover_conformance_batch.sh`.
+
 ```{r setup, include = FALSE}
 library(DBI)
 library(duckdb)

@@ -28,6 +28,10 @@ Useful overrides:
 For a shell-first real-callset comparison, see
 `bash scripts/liftover_conformance.sh ...`.
 
+For curated GIAB benchmark slices, see
+`scripts/conformance_case_table.tsv` and run them in batch with
+`bash scripts/liftover_conformance_batch.sh`.
+
 ## Tools
 
     #>               tool
@@ -45,8 +49,8 @@ For a shell-first real-callset comparison, see
 ## Synthetic Stress Case
 
     #>               engine runs median_sec min_sec max_sec output_rows
-    #> 1            duckhts    3      0.048   0.047   0.061       1e+06
-    #> 2 bcftools_RBCFTools    3    100.394 100.325 103.533       1e+06
+    #> 1            duckhts    3      0.047   0.046   0.054       1e+06
+    #> 2 bcftools_RBCFTools    3    109.419 107.901 112.497       1e+06
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
     #> 1     1e+06         1e+06                0                    0
