@@ -569,6 +569,9 @@ duckhts_extension_dir <- function() {
 #' @param tidy_format Logical. If TRUE, FORMAT columns are returned in tidy format
 #' @param additional_csq_column_types Optional bcftools-style `PATTERN TYPE`
 #'   overrides for CSQ/ANN/BCSQ subfield typing, separated by newlines or `;`
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads per file handle. Default `0`. Use `0` to keep BCF/VCF reads
+#'   single-threaded.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -593,6 +596,7 @@ rduckhts_bcf <- function(
   index_path = NULL,
   tidy_format = FALSE,
   additional_csq_column_types = NULL,
+  decompression_threads = 0,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -621,6 +625,15 @@ rduckhts_bcf <- function(
   }
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- sprintf("'%s'", additional_csq_column_types)
+  }
+  if (!is.null(decompression_threads)) {
+    params$decompression_threads <- sprintf(
+      "%d",
+      .validate_nonnegative_integer_param(
+        decompression_threads,
+        "decompression_threads"
+      )
+    )
   }
 
   param_str <- build_param_str(params)
@@ -2649,6 +2662,8 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 #' @param index_path Optional index file path.
 #' @param tidy_format Logical; use tidy FORMAT column output.
 #' @param additional_csq_column_types Optional CSQ type override string.
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads per file handle. Default `0`.
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2656,6 +2671,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, tidy_format = FALSE,
                                additional_csq_column_types = NULL,
+                               decompression_threads = 0,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
@@ -2663,6 +2679,12 @@ rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
   if (isTRUE(tidy_format)) params$tidy_format <- TRUE
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- additional_csq_column_types
+  }
+  if (!is.null(decompression_threads)) {
+    params$decompression_threads <- .validate_nonnegative_integer_param(
+      decompression_threads,
+      "decompression_threads"
+    )
   }
   .hts_multi_read(con, table_name, "read_bcf", files, params, .params, overwrite)
 }

@@ -23,6 +23,31 @@ SELECT CHROM, POS, ID, REF FROM read_bcf('__WORKING_DIRECTORY__/test/data/format
 ----
 1	100	a	A
 
+# --- decompression_threads := 0 keeps BCF/VCF reads single-threaded ---
+query I
+SELECT count(*)
+FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz',
+  decompression_threads := 0
+);
+----
+1
+
+# --- decompression_threads := 1 enables htslib worker threads ---
+query I
+SELECT count(*)
+FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz',
+  decompression_threads := 1
+);
+----
+1
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', decompression_threads := -1) LIMIT 1;
+----
+read_bcf: decompression_threads must be between 0 and INT_MAX
+
 # --- projection pushdown: no unpack required (rid/pos/qual only) ---
 query IIR
 SELECT CHROM, POS, QUAL FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf') LIMIT 1;

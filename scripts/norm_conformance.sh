@@ -108,7 +108,7 @@ COPY (
          END AS alt_normed,
          COUNT(*) AS duck_n
   FROM normed
-  WHERE coalesce(norm_status, '') IN ('Normalized', 'Unchanged', 'RefOnly')
+  WHERE coalesce(norm_status, '') IN ('Normalized', 'Unchanged', 'RefOnly', 'SpanningDeletion', 'Breakend')
   GROUP BY ALL
   ORDER BY chrom, pos_normed, ref_normed, alt_normed
 ) TO '${DUCK_TSV}' (FORMAT CSV, DELIMITER '\t', HEADER TRUE);

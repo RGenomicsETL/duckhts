@@ -37,6 +37,10 @@ test_bcftools_norm <- function() {
   )
   DBI::dbExecute(
     con,
+    "CREATE OR REPLACE TEMP TABLE norm_spanning AS SELECT * FROM (VALUES ('chrS', 2, 'T', '*,TT')) AS t(chrom, pos, ref, alt)"
+  )
+  DBI::dbExecute(
+    con,
     paste(
       "CREATE OR REPLACE TEMP TABLE norm_empty_seq AS",
       "SELECT * FROM (VALUES",
@@ -114,6 +118,25 @@ test_bcftools_norm <- function() {
   expect_equal(as.logical(empty_list_split$normed), c(FALSE, NA, FALSE))
   expect_true(all(is.na(empty_list_split$alt_index[c(1, 3)])))
   expect_equal(empty_list_split$alt_index[2], 1)
+
+  out_spanning <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path)
+  expect_equal(nrow(out_spanning), 1)
+  expect_equal(out_spanning$pos_normed[1], 2)
+  expect_equal(out_spanning$end_pos_normed[1], 2)
+  expect_equal(out_spanning$ref_normed[1], "T")
+  expect_equal(as.character(out_spanning$alt_normed[[1]]), c("*", "TT"))
+  expect_true(is.na(out_spanning$normed[1]))
+  expect_equal(out_spanning$norm_status[1], "SpanningDeletion")
+
+  out_spanning_split <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path, split_multiallelic = TRUE)
+  out_spanning_split <- out_spanning_split[order(out_spanning_split$alt_index), , drop = FALSE]
+  expect_equal(nrow(out_spanning_split), 2)
+  expect_equal(out_spanning_split$alt_normed, c("*", "GT"))
+  expect_equal(out_spanning_split$ref_normed, c("T", "G"))
+  expect_equal(out_spanning_split$pos_normed, c(2, 1))
+  expect_equal(out_spanning_split$norm_status, c("SpanningDeletion", "Normalized"))
+  expect_equal(as.logical(out_spanning_split$normed), c(NA, TRUE))
+  expect_equal(out_spanning_split$alt_index, c(1, 2))
 
   out_sv <- rduckhts_bcftools_norm(
     con,

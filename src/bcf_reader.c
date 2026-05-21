@@ -38,6 +38,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdbool.h>
 #include <time.h>
 #include <inttypes.h>
+#include <limits.h>
 
 // htslib headers
 #include <htslib/vcf.h>
@@ -97,6 +98,7 @@ typedef struct {
     char* index_path;          // Optional explicit index path
     char* region;              // Optional region filter
     char* additional_csq_column_types;  // Optional bcftools-style override rules
+    int decompression_threads; // htslib decompression worker threads per file handle
     char** regions;            // Parsed comma-separated regions
     unsigned int n_regions;
     int include_info;          // Include INFO fields
@@ -635,6 +637,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
 
     // Optional bcftools-style CSQ/ANN/BCSQ type overrides
     char* additional_csq_column_types = NULL;
+    int decompression_threads = 0;
     duckdb_value csq_types_val = duckdb_bind_get_named_parameter(info, "additional_csq_column_types");
     if (csq_types_val && !duckdb_is_null_value(csq_types_val)) {
         additional_csq_column_types = duckdb_get_varchar(csq_types_val);
@@ -651,6 +654,22 @@ static void bcf_read_bind(duckdb_bind_info info) {
             return;
         }
     }
+
+    duckdb_value dthreads_val = duckdb_bind_get_named_parameter(info, "decompression_threads");
+    if (dthreads_val && !duckdb_is_null_value(dthreads_val)) {
+        int64_t requested_threads = duckdb_get_int64(dthreads_val);
+        if (requested_threads < 0 || requested_threads > INT_MAX) {
+            duckdb_bind_set_error(info, "read_bcf: decompression_threads must be between 0 and INT_MAX");
+            duckdb_free(file_path);
+            if (index_path) duckdb_free(index_path);
+            if (region) duckdb_free(region);
+            if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
+            duckdb_destroy_value(&dthreads_val);
+            return;
+        }
+        decompression_threads = (int)requested_threads;
+    }
+    if (dthreads_val) duckdb_destroy_value(&dthreads_val);
     
     // Open the file to read header
     htsFile* fp = hts_open(file_path, "r");
@@ -683,6 +702,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->index_path = index_path;
     bind->region = region;
     bind->additional_csq_column_types = additional_csq_column_types;
+    bind->decompression_threads = decompression_threads;
     parse_regions_duckdb(region, &bind->regions, &bind->n_regions);
     bind->include_info = 1;
     bind->include_format = 1;
@@ -1103,6 +1123,14 @@ static void bcf_read_local_init(duckdb_init_info info) {
             : DUCKHTS_HTS_IO_PROFILE_STREAMING
     );
     
+    if (bind->decompression_threads > 0 &&
+        hts_get_format(local->fp)->compression != no_compression &&
+        hts_set_threads(local->fp, bind->decompression_threads) < 0) {
+        duckdb_init_set_error(info, "Failed to configure BCF/VCF decompression threads");
+        destroy_init_data(local);
+        return;
+    }
+
     // Read header
     local->hdr = bcf_hdr_read(local->fp);
     if (!local->hdr) {
@@ -2050,11 +2078,14 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_table_function_add_parameter(tf, varchar_type);  // file_path
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);  // optional region
+    duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);  // optional explicit index path
     duckdb_table_function_add_named_parameter(tf, "tidy_format", bool_type);  // optional tidy format
     duckdb_table_function_add_named_parameter(tf, "additional_csq_column_types", varchar_type);  // optional bcftools-style CSQ/ANN/BCSQ type overrides
+    duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);  // optional htslib worker threads
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_logical_type(&bigint_type);
     
     // Callbacks - use global init + local init for parallel scan support
     duckdb_table_function_set_bind(tf, bcf_read_bind);

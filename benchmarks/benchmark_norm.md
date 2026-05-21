@@ -13,6 +13,8 @@ This benchmark:
   alleles
 - covers both site-preserving normalization and
   `split_multiallelic := TRUE`
+- uses `bcftools norm -Ou` plus `bcftools query` so output compression
+  does not dominate the upstream timing
 
 # Run
 
@@ -23,6 +25,11 @@ Useful overrides:
 - `NORM_BENCH_ROWS`: synthetic VCF records, default `100000`
 - `NORM_BENCH_RUNS`: timed repeats, default `3`
 - `BCFTOOLS_BIN`: optional override for the bcftools executable
+- `NORM_DUCK_THREADS`: DuckDB execution threads for DuckHTS, default `1`
+- `NORM_DUCK_DECOMPRESSION_THREADS`: `read_bcf(...)` htslib worker
+  threads, default `0`
+- `NORM_BCFTOOLS_THREADS`: optional `bcftools norm --threads`, default
+  `0`
 - `NORM_REAL_VCF`, `NORM_REAL_REGION`, `NORM_REAL_FASTA`: optional
   real-callset conformance case
 - `NORM_REAL_SPLIT`: `1` to run the optional real-callset case in split
@@ -31,6 +38,19 @@ Useful overrides:
 
 For a shell-first comparison, see
 `bash scripts/norm_conformance.sh ...`.
+
+# Settings
+
+``` r
+knitr::kable(benchmark_settings)
+```
+
+| setting                        | value |
+|:-------------------------------|:------|
+| duckdb_threads                 | 1     |
+| read_bcf_decompression_threads | 0     |
+| bcftools_threads               | 0     |
+| bcftools_output_mode           | -Ou   |
 
 # Synthetic fixture
 
@@ -45,10 +65,10 @@ knitr::kable(synthetic_bench, digits = 3)
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving    |    3 |      0.155 |   0.152 |   0.165 |      100000 |
-| bcftools_norm | site_preserving    |    3 |     72.406 |  71.397 |  76.825 |      100000 |
-| duckhts       | split_multiallelic |    3 |      0.208 |   0.208 |   0.208 |      120000 |
-| bcftools_norm | split_multiallelic |    3 |     97.558 |  96.969 | 104.839 |      120000 |
+| duckhts       | site_preserving    |    3 |      0.147 |   0.146 |   0.149 |      100000 |
+| bcftools_norm | site_preserving    |    3 |     74.821 |  73.809 |  78.000 |      100000 |
+| duckhts       | split_multiallelic |    3 |      0.213 |   0.212 |   0.213 |      120000 |
+| bcftools_norm | split_multiallelic |    3 |    111.976 | 111.904 | 112.016 |      120000 |
 
 Synthetic fixture mix:
 
@@ -143,40 +163,42 @@ if (!nzchar(real_input_path) || !nzchar(real_fasta)) {
 }
 ```
 
-## giab_hg001_grch37_chr20 (site-preserving)
+## giab_hg001_grch37_full (site-preserving)
 
 | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving |    3 |      0.416 |   0.410 |   0.422 |       82640 |
-| bcftools_norm | site_preserving |    3 |      0.299 |   0.297 |   0.302 |       82640 |
+| duckhts       | site_preserving |    3 |     15.801 |  15.586 |  15.957 |     3891440 |
+| bcftools_norm | site_preserving |    3 |     36.541 |  36.169 |  39.581 |     3891440 |
 
-| status |     n |
-|:-------|------:|
-| match  | 82640 |
+| status |       n |
+|:-------|--------:|
+| match  | 3891439 |
 
-| norm_status |     n |
-|:------------|------:|
-| Normalized  |     2 |
-| Unchanged   | 82638 |
+| norm_status      |       n |
+|:-----------------|--------:|
+| Normalized       |      43 |
+| SpanningDeletion |     345 |
+| Unchanged        | 3891052 |
 
 | chrom | pos_normed | end_pos_normed | ref_normed | alt_normed | duck_n | bcf_n | status |
 |:------|-----------:|---------------:|:-----------|:-----------|-------:|------:|:-------|
 
-## giab_hg001_grch37_chr20 (split_multiallelic)
+## giab_hg001_grch37_full (split_multiallelic)
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | split_multiallelic |    3 |      0.526 |   0.523 |   0.587 |       83452 |
-| bcftools_norm | split_multiallelic |    3 |      0.302 |   0.299 |   0.307 |       83452 |
+| duckhts       | split_multiallelic |    3 |     22.726 |  22.653 |  22.791 |     3933714 |
+| bcftools_norm | split_multiallelic |    3 |     34.102 |  33.914 |  38.332 |     3933714 |
 
-| status |     n |
-|:-------|------:|
-| match  | 83452 |
+| status |       n |
+|:-------|--------:|
+| match  | 3933713 |
 
-| norm_status |     n |
-|:------------|------:|
-| Normalized  |   521 |
-| Unchanged   | 82931 |
+| norm_status      |       n |
+|:-----------------|--------:|
+| Normalized       |   26837 |
+| SpanningDeletion |     345 |
+| Unchanged        | 3906532 |
 
 | chrom | pos_normed | end_pos_normed | ref_normed | alt_normed | duck_n | bcf_n | status |
 |:------|-----------:|---------------:|:-----------|:-----------|-------:|------:|:-------|

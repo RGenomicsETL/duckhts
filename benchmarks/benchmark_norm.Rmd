@@ -16,6 +16,7 @@ This benchmark:
 - times DuckHTS `duckhts_bcftools_norm(...)` against installed `bcftools norm`
 - compares normalized outputs after grouping identical normalized alleles
 - covers both site-preserving normalization and `split_multiallelic := TRUE`
+- uses `bcftools norm -Ou` plus `bcftools query` so output compression does not dominate the upstream timing
 
 # Run
 
@@ -26,6 +27,9 @@ Useful overrides:
 - `NORM_BENCH_ROWS`: synthetic VCF records, default `100000`
 - `NORM_BENCH_RUNS`: timed repeats, default `3`
 - `BCFTOOLS_BIN`: optional override for the bcftools executable
+- `NORM_DUCK_THREADS`: DuckDB execution threads for DuckHTS, default `1`
+- `NORM_DUCK_DECOMPRESSION_THREADS`: `read_bcf(...)` htslib worker threads, default `0`
+- `NORM_BCFTOOLS_THREADS`: optional `bcftools norm --threads`, default `0`
 - `NORM_REAL_VCF`, `NORM_REAL_REGION`, `NORM_REAL_FASTA`: optional real-callset conformance case
 - `NORM_REAL_SPLIT`: `1` to run the optional real-callset case in split mode too
 - `NORM_REAL_LABEL`: optional label for the real-callset section
@@ -47,21 +51,51 @@ if (!file.exists(bcftools_bin)) stop("bcftools binary not found: ", bcftools_bin
 
 bench_rows <- as.integer(Sys.getenv("NORM_BENCH_ROWS", unset = "100000"))
 bench_runs <- as.integer(Sys.getenv("NORM_BENCH_RUNS", unset = "3"))
+duck_threads <- as.integer(Sys.getenv("NORM_DUCK_THREADS", unset = "1"))
+duck_decompression_threads <- as.integer(Sys.getenv("NORM_DUCK_DECOMPRESSION_THREADS", unset = "0"))
+bcftools_threads <- as.integer(Sys.getenv("NORM_BCFTOOLS_THREADS", unset = "0"))
 real_input_path <- Sys.getenv("NORM_REAL_VCF", unset = "")
 real_region <- Sys.getenv("NORM_REAL_REGION", unset = "")
 real_fasta <- Sys.getenv("NORM_REAL_FASTA", unset = "")
 real_split <- identical(Sys.getenv("NORM_REAL_SPLIT", unset = "0"), "1")
 real_label <- Sys.getenv("NORM_REAL_LABEL", unset = "real_callset")
 
-if (is.na(bench_rows) || bench_rows < 1L) stop("NORM_BENCH_ROWS must be positive")
-if (is.na(bench_runs) || bench_runs < 1L) stop("NORM_BENCH_RUNS must be positive")
+for (nm in c("NORM_BENCH_ROWS", "NORM_BENCH_RUNS", "NORM_DUCK_THREADS", "NORM_DUCK_DECOMPRESSION_THREADS", "NORM_BCFTOOLS_THREADS")) {
+  val <- get(switch(nm,
+    NORM_BENCH_ROWS = "bench_rows",
+    NORM_BENCH_RUNS = "bench_runs",
+    NORM_DUCK_THREADS = "duck_threads",
+    NORM_DUCK_DECOMPRESSION_THREADS = "duck_decompression_threads",
+    NORM_BCFTOOLS_THREADS = "bcftools_threads"
+  ))
+  if (is.na(val) || val < 0L) stop(nm, " must be a non-negative integer", call. = FALSE)
+}
+if (bench_rows < 1L) stop("NORM_BENCH_ROWS must be positive", call. = FALSE)
+if (bench_runs < 1L) stop("NORM_BENCH_RUNS must be positive", call. = FALSE)
+if (duck_threads < 1L) stop("NORM_DUCK_THREADS must be positive", call. = FALSE)
 
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
 
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 DBI::dbExecute(con, sprintf("LOAD '%s';", gsub("\\\\", "/", ext_path)))
-DBI::dbExecute(con, "PRAGMA threads=4;")
+DBI::dbExecute(con, sprintf("PRAGMA threads=%d;", duck_threads))
+
+benchmark_settings <- data.frame(
+  setting = c(
+    "duckdb_threads",
+    "read_bcf_decompression_threads",
+    "bcftools_threads",
+    "bcftools_output_mode"
+  ),
+  value = c(
+    as.character(duck_threads),
+    as.character(duck_decompression_threads),
+    as.character(bcftools_threads),
+    "-Ou"
+  ),
+  stringsAsFactors = FALSE
+)
 ```
 
 ```{r helpers, include = FALSE}
@@ -71,16 +105,29 @@ sql_string <- function(x) {
   sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
 }
 
-run_cmd <- function(cmd) {
-  status <- system(cmd, ignore.stdout = FALSE, ignore.stderr = FALSE)
-  if (!identical(status, 0L)) stop("command failed: ", cmd, call. = FALSE)
-}
+run_bash <- function(cmd, capture_stdout = FALSE) {
+  stderr_file <- tempfile("duckhts_norm_bench_stderr_")
+  script_file <- tempfile("duckhts_norm_bench_", fileext = ".sh")
+  writeLines(c("#!/usr/bin/env bash", "set -euo pipefail", cmd), script_file)
+  Sys.chmod(script_file, mode = "0700")
+  on.exit(unlink(c(stderr_file, script_file)), add = TRUE)
 
-run_cmd_capture <- function(cmd) {
-  out <- system(cmd, intern = TRUE, ignore.stderr = FALSE)
-  status <- attr(out, "status")
-  if (!is.null(status) && !identical(status, 0L)) stop("command failed: ", cmd, call. = FALSE)
-  out
+  if (capture_stdout) {
+    out <- system2("bash", script_file, stdout = TRUE, stderr = stderr_file)
+    status <- attr(out, "status")
+    stderr <- if (file.exists(stderr_file)) readLines(stderr_file, warn = FALSE) else character()
+    if (!is.null(status) && !identical(status, 0L)) {
+      stop(paste(c("command failed:", cmd, stderr), collapse = "\n"), call. = FALSE)
+    }
+    out
+  } else {
+    status <- system2("bash", script_file, stdout = FALSE, stderr = stderr_file)
+    stderr <- if (file.exists(stderr_file)) readLines(stderr_file, warn = FALSE) else character()
+    if (!identical(status, 0L)) {
+      stop(paste(c("command failed:", cmd, stderr), collapse = "\n"), call. = FALSE)
+    }
+    invisible(NULL)
+  }
 }
 
 flatten_duck_alt_sql <- paste0(
@@ -141,13 +188,13 @@ write_norm_fixture <- function(dir_path, n_rows) {
     )
   )
 
-  run_cmd(sprintf(
+  run_bash(sprintf(
     "%s view -Oz -o %s %s",
     shell_quote(bcftools_bin),
     shell_quote(vcf_gz),
     shell_quote(vcf_path)
   ))
-  run_cmd(sprintf("%s index -f -t %s", shell_quote(bcftools_bin), shell_quote(vcf_gz)))
+  run_bash(sprintf("%s index -f -t %s", shell_quote(bcftools_bin), shell_quote(vcf_gz)))
 
   list(
     input_path = vcf_gz,
@@ -164,14 +211,14 @@ prepare_real_fixture <- function(input_path, fasta_path, region = "") {
   input_local <- file.path(out_dir, "real_input.vcf.gz")
 
   region_arg <- if (nzchar(region)) sprintf("-r %s ", shell_quote(region)) else ""
-  run_cmd(sprintf(
+  run_bash(sprintf(
     "%s view %s-Oz -o %s %s",
     shell_quote(bcftools_bin),
     region_arg,
     shell_quote(input_local),
     shell_quote(input_path)
   ))
-  run_cmd(sprintf("%s index -f -t %s", shell_quote(bcftools_bin), shell_quote(input_local)))
+  run_bash(sprintf("%s index -f -t %s", shell_quote(bcftools_bin), shell_quote(input_local)))
 
   list(
     input_path = input_local,
@@ -186,7 +233,10 @@ prepare_duckdb_input_view <- function(input_path) {
     con,
     paste0(
       "CREATE TEMP VIEW bench_input AS ",
-      "SELECT CHROM, POS, REF, ALT FROM read_bcf(", sql_string(input_path), ")"
+      "SELECT CHROM, POS, REF, ALT FROM read_bcf(",
+      sql_string(input_path), ", decompression_threads := ",
+      duck_decompression_threads,
+      ")"
     )
   )
 }
@@ -199,9 +249,9 @@ duckdb_norm_group_sql <- function(fasta_path, split = FALSE) {
     sql_string("bench_input"), ", ",
     sql_string(fasta_path), ", ",
     "chrom_col := 'CHROM', pos_col := 'POS', ref_col := 'REF', alt_col := 'ALT', ",
-    "split_multiallelic := ", if (split) "true" else "false", 
+    "split_multiallelic := ", if (split) "true" else "false",
     ") ",
-    "WHERE coalesce(norm_status, '') IN ('Normalized', 'Unchanged', 'RefOnly') ",
+    "WHERE coalesce(norm_status, '') IN ('Normalized', 'Unchanged', 'RefOnly', 'SpanningDeletion', 'Breakend') ",
     "GROUP BY ALL ORDER BY chrom, pos_normed, end_pos_normed, ref_normed, alt_normed"
   )
 }
@@ -213,7 +263,7 @@ duckdb_norm_status_sql <- function(fasta_path, split = FALSE) {
     sql_string("bench_input"), ", ",
     sql_string(fasta_path), ", ",
     "chrom_col := 'CHROM', pos_col := 'POS', ref_col := 'REF', alt_col := 'ALT', ",
-    "split_multiallelic := ", if (split) "true" else "false", 
+    "split_multiallelic := ", if (split) "true" else "false",
     ") GROUP BY ALL ORDER BY norm_status"
   )
 }
@@ -225,8 +275,7 @@ run_duckdb_bench <- function(input_path, fasta_path, split = FALSE, n = 3L) {
   times <- numeric(n)
   rows <- NA_integer_
 
-  DBI::dbExecute(con, "PRAGMA threads=1")
-  on.exit(DBI::dbExecute(con, "PRAGMA threads=4"), add = TRUE)
+  DBI::dbExecute(con, sprintf("PRAGMA threads=%d", duck_threads))
 
   for (i in seq_len(n)) {
     gc()
@@ -252,39 +301,46 @@ run_duckdb_bench <- function(input_path, fasta_path, split = FALSE, n = 3L) {
   )
 }
 
-bcftools_output_table <- function(output_path) {
-  header <- run_cmd_capture(sprintf("%s view -h %s", shell_quote(bcftools_bin), shell_quote(output_path)))
-  has_end <- any(grepl("^##INFO=<ID=END,", header))
+bcftools_norm_cmd <- function(input_path, fasta_path, split = FALSE) {
+  args <- c("norm")
+  if (bcftools_threads > 0L) args <- c(args, "--threads", as.character(bcftools_threads))
+  if (split) args <- c(args, "-m", "-any")
+  args <- c(args, "-f", fasta_path, "-Ou", input_path)
+  paste(shell_quote(bcftools_bin), paste(vapply(args, shell_quote, character(1)), collapse = " "))
+}
 
-  if (has_end) {
-    lines <- run_cmd_capture(sprintf(
-      "%s query -f '%%CHROM\\t%%POS\\t%%INFO/END\\t%%REF\\t%%ALT\\n' %s",
-      shell_quote(bcftools_bin),
-      shell_quote(output_path)
+bcftools_grouped_output <- function(input_path, fasta_path, split = FALSE) {
+  query_cmd <- sprintf(
+    "%s | %s query -f '%%CHROM\\t%%POS\\t%%END\\t%%REF\\t%%ALT\\n'",
+    bcftools_norm_cmd(input_path, fasta_path, split = split),
+    shell_quote(bcftools_bin)
+  )
+  lines <- run_bash(query_cmd, capture_stdout = TRUE)
+  if (!length(lines)) {
+    return(data.frame(
+      chrom = character(),
+      pos_normed = integer(),
+      end_pos_normed = integer(),
+      ref_normed = character(),
+      alt_normed = character(),
+      bcf_n = integer(),
+      stringsAsFactors = FALSE
     ))
-    if (!length(lines)) {
-      return(data.frame(chrom = character(), pos_normed = integer(), end_pos_normed = integer(), ref_normed = character(), alt_normed = character(), bcf_n = integer(), stringsAsFactors = FALSE))
-    }
-    raw <- utils::read.delim(text = lines, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
-    names(raw) <- c("chrom", "pos_normed", "end_pos_normed", "ref_normed", "alt_normed")
-    raw$end_pos_normed[raw$end_pos_normed == "." | raw$end_pos_normed == ""] <- NA_character_
-    raw$end_pos_normed <- as.integer(ifelse(is.na(raw$end_pos_normed), raw$pos_normed + nchar(raw$ref_normed) - 1L, raw$end_pos_normed))
-  } else {
-    lines <- run_cmd_capture(sprintf(
-      "%s query -f '%%CHROM\\t%%POS\\t%%REF\\t%%ALT\\n' %s",
-      shell_quote(bcftools_bin),
-      shell_quote(output_path)
-    ))
-    if (!length(lines)) {
-      return(data.frame(chrom = character(), pos_normed = integer(), end_pos_normed = integer(), ref_normed = character(), alt_normed = character(), bcf_n = integer(), stringsAsFactors = FALSE))
-    }
-    raw <- utils::read.delim(text = lines, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
-    names(raw) <- c("chrom", "pos_normed", "ref_normed", "alt_normed")
-    raw$end_pos_normed <- raw$pos_normed + nchar(raw$ref_normed) - 1L
   }
 
+  raw <- utils::read.delim(text = lines, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+  names(raw) <- c("chrom", "pos_normed", "end_pos_normed", "ref_normed", "alt_normed")
+  raw$end_pos_normed <- as.integer(raw$end_pos_normed)
   raw$alt_normed[raw$alt_normed == "."] <- NA_character_
-  key <- paste(raw$chrom, raw$pos_normed, raw$end_pos_normed, raw$ref_normed, ifelse(is.na(raw$alt_normed), "<NULL>", raw$alt_normed), sep = "\r")
+
+  key <- paste(
+    raw$chrom,
+    raw$pos_normed,
+    raw$end_pos_normed,
+    raw$ref_normed,
+    ifelse(is.na(raw$alt_normed), "<NULL>", raw$alt_normed),
+    sep = "\r"
+  )
   counts <- sort(table(key), decreasing = FALSE)
   parts <- strsplit(names(counts), "\r", fixed = TRUE)
   out <- data.frame(
@@ -305,22 +361,10 @@ run_bcftools_bench <- function(input_path, fasta_path, split = FALSE, n = 3L) {
   out <- NULL
 
   for (i in seq_len(n)) {
-    output_path <- file.path(tempdir(), sprintf("duckhts_norm_bench_%s_%02d.vcf.gz", if (split) "split" else "site", i))
-    args <- c("norm")
-    if (split) args <- c(args, "-m", "-any")
-    args <- c(args, "-f", fasta_path, "-Oz", "-o", output_path, input_path)
-
     gc()
     t0 <- proc.time()[["elapsed"]]
-    status <- system2(bcftools_bin, args = args, stdout = TRUE, stderr = TRUE)
+    out <- bcftools_grouped_output(input_path, fasta_path, split = split)
     times[i] <- proc.time()[["elapsed"]] - t0
-    exit_code <- attr(status, "status")
-    if (!is.null(exit_code) && !identical(exit_code, 0L)) {
-      stop("bcftools norm failed", call. = FALSE)
-    }
-
-    out <- bcftools_output_table(output_path)
-    unlink(c(output_path, paste0(output_path, ".tbi"), paste0(output_path, ".csi")))
   }
 
   list(
@@ -380,6 +424,12 @@ run_case <- function(input_path, fasta_path, split = FALSE, n = 3L) {
     mismatches = head(cmp$mismatches, 10L)
   )
 }
+```
+
+# Settings
+
+```{r benchmark-settings}
+knitr::kable(benchmark_settings)
 ```
 
 # Synthetic fixture

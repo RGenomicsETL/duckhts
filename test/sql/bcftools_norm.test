@@ -29,6 +29,13 @@ FROM (VALUES
 ) AS t(chrom, pos, ref, alt, end_pos, svlen);
 
 statement ok
+CREATE OR REPLACE TEMP TABLE norm_spanning AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', '*,TT')
+) AS t(chrom, pos, ref, alt);
+
+statement ok
 CREATE OR REPLACE TEMP TABLE norm_empty_seq AS
 SELECT *
 FROM (VALUES
@@ -169,6 +176,35 @@ FROM duckhts_bcftools_norm('norm_seq', '__WORKING_DIRECTORY__/test/data/liftover
 WHERE chrom = 'chrMissing';
 ----
 2	2	T	[TT]	NULL	MissingContig
+
+query IITTIT
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm('norm_spanning', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa');
+----
+2	2	T	[*, TT]	NULL	SpanningDeletion
+
+query IITTITR
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status,
+       alt_index
+FROM duckhts_bcftools_norm(
+  'norm_spanning',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+ORDER BY alt_index;
+----
+2	2	T	*	NULL	SpanningDeletion	1
+1	1	G	GT	1	Normalized	2
 
 query I
 SELECT count(*)
