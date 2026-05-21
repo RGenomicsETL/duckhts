@@ -65,10 +65,10 @@ knitr::kable(synthetic_bench, digits = 3)
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving    |    3 |      0.147 |   0.146 |   0.149 |      100000 |
-| bcftools_norm | site_preserving    |    3 |     74.821 |  73.809 |  78.000 |      100000 |
-| duckhts       | split_multiallelic |    3 |      0.213 |   0.212 |   0.213 |      120000 |
-| bcftools_norm | split_multiallelic |    3 |    111.976 | 111.904 | 112.016 |      120000 |
+| duckhts       | site_preserving    |    3 |      0.151 |   0.150 |   0.156 |      100000 |
+| bcftools_norm | site_preserving    |    3 |     70.449 |  67.853 |  74.957 |      100000 |
+| duckhts       | split_multiallelic |    3 |      0.207 |   0.207 |   0.207 |      120000 |
+| bcftools_norm | split_multiallelic |    3 |    101.604 | 101.530 | 102.502 |      120000 |
 
 Synthetic fixture mix:
 
@@ -167,8 +167,8 @@ if (!nzchar(real_input_path) || !nzchar(real_fasta)) {
 
 | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving |    3 |     15.801 |  15.586 |  15.957 |     3891440 |
-| bcftools_norm | site_preserving |    3 |     36.541 |  36.169 |  39.581 |     3891440 |
+| duckhts       | site_preserving |    3 |     15.405 |  15.256 |  16.009 |     3891440 |
+| bcftools_norm | site_preserving |    3 |     34.662 |  34.575 |  39.775 |     3891440 |
 
 | status |       n |
 |:-------|--------:|
@@ -187,8 +187,8 @@ if (!nzchar(real_input_path) || !nzchar(real_fasta)) {
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | split_multiallelic |    3 |     22.726 |  22.653 |  22.791 |     3933714 |
-| bcftools_norm | split_multiallelic |    3 |     34.102 |  33.914 |  38.332 |     3933714 |
+| duckhts       | split_multiallelic |    3 |     23.607 |  23.153 |  24.313 |     3933714 |
+| bcftools_norm | split_multiallelic |    3 |     32.456 |  32.431 |  36.844 |     3933714 |
 
 | status |       n |
 |:-------|--------:|
