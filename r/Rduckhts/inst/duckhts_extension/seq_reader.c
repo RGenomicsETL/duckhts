@@ -221,6 +221,19 @@ static char *strdup_duckdb(const char *s) {
     return copy;
 }
 
+static char *default_fasta_index_path(const char *path) {
+    size_t path_len;
+    char *out;
+
+    if (!path) return NULL;
+    path_len = strlen(path);
+    out = (char *)duckdb_malloc(path_len + 5);
+    if (!out) return NULL;
+    memcpy(out, path, path_len);
+    memcpy(out + path_len, ".fai", 5);
+    return out;
+}
+
 static void parse_regions_duckdb(const char *region_str, char ***out_regions, unsigned int *out_count) {
     *out_regions = NULL;
     *out_count = 0;
@@ -1191,6 +1204,15 @@ static void fasta_index_bind(duckdb_bind_info info) {
         return;
     }
 
+    if (!index_path) {
+        index_path = default_fasta_index_path(file_path);
+        if (!index_path) {
+            duckdb_bind_set_error(info, "fasta_index: out of memory");
+            duckdb_free(file_path);
+            return;
+        }
+    }
+
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_bind_add_result_column(info, "success", bool_type);
@@ -1199,7 +1221,7 @@ static void fasta_index_bind(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&varchar_type);
 
     fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_malloc(sizeof(fasta_index_bind_t));
-    bind->index_path = index_path ? index_path : strdup_duckdb("");
+    bind->index_path = index_path;
     bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_fasta_index_bind);
     duckdb_free(file_path);
