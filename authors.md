@@ -14,6 +14,9 @@
 - **Giulio Genovese**. Copyright holder.  
   Author of BCFTools munge,score,liftover plugins
 
+- **Nicola Asuni**. Copyright holder.  
+  Author of the VariantKey and RegionKey C API
+
 - **DuckDB C Extension API Authors**. Contributor.
 
 ## Citation

@@ -4,6 +4,16 @@
 
 CRAN release: 2026-05-07
 
+- bundle the official VariantKey / RegionKey C API (Nicola Asuni, 2018;
+  <https://doi.org/10.1101/473744>) and expose new SQL helpers through
+  [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
+  sessions for both the bcftools-style and raw upstream numeric
+  surfaces: `variantkey(...)` now matches bcftools `%VKX` /
+  `+add-variantkey` on 1-based VCF rows, large/ambiguous/symbolic
+  alleles keep the official hashed nonreversible mode, `regionkey(...)`
+  adds 0-based half-open span keys plus overlap helpers, bundled
+  tinytests pin reversible and hashed cases, and the package README now
+  includes concrete DBI examples for VariantKey / RegionKey usage
 - fix bundled `rduckhts_bcftools_norm(..., split_multiallelic = TRUE)`
   row preservation for ref-only and empty-ALT inputs: rows with
   `ALT='.'`, NULL ALT values, empty ALT lists, or NULL ALT list elements
