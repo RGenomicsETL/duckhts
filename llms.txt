@@ -998,7 +998,7 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
+#>   success                                      index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_fasta(

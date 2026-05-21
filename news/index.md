@@ -16,6 +16,17 @@ CRAN release: 2026-05-07
   now expose `decompression_threads = 0` for explicit htslib
   worker-thread control on bgzipped VCF/BCF reads, and the package
   README now includes a concrete normalization example
+- fix bundled helper-return metadata for omitted output paths:
+  [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.md)
+  now returns the generated `.fai` path when `index_path = NULL` instead
+  of an empty string, bundled regression coverage now also pins
+  default-path returns for BGZF compression/decompression and
+  BAM/BCF/tabix index builders, and the
+  [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgzip.md)
+  /
+  [`rduckhts_bgunzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgunzip.md)
+  wrappers now correctly propagate `keep = FALSE` instead of silently
+  falling back to the extension default `keep := TRUE`
 - add
   [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
   and bundle `bcftools_norm_row(...)` / `duckhts_bcftools_norm(...)` for
