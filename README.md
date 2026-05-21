@@ -220,12 +220,12 @@ SELECT *
 FROM fasta_index('test/data/ce.fa');
 ```
 
-    ┌─────────┬────────────┐
-    │ success │ index_path │
-    │ boolean │  varchar   │
-    ├─────────┼────────────┤
-    │ true    │            │
-    └─────────┴────────────┘
+    ┌─────────┬─────────────────────┐
+    │ success │     index_path      │
+    │ boolean │       varchar       │
+    ├─────────┼─────────────────────┤
+    │ true    │ test/data/ce.fa.fai │
+    └─────────┴─────────────────────┘
 
 ``` sql
 SELECT NAME, length(SEQUENCE) AS seq_length
