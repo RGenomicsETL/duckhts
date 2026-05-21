@@ -102,6 +102,28 @@ FROM read_fastq('test/data/interleaved.fq', interleaved := true)
 LIMIT 3;
 ```
 
+### Variant normalization
+
+`duckhts_bcftools_norm(...)` applies bcftools-style FASTA-backed allele normalization to a regular table or derived relation while preserving the original columns. In split mode, multiallelic rows are expanded first and then normalized one ALT at a time.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+CREATE OR REPLACE TEMP TABLE readme_norm AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', 'TT,TTT'),
+  ('chrS', 2, 'T', '*,TT')
+) AS t(chrom, pos, ref, alt);
+
+SELECT chrom, pos, ref, alt, alt_index,
+       pos_normed, ref_normed, alt_normed, norm_status
+FROM duckhts_bcftools_norm(
+  'readme_norm',
+  'test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+ORDER BY alt, alt_index;
+```
+
 ### Interval + reference helpers
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}

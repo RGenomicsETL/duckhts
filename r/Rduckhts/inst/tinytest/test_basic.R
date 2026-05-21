@@ -40,7 +40,7 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_bcf)),
   c("con", "table_name", "path", "region", "index_path", "tidy_format",
-    "additional_csq_column_types", "overwrite")
+    "additional_csq_column_types", "decompression_threads", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bam)),
@@ -244,6 +244,8 @@ expect_true("duckhts_cgranges_count_overlaps" %in% catalog$name)
 expect_true("duckhts_cgranges_overlaps" %in% catalog$name)
 expect_true("bcftools_liftover" %in% catalog$name)
 expect_true("duckdb_liftover" %in% catalog$name)
+expect_true("bcftools_norm_row" %in% catalog$name)
+expect_true("duckhts_bcftools_norm" %in% catalog$name)
 expect_equal(unique(rduckhts_functions(kind = "scalar")$kind), "scalar")
 expect_equal(unique(rduckhts_functions(category = "Readers")$category), "Readers")
 expect_equal(unique(rduckhts_functions(category = "CIGAR Utils")$category), "CIGAR Utils")
@@ -291,7 +293,7 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_bcf_multi)),
   c("con", "table_name", "files", "region", "index_path", "tidy_format",
-    "additional_csq_column_types", ".params", "overwrite")
+    "additional_csq_column_types", "decompression_threads", ".params", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_fastq_multi)),

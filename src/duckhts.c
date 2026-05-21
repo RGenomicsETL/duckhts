@@ -37,6 +37,8 @@ extern void register_bcf_index_function(duckdb_connection connection);
 extern void register_tabix_index_function(duckdb_connection connection);
 /* liftover_udf.c */
 extern void register_liftover_functions(duckdb_connection connection);
+/* bcftools_norm_udf.c */
+extern void register_bcftools_norm_functions(duckdb_connection connection);
 /* munge_udf.c */
 extern void register_munge_functions(duckdb_connection connection);
 /* kmer_udf.c */
@@ -118,6 +120,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_bcf_function(connection);
     register_read_bam_function(connection);
     register_read_pileup_function(connection);
+    register_bcftools_norm_functions(connection);
     register_read_fasta_function(connection);
     register_read_fastq_function(connection);
     register_fasta_index_function(connection);
@@ -147,6 +150,11 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_quote_string(x) AS "
+        "CASE WHEN x IS NULL THEN NULL ELSE '''' || replace(x, '''', '''''') || '''' END")) {
         return false;
     }
     {
@@ -307,6 +315,38 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, lift_mt, src.__duckhts_end_pos, no_left_align) "
         "END AS lo) q")) {
         return false;
+    }
+    {
+        static const char *const duckhts_bcftools_norm_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_bcftools_norm(table_name, fasta_ref, chrom_col := 'chrom', pos_col := 'pos', ref_col := 'ref', alt_col := 'alt', ",
+            "split_multiallelic := false, end_pos_col := NULL, svlen_col := NULL, fasta_index_path := NULL, gzi_path := NULL) AS TABLE ",
+            "FROM query(CASE WHEN split_multiallelic THEN ",
+            "'SELECT src.* EXCLUDE (__duckhts_chrom, __duckhts_pos, __duckhts_ref, __duckhts_alt, __duckhts_end_pos, __duckhts_svlen), ' || ",
+            "'n.norm.pos_normed, n.norm.end_pos_normed, n.norm.ref_normed, n.norm.alt_normed[1] AS alt_normed, n.norm.normed, n.norm.norm_status, u0.alt_index ' || ",
+            "'FROM (SELECT *, ' || duckhts_quote_ident(chrom_col) || ' AS __duckhts_chrom, ' || ",
+            "duckhts_quote_ident(pos_col) || ' AS __duckhts_pos, ' || duckhts_quote_ident(ref_col) || ' AS __duckhts_ref, ' || ",
+            "duckhts_quote_ident(alt_col) || ' AS __duckhts_alt, ' || coalesce(duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ' AS __duckhts_end_pos, ' || ",
+            "coalesce(duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ' AS __duckhts_svlen FROM ' || table_name || ') src ' || ",
+            "'LEFT JOIN LATERAL UNNEST(duckhts_alt_to_list(src.__duckhts_alt)) WITH ORDINALITY AS u0(alt_item, alt_index) ON TRUE, ' || ",
+            "'LATERAL (SELECT bcftools_norm_row(src.__duckhts_chrom, src.__duckhts_pos, src.__duckhts_ref, CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts_quote_string(fasta_ref) || ', src.__duckhts_end_pos, src.__duckhts_svlen, ' || ",
+            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ') AS norm) AS n' ",
+            "ELSE ",
+            "'SELECT src.* EXCLUDE (__duckhts_chrom, __duckhts_pos, __duckhts_ref, __duckhts_alt, __duckhts_end_pos, __duckhts_svlen), ' || ",
+            "'n.norm.pos_normed, n.norm.end_pos_normed, n.norm.ref_normed, n.norm.alt_normed, n.norm.normed, n.norm.norm_status ' || ",
+            "'FROM (SELECT *, ' || duckhts_quote_ident(chrom_col) || ' AS __duckhts_chrom, ' || ",
+            "duckhts_quote_ident(pos_col) || ' AS __duckhts_pos, ' || duckhts_quote_ident(ref_col) || ' AS __duckhts_ref, ' || ",
+            "duckhts_quote_ident(alt_col) || ' AS __duckhts_alt, ' || coalesce(duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ' AS __duckhts_end_pos, ' || ",
+            "coalesce(duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ' AS __duckhts_svlen FROM ' || table_name || ') src, ' || ",
+            "'LATERAL (SELECT bcftools_norm_row(src.__duckhts_chrom, src.__duckhts_pos, src.__duckhts_ref, src.__duckhts_alt, ' || ",
+            "duckhts_quote_string(fasta_ref) || ', src.__duckhts_end_pos, src.__duckhts_svlen, ' || ",
+            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ') AS norm) AS n' ",
+            "END)"
+        };
+        if (!run_sql_parts_or_fail(connection, duckhts_bcftools_norm_sql,
+                                   sizeof(duckhts_bcftools_norm_sql) / sizeof(duckhts_bcftools_norm_sql[0]))) {
+            return false;
+        }
     }
 
     return true;

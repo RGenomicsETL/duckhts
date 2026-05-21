@@ -350,7 +350,7 @@ echo "---------- Building DuckHTS extension (Windows) ----------"
 # Build the extension
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c munge_udf.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c cgranges.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c kmer_udf.c wasm_http_hfile.c"
+C_SOURCES="duckhts.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c cgranges.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c kmer_udf.c wasm_http_hfile.c"
 INCLUDES="-I./include -I./duckdb_capi -I./htslib"
 
 echo "Compiling extension sources for Windows..."

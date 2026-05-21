@@ -569,6 +569,9 @@ duckhts_extension_dir <- function() {
 #' @param tidy_format Logical. If TRUE, FORMAT columns are returned in tidy format
 #' @param additional_csq_column_types Optional bcftools-style `PATTERN TYPE`
 #'   overrides for CSQ/ANN/BCSQ subfield typing, separated by newlines or `;`
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads per file handle. Default `0`. Use `0` to keep BCF/VCF reads
+#'   single-threaded.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -593,6 +596,7 @@ rduckhts_bcf <- function(
   index_path = NULL,
   tidy_format = FALSE,
   additional_csq_column_types = NULL,
+  decompression_threads = 0,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -621,6 +625,15 @@ rduckhts_bcf <- function(
   }
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- sprintf("'%s'", additional_csq_column_types)
+  }
+  if (!is.null(decompression_threads)) {
+    params$decompression_threads <- sprintf(
+      "%d",
+      .validate_nonnegative_integer_param(
+        decompression_threads,
+        "decompression_threads"
+      )
+    )
   }
 
   param_str <- build_param_str(params)
@@ -2172,6 +2185,75 @@ rduckhts_liftover <- function(
   DBI::dbGetQuery(con, sql)
 }
 
+#' Normalize Variant Alleles with bcftools-style Semantics
+#'
+#' Applies the DuckHTS `duckhts_bcftools_norm(...)` table macro to rows from a
+#' SQL query or table expression. Input rows must expose chromosome, 1-based
+#' position, reference allele, and alternate allele columns. Alternate alleles
+#' may be supplied either as a comma-delimited `VARCHAR` or as a `VARCHAR[]`
+#' list, matching the common DuckDB representations used by plain tables and
+#' `read_bcf(...)`.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param query SQL query or table expression to normalize
+#' @param fasta_ref Path to the reference FASTA
+#' @param chrom_col Source chromosome column name
+#' @param pos_col Source 1-based position column name
+#' @param ref_col Source reference allele column name
+#' @param alt_col Source alternate allele column name (`VARCHAR` or `VARCHAR[]`)
+#' @param split_multiallelic If `TRUE`, split multiallelic sites before
+#'   normalization so `alt_normed` is emitted as `VARCHAR` plus `alt_index`.
+#'   If `FALSE` (default), keep sites intact and emit `alt_normed` as
+#'   `VARCHAR[]`.
+#' @param end_pos_col Optional source column name containing an END-like
+#'   1-based end coordinate for symbolic deletions.
+#' @param svlen_col Optional source column name containing an SVLEN-like signed
+#'   length for symbolic duplications.
+#' @param fasta_index_path Optional explicit `.fai` sidecar path.
+#' @param gzi_path Optional explicit `.gzi` sidecar path for bgzipped FASTA.
+#'
+#' @return A data frame with the original columns plus `pos_normed`,
+#'   `end_pos_normed`, `ref_normed`, `alt_normed`, `normed`, and
+#'   `norm_status`. In split mode the result additionally includes `alt_index`.
+#'
+#' @export
+rduckhts_bcftools_norm <- function(
+  con,
+  query,
+  fasta_ref,
+  chrom_col = "chrom",
+  pos_col = "pos",
+  ref_col = "ref",
+  alt_col = "alt",
+  split_multiallelic = FALSE,
+  end_pos_col = NULL,
+  svlen_col = NULL,
+  fasta_index_path = NULL,
+  gzi_path = NULL
+) {
+  table_expr <- query
+  if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
+    table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
+  }
+
+  params <- list(
+    sql_quote_string(table_expr),
+    sql_quote_string(fasta_ref)
+  )
+  if (!identical(chrom_col, "chrom")) params <- c(params, sprintf("chrom_col := '%s'", chrom_col))
+  if (!identical(pos_col, "pos")) params <- c(params, sprintf("pos_col := '%s'", pos_col))
+  if (!identical(ref_col, "ref")) params <- c(params, sprintf("ref_col := '%s'", ref_col))
+  if (!identical(alt_col, "alt")) params <- c(params, sprintf("alt_col := '%s'", alt_col))
+  params <- c(params, sprintf("split_multiallelic := %s", tolower(as.character(split_multiallelic))))
+  if (!is.null(end_pos_col)) params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
+  if (!is.null(svlen_col)) params <- c(params, sprintf("svlen_col := '%s'", svlen_col))
+  if (!is.null(fasta_index_path)) params <- c(params, sprintf("fasta_index_path := '%s'", fasta_index_path))
+  if (!is.null(gzi_path)) params <- c(params, sprintf("gzi_path := '%s'", gzi_path))
+
+  sql <- sprintf("SELECT * FROM duckhts_bcftools_norm(%s)", paste(params, collapse = ", "))
+  DBI::dbGetQuery(con, sql)
+}
+
 #' Munge Summary Statistics Rows
 #'
 #' Applies the DuckHTS `duckdb_munge(...)` table macro to rows from a SQL query or
@@ -2580,6 +2662,8 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 #' @param index_path Optional index file path.
 #' @param tidy_format Logical; use tidy FORMAT column output.
 #' @param additional_csq_column_types Optional CSQ type override string.
+#' @param decompression_threads Integer. Number of htslib decompression worker
+#'   threads per file handle. Default `0`.
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2587,6 +2671,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, tidy_format = FALSE,
                                additional_csq_column_types = NULL,
+                               decompression_threads = 0,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
@@ -2594,6 +2679,12 @@ rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
   if (isTRUE(tidy_format)) params$tidy_format <- TRUE
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- additional_csq_column_types
+  }
+  if (!is.null(decompression_threads)) {
+    params$decompression_threads <- .validate_nonnegative_integer_param(
+      decompression_threads,
+      "decompression_threads"
+    )
   }
   .hts_multi_read(con, table_name, "read_bcf", files, params, .params, overwrite)
 }

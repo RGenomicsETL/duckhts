@@ -15,8 +15,12 @@ test_bcf_string_format_lists <- function() {
   expect_true(file.exists(bcf_path))
   expect_true(file.exists(fixed_path))
 
-  expect_silent(rduckhts_bcf(con, "bcf_string_lists", bcf_path, overwrite = TRUE))
+  expect_silent(rduckhts_bcf(con, "bcf_string_lists", bcf_path, decompression_threads = 0, overwrite = TRUE))
   expect_silent(rduckhts_bcf(con, "bcf_fixed_counts", fixed_path, overwrite = TRUE))
+  expect_error(
+    rduckhts_bcf(con, "bcf_bad_threads", bcf_path, decompression_threads = -1, overwrite = TRUE),
+    pattern = "decompression_threads must be a single whole number"
+  )
 
   type_row <- DBI::dbGetQuery(
     con,
