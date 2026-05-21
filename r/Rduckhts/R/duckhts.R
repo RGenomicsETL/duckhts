@@ -1160,7 +1160,7 @@ rduckhts_bgzip <- function(
 ) {
   params <- list(threads = threads, level = level)
   if (!is.null(output_path)) params$output_path <- sprintf("'%s'", output_path)
-  if (keep) params$keep <- "true"
+  params$keep <- if (keep) "true" else "false"
   if (overwrite) params$overwrite <- "true"
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM bgzip('%s'%s)", path, param_str)
@@ -1191,7 +1191,7 @@ rduckhts_bgunzip <- function(
 ) {
   params <- list(threads = threads)
   if (!is.null(output_path)) params$output_path <- sprintf("'%s'", output_path)
-  if (keep) params$keep <- "true"
+  params$keep <- if (keep) "true" else "false"
   if (overwrite) params$overwrite <- "true"
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM bgunzip('%s'%s)", path, param_str)

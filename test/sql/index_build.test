@@ -9,6 +9,33 @@ COPY (
   SELECT *
   FROM (
     VALUES
+      ('>chr1'),
+      ('ACGT')
+  ) AS t(line)
+) TO '__WORKING_DIRECTORY__/test_auto.fa' (FORMAT CSV, DELIMITER '	', HEADER FALSE);
+
+query II
+SELECT CASE WHEN success THEN 1 ELSE 0 END,
+       CASE WHEN index_path = '__WORKING_DIRECTORY__/test_auto.fa.fai' THEN 1 ELSE 0 END
+FROM fasta_index('__WORKING_DIRECTORY__/test_auto.fa');
+----
+1	1
+
+query I
+SELECT count(*)
+FROM read_fasta(
+  '__WORKING_DIRECTORY__/test_auto.fa',
+  region := 'chr1:1-4',
+  index_path := '__WORKING_DIRECTORY__/test_auto.fa.fai'
+);
+----
+1
+
+statement ok
+COPY (
+  SELECT *
+  FROM (
+    VALUES
       ('chr1', 0, 10, 'a'),
       ('chr1', 10, 20, 'b'),
       ('chr2', 0, 5, 'c')
@@ -37,6 +64,7 @@ FROM tabix_index(
 );
 ----
 1	TBI
+
 
 query I
 SELECT count(*)
