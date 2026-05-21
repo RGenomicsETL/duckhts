@@ -15,6 +15,7 @@ rduckhts_bcf_multi(
   index_path = NULL,
   tidy_format = FALSE,
   additional_csq_column_types = NULL,
+  decompression_threads = 0,
   .params = NULL,
   overwrite = FALSE
 )
@@ -49,6 +50,11 @@ rduckhts_bcf_multi(
 - additional_csq_column_types:
 
   Optional CSQ type override string.
+
+- decompression_threads:
+
+  Integer. Number of htslib decompression worker threads per file
+  handle. Default \`0\`.
 
 - .params:
 

@@ -4,6 +4,28 @@
 
 CRAN release: 2026-05-07
 
+- fix bundled `rduckhts_bcftools_norm(..., split_multiallelic = TRUE)`
+  row preservation for ref-only and empty-ALT inputs: rows with
+  `ALT='.'`, NULL ALT values, empty ALT lists, or NULL ALT list elements
+  no longer disappear from split-mode DBI results, bundled tinytest
+  coverage now pins the expected `RefOnly` / `NullInput` statuses and
+  `alt_index` behavior, bundled
+  [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
+  /
+  [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.md)
+  now expose `decompression_threads = 0` for explicit htslib
+  worker-thread control on bgzipped VCF/BCF reads, and the package
+  README now includes a concrete normalization example
+- add
+  [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
+  and bundle `bcftools_norm_row(...)` / `duckhts_bcftools_norm(...)` for
+  bcftools/vt-style FASTA-backed variant normalization from DBI queries:
+  ALT inputs may be either comma-delimited `VARCHAR` or `VARCHAR[]`, the
+  bundled result appends `pos_normed`, `end_pos_normed`, `ref_normed`,
+  `alt_normed`, `normed`, and `norm_status`, split mode emits one row
+  per ALT with `alt_index`, and bundled SQL/tinytest coverage now
+  exercises sequence, multiallelic, symbolic `<DEL>`/`<DUP>`, and
+  missing-contig rows
 - fix bundled
   [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
   / `bcftools_liftover(...)` indel parity in two exact upstream rewrite

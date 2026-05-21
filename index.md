@@ -256,17 +256,26 @@ This section is generated from `functions.yaml`.
 
 | Function          | Kind         | Returns | R helper                                                                                                                                                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 |-------------------|--------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `read_bcf`        | table        | table   | `rduckhts_bcf`                                                                                                                                                         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, and optional bcftools-style CSQ type overrides.                                                                                                                                                                                                                                                                                                                                            |
-| `read_bam`        | table        | table   | `rduckhts_bam`                                                                                                                                                         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\] and quality_representation := ‘phred’ to return QUAL as UTINYINT\[\] instead of VARCHAR. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.                                                                                                                                              |
-| `read_fasta`      | table        | table   | `rduckhts_fasta`                                                                                                                                                       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR.                                                                                                                                                                                                                                                                                                                               |
+| `read_bcf`        | table        | table   | `rduckhts_bcf`                                                                                                                                                         | Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, and optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads).                                                                                                                                                                                                                              |
+| `read_bam`        | table        | table   | `rduckhts_bam`                                                                                                                                                         | Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT\[\], quality_representation := ‘phred’ to return QUAL as UTINYINT\[\], and cigar_representation := ‘binary’ to return packed BAM CIGAR operations as UINTEGER\[\] instead of SAM text. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.                                                    |
+| `read_fasta`      | table        | table   | `rduckhts_fasta`                                                                                                                                                       | Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] (htslib nt16 4-bit codes) instead of VARCHAR. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.                                                                                                                                                                                                                   |
 | `read_bed`        | table        | table   | `rduckhts_bed`                                                                                                                                                         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference.                                                                                                                                                                                                                                                                                                                                                                           |
+| `fasta_nuc`       | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.                                                                                                                                                                                                                                                               |
 | `read_fastq`      | table        | table   | `rduckhts_fastq`                                                                                                                                                       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’.                                                                                              |
 | `read_gff`        | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                |
 | `read_gtf`        | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `read_tabix`      | table        | table   | `rduckhts_tabix`                                                                                                                                                       | Read generic tabix-indexed text data with optional header handling and type inference.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
+
+### Coverage
+
+| Function                   | Kind  | Returns | R helper                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|----------------------------|-------|---------|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `read_pileup`              | table | table   | `rduckhts_pileup`           | Construct a region-scoped BAM pileup with one row per covered position, emitting chrom, 1-based position, depth, observed bases, and Phred+33 qualities after SAM flag and MAPQ filtering. This is a compact htslib pileup view, not samtools mpileup text parity.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `bam_bin_counts`           | table | table   | `rduckhts_bam_bin_counts`   | Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; `rmdup := 'streaming'` applies the WisecondorX-style larp/larp2 consecutive-position deduplication, `rmdup := 'flag'` drops SAM duplicate-flagged reads, and `stats := 'gc'`, `'mq'`, or `'gc,mq'` adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when `reference` is provided.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `duckhts_bam_bed_coverage` | table | table   | `rduckhts_bam_bed_coverage` | Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `duckhts_mosdepth`         | table | table   | `rduckhts_mosdepth`         | Write native mosdepth-compatible coverage outputs for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, optional quantized BED.gz + CSI, and optional threshold counts for `by`; `fast_mode` defaults to FALSE to match upstream mosdepth, default mode performs CIGAR-aware coverage with mate-overlap correction, `fragment_mode` switches coverage to full-fragment insert spans for proper pairs, `use_median` switches `by` outputs from mean to median, `read_groups` filters by comma-separated RG IDs, `min_frag_len` and `max_frag_len` filter on absolute template length, `fasta` is required for CRAM when htslib needs a reference, `precision_digits` controls decimal places in the text outputs, and `processing_threads` enables parallel contig processing (0 = sequential, \>0 = number of worker threads). |
 
 ### Intervals
 
@@ -310,24 +319,18 @@ This section is generated from `functions.yaml`.
 | `bcf_index`   | table | table   | `rduckhts_bcf_index`   | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.       |
 | `tabix_index` | table | table   | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
 
-### Coverage
-
-| Function                   | Kind  | Returns | R helper                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-|----------------------------|-------|---------|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bam_bin_counts`           | table | table   | `rduckhts_bam_bin_counts`   | Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; `rmdup := 'streaming'` applies the WisecondorX-style larp/larp2 consecutive-position deduplication, `rmdup := 'flag'` drops SAM duplicate-flagged reads, and `stats := 'gc'`, `'mq'`, or `'gc,mq'` adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when `reference` is provided.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `duckhts_bam_bed_coverage` | table | table   | `rduckhts_bam_bed_coverage` | Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `duckhts_mosdepth`         | table | table   | `rduckhts_mosdepth`         | Write native mosdepth-compatible coverage outputs for indexed BAM or CRAM input. Produces mosdepth-style summary, global distribution, per-base BED.gz + CSI, optional window/BED region outputs, optional quantized BED.gz + CSI, and optional threshold counts for `by`; `fast_mode` defaults to FALSE to match upstream mosdepth, default mode performs CIGAR-aware coverage with mate-overlap correction, `fragment_mode` switches coverage to full-fragment insert spans for proper pairs, `use_median` switches `by` outputs from mean to median, `read_groups` filters by comma-separated RG IDs, `min_frag_len` and `max_frag_len` filter on absolute template length, `fasta` is required for CRAM when htslib needs a reference, `precision_digits` controls decimal places in the text outputs, and `processing_threads` enables parallel contig processing (0 = sequential, \>0 = number of worker threads). |
-
 ### Variants
 
-| Function             | Kind        | Returns | R helper            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-|----------------------|-------------|---------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `bcftools_liftover`  | scalar      | STRUCT  | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors –no-left-align in bcftools +liftover).                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `duckdb_liftover`    | table_macro | table   | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors –no-left-align in bcftools +liftover.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `bcftools_score`     | table       | table   | `rduckhts_score`    | Compute polygenic scores from one genotype BCF/VCF and one or more summary-statistics files with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls. The second argument accepts a scalar path or a DuckDB LIST/array of paths; TSV/SSF summaries produce one PRS column per file in a single genotype scan, while GWAS-VCF summaries still produce one PRS column per FORMAT sample. Use summaries_list_file with a NULL second argument to read paths from a file or directory; list-file entries are interpreted as written, matching upstream `bcftools +score --summaries` behavior, while directory inputs scan supported regular summary files in lexicographic order and ignore index sidecars. Use log_path to write per-PRS loaded/matched/allele-mismatch/duplicate-marker audit counts. |
-| `bcftools_munge_row` | scalar      | STRUCT  |                     | Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `duckdb_munge`       | table_macro | table   | `rduckhts_munge`    | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `duckdb_munge_metal` | table_macro | table   | `rduckhts_munge`    | Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran’s I² heterogeneity, from HET_I2), cq (Cochran’s Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map.                                                                                                                                                                                                                                                                                                                                                                                   |
+| Function                | Kind        | Returns | R helper                 | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-------------------------|-------------|---------|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bcftools_liftover`     | scalar      | STRUCT  | `rduckhts_liftover`      | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors –no-left-align in bcftools +liftover).                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `duckdb_liftover`       | table_macro | table   | `rduckhts_liftover`      | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors –no-left-align in bcftools +liftover.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bcftools_norm_row`     | scalar      | STRUCT  |                          | Normalize one variant row with bcftools/vt-style left-alignment semantics against a FASTA reference. The alt argument may be either a comma-delimited VARCHAR or a VARCHAR\[\] list. The returned STRUCT contains pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR\[\]), normed (TRUE/FALSE/NULL), and norm_status. Symbolic ~~rows can use end_pos, and symbolic rows can use svlen.~~                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `duckhts_bcftools_norm` | table_macro | table   | `rduckhts_bcftools_norm` | DuckDB table macro wrapper over bcftools_norm_row that normalizes variants from a table or derived-table expression while preserving the original columns. The input ALT column may be either VARCHAR or VARCHAR\[\]. The result appends pos_normed, end_pos_normed, ref_normed, alt_normed, normed, and norm_status; with split_multiallelic := TRUE, multiallelic sites are split before normalization and alt_normed becomes VARCHAR plus alt_index.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `bcftools_score`        | table       | table   | `rduckhts_score`         | Compute polygenic scores from one genotype BCF/VCF and one or more summary-statistics files with bcftools +score-compatible GT/DS/HDS/AP/GP/AS dosage semantics, sample subsetting, and region/target/FILTER-string controls. The second argument accepts a scalar path or a DuckDB LIST/array of paths; TSV/SSF summaries produce one PRS column per file in a single genotype scan, while GWAS-VCF summaries still produce one PRS column per FORMAT sample. Use summaries_list_file with a NULL second argument to read paths from a file or directory; list-file entries are interpreted as written, matching upstream `bcftools +score --summaries` behavior, while directory inputs scan supported regular summary files in lexicographic order and ignore index sidecars. Use log_path to write per-PRS loaded/matched/allele-mismatch/duplicate-marker audit counts. |
+| `bcftools_munge_row`    | scalar      | STRUCT  |                          | Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `duckdb_munge`          | table_macro | table   | `rduckhts_munge`         | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `duckdb_munge_metal`    | table_macro | table   | `rduckhts_munge`         | Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran’s I² heterogeneity, from HET_I2), cq (Cochran’s Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map.                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Sequence UDFs
 
@@ -407,13 +410,52 @@ dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 #> 2 HS18_09653:4:1308:11522:27107  161 934    0
 ```
 
+### Variant normalization
+
+[`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
+wraps the bundled `duckhts_bcftools_norm(...)` table macro and keeps the
+original input columns alongside normalized position/reference/ALT
+outputs.
+
+``` r
+norm_fa <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts")
+invisible(DBI::dbExecute(
+  con,
+  paste(
+    "CREATE OR REPLACE TEMP TABLE readme_norm AS SELECT * FROM (VALUES",
+    "('chrS', 2, 'T', 'TT,TTT'),",
+    "('chrS', 2, 'T', '*,TT')",
+    ") AS t(chrom, pos, ref, alt)"
+  )
+))
+
+norm_out <- rduckhts_bcftools_norm(
+  con,
+  "readme_norm",
+  norm_fa,
+  split_multiallelic = TRUE
+)
+norm_out[order(norm_out$alt, norm_out$alt_index),
+         c("chrom", "pos", "ref", "alt", "alt_index", "pos_normed", "ref_normed", "alt_normed", "norm_status")]
+#>   chrom pos ref    alt alt_index pos_normed ref_normed alt_normed
+#> 4  chrS   2   T   *,TT         1          2          T          *
+#> 2  chrS   2   T   *,TT         2          1          G         GT
+#> 3  chrS   2   T TT,TTT         1          1          G         GT
+#> 1  chrS   2   T TT,TTT         2          1          G        GTT
+#>        norm_status
+#> 4 SpanningDeletion
+#> 2       Normalized
+#> 3       Normalized
+#> 1       Normalized
+```
+
 ### Interval + reference helpers
 
 ``` r
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                        index_path
+#>   success                                       index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
@@ -637,9 +679,9 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                  summary_path
+#>                                                                 summary_path
 #> 1 <tempfile>
-#>                                                            regions_path
+#>                                                           regions_path
 #> 1 <tempfile>
 
 utils::read.delim(
@@ -694,10 +736,10 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                 index_path
+#>   success                                                index_path
 #> 1    TRUE <tempfile>
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                 index_path
+#>   success                                                index_path
 #> 1    TRUE <tempfile>
 
 lifted <- rduckhts_liftover(
@@ -724,11 +766,11 @@ lifted[, c(
 #>   src_chrom src_pos dest_chrom dest_pos dest_ref dest_alt mapped
 #> 1      chrF       2   chrLiftF        2        C        T   TRUE
 #> 2      chrR       2   chrLiftR        9        T        C   TRUE
-#> 3      chrF      11   chrLiftF       10        A    AA,AT   TRUE
-#>   reverse_complemented reject_reason   note
-#> 1                FALSE          <NA>   <NA>
-#> 2                 TRUE          <NA>   <NA>
-#> 3                FALSE          <NA> Padded
+#> 3      chrF      11       <NA>       NA     <NA>     <NA>  FALSE
+#>   reverse_complemented     reject_reason note
+#> 1                FALSE              <NA> <NA>
+#> 2                 TRUE              <NA> <NA>
+#> 3                FALSE SourceRefMismatch <NA>
 
 unlink(c(lift_src, paste0(lift_src, ".fai"), lift_dst, paste0(lift_dst, ".fai"), lift_chain))
 ```
@@ -742,7 +784,7 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                          index_path
+#>   success                                         index_path
 #> 1    TRUE <tempfile>
 
 munge_out <- rduckhts_munge(
@@ -851,7 +893,7 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                           output_path bytes_out
+#>   success                                         output_path bytes_out
 #> 1    TRUE <tempfile>       169
 
 bgunzip_meta <- rduckhts_bgunzip(
@@ -862,10 +904,8 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                  output_path
-#> 1    TRUE <tempfile>
-#>   bytes_out
-#> 1       194
+#>   success                                                 output_path bytes_out
+#> 1    TRUE <tempfile>       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -873,7 +913,7 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                           index_path index_format
+#>   success                                          index_path index_format
 #> 1    TRUE <tempfile>          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
@@ -882,7 +922,7 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                              index_path index_format
+#>   success                                             index_path index_format
 #> 1    TRUE <tempfile>          CSI
 
 tabix_meta <- rduckhts_tabix_index(
@@ -892,10 +932,8 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                                index_path
-#> 1    TRUE <tempfile>
-#>   index_format
-#> 1          TBI
+#>   success                                              index_path index_format
+#> 1    TRUE <tempfile>          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -960,7 +998,7 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                        index_path
+#>   success                                       index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_fasta(

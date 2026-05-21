@@ -34,6 +34,8 @@
   : Build VCF or BCF Index
 - [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.md)
   : Read multiple VCF/BCF files into a DuckDB table
+- [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
+  : Normalize Variant Alleles with bcftools-style Semantics
 - [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed.md)
   : Create BED Table
 - [`rduckhts_bed_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed_multi.md)

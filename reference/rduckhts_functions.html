@@ -70,21 +70,21 @@ functions.yaml manifest in the duckhts repository."></head><body>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">catalog</span> <span class="op">&lt;-</span> <span class="fu">rduckhts_functions</span><span class="op">(</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="va">catalog</span>, <span class="va">category</span> <span class="op">==</span> <span class="st">"Sequence UDFs"</span>, select <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"name"</span>, <span class="st">"description"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>               name</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 44     seq_revcomp</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 45   seq_canonical</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 46   seq_hash_2bit</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 47 seq_encode_4bit</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 48 seq_decode_4bit</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 49  seq_gc_content</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 50       seq_kmers</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 46     seq_revcomp</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 47   seq_canonical</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 48   seq_hash_2bit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 49 seq_encode_4bit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 50 seq_decode_4bit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 51  seq_gc_content</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 52       seq_kmers</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>                                                                                              description</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 44                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 45                        Return the lexicographically smaller of a sequence and its reverse complement.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 46                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 47 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 48                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 49                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 50                              Expand a sequence into positional k-mers with optional canonicalization.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 46                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 47                        Return the lexicographically smaller of a sequence and its reverse complement.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 48                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 49 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 50                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 51                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 52                              Expand a sequence into positional k-mers with optional canonicalization.</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="fu">rduckhts_functions</span><span class="op">(</span>kind <span class="op">=</span> <span class="st">"table"</span><span class="op">)</span>, select <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"name"</span>, <span class="st">"r_wrapper"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>                              name                        r_wrapper</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 1                        read_bcf                     rduckhts_bcf</span>
