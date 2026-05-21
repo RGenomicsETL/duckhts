@@ -720,6 +720,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
     for (int i = 0; i < n_orig_alt; i++) {
         if (!orig_alt[i] || !*orig_alt[i]) {
             set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "NullInput");
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
             return 1;
         }
         any_breakend |= is_breakend_alt(orig_alt[i]);
@@ -727,25 +729,35 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
     }
     if (any_breakend) {
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "Breakend");
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     if (any_spanning) {
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "SpanningDeletion");
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     if (has_non_acgtn(orig_ref, (int)strlen(orig_ref))) {
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidRefAllele");
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
 
     ref_fetch = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + (int64_t)strlen(orig_ref) - 2);
     if (!ref_fetch) {
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig");
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     if (strcasecmp(ref_fetch, orig_ref) != 0) {
         free(ref_fetch);
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "RefMismatch");
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     free(ref_fetch);
@@ -768,6 +780,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
                                            "SymbolicInsufficientMetadata");
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
+                    free(orig_ref);
+                    free_string_array(orig_alt, n_orig_alt);
                     return 1;
                 }
                 expanded_ref = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + rlen - 2);
@@ -775,6 +789,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
                     set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig");
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
+                    free(orig_ref);
+                    free_string_array(orig_alt, n_orig_alt);
                     return 1;
                 }
                 free(als[0].s);
@@ -789,6 +805,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
                                            "SymbolicInsufficientMetadata");
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
+                    free(orig_ref);
+                    free_string_array(orig_alt, n_orig_alt);
                     return 1;
                 }
                 dup_ref = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + svlen_in - 1);
@@ -796,6 +814,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
                     set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig");
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
+                    free(orig_ref);
+                    free_string_array(orig_alt, n_orig_alt);
                     return 1;
                 }
                 if (kputs(dup_ref, &als[i]) < 0) {
@@ -808,6 +828,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
                                        "UnsupportedSymbolicAllele");
                 free_kstring_array(als, n_allele);
                 free_kstring_array(sym, n_allele);
+                free(orig_ref);
+                free_string_array(orig_alt, n_orig_alt);
                 return 1;
             }
             if (kputs(alt, &sym[i]) < 0) goto oom;
@@ -818,6 +840,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
             set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidAltAllele");
             free_kstring_array(als, n_allele);
             free_kstring_array(sym, n_allele);
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
             return 1;
         }
         if (!prepare_sequence_allele(alt, &als[i])) goto oom;
@@ -825,6 +849,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
             set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "DuplicateAllele");
             free_kstring_array(als, n_allele);
             free_kstring_array(sym, n_allele);
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
             return 1;
         }
     }
@@ -1101,8 +1127,6 @@ static void register_bcftools_norm_scalar(duckdb_connection connection, duckdb_l
     duckdb_scalar_function fn = duckdb_create_scalar_function();
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
-    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-    duckdb_logical_type list_type = duckdb_create_list_type(varchar_type);
     duckdb_logical_type fields[NORM_OUT_COUNT];
     duckdb_logical_type struct_type;
 
@@ -1133,8 +1157,6 @@ static void register_bcftools_norm_scalar(duckdb_connection connection, duckdb_l
 
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bigint_type);
-    duckdb_destroy_logical_type(&bool_type);
-    duckdb_destroy_logical_type(&list_type);
     for (int i = 0; i < NORM_OUT_COUNT; i++) duckdb_destroy_logical_type(&fields[i]);
     duckdb_destroy_logical_type(&struct_type);
 }
