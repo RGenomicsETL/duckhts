@@ -8,12 +8,13 @@ Authors@R: c(
     person(given = "James K Bonfield, John Marshall,Petr Danecek ,Heng Li , Valeriu Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies", role = "ctb", comment = "Htslib Authors"),
     person(given = "Brent", family = "Pedersen", role = "cph", comment = "Mosdepth Original Author"),
     person(given = "Giulio", family = "Genovese", email = "giulio.genovese@gmail.com", role = "cph", comment = "Author of BCFTools munge,score,liftover plugins"),
+    person(given = "Nicola", family = "Asuni", role = "cph", comment = "Author of the VariantKey and RegionKey C API"),
     person(given = "DuckDB C Extension API Authors", role = "ctb")
     )
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughput
     Sequencing file formats with 'DuckDB'. The 'DuckDB' C extension API
     <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' dependency are
-    compiled from vendored sources during package installation. James K Bonfield and co-authors (2021) <doi:10.1093/gigascience/giab007>.
+    compiled from vendored sources during package installation. James K Bonfield and co-authors (2021) <doi:10.1093/gigascience/giab007>. VariantKey / RegionKey support follows Nicola Asuni (2018) <doi:10.1101/473744>.
 License: GPL-3
 Copyright: See inst/COPYRIGHT
 Encoding: UTF-8

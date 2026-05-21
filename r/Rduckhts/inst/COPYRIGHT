@@ -11,6 +11,12 @@ DuckDB C API headers
 	Authors: DuckDB contributors
 	License: See the DuckDB project license for the version of these headers
 
+VariantKey / RegionKey C API
+	Source: inst/duckhts_extension/include/variantkey/{hex.h,variantkey.h,regionkey.h}
+	Authors: Nicola Asuni and contributors
+	License: MIT
+	Reference: inst/duckhts_extension/include/variantkey/variantkey.h and inst/duckhts_extension/include/variantkey/regionkey.h
+
 Mosdepth test fixtures
 	Source: inst/extdata/{bad.bed,big.bam,empty-tids.*,full-fragment-pairs.*,missing.bed,nanopore.*,overlapping-pairs.*,ovl.*,track.bed,unordered.bed}
 	Authors: Brent Pedersen and mosdepth contributors

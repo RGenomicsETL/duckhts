@@ -104,6 +104,12 @@ bench-score:
 bench-norm:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_norm.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
+bench-variantkey:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+bench-variantkey-join:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_join_overlap.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
 bench-munge:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_munge.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
