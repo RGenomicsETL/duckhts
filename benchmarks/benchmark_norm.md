@@ -45,10 +45,10 @@ knitr::kable(synthetic_bench, digits = 3)
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving    |    3 |      0.162 |   0.154 |   0.163 |      100000 |
-| bcftools_norm | site_preserving    |    3 |     66.333 |  66.036 |  66.672 |      100000 |
-| duckhts       | split_multiallelic |    3 |      0.202 |   0.202 |   0.203 |      120000 |
-| bcftools_norm | split_multiallelic |    3 |     99.937 |  99.063 | 101.207 |      120000 |
+| duckhts       | site_preserving    |    3 |      0.155 |   0.152 |   0.165 |      100000 |
+| bcftools_norm | site_preserving    |    3 |     72.406 |  71.397 |  76.825 |      100000 |
+| duckhts       | split_multiallelic |    3 |      0.208 |   0.208 |   0.208 |      120000 |
+| bcftools_norm | split_multiallelic |    3 |     97.558 |  96.969 | 104.839 |      120000 |
 
 Synthetic fixture mix:
 
@@ -143,5 +143,40 @@ if (!nzchar(real_input_path) || !nzchar(real_fasta)) {
 }
 ```
 
-Real-callset benchmark skipped. Set `NORM_REAL_VCF` and
-`NORM_REAL_FASTA` to enable it.
+## giab_hg001_grch37_chr20 (site-preserving)
+
+| engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows |
+|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|
+| duckhts       | site_preserving |    3 |      0.416 |   0.410 |   0.422 |       82640 |
+| bcftools_norm | site_preserving |    3 |      0.299 |   0.297 |   0.302 |       82640 |
+
+| status |     n |
+|:-------|------:|
+| match  | 82640 |
+
+| norm_status |     n |
+|:------------|------:|
+| Normalized  |     2 |
+| Unchanged   | 82638 |
+
+| chrom | pos_normed | end_pos_normed | ref_normed | alt_normed | duck_n | bcf_n | status |
+|:------|-----------:|---------------:|:-----------|:-----------|-------:|------:|:-------|
+
+## giab_hg001_grch37_chr20 (split_multiallelic)
+
+| engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
+|:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
+| duckhts       | split_multiallelic |    3 |      0.526 |   0.523 |   0.587 |       83452 |
+| bcftools_norm | split_multiallelic |    3 |      0.302 |   0.299 |   0.307 |       83452 |
+
+| status |     n |
+|:-------|------:|
+| match  | 83452 |
+
+| norm_status |     n |
+|:------------|------:|
+| Normalized  |   521 |
+| Unchanged   | 82931 |
+
+| chrom | pos_normed | end_pos_normed | ref_normed | alt_normed | duck_n | bcf_n | status |
+|:------|-----------:|---------------:|:-----------|:-----------|-------:|------:|:-------|
