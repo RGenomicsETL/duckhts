@@ -35,6 +35,28 @@ test_bcftools_norm <- function() {
       ") AS t(chrom, pos, ref, alt, end_pos, svlen)"
     )
   )
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_empty_seq AS",
+      "SELECT * FROM (VALUES",
+      "('dot', 'chrS', 2, 'T', '.'),",
+      "('empty_text', 'chrS', 2, 'T', ''),",
+      "('null_text', 'chrS', 2, 'T', NULL)",
+      ") AS t(case_id, chrom, pos, ref, alt)"
+    )
+  )
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_empty_list AS",
+      "SELECT * FROM (VALUES",
+      "('empty_list', 'chrS', 2, 'T', []::VARCHAR[]),",
+      "('null_item', 'chrS', 2, 'T', [NULL]::VARCHAR[]),",
+      "('null_list', 'chrS', 2, 'T', NULL::VARCHAR[])",
+      ") AS t(case_id, chrom, pos, ref, alt)"
+    )
+  )
 
   out <- rduckhts_bcftools_norm(con, "norm_seq", fasta_path)
   expect_equal(nrow(out), 3)
@@ -71,6 +93,27 @@ test_bcftools_norm <- function() {
   expect_equal(out_list$ref_normed[1], "G")
   expect_equal(as.character(out_list$alt_normed[[1]]), c("GT", "GTT"))
   expect_true(out_list$normed[1])
+
+  empty_seq_split <- rduckhts_bcftools_norm(con, "norm_empty_seq", fasta_path, split_multiallelic = TRUE)
+  empty_seq_split <- empty_seq_split[order(empty_seq_split$case_id), , drop = FALSE]
+  expect_equal(empty_seq_split$case_id, c("dot", "empty_text", "null_text"))
+  expect_equal(nrow(empty_seq_split), 3)
+  expect_true(all(is.na(empty_seq_split$alt_normed[c(1, 3)])))
+  expect_equal(nchar(empty_seq_split$alt_normed[2]), 0)
+  expect_equal(empty_seq_split$norm_status, c("RefOnly", "NullInput", "RefOnly"))
+  expect_equal(as.logical(empty_seq_split$normed), c(FALSE, NA, FALSE))
+  expect_true(all(is.na(empty_seq_split$alt_index[c(1, 3)])))
+  expect_equal(empty_seq_split$alt_index[2], 1)
+
+  empty_list_split <- rduckhts_bcftools_norm(con, "norm_empty_list", fasta_path, split_multiallelic = TRUE)
+  empty_list_split <- empty_list_split[order(empty_list_split$case_id), , drop = FALSE]
+  expect_equal(empty_list_split$case_id, c("empty_list", "null_item", "null_list"))
+  expect_equal(nrow(empty_list_split), 3)
+  expect_true(all(is.na(empty_list_split$alt_normed)))
+  expect_equal(empty_list_split$norm_status, c("RefOnly", "NullInput", "RefOnly"))
+  expect_equal(as.logical(empty_list_split$normed), c(FALSE, NA, FALSE))
+  expect_true(all(is.na(empty_list_split$alt_index[c(1, 3)])))
+  expect_equal(empty_list_split$alt_index[2], 1)
 
   out_sv <- rduckhts_bcftools_norm(
     con,

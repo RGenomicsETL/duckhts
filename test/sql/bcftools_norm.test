@@ -28,6 +28,24 @@ FROM (VALUES
   ('chrS', 3, 'T', '<DUP>', NULL, 2)
 ) AS t(chrom, pos, ref, alt, end_pos, svlen);
 
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_empty_seq AS
+SELECT *
+FROM (VALUES
+  ('dot', 'chrS', 2, 'T', '.'),
+  ('empty_text', 'chrS', 2, 'T', ''),
+  ('null_text', 'chrS', 2, 'T', NULL)
+) AS t(case_id, chrom, pos, ref, alt);
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_empty_list AS
+SELECT *
+FROM (VALUES
+  ('empty_list', 'chrS', 2, 'T', []::VARCHAR[]),
+  ('null_item', 'chrS', 2, 'T', [NULL]::VARCHAR[]),
+  ('null_list', 'chrS', 2, 'T', NULL::VARCHAR[])
+) AS t(case_id, chrom, pos, ref, alt);
+
 query T
 SELECT typeof(alt_normed)
 FROM duckhts_bcftools_norm('norm_seq', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa')
@@ -151,3 +169,57 @@ FROM duckhts_bcftools_norm('norm_seq', '__WORKING_DIRECTORY__/test/data/liftover
 WHERE chrom = 'chrMissing';
 ----
 2	2	T	[TT]	NULL	MissingContig
+
+query I
+SELECT count(*)
+FROM duckhts_bcftools_norm(
+  'norm_empty_seq',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+);
+----
+3
+
+query I
+SELECT count(*)
+FROM duckhts_bcftools_norm(
+  'norm_empty_list',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+);
+----
+3
+
+query TIIIT
+SELECT case_id,
+       CASE WHEN alt_normed IS NULL THEN 'NULL' ELSE cast(length(alt_normed) AS VARCHAR) END,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       coalesce(alt_index, -1),
+       norm_status
+FROM duckhts_bcftools_norm(
+  'norm_empty_seq',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+ORDER BY case_id;
+----
+dot	NULL	0	-1	RefOnly
+empty_text	0	NULL	1	NullInput
+null_text	NULL	0	-1	RefOnly
+
+query TIIIT
+SELECT case_id,
+       CASE WHEN alt_normed IS NULL THEN 'NULL' ELSE cast(length(alt_normed) AS VARCHAR) END,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       coalesce(alt_index, -1),
+       norm_status
+FROM duckhts_bcftools_norm(
+  'norm_empty_list',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+ORDER BY case_id;
+----
+empty_list	NULL	0	-1	RefOnly
+null_item	NULL	NULL	1	NullInput
+null_list	NULL	0	-1	RefOnly
