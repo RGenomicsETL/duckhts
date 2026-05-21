@@ -42,6 +42,20 @@ This section is generated from `functions.yaml`.
 | `duckhts_cgranges_overlaps_list` | scalar | STRUCT(interval_ordinal BIGINT, label VARCHAR, label_type VARCHAR, interval_chrom VARCHAR, interval_start INTEGER, interval_end INTEGER)[] |  | Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL. |
 | `duckhts_cgranges_overlaps` | table | table |  | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates. |
 | `duckhts_cgranges_overlaps_bulk` | table | table |  | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal. |
+| `regionkey` | scalar | UBIGINT |  | Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1. |
+| `regionkey_hex` | scalar | VARCHAR |  | Render a RegionKey as its lowercase 16-character hexadecimal string representation. |
+| `parse_regionkey_hex` | scalar | UBIGINT |  | Parse a 16-character hexadecimal RegionKey string back into its UBIGINT code. Invalid or non-hex strings return NULL. |
+| `encode_regionkey` | scalar | UBIGINT |  | Encode the raw upstream RegionKey fields directly: chromosome code, 0-based start, 0-based end, and strand code (0 = unknown, 1 = +, 2 = -). |
+| `extract_regionkey_chrom` | scalar | UTINYINT |  | Extract the raw upstream RegionKey chromosome code. |
+| `extract_regionkey_startpos` | scalar | UINTEGER |  | Extract the raw upstream RegionKey 0-based start position. |
+| `extract_regionkey_endpos` | scalar | UINTEGER |  | Extract the raw upstream RegionKey 0-based end position. |
+| `extract_regionkey_strand` | scalar | UTINYINT |  | Extract the raw upstream RegionKey strand code (0 = unknown, 1 = +, 2 = -). |
+| `decode_regionkey` | scalar | STRUCT |  | Decode a RegionKey into its raw upstream numeric fields: chrom_code, start, end, and strand_code. |
+| `reverse_regionkey` | scalar | STRUCT |  | Decode a RegionKey into a STRUCT with chrom, chrom_code, start, end, strand, and strand_code. |
+| `extend_regionkey` | scalar | UBIGINT |  | Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range. |
+| `are_overlapping_regions` | scalar | BOOLEAN |  | Return TRUE when two explicit 0-based half-open intervals overlap on the same canonical chromosome. |
+| `are_overlapping_region_regionkey` | scalar | BOOLEAN |  | Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval. |
+| `are_overlapping_regionkeys` | scalar | BOOLEAN |  | Return TRUE when two RegionKeys overlap. |
 
 ### Metadata
 
@@ -73,6 +87,16 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
+| `variantkey` | scalar | UBIGINT |  | Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools `%VKX` / `+add-variantkey`, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not. |
+| `variantkey_hex` | scalar | VARCHAR |  | Render a VariantKey as its lowercase 16-character hexadecimal string representation. |
+| `parse_variantkey_hex` | scalar | UBIGINT |  | Parse a 16-character hexadecimal VariantKey string back into its UBIGINT code. Invalid or non-hex strings return NULL. |
+| `encode_variantkey` | scalar | UBIGINT |  | Encode the raw upstream VariantKey fields directly: chromosome code, 0-based position, and 31-bit REF+ALT code. |
+| `extract_variantkey_chrom` | scalar | UTINYINT |  | Extract the raw upstream VariantKey chromosome code. |
+| `extract_variantkey_pos` | scalar | UINTEGER |  | Extract the raw upstream VariantKey 0-based position field. |
+| `extract_variantkey_refalt` | scalar | UINTEGER |  | Extract the raw upstream 31-bit VariantKey REF+ALT code. |
+| `decode_variantkey` | scalar | STRUCT |  | Decode a VariantKey into its raw upstream numeric fields: chrom_code, pos0, and refalt_code. |
+| `reverse_variantkey` | scalar | STRUCT |  | Decode a VariantKey into a STRUCT with chrom, chrom_code, 1-based pos, upstream 0-based pos0, ref, alt, refalt_code, and reversible. For hashed nonreversible keys, reversible is FALSE and ref/alt are returned as NULL because DuckHTS v1 does not ship the optional NRVK lookup sidecar. |
+| `variantkey_range` | scalar | STRUCT |  | Return the inclusive minimum and maximum VariantKey bounds for a chromosome plus 1-based VCF position range, suitable for numeric range filtering on precomputed VariantKeys. |
 | `bcftools_liftover` | scalar | STRUCT | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover). |
 | `duckdb_liftover` | table_macro | table | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors --no-left-align in bcftools +liftover. |
 | `bcftools_norm_row` | scalar | STRUCT |  | Normalize one variant row with bcftools/vt-style left-alignment semantics against a FASTA reference. The alt argument may be either a comma-delimited VARCHAR or a VARCHAR[] list. The returned STRUCT contains pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), normed (TRUE/FALSE/NULL), and norm_status. Symbolic <DEL> rows can use end_pos, and symbolic <DUP> rows can use svlen. |

@@ -93,6 +93,7 @@ set(EXTENSION_SOURCES
         src/samtools_idxstats_table.c
         src/bam_bed_coverage.c
         src/cgranges_api.c
+        src/variantkey_udf.c
         third_party/cgranges/cgranges.c
         src/bcftools_filter.c
         src/bcftools_shim.c
@@ -130,6 +131,7 @@ endif()
 # Include own headers
 target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/cgranges)
+target_include_directories(${EXTENSION_NAME} PRIVATE third_party/variantkey/include)
 
 # Include DuckDB C API headers
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)

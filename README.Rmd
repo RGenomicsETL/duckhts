@@ -124,6 +124,21 @@ FROM duckhts_bcftools_norm(
 ORDER BY alt, alt_index;
 ```
 
+### VariantKey + RegionKey
+
+DuckHTS vendors the official VariantKey / RegionKey C API and exposes SQL helpers that mirror bcftools `%VKX`-style VariantKey output on VCF rows. `variantkey(...)` accepts 1-based VCF `POS`, while `regionkey(...)` uses 0-based half-open interval semantics. Large, ambiguous, and symbolic alleles still encode through the official hashed nonreversible VariantKey mode, but those keys do not encode `END`, `SVLEN`, mate breakend coordinates, or other SV metadata; use RegionKey explicitly for span-oriented interval work. See Nicola Asuni (2018) <https://doi.org/10.1101/473744>.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+SELECT variantkey_hex(variantkey('1', 324684, 'C', 'G')) AS vkx,
+       reverse_variantkey(parse_variantkey_hex('08027a2588b00000')) AS reversed;
+
+SELECT regionkey_hex(regionkey('X', 1007, 1807, 1)) AS rkx,
+       are_overlapping_regionkeys(
+         regionkey('X', 1007, 1807, 1),
+         parse_regionkey_hex('b80001f78000387a')
+       ) AS overlaps;
+```
+
 ### Interval + reference helpers
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}

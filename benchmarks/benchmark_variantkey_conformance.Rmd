@@ -1,0 +1,151 @@
+---
+title: "DuckHTS VariantKey Conformance"
+output: github_document
+---
+
+<!-- benchmark_variantkey_conformance.md is generated from benchmark_variantkey_conformance.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE)
+```
+
+# Conformance
+
+This report compares DuckHTS VariantKey output against installed `bcftools`
+`%VKX` formatting on real whole-genome GIAB VCF files.
+
+DuckHTS uses the vendored official VariantKey C API and follows the bcftools
+`%VKX` / `+add-variantkey` convention of accepting 1-based VCF `POS` at the SQL
+boundary while encoding the upstream 0-based field internally.
+
+VariantKey / RegionKey are based on Nicola Asuni's work:
+<https://doi.org/10.1101/473744>.
+
+## Run
+
+```sh
+make bench-variantkey
+```
+
+Useful overrides:
+
+- `BCFTOOLS_BIN`: optional bcftools executable override
+- `VARIANTKEY_REAL_CASES`: optional comma-separated local VCF/BCF paths
+- `VARIANTKEY_OUT_DIR`: optional directory for emitted TSVs and summaries
+- `DUCKHTS_EXTENSION`: optional extension path override
+
+If `VARIANTKEY_REAL_CASES` is unset, this report looks for the locally
+downloaded whole-WGS GIAB files already used in earlier DuckHTS conformance
+work under `/root/giab_norm/`.
+
+```{r setup, include = FALSE}
+library(utils)
+
+if (!requireNamespace("RBCFTools", quietly = TRUE)) {
+  stop("RBCFTools is required for VariantKey conformance rendering", call. = FALSE)
+}
+
+RBCFTools::setup_hts_env()
+
+bcftools_bin <- Sys.getenv("BCFTOOLS_BIN", unset = RBCFTools::bcftools_path())
+if (!file.exists(bcftools_bin)) stop("bcftools binary not found: ", bcftools_bin, call. = FALSE)
+
+ext_path <- Sys.getenv(
+  "DUCKHTS_EXTENSION",
+  unset = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
+)
+script_path <- normalizePath("scripts/variantkey_conformance.sh", mustWork = TRUE)
+out_root <- Sys.getenv("VARIANTKEY_OUT_DIR", unset = file.path(tempdir(), "duckhts_variantkey_real"))
+dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
+
+case_env <- Sys.getenv("VARIANTKEY_REAL_CASES", unset = "")
+default_cases <- data.frame(
+  label = c("giab_hg001_grch37_full", "giab_hg002_grch37_full", "giab_hg006_grch37_full"),
+  path = c(
+    "/root/giab_norm/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz",
+    "/root/giab_norm/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz",
+    "/root/giab_norm/HG006_GRCh37_1_22_v4.2.1_benchmark.vcf.gz"
+  ),
+  stringsAsFactors = FALSE
+)
+
+if (nzchar(case_env)) {
+  raw_paths <- trimws(strsplit(case_env, ",", fixed = TRUE)[[1]])
+  raw_paths <- raw_paths[nzchar(raw_paths)]
+  cases <- data.frame(
+    label = sub("\\.(vcf|bcf)(\\.gz)?$", "", basename(raw_paths), ignore.case = TRUE),
+    path = raw_paths,
+    stringsAsFactors = FALSE
+  )
+} else {
+  cases <- default_cases[file.exists(default_cases$path), , drop = FALSE]
+}
+
+if (!nrow(cases)) {
+  stop(
+    "No real GIAB inputs found. Set VARIANTKEY_REAL_CASES or place local files under /root/giab_norm/.",
+    call. = FALSE
+  )
+}
+
+run_case <- function(label, path) {
+  case_out <- file.path(out_root, label)
+  dir.create(case_out, recursive = TRUE, showWarnings = FALSE)
+
+  env <- c(
+    sprintf("VARIANTKEY_VCF=%s", path),
+    sprintf("VARIANTKEY_LABEL=%s", label),
+    sprintf("VARIANTKEY_OUT_DIR=%s", case_out),
+    sprintf("VARIANTKEY_BCFTOOLS_BIN=%s", bcftools_bin),
+    sprintf("DUCKHTS_EXTENSION=%s", ext_path)
+  )
+
+  elapsed <- system.time({
+    status <- system2("bash", script_path, env = env, stdout = TRUE, stderr = TRUE)
+    attr(status, "status") <- NULL
+  })[["elapsed"]]
+
+  summary_path <- file.path(case_out, sprintf("%s.summary.tsv", label))
+  compare_path <- file.path(case_out, sprintf("%s.compare.tsv", label))
+  summary <- read.delim(summary_path, sep = "\t", check.names = FALSE)
+  mismatches <- read.delim(compare_path, sep = "\t", check.names = FALSE)
+
+  data.frame(
+    label = label,
+    path = path,
+    bcftools_rows = summary$bcftools_rows[1],
+    duckhts_rows = summary$duckhts_rows[1],
+    mismatch_groups = summary$mismatch_groups[1],
+    elapsed_seconds = elapsed,
+    stringsAsFactors = FALSE
+  )
+}
+```
+
+```{r run-real-cases}
+results <- do.call(
+  rbind,
+  lapply(seq_len(nrow(cases)), function(i) run_case(cases$label[i], cases$path[i]))
+)
+results
+```
+
+All listed cases should have `mismatch_groups == 0`.
+
+```{r stop-on-mismatch, include = FALSE}
+if (any(results$mismatch_groups != 0)) {
+  stop("VariantKey conformance mismatches detected; inspect VARIANTKEY_OUT_DIR artifacts.", call. = FALSE)
+}
+```
+
+## Notes
+
+- This framework compares against bcftools `%VKX`, which is the same VariantKey
+  hexadecimal output exposed by `+add-variantkey`.
+- DuckHTS currently compares `ALT[1]` from `read_bcf(...)`, mirroring the
+  biallelic `%VKX` field that bcftools derives from the first ALT allele on the
+  current record.
+- Large, ambiguous, and symbolic alleles are expected to fall back to the
+  official hashed nonreversible VariantKey mode. That still preserves bcftools
+  `%VKX` parity, but it does not encode `END`, `SVLEN`, mate breakend
+  coordinates, or other SV metadata.

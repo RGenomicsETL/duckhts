@@ -480,6 +480,294 @@
       ]
     },
     {
+      "name": "variantkey",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "variantkey(chrom, pos, ref, alt)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools `%VKX` / `+add-variantkey`, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not.",
+      "examples": [
+        "SELECT variantkey_hex(variantkey('1', 324684, 'C', 'G'));"
+      ]
+    },
+    {
+      "name": "variantkey_hex",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "variantkey_hex(vk)",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Render a VariantKey as its lowercase 16-character hexadecimal string representation.",
+      "examples": [
+        "SELECT variantkey_hex(variantkey('1', 324684, 'C', 'G'));"
+      ]
+    },
+    {
+      "name": "parse_variantkey_hex",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "parse_variantkey_hex(hex)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Parse a 16-character hexadecimal VariantKey string back into its UBIGINT code. Invalid or non-hex strings return NULL.",
+      "examples": [
+        "SELECT parse_variantkey_hex('08027a2588b00000');"
+      ]
+    },
+    {
+      "name": "encode_variantkey",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "encode_variantkey(chrom_code, pos0, refalt_code)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Encode the raw upstream VariantKey fields directly: chromosome code, 0-based position, and 31-bit REF+ALT code.",
+      "examples": [
+        "SELECT variantkey_hex(encode_variantkey(1, 324683, 145752064));"
+      ]
+    },
+    {
+      "name": "extract_variantkey_chrom",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "extract_variantkey_chrom(vk)",
+      "returns": "UTINYINT",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream VariantKey chromosome code.",
+      "examples": [
+        "SELECT extract_variantkey_chrom(parse_variantkey_hex('08027a2588b00000'));"
+      ]
+    },
+    {
+      "name": "extract_variantkey_pos",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "extract_variantkey_pos(vk)",
+      "returns": "UINTEGER",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream VariantKey 0-based position field.",
+      "examples": [
+        "SELECT extract_variantkey_pos(parse_variantkey_hex('08027a2588b00000'));"
+      ]
+    },
+    {
+      "name": "extract_variantkey_refalt",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "extract_variantkey_refalt(vk)",
+      "returns": "UINTEGER",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream 31-bit VariantKey REF+ALT code.",
+      "examples": [
+        "SELECT extract_variantkey_refalt(parse_variantkey_hex('08027a2588b00000'));"
+      ]
+    },
+    {
+      "name": "decode_variantkey",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "decode_variantkey(vk)",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Decode a VariantKey into its raw upstream numeric fields: chrom_code, pos0, and refalt_code.",
+      "examples": [
+        "SELECT (decode_variantkey(parse_variantkey_hex('08027a2588b00000'))).pos0;"
+      ]
+    },
+    {
+      "name": "reverse_variantkey",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "reverse_variantkey(vk)",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Decode a VariantKey into a STRUCT with chrom, chrom_code, 1-based pos, upstream 0-based pos0, ref, alt, refalt_code, and reversible. For hashed nonreversible keys, reversible is FALSE and ref/alt are returned as NULL because DuckHTS v1 does not ship the optional NRVK lookup sidecar.",
+      "examples": [
+        "SELECT (reverse_variantkey(parse_variantkey_hex('08027a2588b00000'))).ref;"
+      ]
+    },
+    {
+      "name": "variantkey_range",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "variantkey_range(chrom, pos_min, pos_max)",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Return the inclusive minimum and maximum VariantKey bounds for a chromosome plus 1-based VCF position range, suitable for numeric range filtering on precomputed VariantKeys.",
+      "examples": [
+        "SELECT variantkey_hex((variantkey_range('1', 100, 100)).min), variantkey_hex((variantkey_range('1', 100, 100)).max);"
+      ]
+    },
+    {
+      "name": "regionkey",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "regionkey(chrom, start, end, strand := 0)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1.",
+      "examples": [
+        "SELECT regionkey_hex(regionkey('X', 1007, 1807, 1));"
+      ]
+    },
+    {
+      "name": "regionkey_hex",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "regionkey_hex(rk)",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Render a RegionKey as its lowercase 16-character hexadecimal string representation.",
+      "examples": [
+        "SELECT regionkey_hex(regionkey('X', 1007, 1807, 1));"
+      ]
+    },
+    {
+      "name": "parse_regionkey_hex",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "parse_regionkey_hex(hex)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Parse a 16-character hexadecimal RegionKey string back into its UBIGINT code. Invalid or non-hex strings return NULL.",
+      "examples": [
+        "SELECT parse_regionkey_hex('b80001f78000387a');"
+      ]
+    },
+    {
+      "name": "encode_regionkey",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "encode_regionkey(chrom_code, start, end, strand_code)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Encode the raw upstream RegionKey fields directly: chromosome code, 0-based start, 0-based end, and strand code (0 = unknown, 1 = +, 2 = -).",
+      "examples": [
+        "SELECT regionkey_hex(encode_regionkey(23, 1007, 1807, 1));"
+      ]
+    },
+    {
+      "name": "extract_regionkey_chrom",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "extract_regionkey_chrom(rk)",
+      "returns": "UTINYINT",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream RegionKey chromosome code.",
+      "examples": [
+        "SELECT extract_regionkey_chrom(parse_regionkey_hex('b80001f78000387a'));"
+      ]
+    },
+    {
+      "name": "extract_regionkey_startpos",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "extract_regionkey_startpos(rk)",
+      "returns": "UINTEGER",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream RegionKey 0-based start position.",
+      "examples": [
+        "SELECT extract_regionkey_startpos(parse_regionkey_hex('b80001f78000387a'));"
+      ]
+    },
+    {
+      "name": "extract_regionkey_endpos",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "extract_regionkey_endpos(rk)",
+      "returns": "UINTEGER",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream RegionKey 0-based end position.",
+      "examples": [
+        "SELECT extract_regionkey_endpos(parse_regionkey_hex('b80001f78000387a'));"
+      ]
+    },
+    {
+      "name": "extract_regionkey_strand",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "extract_regionkey_strand(rk)",
+      "returns": "UTINYINT",
+      "r_wrapper": "",
+      "description": "Extract the raw upstream RegionKey strand code (0 = unknown, 1 = +, 2 = -).",
+      "examples": [
+        "SELECT extract_regionkey_strand(parse_regionkey_hex('b80001f78000387a'));"
+      ]
+    },
+    {
+      "name": "decode_regionkey",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "decode_regionkey(rk)",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Decode a RegionKey into its raw upstream numeric fields: chrom_code, start, end, and strand_code.",
+      "examples": [
+        "SELECT (decode_regionkey(parse_regionkey_hex('b80001f78000387a'))).strand_code;"
+      ]
+    },
+    {
+      "name": "reverse_regionkey",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "reverse_regionkey(rk)",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Decode a RegionKey into a STRUCT with chrom, chrom_code, start, end, strand, and strand_code.",
+      "examples": [
+        "SELECT (reverse_regionkey(parse_regionkey_hex('b80001f78000387a'))).strand;"
+      ]
+    },
+    {
+      "name": "extend_regionkey",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "extend_regionkey(rk, size)",
+      "returns": "UBIGINT",
+      "r_wrapper": "",
+      "description": "Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range.",
+      "examples": [
+        "SELECT reverse_regionkey(extend_regionkey(regionkey('X', 10000, 20000, -1), 1000));"
+      ]
+    },
+    {
+      "name": "are_overlapping_regions",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "are_overlapping_regions(chrom_a, start_a, end_a, chrom_b, start_b, end_b)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Return TRUE when two explicit 0-based half-open intervals overlap on the same canonical chromosome.",
+      "examples": [
+        "SELECT are_overlapping_regions('1', 2, 4, '1', 3, 7);"
+      ]
+    },
+    {
+      "name": "are_overlapping_region_regionkey",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "are_overlapping_region_regionkey(chrom, start, end, rk)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval.",
+      "examples": [
+        "SELECT are_overlapping_region_regionkey('X', 1008, 1800, parse_regionkey_hex('b80001f78000387a'));"
+      ]
+    },
+    {
+      "name": "are_overlapping_regionkeys",
+      "kind": "scalar",
+      "category": "Intervals",
+      "signature": "are_overlapping_regionkeys(rka, rkb)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Return TRUE when two RegionKeys overlap.",
+      "examples": [
+        "SELECT are_overlapping_regionkeys(regionkey('X', 1007, 1807, 1), parse_regionkey_hex('b80001f78000387a'));"
+      ]
+    },
+    {
       "name": "bcftools_liftover",
       "kind": "scalar",
       "category": "Variants",

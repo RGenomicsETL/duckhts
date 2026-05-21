@@ -1,0 +1,29 @@
+--- a/include/variantkey/regionkey.h
++++ b/include/variantkey/regionkey.h
+@@ -42,7 +42,11 @@
+ #define VARIANTKEY_REGIONKEY_H
+ 
+ #include <stdio.h>
+-#include "nrvk.h"
++#include "variantkey.h"
++
++#ifdef VARIANTKEY_WITH_NRVK
++#include "nrvk.h"
++#endif
+ 
+ #define RK_MAX_POS       0x000000000FFFFFFF  //!< Maximum position value (2^28 - 1)
+ #define RKMASK_CHROM     0xF800000000000000  //!< RegionKey binary mask for CHROM     [ 11111000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 ]
+@@ -315,6 +319,7 @@ static inline uint8_t are_overlapping_regionkeys(uint64_t rka, uint64_t rkb)
+     return (uint8_t)((extract_regionkey_chrom(rka) == extract_regionkey_chrom(rkb)) && (extract_regionkey_startpos(rka) < extract_regionkey_endpos(rkb)) && (extract_regionkey_endpos(rka) > extract_regionkey_startpos(rkb)));
+ }
+ 
++#ifdef VARIANTKEY_WITH_NRVK
+ /** @brief Check if variantkey and regionkey are overlapping.
+  *
+  * @param nvc   Structure containing the pointers to the NRVK memory mapped file columns.
+@@ -339,4 +344,5 @@ static inline uint64_t variantkey_to_regionkey(nrvk_cols_t nvc, uint64_t vk)
+     return ((vk & VKMASK_CHROMPOS) | ((uint64_t)get_variantkey_endpos(nvc, vk) << RKSHIFT_ENDPOS));
+ }
++#endif
+ 
+ #endif  // VARIANTKEY_REGIONKEY_H
