@@ -1,0 +1,153 @@
+# name: test/sql/bcftools_norm.test
+# description: Test bcftools-style allele normalization macro and scalar
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_seq AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', 'TT,TTT'),
+  ('chrS', 2, 'TT', 'T,TTT'),
+  ('chrMissing', 2, 'T', 'TT')
+) AS t(chrom, pos, ref, alt);
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_list AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', ['TT', 'TTT'])
+) AS t(chrom, pos, ref, alt);
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_sv AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', '<DEL>', 3, NULL),
+  ('chrS', 3, 'T', '<DUP>', NULL, 2)
+) AS t(chrom, pos, ref, alt, end_pos, svlen);
+
+query T
+SELECT typeof(alt_normed)
+FROM duckhts_bcftools_norm('norm_seq', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa')
+LIMIT 1;
+----
+VARCHAR[]
+
+query T
+SELECT typeof(alt_normed)
+FROM duckhts_bcftools_norm(
+  'norm_seq',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+LIMIT 1;
+----
+VARCHAR
+
+query IITTIT
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm('norm_seq', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa')
+WHERE ref = 'T' AND alt = 'TT,TTT';
+----
+1	1	G	[GT, GTT]	1	Normalized
+
+query IITTITR
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status,
+       alt_index
+FROM duckhts_bcftools_norm(
+  'norm_seq',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+WHERE ref = 'T' AND alt = 'TT,TTT'
+ORDER BY alt_index;
+----
+1	1	G	GT	1	Normalized	1
+1	1	G	GTT	1	Normalized	2
+
+query IITTITR
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status,
+       alt_index
+FROM duckhts_bcftools_norm(
+  'norm_seq',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+WHERE ref = 'TT' AND alt = 'T,TTT'
+ORDER BY alt_index;
+----
+1	2	GT	G	1	Normalized	1
+1	1	G	GT	1	Normalized	2
+
+query ITTIT
+SELECT pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm('norm_list', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa');
+----
+1	G	[GT, GTT]	1	Normalized
+
+query IITTIT
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm(
+  'norm_sv',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  end_pos_col := 'end_pos',
+  svlen_col := 'svlen'
+)
+WHERE alt = '<DEL>';
+----
+1	2	G	[<DEL>]	1	Normalized
+
+query IITTIT
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm(
+  'norm_sv',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  end_pos_col := 'end_pos',
+  svlen_col := 'svlen'
+)
+WHERE alt = '<DUP>';
+----
+1	1	G	[<DUP>]	1	Normalized
+
+query IITTIT
+SELECT pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm('norm_seq', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa')
+WHERE chrom = 'chrMissing';
+----
+2	2	T	[TT]	NULL	MissingContig
