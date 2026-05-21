@@ -226,6 +226,32 @@ rduckhts_bam(
 dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
 ```
 
+### Variant normalization
+
+`rduckhts_bcftools_norm()` wraps the bundled `duckhts_bcftools_norm(...)` table macro and keeps the original input columns alongside normalized position/reference/ALT outputs.
+
+```{r}
+norm_fa <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts")
+invisible(DBI::dbExecute(
+  con,
+  paste(
+    "CREATE OR REPLACE TEMP TABLE readme_norm AS SELECT * FROM (VALUES",
+    "('chrS', 2, 'T', 'TT,TTT'),",
+    "('chrS', 2, 'T', '*,TT')",
+    ") AS t(chrom, pos, ref, alt)"
+  )
+))
+
+norm_out <- rduckhts_bcftools_norm(
+  con,
+  "readme_norm",
+  norm_fa,
+  split_multiallelic = TRUE
+)
+norm_out[order(norm_out$alt, norm_out$alt_index),
+         c("chrom", "pos", "ref", "alt", "alt_index", "pos_normed", "ref_normed", "alt_normed", "norm_status")]
+```
+
 ### Interval + reference helpers
 
 ```{r}
