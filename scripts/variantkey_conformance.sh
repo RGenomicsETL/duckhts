@@ -8,6 +8,8 @@ BCFTOOLS_BIN="${VARIANTKEY_BCFTOOLS_BIN:-bcftools}"
 EXT_PATH="${DUCKHTS_EXTENSION:-$ROOT_DIR/build/release/duckhts.duckdb_extension}"
 OUT_DIR="${VARIANTKEY_OUT_DIR:-$(mktemp -d /tmp/duckhts_variantkey_conf.XXXXXX)}"
 LABEL="${VARIANTKEY_LABEL:-$(basename "${VCF_PATH:-variantkey}")}" 
+DUCK_THREADS="${VARIANTKEY_DUCK_THREADS:-}"
+DECOMPRESSION_THREADS="${VARIANTKEY_DUCK_DECOMPRESSION_THREADS:-0}"
 
 if [[ -z "$VCF_PATH" ]]; then
   echo "ERROR: set VARIANTKEY_VCF to a local or remote indexed VCF/BCF path" >&2
@@ -33,16 +35,19 @@ BCFTOOLS_ARGS+=("$VCF_PATH")
 
 "$BCFTOOLS_BIN" "${BCFTOOLS_ARGS[@]}" > "$BCFTOOLS_TSV"
 
-python3 - <<'PY' "$VCF_PATH" "$REGION" "$EXT_PATH" "$DUCKHTS_TSV" "$BCFTOOLS_TSV" "$COMPARE_TSV" "$SUMMARY_TSV"
+python3 - <<'PY' "$VCF_PATH" "$REGION" "$EXT_PATH" "$DUCKHTS_TSV" "$BCFTOOLS_TSV" "$COMPARE_TSV" "$SUMMARY_TSV" "$DUCK_THREADS" "$DECOMPRESSION_THREADS"
 import csv
 import duckdb
 import os
 import sys
 
-vcf_path, region, ext_path, duckhts_tsv, bcftools_tsv, compare_tsv, summary_tsv = sys.argv[1:8]
+vcf_path, region, ext_path, duckhts_tsv, bcftools_tsv, compare_tsv, summary_tsv, duck_threads, decompression_threads = sys.argv[1:10]
 
+decompression_threads = int(decompression_threads)
 con = duckdb.connect(config={"allow_unsigned_extensions": "true"})
 con.execute(f"LOAD '{ext_path}'")
+if duck_threads:
+    con.execute(f"PRAGMA threads={int(duck_threads)}")
 
 def sql_quote(text: str) -> str:
     return "'" + text.replace("'", "''") + "'"
@@ -50,6 +55,7 @@ def sql_quote(text: str) -> str:
 region_sql = ""
 if region:
     region_sql = f", region := {sql_quote(region)}"
+thread_sql = f", decompression_threads := {decompression_threads}"
 
 con.execute(
     f"""
@@ -59,7 +65,7 @@ con.execute(
              REF,
              coalesce(ALT[1], '.') AS ALT,
              variantkey_hex(variantkey(CHROM, POS, REF, coalesce(ALT[1], '.'))) AS VKX
-      FROM read_bcf({sql_quote(vcf_path)}{region_sql})
+      FROM read_bcf({sql_quote(vcf_path)}{region_sql}{thread_sql})
       ORDER BY CHROM, POS, REF, ALT
     ) TO {sql_quote(duckhts_tsv)} (FORMAT CSV, DELIMITER '\t', HEADER TRUE)
     """

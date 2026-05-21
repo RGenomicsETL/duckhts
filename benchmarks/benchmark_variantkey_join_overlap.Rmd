@@ -1,0 +1,471 @@
+---
+title: "DuckHTS VariantKey Join and Overlap Benchmark"
+output: github_document
+---
+
+<!-- benchmark_variantkey_join_overlap.md is generated from benchmark_variantkey_join_overlap.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE)
+```
+
+# Benchmark
+
+This report focuses on the workloads that matter for a future DuckVEP-style
+annotation layer:
+
+1. exact variant joins with stored `VariantKey`
+2. safe mixed joins where hashed/nonreversible rows refine on exact alleles
+3. exact span joins with stored `RegionKey`
+4. true interval overlap queries through `duckhts_cgranges_*`
+
+This is intentionally separate from `benchmark_variantkey_conformance.Rmd`.
+That report measures encoding and `%VKX` parity. This one measures join and
+overlap throughput.
+
+## Run
+
+```sh
+make bench-variantkey-join
+```
+
+Useful overrides:
+
+- `VARIANTKEY_JOIN_ROWS`: synthetic exact-join rows, default `1000000`
+- `VARIANTKEY_INTERVAL_ROWS`: synthetic interval rows, default `250000`
+- `VARIANTKEY_JOIN_RUNS`: timed repeats, default `3`
+- `VARIANTKEY_JOIN_THREADS_LIST`: DuckDB thread grid, default `1,2,4`
+- `DUCKHTS_EXTENSION`: optional extension path override
+
+```{r setup, include = FALSE}
+library(DBI)
+library(duckdb)
+
+ext_path <- Sys.getenv(
+  "DUCKHTS_EXTENSION",
+  unset = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
+)
+
+join_rows <- as.integer(Sys.getenv("VARIANTKEY_JOIN_ROWS", unset = "1000000"))
+interval_rows <- as.integer(Sys.getenv("VARIANTKEY_INTERVAL_ROWS", unset = "250000"))
+bench_runs <- as.integer(Sys.getenv("VARIANTKEY_JOIN_RUNS", unset = "3"))
+thread_grid_env <- Sys.getenv("VARIANTKEY_JOIN_THREADS_LIST", unset = "1,2,4")
+
+parse_thread_grid <- function(x) {
+  vals <- trimws(strsplit(x, ",", fixed = TRUE)[[1]])
+  vals <- vals[nzchar(vals)]
+  out <- unique(as.integer(vals))
+  if (!length(out) || any(is.na(out)) || any(out < 1L)) {
+    stop("VARIANTKEY_JOIN_THREADS_LIST must be a comma-separated list of positive integers", call. = FALSE)
+  }
+  out
+}
+
+thread_grid <- parse_thread_grid(thread_grid_env)
+
+if (is.na(join_rows) || join_rows < 1L) stop("VARIANTKEY_JOIN_ROWS must be positive", call. = FALSE)
+if (is.na(interval_rows) || interval_rows < 1L) stop("VARIANTKEY_INTERVAL_ROWS must be positive", call. = FALSE)
+if (is.na(bench_runs) || bench_runs < 1L) stop("VARIANTKEY_JOIN_RUNS must be positive", call. = FALSE)
+
+benchmark_settings <- data.frame(
+  setting = c(
+    "variant_join_rows",
+    "interval_rows",
+    "benchmark_runs",
+    "duckdb_threads_grid",
+    "mixed_hash_fraction"
+  ),
+  value = c(
+    as.character(join_rows),
+    as.character(interval_rows),
+    as.character(bench_runs),
+    paste(thread_grid, collapse = ","),
+    "20%"
+  ),
+  stringsAsFactors = FALSE
+)
+
+drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+con <- dbConnect(drv, dbdir = ":memory:")
+DBI::dbExecute(con, sprintf("LOAD '%s';", gsub("\\\\", "/", ext_path)))
+```
+
+```{r helpers, include = FALSE}
+rows_per_second <- function(rows, seconds) {
+  rows / seconds
+}
+
+sql_string <- function(x) {
+  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+}
+
+set_duck_threads <- function(n) {
+  DBI::dbExecute(con, sprintf("PRAGMA threads=%d;", as.integer(n)))
+}
+
+measure_runs <- function(fun, runs = bench_runs) {
+  times <- numeric(runs)
+  value <- NULL
+  for (i in seq_len(runs)) {
+    gc()
+    times[i] <- system.time({
+      value <- fun()
+    })[["elapsed"]]
+  }
+  list(
+    value = value,
+    times = times,
+    median_seconds = unname(stats::median(times))
+  )
+}
+
+measure_thread_grid <- function(operation, rows, fun) {
+  do.call(
+    rbind,
+    lapply(thread_grid, function(th) {
+      set_duck_threads(th)
+      m <- measure_runs(fun)
+      data.frame(
+        operation = operation,
+        threads = th,
+        rows = rows,
+        median_seconds = m$median_seconds,
+        rows_per_second = rows_per_second(rows, m$median_seconds),
+        stringsAsFactors = FALSE
+      )
+    })
+  )
+}
+```
+
+```{r synthetic-data-setup, include = FALSE}
+DBI::dbExecute(
+  con,
+  sprintf(
+    paste(
+      "CREATE OR REPLACE TEMP TABLE vk_ann_reversible AS",
+      "SELECT '1' AS chrom,",
+      "       i::BIGINT AS pos,",
+      "       'A' AS ref,",
+      "       'C' AS alt,",
+      "       variantkey('1', i, 'A', 'C') AS vk,",
+      "       i::BIGINT AS payload",
+      "FROM range(1, %d) t(i)"
+    ),
+    join_rows + 1L
+  )
+)
+DBI::dbExecute(
+  con,
+  "CREATE OR REPLACE TEMP TABLE vk_probe_reversible AS SELECT * FROM vk_ann_reversible"
+)
+
+DBI::dbExecute(
+  con,
+  sprintf(
+    paste(
+      "CREATE OR REPLACE TEMP TABLE vk_ann_mixed AS",
+      "WITH src AS (",
+      "  SELECT '1' AS chrom,",
+      "         i::BIGINT AS pos,",
+      "         CASE WHEN i %% 5 = 0 THEN 'AAAAAAAAAAAA' ELSE 'A' END AS ref,",
+      "         CASE WHEN i %% 5 = 0 THEN 'T' ELSE 'C' END AS alt,",
+      "         i::BIGINT AS payload",
+      "  FROM range(1, %d) t(i)",
+      "), keyed AS (",
+      "  SELECT src.*, variantkey(chrom, pos, ref, alt) AS vk",
+      "  FROM src",
+      ")",
+      "SELECT keyed.*, (mod(extract_variantkey_refalt(vk), 2) = 1) AS is_hash",
+      "FROM keyed"
+    ),
+    join_rows + 1L
+  )
+)
+DBI::dbExecute(
+  con,
+  "CREATE OR REPLACE TEMP TABLE vk_probe_mixed AS SELECT * FROM vk_ann_mixed"
+)
+
+DBI::dbExecute(
+  con,
+  sprintf(
+    paste(
+      "CREATE OR REPLACE TEMP TABLE rk_ann AS",
+      "WITH src AS (",
+      "  SELECT '1' AS chrom,",
+      "         ((i - 1) * 10)::BIGINT AS start,",
+      "         (((i - 1) * 10) + 20)::BIGINT AS \"end\",",
+      "         i::BIGINT AS label",
+      "  FROM range(1, %d) t(i)",
+      ")",
+      "SELECT src.*, regionkey(chrom, start, \"end\") AS rk FROM src"
+    ),
+    interval_rows + 1L
+  )
+)
+DBI::dbExecute(con, "CREATE OR REPLACE TEMP TABLE rk_probe_eq AS SELECT * FROM rk_ann")
+
+DBI::dbExecute(
+  con,
+  sprintf(
+    paste(
+      "CREATE OR REPLACE TABLE ov_subject AS",
+      "SELECT '1' AS chrom,",
+      "       ((i - 1) * 20)::BIGINT AS start,",
+      "       (((i - 1) * 20) + 30)::BIGINT AS \"end\",",
+      "       i::BIGINT AS label",
+      "FROM range(1, %d) t(i)"
+    ),
+    interval_rows + 1L
+  )
+)
+DBI::dbExecute(
+  con,
+  sprintf(
+    paste(
+      "CREATE OR REPLACE TABLE ov_probe AS",
+      "SELECT '1' AS chrom,",
+      "       (((i - 1) * 20) + 10)::BIGINT AS start,",
+      "       (((i - 1) * 20) + 15)::BIGINT AS \"end\",",
+      "       i::BIGINT AS probe_id",
+      "FROM range(1, %d) t(i)"
+    ),
+    interval_rows + 1L
+  )
+)
+
+idx_name <- "vk_join_overlap_idx"
+try(DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_destroy('%s') AS ok", idx_name)), silent = TRUE)
+DBI::dbGetQuery(
+  con,
+  paste0(
+    "SELECT duckhts_cgranges_from_query(",
+    sql_string(idx_name), ", ",
+    sql_string('SELECT chrom, start, "end", label FROM ov_subject'), ", ",
+    sql_string("chrom"), ", ",
+    sql_string("start"), ", ",
+    sql_string("end"), ", ",
+    sql_string("label"),
+    ") AS ok"
+  )
+)
+DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_index('%s') AS ok", idx_name))
+```
+
+## Benchmark settings
+
+```{r benchmark-settings}
+benchmark_settings
+```
+
+## 1. Exact reversible VariantKey joins
+
+This section benchmarks exact self-joins over normalized reversible variants.
+
+```{r reversible-joins}
+reversible_multicol <- measure_thread_grid(
+  "reversible_multicolumn_join",
+  join_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      paste(
+        "SELECT count(*) AS n",
+        "FROM vk_probe_reversible p",
+        "JOIN vk_ann_reversible a",
+        "  ON p.chrom = a.chrom AND p.pos = a.pos AND p.ref = a.ref AND p.alt = a.alt"
+      )
+    )
+  }
+)
+
+reversible_stored_vk <- measure_thread_grid(
+  "reversible_stored_vk_join",
+  join_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      "SELECT count(*) AS n FROM vk_probe_reversible p JOIN vk_ann_reversible a USING (vk)"
+    )
+  }
+)
+
+reversible_on_the_fly_vk <- measure_thread_grid(
+  "reversible_on_the_fly_vk_join",
+  join_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      paste(
+        "SELECT count(*) AS n",
+        "FROM vk_probe_reversible p",
+        "JOIN vk_ann_reversible a",
+        "  ON variantkey(p.chrom, p.pos, p.ref, p.alt) = a.vk"
+      )
+    )
+  }
+)
+
+reversible_join_results <- rbind(
+  reversible_multicol,
+  reversible_stored_vk,
+  reversible_on_the_fly_vk
+)
+reversible_join_results
+```
+
+## 2. Mixed joins with hashed-row refinement
+
+This section benchmarks the safe join policy for mixed data:
+
+- join on stored `vk`
+- refine only when the probe row is hashed / nonreversible
+
+```{r mixed-joins}
+mixed_multicol <- measure_thread_grid(
+  "mixed_multicolumn_join",
+  join_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      paste(
+        "SELECT count(*) AS n",
+        "FROM vk_probe_mixed p",
+        "JOIN vk_ann_mixed a",
+        "  ON p.chrom = a.chrom AND p.pos = a.pos AND p.ref = a.ref AND p.alt = a.alt"
+      )
+    )
+  }
+)
+
+mixed_stored_vk <- measure_thread_grid(
+  "mixed_stored_vk_join_only",
+  join_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      "SELECT count(*) AS n FROM vk_probe_mixed p JOIN vk_ann_mixed a USING (vk)"
+    )
+  }
+)
+
+mixed_safe_refine <- measure_thread_grid(
+  "mixed_stored_vk_join_plus_hash_refine",
+  join_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      paste(
+        "SELECT count(*) AS n",
+        "FROM vk_probe_mixed p",
+        "JOIN vk_ann_mixed a",
+        "  ON p.vk = a.vk",
+        " AND (NOT p.is_hash OR (p.chrom = a.chrom AND p.pos = a.pos AND p.ref = a.ref AND p.alt = a.alt))"
+      )
+    )
+  }
+)
+
+mixed_join_results <- rbind(
+  mixed_multicol,
+  mixed_stored_vk,
+  mixed_safe_refine
+)
+mixed_join_results
+```
+
+## 3. Exact RegionKey span joins
+
+`RegionKey` is useful for exact stored span equality. It is not the general
+interval-overlap engine; that comes next.
+
+```{r regionkey-joins}
+region_multicol <- measure_thread_grid(
+  "region_multicolumn_join",
+  interval_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      paste(
+        "SELECT count(*) AS n",
+        "FROM rk_probe_eq p",
+        "JOIN rk_ann a",
+        "  ON p.chrom = a.chrom AND p.start = a.start AND p.\"end\" = a.\"end\""
+      )
+    )
+  }
+)
+
+region_rk <- measure_thread_grid(
+  "region_stored_rk_join",
+  interval_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      "SELECT count(*) AS n FROM rk_probe_eq p JOIN rk_ann a USING (rk)"
+    )
+  }
+)
+
+region_join_results <- rbind(region_multicol, region_rk)
+region_join_results
+```
+
+## 4. cgranges overlap probes
+
+This is the actual overlap path of interest for transcript/gene/regulatory
+annotation candidate generation.
+
+```{r cgranges-overlap}
+cgranges_has_overlap <- measure_thread_grid(
+  "cgranges_has_overlap_filter",
+  interval_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      sprintf(
+        paste(
+          "SELECT count(*) AS n",
+          "FROM ov_probe p",
+          "WHERE duckhts_cgranges_has_overlap('%s', p.chrom, p.start, p.\"end\")"
+        ),
+        idx_name
+      )
+    )
+  }
+)
+
+cgranges_count_overlap <- measure_thread_grid(
+  "cgranges_count_overlaps_sum",
+  interval_rows,
+  function() {
+    DBI::dbGetQuery(
+      con,
+      sprintf(
+        paste(
+          "SELECT sum(duckhts_cgranges_count_overlaps('%s', p.chrom, p.start, p.\"end\"))::BIGINT AS n",
+          "FROM ov_probe p"
+        ),
+        idx_name
+      )
+    )
+  }
+)
+
+cgranges_overlap_results <- rbind(cgranges_has_overlap, cgranges_count_overlap)
+cgranges_overlap_results
+```
+
+## Notes
+
+- The exact-join sections are the relevant comparison class for future
+  `echtvar`-style annotation throughput work.
+- The `mixed_stored_vk_join_plus_hash_refine` query represents the safe SQL
+  pattern for hashed/nonreversible VariantKey rows when exact `REF/ALT`
+  verification is required.
+- `RegionKey` equality is useful for exact stored spans, but real overlap work
+  should go through `duckhts_cgranges_*` or later overlap kernels rather than
+  a plain `rk = rk` join.
+- For richer overlap comparisons against external tools such as `bedtk` or
+  `bedtools`, see the existing `benchmarks/benchmark_cgranges.Rmd` report.
