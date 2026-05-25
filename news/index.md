@@ -4,6 +4,20 @@
 
 CRAN release: 2026-05-07
 
+- fix bundled
+  [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
+  / `bcftools_liftover(...)` FASTA contig alias handling during
+  source/destination reference validation and sequence fetches, and
+  align bundled spanning-deletion `*` allele handling with upstream
+  `bcftools +liftover`: inputs such as `23`, `24`, `26`, `X`, `Y`, `MT`,
+  and `chr*` aliases now resolve through the same canonical path,
+  avoiding spurious `SourceRefMismatch` rejects for X/Y/MT indels when
+  the bundled chain names and FASTA names differ only by canonical
+  aliasing; bundled `*`-allele rows now follow upstream swap/ref-add
+  semantics instead of taking the symbolic short-circuit path, full-file
+  GIAB conformance against installed `bcftools +liftover` is now exact,
+  and bundled SQL/tinytest coverage now pins the `23 -> chrX`, `SWAP=2`,
+  and `SWAP=-1` regressions
 - bundle the official VariantKey / RegionKey C API (Nicola Asuni, 2018;
   <https://doi.org/10.1101/473744>) and expose new SQL helpers through
   [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
