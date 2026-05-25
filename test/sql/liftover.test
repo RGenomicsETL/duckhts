@@ -23,6 +23,26 @@ FROM (
 ----
 chrLiftF	2	C	T	1	0	0	OK	OK
 
+# Source FASTA alias handling: input 23 should validate against chrX source FASTA
+query TITTIIITT
+SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
+       CASE WHEN lo.mapped THEN 1 ELSE 0 END,
+       CASE WHEN lo.reverse_complemented THEN 1 ELSE 0 END,
+       lo.swap,
+       coalesce(lo.reject_reason, 'OK'),
+       coalesce(lo.note, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    '23', 2, 'CG', 'C',
+    '__WORKING_DIRECTORY__/test/data/liftover_chr23_alias.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_chr23_alias_dst.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_chr23_alias_src.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+) s;
+----
+chrLiftX	2	CG	C	1	0	0	OK	OK
+
 query TITTIIITT
 SELECT dest_chrom, dest_pos, dest_ref, dest_alt,
        CASE WHEN mapped THEN 1 ELSE 0 END,

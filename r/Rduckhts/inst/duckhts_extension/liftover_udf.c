@@ -517,6 +517,58 @@ static int has_source_contig(const liftover_bind_t *bind, const char *chrom) {
     return found;
 }
 
+static int append_contig_alias(const char **aliases, int idx, int max_aliases, const char *alias) {
+    if (!aliases || !alias || !*alias) return idx;
+    for (int i = 0; i < idx; i++) {
+        if (strcmp(aliases[i], alias) == 0) return idx;
+    }
+    if (idx < max_aliases - 1) aliases[idx++] = alias;
+    return idx;
+}
+
+static int build_fasta_aliases(const char *chrom,
+                               const char **aliases,
+                               int max_aliases,
+                               char *with_chr,
+                               size_t with_chr_size,
+                               char *canonical,
+                               size_t canonical_size,
+                               char *canonical_with_chr,
+                               size_t canonical_with_chr_size) {
+    static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
+    char *canon = NULL;
+    int idx = 0;
+
+    if (!chrom || !*chrom || !aliases || max_aliases < 2) return 0;
+
+    idx = append_contig_alias(aliases, idx, max_aliases, chrom);
+    if (strncasecmp(chrom, "chr", 3) != 0) {
+        snprintf(with_chr, with_chr_size, "chr%s", chrom);
+        idx = append_contig_alias(aliases, idx, max_aliases, with_chr);
+    } else if (chrom[3] != '\0') {
+        idx = append_contig_alias(aliases, idx, max_aliases, chrom + 3);
+    }
+
+    canon = canonical_contig_name(chrom);
+    if (canon) {
+        snprintf(canonical, canonical_size, "%s", canon);
+        idx = append_contig_alias(aliases, idx, max_aliases, canonical);
+        if (strncasecmp(canonical, "chr", 3) != 0) {
+            snprintf(canonical_with_chr, canonical_with_chr_size, "chr%s", canonical);
+            idx = append_contig_alias(aliases, idx, max_aliases, canonical_with_chr);
+        }
+        if (strcmp(canonical, "MT") == 0) {
+            for (int i = 0; mt_aliases[i]; i++) {
+                idx = append_contig_alias(aliases, idx, max_aliases, mt_aliases[i]);
+            }
+        }
+        free(canon);
+    }
+
+    aliases[idx] = NULL;
+    return idx;
+}
+
 static inline const lo_block_t *prev_block(const lo_block_t *block, const lo_block_t *blocks, const lo_chain_t *chains) {
     int ind = (int)((block - blocks) - chains[block->chain_ind].block_ind);
     return ind == 0 ? NULL : block - 1;
@@ -528,25 +580,18 @@ static inline const lo_block_t *next_block(const lo_block_t *block, const lo_blo
 }
 
 static char *fetch_sequence_flexible(faidx_t *fai, const char *chrom, hts_pos_t start, hts_pos_t end) {
-    static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
     char with_chr[512];
-    const char *aliases[8];
+    char canonical[512];
+    char canonical_with_chr[512];
+    const char *aliases[12];
     hts_pos_t len = 0;
     char *ref = NULL;
-    int idx = 0;
     if (!fai || !chrom || start < 1 || end < start) return NULL;
 
-    aliases[idx++] = chrom;
-    if (strncasecmp(chrom, "chr", 3) != 0) {
-        snprintf(with_chr, sizeof(with_chr), "chr%s", chrom);
-        aliases[idx++] = with_chr;
-    } else if (chrom[3] != '\0') {
-        aliases[idx++] = chrom + 3;
-    }
-    if (strcasecmp(chrom, "MT") == 0 || strcasecmp(chrom, "M") == 0 || strcasecmp(chrom, "chrM") == 0) {
-        for (int i = 0; mt_aliases[i]; i++) aliases[idx++] = mt_aliases[i];
-    }
-    aliases[idx] = NULL;
+    build_fasta_aliases(chrom, aliases, (int)(sizeof(aliases) / sizeof(aliases[0])),
+                        with_chr, sizeof(with_chr),
+                        canonical, sizeof(canonical),
+                        canonical_with_chr, sizeof(canonical_with_chr));
 
     for (int i = 0; aliases[i]; i++) {
         if (faidx_has_seq(fai, aliases[i]) <= 0) {
@@ -579,24 +624,17 @@ static int source_ref_matches_flexible(faidx_t *fai, const char *chrom, hts_pos_
 }
 
 static char *resolve_fasta_contig_name(faidx_t *fai, const char *chrom) {
-    static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
     char with_chr[512];
-    const char *aliases[8];
-    int idx = 0;
+    char canonical[512];
+    char canonical_with_chr[512];
+    const char *aliases[12];
 
     if (!fai || !chrom || !*chrom) return NULL;
 
-    aliases[idx++] = chrom;
-    if (strncasecmp(chrom, "chr", 3) != 0) {
-        snprintf(with_chr, sizeof(with_chr), "chr%s", chrom);
-        aliases[idx++] = with_chr;
-    } else if (chrom[3] != '\0') {
-        aliases[idx++] = chrom + 3;
-    }
-    if (strcasecmp(chrom, "MT") == 0 || strcasecmp(chrom, "M") == 0 || strcasecmp(chrom, "chrM") == 0) {
-        for (int i = 0; mt_aliases[i]; i++) aliases[idx++] = mt_aliases[i];
-    }
-    aliases[idx] = NULL;
+    build_fasta_aliases(chrom, aliases, (int)(sizeof(aliases) / sizeof(aliases[0])),
+                        with_chr, sizeof(with_chr),
+                        canonical, sizeof(canonical),
+                        canonical_with_chr, sizeof(canonical_with_chr));
 
     for (int i = 0; aliases[i]; i++) {
         if (faidx_has_seq(fai, aliases[i]) > 0) return dup_cstr(aliases[i]);
