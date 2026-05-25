@@ -275,9 +275,11 @@ static int make_allele_array(const char *ref, const char *alt_csv, char ***out_a
 }
 
 static int scalar_is_symbolic_alleles(char **alleles, int n_allele) {
-    for (int i = 0; i < n_allele; i++) {
+    if (!alleles || n_allele < 1) return 0;
+    if (alleles[0] && alleles[0][0] == '*') return 1;
+    for (int i = 1; i < n_allele; i++) {
         if (!alleles[i]) continue;
-        if (alleles[i][0] == '*' || alleles[i][0] == '<') return 1;
+        if (alleles[i][0] == '<') return 1;
     }
     return 0;
 }
@@ -288,6 +290,7 @@ static int scalar_is_snp_alleles(char **alleles, int n_allele) {
     for (int i = 0; i < n_allele; i++) {
         if (!alleles[i]) return 0;
         if (strlen(alleles[i]) != 1) return 0;
+        if (alleles[i][0] == '*') return 0;
     }
     return 1;
 }

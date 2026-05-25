@@ -26,7 +26,7 @@ Useful overrides:
 - `LIFTOVER_BENCH_RUNS`: timed repeats, default `3`
 - `BCFTOOLS_BIN`: optional override for the bcftools executable
 - `BCFTOOLS_PLUGIN_DIR`: optional override for the bcftools plugin directory
-- `LIFTOVER_REAL_VCF`, `LIFTOVER_REAL_REGION`, `LIFTOVER_REAL_CHAIN`, `LIFTOVER_REAL_SRC_FASTA`, `LIFTOVER_REAL_DST_FASTA`: optional real-callset conformance case (for example GIAB HG001 GRCh37 chr20)
+- `LIFTOVER_REAL_VCF`, `LIFTOVER_REAL_REGION`, `LIFTOVER_REAL_CHAIN`, `LIFTOVER_REAL_SRC_FASTA`, `LIFTOVER_REAL_DST_FASTA`: override the rendered real-callset case; by default the benchmark renders the local full-file GIAB HG001 GRCh37 case from `/root/giab_norm/` against `/root/GRCh37/GRCh37_to_GRCh38.chain.gz`
 
 For a shell-first real-callset comparison, see
 `bash scripts/liftover_conformance.sh ...`.
@@ -57,11 +57,23 @@ Sys.setenv(BCFTOOLS_PLUGINS = bcftools_plugin_dir)
 
 bench_rows <- as.integer(Sys.getenv("LIFTOVER_BENCH_ROWS", unset = "1000000"))
 bench_runs <- as.integer(Sys.getenv("LIFTOVER_BENCH_RUNS", unset = "3"))
-real_input_path <- Sys.getenv("LIFTOVER_REAL_VCF", unset = "")
+real_input_path <- Sys.getenv(
+  "LIFTOVER_REAL_VCF",
+  unset = "/root/giab_norm/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz"
+)
 real_region <- Sys.getenv("LIFTOVER_REAL_REGION", unset = "")
-real_chain_path <- Sys.getenv("LIFTOVER_REAL_CHAIN", unset = "")
-real_src_fasta <- Sys.getenv("LIFTOVER_REAL_SRC_FASTA", unset = "")
-real_dst_fasta <- Sys.getenv("LIFTOVER_REAL_DST_FASTA", unset = "")
+real_chain_path <- Sys.getenv(
+  "LIFTOVER_REAL_CHAIN",
+  unset = "/root/GRCh37/GRCh37_to_GRCh38.chain.gz"
+)
+real_src_fasta <- Sys.getenv(
+  "LIFTOVER_REAL_SRC_FASTA",
+  unset = "/root/GRCh37/human_g1k_v37.fasta"
+)
+real_dst_fasta <- Sys.getenv(
+  "LIFTOVER_REAL_DST_FASTA",
+  unset = "/root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
+)
 
 if (is.na(bench_rows) || bench_rows < 1L) stop("LIFTOVER_BENCH_ROWS must be positive")
 if (is.na(bench_runs) || bench_runs < 1L) stop("LIFTOVER_BENCH_RUNS must be positive")
@@ -421,56 +433,59 @@ bench_case$compare
 ```
 
 ```{r real-case-setup, include = FALSE}
-have_real_case <- nzchar(real_input_path) && nzchar(real_chain_path) &&
-  nzchar(real_src_fasta) && nzchar(real_dst_fasta)
-real_case <- NULL
-real_fixture <- NULL
-if (have_real_case) {
-  real_fixture <- prepare_real_fixture(
-    real_input_path,
-    real_chain_path,
-    real_src_fasta,
-    real_dst_fasta,
-    region = real_region
-  )
-  real_case <- run_benchmark_case(
-    real_fixture$input_path,
-    real_fixture$chain_path,
-    real_fixture$src_fasta,
-    real_fixture$dst_fasta,
-    n = bench_runs
+required_real_paths <- c(
+  input_vcf = real_input_path,
+  chain = real_chain_path,
+  src_fasta = real_src_fasta,
+  dst_fasta = real_dst_fasta
+)
+missing_real_paths <- names(required_real_paths)[!file.exists(required_real_paths)]
+if (length(missing_real_paths)) {
+  stop(
+    sprintf(
+      "Real-callset benchmark inputs are required but missing: %s",
+      paste(sprintf("%s=%s", missing_real_paths, required_real_paths[missing_real_paths]), collapse = ", ")
+    ),
+    call. = FALSE
   )
 }
+real_fixture <- prepare_real_fixture(
+  real_input_path,
+  real_chain_path,
+  real_src_fasta,
+  real_dst_fasta,
+  region = real_region
+)
+real_case <- run_benchmark_case(
+  real_fixture$input_path,
+  real_fixture$chain_path,
+  real_fixture$src_fasta,
+  real_fixture$dst_fasta,
+  n = bench_runs
+)
 ```
 
-## Optional Real-Callset Case
+## Real-Callset Case
 
 ```{r real-case-config, echo = FALSE}
-if (have_real_case) {
-  data.frame(
-    input_vcf = real_input_path,
-    region = if (nzchar(real_region)) real_region else "full_input",
-    chain = real_chain_path,
-    src_fasta = real_src_fasta,
-    dst_fasta = real_dst_fasta,
-    stringsAsFactors = FALSE
-  )
-} else {
-  data.frame(
-    note = "Set LIFTOVER_REAL_VCF, LIFTOVER_REAL_CHAIN, LIFTOVER_REAL_SRC_FASTA, and LIFTOVER_REAL_DST_FASTA to run a real-callset case.",
-    stringsAsFactors = FALSE
-  )
-}
+data.frame(
+  input_vcf = real_input_path,
+  region = if (nzchar(real_region)) real_region else "full_input",
+  chain = real_chain_path,
+  src_fasta = real_src_fasta,
+  dst_fasta = real_dst_fasta,
+  stringsAsFactors = FALSE
+)
 ```
 
 ```{r real-case-bench, echo = FALSE}
-if (have_real_case) real_case$bench
+real_case$bench
 ```
 
 ```{r real-case-compare, echo = FALSE}
-if (have_real_case) real_case$compare
+real_case$compare
 ```
 
 ```{r real-case-examples, echo = FALSE}
-if (have_real_case && nrow(real_case$compare_examples)) real_case$compare_examples
+if (nrow(real_case$compare_examples)) real_case$compare_examples
 ```
