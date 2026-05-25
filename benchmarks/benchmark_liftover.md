@@ -22,8 +22,10 @@ Useful overrides:
 - `BCFTOOLS_PLUGIN_DIR`: optional override for the bcftools plugin
   directory
 - `LIFTOVER_REAL_VCF`, `LIFTOVER_REAL_REGION`, `LIFTOVER_REAL_CHAIN`,
-  `LIFTOVER_REAL_SRC_FASTA`, `LIFTOVER_REAL_DST_FASTA`: optional
-  real-callset conformance case (for example GIAB HG001 GRCh37 chr20)
+  `LIFTOVER_REAL_SRC_FASTA`, `LIFTOVER_REAL_DST_FASTA`: override the
+  rendered real-callset case; by default the benchmark renders the local
+  full-file GIAB HG001 GRCh37 case from `/root/giab_norm/` against
+  `/root/GRCh37/GRCh37_to_GRCh38.chain.gz`
 
 For a shell-first real-callset comparison, see
 `bash scripts/liftover_conformance.sh ...`.
@@ -49,15 +51,28 @@ For curated GIAB benchmark slices, see
 ## Synthetic Stress Case
 
     #>               engine runs median_sec min_sec max_sec output_rows
-    #> 1            duckhts    3      0.047   0.046   0.054       1e+06
-    #> 2 bcftools_RBCFTools    3    109.419 107.901 112.497       1e+06
+    #> 1            duckhts    3      0.048   0.047   0.049       1e+06
+    #> 2 bcftools_RBCFTools    3    101.570 101.306 104.393       1e+06
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
     #> 1     1e+06         1e+06                0                    0
     #>   mismatched_count_groups outputs_match
     #> 1                       0          TRUE
 
-## Optional Real-Callset Case
+## Real-Callset Case
 
-    #>                                                                                                                           note
-    #> 1 Set LIFTOVER_REAL_VCF, LIFTOVER_REAL_CHAIN, LIFTOVER_REAL_SRC_FASTA, and LIFTOVER_REAL_DST_FASTA to run a real-callset case.
+    #>                                                   input_vcf     region
+    #> 1 /root/giab_norm/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz full_input
+    #>                                    chain                        src_fasta
+    #> 1 /root/GRCh37/GRCh37_to_GRCh38.chain.gz /root/GRCh37/human_g1k_v37.fasta
+    #>                                                      dst_fasta
+    #> 1 /root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
+
+    #>               engine runs median_sec min_sec max_sec output_rows
+    #> 1            duckhts    3      5.639   5.615   5.704     3886470
+    #> 2 bcftools_RBCFTools    3     12.104  12.087  12.212     3886470
+
+    #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
+    #> 1   3886470       3886470                0                    0
+    #>   mismatched_count_groups outputs_match
+    #> 1                       0          TRUE

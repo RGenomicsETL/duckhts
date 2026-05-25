@@ -38,6 +38,24 @@ test_liftover <- function() {
   expect_true(rduckhts_fasta_index(con, src_fa, index_path = paste0(src_fa, ".fai"))$success[1])
   expect_true(rduckhts_fasta_index(con, dst_fa, index_path = paste0(dst_fa, ".fai"))$success[1])
 
+  alias_src_fa <- file.path(tmp_dir, "liftover_chr23_alias_src.fa")
+  alias_dst_fa <- file.path(tmp_dir, "liftover_chr23_alias_dst.fa")
+  alias_chain_path <- file.path(tmp_dir, "liftover_chr23_alias.chain")
+  writeLines(c(
+    ">chrX",
+    "ACGTACGTAA"
+  ), alias_src_fa)
+  writeLines(c(
+    ">chrLiftX",
+    "ACGTACGTAA"
+  ), alias_dst_fa)
+  writeLines(c(
+    "chain 100 X 10 + 0 10 chrLiftX 10 + 0 10 1",
+    "10"
+  ), alias_chain_path)
+  expect_true(rduckhts_fasta_index(con, alias_src_fa, index_path = paste0(alias_src_fa, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(con, alias_dst_fa, index_path = paste0(alias_dst_fa, ".fai"))$success[1])
+
   query <- paste(
     "SELECT * FROM (VALUES",
     "('chrF', 2, 'C', 'T'),",
@@ -78,6 +96,98 @@ test_liftover <- function() {
   expect_true(row_missing_ref$mapped[1])
   expect_true(is.na(row_missing_ref$reject_reason[1]))
   expect_equal(row_missing_ref$note[1], "MissingSourceRef")
+
+  alias_out <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('23', 2, 'CG', 'C')) AS t(chrom, pos, ref, alt)",
+    chain_path = alias_chain_path,
+    dst_fasta_ref = alias_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = alias_src_fa
+  )
+  expect_equal(nrow(alias_out), 1)
+  expect_true(alias_out$mapped[1])
+  expect_equal(alias_out$dest_chrom[1], "chrLiftX")
+  expect_equal(alias_out$dest_pos[1], 2)
+  expect_equal(alias_out$dest_ref[1], "CG")
+  expect_equal(alias_out$dest_alt[1], "C")
+  expect_true(is.na(alias_out$reject_reason[1]))
+
+  star_swap_src_fa <- file.path(tmp_dir, "liftover_star_swap_src.fa")
+  star_swap_dst_fa <- file.path(tmp_dir, "liftover_star_swap_dst.fa")
+  star_swap_chain <- file.path(tmp_dir, "liftover_star_swap.chain")
+  writeLines(c(
+    ">chrS",
+    "TCCAC"
+  ), star_swap_src_fa)
+  writeLines(c(
+    ">chrD",
+    "TCTGC"
+  ), star_swap_dst_fa)
+  writeLines(c(
+    "chain 1 chrS 5 + 0 5 chrD 5 + 0 5 1",
+    "5"
+  ), star_swap_chain)
+  expect_true(rduckhts_fasta_index(con, star_swap_src_fa, index_path = paste0(star_swap_src_fa, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(con, star_swap_dst_fa, index_path = paste0(star_swap_dst_fa, ".fai"))$success[1])
+
+  star_swap_out <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrS', 3, 'C', '*,T')) AS t(chrom, pos, ref, alt)",
+    chain_path = star_swap_chain,
+    dst_fasta_ref = star_swap_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = star_swap_src_fa
+  )
+  expect_equal(nrow(star_swap_out), 1)
+  expect_true(star_swap_out$mapped[1])
+  expect_equal(star_swap_out$dest_chrom[1], "chrD")
+  expect_equal(star_swap_out$dest_pos[1], 3)
+  expect_equal(star_swap_out$dest_ref[1], "T")
+  expect_equal(star_swap_out$dest_alt[1], "*,C")
+  expect_equal(star_swap_out$swap[1], 2)
+  expect_true(is.na(star_swap_out$reject_reason[1]))
+  expect_true(is.na(star_swap_out$note[1]))
+
+  star_refadd_src_fa <- file.path(tmp_dir, "liftover_star_refadd_src.fa")
+  star_refadd_dst_fa <- file.path(tmp_dir, "liftover_star_refadd_dst.fa")
+  star_refadd_chain <- file.path(tmp_dir, "liftover_star_refadd.chain")
+  writeLines(c(
+    ">chrS",
+    "GTGCGTGGGTGGGC"
+  ), star_refadd_src_fa)
+  writeLines(c(
+    ">chrD",
+    "GTGCGGCCGGGGGGGC"
+  ), star_refadd_dst_fa)
+  writeLines(c(
+    "chain 1 chrS 14 + 0 14 chrD 16 + 0 16 1",
+    "5 0 2",
+    "9"
+  ), star_refadd_chain)
+  expect_true(rduckhts_fasta_index(con, star_refadd_src_fa, index_path = paste0(star_refadd_src_fa, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(con, star_refadd_dst_fa, index_path = paste0(star_refadd_dst_fa, ".fai"))$success[1])
+
+  star_refadd_out <- rduckhts_liftover(
+    con,
+    query = "SELECT * FROM (VALUES ('chrS', 5, 'G', '*,C')) AS t(chrom, pos, ref, alt)",
+    chain_path = star_refadd_chain,
+    dst_fasta_ref = star_refadd_dst_fa,
+    ref_col = "ref",
+    alt_col = "alt",
+    src_fasta_ref = star_refadd_src_fa
+  )
+  expect_equal(nrow(star_refadd_out), 1)
+  expect_true(star_refadd_out$mapped[1])
+  expect_equal(star_refadd_out$dest_chrom[1], "chrD")
+  expect_equal(star_refadd_out$dest_pos[1], 5)
+  expect_equal(star_refadd_out$dest_ref[1], "GGC")
+  expect_equal(star_refadd_out$dest_alt[1], "G,*,C")
+  expect_equal(star_refadd_out$swap[1], -1)
+  expect_true(is.na(star_refadd_out$reject_reason[1]))
+  expect_true(is.na(star_refadd_out$note[1]))
 
   # Multi-allelic semantics should preserve all ALT alleles after liftover
   multi_out <- rduckhts_liftover(

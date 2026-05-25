@@ -177,6 +177,59 @@ EOF
 done
 echo "  liftover clip-pad negative-score fixtures + .fai"
 
+# ---- Liftover chr23/X source-FASTA alias regression fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/liftover_chr23_alias_src.fa" <<'EOF'
+>chrX
+ACGTACGTAA
+EOF
+  cat > "$out_dir/liftover_chr23_alias_dst.fa" <<'EOF'
+>chrLiftX
+ACGTACGTAA
+EOF
+  cat > "$out_dir/liftover_chr23_alias.chain" <<'EOF'
+chain 100 X 10 + 0 10 chrLiftX 10 + 0 10 1
+10
+EOF
+  samtools faidx "$out_dir/liftover_chr23_alias_src.fa"
+  samtools faidx "$out_dir/liftover_chr23_alias_dst.fa"
+done
+echo "  liftover chr23/X source-FASTA alias fixtures + .fai"
+
+# ---- Liftover spanning-deletion swap / ref-add regression fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/liftover_star_swap_src.fa" <<'EOF'
+>chrS
+TCCAC
+EOF
+  cat > "$out_dir/liftover_star_swap_dst.fa" <<'EOF'
+>chrD
+TCTGC
+EOF
+  cat > "$out_dir/liftover_star_swap.chain" <<'EOF'
+chain 1 chrS 5 + 0 5 chrD 5 + 0 5 1
+5
+EOF
+  cat > "$out_dir/liftover_star_refadd_src.fa" <<'EOF'
+>chrS
+GTGCGTGGGTGGGC
+EOF
+  cat > "$out_dir/liftover_star_refadd_dst.fa" <<'EOF'
+>chrD
+GTGCGGCCGGGGGGGC
+EOF
+  cat > "$out_dir/liftover_star_refadd.chain" <<'EOF'
+chain 1 chrS 14 + 0 14 chrD 16 + 0 16 1
+5 0 2
+9
+EOF
+  samtools faidx "$out_dir/liftover_star_swap_src.fa"
+  samtools faidx "$out_dir/liftover_star_swap_dst.fa"
+  samtools faidx "$out_dir/liftover_star_refadd_src.fa"
+  samtools faidx "$out_dir/liftover_star_refadd_dst.fa"
+done
+echo "  liftover spanning-deletion swap / ref-add fixtures + .fai"
+
 # ---- vcfppR-generated VCF fixtures (spec/mapping/regression) + manifest ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"
