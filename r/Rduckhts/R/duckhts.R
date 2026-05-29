@@ -268,6 +268,124 @@ rduckhts_functions <- function(category = NULL, kind = NULL) {
   catalog
 }
 
+.simd_backend_arg <- function(backend) {
+  if (!is.character(backend) || length(backend) != 1L || is.na(backend)) {
+    stop("backend must be a single non-missing character string", call. = FALSE)
+  }
+  backend
+}
+
+#' DuckHTS SIMD backend diagnostics
+#'
+#' Inspect or explicitly select the SIMD dispatch policy used by bundled
+#' DuckHTS byte-oriented helper kernels such as \code{seq_gc_content(...)}.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded via \code{rduckhts_load()}.
+#' @param backend A single backend request. \code{"auto"} selects the best
+#'   available implementation independently for each logical kernel at runtime
+#'   for \code{rduckhts_simd_set_backend()}. Backend inventory predicates such
+#'   as \code{rduckhts_simd_backend_available()} refer to concrete backends such
+#'   as \code{"scalar"}, \code{"sse2"}, \code{"sse41"}, \code{"avx2"},
+#'   \code{"avx512"}, \code{"neon"}, and \code{"wasm_simd128"}.
+#'
+#' @return \code{rduckhts_simd_backend()},
+#'   \code{rduckhts_simd_requested_backend()}, and
+#'   \code{rduckhts_simd_set_backend()} return a character scalar.
+#'   \code{rduckhts_simd_backend_compiled()},
+#'   \code{rduckhts_simd_backend_cpu_supported()}, and
+#'   \code{rduckhts_simd_backend_available()} return logical scalars.
+#'   \code{rduckhts_simd_info()} returns the extension-owned backend inventory
+#'   table with one row per known backend; availability means compiled and
+#'   CPU/runtime supported; SQL-level backend changes are process-wide and use
+#'   the one-row \code{duckhts_simd_set_backend(...)} table function; the
+#'   \code{selectable} column reports whether the backend has a selectable
+#'   implementation path.
+#'   Explicit selection still
+#'   requires \code{available = TRUE}. \code{rduckhts_simd_kernel_info()}
+#'   returns one row per logical SIMD kernel and is the authoritative diagnostic
+#'   for mixed per-kernel auto-dispatch.
+#'
+#' @examples
+#' \dontrun{
+#' con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+#' rduckhts_load(con)
+#' rduckhts_simd_info(con)
+#' rduckhts_simd_kernel_info(con)
+#' rduckhts_simd_backend_available(con, "scalar")
+#' rduckhts_simd_set_backend(con, "scalar")
+#' rduckhts_simd_set_backend(con, "auto")
+#' DBI::dbDisconnect(con, shutdown = TRUE)
+#' }
+#'
+#' @export
+rduckhts_simd_backend <- function(con) {
+  out <- DBI::dbGetQuery(con, "SELECT duckhts_simd_backend() AS backend")
+  out$backend[[1]]
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_requested_backend <- function(con) {
+  out <- DBI::dbGetQuery(con, "SELECT duckhts_simd_requested_backend() AS backend")
+  out$backend[[1]]
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_backend_compiled <- function(con, backend) {
+  backend <- .simd_backend_arg(backend)
+  out <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT duckhts_simd_backend_compiled(%s) AS compiled", sql_quote_string(backend))
+  )
+  isTRUE(out$compiled[[1]])
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_backend_cpu_supported <- function(con, backend) {
+  backend <- .simd_backend_arg(backend)
+  out <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT duckhts_simd_backend_cpu_supported(%s) AS supported", sql_quote_string(backend))
+  )
+  isTRUE(out$supported[[1]])
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_backend_available <- function(con, backend) {
+  backend <- .simd_backend_arg(backend)
+  out <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT duckhts_simd_backend_available(%s) AS available", sql_quote_string(backend))
+  )
+  isTRUE(out$available[[1]])
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_info <- function(con) {
+  DBI::dbGetQuery(con, "SELECT * FROM duckhts_simd_info()")
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_kernel_info <- function(con) {
+  DBI::dbGetQuery(con, "SELECT * FROM duckhts_simd_kernel_info()")
+}
+
+#' @rdname rduckhts_simd_backend
+#' @export
+rduckhts_simd_set_backend <- function(con, backend = "auto") {
+  backend <- .simd_backend_arg(backend)
+  out <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT backend FROM duckhts_simd_set_backend(%s)", sql_quote_string(backend))
+  )
+  out$backend[[1]]
+}
+
 #' DuckDB to R Type Mappings
 #'
 #' Returns a named list mapping between DuckDB and R data types.

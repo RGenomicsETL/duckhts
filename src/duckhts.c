@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
 
 DUCKDB_EXTENSION_EXTERN
@@ -67,6 +68,8 @@ extern void register_duckhts_bam_bed_coverage_function(duckdb_connection connect
 extern void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
 /* variantkey_udf.c */
 extern void register_variantkey_functions(duckdb_connection connection);
+/* simd/duckhts_simd_dispatch.c */
+extern void register_duckhts_simd_functions(duckdb_connection connection);
 
 static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
     duckdb_result result;
@@ -118,7 +121,9 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     (void)info;
     (void)access;
     register_wasm_http_hfile_backend();
+    duckhts_simd_init();
 
+    register_duckhts_simd_functions(connection);
     register_read_bcf_function(connection);
     register_read_bam_function(connection);
     register_read_pileup_function(connection);

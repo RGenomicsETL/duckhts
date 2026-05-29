@@ -66,7 +66,18 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "wasm_http_hfile.c"
   )
   file.copy(file.path(src_dir, c_files), dest)
-  message("  Copied ", length(c_files), " C source files")
+  simd_files <- c(
+    "duckhts_simd_dispatch.c",
+    "duckhts_simd_scalar.c",
+    "duckhts_simd_avx2.c",
+    "duckhts_simd_avx512.c",
+    "duckhts_simd_neon.c",
+    "duckhts_simd_wasm_simd128.c"
+  )
+  simd_dest <- file.path(dest, "simd")
+  dir.create(simd_dest, recursive = TRUE, showWarnings = FALSE)
+  file.copy(file.path(src_dir, "simd", simd_files), simd_dest)
+  message("  Copied ", length(c_files) + length(simd_files), " C source files")
 
   # Headers
   inc_dest <- file.path(dest, "include")
@@ -239,6 +250,12 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
     ext_dir,
     c(
       "duckhts.c",
+      file.path("simd", "duckhts_simd_dispatch.c"),
+      file.path("simd", "duckhts_simd_scalar.c"),
+      file.path("simd", "duckhts_simd_avx2.c"),
+      file.path("simd", "duckhts_simd_avx512.c"),
+      file.path("simd", "duckhts_simd_neon.c"),
+      file.path("simd", "duckhts_simd_wasm_simd128.c"),
       "bcf_reader.c",
       "bam_reader.c",
       "bam_pileup.c",

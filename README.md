@@ -43,6 +43,19 @@ Show generated function catalog
 
 This section is generated from `functions.yaml`.
 
+### Diagnostics
+
+| Function                             | Kind   | Returns                | R helper                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|--------------------------------------|--------|------------------------|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_simd_backend`               | scalar | VARCHAR                | `rduckhts_simd_backend`               | Return the current DuckHTS SIMD dispatch label. For explicit scalar or concrete backend requests this is the requested policy; for auto it is the single selected backend when all logical kernels resolve to the same backend, or mixed when per-kernel auto-dispatch resolves to multiple backends. Use duckhts_simd_kernel_info() for per-kernel details.                                                                                                                                                                                                |
+| `duckhts_simd_requested_backend`     | scalar | VARCHAR                | `rduckhts_simd_requested_backend`     | Return the current explicit SIMD backend request, usually auto unless `SELECT backend FROM duckhts_simd_set_backend('auto'\|'scalar'\|backend)` was called. The selected per-kernel backend may differ under auto-dispatch across x86, ARM, wasm, and scalar-only builds.                                                                                                                                                                                                                                                                                   |
+| `duckhts_simd_backend_compiled`      | scalar | BOOLEAN                | `rduckhts_simd_backend_compiled`      | Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.                                                                                                                                                                                                                                                                                                          |
+| `duckhts_simd_backend_cpu_supported` | scalar | BOOLEAN                | `rduckhts_simd_backend_cpu_supported` | Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.                                                                                                                                                                                                                                                                                                                                          |
+| `duckhts_simd_backend_available`     | scalar | BOOLEAN                | `rduckhts_simd_backend_available`     | Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.                                                                                                                                                                                                                                                                                |
+| `duckhts_simd_info`                  | table  | table                  | `rduckhts_simd_info`                  | Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported. selectable reports whether the backend has a selectable implementation path; explicit selection still requires available = TRUE. selected is TRUE when the current dispatch table uses that backend for at least one logical kernel. auto is a selection request and is not a concrete backend row. |
+| `duckhts_simd_kernel_info`           | table  | table                  | `rduckhts_simd_kernel_info`           | Return one row per logical DuckHTS SIMD kernel showing the concrete backend selected by the current immutable dispatch table, the selected capability, the requested backend policy, whether scalar was used as a per-kernel fallback, and the dispatch mode. This is the authoritative diagnostic for mixed auto-dispatch when different kernels resolve to different backends.                                                                                                                                                                            |
+| `duckhts_simd_set_backend`           | table  | table(backend VARCHAR) | `rduckhts_simd_set_backend`           | Explicitly select the DuckHTS SIMD dispatch policy for this process using a one-row table-function call and return the current dispatch label in a backend column. Use auto for per-kernel runtime dispatch or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.                                                                                                                                                                                   |
+
 ### Readers
 
 | Function          | Kind         | Returns | R helper                                                                                                                                                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -801,6 +814,85 @@ FROM duckdb_liftover(
     │ chrF      │      11 │ NULL       │     NULL │ NULL     │ NULL     │ false   │ false                │ SourceRefMismatch │ NULL    │
     └───────────┴─────────┴────────────┴──────────┴──────────┴──────────┴─────────┴──────────────────────┴───────────────────┴─────────┘
 
+### SIMD dispatch flow
+
+DuckHTS uses explicit runtime SIMD dispatch for byte-oriented helper
+kernels, starting with `seq_gc_content(...)`. `scalar` is always
+available and is the portable baseline. Optional platform backends such
+as `avx2` or `avx512` should be checked with
+`duckhts_simd_backend_available(...)` before being requested. The `auto`
+policy resolves each logical kernel independently from the current
+compiled-and-CPU-supported capability mask; use
+`duckhts_simd_kernel_info()` for the per-kernel result and
+`SELECT backend FROM duckhts_simd_set_backend('auto')` to return to
+runtime auto-detection.
+
+``` sql
+SELECT backend, selectable, compiled, cpu_supported, available, selected
+FROM duckhts_simd_info();
+```
+
+    ┌──────────────┬────────────┬──────────┬───────────────┬───────────┬──────────┐
+    │   backend    │ selectable │ compiled │ cpu_supported │ available │ selected │
+    │   varchar    │  boolean   │ boolean  │    boolean    │  boolean  │ boolean  │
+    ├──────────────┼────────────┼──────────┼───────────────┼───────────┼──────────┤
+    │ scalar       │ true       │ true     │ true          │ true      │ false    │
+    │ sse2         │ false      │ false    │ true          │ false     │ false    │
+    │ sse41        │ false      │ false    │ true          │ false     │ false    │
+    │ avx2         │ true       │ true     │ true          │ true      │ true     │
+    │ avx512       │ true       │ true     │ false         │ false     │ false    │
+    │ neon         │ true       │ false    │ false         │ false     │ false    │
+    │ wasm_simd128 │ true       │ false    │ false         │ false     │ false    │
+    └──────────────┴────────────┴──────────┴───────────────┴───────────┴──────────┘
+
+``` sql
+SELECT kernel, selected_backend, scalar_fallback
+FROM duckhts_simd_kernel_info();
+```
+
+    ┌─────────────────┬──────────────────┬─────────────────┐
+    │     kernel      │ selected_backend │ scalar_fallback │
+    │     varchar     │     varchar      │     boolean     │
+    ├─────────────────┼──────────────────┼─────────────────┤
+    │ seq_base_counts │ avx2             │ false           │
+    └─────────────────┴──────────────────┴─────────────────┘
+
+``` sql
+SELECT backend AS selected_backend FROM duckhts_simd_set_backend('scalar');
+```
+
+    ┌──────────────────┐
+    │ selected_backend │
+    │     varchar      │
+    ├──────────────────┤
+    │ scalar           │
+    └──────────────────┘
+
+``` sql
+SELECT
+  duckhts_simd_requested_backend() AS requested_backend,
+  duckhts_simd_backend() AS selected_backend,
+  printf('%.3f', seq_gc_content('ACGTNNacgtnn')) AS gc_content;
+```
+
+    ┌───────────────────┬──────────────────┬────────────┐
+    │ requested_backend │ selected_backend │ gc_content │
+    │      varchar      │     varchar      │  varchar   │
+    ├───────────────────┼──────────────────┼────────────┤
+    │ scalar            │ scalar           │ 0.500      │
+    └───────────────────┴──────────────────┴────────────┘
+
+``` sql
+SELECT backend IS NOT NULL AS restored_auto FROM duckhts_simd_set_backend('auto');
+```
+
+    ┌───────────────┐
+    │ restored_auto │
+    │    boolean    │
+    ├───────────────┤
+    │ true          │
+    └───────────────┘
+
 ### Sequence utilities
 
 ``` sql
@@ -1545,26 +1637,38 @@ dbDisconnect(con, shutdown = TRUE)
 ## Project Structure
 
     src/
-      duckhts.c          # Extension entry point
-      bcf_reader.c       # VCF/BCF reader (read_bcf)
-      bam_reader.c       # SAM/BAM/CRAM reader (read_bam)
-      seq_reader.c       # FASTA/FASTQ reader (read_fasta, read_fastq)
-      tabix_reader.c     # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
-      vep_parser.c       # VEP/CSQ annotation parser
+      duckhts.c              # Extension entry point and SQL registration
+      bcf_reader.c           # VCF/BCF reader (read_bcf)
+      bam_reader.c           # SAM/BAM/CRAM reader (read_bam)
+      seq_reader.c           # FASTA/FASTQ reader (read_fasta, read_fastq)
+      tabix_reader.c         # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
+      vep_parser.c           # VEP/CSQ annotation parser
+      kmer_udf.c             # Sequence utilities, including SIMD-routed seq_gc_content
       ......
+      simd/                  # Runtime SIMD dispatch and scalar/AVX/NEON/wasm backends
+        duckhts_simd_dispatch.c
+        duckhts_simd_scalar.c
+        duckhts_simd_avx2.c
+        duckhts_simd_avx512.c
+        duckhts_simd_neon.c
+        duckhts_simd_wasm_simd128.c
       include/
+        duckhts_simd.h
+        duckhts_simd_internal.h
+        duckhts_simd_kernels.def
         vcf_types.h
         vep_parser.h
-        .....
     third_party/
-      htslib/            # Vendored htslib 1.23.1 (built automatically)
+      htslib/                # Vendored htslib 1.23.1 (built automatically)
+    benchmarks/
+      benchmark_simd_seq_gc.Rmd  # Scalar-vs-runtime-SIMD benchmark report
     test/
-      sql/               # SQL logic tests
+      sql/                   # SQL logic tests, including SIMD conformance
     duckdb_capi/
-      duckdb.h           # DuckDB C API headers
+      duckdb.h               # DuckDB C API headers
       duckdb_extension.h
     r/
-      Rduckhts/          # R package 
+      Rduckhts/              # R package with bundled extension sources
 
 ## References
 

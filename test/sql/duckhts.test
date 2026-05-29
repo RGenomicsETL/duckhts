@@ -959,6 +959,236 @@ SELECT printf('%.3f', seq_gc_content('ACGTNN')), seq_gc_content('NNNN') IS NULL;
 ----
 0.500	true
 
+# --- SIMD backend diagnostics are backend-agnostic and GC accepts lower-case bases ---
+query T
+SELECT backend FROM duckhts_simd_set_backend('scalar');
+----
+scalar
+
+query TTT
+SELECT
+  length(duckhts_simd_backend()) > 0,
+  duckhts_simd_backend_available('scalar'),
+  printf('%.3f', seq_gc_content('acgtnn'));
+----
+true	true	0.500
+
+query T
+SELECT backend IS NOT NULL FROM duckhts_simd_set_backend('auto');
+----
+true
+
+query T
+SELECT duckhts_simd_backend_available('neon') = (
+  SELECT compiled AND cpu_supported
+  FROM duckhts_simd_info()
+  WHERE backend = 'neon'
+);
+----
+true
+
+query T
+SELECT duckhts_simd_backend_available('avx512') IN (true, false);
+----
+true
+
+query TTT
+SELECT
+  count(*) >= 7,
+  sum(CASE WHEN available = (compiled AND cpu_supported) THEN 1 ELSE 0 END) = count(*),
+  sum(CASE WHEN backend = 'scalar' AND available THEN 1 ELSE 0 END) = 1
+FROM duckhts_simd_info();
+----
+true	true	true
+
+query TTTT
+SELECT
+  count(*) >= 1,
+  sum(CASE WHEN kernel = 'seq_base_counts' THEN 1 ELSE 0 END) = 1,
+  sum(CASE WHEN length(selected_backend) > 0 THEN 1 ELSE 0 END) = count(*),
+  sum(CASE WHEN dispatch_mode = 'capability-mask-dispatch-table' THEN 1 ELSE 0 END) = count(*)
+FROM duckhts_simd_kernel_info();
+----
+true	true	true	true
+
+query TTTT
+SELECT
+  duckhts_simd_backend_compiled('scalar'),
+  NOT duckhts_simd_backend_compiled('sse2'),
+  duckhts_simd_backend_cpu_supported('scalar'),
+  NOT duckhts_simd_backend_cpu_supported('not-a-backend');
+----
+true	true	true	true
+
+query T
+SELECT count(*) = 1
+FROM duckhts_simd_info()
+WHERE backend = 'avx512' AND available = (compiled AND cpu_supported);
+----
+true
+
+query TT
+SELECT
+  duckhts_simd_requested_backend(),
+  printf('%.3f', seq_gc_content('acgtnn'));
+----
+auto	0.500
+
+query TTT
+SELECT
+  selected_backend IN (SELECT backend FROM duckhts_simd_info() WHERE selected),
+  selected_capability = selected_backend,
+  scalar_fallback IN (true, false)
+FROM duckhts_simd_kernel_info()
+WHERE kernel = 'seq_base_counts';
+----
+true	true	true
+
+statement error
+SELECT * FROM duckhts_simd_set_backend('sse2');
+----
+no selectable implementation
+
+statement error
+SELECT * FROM duckhts_simd_set_backend('not-a-backend');
+----
+unknown SIMD backend
+
+# Process-wide SIMD policy changes are exposed as a one-row table function so
+# failing statements validate all backend requests before mutating global state.
+query T
+SELECT backend IS NOT NULL FROM duckhts_simd_set_backend('auto');
+----
+true
+
+statement error
+SELECT * FROM duckhts_simd_set_backend('scalar')
+UNION ALL
+SELECT * FROM duckhts_simd_set_backend('not-a-backend');
+----
+unknown SIMD backend
+
+query T
+SELECT duckhts_simd_requested_backend();
+----
+auto
+
+statement ok
+PREPARE duckhts_simd_set_stmt AS SELECT backend FROM duckhts_simd_set_backend($1);
+
+query T
+EXECUTE duckhts_simd_set_stmt('scalar');
+----
+scalar
+
+query T
+SELECT duckhts_simd_requested_backend();
+----
+scalar
+
+query T
+SELECT backend IS NOT NULL FROM duckhts_simd_set_backend('auto');
+----
+true
+
+statement ok
+DEALLOCATE duckhts_simd_set_stmt
+
+# --- scalar vs accelerated backend correctness ---
+# Force scalar, compute GC on sequences long enough to exercise the SIMD loop
+# (>32 bytes for AVX2, >16 for NEON/wasm_simd128), then verify that the
+# auto-selected backend (AVX2 on x86, NEON on aarch64) returns the same result.
+# The test is backend-agnostic: it compares scalar against whatever 'auto'
+# selects, so it passes on any supported ISA.
+
+query T
+SELECT backend FROM duckhts_simd_set_backend('scalar');
+----
+scalar
+
+query TTT
+SELECT selected_backend, selected_capability, scalar_fallback
+FROM duckhts_simd_kernel_info()
+WHERE kernel = 'seq_base_counts';
+----
+scalar	scalar	false
+
+# 64-char sequence: 16 G + 16 C + 16 A + 16 T = GC fraction 0.500
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCATGCAT', 8)));
+----
+0.500000
+
+# 64-char all-GC: fraction 1.000
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GC', 32)));
+----
+1.000000
+
+# 64-char all-AT: fraction 0.000
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('AT', 32)));
+----
+0.000000
+
+# 96-char mixed with Ns: GCATGCATN repeated 10 times + 6 extra chars
+# 8-char period: 2G+2C+2A+2T per unit, no N in first 9 units; unit 10 has N
+# Use a deterministic 96-char string: 'GCGCATAT' x 12 = 48 GC, 48 AT -> 0.500
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCGCATAT', 12)));
+----
+0.500000
+
+# 96-char with embedded Ns: called bases only
+# 'GCNN' x 24: 24 G + 24 C + 48 N -> GC/called = 48/48 = 1.000
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCNN', 24)));
+----
+1.000000
+
+# soft-masked (lowercase) in a long sequence: same result as uppercase
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('gcgcatat', 12)));
+----
+0.500000
+
+query T
+SELECT backend IS NOT NULL FROM duckhts_simd_set_backend('auto');
+----
+true
+
+# Re-run the same sequences under the auto-selected backend (AVX2 on x86,
+# NEON on aarch64); results must match the scalar values above.
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCATGCAT', 8)));
+----
+0.500000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GC', 32)));
+----
+1.000000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('AT', 32)));
+----
+0.000000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCGCATAT', 12)));
+----
+0.500000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCNN', 24)));
+----
+1.000000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('gcgcatat', 12)));
+----
+0.500000
+
 # --- k-mer emission ---
 query T
 SELECT string_agg(kmer, ',' ORDER BY pos)
