@@ -85,10 +85,13 @@ static int duckhts_cpu_has_avx2(void) {
     return __builtin_cpu_supports("avx2") != 0 && __builtin_cpu_supports("popcnt") != 0;
 }
 
-static const duckhts_simd_ops_t duckhts_simd_ops_avx2 = {
-    .name = "avx2",
-    .base_counts = duckhts_base_counts_avx2
-};
+void duckhts_simd_avx2_register(duckhts_simd_builder_t *builder) {
+    duckhts_simd_builder_consider_base_counts(builder,
+                                              DUCKHTS_SIMD_CAP_AVX2,
+                                              "avx2",
+                                              20,
+                                              duckhts_base_counts_avx2);
+}
 
 int duckhts_simd_avx2_compiled(void) { return 1; }
 
@@ -100,15 +103,9 @@ int duckhts_simd_avx2_available(void) {
     return duckhts_simd_avx2_compiled() && duckhts_simd_avx2_cpu_supported();
 }
 
-const duckhts_simd_ops_t *duckhts_simd_avx2_ops_if_available(void) {
-    return duckhts_simd_avx2_available() ? &duckhts_simd_ops_avx2 : (const duckhts_simd_ops_t *)0;
-}
 #else
+void duckhts_simd_avx2_register(duckhts_simd_builder_t *builder) { (void)builder; }
 int duckhts_simd_avx2_compiled(void) { return 0; }
 int duckhts_simd_avx2_cpu_supported(void) { return 0; }
 int duckhts_simd_avx2_available(void) { return 0; }
-
-const duckhts_simd_ops_t *duckhts_simd_avx2_ops_if_available(void) {
-    return (const duckhts_simd_ops_t *)0;
-}
 #endif

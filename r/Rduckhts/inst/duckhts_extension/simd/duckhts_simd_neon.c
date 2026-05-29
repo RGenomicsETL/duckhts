@@ -77,24 +77,21 @@ static void duckhts_base_counts_neon(const char *seq, size_t len,
     out->called = called;
 }
 
-static const duckhts_simd_ops_t duckhts_simd_ops_neon = {
-    .name = "neon",
-    .base_counts = duckhts_base_counts_neon
-};
+void duckhts_simd_neon_register(duckhts_simd_builder_t *builder) {
+    duckhts_simd_builder_consider_base_counts(builder,
+                                              DUCKHTS_SIMD_CAP_NEON,
+                                              "neon",
+                                              50,
+                                              duckhts_base_counts_neon);
+}
 
 int duckhts_simd_neon_compiled(void) { return 1; }
 int duckhts_simd_neon_cpu_supported(void) { return 1; }
 int duckhts_simd_neon_available(void) { return 1; }
 
-const duckhts_simd_ops_t *duckhts_simd_neon_ops_if_available(void) {
-    return &duckhts_simd_ops_neon;
-}
 #else
+void duckhts_simd_neon_register(duckhts_simd_builder_t *builder) { (void)builder; }
 int duckhts_simd_neon_compiled(void) { return 0; }
 int duckhts_simd_neon_cpu_supported(void) { return 0; }
 int duckhts_simd_neon_available(void) { return 0; }
-
-const duckhts_simd_ops_t *duckhts_simd_neon_ops_if_available(void) {
-    return (const duckhts_simd_ops_t *)0;
-}
 #endif

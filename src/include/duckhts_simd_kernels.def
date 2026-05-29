@@ -1,0 +1,11 @@
+/* DuckHTS SIMD kernel manifest.
+ *
+ * Format:
+ *   DUCKHTS_SIMD_KERNEL(enum_id, dispatch_table_field, function_signature_tag, sql_name)
+ *
+ * Keep this as the single source of truth for logical byte-oriented kernels.
+ * Backends register concrete implementations for these logical kernels; the
+ * dispatch builder resolves the best implementation per kernel from the current
+ * capability mask.
+ */
+DUCKHTS_SIMD_KERNEL(SEQ_BASE_COUNTS, base_counts, BASE_COUNTS, "seq_base_counts")

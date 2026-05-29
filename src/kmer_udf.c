@@ -5,7 +5,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdint.h>
 #include <string.h>
 
-#include "duckhts_simd.h"
+#include "duckhts_simd_internal.h"
 #include "seq_encoding.h"
 
 #define SAM_FLAG_PAIRED 0x1
@@ -476,6 +476,7 @@ static void seq_gc_content_scalar(duckdb_function_info info, duckdb_data_chunk i
     duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
     double *out_data = (double *)duckdb_vector_get_data(output);
     idx_t row_count = duckdb_data_chunk_get_size(input);
+    const duckhts_simd_dispatch_table_t *simd_table = duckhts_simd_dispatch_snapshot();
 
     for (idx_t row = 0; row < row_count; row++) {
         if (!row_is_valid(seq_vec, row)) {
@@ -491,7 +492,7 @@ static void seq_gc_content_scalar(duckdb_function_info info, duckdb_data_chunk i
         }
 
         duckhts_simd_base_counts_t counts;
-        duckhts_simd_base_counts(seq, (size_t)len, &counts);
+        duckhts_simd_base_counts_with_table(simd_table, seq, (size_t)len, &counts);
 
         if (counts.invalid || counts.called == 0) {
             set_null_at(output, row);

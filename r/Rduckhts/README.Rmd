@@ -154,17 +154,21 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
 ```
 
-## SIMD backend flow
+## SIMD dispatch flow
 
 The bundled extension uses explicit runtime SIMD dispatch for byte-oriented
 helper kernels, starting with `seq_gc_content(...)`. `scalar` is always
 available and is the portable baseline. Optional platform backends such as
 `avx2` or `avx512` should be checked with `rduckhts_simd_backend_available()`
-before being requested; use
+before being requested. The `auto` policy resolves each logical kernel
+independently from the current compiled-and-CPU-supported capability mask; use
+`rduckhts_simd_kernel_info()` for the per-kernel result and
 `rduckhts_simd_set_backend(con, "auto")` to return to runtime auto-detection.
 
 ```{r}
 rduckhts_simd_info(con)[, c("backend", "selectable", "compiled", "cpu_supported", "available", "selected")]
+
+rduckhts_simd_kernel_info(con)[, c("kernel", "selected_backend", "scalar_fallback")]
 
 rduckhts_simd_set_backend(con, "scalar")
 

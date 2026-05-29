@@ -60,9 +60,9 @@ test_seq_ops <- function() {
   expect_true(nzchar(simd$selected[1]))
   expect_true(nzchar(simd$requested[1]))
   expect_true(simd$has_scalar[1])
-  forced <- DBI::dbGetQuery(con, "SELECT duckhts_simd_set_backend('scalar') AS selected")
+  forced <- DBI::dbGetQuery(con, "SELECT backend AS selected FROM duckhts_simd_set_backend('scalar')")
   expect_identical(forced$selected[1], "scalar")
-  auto <- DBI::dbGetQuery(con, "SELECT duckhts_simd_set_backend('auto') AS selected")
+  auto <- DBI::dbGetQuery(con, "SELECT backend AS selected FROM duckhts_simd_set_backend('auto')")
   expect_true(nzchar(auto$selected[1]))
   auto_req <- DBI::dbGetQuery(con, "SELECT duckhts_simd_requested_backend() AS requested")
   expect_identical(auto_req$requested[1], "auto")
@@ -86,10 +86,27 @@ test_seq_ops <- function() {
   expect_true("avx512" %in% simd_info$backend)
   expect_false("auto" %in% simd_info$backend)
   expect_true(all(simd_info$available == (simd_info$compiled & simd_info$cpu_supported)))
+  kernel_info <- rduckhts_simd_kernel_info(con)
+  expect_true(is.data.frame(kernel_info))
+  expect_true(all(c("kernel", "selected_backend", "selected_capability", "requested_backend", "scalar_fallback") %in% names(kernel_info)))
+  expect_true("seq_base_counts" %in% kernel_info$kernel)
+  expect_true(all(nzchar(kernel_info$selected_backend)))
   expect_error(rduckhts_simd_backend_available(con, character()), "single non-missing")
   expect_error(rduckhts_simd_set_backend(con, c("scalar", "auto")), "single non-missing")
   expect_error(rduckhts_simd_set_backend(con, NA_character_), "single non-missing")
   expect_error(rduckhts_simd_set_backend(con, ""), "backend")
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
+  expect_error(
+    DBI::dbGetQuery(con, paste(
+      "SELECT * FROM duckhts_simd_set_backend('scalar')",
+      "UNION ALL SELECT * FROM duckhts_simd_set_backend('not-a-backend')"
+    )),
+    "unknown SIMD backend"
+  )
+  expect_identical(rduckhts_simd_requested_backend(con), "auto")
+  param_set <- DBI::dbGetQuery(con, "SELECT backend FROM duckhts_simd_set_backend(?)", params = list("scalar"))
+  expect_identical(param_set$backend[1], "scalar")
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
   expect_error(rduckhts_simd_set_backend(con, "sse2"), "no selectable implementation")
   expect_error(rduckhts_simd_set_backend(con, "not-a-backend"), "unknown SIMD backend")
 
@@ -108,6 +125,9 @@ test_seq_ops <- function() {
   sql_vals <- function(xs) paste(sprintf("seq_gc_content('%s')", xs), collapse = ", ")
 
   expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
+  scalar_kernel_info <- rduckhts_simd_kernel_info(con)
+  expect_identical(scalar_kernel_info$selected_backend[scalar_kernel_info$kernel == "seq_base_counts"], "scalar")
+  expect_false(scalar_kernel_info$scalar_fallback[scalar_kernel_info$kernel == "seq_base_counts"])
   scalar_gc <- DBI::dbGetQuery(con, sprintf("SELECT %s", sql_vals(seqs)))
 
   expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))

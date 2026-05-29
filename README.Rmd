@@ -352,26 +352,32 @@ FROM duckdb_liftover(
 );
 ```
 
-### SIMD backend flow
+### SIMD dispatch flow
 
 DuckHTS uses explicit runtime SIMD dispatch for byte-oriented helper kernels,
 starting with `seq_gc_content(...)`. `scalar` is always available and is the
 portable baseline. Optional platform backends such as `avx2` or `avx512`
-should be checked with `duckhts_simd_backend_available(...)` before being requested; use
-`duckhts_simd_set_backend('auto')` to return to runtime auto-detection.
+should be checked with `duckhts_simd_backend_available(...)` before being requested.
+The `auto` policy resolves each logical kernel independently from the current
+compiled-and-CPU-supported capability mask; use `duckhts_simd_kernel_info()` for
+the per-kernel result and `SELECT backend FROM duckhts_simd_set_backend('auto')`
+to return to runtime auto-detection.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT backend, selectable, compiled, cpu_supported, available, selected
 FROM duckhts_simd_info();
 
-SELECT duckhts_simd_set_backend('scalar') AS selected_backend;
+SELECT kernel, selected_backend, scalar_fallback
+FROM duckhts_simd_kernel_info();
+
+SELECT backend AS selected_backend FROM duckhts_simd_set_backend('scalar');
 
 SELECT
   duckhts_simd_requested_backend() AS requested_backend,
   duckhts_simd_backend() AS selected_backend,
   printf('%.3f', seq_gc_content('ACGTNNacgtnn')) AS gc_content;
 
-SELECT duckhts_simd_set_backend('auto') IS NOT NULL AS restored_auto;
+SELECT backend IS NOT NULL AS restored_auto FROM duckhts_simd_set_backend('auto');
 ```
 
 ### Sequence utilities

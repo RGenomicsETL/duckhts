@@ -12,15 +12,16 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning 
 # Benchmark
 
 This report measures the first DuckHTS runtime-SIMD dispatch path:
-`seq_gc_content(...)` uses the shared byte-oriented base-count vtable with a
-scalar fallback and optional platform-specific SIMD implementations such as
-AVX2. The benchmark requests backends explicitly through
-`duckhts_simd_set_backend(...)`; unavailable requests are reported as skipped so
-the same report remains valid on x86, ARM, and wasm builds.
+`seq_gc_content(...)` uses the immutable byte-oriented dispatch table and the
+logical `seq_base_counts` kernel. The `auto` policy resolves kernels from the
+compiled-and-CPU-supported capability mask, while concrete backend requests
+measure that backend's kernel implementation with scalar fallback for missing
+slots. Unavailable requests are reported as skipped so the same report remains
+valid on x86, ARM, and wasm builds.
 
 The goal is to decide whether a SIMD path is worth keeping before expanding the
-same dispatch scaffold to quality-score scans, BAM packed-sequence GC counts,
-depth reductions, and variant normalization helpers.
+same dispatch scaffold to quality-score scans, delimiter scans, BAM
+packed-sequence GC counts, depth reductions, and variant normalization helpers.
 
 # Run
 
@@ -68,7 +69,7 @@ if (!nzchar(pattern)) stop("SIMD_SEQ_GC_PATTERN must be non-empty", call. = FALS
 
 meta_out <- file.path(out_dir, "benchmark_simd_seq_gc_meta.json")
 requested_meta <- list(
-  schema = 2L,
+  schema = 3L,
   rows = rows,
   seq_len = seq_len,
   runs = runs,
@@ -111,6 +112,9 @@ results <- do.call(rbind, lapply(raw_results, function(x) {
     backend_request = null_chr(x$backend_request),
     requested_backend = null_chr(x$requested_backend),
     selected_backend = null_chr(x$selected_backend),
+    kernel_backend = null_chr(x$kernel_backend),
+    kernel_capability = null_chr(x$kernel_capability),
+    kernel_scalar_fallback = if (is.null(x$kernel_scalar_fallback)) NA else isTRUE(x$kernel_scalar_fallback),
     available = if (is.null(x$available)) NA else isTRUE(x$available),
     skipped = null_lgl(x$skipped),
     skip_reason = null_chr(x$skip_reason),
@@ -168,6 +172,9 @@ display <- results[, c(
   "backend_request",
   "requested_backend",
   "selected_backend",
+  "kernel_backend",
+  "kernel_capability",
+  "kernel_scalar_fallback",
   "status",
   "median_sec",
   "min_sec",
@@ -187,8 +194,8 @@ if (!nrow(measured)) {
 } else {
   best <- measured[which.max(measured$mbases_per_sec_median), , drop = FALSE]
   cat(sprintf(
-    "The fastest measured backend was `%s` selected from request `%s`, at %.1f Mbases/s.\n\n",
-    best$selected_backend, best$backend_request, best$mbases_per_sec_median
+    "The fastest measured `seq_base_counts` kernel backend was `%s` selected from request `%s`, at %.1f Mbases/s.\n\n",
+    best$kernel_backend, best$backend_request, best$mbases_per_sec_median
   ))
   if (is.finite(best$speedup_vs_scalar)) {
     cat(sprintf(
@@ -209,6 +216,7 @@ timing_rows <- do.call(rbind, lapply(raw_results, function(x) {
   data.frame(
     backend_request = x$backend_request,
     selected_backend = x$selected_backend,
+    kernel_backend = x$kernel_backend,
     iteration = seq_along(x$timings_sec),
     seconds = unlist(x$timings_sec),
     stringsAsFactors = FALSE

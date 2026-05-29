@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Benchmark DuckHTS seq_gc_content() across explicit SIMD backend requests.
+"""Benchmark DuckHTS seq_gc_content() across SIMD dispatch-policy requests.
 
-Each requested backend is run in a fresh Python/DuckDB process for clean state,
-but backend selection itself is done through SQL with duckhts_simd_set_backend().
-Unsupported backends are reported as skipped instead of failing, so the same
-benchmark can run on x86, ARM, and wasm-capable builds with different SIMD sets.
+Each requested backend policy is run in a fresh Python/DuckDB process for clean
+state, but selection itself is done through SQL with duckhts_simd_set_backend().
+The benchmark records both the dispatch label and the concrete seq_base_counts
+kernel backend from duckhts_simd_kernel_info(). Unsupported concrete backends
+are reported as skipped instead of failing, so the same benchmark can run on
+x86, ARM, and wasm-capable builds with different SIMD sets.
 """
 
 from __future__ import annotations
@@ -37,6 +39,9 @@ def worker(args: argparse.Namespace) -> int:
             "backend_request": args.backend,
             "requested_backend": None,
             "selected_backend": None,
+            "kernel_backend": None,
+            "kernel_capability": None,
+            "kernel_scalar_fallback": None,
             "available": False,
             "skipped": True,
             "skip_reason": "backend request is not available in this process",
@@ -49,11 +54,15 @@ def worker(args: argparse.Namespace) -> int:
         return 0
 
     selected_after_set = con.execute(
-        "SELECT duckhts_simd_set_backend(?)",
+        "SELECT backend FROM duckhts_simd_set_backend(?)",
         [args.backend],
     ).fetchone()[0]
     selected = con.execute("SELECT duckhts_simd_backend()").fetchone()[0]
     requested = con.execute("SELECT duckhts_simd_requested_backend()").fetchone()[0]
+    kernel_row = con.execute(
+        "SELECT selected_backend, selected_capability, scalar_fallback "
+        "FROM duckhts_simd_kernel_info() WHERE kernel = 'seq_base_counts'"
+    ).fetchone()
     if selected_after_set != selected:
         raise RuntimeError(f"set_backend returned {selected_after_set!r}, diagnostics returned {selected!r}")
 
@@ -78,6 +87,9 @@ def worker(args: argparse.Namespace) -> int:
         "backend_request": args.backend,
         "requested_backend": requested,
         "selected_backend": selected,
+        "kernel_backend": kernel_row[0],
+        "kernel_capability": kernel_row[1],
+        "kernel_scalar_fallback": bool(kernel_row[2]),
         "available": True,
         "skipped": False,
         "rows": args.rows,
@@ -147,16 +159,16 @@ def main(argv: list[str]) -> int:
     scalar = next((r for r in results if not r.get("skipped") and r.get("backend_request") == "scalar"), None)
     scalar_mbps = scalar["mbases_per_sec_median"] if scalar else None
 
-    print("backend_request\tselected\tstatus\tmedian_s\tMbases/s\tspeedup_vs_scalar")
+    print("backend_request\tdispatch_label\tseq_kernel\tstatus\tmedian_s\tMbases/s\tspeedup_vs_scalar")
     for r in results:
         if r.get("skipped"):
-            print(f"{r['backend_request']}\t-\tskipped\t-\t-\t-")
+            print(f"{r['backend_request']}\t-\t-\tskipped\t-\t-\t-")
             continue
         speedup = ""
         if scalar_mbps and r["mbases_per_sec_median"]:
             speedup = f"{r['mbases_per_sec_median'] / scalar_mbps:.3f}"
         print(
-            f"{r['backend_request']}\t{r['selected_backend']}\tok\t"
+            f"{r['backend_request']}\t{r['selected_backend']}\t{r.get('kernel_backend', '-')}\tok\t"
             f"{r['median_sec']:.6f}\t{r['mbases_per_sec_median']:.1f}\t{speedup}"
         )
 

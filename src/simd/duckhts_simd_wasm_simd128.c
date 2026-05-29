@@ -85,24 +85,21 @@ static void duckhts_base_counts_wasm_simd128(const char *seq, size_t len,
     out->called = called;
 }
 
-static const duckhts_simd_ops_t duckhts_simd_ops_wasm_simd128 = {
-    .name = "wasm_simd128",
-    .base_counts = duckhts_base_counts_wasm_simd128
-};
+void duckhts_simd_wasm_simd128_register(duckhts_simd_builder_t *builder) {
+    duckhts_simd_builder_consider_base_counts(builder,
+                                              DUCKHTS_SIMD_CAP_WASM_SIMD128,
+                                              "wasm_simd128",
+                                              60,
+                                              duckhts_base_counts_wasm_simd128);
+}
 
 int duckhts_simd_wasm_simd128_compiled(void) { return 1; }
 int duckhts_simd_wasm_simd128_cpu_supported(void) { return 1; }
 int duckhts_simd_wasm_simd128_available(void) { return 1; }
 
-const duckhts_simd_ops_t *duckhts_simd_wasm_simd128_ops_if_available(void) {
-    return &duckhts_simd_ops_wasm_simd128;
-}
 #else
+void duckhts_simd_wasm_simd128_register(duckhts_simd_builder_t *builder) { (void)builder; }
 int duckhts_simd_wasm_simd128_compiled(void) { return 0; }
 int duckhts_simd_wasm_simd128_cpu_supported(void) { return 0; }
 int duckhts_simd_wasm_simd128_available(void) { return 0; }
-
-const duckhts_simd_ops_t *duckhts_simd_wasm_simd128_ops_if_available(void) {
-    return (const duckhts_simd_ops_t *)0;
-}
 #endif

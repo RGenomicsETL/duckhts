@@ -7,6 +7,7 @@
 \alias{rduckhts_simd_backend_cpu_supported}
 \alias{rduckhts_simd_backend_available}
 \alias{rduckhts_simd_info}
+\alias{rduckhts_simd_kernel_info}
 \alias{rduckhts_simd_set_backend}
 \title{DuckHTS SIMD backend diagnostics}
 \usage{
@@ -22,16 +23,18 @@ rduckhts_simd_backend_available(con, backend)
 
 rduckhts_simd_info(con)
 
+rduckhts_simd_kernel_info(con)
+
 rduckhts_simd_set_backend(con, backend = "auto")
 }
 \arguments{
 \item{con}{A DuckDB connection with DuckHTS loaded via \code{rduckhts_load()}.}
 
 \item{backend}{A single backend request. \code{"auto"} selects the best
-available backend at runtime for \code{rduckhts_simd_set_backend()}.
-Backend inventory predicates such as
-\code{rduckhts_simd_backend_available()} refer to concrete backends such as
-\code{"scalar"}, \code{"sse2"}, \code{"sse41"}, \code{"avx2"},
+available implementation independently for each logical kernel at runtime
+for \code{rduckhts_simd_set_backend()}. Backend inventory predicates such
+as \code{rduckhts_simd_backend_available()} refer to concrete backends such
+as \code{"scalar"}, \code{"sse2"}, \code{"sse41"}, \code{"avx2"},
 \code{"avx512"}, \code{"neon"}, and \code{"wasm_simd128"}.}
 }
 \value{
@@ -43,19 +46,25 @@ Backend inventory predicates such as
   \code{rduckhts_simd_backend_available()} return logical scalars.
   \code{rduckhts_simd_info()} returns the extension-owned backend inventory
   table with one row per known backend; availability means compiled and
-  CPU/runtime supported; the \code{selectable} column reports whether the
-  backend has a selectable implementation path. Explicit selection still
-  requires \code{available = TRUE}.
+  CPU/runtime supported; SQL-level backend changes are process-wide and use
+  the one-row \code{duckhts_simd_set_backend(...)} table function; the
+  \code{selectable} column reports whether the backend has a selectable
+  implementation path.
+  Explicit selection still
+  requires \code{available = TRUE}. \code{rduckhts_simd_kernel_info()}
+  returns one row per logical SIMD kernel and is the authoritative diagnostic
+  for mixed per-kernel auto-dispatch.
 }
 \description{
-Inspect or explicitly select the SIMD backend used by bundled DuckHTS
-byte-oriented helper kernels such as \code{seq_gc_content(...)}.
+Inspect or explicitly select the SIMD dispatch policy used by bundled
+DuckHTS byte-oriented helper kernels such as \code{seq_gc_content(...)}.
 }
 \examples{
 \dontrun{
 con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
 rduckhts_simd_info(con)
+rduckhts_simd_kernel_info(con)
 rduckhts_simd_backend_available(con, "scalar")
 rduckhts_simd_set_backend(con, "scalar")
 rduckhts_simd_set_backend(con, "auto")

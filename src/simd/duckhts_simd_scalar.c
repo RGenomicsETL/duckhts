@@ -37,11 +37,10 @@ static void duckhts_base_counts_scalar(const char *seq, size_t len,
     out->called = called;
 }
 
-static const duckhts_simd_ops_t duckhts_simd_ops_scalar = {
-    .name = "scalar",
-    .base_counts = duckhts_base_counts_scalar
-};
-
-const duckhts_simd_ops_t *duckhts_simd_scalar_ops(void) {
-    return &duckhts_simd_ops_scalar;
+void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder) {
+    duckhts_simd_builder_consider_base_counts(builder,
+                                              DUCKHTS_SIMD_CAP_SCALAR,
+                                              "scalar",
+                                              1000,
+                                              duckhts_base_counts_scalar);
 }
