@@ -70,7 +70,9 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "duckhts_simd_dispatch.c",
     "duckhts_simd_scalar.c",
     "duckhts_simd_avx2.c",
-    "duckhts_simd_avx512.c"
+    "duckhts_simd_avx512.c",
+    "duckhts_simd_neon.c",
+    "duckhts_simd_wasm_simd128.c"
   )
   simd_dest <- file.path(dest, "simd")
   dir.create(simd_dest, recursive = TRUE, showWarnings = FALSE)
@@ -252,6 +254,8 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       file.path("simd", "duckhts_simd_scalar.c"),
       file.path("simd", "duckhts_simd_avx2.c"),
       file.path("simd", "duckhts_simd_avx512.c"),
+      file.path("simd", "duckhts_simd_neon.c"),
+      file.path("simd", "duckhts_simd_wasm_simd128.c"),
       "bcf_reader.c",
       "bam_reader.c",
       "bam_pileup.c",

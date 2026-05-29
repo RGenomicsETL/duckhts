@@ -75,6 +75,8 @@ set(EXTENSION_SOURCES
         src/simd/duckhts_simd_scalar.c
         src/simd/duckhts_simd_avx2.c
         src/simd/duckhts_simd_avx512.c
+        src/simd/duckhts_simd_neon.c
+        src/simd/duckhts_simd_wasm_simd128.c
         src/bcf_reader.c
         src/bam_reader.c
         src/bam_pileup.c
