@@ -979,9 +979,13 @@ SELECT duckhts_simd_set_backend('auto') IS NOT NULL;
 true
 
 query T
-SELECT duckhts_simd_backend_available('neon');
+SELECT duckhts_simd_backend_available('neon') = (
+  SELECT compiled AND cpu_supported
+  FROM duckhts_simd_info()
+  WHERE backend = 'neon'
+);
 ----
-false
+true
 
 query T
 SELECT duckhts_simd_backend_available('avx512') IN (true, false);
