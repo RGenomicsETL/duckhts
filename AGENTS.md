@@ -37,12 +37,73 @@ R package changelog scope is strict:
 - `community-extensions/` is a local sync copy only — do not commit it; copy `description.yml` manually to the community-extensions repo after regenerating.
 - `r/Rduckhts/README.Rmd` is wired to the generated function catalog; do not duplicate function lists by hand.
 - Keep new benchmark `.Rmd` / `.md` files under `benchmarks/`, not the repo root.
+
 - Scan-planning and deferred record-offset design work is tracked in `design/better_scans.md`. If a task touches weighted contig claiming or a future BCF/VCF offset column, read that file before changing reader code.
 - FASTQ reader throughput and remote-safe parser design notes are tracked in `design/fastq_throughput.md`. If a task touches `read_fastq(...)` performance, read that file before changing the reader path.
 - Native mosdepth rewrite planning is tracked in `design/duckhts_mosdepth.md`. If a task touches `duckhts_mosdepth(...)`, mosdepth compatibility, or native coverage rewrite work, read that file before implementing reader or coverage code.
 - BAM/BED regional coverage, future `fragment_mode := TRUE` work, and irregular-interval coverage design are tracked in `design/duckhts_idxstats_and_interval_coverage.md` and `design/coverage_memory_footprint.md`. If a task touches `duckhts_bam_bed_coverage(...)`, cgranges-backed irregular interval work, or BED regional coverage memory/semantics, read those files first. For `duckhts_bam_bed_coverage(..., fragment_mode := TRUE)`, do not invent new pair semantics from scratch: mirror the existing `duckhts_mosdepth(..., fragment_mode := TRUE)` / upstream `mosdepth --fragment-mode` policy as the primary semantic anchor, and treat `meanbaseq` / `meanmapq` as read-level summaries unless the design doc is explicitly updated.
 - Samtools-compatible kernel planning is tracked in `design/duckhts_samtools.md`. If a task touches new `duckhts_samtools_*` functions, scan-fused summary kernels, or future samtools-compatible rewrites beyond `duckhts_samtools_idxstats(...)`, read that file before implementing.
 - DuckDB C API deprecation tracking is documented in `design/duckdb_c_api_deprecation_scan_2026-04-21.md`. If a task touches DuckDB C API usage, bundled DuckDB header bumps, or extension/runtime integration code, read that file first and re-run the deprecation scan after updating DuckDB.
+
+## SIMD Kernel Development Workflow
+DuckHTS SIMD dispatch is a capability-mask, per-logical-kernel system under `src/simd/`.  Do not add ad-hoc ISA checks inside individual SQL functions when the logic can be represented as a reusable byte-oriented kernel.
+
+Use this flow when adding a SIMD operation:
+
+1. **Define the logical kernel first**
+   - Add one entry to `src/include/duckhts_simd_kernels.def` using `DUCKHTS_SIMD_KERNEL(enum_id, dispatch_table_field, signature_tag, sql_name)`.
+   - Keep kernel ids separate from capability bits.  Never use enum values as bit positions.
+   - If the function signature is new, add the typedef and `DUCKHTS_SIMD_FN_<TAG>` mapping in `src/include/duckhts_simd_internal.h`.
+   - Add a typed builder-consider helper in `duckhts_simd_dispatch.c`; avoid untyped function-pointer punning.
+
+2. **Scalar is mandatory**
+   - Implement the scalar reference in `src/simd/duckhts_simd_scalar.c` before any ISA backend.
+   - Register scalar for the kernel.  Scalar is the correctness oracle and must resolve every logical kernel.
+   - `duckhts_simd_require_table_resolved()` must still prove that every dispatch table slot has a fallback.
+
+3. **Register optional backends independently**
+   - Put ISA-specific implementations in the existing backend files (`duckhts_simd_avx2.c`, `duckhts_simd_avx512.c`, `duckhts_simd_neon.c`, `duckhts_simd_wasm_simd128.c`) or add a new backend translation unit only when needed.
+   - Compile/runtime-gate with compiler/platform-native checks, not htslib autoconf `HAVE_*` macros.
+   - x86 kernels that require an ISA should use function-level target attributes where possible so CPU probing remains safe on baseline hosts.
+   - Backend registration functions should register only kernels they actually implement.  Public trampolines must tolerate missing non-scalar slots by falling back through the resolved table.
+   - Lower priority numbers win under `auto`; choose priorities deliberately and document surprising ordering.
+
+4. **Snapshot dispatch in consumers**
+   - Consumers such as UDFs should snapshot once per DuckDB vector/chunk with `duckhts_simd_dispatch_snapshot()` and call `*_with_table(...)` helpers inside the row loop.
+   - Table functions should capture the dispatch table in init data when a scan needs a stable view.
+   - Do not reload the global dispatch pointer per row unless there is a strong reason.
+
+5. **Wire both extension and R package builds**
+   - If adding new source files, update `CMakeLists.txt`, `r/Rduckhts/R/bootstrap.R`, `r/Rduckhts/configure`, and `r/Rduckhts/configure.win`.
+   - Run `cd r/Rduckhts && Rscript bootstrap.R /root/duckhts` after source/header changes and verify bundled copies under `r/Rduckhts/inst/duckhts_extension/` match the root sources.
+
+6. **Validation requirements**
+   - Add SQL conformance tests that compare forced `scalar` with `auto` for representative inputs and edge cases.
+   - Add R tinytests for wrappers or R-visible behavior.
+   - Tests must be backend-agnostic: never require AVX2/AVX512/NEON/wasm availability on the runner.
+   - Assert diagnostics semantics: `available = compiled && cpu_supported`; `selectable` only means a selectable implementation path exists; `auto` is a request, not a concrete backend row.
+   - Cover invalid input, lowercase/uppercase behavior, `N`/missing handling, and any NULL/empty semantics for the kernel.
+
+7. **Benchmarking requirements**
+   - Add benchmark drivers under `scripts/` and rendered reports under `benchmarks/`.
+   - Benchmarks should run each backend request in a fresh process when measuring process-wide backend selection.
+   - Always record `duckhts_simd_kernel_info()` so reports show the concrete kernel backend selected by `auto`.
+   - Include both a kernel-isolating benchmark and, when relevant, a real-data end-to-end workload (for example BAM/FASTQ/FASTA input) so I/O and materialization effects are visible.
+   - Skip unavailable concrete backends instead of failing portable benchmark runs.
+
+8. **Documentation and changelog**
+   - Public SQL/R surfaces require `functions.yaml`, regenerated catalogs, README examples when useful, and both `NEWS.md` files.
+   - Internal-only SIMD kernels should still be documented in design notes or benchmark reports when they affect performance claims.
+   - Keep `design/simd_dispatch_matrix.md` current when changing dispatch architecture, semantics, or validation strategy.
+
+Required validation after SIMD changes:
+
+```
+make release -j2
+./configure/venv/bin/python3 -m duckdb_sqllogictest --test-dir test/sql --file-path test/sql/duckhts.test --external-extension build/release/duckhts.duckdb_extension
+cd r/Rduckhts && Rscript bootstrap.R /root/duckhts && THREADS=4 make test
+git diff --check
+```
 
 ## Build & CI Rules
 - Build scripts must be deterministic and non-interactive.
