@@ -174,6 +174,11 @@ into:
   [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.md),
   [`rduckhts_hts_index_spans()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_spans.md),
   [`rduckhts_hts_index_raw()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_raw.md)
+- SIMD diagnostics:
+  [`rduckhts_simd_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  [`rduckhts_simd_requested_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  [`rduckhts_simd_backend_available()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  [`rduckhts_simd_set_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
 
 Start with one reader, then materialize tables and compose the richer
 helpers around them.
@@ -200,6 +205,65 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #>    n
 #> 1 10
+```
+
+## SIMD dispatch flow
+
+The bundled extension uses explicit runtime SIMD dispatch for
+byte-oriented helper kernels, starting with `seq_gc_content(...)`.
+`scalar` is always available and is the portable baseline. Optional
+platform backends such as `avx2` or `avx512` should be checked with
+[`rduckhts_simd_backend_available()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+before being requested. The `auto` policy resolves each logical kernel
+independently from the current compiled-and-CPU-supported capability
+mask; use
+[`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+for the per-kernel result and `rduckhts_simd_set_backend(con, "auto")`
+to return to runtime auto-detection.
+
+``` r
+rduckhts_simd_info(con)[, c("backend", "selectable", "compiled", "cpu_supported", "available", "selected")]
+#>        backend selectable compiled cpu_supported available selected
+#> 1       scalar       TRUE     TRUE          TRUE      TRUE    FALSE
+#> 2         sse2      FALSE    FALSE          TRUE     FALSE    FALSE
+#> 3        sse41      FALSE    FALSE          TRUE     FALSE    FALSE
+#> 4         avx2       TRUE     TRUE          TRUE      TRUE     TRUE
+#> 5       avx512       TRUE     TRUE         FALSE     FALSE    FALSE
+#> 6         neon       TRUE    FALSE         FALSE     FALSE    FALSE
+#> 7 wasm_simd128       TRUE    FALSE         FALSE     FALSE    FALSE
+
+rduckhts_simd_kernel_info(con)[, c("kernel", "selected_backend", "scalar_fallback")]
+#>            kernel selected_backend scalar_fallback
+#> 1 seq_base_counts             avx2           FALSE
+
+rduckhts_simd_set_backend(con, "scalar")
+#> [1] "scalar"
+
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT duckhts_simd_requested_backend() AS requested_backend,",
+    "duckhts_simd_backend() AS selected_backend,",
+    "round(seq_gc_content('ACGTNNacgtnn'), 3) AS gc_content"
+  )
+)
+#>   requested_backend selected_backend gc_content
+#> 1            scalar           scalar        0.5
+
+data.frame(
+  requested_backend = rduckhts_simd_requested_backend(con),
+  selected_backend = rduckhts_simd_backend(con)
+)
+#>   requested_backend selected_backend
+#> 1            scalar           scalar
+
+restored_backend <- rduckhts_simd_set_backend(con, "auto")
+data.frame(
+  requested_backend = rduckhts_simd_requested_backend(con),
+  selected_backend_known = nzchar(restored_backend)
+)
+#>   requested_backend selected_backend_known
+#> 1              auto                   TRUE
 ```
 
 ## Multi-file Reading
@@ -251,6 +315,19 @@ Show generated function catalog
 ## Extension Function Catalog
 
 This section is generated from `functions.yaml`.
+
+### Diagnostics
+
+| Function                             | Kind   | Returns                | R helper                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|--------------------------------------|--------|------------------------|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_simd_backend`               | scalar | VARCHAR                | `rduckhts_simd_backend`               | Return the current DuckHTS SIMD dispatch label. For explicit scalar or concrete backend requests this is the requested policy; for auto it is the single selected backend when all logical kernels resolve to the same backend, or mixed when per-kernel auto-dispatch resolves to multiple backends. Use duckhts_simd_kernel_info() for per-kernel details.                                                                                                                                                                                                |
+| `duckhts_simd_requested_backend`     | scalar | VARCHAR                | `rduckhts_simd_requested_backend`     | Return the current explicit SIMD backend request, usually auto unless `SELECT backend FROM duckhts_simd_set_backend('auto'\|'scalar'\|backend)` was called. The selected per-kernel backend may differ under auto-dispatch across x86, ARM, wasm, and scalar-only builds.                                                                                                                                                                                                                                                                                   |
+| `duckhts_simd_backend_compiled`      | scalar | BOOLEAN                | `rduckhts_simd_backend_compiled`      | Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.                                                                                                                                                                                                                                                                                                          |
+| `duckhts_simd_backend_cpu_supported` | scalar | BOOLEAN                | `rduckhts_simd_backend_cpu_supported` | Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.                                                                                                                                                                                                                                                                                                                                          |
+| `duckhts_simd_backend_available`     | scalar | BOOLEAN                | `rduckhts_simd_backend_available`     | Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.                                                                                                                                                                                                                                                                                |
+| `duckhts_simd_info`                  | table  | table                  | `rduckhts_simd_info`                  | Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported. selectable reports whether the backend has a selectable implementation path; explicit selection still requires available = TRUE. selected is TRUE when the current dispatch table uses that backend for at least one logical kernel. auto is a selection request and is not a concrete backend row. |
+| `duckhts_simd_kernel_info`           | table  | table                  | `rduckhts_simd_kernel_info`           | Return one row per logical DuckHTS SIMD kernel showing the concrete backend selected by the current immutable dispatch table, the selected capability, the requested backend policy, whether scalar was used as a per-kernel fallback, and the dispatch mode. This is the authoritative diagnostic for mixed auto-dispatch when different kernels resolve to different backends.                                                                                                                                                                            |
+| `duckhts_simd_set_backend`           | table  | table(backend VARCHAR) | `rduckhts_simd_set_backend`           | Explicitly select the DuckHTS SIMD dispatch policy for this process using a one-row table-function call and return the current dispatch label in a backend column. Use auto for per-kernel runtime dispatch or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.                                                                                                                                                                                   |
 
 ### Readers
 
@@ -797,7 +874,7 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
+#>   success                                                 index_path
 #> 1    TRUE <tempfile>
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
 #>   success                                                index_path
@@ -954,7 +1031,7 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                          output_path bytes_out
+#>   success                                           output_path bytes_out
 #> 1    TRUE <tempfile>       169
 
 bgunzip_meta <- rduckhts_bgunzip(
@@ -965,8 +1042,10 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE <tempfile>       194
+#>   success                                                  output_path
+#> 1    TRUE <tempfile>
+#>   bytes_out
+#> 1       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -974,7 +1053,7 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                         index_path index_format
+#>   success                                           index_path index_format
 #> 1    TRUE <tempfile>          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
@@ -983,7 +1062,7 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                            index_path index_format
+#>   success                                              index_path index_format
 #> 1    TRUE <tempfile>          CSI
 
 tabix_meta <- rduckhts_tabix_index(
@@ -993,8 +1072,10 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                               index_path index_format
-#> 1    TRUE <tempfile>          TBI
+#>   success                                                index_path
+#> 1    TRUE <tempfile>
+#>   index_format
+#> 1          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -1059,7 +1140,7 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
+#>   success                                        index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_fasta(

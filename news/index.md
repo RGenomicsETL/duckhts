@@ -1,9 +1,51 @@
 # Changelog
 
+## Rduckhts 1.3.0-0.1.0 (2026-05-29)
+
+- expose the rebuilt capability-mask SIMD dispatch diagnostics through
+  [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  keeping R wrappers thin while reporting one row per logical kernel and
+  preserving backend-agnostic SQL/R conformance tests for
+  `seq_gc_content(...)`
+- harden bundled SIMD backend helpers: retain extension-owned
+  backend-name validation while restoring R-side scalar/non-missing
+  argument shape checks, clarify `selectable` versus `available`
+  diagnostics in generated docs, and preserve ASCII SQL quotes for the
+  rendered `duckhts_simd_set_backend('auto'|'scalar'|backend)` catalog
+  call
+- remove htslib autoconf `HAVE_*` macro guards from all bundled SIMD
+  backend translation units; compile-time gate is now
+  `defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))` for
+  x86 backends, available without autoconf; runtime dispatch and scalar
+  fallback behavior are unchanged; add scalar-vs-auto backend R
+  correctness tests for
+  [`rduckhts_simd_set_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  / `seq_gc_content(...)` covering GC=0/0.5/1.0, embedded-N calling, and
+  soft-masked lowercase bases
+- drop internal `.validate_simd_backend()` R helper from SIMD wrapper
+  functions; backend-name normalization and validation now belong to the
+  extension, while the R wrappers only enforce that `backend` is a
+  single non-missing character string
+
 ## Rduckhts 1.2.1-0.1.0 (2026-05-07)
 
 CRAN release: 2026-05-07
 
+- expose bundled SIMD diagnostics and explicit backend selection through
+  SQL functions and R helpers
+  [`rduckhts_simd_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  [`rduckhts_simd_requested_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  [`rduckhts_simd_backend_available()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  and
+  [`rduckhts_simd_set_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
+  route bundled `seq_gc_content(...)` through the new eager
+  scalar/optional-AVX2 runtime dispatch scaffold while preserving scalar
+  fallback behavior on ARM, wasm, and scalar-only builds, add
+  runtime-gated AVX-512, ARM NEON, and wasm SIMD128 backend translation
+  units where compiler-supported, keep the manual
+  [`duckhts_build()`](https://rgenomicsetl.github.io/duckhts/reference/duckhts_build.md)
+  rebuild path wired to the SIMD sources, and add README examples for
+  the scalar/auto SIMD flow
 - fix bundled
   [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
   / `bcftools_liftover(...)` FASTA contig alias handling during

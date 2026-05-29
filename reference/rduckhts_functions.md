@@ -32,49 +32,52 @@ wrapper, short description, and example SQL.
 catalog <- rduckhts_functions()
 subset(catalog, category == "Sequence UDFs", select = c("name", "description"))
 #>               name
-#> 70     seq_revcomp
-#> 71   seq_canonical
-#> 72   seq_hash_2bit
-#> 73 seq_encode_4bit
-#> 74 seq_decode_4bit
-#> 75  seq_gc_content
-#> 76       seq_kmers
+#> 78     seq_revcomp
+#> 79   seq_canonical
+#> 80   seq_hash_2bit
+#> 81 seq_encode_4bit
+#> 82 seq_decode_4bit
+#> 83  seq_gc_content
+#> 84       seq_kmers
 #>                                                                                              description
-#> 70                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.
-#> 71                        Return the lexicographically smaller of a sequence and its reverse complement.
-#> 72                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.
-#> 73 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.
-#> 74                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.
-#> 75                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.
-#> 76                              Expand a sequence into positional k-mers with optional canonicalization.
+#> 78                       Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.
+#> 79                        Return the lexicographically smaller of a sequence and its reverse complement.
+#> 80                                         Encode a short DNA sequence as a 2-bit unsigned integer hash.
+#> 81 Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.
+#> 82                              Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.
+#> 83                                    Compute GC fraction for a DNA sequence as a value between 0 and 1.
+#> 84                              Expand a sequence into positional k-mers with optional canonicalization.
 subset(rduckhts_functions(kind = "table"), select = c("name", "r_wrapper"))
 #>                              name                        r_wrapper
-#> 1                        read_bcf                     rduckhts_bcf
-#> 2                        read_bam                     rduckhts_bam
-#> 3                     read_pileup                  rduckhts_pileup
-#> 4                      read_fasta                   rduckhts_fasta
-#> 5                        read_bed                     rduckhts_bed
-#> 6                       fasta_nuc               rduckhts_fasta_nuc
-#> 7       duckhts_cgranges_overlaps                                 
-#> 8  duckhts_cgranges_overlaps_bulk                                 
-#> 9                      read_fastq                   rduckhts_fastq
-#> 10        detect_quality_encoding rduckhts_detect_quality_encoding
-#> 11                       read_gff                     rduckhts_gff
-#> 12                       read_gtf                     rduckhts_gtf
-#> 13                     read_tabix                   rduckhts_tabix
-#> 14                    fasta_index             rduckhts_fasta_index
-#> 15                          bgzip                   rduckhts_bgzip
-#> 16                        bgunzip                 rduckhts_bgunzip
-#> 17                      bam_index               rduckhts_bam_index
-#> 18                      bcf_index               rduckhts_bcf_index
-#> 19                    tabix_index             rduckhts_tabix_index
-#> 20                 bam_bin_counts          rduckhts_bam_bin_counts
-#> 21       duckhts_bam_bed_coverage        rduckhts_bam_bed_coverage
-#> 22               duckhts_mosdepth                rduckhts_mosdepth
-#> 23      duckhts_samtools_idxstats       rduckhts_samtools_idxstats
-#> 24                read_hts_header              rduckhts_hts_header
-#> 25                 read_hts_index               rduckhts_hts_index
-#> 26           read_hts_index_spans         rduckhts_hts_index_spans
-#> 27                 bcftools_score                   rduckhts_score
-#> 28                      seq_kmers                                 
+#> 1               duckhts_simd_info               rduckhts_simd_info
+#> 2        duckhts_simd_kernel_info        rduckhts_simd_kernel_info
+#> 3        duckhts_simd_set_backend        rduckhts_simd_set_backend
+#> 4                        read_bcf                     rduckhts_bcf
+#> 5                        read_bam                     rduckhts_bam
+#> 6                     read_pileup                  rduckhts_pileup
+#> 7                      read_fasta                   rduckhts_fasta
+#> 8                        read_bed                     rduckhts_bed
+#> 9                       fasta_nuc               rduckhts_fasta_nuc
+#> 10      duckhts_cgranges_overlaps                                 
+#> 11 duckhts_cgranges_overlaps_bulk                                 
+#> 12                     read_fastq                   rduckhts_fastq
+#> 13        detect_quality_encoding rduckhts_detect_quality_encoding
+#> 14                       read_gff                     rduckhts_gff
+#> 15                       read_gtf                     rduckhts_gtf
+#> 16                     read_tabix                   rduckhts_tabix
+#> 17                    fasta_index             rduckhts_fasta_index
+#> 18                          bgzip                   rduckhts_bgzip
+#> 19                        bgunzip                 rduckhts_bgunzip
+#> 20                      bam_index               rduckhts_bam_index
+#> 21                      bcf_index               rduckhts_bcf_index
+#> 22                    tabix_index             rduckhts_tabix_index
+#> 23                 bam_bin_counts          rduckhts_bam_bin_counts
+#> 24       duckhts_bam_bed_coverage        rduckhts_bam_bed_coverage
+#> 25               duckhts_mosdepth                rduckhts_mosdepth
+#> 26      duckhts_samtools_idxstats       rduckhts_samtools_idxstats
+#> 27                read_hts_header              rduckhts_hts_header
+#> 28                 read_hts_index               rduckhts_hts_index
+#> 29           read_hts_index_spans         rduckhts_hts_index_spans
+#> 30                 bcftools_score                   rduckhts_score
+#> 31                      seq_kmers                                 
 ```

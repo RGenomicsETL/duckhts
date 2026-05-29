@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.1.9000-0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0-0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -162,6 +162,8 @@
 </li>
 <li>metadata helpers: <code><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header()</a></code>, <code><a href="reference/rduckhts_hts_index.html">rduckhts_hts_index()</a></code>, <code><a href="reference/rduckhts_hts_index_spans.html">rduckhts_hts_index_spans()</a></code>, <code><a href="reference/rduckhts_hts_index_raw.html">rduckhts_hts_index_raw()</a></code>
 </li>
+<li>SIMD diagnostics: <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_requested_backend()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend_available()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_set_backend()</a></code>
+</li>
 </ul>
 <p>Start with one reader, then materialize tables and compose the richer helpers around them.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
@@ -188,10 +190,58 @@
 <span><span class="co">#&gt; 1 10</span></span></code></pre></div>
 </div>
 <div class="section level2">
+<h2 id="simd-dispatch-flow">SIMD dispatch flow<a class="anchor" aria-label="anchor" href="#simd-dispatch-flow"></a>
+</h2>
+<p>The bundled extension uses explicit runtime SIMD dispatch for byte-oriented helper kernels, starting with <code>seq_gc_content(...)</code>. <code>scalar</code> is always available and is the portable baseline. Optional platform backends such as <code>avx2</code> or <code>avx512</code> should be checked with <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend_available()</a></code> before being requested. The <code>auto</code> policy resolves each logical kernel independently from the current compiled-and-CPU-supported capability mask; use <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_kernel_info()</a></code> for the per-kernel result and <code>rduckhts_simd_set_backend(con, "auto")</code> to return to runtime auto-detection.</p>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_info</a></span><span class="op">(</span><span class="va">con</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"backend"</span>, <span class="st">"selectable"</span>, <span class="st">"compiled"</span>, <span class="st">"cpu_supported"</span>, <span class="st">"available"</span>, <span class="st">"selected"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="co">#&gt;        backend selectable compiled cpu_supported available selected</span></span>
+<span><span class="co">#&gt; 1       scalar       TRUE     TRUE          TRUE      TRUE    FALSE</span></span>
+<span><span class="co">#&gt; 2         sse2      FALSE    FALSE          TRUE     FALSE    FALSE</span></span>
+<span><span class="co">#&gt; 3        sse41      FALSE    FALSE          TRUE     FALSE    FALSE</span></span>
+<span><span class="co">#&gt; 4         avx2       TRUE     TRUE          TRUE      TRUE     TRUE</span></span>
+<span><span class="co">#&gt; 5       avx512       TRUE     TRUE         FALSE     FALSE    FALSE</span></span>
+<span><span class="co">#&gt; 6         neon       TRUE    FALSE         FALSE     FALSE    FALSE</span></span>
+<span><span class="co">#&gt; 7 wasm_simd128       TRUE    FALSE         FALSE     FALSE    FALSE</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_kernel_info</a></span><span class="op">(</span><span class="va">con</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"kernel"</span>, <span class="st">"selected_backend"</span>, <span class="st">"scalar_fallback"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="co">#&gt;            kernel selected_backend scalar_fallback</span></span>
+<span><span class="co">#&gt; 1 seq_base_counts             avx2           FALSE</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_set_backend</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"scalar"</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "scalar"</span></span>
+<span></span>
+<span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>,</span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
+<span>    <span class="st">"SELECT duckhts_simd_requested_backend() AS requested_backend,"</span>,</span>
+<span>    <span class="st">"duckhts_simd_backend() AS selected_backend,"</span>,</span>
+<span>    <span class="st">"round(seq_gc_content('ACGTNNacgtnn'), 3) AS gc_content"</span></span>
+<span>  <span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt;   requested_backend selected_backend gc_content</span></span>
+<span><span class="co">#&gt; 1            scalar           scalar        0.5</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  requested_backend <span class="op">=</span> <span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_requested_backend</a></span><span class="op">(</span><span class="va">con</span><span class="op">)</span>,</span>
+<span>  selected_backend <span class="op">=</span> <span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend</a></span><span class="op">(</span><span class="va">con</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt;   requested_backend selected_backend</span></span>
+<span><span class="co">#&gt; 1            scalar           scalar</span></span>
+<span></span>
+<span><span class="va">restored_backend</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_set_backend</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"auto"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  requested_backend <span class="op">=</span> <span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_requested_backend</a></span><span class="op">(</span><span class="va">con</span><span class="op">)</span>,</span>
+<span>  selected_backend_known <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/nchar.html" class="external-link">nzchar</a></span><span class="op">(</span><span class="va">restored_backend</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt;   requested_backend selected_backend_known</span></span>
+<span><span class="co">#&gt; 1              auto                   TRUE</span></span></code></pre></div>
+</div>
+<div class="section level2">
 <h2 id="multi-file-reading">Multi-file Reading<a class="anchor" aria-label="anchor" href="#multi-file-reading"></a>
 </h2>
 <p>The <code>rduckhts_*_multi</code> family reads multiple files into a single DuckDB table with a <code>filename</code> column, following the same <code>(con, table_name, ...)</code> convention as the single-file wrappers:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fq_files</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -202,7 +252,7 @@
 <span><span class="co">#&gt; 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5</span></span>
 <span><span class="co">#&gt; 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5</span></span></code></pre></div>
 <p>Per-file parameters are supported via a <code>.params</code> data.frame with a <code>file</code> column and columns matching reader arguments. <code>NA</code> values fall back to the uniform default:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bam_idx</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam.bai"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
@@ -229,6 +279,84 @@ Show generated function catalog
 <h2 id="extension-function-catalog">Extension Function Catalog<a class="anchor" aria-label="anchor" href="#extension-function-catalog"></a>
 </h2>
 <p>This section is generated from <code>functions.yaml</code>.</p>
+<div class="section level3">
+<h3 id="diagnostics">Diagnostics<a class="anchor" aria-label="anchor" href="#diagnostics"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="5%">
+<col width="1%">
+<col width="3%">
+<col width="6%">
+<col width="83%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><code>duckhts_simd_backend</code></td>
+<td>scalar</td>
+<td>VARCHAR</td>
+<td><code>rduckhts_simd_backend</code></td>
+<td>Return the current DuckHTS SIMD dispatch label. For explicit scalar or concrete backend requests this is the requested policy; for auto it is the single selected backend when all logical kernels resolve to the same backend, or mixed when per-kernel auto-dispatch resolves to multiple backends. Use duckhts_simd_kernel_info() for per-kernel details.</td>
+</tr>
+<tr class="even">
+<td><code>duckhts_simd_requested_backend</code></td>
+<td>scalar</td>
+<td>VARCHAR</td>
+<td><code>rduckhts_simd_requested_backend</code></td>
+<td>Return the current explicit SIMD backend request, usually auto unless <code>SELECT backend FROM duckhts_simd_set_backend('auto'\|'scalar'\|backend)</code> was called. The selected per-kernel backend may differ under auto-dispatch across x86, ARM, wasm, and scalar-only builds.</td>
+</tr>
+<tr class="odd">
+<td><code>duckhts_simd_backend_compiled</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td><code>rduckhts_simd_backend_compiled</code></td>
+<td>Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.</td>
+</tr>
+<tr class="even">
+<td><code>duckhts_simd_backend_cpu_supported</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td><code>rduckhts_simd_backend_cpu_supported</code></td>
+<td>Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.</td>
+</tr>
+<tr class="odd">
+<td><code>duckhts_simd_backend_available</code></td>
+<td>scalar</td>
+<td>BOOLEAN</td>
+<td><code>rduckhts_simd_backend_available</code></td>
+<td>Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.</td>
+</tr>
+<tr class="even">
+<td><code>duckhts_simd_info</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_simd_info</code></td>
+<td>Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported. selectable reports whether the backend has a selectable implementation path; explicit selection still requires available = TRUE. selected is TRUE when the current dispatch table uses that backend for at least one logical kernel. auto is a selection request and is not a concrete backend row.</td>
+</tr>
+<tr class="odd">
+<td><code>duckhts_simd_kernel_info</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_simd_kernel_info</code></td>
+<td>Return one row per logical DuckHTS SIMD kernel showing the concrete backend selected by the current immutable dispatch table, the selected capability, the requested backend policy, whether scalar was used as a per-kernel fallback, and the dispatch mode. This is the authoritative diagnostic for mixed auto-dispatch when different kernels resolve to different backends.</td>
+</tr>
+<tr class="even">
+<td><code>duckhts_simd_set_backend</code></td>
+<td>table</td>
+<td>table(backend VARCHAR)</td>
+<td><code>rduckhts_simd_set_backend</code></td>
+<td>Explicitly select the DuckHTS SIMD dispatch policy for this process using a one-row table-function call and return the current dispatch label in a backend column. Use auto for per-kernel runtime dispatch or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.</td>
+</tr>
+</tbody>
+</table>
+</div>
 <div class="section level3">
 <h3 id="readers">Readers<a class="anchor" aria-label="anchor" href="#readers"></a>
 </h3>
@@ -1150,7 +1278,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="region-aware-variant-and-alignment-queries">Region-aware variant and alignment queries<a class="anchor" aria-label="anchor" href="#region-aware-variant-and-alignment-queries"></a>
 </h3>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bcf_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bcf_index_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf.csi"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -1182,7 +1310,7 @@ Show generated function catalog
 <h3 id="variant-normalization">Variant normalization<a class="anchor" aria-label="anchor" href="#variant-normalization"></a>
 </h3>
 <p><code><a href="reference/rduckhts_bcftools_norm.html">rduckhts_bcftools_norm()</a></code> wraps the bundled <code>duckhts_bcftools_norm(...)</code> table macro and keeps the original input columns alongside normalized position/reference/ALT outputs.</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">norm_fa</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"liftover_repeat_src.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/invisible.html" class="external-link">invisible</a></span><span class="op">(</span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbExecute.html" class="external-link">dbExecute</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -1217,7 +1345,7 @@ Show generated function catalog
 <h3 id="variantkey--regionkey">VariantKey + RegionKey<a class="anchor" aria-label="anchor" href="#variantkey--regionkey"></a>
 </h3>
 <p>DuckHTS now bundles the official VariantKey / RegionKey C API. The SQL helper <code>variantkey(...)</code> accepts 1-based VCF positions to match bcftools <code>%VKX</code>, while <code>regionkey(...)</code> keeps 0-based half-open interval semantics for span work. Large, ambiguous, and symbolic alleles still encode through the official hashed nonreversible VariantKey mode, but those keys do not encode <code>END</code>, <code>SVLEN</code>, mate breakend coordinates, or other SV metadata; use RegionKey explicitly for interval/SV span indexing. See Nicola Asuni (2018) <a href="https://doi.org/10.1101/473744" class="external-link uri">https://doi.org/10.1101/473744</a>.</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
@@ -1245,7 +1373,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="interval--reference-helpers">Interval + reference helpers<a class="anchor" aria-label="anchor" href="#interval--reference-helpers"></a>
 </h3>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bed_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
@@ -1284,7 +1412,7 @@ Show generated function catalog
 <h3 id="cgranges-registry-entry-points">cgranges registry entry points<a class="anchor" aria-label="anchor" href="#cgranges-registry-entry-points"></a>
 </h3>
 <p>The bundled extension also exposes SQL-first <code>duckhts_cgranges_*</code> entry points. These are session-scoped interval indexes that you can populate either row-wise or in bulk from a SQL query, then query through <code>duckhts_cgranges_overlaps(...)</code>. For row-preserving filters or count annotations over provider rows, use the vectorized scalar helpers <code>duckhts_cgranges_has_overlap(...)</code> and <code>duckhts_cgranges_count_overlaps(...)</code> directly in queries over <code>read_bed(...)</code>, <code>read_bam(...)</code>, <code>read_bcf(...)</code>, or regular tables. For streaming one-row-per-hit expansion while keeping provider columns, use <code>duckhts_cgranges_overlaps_list(...)</code> with <code>UNNEST(...)</code>. The older <code>duckhts_cgranges_overlaps_bulk(...)</code> table function still accepts a probe query and emits matching indexed intervals in one table-function call; that bulk query runs on the extension-owned helper connection, so use a regular table or view rather than a temp table. There is no dedicated R wrapper yet, so use them through <code>DBI</code>.</p>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT duckhts_cgranges_create('readme_idx') AS ok"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     ok</span></span>
 <span><span class="co">#&gt; 1 TRUE</span></span>
@@ -1390,7 +1518,7 @@ Show generated function catalog
 <h3 id="fixed-bin-native-counting">Fixed-bin native counting<a class="anchor" aria-label="anchor" href="#fixed-bin-native-counting"></a>
 </h3>
 <p><code><a href="reference/rduckhts_bam_bin_counts.html">rduckhts_bam_bin_counts()</a></code> exposes the native fixed-width read-start counting kernel. It returns one row per bin across the selected contig span, including zero-count bins, which makes it suitable as a dense CNV binning primitive. It can also add one-pass GC and MAPQ summaries on the same scan.</p>
-<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">mixed_cram</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"fixture_mixed.cram"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fixture_ref</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"fixture_ref.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
@@ -1434,7 +1562,7 @@ Show generated function catalog
 <h3 id="mosdepth-compatible-coverage-outputs">Mosdepth-compatible coverage outputs<a class="anchor" aria-label="anchor" href="#mosdepth-compatible-coverage-outputs"></a>
 </h3>
 <p><code><a href="reference/rduckhts_mosdepth.html">rduckhts_mosdepth()</a></code> writes mosdepth-style outputs to disk and returns the paths it created. This example writes windowed fragment coverage from the bundled BAM fixture and previews the generated regions BED.gz.</p>
-<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">mos_prefix</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_mosdepth_"</span><span class="op">)</span></span>
 <span><span class="va">mos_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_mosdepth.html">rduckhts_mosdepth</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
@@ -1480,7 +1608,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="liftover-score-style-rows">Liftover score-style rows<a class="anchor" aria-label="anchor" href="#liftover-score-style-rows"></a>
 </h3>
-<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">lift_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_liftover_src_"</span>, fileext <span class="op">=</span> <span class="st">".fa"</span><span class="op">)</span></span>
 <span><span class="va">lift_dst</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_liftover_dst_"</span>, fileext <span class="op">=</span> <span class="st">".fa"</span><span class="op">)</span></span>
 <span><span class="va">lift_chain</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_liftover_"</span>, fileext <span class="op">=</span> <span class="st">".chain"</span><span class="op">)</span></span>
@@ -1506,7 +1634,7 @@ Show generated function catalog
 <span><span class="op">)</span>, <span class="va">lift_chain</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_src</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_src</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt;   success                                                 index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_dst</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_dst</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   success                                                index_path</span></span>
@@ -1547,7 +1675,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="munge-score-style-rows">Munge score-style rows<a class="anchor" aria-label="anchor" href="#munge-score-style-rows"></a>
 </h3>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">munge_fasta</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_munge_"</span>, fileext <span class="op">=</span> <span class="st">".fa"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/writeLines.html" class="external-link">writeLines</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
 <span>  <span class="st">"&gt;chrF"</span>,</span>
@@ -1583,7 +1711,7 @@ Show generated function catalog
 <h3 id="polygenic-risk-scoring">Polygenic risk scoring<a class="anchor" aria-label="anchor" href="#polygenic-risk-scoring"></a>
 </h3>
 <p><code><a href="reference/rduckhts_score.html">rduckhts_score()</a></code> computes per-sample polygenic risk scores (PRS) from a genotype VCF/BCF and one or more GWAS summary statistics files, wrapping <code>bcftools_score</code>.</p>
-<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">vcf_path</span>    <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"score_input.vcf"</span>,        package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">dosage_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"score_dosage.vcf"</span>,       package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">sumf_path</span>   <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"score_summary.tsv"</span>,      package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -1637,7 +1765,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="compression--tabix-round-trips">Compression + tabix round-trips<a class="anchor" aria-label="anchor" href="#compression--tabix-round-trips"></a>
 </h3>
-<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bed_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bam_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bcf_src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -1659,7 +1787,7 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
+<span><span class="co">#&gt;   success                                           output_path bytes_out</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
@@ -1670,8 +1798,10 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgunzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                                 output_path bytes_out</span></span>
-<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       194</span></span>
+<span><span class="co">#&gt;   success                                                  output_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
+<span><span class="co">#&gt;   bytes_out</span></span>
+<span><span class="co">#&gt; 1       194</span></span>
 <span></span>
 <span><span class="va">bam_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bam_index.html">rduckhts_bam_index</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="va">bam_src</span>,</span>
@@ -1679,7 +1809,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bam_index_meta</span></span>
-<span><span class="co">#&gt;   success                                         index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                           index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          BAI</span></span>
 <span></span>
 <span><span class="va">bcf_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bcf_index.html">rduckhts_bcf_index</a></span><span class="op">(</span></span>
@@ -1688,7 +1818,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bcf_index_meta</span></span>
-<span><span class="co">#&gt;   success                                            index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          CSI</span></span>
 <span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span></span>
@@ -1698,8 +1828,10 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          TBI</span></span>
+<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
+<span><span class="co">#&gt;   index_format</span></span>
+<span><span class="co">#&gt; 1          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>
@@ -1717,7 +1849,7 @@ Show generated function catalog
 <h2 id="sequence-udfs-1">Sequence UDFs<a class="anchor" aria-label="anchor" href="#sequence-udfs-1"></a>
 </h2>
 <p>The extension also exposes sequence utility UDFs directly in DuckDB SQL, including 4-bit IUPAC DNA encode/decode helpers. These can be applied to <code>SEQUENCE</code> columns from FASTA and FASTQ scans.</p>
-<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
 <span>  <span class="st">"SELECT</span></span>
@@ -1755,11 +1887,11 @@ Show generated function catalog
 <h3 id="fasta-region-queries">FASTA region queries<a class="anchor" aria-label="anchor" href="#fasta-region-queries"></a>
 </h3>
 <p><code>read_fasta</code> supports indexed region queries via <code>rduckhts_fasta(..., region = ...)</code>.</p>
-<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
 <span><span class="va">fai_info</span></span>
-<span><span class="co">#&gt;   success                                       index_path</span></span>
+<span><span class="co">#&gt;   success                                        index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span></span>
@@ -1780,7 +1912,7 @@ Show generated function catalog
 <h3 id="region-queries">Region Queries<a class="anchor" aria-label="anchor" href="#region-queries"></a>
 </h3>
 <p>Region queries can use implicit sidecar indexes or an explicit <code>index_path</code> for custom index names/locations.</p>
-<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bcf_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bcf_index_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"vcf_file.bcf.csi"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bcf.html">rduckhts_bcf</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"variants"</span>, <span class="va">bcf_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -1835,7 +1967,7 @@ Show generated function catalog
 <h3 id="remote-vcf-on-s3">Remote VCF on S3<a class="anchor" aria-label="anchor" href="#remote-vcf-on-s3"></a>
 </h3>
 <p>S3 files can be query when <code>htslib</code> is built with plugins enable. This is not the case on RTools</p>
-<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Enable htslib plugins for remote access (S3/GCS/HTTP)</span></span>
 <span><span class="fu"><a href="reference/setup_hts_env.html">setup_hts_env</a></span><span class="op">(</span><span class="op">)</span></span>
 <span></span>
@@ -1854,7 +1986,7 @@ Show generated function catalog
 <h3 id="fastq-files">FASTQ files<a class="anchor" aria-label="anchor" href="#fastq-files"></a>
 </h3>
 <p>Three modes for fastq files, single, paired and interleaved</p>
-<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">r1</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">r2</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">interleaved</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"interleaved.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -1904,7 +2036,7 @@ Show generated function catalog
 <li>Return either numeric arrays or canonical Phred+33 text.</li>
 </ol>
 <p><code>BAM</code>/<code>CRAM</code> reads skip the text-decoding step because qualities are already stored numerically.</p>
-<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">legacy_fastq</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"legacy_phred64.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_detect_quality_encoding.html">rduckhts_detect_quality_encoding</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">legacy_fastq</span><span class="op">)</span></span>
@@ -1955,7 +2087,7 @@ Show generated function catalog
 </h3>
 <p>GFF3 files are read with <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code> / SQL <code>read_gff(...)</code>; GTF files are read with <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code> / SQL <code>read_gtf(...)</code>. <code>strict = TRUE</code> enables GFF3 structural validation. Attribute decoding can be scalar and raw for legacy convenience (<code>attributes_map</code>), grouped and lossless for multi-values (<code>attributes_list</code>, a DuckDB <code>MAP(VARCHAR, VARCHAR[])</code>), or exact parser-style pairs (<code>attributes_pairs</code>, a DuckDB <code>LIST&lt;STRUCT(key, value, idx)&gt;</code>).</p>
 <p>The extension-level GFF3 implementation is benchmarked and audited against <a href="https://github.com/Kuanhao-Chao/gffbase" class="external-link">GFFBase</a> in the DuckHTS repo: <a href="https://github.com/RGenomicsETL/duckhts/blob/develop/benchmarks/benchmark_gffbase_conformance.md" class="external-link uri">https://github.com/RGenomicsETL/duckhts/blob/develop/benchmarks/benchmark_gffbase_conformance.md</a>.</p>
-<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gff_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"gff_file.gff.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_gff.html">rduckhts_gff</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"genes"</span>, <span class="va">gff_path</span>, attributes_map <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5"</span><span class="op">)</span></span>
@@ -1990,7 +2122,7 @@ Show generated function catalog
 <h3 id="bamcram">BAM/CRAM<a class="anchor" aria-label="anchor" href="#bamcram"></a>
 </h3>
 <p>When built with htslib codec, <code>CRAM</code> can be opened in addition to <code>BAM</code> files. <code>index_path</code> can also be passed for region scans with non-standard index names.</p>
-<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cram_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.cram"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">ref_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"ce.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -2020,7 +2152,7 @@ Show generated function catalog
 <h3 id="samtags--auxiliary-tags">SAMtags + auxiliary tags<a class="anchor" aria-label="anchor" href="#samtags--auxiliary-tags"></a>
 </h3>
 <p>Standard SAMtags can be exposed as typed columns, and any remaining tags are available via <code>AUXILIARY_TAGS</code>:</p>
-<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">aux_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"aux_tags.sam.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bam.html">rduckhts_bam</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"aux_reads"</span>, <span class="va">aux_path</span>, standard_tags <span class="op">=</span> <span class="cn">TRUE</span>, auxiliary_tags <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux_reads LIMIT 1"</span><span class="op">)</span></span>
@@ -2031,7 +2163,7 @@ Show generated function catalog
 <h3 id="tabix-headers--types">Tabix headers + types<a class="anchor" aria-label="anchor" href="#tabix-headers--types"></a>
 </h3>
 <p>Use <code>header = TRUE</code> to use the first non-meta row as column names, and <code>auto_detect = TRUE</code> / <code>column_types</code> to control column typing:</p>
-<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">tabix_header</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"header_tabix.tsv.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"meta_tabix.tsv.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
@@ -2058,7 +2190,7 @@ Show generated function catalog
 <h3 id="hts-header-and-index-metadata">HTS header and index metadata<a class="anchor" aria-label="anchor" href="#hts-header-and-index-metadata"></a>
 </h3>
 <p>Use metadata helpers to inspect parsed headers, raw header lines, index summaries, span-oriented index views, and raw index blobs.</p>
-<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">header_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">header_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"record_type"</span>, <span class="st">"id"</span>, <span class="st">"number"</span>, <span class="st">"value_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   record_type   id number value_type</span></span>
@@ -2111,7 +2243,7 @@ Show generated function catalog
 <h3 id="remote-gtex-tabix-example">Remote GTEx tabix example<a class="anchor" aria-label="anchor" href="#remote-gtex-tabix-example"></a>
 </h3>
 <p>GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this still depends on CORS policy on both the data object and index object.</p>
-<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gtex_url</span> <span class="op">&lt;-</span> <span class="st">"https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"</span> </span>
 <span><span class="fu"><a href="reference/rduckhts_tabix.html">rduckhts_tabix</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"gtex_eqtl"</span>, <span class="va">gtex_url</span>, region <span class="op">=</span> <span class="st">"1:11868-14409"</span>,</span>
 <span>                  header <span class="op">=</span> <span class="cn">TRUE</span>, auto_detect <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -2134,7 +2266,7 @@ Show generated function catalog
 <span><span class="co">#&gt; 3    13550   G   A  SNP rs554008981</span></span>
 <span><span class="co">#&gt; 4    13550   G   A  SNP rs554008981</span></span>
 <span><span class="co">#&gt; 5    13550   G   A  SNP rs554008981</span></span></code></pre></div>
-<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>

@@ -90,6 +90,15 @@
   : samtools idxstats-Compatible Alignment Summary
 - [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.md)
   : Compute Polygenic Scores
+- [`rduckhts_simd_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_requested_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_backend_compiled()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_backend_cpu_supported()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_backend_available()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_set_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  : DuckHTS SIMD backend diagnostics
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)
   : Create Tabix-Indexed File Table
 - [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.md)

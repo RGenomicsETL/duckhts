@@ -52,6 +52,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_pileup.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_multi.html</loc></url>
