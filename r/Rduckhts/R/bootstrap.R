@@ -247,6 +247,9 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
     ext_dir,
     c(
       "duckhts.c",
+      file.path("simd", "duckhts_simd_dispatch.c"),
+      file.path("simd", "duckhts_simd_scalar.c"),
+      file.path("simd", "duckhts_simd_avx2.c"),
       "bcf_reader.c",
       "bam_reader.c",
       "bam_pileup.c",
