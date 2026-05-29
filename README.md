@@ -1637,26 +1637,38 @@ dbDisconnect(con, shutdown = TRUE)
 ## Project Structure
 
     src/
-      duckhts.c          # Extension entry point
-      bcf_reader.c       # VCF/BCF reader (read_bcf)
-      bam_reader.c       # SAM/BAM/CRAM reader (read_bam)
-      seq_reader.c       # FASTA/FASTQ reader (read_fasta, read_fastq)
-      tabix_reader.c     # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
-      vep_parser.c       # VEP/CSQ annotation parser
+      duckhts.c              # Extension entry point and SQL registration
+      bcf_reader.c           # VCF/BCF reader (read_bcf)
+      bam_reader.c           # SAM/BAM/CRAM reader (read_bam)
+      seq_reader.c           # FASTA/FASTQ reader (read_fasta, read_fastq)
+      tabix_reader.c         # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
+      vep_parser.c           # VEP/CSQ annotation parser
+      kmer_udf.c             # Sequence utilities, including SIMD-routed seq_gc_content
       ......
+      simd/                  # Runtime SIMD dispatch and scalar/AVX/NEON/wasm backends
+        duckhts_simd_dispatch.c
+        duckhts_simd_scalar.c
+        duckhts_simd_avx2.c
+        duckhts_simd_avx512.c
+        duckhts_simd_neon.c
+        duckhts_simd_wasm_simd128.c
       include/
+        duckhts_simd.h
+        duckhts_simd_internal.h
+        duckhts_simd_kernels.def
         vcf_types.h
         vep_parser.h
-        .....
     third_party/
-      htslib/            # Vendored htslib 1.23.1 (built automatically)
+      htslib/                # Vendored htslib 1.23.1 (built automatically)
+    benchmarks/
+      benchmark_simd_seq_gc.Rmd  # Scalar-vs-runtime-SIMD benchmark report
     test/
-      sql/               # SQL logic tests
+      sql/                   # SQL logic tests, including SIMD conformance
     duckdb_capi/
-      duckdb.h           # DuckDB C API headers
+      duckdb.h               # DuckDB C API headers
       duckdb_extension.h
     r/
-      Rduckhts/          # R package 
+      Rduckhts/              # R package with bundled extension sources
 
 ## References
 
