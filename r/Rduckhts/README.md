@@ -577,7 +577,7 @@ dbGetQuery(
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                        index_path
+#>   success                                       index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
@@ -905,7 +905,7 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                          index_path
+#>   success                                         index_path
 #> 1    TRUE <tempfile>
 
 munge_out <- rduckhts_munge(
