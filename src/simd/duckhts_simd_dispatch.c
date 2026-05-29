@@ -16,6 +16,12 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "duckhts_simd_internal.h"
 
+enum {
+    DUCKHTS_SIMD_INIT_UNINITIALIZED = 0,
+    DUCKHTS_SIMD_INIT_IN_PROGRESS = 1,
+    DUCKHTS_SIMD_INIT_DONE = 2
+};
+
 #if DUCKHTS_SIMD_HAVE_C11_ATOMICS
 static _Atomic(const duckhts_simd_ops_t *) duckhts_simd_ops;
 static _Atomic(const char *) duckhts_simd_requested;
@@ -32,11 +38,24 @@ static const char *duckhts_simd_load_requested(void) {
 static void duckhts_simd_store_requested(const char *name) {
     atomic_store_explicit(&duckhts_simd_requested, name, memory_order_release);
 }
-static int duckhts_simd_load_initialized(void) {
+static int duckhts_simd_load_init_state(void) {
     return atomic_load_explicit(&duckhts_simd_initialized, memory_order_acquire);
 }
-static void duckhts_simd_store_initialized(int initialized) {
-    atomic_store_explicit(&duckhts_simd_initialized, initialized, memory_order_release);
+static int duckhts_simd_is_initialized(void) {
+    return duckhts_simd_load_init_state() == DUCKHTS_SIMD_INIT_DONE;
+}
+static int duckhts_simd_try_begin_init(void) {
+    int expected = DUCKHTS_SIMD_INIT_UNINITIALIZED;
+    return atomic_compare_exchange_strong_explicit(&duckhts_simd_initialized, &expected,
+                                                   DUCKHTS_SIMD_INIT_IN_PROGRESS,
+                                                   memory_order_acq_rel, memory_order_acquire);
+}
+static void duckhts_simd_finish_init(void) {
+    atomic_store_explicit(&duckhts_simd_initialized, DUCKHTS_SIMD_INIT_DONE, memory_order_release);
+}
+static void duckhts_simd_wait_initialized(void) {
+    while (duckhts_simd_load_init_state() != DUCKHTS_SIMD_INIT_DONE) {
+    }
 }
 #else
 static const duckhts_simd_ops_t *duckhts_simd_ops;
@@ -46,8 +65,17 @@ static const duckhts_simd_ops_t *duckhts_simd_load_ops(void) { return duckhts_si
 static void duckhts_simd_store_ops(const duckhts_simd_ops_t *ops) { duckhts_simd_ops = ops; }
 static const char *duckhts_simd_load_requested(void) { return duckhts_simd_requested; }
 static void duckhts_simd_store_requested(const char *name) { duckhts_simd_requested = name; }
-static int duckhts_simd_load_initialized(void) { return duckhts_simd_initialized; }
-static void duckhts_simd_store_initialized(int initialized) { duckhts_simd_initialized = initialized; }
+static int duckhts_simd_is_initialized(void) { return duckhts_simd_initialized == DUCKHTS_SIMD_INIT_DONE; }
+static int duckhts_simd_try_begin_init(void) {
+    if (duckhts_simd_initialized != DUCKHTS_SIMD_INIT_UNINITIALIZED) return 0;
+    duckhts_simd_initialized = DUCKHTS_SIMD_INIT_IN_PROGRESS;
+    return 1;
+}
+static void duckhts_simd_finish_init(void) { duckhts_simd_initialized = DUCKHTS_SIMD_INIT_DONE; }
+static void duckhts_simd_wait_initialized(void) {
+    while (duckhts_simd_initialized != DUCKHTS_SIMD_INIT_DONE) {
+    }
+}
 #endif
 
 static const char *duckhts_simd_dispatch_mode_name = "single-shlib-ops-table";
@@ -170,10 +198,14 @@ static const duckhts_simd_ops_t *duckhts_simd_ops_for_backend(const char *backen
 }
 
 void duckhts_simd_init(void) {
-    if (duckhts_simd_load_initialized()) return;
+    if (duckhts_simd_is_initialized()) return;
+    if (!duckhts_simd_try_begin_init()) {
+        duckhts_simd_wait_initialized();
+        return;
+    }
     duckhts_simd_store_requested("auto");
     duckhts_simd_store_ops(duckhts_simd_best_ops());
-    duckhts_simd_store_initialized(1);
+    duckhts_simd_finish_init();
 }
 
 int duckhts_simd_backend_compiled(const char *backend) {
@@ -193,7 +225,7 @@ int duckhts_simd_set_backend(const char *backend, char *err, size_t err_len) {
     const duckhts_simd_backend_entry_t *entry = (const duckhts_simd_backend_entry_t *)0;
     const char *canonical;
 
-    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
+    if (!duckhts_simd_is_initialized()) duckhts_simd_init();
 
     canonical = duckhts_simd_backend_canonical(backend);
     if (!canonical) {
@@ -243,12 +275,12 @@ int duckhts_simd_set_backend(const char *backend, char *err, size_t err_len) {
 }
 
 const char *duckhts_simd_selected_backend(void) {
-    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
+    if (!duckhts_simd_is_initialized()) duckhts_simd_init();
     return duckhts_simd_load_ops()->name;
 }
 
 const char *duckhts_simd_requested_backend(void) {
-    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
+    if (!duckhts_simd_is_initialized()) duckhts_simd_init();
     return duckhts_simd_load_requested();
 }
 
@@ -256,7 +288,7 @@ void duckhts_simd_base_counts(const char *seq, size_t len,
                               duckhts_simd_base_counts_t *out) {
     const duckhts_simd_ops_t *ops;
     duckhts_base_counts_fn fn;
-    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
+    if (!duckhts_simd_is_initialized()) duckhts_simd_init();
     ops = duckhts_simd_load_ops();
     fn = (ops && ops->base_counts) ? ops->base_counts : duckhts_simd_scalar_ops()->base_counts;
     fn(seq, len, out);

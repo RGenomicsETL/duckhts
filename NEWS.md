@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.2.1.9000 (development)
+- harden SIMD dispatch follow-up behavior: initialize the SIMD ops table with an atomic one-time state machine so an in-flight initialization cannot overwrite an explicit backend selection, keep per-kernel scalar fallback dispatch for future ops-table growth, clarify `selectable` versus `available` diagnostics, and render the generated SIMD backend catalog call with Markdown code ticks so ASCII SQL quotes survive README/function-catalog generation
 - remove htslib autoconf `HAVE_*` macro guards from all SIMD backend translation units (`duckhts_simd_avx2.c`, `duckhts_simd_avx512.c`, `duckhts_simd_neon.c`, `duckhts_simd_wasm_simd128.c`, `duckhts_simd_dispatch.c`): the design intent is always-compile all ISA backends and dispatch at runtime via CPU feature detection, so static compile-time gating on autoconf-generated macros was both wrong by design and fragile across out-of-tree builds; the compile-time guard is now `defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && !defined(DUCKDB_WASM_EXTENSION)` for x86 backends and `defined(__aarch64__)` / `defined(__wasm_simd128__)` for NEON/wasm, which are universally available from the compiler without autoconf; `DUCKHTS_POPCOUNT32` now unconditionally expands to `__builtin_popcount` on x86; add scalar-vs-auto backend SQL correctness tests covering GC=0/0.5/1.0 sequences, embedded-N calling, and soft-masked lowercase bases
 
 # duckhts 1.2.1 (2026-05-07)

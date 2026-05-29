@@ -43,8 +43,9 @@ Backend inventory predicates such as
   \code{rduckhts_simd_backend_available()} return logical scalars.
   \code{rduckhts_simd_info()} returns the extension-owned backend inventory
   table with one row per known backend; availability means compiled and
-  CPU/runtime supported; the \code{selectable} column reports whether
-  \code{rduckhts_simd_set_backend()} can choose that row.
+  CPU/runtime supported; the \code{selectable} column reports whether the
+  backend has a selectable implementation path. Explicit selection still
+  requires \code{available = TRUE}.
 }
 \description{
 Inspect or explicitly select the SIMD backend used by bundled DuckHTS

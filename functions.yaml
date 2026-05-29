@@ -54,7 +54,7 @@
       "signature": "duckhts_simd_backend()",
       "returns": "VARCHAR",
       "r_wrapper": "rduckhts_simd_backend",
-      "description": "Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend('auto'|'scalar'|backend).",
+      "description": "Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with `duckhts_simd_set_backend('auto'|'scalar'|backend)`.",
       "examples": [
         "SELECT duckhts_simd_backend();"
       ]
@@ -118,7 +118,7 @@
       "signature": "duckhts_simd_info()",
       "returns": "table",
       "r_wrapper": "rduckhts_simd_info",
-      "description": "Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; selectable reports whether duckhts_simd_set_backend can choose that backend. auto is a selection request and is not a concrete backend row.",
+      "description": "Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported. selectable reports whether the backend has a selectable implementation path; explicit selection still requires available = TRUE. auto is a selection request and is not a concrete backend row.",
       "examples": [
         "SELECT * FROM duckhts_simd_info();",
         "SELECT backend FROM duckhts_simd_info() WHERE available;"
