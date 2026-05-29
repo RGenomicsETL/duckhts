@@ -130,6 +130,7 @@ The extension is loaded with `rduckhts_load(con, extension_path = NULL)`. The wr
 - reference helpers: `rduckhts_fasta_index()`, `rduckhts_fasta_nuc()`
 - compression/indexing: `rduckhts_bgzip()`, `rduckhts_bgunzip()`, `rduckhts_bam_index()`, `rduckhts_bcf_index()`, `rduckhts_tabix_index()`
 - metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`, `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
+- SIMD diagnostics: `rduckhts_simd_backend()`, `rduckhts_simd_requested_backend()`, `rduckhts_simd_backend_available()`, `rduckhts_simd_set_backend()`
 
 Start with one reader, then materialize tables and compose the richer helpers around them.
 
@@ -151,6 +152,46 @@ rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
+```
+
+## SIMD backend flow
+
+The bundled extension uses explicit runtime SIMD dispatch for byte-oriented
+helper kernels, starting with `seq_gc_content(...)`. `scalar` is always
+available and is the portable baseline. Optional platform backends should be
+checked with `rduckhts_simd_backend_available()` before being requested; use
+`rduckhts_simd_set_backend(con, "auto")` to return to runtime auto-detection.
+
+```{r}
+data.frame(
+  backend = c("scalar", "not-a-backend"),
+  available = c(
+    rduckhts_simd_backend_available(con, "scalar"),
+    rduckhts_simd_backend_available(con, "not-a-backend")
+  )
+)
+
+rduckhts_simd_set_backend(con, "scalar")
+
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT duckhts_simd_requested_backend() AS requested_backend,",
+    "duckhts_simd_backend() AS selected_backend,",
+    "round(seq_gc_content('ACGTNNacgtnn'), 3) AS gc_content"
+  )
+)
+
+data.frame(
+  requested_backend = rduckhts_simd_requested_backend(con),
+  selected_backend = rduckhts_simd_backend(con)
+)
+
+restored_backend <- rduckhts_simd_set_backend(con, "auto")
+data.frame(
+  requested_backend = rduckhts_simd_requested_backend(con),
+  selected_backend_known = nzchar(restored_backend)
+)
 ```
 
 ## Multi-file Reading

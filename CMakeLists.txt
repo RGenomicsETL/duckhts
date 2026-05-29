@@ -71,6 +71,9 @@ project(${EXTENSION_NAME} LANGUAGES C)
 # Create Extension library
 set(EXTENSION_SOURCES
         src/duckhts.c
+        src/simd/duckhts_simd_dispatch.c
+        src/simd/duckhts_simd_scalar.c
+        src/simd/duckhts_simd_avx2.c
         src/bcf_reader.c
         src/bam_reader.c
         src/bam_pileup.c

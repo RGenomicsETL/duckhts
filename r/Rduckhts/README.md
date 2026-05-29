@@ -158,6 +158,9 @@ into:
   `rduckhts_tabix_index()`
 - metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`,
   `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
+- SIMD diagnostics: `rduckhts_simd_backend()`,
+  `rduckhts_simd_requested_backend()`,
+  `rduckhts_simd_backend_available()`, `rduckhts_simd_set_backend()`
 
 Start with one reader, then materialize tables and compose the richer
 helpers around them.
@@ -184,6 +187,58 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #>    n
 #> 1 10
+```
+
+## SIMD backend flow
+
+The bundled extension uses explicit runtime SIMD dispatch for
+byte-oriented helper kernels, starting with `seq_gc_content(...)`.
+`scalar` is always available and is the portable baseline. Optional
+platform backends should be checked with
+`rduckhts_simd_backend_available()` before being requested; use
+`rduckhts_simd_set_backend(con, "auto")` to return to runtime
+auto-detection.
+
+``` r
+data.frame(
+  backend = c("scalar", "not-a-backend"),
+  available = c(
+    rduckhts_simd_backend_available(con, "scalar"),
+    rduckhts_simd_backend_available(con, "not-a-backend")
+  )
+)
+#>         backend available
+#> 1        scalar      TRUE
+#> 2 not-a-backend     FALSE
+
+rduckhts_simd_set_backend(con, "scalar")
+#> [1] "scalar"
+
+DBI::dbGetQuery(
+  con,
+  paste(
+    "SELECT duckhts_simd_requested_backend() AS requested_backend,",
+    "duckhts_simd_backend() AS selected_backend,",
+    "round(seq_gc_content('ACGTNNacgtnn'), 3) AS gc_content"
+  )
+)
+#>   requested_backend selected_backend gc_content
+#> 1            scalar           scalar        0.5
+
+data.frame(
+  requested_backend = rduckhts_simd_requested_backend(con),
+  selected_backend = rduckhts_simd_backend(con)
+)
+#>   requested_backend selected_backend
+#> 1            scalar           scalar
+
+restored_backend <- rduckhts_simd_set_backend(con, "auto")
+data.frame(
+  requested_backend = rduckhts_simd_requested_backend(con),
+  selected_backend_known = nzchar(restored_backend)
+)
+#>   requested_backend selected_backend_known
+#> 1              auto                   TRUE
 ```
 
 ## Multi-file Reading
@@ -237,6 +292,15 @@ Show generated function catalog
 ## Extension Function Catalog
 
 This section is generated from `functions.yaml`.
+
+### Diagnostics
+
+| Function                         | Kind   | Returns | R helper                          | Description                                                                                                                                                                                                                                            |
+|----------------------------------|--------|---------|-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_simd_backend`           | scalar | VARCHAR | `rduckhts_simd_backend`           | Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend(‘auto’\|‘scalar’\|backend).   |
+| `duckhts_simd_requested_backend` | scalar | VARCHAR | `rduckhts_simd_requested_backend` | Return the current explicit SIMD backend request, usually auto unless duckhts_simd_set_backend(…) was called. The selected backend may differ from auto across x86, ARM, wasm, and scalar-only builds.                                                 |
+| `duckhts_simd_backend_available` | scalar | BOOLEAN | `rduckhts_simd_backend_available` | Return whether a SIMD backend request is usable in the current process. scalar and auto are portable; platform-specific requests such as avx2 are true only when compiled in and supported by the running CPU/runtime.                                 |
+| `duckhts_simd_set_backend`       | scalar | VARCHAR | `rduckhts_simd_set_backend`       | Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests raise an error instead of silently falling back. |
 
 ### Readers
 
@@ -503,7 +567,7 @@ dbGetQuery(
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
+#>   success                                        index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
@@ -726,9 +790,9 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                 summary_path
+#>                                                                  summary_path
 #> 1 <tempfile>
-#>                                                           regions_path
+#>                                                            regions_path
 #> 1 <tempfile>
 
 utils::read.delim(
@@ -783,10 +847,10 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
+#>   success                                                 index_path
 #> 1    TRUE <tempfile>
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
+#>   success                                                 index_path
 #> 1    TRUE <tempfile>
 
 lifted <- rduckhts_liftover(
@@ -831,7 +895,7 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                         index_path
+#>   success                                          index_path
 #> 1    TRUE <tempfile>
 
 munge_out <- rduckhts_munge(
@@ -939,7 +1003,7 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                          output_path bytes_out
+#>   success                                           output_path bytes_out
 #> 1    TRUE <tempfile>       169
 
 bgunzip_meta <- rduckhts_bgunzip(
@@ -950,8 +1014,10 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE <tempfile>       194
+#>   success                                                  output_path
+#> 1    TRUE <tempfile>
+#>   bytes_out
+#> 1       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -959,7 +1025,7 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                         index_path index_format
+#>   success                                          index_path index_format
 #> 1    TRUE <tempfile>          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
@@ -968,7 +1034,7 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                            index_path index_format
+#>   success                                              index_path index_format
 #> 1    TRUE <tempfile>          CSI
 
 tabix_meta <- rduckhts_tabix_index(
@@ -978,8 +1044,10 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                               index_path index_format
-#> 1    TRUE <tempfile>          TBI
+#>   success                                                index_path
+#> 1    TRUE <tempfile>
+#>   index_format
+#> 1          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -1044,7 +1112,7 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
+#>   success                                        index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_fasta(

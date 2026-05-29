@@ -5,7 +5,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdint.h>
 #include <string.h>
 
-#include "include/seq_encoding.h"
+#include "duckhts_simd.h"
+#include "seq_encoding.h"
 
 #define SAM_FLAG_PAIRED 0x1
 #define SAM_FLAG_PROPER_PAIR 0x2
@@ -489,37 +490,14 @@ static void seq_gc_content_scalar(duckdb_function_info info, duckdb_data_chunk i
             continue;
         }
 
-        idx_t gc = 0;
-        idx_t called = 0;
-        int valid = 1;
-        for (idx_t i = 0; i < len; i++) {
-            unsigned char c = (unsigned char)toupper((unsigned char)seq[i]);
-            switch (c) {
-            case 'G':
-            case 'C':
-                gc++;
-                called++;
-                break;
-            case 'A':
-            case 'T':
-                called++;
-                break;
-            case 'N':
-                break;
-            default:
-                valid = 0;
-                break;
-            }
-            if (!valid) {
-                break;
-            }
-        }
+        duckhts_simd_base_counts_t counts;
+        duckhts_simd_base_counts(seq, (size_t)len, &counts);
 
-        if (!valid || called == 0) {
+        if (counts.invalid || counts.called == 0) {
             set_null_at(output, row);
             continue;
         }
-        out_data[row] = (double)gc / (double)called;
+        out_data[row] = (double)counts.gc / (double)counts.called;
     }
 }
 

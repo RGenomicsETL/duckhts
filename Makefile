@@ -118,3 +118,6 @@ bench-mosdepth:
 
 bench-gffbase:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_gffbase_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+bench-simd-seq-gc:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_seq_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"

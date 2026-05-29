@@ -48,11 +48,34 @@ test_seq_ops <- function() {
     "SELECT length(seq_decode_4bit(seq_encode_4bit(''))) AS len")
   expect_equal(empty$len[1], 0L)
 
-  # seq_gc_content
+  # seq_gc_content and SIMD backend diagnostics
   gc <- DBI::dbGetQuery(con,
     "SELECT seq_gc_content('ACGTNN') AS gc, seq_gc_content('NNNN') IS NULL AS all_n")
   expect_true(abs(gc$gc[1] - 0.5) < 1e-6)
   expect_true(gc$all_n[1])
+  gc_lower <- DBI::dbGetQuery(con, "SELECT seq_gc_content('acgtnn') AS gc")
+  expect_true(abs(gc_lower$gc[1] - 0.5) < 1e-6)
+  simd <- DBI::dbGetQuery(con,
+    "SELECT duckhts_simd_backend() AS selected, duckhts_simd_requested_backend() AS requested, duckhts_simd_backend_available('scalar') AS has_scalar")
+  expect_true(nzchar(simd$selected[1]))
+  expect_true(nzchar(simd$requested[1]))
+  expect_true(simd$has_scalar[1])
+  forced <- DBI::dbGetQuery(con, "SELECT duckhts_simd_set_backend('scalar') AS selected")
+  expect_identical(forced$selected[1], "scalar")
+  auto <- DBI::dbGetQuery(con, "SELECT duckhts_simd_set_backend('auto') AS selected")
+  expect_true(nzchar(auto$selected[1]))
+  auto_req <- DBI::dbGetQuery(con, "SELECT duckhts_simd_requested_backend() AS requested")
+  expect_identical(auto_req$requested[1], "auto")
+  expect_true(nzchar(rduckhts_simd_backend(con)))
+  expect_identical(rduckhts_simd_requested_backend(con), "auto")
+  expect_true(rduckhts_simd_backend_available(con, "scalar"))
+  expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
+  expect_identical(rduckhts_simd_backend(con), "scalar")
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
+  expect_identical(rduckhts_simd_requested_backend(con), "auto")
+  expect_false(rduckhts_simd_backend_available(con, "not-a-backend"))
+  expect_error(rduckhts_simd_set_backend(con, ""), "backend")
+  expect_error(rduckhts_simd_set_backend(con, "not-a-backend"), "unknown SIMD backend")
 
   # seq_revcomp
   rc <- DBI::dbGetQuery(con, "SELECT seq_revcomp('ACGT') AS rc")

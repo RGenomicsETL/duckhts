@@ -959,6 +959,42 @@ SELECT printf('%.3f', seq_gc_content('ACGTNN')), seq_gc_content('NNNN') IS NULL;
 ----
 0.500	true
 
+# --- SIMD backend diagnostics are backend-agnostic and GC accepts lower-case bases ---
+query T
+SELECT duckhts_simd_set_backend('scalar');
+----
+scalar
+
+query TTT
+SELECT
+  length(duckhts_simd_backend()) > 0,
+  duckhts_simd_backend_available('scalar'),
+  printf('%.3f', seq_gc_content('acgtnn'));
+----
+true	true	0.500
+
+query T
+SELECT duckhts_simd_set_backend('auto') IS NOT NULL;
+----
+true
+
+query T
+SELECT duckhts_simd_backend_available('neon');
+----
+false
+
+query TT
+SELECT
+  duckhts_simd_requested_backend(),
+  printf('%.3f', seq_gc_content('acgtnn'));
+----
+auto	0.500
+
+statement error
+SELECT duckhts_simd_set_backend('not-a-backend');
+----
+unknown SIMD backend
+
 # --- k-mer emission ---
 query T
 SELECT string_agg(kmer, ',' ORDER BY pos)

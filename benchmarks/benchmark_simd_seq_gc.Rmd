@@ -1,0 +1,222 @@
+---
+title: "DuckHTS SIMD seq_gc_content Benchmark"
+output: github_document
+---
+
+<!-- benchmark_simd_seq_gc.md is generated from benchmark_simd_seq_gc.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE)
+```
+
+# Benchmark
+
+This report measures the first DuckHTS runtime-SIMD dispatch path:
+`seq_gc_content(...)` uses the shared byte-oriented base-count vtable with a
+scalar fallback and optional platform-specific SIMD implementations such as
+AVX2. The benchmark requests backends explicitly through
+`duckhts_simd_set_backend(...)`; unavailable requests are reported as skipped so
+the same report remains valid on x86, ARM, and wasm builds.
+
+The goal is to decide whether a SIMD path is worth keeping before expanding the
+same dispatch scaffold to quality-score scans, BAM packed-sequence GC counts,
+depth reductions, and variant normalization helpers.
+
+# Run
+
+```sh
+make bench-simd-seq-gc
+```
+
+Useful overrides:
+
+- `SIMD_SEQ_GC_ROWS`: number of rows, default `200000`
+- `SIMD_SEQ_GC_LEN`: sequence length per row, default `512`
+- `SIMD_SEQ_GC_RUNS`: timed repeats per backend, default `7`
+- `SIMD_SEQ_GC_BACKENDS`: comma-separated backend requests, default `scalar,auto,avx2`
+- `SIMD_SEQ_GC_PATTERN`: repeated sequence pattern, default `ACGTNNacgtnn`
+- `SIMD_SEQ_GC_FORCE=1`: rerun even if cached JSON exists
+- `DUCKHTS_EXTENSION`: extension path override
+
+```{r setup, include = FALSE}
+library(knitr)
+library(jsonlite)
+
+repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
+out_dir <- file.path(repo_root, ".tmp", "simd_seq_gc")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+json_out <- file.path(out_dir, "benchmark_simd_seq_gc.json")
+
+extension <- Sys.getenv(
+  "DUCKHTS_EXTENSION",
+  unset = file.path(repo_root, "build", "release", "duckhts.duckdb_extension")
+)
+extension <- normalizePath(extension, mustWork = TRUE)
+
+rows <- as.integer(Sys.getenv("SIMD_SEQ_GC_ROWS", unset = "200000"))
+seq_len <- as.integer(Sys.getenv("SIMD_SEQ_GC_LEN", unset = "512"))
+runs <- as.integer(Sys.getenv("SIMD_SEQ_GC_RUNS", unset = "7"))
+backends <- Sys.getenv("SIMD_SEQ_GC_BACKENDS", unset = "scalar,auto,avx2")
+pattern <- Sys.getenv("SIMD_SEQ_GC_PATTERN", unset = "ACGTNNacgtnn")
+force <- identical(Sys.getenv("SIMD_SEQ_GC_FORCE", unset = "0"), "1")
+python <- Sys.getenv("PYTHON", unset = "python3")
+
+if (is.na(rows) || rows < 1L) stop("SIMD_SEQ_GC_ROWS must be positive", call. = FALSE)
+if (is.na(seq_len) || seq_len < 1L) stop("SIMD_SEQ_GC_LEN must be positive", call. = FALSE)
+if (is.na(runs) || runs < 1L) stop("SIMD_SEQ_GC_RUNS must be positive", call. = FALSE)
+if (!nzchar(pattern)) stop("SIMD_SEQ_GC_PATTERN must be non-empty", call. = FALSE)
+
+meta_out <- file.path(out_dir, "benchmark_simd_seq_gc_meta.json")
+requested_meta <- list(
+  schema = 2L,
+  rows = rows,
+  seq_len = seq_len,
+  runs = runs,
+  backends = backends,
+  pattern = pattern,
+  extension = extension
+)
+needs_run <- force || !file.exists(json_out) || !file.exists(meta_out)
+if (!needs_run) {
+  old_meta <- tryCatch(jsonlite::fromJSON(meta_out, simplifyVector = FALSE), error = function(e) list())
+  needs_run <- !identical(old_meta, requested_meta)
+}
+
+if (needs_run) {
+  cmd <- c(
+    file.path(repo_root, "scripts", "benchmark_simd_seq_gc.py"),
+    "--extension", extension,
+    "--rows", as.character(rows),
+    "--seq-len", as.character(seq_len),
+    "--iterations", as.character(runs),
+    "--pattern", pattern,
+    "--backends", backends,
+    "--json-out", json_out
+  )
+  out <- system2(python, cmd, stdout = TRUE, stderr = TRUE)
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0) {
+    stop(paste(out, collapse = "\n"), call. = FALSE)
+  }
+  writeLines(jsonlite::toJSON(requested_meta, auto_unbox = TRUE, pretty = TRUE), meta_out)
+}
+
+raw_results <- jsonlite::fromJSON(json_out, simplifyVector = FALSE)
+null_chr <- function(x) if (is.null(x)) NA_character_ else as.character(x)
+null_num <- function(x) if (is.null(x)) NA_real_ else as.numeric(x)
+null_lgl <- function(x) if (is.null(x)) FALSE else isTRUE(x)
+
+results <- do.call(rbind, lapply(raw_results, function(x) {
+  data.frame(
+    backend_request = null_chr(x$backend_request),
+    requested_backend = null_chr(x$requested_backend),
+    selected_backend = null_chr(x$selected_backend),
+    available = if (is.null(x$available)) NA else isTRUE(x$available),
+    skipped = null_lgl(x$skipped),
+    skip_reason = null_chr(x$skip_reason),
+    rows = as.integer(x$rows),
+    seq_len = as.integer(x$seq_len),
+    total_bases = as.numeric(x$total_bases),
+    iterations = as.integer(x$iterations),
+    median_sec = null_num(x$median_sec),
+    min_sec = null_num(x$min_sec),
+    mbases_per_sec_median = null_num(x$mbases_per_sec_median),
+    stringsAsFactors = FALSE
+  )
+}))
+
+scalar_idx <- which(!results$skipped & results$backend_request == "scalar")[1]
+scalar_rate <- if (length(scalar_idx) && !is.na(scalar_idx)) results$mbases_per_sec_median[scalar_idx] else NA_real_
+results$speedup_vs_scalar <- if (is.finite(scalar_rate) && scalar_rate > 0) {
+  results$mbases_per_sec_median / scalar_rate
+} else {
+  NA_real_
+}
+results$status <- ifelse(results$skipped, "skipped", "ok")
+
+extension_display <- if (startsWith(extension, paste0(repo_root, .Platform$file.sep))) {
+  sub(paste0("^", repo_root, .Platform$file.sep), "", extension)
+} else {
+  extension
+}
+
+configuration <- data.frame(
+  setting = c("rows", "sequence_length", "total_bases", "iterations", "backend_requests", "pattern", "extension"),
+  value = c(
+    format(rows, big.mark = ","),
+    format(seq_len, big.mark = ","),
+    format(rows * seq_len, big.mark = ","),
+    as.character(runs),
+    backends,
+    pattern,
+    extension_display
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+# Configuration
+
+```{r configuration, echo=FALSE}
+knitr::kable(configuration)
+```
+
+# Results
+
+```{r results, echo=FALSE}
+display <- results[, c(
+  "backend_request",
+  "requested_backend",
+  "selected_backend",
+  "status",
+  "median_sec",
+  "min_sec",
+  "mbases_per_sec_median",
+  "speedup_vs_scalar",
+  "skip_reason"
+)]
+knitr::kable(display, digits = 3)
+```
+
+# Interpretation
+
+```{r interpretation, echo=FALSE, results='asis'}
+measured <- results[!results$skipped, , drop = FALSE]
+if (!nrow(measured)) {
+  cat("No backend requests were available for measurement.\n")
+} else {
+  best <- measured[which.max(measured$mbases_per_sec_median), , drop = FALSE]
+  cat(sprintf(
+    "The fastest measured backend was `%s` selected from request `%s`, at %.1f Mbases/s.\n\n",
+    best$selected_backend, best$backend_request, best$mbases_per_sec_median
+  ))
+  if (is.finite(best$speedup_vs_scalar)) {
+    cat(sprintf(
+      "That is %.2fx the scalar baseline for this synthetic workload.\n\n",
+      best$speedup_vs_scalar
+    ))
+  }
+  cat("The benchmark is intentionally synthetic: it isolates the byte-scanning kernel and does not include FASTA/VCF/BAM I/O. Real end-to-end wins will be smaller when decompression, SQL materialization, and joins dominate.\n")
+}
+
+```
+
+# Raw timing vectors
+
+```{r raw-timings, echo=FALSE}
+timing_rows <- do.call(rbind, lapply(raw_results, function(x) {
+  if (isTRUE(x$skipped) || !length(x$timings_sec)) return(NULL)
+  data.frame(
+    backend_request = x$backend_request,
+    selected_backend = x$selected_backend,
+    iteration = seq_along(x$timings_sec),
+    seconds = unlist(x$timings_sec),
+    stringsAsFactors = FALSE
+  )
+}))
+if (is.null(timing_rows) || !nrow(timing_rows)) {
+  cat("No timing rows were recorded.\n")
+} else {
+  knitr::kable(timing_rows, digits = 6)
+}
+```

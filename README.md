@@ -43,6 +43,15 @@ Show generated function catalog
 
 This section is generated from `functions.yaml`.
 
+### Diagnostics
+
+| Function                         | Kind   | Returns | R helper                          | Description                                                                                                                                                                                                                                            |
+|----------------------------------|--------|---------|-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_simd_backend`           | scalar | VARCHAR | `rduckhts_simd_backend`           | Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend(‘auto’\|‘scalar’\|backend).   |
+| `duckhts_simd_requested_backend` | scalar | VARCHAR | `rduckhts_simd_requested_backend` | Return the current explicit SIMD backend request, usually auto unless duckhts_simd_set_backend(…) was called. The selected backend may differ from auto across x86, ARM, wasm, and scalar-only builds.                                                 |
+| `duckhts_simd_backend_available` | scalar | BOOLEAN | `rduckhts_simd_backend_available` | Return whether a SIMD backend request is usable in the current process. scalar and auto are portable; platform-specific requests such as avx2 are true only when compiled in and supported by the running CPU/runtime.                                 |
+| `duckhts_simd_set_backend`       | scalar | VARCHAR | `rduckhts_simd_set_backend`       | Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests raise an error instead of silently falling back. |
+
 ### Readers
 
 | Function          | Kind         | Returns | R helper                                                                                                                                                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -800,6 +809,64 @@ FROM duckdb_liftover(
     │ chrR      │       2 │ chrLiftR   │        9 │ T        │ C        │ true    │ true                 │ NULL              │ NULL    │
     │ chrF      │      11 │ NULL       │     NULL │ NULL     │ NULL     │ false   │ false                │ SourceRefMismatch │ NULL    │
     └───────────┴─────────┴────────────┴──────────┴──────────┴──────────┴─────────┴──────────────────────┴───────────────────┴─────────┘
+
+### SIMD backend flow
+
+DuckHTS uses explicit runtime SIMD dispatch for byte-oriented helper
+kernels, starting with `seq_gc_content(...)`. `scalar` is always
+available and is the portable baseline. Optional platform backends
+should be checked with `duckhts_simd_backend_available(...)` before
+being requested; use `duckhts_simd_set_backend('auto')` to return to
+runtime auto-detection.
+
+``` sql
+SELECT
+  duckhts_simd_backend_available('scalar') AS scalar_available,
+  duckhts_simd_backend_available('not-a-backend') AS bogus_available;
+```
+
+    ┌──────────────────┬─────────────────┐
+    │ scalar_available │ bogus_available │
+    │     boolean      │     boolean     │
+    ├──────────────────┼─────────────────┤
+    │ true             │ false           │
+    └──────────────────┴─────────────────┘
+
+``` sql
+SELECT duckhts_simd_set_backend('scalar') AS selected_backend;
+```
+
+    ┌──────────────────┐
+    │ selected_backend │
+    │     varchar      │
+    ├──────────────────┤
+    │ scalar           │
+    └──────────────────┘
+
+``` sql
+SELECT
+  duckhts_simd_requested_backend() AS requested_backend,
+  duckhts_simd_backend() AS selected_backend,
+  printf('%.3f', seq_gc_content('ACGTNNacgtnn')) AS gc_content;
+```
+
+    ┌───────────────────┬──────────────────┬────────────┐
+    │ requested_backend │ selected_backend │ gc_content │
+    │      varchar      │     varchar      │  varchar   │
+    ├───────────────────┼──────────────────┼────────────┤
+    │ scalar            │ scalar           │ 0.500      │
+    └───────────────────┴──────────────────┴────────────┘
+
+``` sql
+SELECT duckhts_simd_set_backend('auto') IS NOT NULL AS restored_auto;
+```
+
+    ┌───────────────┐
+    │ restored_auto │
+    │    boolean    │
+    ├───────────────┤
+    │ true          │
+    └───────────────┘
 
 ### Sequence utilities
 
