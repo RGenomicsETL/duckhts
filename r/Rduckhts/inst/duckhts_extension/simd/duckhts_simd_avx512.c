@@ -1,31 +1,16 @@
-#include <config.h>
-
 #include <stdint.h>
 
-#if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && \
+    !defined(DUCKDB_WASM_EXTENSION)
 #include <x86intrin.h>
 #endif
 
 #include "duckhts_simd_internal.h"
 
-#if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H && \
-    defined(HAVE_ATTRIBUTE_TARGET_SSSE3) && HAVE_ATTRIBUTE_TARGET_SSSE3 && \
-    defined(HAVE_BUILTIN_CPU_SUPPORT_SSSE3) && HAVE_BUILTIN_CPU_SUPPORT_SSSE3 && \
-    defined(HAVE_AVX512) && HAVE_AVX512 && defined(HAVE_POPCNT) && HAVE_POPCNT && \
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && \
     !defined(DUCKDB_WASM_EXTENSION)
 #define DUCKHTS_SIMD_COMPILED_AVX512 1
-#if defined(__GNUC__) || defined(__clang__)
 #define DUCKHTS_POPCOUNT64(x) __builtin_popcountll((unsigned long long)(x))
-#else
-static unsigned int DUCKHTS_POPCOUNT64(uint64_t x) {
-    unsigned int n = 0;
-    while (x) {
-        n += (unsigned int)(x & UINT64_C(1));
-        x >>= 1;
-    }
-    return n;
-}
-#endif
 
 /* Compile only this function for AVX512F+AVX512BW+POPCNT.  The rest of the
  * translation unit stays on baseline CFLAGS so runtime availability probes can
@@ -96,19 +81,15 @@ static void duckhts_base_counts_avx512(const char *seq, size_t len,
 }
 
 static int duckhts_cpu_has_avx512(void) {
-#if defined(__GNUC__) || defined(__clang__)
     __builtin_cpu_init();
     return __builtin_cpu_supports("avx512f") != 0 &&
            __builtin_cpu_supports("avx512bw") != 0 &&
            __builtin_cpu_supports("popcnt") != 0;
-#else
-    return 0;
-#endif
 }
 
 static const duckhts_simd_ops_t duckhts_simd_ops_avx512 = {
-    "avx512",
-    duckhts_base_counts_avx512
+    .name = "avx512",
+    .base_counts = duckhts_base_counts_avx512
 };
 
 int duckhts_simd_avx512_compiled(void) { return 1; }

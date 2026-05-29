@@ -1,5 +1,3 @@
-#include <config.h>
-
 #include <stdint.h>
 
 #if defined(__aarch64__) && !defined(DUCKDB_WASM_EXTENSION)
@@ -80,8 +78,8 @@ static void duckhts_base_counts_neon(const char *seq, size_t len,
 }
 
 static const duckhts_simd_ops_t duckhts_simd_ops_neon = {
-    "neon",
-    duckhts_base_counts_neon
+    .name = "neon",
+    .base_counts = duckhts_base_counts_neon
 };
 
 int duckhts_simd_neon_compiled(void) { return 1; }

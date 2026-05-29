@@ -1,33 +1,19 @@
-#include <config.h>
-
 #include <stdint.h>
 
-#if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && \
+    !defined(DUCKDB_WASM_EXTENSION)
 #include <x86intrin.h>
 #endif
 
 #include "duckhts_simd_internal.h"
 
-#if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H && \
-    defined(HAVE_ATTRIBUTE_TARGET_SSSE3) && HAVE_ATTRIBUTE_TARGET_SSSE3 && \
-    defined(HAVE_BUILTIN_CPU_SUPPORT_SSSE3) && HAVE_BUILTIN_CPU_SUPPORT_SSSE3 && \
-    defined(HAVE_AVX2) && HAVE_AVX2 && defined(HAVE_POPCNT) && HAVE_POPCNT && \
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && \
     !defined(DUCKDB_WASM_EXTENSION)
 #define DUCKHTS_SIMD_COMPILED_AVX2 1
-#if defined(__GNUC__) || defined(__clang__)
 #define DUCKHTS_POPCOUNT32(x) __builtin_popcount((unsigned int)(x))
-#else
-static unsigned int DUCKHTS_POPCOUNT32(uint32_t x) {
-    unsigned int n = 0;
-    while (x) {
-        n += (unsigned int)(x & 1u);
-        x >>= 1;
-    }
-    return n;
-}
-#endif
+
 /* Compile only this function for AVX2+POPCNT.  The translation unit itself
- * must stay on the baseline CFLAGS so availability/probe code remains safe on
+ * stays on the baseline CFLAGS so availability/probe code remains safe on
  * non-AVX2 hosts. */
 __attribute__((target("avx2,popcnt")))
 static void duckhts_base_counts_avx2(const char *seq, size_t len,
@@ -95,17 +81,13 @@ static void duckhts_base_counts_avx2(const char *seq, size_t len,
 }
 
 static int duckhts_cpu_has_avx2(void) {
-#if defined(__GNUC__) || defined(__clang__)
     __builtin_cpu_init();
     return __builtin_cpu_supports("avx2") != 0 && __builtin_cpu_supports("popcnt") != 0;
-#else
-    return 0;
-#endif
 }
 
 static const duckhts_simd_ops_t duckhts_simd_ops_avx2 = {
-    "avx2",
-    duckhts_base_counts_avx2
+    .name = "avx2",
+    .base_counts = duckhts_base_counts_avx2
 };
 
 int duckhts_simd_avx2_compiled(void) { return 1; }

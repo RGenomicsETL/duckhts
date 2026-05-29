@@ -74,16 +74,50 @@ test_seq_ops <- function() {
   expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
   expect_identical(rduckhts_simd_requested_backend(con), "auto")
   expect_false(rduckhts_simd_backend_available(con, "not-a-backend"))
+  expect_true(rduckhts_simd_backend_compiled(con, "scalar"))
+  expect_false(rduckhts_simd_backend_compiled(con, "sse2"))
+  expect_true(rduckhts_simd_backend_cpu_supported(con, "scalar"))
+  expect_false(rduckhts_simd_backend_cpu_supported(con, "not-a-backend"))
   expect_true(is.logical(rduckhts_simd_backend_available(con, "avx512")))
   simd_info <- rduckhts_simd_info(con)
   expect_true(is.data.frame(simd_info))
-  expect_true(all(c("backend", "compiled", "cpu_supported", "available", "selected") %in% names(simd_info)))
+  expect_true(all(c("backend", "selectable", "compiled", "cpu_supported", "available", "selected") %in% names(simd_info)))
   expect_true("scalar" %in% simd_info$backend)
   expect_true("avx512" %in% simd_info$backend)
   expect_false("auto" %in% simd_info$backend)
   expect_true(all(simd_info$available == (simd_info$compiled & simd_info$cpu_supported)))
   expect_error(rduckhts_simd_set_backend(con, ""), "backend")
+  expect_error(rduckhts_simd_set_backend(con, "sse2"), "no selectable implementation")
   expect_error(rduckhts_simd_set_backend(con, "not-a-backend"), "unknown SIMD backend")
+
+  # scalar vs auto-selected backend correctness on sequences long enough to
+  # exercise the SIMD vector loop (>32 bytes for AVX2, >16 for NEON/wasm).
+  # The test is ISA-agnostic: it forces scalar, records results, forces auto,
+  # records results again, and asserts they are identical.
+  seqs <- list(
+    gc50_64   = strrep("GCATGCAT", 8L),   # 64 chars, GC = 0.5
+    gc100_64  = strrep("GC",       32L),  # 64 chars, GC = 1.0
+    gc0_64    = strrep("AT",       32L),  # 64 chars, GC = 0.0
+    gc50_96   = strrep("GCGCATAT", 12L),  # 96 chars, GC = 0.5
+    gc_n      = strrep("GCNN",     24L),  # 96 chars, GC/called = 1.0
+    gc_lower  = strrep("gcgcatat", 12L)   # soft-masked lowercase, GC = 0.5
+  )
+  sql_vals <- function(xs) paste(sprintf("seq_gc_content('%s')", xs), collapse = ", ")
+
+  expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
+  scalar_gc <- DBI::dbGetQuery(con, sprintf("SELECT %s", sql_vals(seqs)))
+
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
+  auto_gc <- DBI::dbGetQuery(con, sprintf("SELECT %s", sql_vals(seqs)))
+
+  for (col in names(scalar_gc)) {
+    expect_true(
+      abs(scalar_gc[[col]][1] - auto_gc[[col]][1]) < 1e-9,
+      info = sprintf("scalar vs auto GC mismatch for sequence '%s'", col)
+    )
+  }
+  # Leave backend in auto state
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
 
   # seq_revcomp
   rc <- DBI::dbGetQuery(con, "SELECT seq_revcomp('ACGT') AS rc")

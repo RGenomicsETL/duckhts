@@ -1,8 +1,6 @@
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
 
-#include <config.h>
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,6 +19,7 @@ DUCKDB_EXTENSION_EXTERN
 #if DUCKHTS_SIMD_HAVE_C11_ATOMICS
 static _Atomic(const duckhts_simd_ops_t *) duckhts_simd_ops;
 static _Atomic(const char *) duckhts_simd_requested;
+static _Atomic int duckhts_simd_initialized;
 static const duckhts_simd_ops_t *duckhts_simd_load_ops(void) {
     return atomic_load_explicit(&duckhts_simd_ops, memory_order_acquire);
 }
@@ -33,16 +32,23 @@ static const char *duckhts_simd_load_requested(void) {
 static void duckhts_simd_store_requested(const char *name) {
     atomic_store_explicit(&duckhts_simd_requested, name, memory_order_release);
 }
+static int duckhts_simd_load_initialized(void) {
+    return atomic_load_explicit(&duckhts_simd_initialized, memory_order_acquire);
+}
+static void duckhts_simd_store_initialized(int initialized) {
+    atomic_store_explicit(&duckhts_simd_initialized, initialized, memory_order_release);
+}
 #else
 static const duckhts_simd_ops_t *duckhts_simd_ops;
 static const char *duckhts_simd_requested;
+static int duckhts_simd_initialized;
 static const duckhts_simd_ops_t *duckhts_simd_load_ops(void) { return duckhts_simd_ops; }
 static void duckhts_simd_store_ops(const duckhts_simd_ops_t *ops) { duckhts_simd_ops = ops; }
 static const char *duckhts_simd_load_requested(void) { return duckhts_simd_requested; }
 static void duckhts_simd_store_requested(const char *name) { duckhts_simd_requested = name; }
+static int duckhts_simd_load_initialized(void) { return duckhts_simd_initialized; }
+static void duckhts_simd_store_initialized(int initialized) { duckhts_simd_initialized = initialized; }
 #endif
-
-static int duckhts_simd_initialized = 0;
 
 static const char *duckhts_simd_dispatch_mode_name = "single-shlib-ops-table";
 
@@ -68,7 +74,7 @@ static int duckhts_backend_name_equal(const char *a, const char *b) {
 
 static int duckhts_cpu_has_sse2(void) {
 #if (defined(__x86_64__) || defined(__i386__)) && \
-    defined(HAVE_BUILTIN_CPU_SUPPORT_SSSE3) && HAVE_BUILTIN_CPU_SUPPORT_SSSE3
+    (defined(__GNUC__) || defined(__clang__))
     __builtin_cpu_init();
     return __builtin_cpu_supports("sse2") != 0;
 #else
@@ -78,7 +84,7 @@ static int duckhts_cpu_has_sse2(void) {
 
 static int duckhts_cpu_has_sse41(void) {
 #if (defined(__x86_64__) || defined(__i386__)) && \
-    defined(HAVE_BUILTIN_CPU_SUPPORT_SSSE3) && HAVE_BUILTIN_CPU_SUPPORT_SSSE3
+    (defined(__GNUC__) || defined(__clang__))
     __builtin_cpu_init();
     return __builtin_cpu_supports("sse4.1") != 0;
 #else
@@ -86,13 +92,16 @@ static int duckhts_cpu_has_sse41(void) {
 #endif
 }
 
+/* Lower priority values are preferred by auto-dispatch.  Placeholder rows
+ * (selectable = 0) document known CPU features before DuckHTS has a backend
+ * implementation for them. */
 static const duckhts_simd_backend_entry_t duckhts_simd_backend_entries[] = {
-    {"scalar",       1, duckhts_simd_true,                  duckhts_simd_true,                         duckhts_simd_scalar_ops,                     70},
-    {"sse2",         0, duckhts_simd_false,                 duckhts_cpu_has_sse2,                      duckhts_simd_no_ops,                         40},
-    {"sse41",        0, duckhts_simd_false,                 duckhts_cpu_has_sse41,                     duckhts_simd_no_ops,                         30},
-    {"avx2",         1, duckhts_simd_avx2_compiled,         duckhts_simd_avx2_cpu_supported,          duckhts_simd_avx2_ops_if_available,          20},
-    {"avx512",       1, duckhts_simd_avx512_compiled,       duckhts_simd_avx512_cpu_supported,        duckhts_simd_avx512_ops_if_available,        10},
-    {"neon",         1, duckhts_simd_neon_compiled,         duckhts_simd_neon_cpu_supported,          duckhts_simd_neon_ops_if_available,          50},
+    {"scalar",       1, duckhts_simd_true,                  duckhts_simd_true,                        duckhts_simd_scalar_ops,                    70},
+    {"sse2",         0, duckhts_simd_false,                 duckhts_cpu_has_sse2,                     duckhts_simd_no_ops,                        40},
+    {"sse41",        0, duckhts_simd_false,                 duckhts_cpu_has_sse41,                    duckhts_simd_no_ops,                        30},
+    {"avx2",         1, duckhts_simd_avx2_compiled,         duckhts_simd_avx2_cpu_supported,         duckhts_simd_avx2_ops_if_available,         20},
+    {"avx512",       1, duckhts_simd_avx512_compiled,       duckhts_simd_avx512_cpu_supported,       duckhts_simd_avx512_ops_if_available,       10},
+    {"neon",         1, duckhts_simd_neon_compiled,         duckhts_simd_neon_cpu_supported,         duckhts_simd_neon_ops_if_available,         50},
     {"wasm_simd128", 1, duckhts_simd_wasm_simd128_compiled, duckhts_simd_wasm_simd128_cpu_supported, duckhts_simd_wasm_simd128_ops_if_available, 60}
 };
 
@@ -161,10 +170,10 @@ static const duckhts_simd_ops_t *duckhts_simd_ops_for_backend(const char *backen
 }
 
 void duckhts_simd_init(void) {
-    if (duckhts_simd_initialized) return;
+    if (duckhts_simd_load_initialized()) return;
     duckhts_simd_store_requested("auto");
     duckhts_simd_store_ops(duckhts_simd_best_ops());
-    duckhts_simd_initialized = 1;
+    duckhts_simd_store_initialized(1);
 }
 
 int duckhts_simd_backend_compiled(const char *backend) {
@@ -181,9 +190,10 @@ int duckhts_simd_backend_available(const char *backend) {
 
 int duckhts_simd_set_backend(const char *backend, char *err, size_t err_len) {
     const duckhts_simd_ops_t *ops;
+    const duckhts_simd_backend_entry_t *entry = (const duckhts_simd_backend_entry_t *)0;
     const char *canonical;
 
-    if (!duckhts_simd_initialized) duckhts_simd_init();
+    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
 
     canonical = duckhts_simd_backend_canonical(backend);
     if (!canonical) {
@@ -193,6 +203,30 @@ int duckhts_simd_set_backend(const char *backend, char *err, size_t err_len) {
                      backend ? backend : "");
         }
         return 0;
+    }
+
+    if (!duckhts_backend_name_equal(canonical, "auto")) {
+        entry = duckhts_simd_find_backend(canonical);
+        if (entry && !entry->selectable) {
+            if (err && err_len) {
+                snprintf(err, err_len,
+                         "SIMD backend '%s' is recognized but has no selectable implementation in this build",
+                         canonical);
+            }
+            return 0;
+        }
+        if (entry && !duckhts_simd_entry_compiled(entry)) {
+            if (err && err_len) {
+                snprintf(err, err_len, "SIMD backend '%s' was not compiled into this build", canonical);
+            }
+            return 0;
+        }
+        if (entry && !duckhts_simd_entry_cpu_supported(entry)) {
+            if (err && err_len) {
+                snprintf(err, err_len, "SIMD backend '%s' is not supported by this CPU/runtime", canonical);
+            }
+            return 0;
+        }
     }
 
     ops = duckhts_simd_ops_for_backend(canonical);
@@ -209,21 +243,23 @@ int duckhts_simd_set_backend(const char *backend, char *err, size_t err_len) {
 }
 
 const char *duckhts_simd_selected_backend(void) {
-    if (!duckhts_simd_initialized) duckhts_simd_init();
+    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
     return duckhts_simd_load_ops()->name;
 }
 
 const char *duckhts_simd_requested_backend(void) {
-    if (!duckhts_simd_initialized) duckhts_simd_init();
+    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
     return duckhts_simd_load_requested();
 }
 
 void duckhts_simd_base_counts(const char *seq, size_t len,
                               duckhts_simd_base_counts_t *out) {
     const duckhts_simd_ops_t *ops;
-    if (!duckhts_simd_initialized) duckhts_simd_init();
+    duckhts_base_counts_fn fn;
+    if (!duckhts_simd_load_initialized()) duckhts_simd_init();
     ops = duckhts_simd_load_ops();
-    ops->base_counts(seq, len, out);
+    fn = (ops && ops->base_counts) ? ops->base_counts : duckhts_simd_scalar_ops()->base_counts;
+    fn(seq, len, out);
 }
 
 static inline void set_null_at(duckdb_vector vector, idx_t row) {
@@ -413,6 +449,7 @@ static void duckhts_simd_info_bind(duckdb_bind_info info) {
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
 
     duckdb_bind_add_result_column(info, "backend", varchar_type);
+    duckdb_bind_add_result_column(info, "selectable", bool_type);
     duckdb_bind_add_result_column(info, "compiled", bool_type);
     duckdb_bind_add_result_column(info, "cpu_supported", bool_type);
     duckdb_bind_add_result_column(info, "available", bool_type);
@@ -443,12 +480,13 @@ static void duckhts_simd_info_scan(duckdb_function_info info, duckdb_data_chunk 
     const char *requested = duckhts_simd_requested_backend();
 
     duckdb_vector backend_vec = duckdb_data_chunk_get_vector(output, 0);
-    bool *compiled = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 1));
-    bool *cpu_supported = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 2));
-    bool *available = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 3));
-    bool *selected_out = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 4));
-    bool *requested_out = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 5));
-    duckdb_vector dispatch_mode_vec = duckdb_data_chunk_get_vector(output, 6);
+    bool *selectable = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 1));
+    bool *compiled = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 2));
+    bool *cpu_supported = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 3));
+    bool *available = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 4));
+    bool *selected_out = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 5));
+    bool *requested_out = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(output, 6));
+    duckdb_vector dispatch_mode_vec = duckdb_data_chunk_get_vector(output, 7);
 
     if (!init) {
         duckdb_data_chunk_set_size(output, 0);
@@ -456,14 +494,17 @@ static void duckhts_simd_info_scan(duckdb_function_info info, duckdb_data_chunk 
     }
 
     while (row_count < vector_size && init->offset < n_backends) {
-        const char *backend = duckhts_simd_backend_entries[init->offset].name;
-        int is_compiled = duckhts_simd_backend_compiled(backend) != 0;
-        int is_cpu_supported = duckhts_simd_backend_cpu_supported(backend) != 0;
+        const duckhts_simd_backend_entry_t *entry = &duckhts_simd_backend_entries[init->offset];
+        const char *backend = entry->name;
+        int is_selectable = entry->selectable != 0;
+        int is_compiled = duckhts_simd_entry_compiled(entry) != 0;
+        int is_cpu_supported = duckhts_simd_entry_cpu_supported(entry) != 0;
 
         duckdb_vector_assign_string_element(backend_vec, row_count, backend);
+        selectable[row_count] = is_selectable;
         compiled[row_count] = is_compiled;
         cpu_supported[row_count] = is_cpu_supported;
-        available[row_count] = (is_compiled && is_cpu_supported) != 0;
+        available[row_count] = duckhts_simd_entry_available(entry) != 0;
         selected_out[row_count] = duckhts_backend_name_equal(backend, selected) != 0;
         requested_out[row_count] = duckhts_backend_name_equal(backend, requested) != 0;
         duckdb_vector_assign_string_element(dispatch_mode_vec, row_count, duckhts_simd_dispatch_mode_name);

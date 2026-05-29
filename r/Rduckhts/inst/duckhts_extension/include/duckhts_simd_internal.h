@@ -10,6 +10,9 @@ typedef void (*duckhts_base_counts_fn)(const char *seq, size_t len,
 
 typedef struct duckhts_simd_ops {
     const char *name;
+    /* Non-scalar backends may leave individual kernel slots NULL; public
+     * dispatch wrappers must fall back to the scalar implementation per op.
+     * The scalar backend is the only backend required to fill every slot. */
     duckhts_base_counts_fn base_counts;
 } duckhts_simd_ops_t;
 

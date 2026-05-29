@@ -1001,6 +1001,15 @@ FROM duckhts_simd_info();
 ----
 true	true	true
 
+query TTTT
+SELECT
+  duckhts_simd_backend_compiled('scalar'),
+  NOT duckhts_simd_backend_compiled('sse2'),
+  duckhts_simd_backend_cpu_supported('scalar'),
+  NOT duckhts_simd_backend_cpu_supported('not-a-backend');
+----
+true	true	true	true
+
 query T
 SELECT count(*) = 1
 FROM duckhts_simd_info()
@@ -1016,9 +1025,102 @@ SELECT
 auto	0.500
 
 statement error
+SELECT duckhts_simd_set_backend('sse2');
+----
+no selectable implementation
+
+statement error
 SELECT duckhts_simd_set_backend('not-a-backend');
 ----
 unknown SIMD backend
+
+# --- scalar vs accelerated backend correctness ---
+# Force scalar, compute GC on sequences long enough to exercise the SIMD loop
+# (>32 bytes for AVX2, >16 for NEON/wasm_simd128), then verify that the
+# auto-selected backend (AVX2 on x86, NEON on aarch64) returns the same result.
+# The test is backend-agnostic: it compares scalar against whatever 'auto'
+# selects, so it passes on any supported ISA.
+
+query T
+SELECT duckhts_simd_set_backend('scalar');
+----
+scalar
+
+# 64-char sequence: 16 G + 16 C + 16 A + 16 T = GC fraction 0.500
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCATGCAT', 8)));
+----
+0.500000
+
+# 64-char all-GC: fraction 1.000
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GC', 32)));
+----
+1.000000
+
+# 64-char all-AT: fraction 0.000
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('AT', 32)));
+----
+0.000000
+
+# 96-char mixed with Ns: GCATGCATN repeated 10 times + 6 extra chars
+# 8-char period: 2G+2C+2A+2T per unit, no N in first 9 units; unit 10 has N
+# Use a deterministic 96-char string: 'GCGCATAT' x 12 = 48 GC, 48 AT -> 0.500
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCGCATAT', 12)));
+----
+0.500000
+
+# 96-char with embedded Ns: called bases only
+# 'GCNN' x 24: 24 G + 24 C + 48 N -> GC/called = 48/48 = 1.000
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCNN', 24)));
+----
+1.000000
+
+# soft-masked (lowercase) in a long sequence: same result as uppercase
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('gcgcatat', 12)));
+----
+0.500000
+
+query T
+SELECT duckhts_simd_set_backend('auto') IS NOT NULL;
+----
+true
+
+# Re-run the same sequences under the auto-selected backend (AVX2 on x86,
+# NEON on aarch64); results must match the scalar values above.
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCATGCAT', 8)));
+----
+0.500000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GC', 32)));
+----
+1.000000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('AT', 32)));
+----
+0.000000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCGCATAT', 12)));
+----
+0.500000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('GCNN', 24)));
+----
+1.000000
+
+query T
+SELECT printf('%.6f', seq_gc_content(repeat('gcgcatat', 12)));
+----
+0.500000
 
 # --- k-mer emission ---
 query T

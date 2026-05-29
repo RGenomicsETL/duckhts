@@ -118,7 +118,7 @@
       "signature": "duckhts_simd_info()",
       "returns": "table",
       "r_wrapper": "rduckhts_simd_info",
-      "description": "Return one row per known concrete DuckHTS SIMD backend with extension-owned compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; auto is a selection request and is not a concrete backend row.",
+      "description": "Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; selectable reports whether duckhts_simd_set_backend can choose that backend. auto is a selection request and is not a concrete backend row.",
       "examples": [
         "SELECT * FROM duckhts_simd_info();",
         "SELECT backend FROM duckhts_simd_info() WHERE available;"

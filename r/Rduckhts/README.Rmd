@@ -164,7 +164,7 @@ before being requested; use
 `rduckhts_simd_set_backend(con, "auto")` to return to runtime auto-detection.
 
 ```{r}
-rduckhts_simd_info(con)[, c("backend", "compiled", "cpu_supported", "available", "selected")]
+rduckhts_simd_info(con)[, c("backend", "selectable", "compiled", "cpu_supported", "available", "selected")]
 
 rduckhts_simd_set_backend(con, "scalar")
 

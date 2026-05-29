@@ -38,8 +38,8 @@ static void duckhts_base_counts_scalar(const char *seq, size_t len,
 }
 
 static const duckhts_simd_ops_t duckhts_simd_ops_scalar = {
-    "scalar",
-    duckhts_base_counts_scalar
+    .name = "scalar",
+    .base_counts = duckhts_base_counts_scalar
 };
 
 const duckhts_simd_ops_t *duckhts_simd_scalar_ops(void) {

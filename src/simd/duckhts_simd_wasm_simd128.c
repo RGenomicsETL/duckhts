@@ -1,5 +1,3 @@
-#include <config.h>
-
 #include <stdint.h>
 
 #if defined(__wasm_simd128__)
@@ -88,8 +86,8 @@ static void duckhts_base_counts_wasm_simd128(const char *seq, size_t len,
 }
 
 static const duckhts_simd_ops_t duckhts_simd_ops_wasm_simd128 = {
-    "wasm_simd128",
-    duckhts_base_counts_wasm_simd128
+    .name = "wasm_simd128",
+    .base_counts = duckhts_base_counts_wasm_simd128
 };
 
 int duckhts_simd_wasm_simd128_compiled(void) { return 1; }

@@ -268,17 +268,6 @@ rduckhts_functions <- function(category = NULL, kind = NULL) {
   catalog
 }
 
-.validate_simd_backend <- function(backend) {
-  if (!is.character(backend) || length(backend) != 1L || is.na(backend)) {
-    stop("backend must be a single non-missing character string", call. = FALSE)
-  }
-  backend <- tolower(trimws(backend))
-  if (!nzchar(backend)) {
-    stop("backend must be a non-empty character string", call. = FALSE)
-  }
-  backend
-}
-
 #' DuckHTS SIMD backend diagnostics
 #'
 #' Inspect or explicitly select the SIMD backend used by bundled DuckHTS
@@ -300,7 +289,8 @@ rduckhts_functions <- function(category = NULL, kind = NULL) {
 #'   \code{rduckhts_simd_backend_available()} return logical scalars.
 #'   \code{rduckhts_simd_info()} returns the extension-owned backend inventory
 #'   table with one row per known backend; availability means compiled and
-#'   CPU/runtime supported.
+#'   CPU/runtime supported; the \code{selectable} column reports whether
+#'   \code{rduckhts_simd_set_backend()} can choose that row.
 #'
 #' @examples
 #' \dontrun{
@@ -329,7 +319,7 @@ rduckhts_simd_requested_backend <- function(con) {
 #' @rdname rduckhts_simd_backend
 #' @export
 rduckhts_simd_backend_compiled <- function(con, backend) {
-  backend <- .validate_simd_backend(backend)
+  if (is.na(backend)) stop("backend must not be NA", call. = FALSE)
   out <- DBI::dbGetQuery(
     con,
     sprintf("SELECT duckhts_simd_backend_compiled(%s) AS compiled", sql_quote_string(backend))
@@ -340,7 +330,7 @@ rduckhts_simd_backend_compiled <- function(con, backend) {
 #' @rdname rduckhts_simd_backend
 #' @export
 rduckhts_simd_backend_cpu_supported <- function(con, backend) {
-  backend <- .validate_simd_backend(backend)
+  if (is.na(backend)) stop("backend must not be NA", call. = FALSE)
   out <- DBI::dbGetQuery(
     con,
     sprintf("SELECT duckhts_simd_backend_cpu_supported(%s) AS supported", sql_quote_string(backend))
@@ -351,7 +341,7 @@ rduckhts_simd_backend_cpu_supported <- function(con, backend) {
 #' @rdname rduckhts_simd_backend
 #' @export
 rduckhts_simd_backend_available <- function(con, backend) {
-  backend <- .validate_simd_backend(backend)
+  if (is.na(backend)) stop("backend must not be NA", call. = FALSE)
   out <- DBI::dbGetQuery(
     con,
     sprintf("SELECT duckhts_simd_backend_available(%s) AS available", sql_quote_string(backend))
@@ -368,7 +358,7 @@ rduckhts_simd_info <- function(con) {
 #' @rdname rduckhts_simd_backend
 #' @export
 rduckhts_simd_set_backend <- function(con, backend = "auto") {
-  backend <- .validate_simd_backend(backend)
+  if (is.na(backend)) stop("backend must not be NA", call. = FALSE)
   out <- DBI::dbGetQuery(
     con,
     sprintf("SELECT duckhts_simd_set_backend(%s) AS backend", sql_quote_string(backend))

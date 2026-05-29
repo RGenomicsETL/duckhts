@@ -200,15 +200,15 @@ platform backends such as `avx2` or `avx512` should be checked with
 auto-detection.
 
 ``` r
-rduckhts_simd_info(con)[, c("backend", "compiled", "cpu_supported", "available", "selected")]
-#>        backend compiled cpu_supported available selected
-#> 1       scalar     TRUE          TRUE      TRUE    FALSE
-#> 2         sse2    FALSE          TRUE     FALSE    FALSE
-#> 3        sse41    FALSE          TRUE     FALSE    FALSE
-#> 4         avx2     TRUE          TRUE      TRUE     TRUE
-#> 5       avx512     TRUE         FALSE     FALSE    FALSE
-#> 6         neon    FALSE         FALSE     FALSE    FALSE
-#> 7 wasm_simd128    FALSE         FALSE     FALSE    FALSE
+rduckhts_simd_info(con)[, c("backend", "selectable", "compiled", "cpu_supported", "available", "selected")]
+#>        backend selectable compiled cpu_supported available selected
+#> 1       scalar       TRUE     TRUE          TRUE      TRUE    FALSE
+#> 2         sse2      FALSE    FALSE          TRUE     FALSE    FALSE
+#> 3        sse41      FALSE    FALSE          TRUE     FALSE    FALSE
+#> 4         avx2       TRUE     TRUE          TRUE      TRUE     TRUE
+#> 5       avx512       TRUE     TRUE         FALSE     FALSE    FALSE
+#> 6         neon       TRUE    FALSE         FALSE     FALSE    FALSE
+#> 7 wasm_simd128       TRUE    FALSE         FALSE     FALSE    FALSE
 
 rduckhts_simd_set_backend(con, "scalar")
 #> [1] "scalar"
@@ -294,15 +294,15 @@ This section is generated from `functions.yaml`.
 
 ### Diagnostics
 
-| Function                             | Kind   | Returns | R helper                              | Description                                                                                                                                                                                                                                                                                                |
-|--------------------------------------|--------|---------|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `duckhts_simd_backend`               | scalar | VARCHAR | `rduckhts_simd_backend`               | Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend(‘auto’\|‘scalar’\|backend).                                                       |
-| `duckhts_simd_requested_backend`     | scalar | VARCHAR | `rduckhts_simd_requested_backend`     | Return the current explicit SIMD backend request, usually auto unless duckhts_simd_set_backend(…) was called. The selected backend may differ from auto across x86, ARM, wasm, and scalar-only builds.                                                                                                     |
-| `duckhts_simd_backend_compiled`      | scalar | BOOLEAN | `rduckhts_simd_backend_compiled`      | Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.                                                         |
-| `duckhts_simd_backend_cpu_supported` | scalar | BOOLEAN | `rduckhts_simd_backend_cpu_supported` | Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.                                                                                         |
-| `duckhts_simd_backend_available`     | scalar | BOOLEAN | `rduckhts_simd_backend_available`     | Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.                               |
-| `duckhts_simd_info`                  | table  | table   | `rduckhts_simd_info`                  | Return one row per known concrete DuckHTS SIMD backend with extension-owned compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; auto is a selection request and is not a concrete backend row. |
-| `duckhts_simd_set_backend`           | scalar | VARCHAR | `rduckhts_simd_set_backend`           | Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.                  |
+| Function                             | Kind   | Returns | R helper                              | Description                                                                                                                                                                                                                                                                                                                                                                                         |
+|--------------------------------------|--------|---------|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_simd_backend`               | scalar | VARCHAR | `rduckhts_simd_backend`               | Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend(‘auto’\|‘scalar’\|backend).                                                                                                                                                |
+| `duckhts_simd_requested_backend`     | scalar | VARCHAR | `rduckhts_simd_requested_backend`     | Return the current explicit SIMD backend request, usually auto unless duckhts_simd_set_backend(…) was called. The selected backend may differ from auto across x86, ARM, wasm, and scalar-only builds.                                                                                                                                                                                              |
+| `duckhts_simd_backend_compiled`      | scalar | BOOLEAN | `rduckhts_simd_backend_compiled`      | Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.                                                                                                                                                  |
+| `duckhts_simd_backend_cpu_supported` | scalar | BOOLEAN | `rduckhts_simd_backend_cpu_supported` | Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.                                                                                                                                                                                  |
+| `duckhts_simd_backend_available`     | scalar | BOOLEAN | `rduckhts_simd_backend_available`     | Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.                                                                                                                        |
+| `duckhts_simd_info`                  | table  | table   | `rduckhts_simd_info`                  | Return one row per known concrete DuckHTS SIMD backend with extension-owned selectable, compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; selectable reports whether duckhts_simd_set_backend can choose that backend. auto is a selection request and is not a concrete backend row. |
+| `duckhts_simd_set_backend`           | scalar | VARCHAR | `rduckhts_simd_set_backend`           | Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.                                                                                                           |
 
 ### Readers
 
@@ -792,9 +792,9 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                  summary_path
+#>                                                                 summary_path
 #> 1 <tempfile>
-#>                                                            regions_path
+#>                                                           regions_path
 #> 1 <tempfile>
 
 utils::read.delim(
@@ -1005,7 +1005,7 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                           output_path bytes_out
+#>   success                                          output_path bytes_out
 #> 1    TRUE <tempfile>       169
 
 bgunzip_meta <- rduckhts_bgunzip(
@@ -1046,10 +1046,8 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                                index_path
-#> 1    TRUE <tempfile>
-#>   index_format
-#> 1          TBI
+#>   success                                               index_path index_format
+#> 1    TRUE <tempfile>          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")

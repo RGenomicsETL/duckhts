@@ -361,7 +361,7 @@ should be checked with `duckhts_simd_backend_available(...)` before being reques
 `duckhts_simd_set_backend('auto')` to return to runtime auto-detection.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
-SELECT backend, compiled, cpu_supported, available, selected
+SELECT backend, selectable, compiled, cpu_supported, available, selected
 FROM duckhts_simd_info();
 
 SELECT duckhts_simd_set_backend('scalar') AS selected_backend;
