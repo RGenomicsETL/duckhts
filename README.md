@@ -45,12 +45,15 @@ This section is generated from `functions.yaml`.
 
 ### Diagnostics
 
-| Function                         | Kind   | Returns | R helper                          | Description                                                                                                                                                                                                                                            |
-|----------------------------------|--------|---------|-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `duckhts_simd_backend`           | scalar | VARCHAR | `rduckhts_simd_backend`           | Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend(‘auto’\|‘scalar’\|backend).   |
-| `duckhts_simd_requested_backend` | scalar | VARCHAR | `rduckhts_simd_requested_backend` | Return the current explicit SIMD backend request, usually auto unless duckhts_simd_set_backend(…) was called. The selected backend may differ from auto across x86, ARM, wasm, and scalar-only builds.                                                 |
-| `duckhts_simd_backend_available` | scalar | BOOLEAN | `rduckhts_simd_backend_available` | Return whether a SIMD backend request is usable in the current process. scalar and auto are portable; platform-specific requests such as avx2 are true only when compiled in and supported by the running CPU/runtime.                                 |
-| `duckhts_simd_set_backend`       | scalar | VARCHAR | `rduckhts_simd_set_backend`       | Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests raise an error instead of silently falling back. |
+| Function                             | Kind   | Returns | R helper                              | Description                                                                                                                                                                                                                                                                                                |
+|--------------------------------------|--------|---------|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_simd_backend`               | scalar | VARCHAR | `rduckhts_simd_backend`               | Return the SIMD backend currently selected for DuckHTS byte-oriented helper kernels in this process. The selected backend is auto-detected at extension load and can be changed explicitly with duckhts_simd_set_backend(‘auto’\|‘scalar’\|backend).                                                       |
+| `duckhts_simd_requested_backend`     | scalar | VARCHAR | `rduckhts_simd_requested_backend`     | Return the current explicit SIMD backend request, usually auto unless duckhts_simd_set_backend(…) was called. The selected backend may differ from auto across x86, ARM, wasm, and scalar-only builds.                                                                                                     |
+| `duckhts_simd_backend_compiled`      | scalar | BOOLEAN | `rduckhts_simd_backend_compiled`      | Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.                                                         |
+| `duckhts_simd_backend_cpu_supported` | scalar | BOOLEAN | `rduckhts_simd_backend_cpu_supported` | Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.                                                                                         |
+| `duckhts_simd_backend_available`     | scalar | BOOLEAN | `rduckhts_simd_backend_available`     | Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.                               |
+| `duckhts_simd_info`                  | table  | table   | `rduckhts_simd_info`                  | Return one row per known concrete DuckHTS SIMD backend with extension-owned compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; auto is a selection request and is not a concrete backend row. |
+| `duckhts_simd_set_backend`           | scalar | VARCHAR | `rduckhts_simd_set_backend`           | Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.                  |
 
 ### Readers
 
@@ -814,23 +817,28 @@ FROM duckdb_liftover(
 
 DuckHTS uses explicit runtime SIMD dispatch for byte-oriented helper
 kernels, starting with `seq_gc_content(...)`. `scalar` is always
-available and is the portable baseline. Optional platform backends
-should be checked with `duckhts_simd_backend_available(...)` before
-being requested; use `duckhts_simd_set_backend('auto')` to return to
-runtime auto-detection.
+available and is the portable baseline. Optional platform backends such
+as `avx2` or `avx512` should be checked with
+`duckhts_simd_backend_available(...)` before being requested; use
+`duckhts_simd_set_backend('auto')` to return to runtime auto-detection.
 
 ``` sql
-SELECT
-  duckhts_simd_backend_available('scalar') AS scalar_available,
-  duckhts_simd_backend_available('not-a-backend') AS bogus_available;
+SELECT backend, compiled, cpu_supported, available, selected
+FROM duckhts_simd_info();
 ```
 
-    ┌──────────────────┬─────────────────┐
-    │ scalar_available │ bogus_available │
-    │     boolean      │     boolean     │
-    ├──────────────────┼─────────────────┤
-    │ true             │ false           │
-    └──────────────────┴─────────────────┘
+    ┌──────────────┬──────────┬───────────────┬───────────┬──────────┐
+    │   backend    │ compiled │ cpu_supported │ available │ selected │
+    │   varchar    │ boolean  │    boolean    │  boolean  │ boolean  │
+    ├──────────────┼──────────┼───────────────┼───────────┼──────────┤
+    │ scalar       │ true     │ true          │ true      │ false    │
+    │ sse2         │ false    │ true          │ false     │ false    │
+    │ sse41        │ false    │ true          │ false     │ false    │
+    │ avx2         │ true     │ true          │ true      │ true     │
+    │ avx512       │ true     │ false         │ false     │ false    │
+    │ neon         │ false    │ false         │ false     │ false    │
+    │ wasm_simd128 │ false    │ false         │ false     │ false    │
+    └──────────────┴──────────┴───────────────┴───────────┴──────────┘
 
 ``` sql
 SELECT duckhts_simd_set_backend('scalar') AS selected_backend;
@@ -1124,8 +1132,8 @@ GROUP BY ALL;
     │    filename     │   n   │
     │     varchar     │ int64 │
     ├─────────────────┼───────┤
-    │ test/data/r1.fq │     5 │
     │ test/data/r2.fq │     5 │
+    │ test/data/r1.fq │     5 │
     └─────────────────┴───────┘
 
 Per-file parameters can be passed as the third argument (SQL literal):

@@ -356,14 +356,13 @@ FROM duckdb_liftover(
 
 DuckHTS uses explicit runtime SIMD dispatch for byte-oriented helper kernels,
 starting with `seq_gc_content(...)`. `scalar` is always available and is the
-portable baseline. Optional platform backends should be checked with
-`duckhts_simd_backend_available(...)` before being requested; use
+portable baseline. Optional platform backends such as `avx2` or `avx512`
+should be checked with `duckhts_simd_backend_available(...)` before being requested; use
 `duckhts_simd_set_backend('auto')` to return to runtime auto-detection.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
-SELECT
-  duckhts_simd_backend_available('scalar') AS scalar_available,
-  duckhts_simd_backend_available('not-a-backend') AS bogus_available;
+SELECT backend, compiled, cpu_supported, available, selected
+FROM duckhts_simd_info();
 
 SELECT duckhts_simd_set_backend('scalar') AS selected_backend;
 

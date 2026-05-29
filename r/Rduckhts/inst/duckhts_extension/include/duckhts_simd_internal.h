@@ -15,6 +15,12 @@ typedef struct duckhts_simd_ops {
 
 const duckhts_simd_ops_t *duckhts_simd_scalar_ops(void);
 const duckhts_simd_ops_t *duckhts_simd_avx2_ops_if_available(void);
+int duckhts_simd_avx2_compiled(void);
+int duckhts_simd_avx2_cpu_supported(void);
 int duckhts_simd_avx2_available(void);
+const duckhts_simd_ops_t *duckhts_simd_avx512_ops_if_available(void);
+int duckhts_simd_avx512_compiled(void);
+int duckhts_simd_avx512_cpu_supported(void);
+int duckhts_simd_avx512_available(void);
 
 #endif /* DUCKHTS_SIMD_INTERNAL_H */

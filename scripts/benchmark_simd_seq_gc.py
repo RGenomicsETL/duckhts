@@ -24,7 +24,9 @@ def worker(args: argparse.Namespace) -> int:
     con = duckdb.connect(":memory:", config={"allow_unsigned_extensions": "true"})
     con.execute(f"LOAD {sql_string(str(Path(args.extension).resolve()))}")
 
-    available = bool(
+    # duckhts_simd_backend_available() is for concrete backends.  "auto" is
+    # a request that selects the best available backend, so measure it directly.
+    available = args.backend == "auto" or bool(
         con.execute(
             "SELECT duckhts_simd_backend_available(?)",
             [args.backend],
@@ -129,7 +131,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--seq-len", type=int, default=512)
     parser.add_argument("--iterations", type=int, default=7)
     parser.add_argument("--pattern", default="ACGTNNacgtnn")
-    parser.add_argument("--backends", default="scalar,auto,avx2")
+    parser.add_argument("--backends", default="scalar,auto,avx2,avx512")
     parser.add_argument("--backend", default="auto", help=argparse.SUPPRESS)
     parser.add_argument("--json-out")
     parser.add_argument("--worker", action="store_true")

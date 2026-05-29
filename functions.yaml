@@ -72,16 +72,56 @@
       ]
     },
     {
+      "name": "duckhts_simd_backend_compiled",
+      "kind": "scalar",
+      "category": "Diagnostics",
+      "signature": "duckhts_simd_backend_compiled(backend)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "rduckhts_simd_backend_compiled",
+      "description": "Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.",
+      "examples": [
+        "SELECT duckhts_simd_backend_compiled('scalar');",
+        "SELECT duckhts_simd_backend_compiled('avx512');"
+      ]
+    },
+    {
+      "name": "duckhts_simd_backend_cpu_supported",
+      "kind": "scalar",
+      "category": "Diagnostics",
+      "signature": "duckhts_simd_backend_cpu_supported(backend)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "rduckhts_simd_backend_cpu_supported",
+      "description": "Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.",
+      "examples": [
+        "SELECT duckhts_simd_backend_cpu_supported('avx2');",
+        "SELECT duckhts_simd_backend_cpu_supported('avx512');"
+      ]
+    },
+    {
       "name": "duckhts_simd_backend_available",
       "kind": "scalar",
       "category": "Diagnostics",
       "signature": "duckhts_simd_backend_available(backend)",
       "returns": "BOOLEAN",
       "r_wrapper": "rduckhts_simd_backend_available",
-      "description": "Return whether a SIMD backend request is usable in the current process. scalar and auto are portable; platform-specific requests such as avx2 are true only when compiled in and supported by the running CPU/runtime.",
+      "description": "Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.",
       "examples": [
         "SELECT duckhts_simd_backend_available('scalar');",
-        "SELECT duckhts_simd_backend_available('avx2');"
+        "SELECT duckhts_simd_backend_available('avx2');",
+        "SELECT duckhts_simd_backend_available('avx512');"
+      ]
+    },
+    {
+      "name": "duckhts_simd_info",
+      "kind": "table",
+      "category": "Diagnostics",
+      "signature": "duckhts_simd_info()",
+      "returns": "table",
+      "r_wrapper": "rduckhts_simd_info",
+      "description": "Return one row per known concrete DuckHTS SIMD backend with extension-owned compiled, CPU-supported, available, selected, requested, and dispatch-mode diagnostics. Availability is the intersection of compiled and CPU/runtime-supported; auto is a selection request and is not a concrete backend row.",
+      "examples": [
+        "SELECT * FROM duckhts_simd_info();",
+        "SELECT backend FROM duckhts_simd_info() WHERE available;"
       ]
     },
     {
@@ -91,7 +131,7 @@
       "signature": "duckhts_simd_set_backend(backend)",
       "returns": "VARCHAR",
       "r_wrapper": "rduckhts_simd_set_backend",
-      "description": "Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests raise an error instead of silently falling back.",
+      "description": "Explicitly select the DuckHTS SIMD backend for this process and return the selected backend. Use auto for runtime detection or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.",
       "examples": [
         "SELECT duckhts_simd_set_backend('scalar');",
         "SELECT duckhts_simd_set_backend('auto');"

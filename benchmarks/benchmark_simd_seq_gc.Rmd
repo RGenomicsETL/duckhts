@@ -33,7 +33,7 @@ Useful overrides:
 - `SIMD_SEQ_GC_ROWS`: number of rows, default `200000`
 - `SIMD_SEQ_GC_LEN`: sequence length per row, default `512`
 - `SIMD_SEQ_GC_RUNS`: timed repeats per backend, default `7`
-- `SIMD_SEQ_GC_BACKENDS`: comma-separated backend requests, default `scalar,auto,avx2`
+- `SIMD_SEQ_GC_BACKENDS`: comma-separated backend requests, default `scalar,auto,avx2,avx512`
 - `SIMD_SEQ_GC_PATTERN`: repeated sequence pattern, default `ACGTNNacgtnn`
 - `SIMD_SEQ_GC_FORCE=1`: rerun even if cached JSON exists
 - `DUCKHTS_EXTENSION`: extension path override
@@ -56,7 +56,7 @@ extension <- normalizePath(extension, mustWork = TRUE)
 rows <- as.integer(Sys.getenv("SIMD_SEQ_GC_ROWS", unset = "200000"))
 seq_len <- as.integer(Sys.getenv("SIMD_SEQ_GC_LEN", unset = "512"))
 runs <- as.integer(Sys.getenv("SIMD_SEQ_GC_RUNS", unset = "7"))
-backends <- Sys.getenv("SIMD_SEQ_GC_BACKENDS", unset = "scalar,auto,avx2")
+backends <- Sys.getenv("SIMD_SEQ_GC_BACKENDS", unset = "scalar,auto,avx2,avx512")
 pattern <- Sys.getenv("SIMD_SEQ_GC_PATTERN", unset = "ACGTNNacgtnn")
 force <- identical(Sys.getenv("SIMD_SEQ_GC_FORCE", unset = "0"), "1")
 python <- Sys.getenv("PYTHON", unset = "python3")

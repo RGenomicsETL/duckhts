@@ -3,7 +3,10 @@
 \name{rduckhts_simd_backend}
 \alias{rduckhts_simd_backend}
 \alias{rduckhts_simd_requested_backend}
+\alias{rduckhts_simd_backend_compiled}
+\alias{rduckhts_simd_backend_cpu_supported}
 \alias{rduckhts_simd_backend_available}
+\alias{rduckhts_simd_info}
 \alias{rduckhts_simd_set_backend}
 \title{DuckHTS SIMD backend diagnostics}
 \usage{
@@ -11,7 +14,13 @@ rduckhts_simd_backend(con)
 
 rduckhts_simd_requested_backend(con)
 
+rduckhts_simd_backend_compiled(con, backend)
+
+rduckhts_simd_backend_cpu_supported(con, backend)
+
 rduckhts_simd_backend_available(con, backend)
+
+rduckhts_simd_info(con)
 
 rduckhts_simd_set_backend(con, backend = "auto")
 }
@@ -19,15 +28,22 @@ rduckhts_simd_set_backend(con, backend = "auto")
 \item{con}{A DuckDB connection with DuckHTS loaded via \code{rduckhts_load()}.}
 
 \item{backend}{A single backend request. \code{"auto"} selects the best
-available backend at runtime, \code{"scalar"} selects the portable scalar
-baseline, and platform-specific requests such as \code{"avx2"} are only
-valid when \code{rduckhts_simd_backend_available()} returns \code{TRUE}.}
+available backend at runtime for \code{rduckhts_simd_set_backend()}.
+Backend inventory predicates such as
+\code{rduckhts_simd_backend_available()} refer to concrete backends such as
+\code{"scalar"}, \code{"sse2"}, \code{"sse41"}, \code{"avx2"},
+\code{"avx512"}, \code{"neon"}, and \code{"wasm_simd128"}.}
 }
 \value{
 \code{rduckhts_simd_backend()},
   \code{rduckhts_simd_requested_backend()}, and
   \code{rduckhts_simd_set_backend()} return a character scalar.
-  \code{rduckhts_simd_backend_available()} returns a logical scalar.
+  \code{rduckhts_simd_backend_compiled()},
+  \code{rduckhts_simd_backend_cpu_supported()}, and
+  \code{rduckhts_simd_backend_available()} return logical scalars.
+  \code{rduckhts_simd_info()} returns the extension-owned backend inventory
+  table with one row per known backend; availability means compiled and
+  CPU/runtime supported.
 }
 \description{
 Inspect or explicitly select the SIMD backend used by bundled DuckHTS
@@ -37,7 +53,7 @@ byte-oriented helper kernels such as \code{seq_gc_content(...)}.
 \dontrun{
 con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 rduckhts_load(con)
-rduckhts_simd_backend(con)
+rduckhts_simd_info(con)
 rduckhts_simd_backend_available(con, "scalar")
 rduckhts_simd_set_backend(con, "scalar")
 rduckhts_simd_set_backend(con, "auto")

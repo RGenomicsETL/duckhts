@@ -983,6 +983,27 @@ SELECT duckhts_simd_backend_available('neon');
 ----
 false
 
+query T
+SELECT duckhts_simd_backend_available('avx512') IN (true, false);
+----
+true
+
+query TTT
+SELECT
+  count(*) >= 7,
+  sum(CASE WHEN available = (compiled AND cpu_supported) THEN 1 ELSE 0 END) = count(*),
+  sum(CASE WHEN backend = 'scalar' AND available THEN 1 ELSE 0 END) = 1
+FROM duckhts_simd_info();
+----
+true	true	true
+
+query T
+SELECT count(*) = 1
+FROM duckhts_simd_info()
+WHERE backend = 'avx512' AND available = (compiled AND cpu_supported);
+----
+true
+
 query TT
 SELECT
   duckhts_simd_requested_backend(),

@@ -11,7 +11,8 @@
 #if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H && \
     defined(HAVE_ATTRIBUTE_TARGET_SSSE3) && HAVE_ATTRIBUTE_TARGET_SSSE3 && \
     defined(HAVE_BUILTIN_CPU_SUPPORT_SSSE3) && HAVE_BUILTIN_CPU_SUPPORT_SSSE3 && \
-    defined(HAVE_AVX2) && HAVE_AVX2 && !defined(DUCKDB_WASM_EXTENSION)
+    defined(HAVE_AVX2) && HAVE_AVX2 && defined(HAVE_POPCNT) && HAVE_POPCNT && \
+    !defined(DUCKDB_WASM_EXTENSION)
 #define DUCKHTS_SIMD_COMPILED_AVX2 1
 #if defined(__GNUC__) || defined(__clang__)
 #define DUCKHTS_POPCOUNT32(x) __builtin_popcount((unsigned int)(x))
@@ -25,7 +26,10 @@ static unsigned int DUCKHTS_POPCOUNT32(uint32_t x) {
     return n;
 }
 #endif
-__attribute__((target("avx2")))
+/* Compile only this function for AVX2+POPCNT.  The translation unit itself
+ * must stay on the baseline CFLAGS so availability/probe code remains safe on
+ * non-AVX2 hosts. */
+__attribute__((target("avx2,popcnt")))
 static void duckhts_base_counts_avx2(const char *seq, size_t len,
                                      duckhts_simd_base_counts_t *out) {
     const __m256i case_mask = _mm256_set1_epi8((char)0xDF);
@@ -93,7 +97,7 @@ static void duckhts_base_counts_avx2(const char *seq, size_t len,
 static int duckhts_cpu_has_avx2(void) {
 #if defined(__GNUC__) || defined(__clang__)
     __builtin_cpu_init();
-    return __builtin_cpu_supports("avx2") != 0;
+    return __builtin_cpu_supports("avx2") != 0 && __builtin_cpu_supports("popcnt") != 0;
 #else
     return 0;
 #endif
@@ -104,14 +108,22 @@ static const duckhts_simd_ops_t duckhts_simd_ops_avx2 = {
     duckhts_base_counts_avx2
 };
 
-int duckhts_simd_avx2_available(void) {
+int duckhts_simd_avx2_compiled(void) { return 1; }
+
+int duckhts_simd_avx2_cpu_supported(void) {
     return duckhts_cpu_has_avx2();
 }
 
+int duckhts_simd_avx2_available(void) {
+    return duckhts_simd_avx2_compiled() && duckhts_simd_avx2_cpu_supported();
+}
+
 const duckhts_simd_ops_t *duckhts_simd_avx2_ops_if_available(void) {
-    return duckhts_cpu_has_avx2() ? &duckhts_simd_ops_avx2 : (const duckhts_simd_ops_t *)0;
+    return duckhts_simd_avx2_available() ? &duckhts_simd_ops_avx2 : (const duckhts_simd_ops_t *)0;
 }
 #else
+int duckhts_simd_avx2_compiled(void) { return 0; }
+int duckhts_simd_avx2_cpu_supported(void) { return 0; }
 int duckhts_simd_avx2_available(void) { return 0; }
 
 const duckhts_simd_ops_t *duckhts_simd_avx2_ops_if_available(void) {
