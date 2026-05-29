@@ -121,3 +121,6 @@ bench-gffbase:
 
 bench-simd-seq-gc:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_seq_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+bench-simd-bam-gc:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_bam_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"

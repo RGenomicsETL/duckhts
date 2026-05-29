@@ -1,0 +1,260 @@
+---
+title: "DuckHTS SIMD BAM GC-content Benchmark"
+output: github_document
+---
+
+<!-- benchmark_simd_bam_gc.md is generated from benchmark_simd_bam_gc.Rmd. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE)
+```
+
+# Benchmark
+
+This report measures `seq_gc_content(SEQ)` on real BAM read sequences.  It is
+intended to complement the synthetic `seq_gc_content(...)` benchmark: the input
+strings come from `read_bam(...)`, so read lengths, lowercase/uppercase handling,
+`N` bases, DuckDB vector flow, and BAM decoding overhead are closer to a real HTS
+workload.
+
+Two workloads are reported for each SIMD backend request:
+
+- `bam_scan`: scan the BAM and compute `seq_gc_content(SEQ)` in the same query.
+  This is the end-to-end path and includes BAM decoding, decompression, DuckDB
+  materialization, and GC-content computation.
+- `materialized_seq`: materialize BAM `SEQ` strings once, then time only the
+  real BAM sequence strings flowing through `seq_gc_content(...)`.  This better
+  isolates the SIMD byte-scanning kernel on realistic sequence lengths.
+
+The default local input is `HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam`
+when present, falling back to `test/data/nanopore.bam` for smaller checkouts.
+
+# Run
+
+```sh
+make bench-simd-bam-gc
+```
+
+Useful overrides:
+
+- `SIMD_BAM_GC_BAM`: BAM path; default is the local HG00106 exome BAM if present
+- `SIMD_BAM_GC_MAX_READS`: read limit before aggregation, default `0` for all reads
+- `SIMD_BAM_GC_RUNS`: timed repeats per backend/workload, default `5`
+- `SIMD_BAM_GC_THREADS`: DuckDB threads, default `1` to isolate SIMD effects
+- `SIMD_BAM_GC_BACKENDS`: comma-separated backend requests, default `scalar,auto,avx2,avx512`
+- `SIMD_BAM_GC_MODES`: comma-separated workloads, default `bam_scan,materialized_seq`
+- `SIMD_BAM_GC_FORCE=1`: rerun even if cached JSON exists
+- `DUCKHTS_EXTENSION`: extension path override
+
+```{r setup, include = FALSE}
+library(knitr)
+library(jsonlite)
+
+repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
+out_dir <- file.path(repo_root, ".tmp", "simd_bam_gc")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+json_out <- file.path(out_dir, "benchmark_simd_bam_gc.json")
+meta_out <- file.path(out_dir, "benchmark_simd_bam_gc_meta.json")
+
+extension <- Sys.getenv(
+  "DUCKHTS_EXTENSION",
+  unset = file.path(repo_root, "build", "release", "duckhts.duckdb_extension")
+)
+extension <- normalizePath(extension, mustWork = TRUE)
+
+default_bam <- file.path(repo_root, "HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam")
+if (!file.exists(default_bam)) {
+  default_bam <- file.path(repo_root, "test", "data", "nanopore.bam")
+}
+bam <- Sys.getenv("SIMD_BAM_GC_BAM", unset = default_bam)
+bam <- normalizePath(bam, mustWork = TRUE)
+
+max_reads <- as.integer(Sys.getenv("SIMD_BAM_GC_MAX_READS", unset = "0"))
+runs <- as.integer(Sys.getenv("SIMD_BAM_GC_RUNS", unset = "5"))
+threads <- as.integer(Sys.getenv("SIMD_BAM_GC_THREADS", unset = "1"))
+backends <- Sys.getenv("SIMD_BAM_GC_BACKENDS", unset = "scalar,auto,avx2,avx512")
+modes <- Sys.getenv("SIMD_BAM_GC_MODES", unset = "bam_scan,materialized_seq")
+force <- identical(Sys.getenv("SIMD_BAM_GC_FORCE", unset = "0"), "1")
+python <- Sys.getenv("PYTHON", unset = "python3")
+
+if (is.na(max_reads) || max_reads < 0L) stop("SIMD_BAM_GC_MAX_READS must be >= 0", call. = FALSE)
+if (is.na(runs) || runs < 1L) stop("SIMD_BAM_GC_RUNS must be positive", call. = FALSE)
+if (is.na(threads) || threads < 1L) stop("SIMD_BAM_GC_THREADS must be positive", call. = FALSE)
+
+requested_meta <- list(
+  schema = 1L,
+  bam = bam,
+  max_reads = max_reads,
+  runs = runs,
+  threads = threads,
+  backends = backends,
+  modes = modes,
+  extension = extension
+)
+needs_run <- force || !file.exists(json_out) || !file.exists(meta_out)
+if (!needs_run) {
+  old_meta <- tryCatch(jsonlite::fromJSON(meta_out, simplifyVector = FALSE), error = function(e) list())
+  needs_run <- !identical(old_meta, requested_meta)
+}
+
+if (needs_run) {
+  cmd <- c(
+    file.path(repo_root, "scripts", "benchmark_simd_bam_gc.py"),
+    "--extension", extension,
+    "--bam", bam,
+    "--max-reads", as.character(max_reads),
+    "--iterations", as.character(runs),
+    "--threads", as.character(threads),
+    "--backends", backends,
+    "--modes", modes,
+    "--json-out", json_out
+  )
+  out <- system2(python, cmd, stdout = TRUE, stderr = TRUE)
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0) {
+    stop(paste(out, collapse = "\n"), call. = FALSE)
+  }
+  writeLines(jsonlite::toJSON(requested_meta, auto_unbox = TRUE, pretty = TRUE), meta_out)
+}
+
+raw_results <- jsonlite::fromJSON(json_out, simplifyVector = FALSE)
+null_chr <- function(x) if (is.null(x)) NA_character_ else as.character(x)
+null_num <- function(x) if (is.null(x)) NA_real_ else as.numeric(x)
+null_int <- function(x) if (is.null(x)) NA_integer_ else as.integer(x)
+null_lgl <- function(x) if (is.null(x)) FALSE else isTRUE(x)
+
+results <- do.call(rbind, lapply(raw_results, function(x) {
+  data.frame(
+    benchmark = null_chr(x$benchmark),
+    backend_request = null_chr(x$backend_request),
+    requested_backend = null_chr(x$requested_backend),
+    selected_backend = null_chr(x$selected_backend),
+    kernel_backend = null_chr(x$kernel_backend),
+    kernel_capability = null_chr(x$kernel_capability),
+    kernel_scalar_fallback = if (is.null(x$kernel_scalar_fallback)) NA else isTRUE(x$kernel_scalar_fallback),
+    available = if (is.null(x$available)) NA else isTRUE(x$available),
+    skipped = null_lgl(x$skipped),
+    skip_reason = null_chr(x$skip_reason),
+    reads = null_int(x$reads),
+    total_bases = null_num(x$total_bases),
+    iterations = null_int(x$iterations),
+    load_sec = null_num(x$load_sec),
+    gc_fraction_sum = null_num(x$gc_fraction_sum),
+    median_sec = null_num(x$median_sec),
+    min_sec = null_num(x$min_sec),
+    reads_per_sec_median = null_num(x$reads_per_sec_median),
+    mbases_per_sec_median = null_num(x$mbases_per_sec_median),
+    stringsAsFactors = FALSE
+  )
+}))
+
+results$speedup_vs_scalar <- NA_real_
+for (bench in unique(results$benchmark)) {
+  idx <- which(!results$skipped & results$benchmark == bench & results$backend_request == "scalar")[1]
+  if (length(idx) && !is.na(idx)) {
+    scalar_rate <- results$mbases_per_sec_median[idx]
+    if (is.finite(scalar_rate) && scalar_rate > 0) {
+      rows <- which(results$benchmark == bench)
+      results$speedup_vs_scalar[rows] <- results$mbases_per_sec_median[rows] / scalar_rate
+    }
+  }
+}
+results$status <- ifelse(results$skipped, "skipped", "ok")
+
+path_display <- function(path) {
+  if (startsWith(path, paste0(repo_root, .Platform$file.sep))) {
+    sub(paste0("^", repo_root, .Platform$file.sep), "", path)
+  } else {
+    path
+  }
+}
+
+configuration <- data.frame(
+  setting = c("bam", "max_reads", "iterations", "threads", "backend_requests", "workloads", "extension"),
+  value = c(
+    path_display(bam),
+    if (max_reads == 0L) "all" else format(max_reads, big.mark = ","),
+    as.character(runs),
+    as.character(threads),
+    backends,
+    modes,
+    path_display(extension)
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+# Configuration
+
+```{r configuration, echo=FALSE}
+knitr::kable(configuration)
+```
+
+# Results
+
+```{r results, echo=FALSE}
+display <- results[, c(
+  "benchmark",
+  "backend_request",
+  "requested_backend",
+  "selected_backend",
+  "kernel_backend",
+  "status",
+  "reads",
+  "total_bases",
+  "load_sec",
+  "median_sec",
+  "min_sec",
+  "mbases_per_sec_median",
+  "speedup_vs_scalar",
+  "skip_reason"
+)]
+knitr::kable(display, digits = 3)
+```
+
+# Interpretation
+
+```{r interpretation, echo=FALSE, results='asis'}
+measured <- results[!results$skipped, , drop = FALSE]
+if (!nrow(measured)) {
+  cat("No backend requests were available for measurement.\n")
+} else {
+  for (bench in unique(measured$benchmark)) {
+    subset <- measured[measured$benchmark == bench, , drop = FALSE]
+    best <- subset[which.max(subset$mbases_per_sec_median), , drop = FALSE]
+    cat(sprintf(
+      "For `%s`, the fastest measured `seq_base_counts` kernel backend was `%s` selected from request `%s`, at %.1f Mbases/s",
+      bench, best$kernel_backend, best$backend_request, best$mbases_per_sec_median
+    ))
+    if (is.finite(best$speedup_vs_scalar)) {
+      cat(sprintf(" (%.2fx scalar).", best$speedup_vs_scalar))
+    } else {
+      cat(".")
+    }
+    cat("\n\n")
+  }
+  cat("`bam_scan` is the practical end-to-end view. `materialized_seq` removes repeated BAM I/O and shows the SIMD kernel headroom on realistic read strings.\n")
+}
+```
+
+# Raw timing vectors
+
+```{r raw-timings, echo=FALSE}
+timing_rows <- do.call(rbind, lapply(raw_results, function(x) {
+  if (isTRUE(x$skipped) || !length(x$timings_sec)) return(NULL)
+  data.frame(
+    benchmark = x$benchmark,
+    backend_request = x$backend_request,
+    selected_backend = x$selected_backend,
+    kernel_backend = x$kernel_backend,
+    iteration = seq_along(x$timings_sec),
+    seconds = unlist(x$timings_sec),
+    stringsAsFactors = FALSE
+  )
+}))
+if (is.null(timing_rows) || !nrow(timing_rows)) {
+  cat("No timing rows were recorded.\n")
+} else {
+  knitr::kable(timing_rows, digits = 6)
+}
+```
