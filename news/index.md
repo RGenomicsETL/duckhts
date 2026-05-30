@@ -1,6 +1,13 @@
 # Changelog
 
+## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
+
+- start the post-1.3.0 development cycle for the bundled duckhts
+  extension
+
 ## Rduckhts 1.3.0-0.1.0 (2026-05-29)
+
+CRAN release: 2026-05-29
 
 - expose the rebuilt capability-mask SIMD dispatch diagnostics through
   [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
