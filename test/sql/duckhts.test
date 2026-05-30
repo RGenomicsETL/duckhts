@@ -795,6 +795,28 @@ WHERE raw LIKE '##%';
 ----
 6
 
+# --- raw header mode includes VCF column/sample header ---
+query I
+SELECT count(*)
+FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', mode := 'raw')
+WHERE raw LIKE '#CHROM%';
+----
+1
+
+# --- extension-level Parquet converter SQL builder includes metadata COPY syntax ---
+query I
+SELECT CASE WHEN instr(
+  duckhts_bcf_convert_parquet_sql(
+    '__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz',
+    '__WORKING_DIRECTORY__/test_formatcols.parquet',
+    columns := ['CHROM','POS'],
+    metadata := map(['project'], ['sqltest'])
+  ),
+  '"project" := ''sqltest'''
+) > 0 THEN 1 ELSE 0 END;
+----
+1
+
 # --- raw header mode schema ---
 query T
 SELECT string_agg(column_name, '|')

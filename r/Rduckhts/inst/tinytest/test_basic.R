@@ -31,6 +31,10 @@ expect_true(exists("rduckhts_hts_index"))
 expect_true(exists("rduckhts_hts_index_spans"))
 expect_true(exists("rduckhts_hts_index_raw"))
 expect_true(exists("rduckhts_liftover"))
+expect_true(exists("rduckhts_bcf_convert_parquet"))
+expect_true(exists("rduckhts_bam_convert_parquet"))
+expect_true(exists("rduckhts_gff_convert_parquet"))
+expect_true(exists("rduckhts_tabix_convert_parquet"))
 
 # Test function signatures
 expect_identical(
@@ -156,6 +160,35 @@ expect_identical(
   c("con", "query", "chain_path", "dst_fasta_ref", "chrom_col", "pos_col",
     "ref_col", "alt_col", "src_fasta_ref", "max_snp_gap", "max_indel_inc",
     "lift_mt", "end_pos_col", "no_left_align")
+)
+expect_identical(
+  names(formals(rduckhts_bcf_convert_parquet)),
+  c("con", "path", "output", "columns", "region", "index_path", "tidy_format",
+    "additional_csq_column_types", "decompression_threads", "where", "compression",
+    "row_group_size", "partition_by", "include_metadata", "header_text", "metadata",
+    "metadata_json_file", "write_format_version", "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_bam_convert_parquet)),
+  c("con", "path", "output", "columns", "region", "index_path", "reference",
+    "standard_tags", "auxiliary_tags", "sequence_encoding", "quality_representation",
+    "cigar_representation", "decompression_threads", "where", "compression",
+    "row_group_size", "partition_by", "include_metadata", "header_text", "metadata",
+    "metadata_json_file", "write_format_version", "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_gff_convert_parquet)),
+  c("con", "path", "output", "columns", "region", "index_path", "header",
+    "header_names", "auto_detect", "column_types", "attributes_map", "attributes_list",
+    "attributes_pairs", "strict", "where", "compression", "row_group_size", "partition_by",
+    "include_metadata", "header_text", "metadata", "metadata_json_file", "write_format_version", "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_tabix_convert_parquet)),
+  c("con", "path", "output", "columns", "region", "index_path", "header",
+    "header_names", "auto_detect", "column_types", "where", "compression", "row_group_size",
+    "partition_by", "include_metadata", "header_text", "metadata", "metadata_json_file", "write_format_version",
+    "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_munge)),

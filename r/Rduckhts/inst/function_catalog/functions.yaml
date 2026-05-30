@@ -175,6 +175,54 @@
       ]
     },
     {
+      "name": "duckhts_bcf_convert_parquet_sql",
+      "kind": "scalar_macro",
+      "category": "Converters",
+      "signature": "duckhts_bcf_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, decompression_threads := 0, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
+      "returns": "VARCHAR",
+      "r_wrapper": "rduckhts_bcf_convert_parquet",
+      "description": "Build a DuckDB COPY statement that converts read_bcf(...) output to Parquet with DuckHTS key-value metadata, preserved or corrected VCF header text, user metadata from metadata := map(...), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB's json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.",
+      "examples": [
+        "SELECT duckhts_bcf_convert_parquet_sql('cohort.vcf.gz', 'cohort.parquet', columns := ['CHROM','POS','REF','ALT'], metadata := map(['project'], ['cohort-a']));"
+      ]
+    },
+    {
+      "name": "duckhts_bam_convert_parquet_sql",
+      "kind": "scalar_macro",
+      "category": "Converters",
+      "signature": "duckhts_bam_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, reference := NULL, standard_tags := FALSE, auxiliary_tags := FALSE, sequence_encoding := NULL, quality_representation := NULL, cigar_representation := NULL, decompression_threads := 2, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
+      "returns": "VARCHAR",
+      "r_wrapper": "rduckhts_bam_convert_parquet",
+      "description": "Build a DuckDB COPY statement that converts read_bam(...) output to Parquet with DuckHTS key-value metadata, preserved or corrected SAM header text, user metadata from metadata := map(...), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB's json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.",
+      "examples": [
+        "SELECT duckhts_bam_convert_parquet_sql('sample.bam', 'sample.parquet', columns := ['QNAME','FLAG','RNAME','POS']);"
+      ]
+    },
+    {
+      "name": "duckhts_gff_convert_parquet_sql",
+      "kind": "scalar_macro",
+      "category": "Converters",
+      "signature": "duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
+      "returns": "VARCHAR",
+      "r_wrapper": "rduckhts_gff_convert_parquet",
+      "description": "Build a DuckDB COPY statement that converts read_gff(...) output to Parquet with DuckHTS key-value metadata, preserved or corrected GFF/tabix header text, user metadata from metadata := map(...), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB's json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.",
+      "examples": [
+        "SELECT duckhts_gff_convert_parquet_sql('annotations.gff3.gz', 'annotations/', columns := ['seqname','feature','start','end'], partition_by := ['feature']);"
+      ]
+    },
+    {
+      "name": "duckhts_tabix_convert_parquet_sql",
+      "kind": "scalar_macro",
+      "category": "Converters",
+      "signature": "duckhts_tabix_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
+      "returns": "VARCHAR",
+      "r_wrapper": "rduckhts_tabix_convert_parquet",
+      "description": "Build a DuckDB COPY statement that converts read_tabix(...) output to Parquet with DuckHTS key-value metadata, preserved or corrected tabix header text, user metadata from metadata := map(...), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB's json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.",
+      "examples": [
+        "SELECT duckhts_tabix_convert_parquet_sql('regions.tsv.gz', 'regions.parquet', header_names := ['chrom','pos','value'], auto_detect := TRUE);"
+      ]
+    },
+    {
       "name": "read_pileup",
       "kind": "table",
       "category": "Coverage",
@@ -541,7 +589,7 @@
       "signature": "read_hts_header(path, format := NULL, mode := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_hts_header",
-      "description": "Inspect HTS headers in parsed, raw, or combined form across supported formats.",
+      "description": "Inspect HTS headers in parsed, raw, or combined form across supported formats. Raw VCF/BCF mode includes the final `#CHROM` sample header line so the returned text is suitable for Parquet metadata and future VCF/BCF regeneration.",
       "examples": [
         "SELECT record_type, id FROM read_hts_header('formatcols.vcf.gz') LIMIT 10;"
       ]

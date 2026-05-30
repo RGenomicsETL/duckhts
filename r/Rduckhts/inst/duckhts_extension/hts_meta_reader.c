@@ -264,11 +264,12 @@ static const char *header_kv_value(const hts_header_entry_t *e, const char *key)
 
 static void build_vcf_header_entries(bcf_hdr_t *hdr, hts_header_bind_t *bind) {
     if (!hdr || !bind) return;
-    if (hdr->nhrec <= 0) return;
 
-    bind->entries = (hts_header_entry_t *)calloc((size_t)hdr->nhrec, sizeof(hts_header_entry_t));
+    int nsamples = bcf_hdr_nsamples(hdr);
+    int64_t n_entries = (int64_t)hdr->nhrec + 1; // include the final #CHROM header line
+    bind->entries = (hts_header_entry_t *)calloc((size_t)n_entries, sizeof(hts_header_entry_t));
     if (!bind->entries) return;
-    bind->n_entries = hdr->nhrec;
+    bind->n_entries = n_entries;
 
     kstring_t ks = {0, 0, NULL};
     for (int i = 0; i < hdr->nhrec; i++) {
@@ -317,6 +318,25 @@ static void build_vcf_header_entries(bcf_hdr_t *hdr, hts_header_bind_t *bind) {
             int64_t v = parse_int64(len);
             if (v >= 0) e->length = v;
         }
+    }
+
+    hts_header_entry_t *chrom = &bind->entries[hdr->nhrec];
+    chrom->idx = hdr->nhrec;
+    chrom->length = -1;
+    chrom->record_type = dup_str("#CHROM");
+    ks.l = 0;
+    if (ks.s) ks.s[0] = '\0';
+    if (kputs("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO", &ks) >= 0) {
+        if (nsamples > 0) {
+            if (kputs("\tFORMAT", &ks) < 0) ks.l = 0;
+            for (int i = 0; ks.l > 0 && i < nsamples; i++) {
+                if (kputc('\t', &ks) < 0 || kputs(hdr->samples[i], &ks) < 0) {
+                    ks.l = 0;
+                    break;
+                }
+            }
+        }
+        if (ks.l > 0) chrom->raw = dup_str(ks.s);
     }
     free(ks.s);
 }

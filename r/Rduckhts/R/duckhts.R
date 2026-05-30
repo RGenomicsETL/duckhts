@@ -43,17 +43,45 @@ sql_quote_string <- function(x) {
   as.integer(value)
 }
 
-sql_map_literal <- function(x) {
+sql_varchar_list_literal <- function(x, name = "value") {
+  if (is.null(x) || length(x) == 0L) {
+    return("[]::VARCHAR[]")
+  }
+  if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
+    stop(name, " must be a character vector without NA or empty values", call. = FALSE)
+  }
+  sprintf("[%s]", paste(vapply(x, sql_quote_string, character(1)), collapse = ", "))
+}
+
+sql_map_literal <- function(x, name = "column_map", allow_empty = FALSE) {
   if (is.null(x) || length(x) == 0) {
-    stop("column_map must be non-empty", call. = FALSE)
+    if (allow_empty) {
+      return("map([]::VARCHAR[], []::VARCHAR[])")
+    }
+    stop(name, " must be non-empty", call. = FALSE)
   }
   nm <- names(x)
   if (is.null(nm) || any(!nzchar(nm))) {
-    stop("column_map must be a named character vector with canonical names as names", call. = FALSE)
+    stop(name, " must be a named character vector", call. = FALSE)
   }
   keys <- paste(vapply(nm, sql_quote_string, character(1)), collapse = ", ")
   vals <- paste(vapply(as.character(x), sql_quote_string, character(1)), collapse = ", ")
   sprintf("map([%s], [%s])", keys, vals)
+}
+
+duckdb_path_exists <- function(con, path) {
+  child_pattern <- paste0(sub("/+$", "", path), "/**")
+  tryCatch(
+    isTRUE(DBI::dbGetQuery(
+      con,
+      sprintf(
+        "SELECT EXISTS(SELECT 1 FROM glob([%s, %s]) LIMIT 1) AS exists",
+        sql_quote_string(path),
+        sql_quote_string(child_pattern)
+      )
+    )$exists[[1]]),
+    error = function(e) NA
+  )
 }
 
 read_munge_column_map_file <- function(path) {
