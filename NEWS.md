@@ -1,5 +1,8 @@
 # DuckHTS Extension News
 
+# duckhts 1.3.0.9000 (2026-05-30)
+- start the post-1.3.0 development cycle
+
 # duckhts 1.3.0 (2026-05-29)
 - add a real-BAM SIMD GC-content benchmark (`scripts/benchmark_simd_bam_gc.py`, `benchmarks/benchmark_simd_bam_gc.Rmd`, and `make bench-simd-bam-gc`) that compares scalar/auto/concrete backend requests for both end-to-end `read_bam(...)` scans and materialized BAM `SEQ` strings
 - replace the initial backend-wide SIMD ops table with a NumKong-style capability-mask dispatch design: logical kernels are generated from `duckhts_simd_kernels.def`, concrete backends register only the kernels they implement, initialization builds immutable dispatch tables for `auto`/`scalar`/concrete backend policies, runtime selection swaps an atomic table pointer, `auto` resolves the best implementation per kernel, and new `duckhts_simd_kernel_info()` diagnostics report the selected backend/capability for each logical kernel; add a design note plus SQL/R conformance coverage and benchmark reporting for the selected `seq_base_counts` kernel backend

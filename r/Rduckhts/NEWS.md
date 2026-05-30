@@ -1,4 +1,7 @@
 
+# Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
+- start the post-1.3.0 development cycle for the bundled duckhts extension
+
 # Rduckhts 1.3.0-0.1.0 (2026-05-29)
 - expose the rebuilt capability-mask SIMD dispatch diagnostics through `rduckhts_simd_kernel_info()`, keeping R wrappers thin while reporting one row per logical kernel and preserving backend-agnostic SQL/R conformance tests for `seq_gc_content(...)`
 - harden bundled SIMD backend helpers: retain extension-owned backend-name validation while restoring R-side scalar/non-missing argument shape checks, clarify `selectable` versus `available` diagnostics in generated docs, and preserve ASCII SQL quotes for the rendered `duckhts_simd_set_backend('auto'|'scalar'|backend)` catalog call
