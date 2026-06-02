@@ -174,6 +174,11 @@ into:
   [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.md),
   [`rduckhts_hts_index_spans()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_spans.md),
   [`rduckhts_hts_index_raw()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_raw.md)
+- Parquet converters:
+  [`rduckhts_bcf_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_convert_parquet.md),
+  [`rduckhts_bam_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_convert_parquet.md),
+  [`rduckhts_gff_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_convert_parquet.md),
+  [`rduckhts_tabix_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_convert_parquet.md)
 - SIMD diagnostics:
   [`rduckhts_simd_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
   [`rduckhts_simd_requested_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md),
@@ -345,6 +350,15 @@ This section is generated from `functions.yaml`.
 | `fasta_index`     | table        | table   | `rduckhts_fasta_index`                                                                                                                                                 | Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hts_union_query` | scalar_macro | VARCHAR | `rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi` | Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts\_\*\_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly. |
 
+### Converters
+
+| Function                            | Kind         | Returns | R helper                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+|-------------------------------------|--------------|---------|----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_bcf_convert_parquet_sql`   | scalar_macro | VARCHAR | `rduckhts_bcf_convert_parquet`   | Build a DuckDB COPY statement that converts read_bcf(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected VCF header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.       |
+| `duckhts_bam_convert_parquet_sql`   | scalar_macro | VARCHAR | `rduckhts_bam_convert_parquet`   | Build a DuckDB COPY statement that converts read_bam(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected SAM header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.       |
+| `duckhts_gff_convert_parquet_sql`   | scalar_macro | VARCHAR | `rduckhts_gff_convert_parquet`   | Build a DuckDB COPY statement that converts read_gff(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected GFF/tabix header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution. |
+| `duckhts_tabix_convert_parquet_sql` | scalar_macro | VARCHAR | `rduckhts_tabix_convert_parquet` | Build a DuckDB COPY statement that converts read_tabix(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected tabix header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.   |
+
 ### Coverage
 
 | Function                   | Kind  | Returns | R helper                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -390,7 +404,7 @@ This section is generated from `functions.yaml`.
 |-----------------------------|-------------|---------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `detect_quality_encoding`   | table       | table   | `rduckhts_detect_quality_encoding` | Inspect a FASTQ file’s observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding.                                                                                                                                              |
 | `duckhts_samtools_idxstats` | table       | table   | `rduckhts_samtools_idxstats`       | Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses `hts_idx_get_stat(...)` for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final `*` row. |
-| `read_hts_header`           | table       | table   | `rduckhts_hts_header`              | Inspect HTS headers in parsed, raw, or combined form across supported formats.                                                                                                                                                                                             |
+| `read_hts_header`           | table       | table   | `rduckhts_hts_header`              | Inspect HTS headers in parsed, raw, or combined form across supported formats. Raw VCF/BCF mode includes the final `#CHROM` sample header line so the returned text is suitable for Parquet metadata and future VCF/BCF regeneration.                                      |
 | `read_hts_index`            | table       | table   | `rduckhts_hts_index`               | Inspect high-level HTS index metadata such as sequence names and mapped counts.                                                                                                                                                                                            |
 | `read_hts_index_spans`      | table       | table   | `rduckhts_hts_index_spans`         | Expand index metadata into span and chunk rows suitable for low-level index inspection.                                                                                                                                                                                    |
 | `read_hts_index_raw`        | table_macro | table   | `rduckhts_hts_index_raw`           | Return the raw on-disk HTS index blob together with basic identifying metadata.                                                                                                                                                                                            |
@@ -593,7 +607,7 @@ dbGetQuery(
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                       index_path
+#>   success                                        index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
@@ -877,7 +891,7 @@ rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
 #>   success                                                 index_path
 #> 1    TRUE <tempfile>
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
+#>   success                                                 index_path
 #> 1    TRUE <tempfile>
 
 lifted <- rduckhts_liftover(
@@ -922,7 +936,7 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                         index_path
+#>   success                                          index_path
 #> 1    TRUE <tempfile>
 
 munge_out <- rduckhts_munge(
@@ -1201,6 +1215,49 @@ rduckhts_bcf(
 dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")
 #>   n
 #> 1 2
+
+# Convert to a round-trip-aware Parquet copy with VCF header metadata.
+# Extra named metadata is merged into the Parquet key-value metadata.
+parquet_path <- tempfile(fileext = ".parquet")
+rduckhts_bcf_convert_parquet(
+  con,
+  bcf_path,
+  parquet_path,
+  columns = c("CHROM", "POS", "REF", "ALT"),
+  metadata = list(project = "demo-cohort", batch = "1"),
+  overwrite = TRUE
+)
+
+metadata_preview <- dbGetQuery(con, sprintf(
+  "SELECT key::VARCHAR AS key, left(value::VARCHAR, 40) AS value_prefix
+   FROM parquet_kv_metadata('%s')
+   WHERE key::VARCHAR IN ('duckhts_write_format_version', 'duckhts_reader', 'project', 'batch', 'vcf_header')
+   ORDER BY key::VARCHAR",
+  parquet_path
+))
+metadata_preview
+#>                            key                              value_prefix
+#> 1                        batch                                         1
+#> 2               duckhts_reader                                  read_bcf
+#> 3 duckhts_write_format_version                                         1
+#> 4                      project                               demo-cohort
+#> 5                   vcf_header ##fileformat=VCFv4.1\\x5Cn##FILTER=<ID=PA
+
+# The same converter helpers support partitioned output for DuckLake-style
+# registration of premade Parquet files.
+gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
+gff_parquet_dir <- tempfile("duckhts_gff_parquet_")
+rduckhts_gff_convert_parquet(
+  con,
+  gff_path,
+  gff_parquet_dir,
+  columns = c("seqname", "source", "feature", "start", "end"),
+  partition_by = "feature",
+  overwrite = TRUE
+)
+length(list.files(gff_parquet_dir, pattern = "\\.parquet$", recursive = TRUE))
+#> [1] 5
+unlink(c(parquet_path, gff_parquet_dir), recursive = TRUE)
 
 # Span-oriented index view from the same file
 index_spans_preview <- rduckhts_hts_index_spans(con, bcf_path, index_path = bcf_index_path)

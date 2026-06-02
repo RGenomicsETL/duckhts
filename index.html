@@ -162,6 +162,8 @@
 </li>
 <li>metadata helpers: <code><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header()</a></code>, <code><a href="reference/rduckhts_hts_index.html">rduckhts_hts_index()</a></code>, <code><a href="reference/rduckhts_hts_index_spans.html">rduckhts_hts_index_spans()</a></code>, <code><a href="reference/rduckhts_hts_index_raw.html">rduckhts_hts_index_raw()</a></code>
 </li>
+<li>Parquet converters: <code><a href="reference/rduckhts_bcf_convert_parquet.html">rduckhts_bcf_convert_parquet()</a></code>, <code><a href="reference/rduckhts_bam_convert_parquet.html">rduckhts_bam_convert_parquet()</a></code>, <code><a href="reference/rduckhts_gff_convert_parquet.html">rduckhts_gff_convert_parquet()</a></code>, <code><a href="reference/rduckhts_tabix_convert_parquet.html">rduckhts_tabix_convert_parquet()</a></code>
+</li>
 <li>SIMD diagnostics: <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_requested_backend()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend_available()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_set_backend()</a></code>
 </li>
 </ul>
@@ -457,6 +459,56 @@ Show generated function catalog
 </table>
 </div>
 <div class="section level3">
+<h3 id="converters">Converters<a class="anchor" aria-label="anchor" href="#converters"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="5%">
+<col width="2%">
+<col width="1%">
+<col width="5%">
+<col width="84%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><code>duckhts_bcf_convert_parquet_sql</code></td>
+<td>scalar_macro</td>
+<td>VARCHAR</td>
+<td><code>rduckhts_bcf_convert_parquet</code></td>
+<td>Build a DuckDB COPY statement that converts read_bcf(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected VCF header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.</td>
+</tr>
+<tr class="even">
+<td><code>duckhts_bam_convert_parquet_sql</code></td>
+<td>scalar_macro</td>
+<td>VARCHAR</td>
+<td><code>rduckhts_bam_convert_parquet</code></td>
+<td>Build a DuckDB COPY statement that converts read_bam(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected SAM header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.</td>
+</tr>
+<tr class="odd">
+<td><code>duckhts_gff_convert_parquet_sql</code></td>
+<td>scalar_macro</td>
+<td>VARCHAR</td>
+<td><code>rduckhts_gff_convert_parquet</code></td>
+<td>Build a DuckDB COPY statement that converts read_gff(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected GFF/tabix header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.</td>
+</tr>
+<tr class="even">
+<td><code>duckhts_tabix_convert_parquet_sql</code></td>
+<td>scalar_macro</td>
+<td>VARCHAR</td>
+<td><code>rduckhts_tabix_convert_parquet</code></td>
+<td>Build a DuckDB COPY statement that converts read_tabix(…) output to Parquet with DuckHTS key-value metadata, preserved or corrected tabix header text, user metadata from metadata := map(…), selected columns, filters, and partition columns. Optional metadata_json_file is caller-managed and requires DuckDB’s json extension to be available when the builder is called; use metadata maps for CRAN/offline-safe workflows. Clients execute the returned SQL string; the R wrapper is a thin DBI helper that does this execution.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section level3">
 <h3 id="coverage">Coverage<a class="anchor" aria-label="anchor" href="#coverage"></a>
 </h3>
 <table class="table">
@@ -741,7 +793,7 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_hts_header</code></td>
-<td>Inspect HTS headers in parsed, raw, or combined form across supported formats.</td>
+<td>Inspect HTS headers in parsed, raw, or combined form across supported formats. Raw VCF/BCF mode includes the final <code>#CHROM</code> sample header line so the returned text is suitable for Parquet metadata and future VCF/BCF regeneration.</td>
 </tr>
 <tr class="even">
 <td><code>read_hts_index</code></td>
@@ -1377,7 +1429,7 @@ Show generated function catalog
 <code class="sourceCode R"><span><span class="va">bed_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fai_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_readme_"</span>, fileext <span class="op">=</span> <span class="st">".fai"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">fasta_path</span>, index_path <span class="op">=</span> <span class="va">fai_path</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                       index_path</span></span>
+<span><span class="co">#&gt;   success                                        index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets"</span>, <span class="va">bed_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -1637,7 +1689,7 @@ Show generated function catalog
 <span><span class="co">#&gt;   success                                                 index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_dst</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_dst</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt;   success                                                 index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">lifted</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_liftover.html">rduckhts_liftover</a></span><span class="op">(</span></span>
@@ -1682,7 +1734,7 @@ Show generated function catalog
 <span>  <span class="st">"ACGTACGTAA"</span></span>
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                         index_path</span></span>
+<span><span class="co">#&gt;   success                                          index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
@@ -1952,6 +2004,49 @@ Show generated function catalog
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT count(*) AS n FROM variants_idx"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   n</span></span>
 <span><span class="co">#&gt; 1 2</span></span>
+<span></span>
+<span><span class="co"># Convert to a round-trip-aware Parquet copy with VCF header metadata.</span></span>
+<span><span class="co"># Extra named metadata is merged into the Parquet key-value metadata.</span></span>
+<span><span class="va">parquet_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span>fileext <span class="op">=</span> <span class="st">".parquet"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/rduckhts_bcf_convert_parquet.html">rduckhts_bcf_convert_parquet</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>,</span>
+<span>  <span class="va">bcf_path</span>,</span>
+<span>  <span class="va">parquet_path</span>,</span>
+<span>  columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"CHROM"</span>, <span class="st">"POS"</span>, <span class="st">"REF"</span>, <span class="st">"ALT"</span><span class="op">)</span>,</span>
+<span>  metadata <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>project <span class="op">=</span> <span class="st">"demo-cohort"</span>, batch <span class="op">=</span> <span class="st">"1"</span><span class="op">)</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">metadata_preview</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span></span>
+<span>  <span class="st">"SELECT key::VARCHAR AS key, left(value::VARCHAR, 40) AS value_prefix</span></span>
+<span><span class="st">   FROM parquet_kv_metadata('%s')</span></span>
+<span><span class="st">   WHERE key::VARCHAR IN ('duckhts_write_format_version', 'duckhts_reader', 'project', 'batch', 'vcf_header')</span></span>
+<span><span class="st">   ORDER BY key::VARCHAR"</span>,</span>
+<span>  <span class="va">parquet_path</span></span>
+<span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">metadata_preview</span></span>
+<span><span class="co">#&gt;                            key                              value_prefix</span></span>
+<span><span class="co">#&gt; 1                        batch                                         1</span></span>
+<span><span class="co">#&gt; 2               duckhts_reader                                  read_bcf</span></span>
+<span><span class="co">#&gt; 3 duckhts_write_format_version                                         1</span></span>
+<span><span class="co">#&gt; 4                      project                               demo-cohort</span></span>
+<span><span class="co">#&gt; 5                   vcf_header ##fileformat=VCFv4.1\\x5Cn##FILTER=&lt;ID=PA</span></span>
+<span></span>
+<span><span class="co"># The same converter helpers support partitioned output for DuckLake-style</span></span>
+<span><span class="co"># registration of premade Parquet files.</span></span>
+<span><span class="va">gff_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"gff_file.gff.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="va">gff_parquet_dir</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"duckhts_gff_parquet_"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/rduckhts_gff_convert_parquet.html">rduckhts_gff_convert_parquet</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>,</span>
+<span>  <span class="va">gff_path</span>,</span>
+<span>  <span class="va">gff_parquet_dir</span>,</span>
+<span>  columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"seqname"</span>, <span class="st">"source"</span>, <span class="st">"feature"</span>, <span class="st">"start"</span>, <span class="st">"end"</span><span class="op">)</span>,</span>
+<span>  partition_by <span class="op">=</span> <span class="st">"feature"</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.files.html" class="external-link">list.files</a></span><span class="op">(</span><span class="va">gff_parquet_dir</span>, pattern <span class="op">=</span> <span class="st">"\\.parquet$"</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 5</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">parquet_path</span>, <span class="va">gff_parquet_dir</span><span class="op">)</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Span-oriented index view from the same file</span></span>
 <span><span class="va">index_spans_preview</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index_spans.html">rduckhts_hts_index_spans</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>

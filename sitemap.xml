@@ -19,9 +19,11 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bed_coverage.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.html</loc></url>
@@ -38,6 +40,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_functions.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf_multi.html</loc></url>
@@ -54,6 +57,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/setup_hts_env.html</loc></url>

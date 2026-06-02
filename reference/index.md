@@ -24,12 +24,16 @@
   : Native BAM/CRAM BED Regional Coverage Summary
 - [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_bin_counts.md)
   : Native Fixed-Width BAM/CRAM Bin Counts
+- [`rduckhts_bam_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_convert_parquet.md)
+  : Convert SAM/BAM/CRAM reader output to Parquet with DuckHTS metadata
 - [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_index.md)
   : Build BAM or CRAM Index
 - [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_multi.md)
   : Read multiple BAM/SAM files into a DuckDB table
 - [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf.md)
   : Create VCF/BCF Table
+- [`rduckhts_bcf_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_convert_parquet.md)
+  : Convert VCF/BCF reader output to Parquet with DuckHTS metadata
 - [`rduckhts_bcf_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_index.md)
   : Build VCF or BCF Index
 - [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.md)
@@ -62,6 +66,8 @@
   : List DuckHTS Extension Functions
 - [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
   : Create GFF3 Table
+- [`rduckhts_gff_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_convert_parquet.md)
+  : Convert GFF3 reader output to Parquet with DuckHTS metadata
 - [`rduckhts_gff_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_multi.md)
   : Read multiple GFF files into a DuckDB table
 - [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf.md)
@@ -101,6 +107,8 @@
   : DuckHTS SIMD backend diagnostics
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)
   : Create Tabix-Indexed File Table
+- [`rduckhts_tabix_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_convert_parquet.md)
+  : Convert generic tabix reader output to Parquet with DuckHTS metadata
 - [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.md)
   : Build Tabix Index
 - [`rduckhts_tabix_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_multi.md)
