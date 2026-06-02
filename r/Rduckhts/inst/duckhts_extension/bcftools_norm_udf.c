@@ -210,6 +210,14 @@ static int is_symbolic_alt(const char *alt) {
     return len >= 3 && alt[0] == '<' && alt[len - 1] == '>';
 }
 
+static int is_gvcf_symbolic_alt(const char *alt) {
+    return alt && (strcmp(alt, "<NON_REF>") == 0 || strcmp(alt, "<*>") == 0);
+}
+
+static int is_gvcf_ignored_alt(const char *alt) {
+    return is_gvcf_symbolic_alt(alt) || is_spanning_deletion_alt(alt);
+}
+
 static char *resolve_fasta_contig_name(faidx_t *fai, const char *chrom) {
     static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
     char with_chr[512];
@@ -727,6 +735,108 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
         any_breakend |= is_breakend_alt(orig_alt[i]);
         any_spanning |= is_spanning_deletion_alt(orig_alt[i]);
     }
+
+    int n_gvcf_ignored = 0;
+    int has_gvcf_symbolic = 0;
+    for (int i = 0; i < n_orig_alt; i++) {
+        if (!is_gvcf_ignored_alt(orig_alt[i])) continue;
+        n_gvcf_ignored++;
+        if (is_gvcf_symbolic_alt(orig_alt[i])) has_gvcf_symbolic = 1;
+    }
+    if (n_gvcf_ignored > 0) {
+        if (n_gvcf_ignored == n_orig_alt) {
+            if (has_gvcf_symbolic) {
+                set_result_applicable(result, 0, "GVCFReferenceBlock", pos1, original_end, orig_ref, orig_alt, n_orig_alt);
+            } else {
+                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "SpanningDeletion");
+                free(orig_ref);
+                free_string_array(orig_alt, n_orig_alt);
+            }
+            return 1;
+        }
+
+        int n_real_alt = n_orig_alt - n_gvcf_ignored;
+        char **real_alt = (char **)calloc((size_t)n_real_alt, sizeof(char *));
+        int *real_to_orig = (int *)calloc((size_t)n_real_alt, sizeof(int));
+        norm_result_t real_result;
+        memset(&real_result, 0, sizeof(real_result));
+        if (!real_alt || !real_to_orig) {
+            free(real_alt);
+            free(real_to_orig);
+            goto oom;
+        }
+        int real_i = 0;
+        for (int i = 0; i < n_orig_alt; i++) {
+            if (is_gvcf_ignored_alt(orig_alt[i])) continue;
+            real_alt[real_i] = dup_cstr(orig_alt[i]);
+            if (!real_alt[real_i]) {
+                free_string_array(real_alt, n_real_alt);
+                free(real_to_orig);
+                goto oom;
+            }
+            real_to_orig[real_i] = i;
+            real_i++;
+        }
+
+        if (!normalize_variant_row(cache, chrom, pos1, orig_ref, real_alt, n_real_alt,
+                                   has_end_pos, end_pos_in, has_svlen, svlen_in,
+                                   &real_result, err)) {
+            free_string_array(real_alt, n_real_alt);
+            free(real_to_orig);
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
+            return 0;
+        }
+        free_string_array(real_alt, n_real_alt);
+        free(real_to_orig);
+
+        if (!real_result.applicable) {
+            set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                   real_result.status ? real_result.status : "GVCFMixedPassthrough");
+            free_norm_result(&real_result);
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
+            return 1;
+        }
+
+        char **merged_alt = (char **)calloc((size_t)n_orig_alt, sizeof(char *));
+        char *merged_ref = dup_cstr(real_result.ref);
+        if (!merged_alt || !merged_ref) {
+            free(merged_ref);
+            free_string_array(merged_alt, n_orig_alt);
+            free_norm_result(&real_result);
+            goto oom;
+        }
+        real_i = 0;
+        for (int i = 0; i < n_orig_alt; i++) {
+            const char *src_alt = NULL;
+            if (is_gvcf_ignored_alt(orig_alt[i])) {
+                src_alt = orig_alt[i];
+            } else {
+                src_alt = real_i < real_result.n_alt ? real_result.alts[real_i] : NULL;
+                real_i++;
+            }
+            merged_alt[i] = dup_cstr(src_alt);
+            if (!merged_alt[i]) {
+                free(merged_ref);
+                free_string_array(merged_alt, n_orig_alt);
+                free_norm_result(&real_result);
+                goto oom;
+            }
+        }
+        changed = real_result.pos1 != pos1 || real_result.end_pos1 != original_end ||
+                  strcmp(merged_ref, orig_ref) != 0 ||
+                  !compare_alt_arrays(merged_alt, n_orig_alt, orig_alt, n_orig_alt);
+        set_result_applicable(result, changed,
+                              changed ? "Normalized" : "Unchanged",
+                              real_result.pos1, real_result.end_pos1,
+                              merged_ref, merged_alt, n_orig_alt);
+        free_norm_result(&real_result);
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
+        return 1;
+    }
+
     if (any_breakend) {
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "Breakend");
         free(orig_ref);

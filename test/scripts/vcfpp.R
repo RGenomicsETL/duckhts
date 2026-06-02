@@ -235,7 +235,7 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "phased_genotype_fields.vcf",
   section = "mapping",
-  purpose = "Phased GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests",
+  purpose = "Phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests",
   contigs = c("chrP"),
   format_defs = list(
     tag_def("GT", "1", "String", "Genotype"),
@@ -258,6 +258,20 @@ manifest[[length(manifest) + 1]] <- render_fixture(
       "GT:PL:GP:DS:PS",
       "1|0:20,0,30:0.10,0.85,0.05:0.5:20",
       "0/1:10,0,40:0.20,0.70,0.10:0.4:.",
+      sep = "\t"
+    ),
+    paste(
+      "chrP\t30\tmixed_ploidy_biallelic\tC\tA\t.\tPASS\t.",
+      "GT:PL:GP:DS:PS",
+      "1:50,0:0.05,0.95:1.0:30",
+      "0|1|1:0,10,20,30:0.50,0.30,0.15,0.05:1.7:30",
+      sep = "\t"
+    ),
+    paste(
+      "chrP\t40\ttetraploid_triallelic\tT\tC,G\t.\tPASS\t.",
+      "GT:PL:GP:DS:PS",
+      "0|1|1|2:0,5,10,15,20,25,30,35,40,45,50,55,60,65,70:0.20,0.15,0.10,0.08,0.07,0.06,0.05,0.05,0.04,0.04,0.03,0.03,0.02,0.02,0.06:1.4,0.6:40",
+      "2|2:60,50,40,30,20,10:0.01,0.02,0.03,0.04,0.10,0.80:0.0,2.0:40",
       sep = "\t"
     )
   ),

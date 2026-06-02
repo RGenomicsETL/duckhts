@@ -42,6 +42,18 @@ test_bcftools_norm <- function() {
   DBI::dbExecute(
     con,
     paste(
+      "CREATE OR REPLACE TEMP TABLE norm_gvcf AS",
+      "SELECT * FROM (VALUES",
+      "('band_non_ref', 'chrS', 2, 'T', '<NON_REF>', 6::BIGINT),",
+      "('mixed_non_ref', 'chrS', 2, 'T', 'TT,<NON_REF>', NULL::BIGINT),",
+      "('mixed_symbolic_star', 'chrS', 2, 'T', 'TT,<*>', NULL::BIGINT),",
+      "('star_only', 'chrS', 2, 'T', '*', NULL::BIGINT)",
+      ") AS t(case_id, chrom, pos, ref, alt, end_pos)"
+    )
+  )
+  DBI::dbExecute(
+    con,
+    paste(
       "CREATE OR REPLACE TEMP TABLE norm_empty_seq AS",
       "SELECT * FROM (VALUES",
       "('dot', 'chrS', 2, 'T', '.'),",
@@ -121,12 +133,25 @@ test_bcftools_norm <- function() {
 
   out_spanning <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path)
   expect_equal(nrow(out_spanning), 1)
-  expect_equal(out_spanning$pos_normed[1], 2)
-  expect_equal(out_spanning$end_pos_normed[1], 2)
-  expect_equal(out_spanning$ref_normed[1], "T")
-  expect_equal(as.character(out_spanning$alt_normed[[1]]), c("*", "TT"))
-  expect_true(is.na(out_spanning$normed[1]))
-  expect_equal(out_spanning$norm_status[1], "SpanningDeletion")
+  expect_equal(out_spanning$pos_normed[1], 1)
+  expect_equal(out_spanning$end_pos_normed[1], 1)
+  expect_equal(out_spanning$ref_normed[1], "G")
+  expect_equal(as.character(out_spanning$alt_normed[[1]]), c("*", "GT"))
+  expect_true(out_spanning$normed[1])
+  expect_equal(out_spanning$norm_status[1], "Normalized")
+
+  out_gvcf <- rduckhts_bcftools_norm(con, "norm_gvcf", fasta_path, end_pos_col = "end_pos")
+  out_gvcf <- out_gvcf[order(out_gvcf$case_id), , drop = FALSE]
+  expect_equal(out_gvcf$case_id, c("band_non_ref", "mixed_non_ref", "mixed_symbolic_star", "star_only"))
+  expect_equal(out_gvcf$pos_normed, c(2, 1, 1, 2))
+  expect_equal(out_gvcf$end_pos_normed, c(6, 1, 1, 2))
+  expect_equal(out_gvcf$ref_normed, c("T", "G", "G", "T"))
+  expect_equal(as.character(out_gvcf$alt_normed[[1]]), "<NON_REF>")
+  expect_equal(as.character(out_gvcf$alt_normed[[2]]), c("GT", "<NON_REF>"))
+  expect_equal(as.character(out_gvcf$alt_normed[[3]]), c("GT", "<*>"))
+  expect_equal(as.character(out_gvcf$alt_normed[[4]]), "*")
+  expect_equal(as.logical(out_gvcf$normed), c(FALSE, TRUE, TRUE, NA))
+  expect_equal(out_gvcf$norm_status, c("GVCFReferenceBlock", "Normalized", "Normalized", "SpanningDeletion"))
 
   out_spanning_split <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path, split_multiallelic = TRUE)
   out_spanning_split <- out_spanning_split[order(out_spanning_split$alt_index), , drop = FALSE]
@@ -165,6 +190,42 @@ test_bcftools_norm <- function() {
   )
   expect_equal(nrow(out_query), 1)
   expect_equal(out_query$ref_normed[1], "G")
+
+  phased_fields_path <- system.file("extdata", "phased_genotype_fields.vcf", package = "Rduckhts", mustWork = TRUE)
+  quoted_phased <- DBI::dbQuoteString(con, phased_fields_path)
+  phased_gt <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PS=' || coalesce(CAST(FORMAT_PS AS VARCHAR), 'NA'), ',' ORDER BY POS, SAMPLE_ID) AS gt ",
+        "FROM read_bcf(%s, tidy_format := true)"
+      ),
+      quoted_phased
+    )
+  )
+  expect_equal(
+    phased_gt$gt[1],
+    paste(
+      "S1=0|1:PS=10,S2=1|2:PS=10,S1=1|0:PS=20,S2=0/1:PS=NA",
+      "S1=1:PS=30,S2=0|1|1:PS=30,S1=0|1|1|2:PS=40,S2=2|2:PS=40",
+      sep = ","
+    )
+  )
+  phased_ploidy_lengths <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PL=' || length(FORMAT_PL) || ':GP=' || length(FORMAT_GP) || ':DS=' || length(FORMAT_DS), ',' ORDER BY POS, SAMPLE_ID) AS lengths ",
+        "FROM read_bcf(%s, tidy_format := true) ",
+        "WHERE POS >= 30"
+      ),
+      quoted_phased
+    )
+  )
+  expect_equal(
+    phased_ploidy_lengths$lengths[1],
+    "S1=1:PL=2:GP=2:DS=1,S2=0|1|1:PL=4:GP=4:DS=1,S1=0|1|1|2:PL=15:GP=15:DS=2,S2=2|2:PL=6:GP=6:DS=2"
+  )
 }
 
 test_bcftools_norm()
