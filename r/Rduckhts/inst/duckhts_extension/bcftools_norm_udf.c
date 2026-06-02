@@ -824,12 +824,13 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
                 goto oom;
             }
         }
-        changed = real_result.pos1 != pos1 || real_result.end_pos1 != original_end ||
+        int64_t merged_end = (has_end_pos && has_gvcf_symbolic) ? original_end : real_result.end_pos1;
+        changed = real_result.pos1 != pos1 || merged_end != original_end ||
                   strcmp(merged_ref, orig_ref) != 0 ||
                   !compare_alt_arrays(merged_alt, n_orig_alt, orig_alt, n_orig_alt);
         set_result_applicable(result, changed,
                               changed ? "Normalized" : "Unchanged",
-                              real_result.pos1, real_result.end_pos1,
+                              real_result.pos1, merged_end,
                               merged_ref, merged_alt, n_orig_alt);
         free_norm_result(&real_result);
         free(orig_ref);
