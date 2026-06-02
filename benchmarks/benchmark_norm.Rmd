@@ -33,6 +33,13 @@ Useful overrides:
 - `NORM_REAL_VCF`, `NORM_REAL_REGION`, `NORM_REAL_FASTA`: optional real-callset conformance case
 - `NORM_REAL_SPLIT`: `1` to run the optional real-callset case in split mode too
 - `NORM_REAL_LABEL`: optional label for the real-callset section
+- `NORM_GVCF_VCF`, `NORM_GVCF_FASTA`, `NORM_GVCF_LABEL`: optional locally staged gVCF slice benchmark; the current local default is a 10 Mb 1000 Genomes DRAGEN HG00096 chr22 slice when present
+- `NORM_GVCF_RUNS`: timed repeats for the optional gVCF slice, default `1`
+- `NORM_GVCF_SPLIT`: `1` to also run split-multiallelic mode for the optional gVCF slice
+- `NORM_GIAB_DIR`, `NORM_GIAB_FASTA`, `NORM_GIAB_SAMPLES`: full GIAB benchmark inputs; defaults target locally staged HG001/HG002/HG006 GRCh37 files
+- `NORM_GIAB_RUNS`: timed repeats for each full GIAB sample, default `1`
+- `NORM_GIAB_SPLIT`: `1` to also run split-multiallelic mode for full GIAB inputs
+- `NORM_REQUIRE_GIAB`: `1` to fail if any configured full GIAB input is missing
 
 For a shell-first comparison, see `bash scripts/norm_conformance.sh ...`.
 
@@ -59,20 +66,36 @@ real_region <- Sys.getenv("NORM_REAL_REGION", unset = "")
 real_fasta <- Sys.getenv("NORM_REAL_FASTA", unset = "")
 real_split <- identical(Sys.getenv("NORM_REAL_SPLIT", unset = "0"), "1")
 real_label <- Sys.getenv("NORM_REAL_LABEL", unset = "real_callset")
+gvcf_input_path <- Sys.getenv("NORM_GVCF_VCF", unset = ".tmp/1000g_dragen_hg00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz")
+gvcf_fasta <- Sys.getenv("NORM_GVCF_FASTA", unset = "/root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna")
+gvcf_label <- Sys.getenv("NORM_GVCF_LABEL", unset = "1000G_DRAGEN_HG00096_chr22_20_30Mb_gVCF")
+gvcf_runs <- as.integer(Sys.getenv("NORM_GVCF_RUNS", unset = "1"))
+gvcf_split <- identical(Sys.getenv("NORM_GVCF_SPLIT", unset = "0"), "1")
+giab_dir <- Sys.getenv("NORM_GIAB_DIR", unset = "/root/giab_norm")
+giab_fasta <- Sys.getenv("NORM_GIAB_FASTA", unset = "/root/GRCh37/human_g1k_v37.fasta")
+giab_samples <- trimws(strsplit(Sys.getenv("NORM_GIAB_SAMPLES", unset = "HG001,HG002,HG006"), ",", fixed = TRUE)[[1]])
+giab_samples <- giab_samples[nzchar(giab_samples)]
+giab_runs <- as.integer(Sys.getenv("NORM_GIAB_RUNS", unset = "1"))
+giab_split <- identical(Sys.getenv("NORM_GIAB_SPLIT", unset = "0"), "1")
+require_giab <- identical(Sys.getenv("NORM_REQUIRE_GIAB", unset = "0"), "1")
 
-for (nm in c("NORM_BENCH_ROWS", "NORM_BENCH_RUNS", "NORM_DUCK_THREADS", "NORM_DUCK_DECOMPRESSION_THREADS", "NORM_BCFTOOLS_THREADS")) {
+for (nm in c("NORM_BENCH_ROWS", "NORM_BENCH_RUNS", "NORM_DUCK_THREADS", "NORM_DUCK_DECOMPRESSION_THREADS", "NORM_BCFTOOLS_THREADS", "NORM_GVCF_RUNS", "NORM_GIAB_RUNS")) {
   val <- get(switch(nm,
     NORM_BENCH_ROWS = "bench_rows",
     NORM_BENCH_RUNS = "bench_runs",
     NORM_DUCK_THREADS = "duck_threads",
     NORM_DUCK_DECOMPRESSION_THREADS = "duck_decompression_threads",
-    NORM_BCFTOOLS_THREADS = "bcftools_threads"
+    NORM_BCFTOOLS_THREADS = "bcftools_threads",
+    NORM_GVCF_RUNS = "gvcf_runs",
+    NORM_GIAB_RUNS = "giab_runs"
   ))
   if (is.na(val) || val < 0L) stop(nm, " must be a non-negative integer", call. = FALSE)
 }
 if (bench_rows < 1L) stop("NORM_BENCH_ROWS must be positive", call. = FALSE)
 if (bench_runs < 1L) stop("NORM_BENCH_RUNS must be positive", call. = FALSE)
 if (duck_threads < 1L) stop("NORM_DUCK_THREADS must be positive", call. = FALSE)
+if (gvcf_runs < 1L) stop("NORM_GVCF_RUNS must be positive", call. = FALSE)
+if (giab_runs < 1L) stop("NORM_GIAB_RUNS must be positive", call. = FALSE)
 
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
@@ -86,13 +109,27 @@ benchmark_settings <- data.frame(
     "duckdb_threads",
     "read_bcf_decompression_threads",
     "bcftools_threads",
-    "bcftools_output_mode"
+    "bcftools_output_mode",
+    "gvcf_input_path",
+    "gvcf_fasta",
+    "gvcf_runs",
+    "giab_dir",
+    "giab_fasta",
+    "giab_samples",
+    "giab_runs"
   ),
   value = c(
     as.character(duck_threads),
     as.character(duck_decompression_threads),
     as.character(bcftools_threads),
-    "-Ou"
+    "-Ou",
+    gvcf_input_path,
+    gvcf_fasta,
+    as.character(gvcf_runs),
+    giab_dir,
+    giab_fasta,
+    paste(giab_samples, collapse = ","),
+    as.character(giab_runs)
   ),
   stringsAsFactors = FALSE
 )
@@ -229,11 +266,16 @@ prepare_real_fixture <- function(input_path, fasta_path, region = "") {
 
 prepare_duckdb_input_view <- function(input_path) {
   DBI::dbExecute(con, "DROP VIEW IF EXISTS bench_input")
+  input_schema <- DBI::dbGetQuery(
+    con,
+    paste0("DESCRIBE SELECT * FROM read_bcf(", sql_string(input_path), ")")
+  )
+  end_expr <- if ("INFO_END" %in% input_schema$column_name) "INFO_END::BIGINT" else "NULL::BIGINT"
   DBI::dbExecute(
     con,
     paste0(
       "CREATE TEMP VIEW bench_input AS ",
-      "SELECT CHROM, POS, REF, ALT FROM read_bcf(",
+      "SELECT CHROM, POS, REF, ALT, ", end_expr, " AS END_POS FROM read_bcf(",
       sql_string(input_path), ", decompression_threads := ",
       duck_decompression_threads,
       ")"
@@ -249,9 +291,10 @@ duckdb_norm_group_sql <- function(fasta_path, split = FALSE) {
     sql_string("bench_input"), ", ",
     sql_string(fasta_path), ", ",
     "chrom_col := 'CHROM', pos_col := 'POS', ref_col := 'REF', alt_col := 'ALT', ",
+    "end_pos_col := 'END_POS', ",
     "split_multiallelic := ", if (split) "true" else "false",
     ") ",
-    "WHERE coalesce(norm_status, '') IN ('Normalized', 'Unchanged', 'RefOnly', 'SpanningDeletion', 'Breakend') ",
+    "WHERE coalesce(norm_status, '') IN ('Normalized', 'Unchanged', 'RefOnly', 'SpanningDeletion', 'Breakend', 'GVCFReferenceBlock') ",
     "GROUP BY ALL ORDER BY chrom, pos_normed, end_pos_normed, ref_normed, alt_normed"
   )
 }
@@ -263,6 +306,7 @@ duckdb_norm_status_sql <- function(fasta_path, split = FALSE) {
     sql_string("bench_input"), ", ",
     sql_string(fasta_path), ", ",
     "chrom_col := 'CHROM', pos_col := 'POS', ref_col := 'REF', alt_col := 'ALT', ",
+    "end_pos_col := 'END_POS', ",
     "split_multiallelic := ", if (split) "true" else "false",
     ") GROUP BY ALL ORDER BY norm_status"
   )
@@ -424,6 +468,72 @@ run_case <- function(input_path, fasta_path, split = FALSE, n = 3L) {
     mismatches = head(cmp$mismatches, 10L)
   )
 }
+
+run_duckdb_discard_bench <- function(input_path, fasta_path, split = FALSE, n = 1L) {
+  prepare_duckdb_input_view(input_path)
+  sql <- paste0(
+    "SELECT count(*) AS rows, sum(CASE WHEN normed THEN 1 ELSE 0 END) AS normalized_rows ",
+    "FROM duckhts_bcftools_norm(",
+    sql_string("bench_input"), ", ", sql_string(fasta_path), ", ",
+    "chrom_col := 'CHROM', pos_col := 'POS', ref_col := 'REF', alt_col := 'ALT', ",
+    "end_pos_col := 'END_POS', ",
+    "split_multiallelic := ", if (split) "true" else "false", ")"
+  )
+  status_sql <- duckdb_norm_status_sql(fasta_path, split = split)
+  times <- numeric(n)
+  out <- NULL
+  DBI::dbExecute(con, sprintf("PRAGMA threads=%d", duck_threads))
+  for (i in seq_len(n)) {
+    gc()
+    t0 <- proc.time()[["elapsed"]]
+    out <- DBI::dbGetQuery(con, sql)
+    times[i] <- proc.time()[["elapsed"]] - t0
+  }
+  list(
+    bench = data.frame(
+      engine = "duckhts",
+      mode = if (split) "split_multiallelic" else "site_preserving",
+      runs = n,
+      median_sec = stats::median(times),
+      min_sec = min(times),
+      max_sec = max(times),
+      output_rows = out$rows[1],
+      normalized_rows = out$normalized_rows[1],
+      stringsAsFactors = FALSE
+    ),
+    status = DBI::dbGetQuery(con, status_sql)
+  )
+}
+
+run_bcftools_discard_bench <- function(input_path, fasta_path, split = FALSE, n = 1L) {
+  cmd <- sprintf("%s > /dev/null", bcftools_norm_cmd(input_path, fasta_path, split = split))
+  times <- numeric(n)
+  for (i in seq_len(n)) {
+    gc()
+    t0 <- proc.time()[["elapsed"]]
+    run_bash(cmd)
+    times[i] <- proc.time()[["elapsed"]] - t0
+  }
+  data.frame(
+    engine = "bcftools_norm",
+    mode = if (split) "split_multiallelic" else "site_preserving",
+    runs = n,
+    median_sec = stats::median(times),
+    min_sec = min(times),
+    max_sec = max(times),
+    output_rows = NA_integer_,
+    normalized_rows = NA_integer_,
+    stringsAsFactors = FALSE
+  )
+}
+
+run_giab_bench_case <- function(label, input_path, fasta_path, split = FALSE, n = 1L) {
+  duck <- run_duckdb_discard_bench(input_path, fasta_path, split = split, n = n)
+  bcf <- run_bcftools_discard_bench(input_path, fasta_path, split = split, n = n)
+  bench <- rbind(duck$bench, bcf)
+  bench$case <- label
+  list(bench = bench[, c("case", setdiff(names(bench), "case"))], status = duck$status)
+}
 ```
 
 # Settings
@@ -497,5 +607,101 @@ if (!nzchar(real_input_path) || !nzchar(real_fasta)) {
     print(knitr::kable(real_split_case$mismatches))
     cat("\n")
   }
+}
+```
+
+# Optional public gVCF slice benchmark
+
+This section is non-network-dependent during rendering. Stage a local slice first with:
+
+```sh
+make stage-norm-1000g-dragen-gvcf
+```
+
+```{r gvcf-slice-case, results='asis'}
+if (!file.exists(gvcf_input_path) || !file.exists(gvcf_fasta)) {
+  cat("gVCF slice benchmark skipped. Set `NORM_GVCF_VCF` and `NORM_GVCF_FASTA`, or stage the default 1000G DRAGEN slice locally.\n")
+} else {
+  gvcf_case <- run_case(gvcf_input_path, gvcf_fasta, split = FALSE, n = gvcf_runs)
+  cat("## ", gvcf_label, " (site-preserving)\n\n", sep = "")
+  print(knitr::kable(gvcf_case$bench, digits = 3))
+  cat("\n")
+  print(knitr::kable(gvcf_case$compare_summary))
+  cat("\n")
+  print(knitr::kable(gvcf_case$duck_status))
+  cat("\n")
+  print(knitr::kable(gvcf_case$mismatches))
+  cat("\n")
+
+  if (gvcf_split) {
+    gvcf_split_case <- run_case(gvcf_input_path, gvcf_fasta, split = TRUE, n = gvcf_runs)
+    cat("## ", gvcf_label, " (split_multiallelic)\n\n", sep = "")
+    print(knitr::kable(gvcf_split_case$bench, digits = 3))
+    cat("\n")
+    print(knitr::kable(gvcf_split_case$compare_summary))
+    cat("\n")
+    print(knitr::kable(gvcf_split_case$duck_status))
+    cat("\n")
+    print(knitr::kable(gvcf_split_case$mismatches))
+    cat("\n")
+  }
+}
+```
+
+# Full GIAB sample benchmarks
+
+This section benchmarks full locally staged GIAB benchmark VCFs without slicing.
+DuckHTS counts normalized rows and status classes through `duckhts_bcftools_norm(...)`;
+`bcftools norm` is timed with `-Ou > /dev/null` so output compression does not dominate.
+
+```{r giab-full-bench, results='asis'}
+giab_inputs <- if (length(giab_samples)) {
+  data.frame(
+    sample = giab_samples,
+    path = file.path(giab_dir, paste0(giab_samples, "_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")),
+    stringsAsFactors = FALSE
+  )
+} else {
+  data.frame(sample = character(), path = character(), stringsAsFactors = FALSE)
+}
+giab_inputs$exists <- file.exists(giab_inputs$path)
+giab_ready <- length(giab_samples) > 0 && file.exists(giab_fasta) && all(giab_inputs$exists)
+
+if (!giab_ready) {
+  missing <- c(giab_inputs$path[!giab_inputs$exists], if (!file.exists(giab_fasta)) giab_fasta else character())
+  msg <- if (!length(giab_samples)) {
+    "Full GIAB benchmark skipped; set `NORM_GIAB_SAMPLES` to one or more staged sample IDs to enable it."
+  } else {
+    paste("Full GIAB benchmark skipped; missing:", paste(missing, collapse = ", "))
+  }
+  if (require_giab) stop(msg, call. = FALSE)
+  cat(msg, "\n")
+} else {
+  giab_bench <- list()
+  giab_status <- list()
+  for (i in seq_len(nrow(giab_inputs))) {
+    label <- giab_inputs$sample[[i]]
+    cat("## ", label, " full GIAB (site-preserving)\n\n", sep = "")
+    case <- run_giab_bench_case(label, giab_inputs$path[[i]], giab_fasta, split = FALSE, n = giab_runs)
+    giab_bench[[length(giab_bench) + 1L]] <- case$bench
+    giab_status[[label]] <- case$status
+    print(knitr::kable(case$bench, digits = 3))
+    cat("\n")
+    print(knitr::kable(case$status))
+    cat("\n")
+
+    if (giab_split) {
+      cat("## ", label, " full GIAB (split_multiallelic)\n\n", sep = "")
+      split_case <- run_giab_bench_case(paste0(label, "_split"), giab_inputs$path[[i]], giab_fasta, split = TRUE, n = giab_runs)
+      giab_bench[[length(giab_bench) + 1L]] <- split_case$bench
+      print(knitr::kable(split_case$bench, digits = 3))
+      cat("\n")
+      print(knitr::kable(split_case$status))
+      cat("\n")
+    }
+  }
+
+  cat("## Full GIAB summary\n\n")
+  print(knitr::kable(do.call(rbind, giab_bench), digits = 3))
 }
 ```
