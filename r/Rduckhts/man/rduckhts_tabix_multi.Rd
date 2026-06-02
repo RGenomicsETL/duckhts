@@ -14,6 +14,7 @@ rduckhts_tabix_multi(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -36,6 +37,8 @@ rduckhts_tabix_multi(
 \item{auto_detect}{Logical or NULL; enable type auto-detection.}
 
 \item{column_types}{Character vector of column type names.}
+
+\item{scan_mode}{Optional scan mode (\code{"auto"} or \code{"sequential"}).}
 
 \item{.params}{Optional data.frame with per-file parameter overrides.}
 

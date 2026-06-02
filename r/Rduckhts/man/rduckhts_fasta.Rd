@@ -12,6 +12,7 @@ rduckhts_fasta(
   index_path = NULL,
   gzi_path = NULL,
   sequence_encoding = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 }
@@ -32,6 +33,11 @@ bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.}
 \item{sequence_encoding}{Character. Sequence encoding for the SEQUENCE column:
 \code{"string"} (default) returns decoded bases as \code{VARCHAR};
 \code{"nt16"} returns raw htslib nt16 4-bit codes as \code{UTINYINT[]}.}
+
+\item{scan_mode}{Optional scan mode. Use \code{"auto"} (default extension
+behavior) or \code{"sequential"} to force full-file streaming/counting
+instead of index-backed count paths. Sequential mode is incompatible with
+\code{region}.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

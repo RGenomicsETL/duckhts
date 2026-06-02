@@ -12,6 +12,7 @@ rduckhts_fasta_multi(
   index_path = NULL,
   gzi_path = NULL,
   sequence_encoding = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -30,6 +31,8 @@ rduckhts_fasta_multi(
 \item{gzi_path}{Optional explicit BGZF FASTA block index path (.gzi).}
 
 \item{sequence_encoding}{Optional sequence encoding.}
+
+\item{scan_mode}{Optional scan mode (\code{"auto"} or \code{"sequential"}).}
 
 \item{.params}{Optional data.frame with per-file parameter overrides.}
 

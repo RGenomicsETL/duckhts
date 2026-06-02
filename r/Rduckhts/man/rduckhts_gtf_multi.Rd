@@ -14,6 +14,7 @@ rduckhts_gtf_multi(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -39,6 +40,8 @@ rduckhts_gtf_multi(
 \item{auto_detect}{Logical or NULL; enable type auto-detection.}
 
 \item{column_types}{Character vector of column type names.}
+
+\item{scan_mode}{Optional scan mode (\code{"auto"} or \code{"sequential"}).}
 
 \item{attributes_map}{Logical; return raw attributes as a scalar MAP.}
 

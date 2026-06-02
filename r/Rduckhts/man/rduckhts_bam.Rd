@@ -16,6 +16,7 @@ rduckhts_bam(
   sequence_encoding = NULL,
   quality_representation = NULL,
   cigar_representation = NULL,
+  scan_mode = NULL,
   decompression_threads = 2,
   overwrite = FALSE
 )
@@ -49,6 +50,11 @@ rduckhts_bam(
 \code{"string"} (default) returns SAM text such as \code{"36M"};
 \code{"binary"} returns packed BAM operations as \code{UINTEGER[]} where each
 element is \code{(len << 4) | op}.}
+
+\item{scan_mode}{Optional scan mode. Use \code{"auto"} (default extension
+behavior) or \code{"sequential"} to force full-file streaming instead of
+index-backed count/parallel scan paths. Sequential mode is incompatible
+with \code{region}.}
 
 \item{decompression_threads}{Integer. Number of htslib decompression worker
 threads per file handle. Default \code{2}. Use \code{0} to disable worker

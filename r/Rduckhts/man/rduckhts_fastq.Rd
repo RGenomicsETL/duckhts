@@ -13,6 +13,7 @@ rduckhts_fastq(
   sequence_encoding = NULL,
   quality_representation = NULL,
   input_quality_encoding = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 }
@@ -38,6 +39,10 @@ rduckhts_fastq(
 \item{input_quality_encoding}{Character. Input FASTQ quality encoding:
 \code{"phred33"} (default FASTQ convention), \code{"auto"}, \code{"phred64"},
 or \code{"solexa64"}.}
+
+\item{scan_mode}{Optional scan mode. Use \code{"auto"} (default extension
+behavior) or \code{"sequential"} to force raw streaming/counting instead
+of index-backed count paths.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

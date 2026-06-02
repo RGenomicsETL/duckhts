@@ -14,6 +14,7 @@ rduckhts_tabix(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 }
@@ -35,6 +36,11 @@ rduckhts_tabix(
 \item{auto_detect}{Logical. If TRUE, infer basic numeric column types}
 
 \item{column_types}{Character vector of column types (e.g. "BIGINT", "VARCHAR")}
+
+\item{scan_mode}{Optional scan mode. Use \code{"auto"} (default extension
+behavior) or \code{"sequential"} to force full-file streaming/counting
+instead of index-backed count paths. Sequential mode is incompatible with
+\code{region}.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 }

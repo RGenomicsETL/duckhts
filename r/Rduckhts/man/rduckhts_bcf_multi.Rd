@@ -12,6 +12,7 @@ rduckhts_bcf_multi(
   index_path = NULL,
   tidy_format = FALSE,
   additional_csq_column_types = NULL,
+  scan_mode = NULL,
   decompression_threads = 0,
   .params = NULL,
   overwrite = FALSE
@@ -31,6 +32,8 @@ rduckhts_bcf_multi(
 \item{tidy_format}{Logical; use tidy FORMAT column output.}
 
 \item{additional_csq_column_types}{Optional CSQ type override string.}
+
+\item{scan_mode}{Optional scan mode (`"auto"` or `"sequential"`).}
 
 \item{decompression_threads}{Integer. Number of htslib decompression worker
 threads per file handle. Default `0`.}

@@ -10,6 +10,7 @@ rduckhts_bed_multi(
   files,
   region = NULL,
   index_path = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -24,6 +25,8 @@ rduckhts_bed_multi(
 \item{region}{Optional region string.}
 
 \item{index_path}{Optional index file path.}
+
+\item{scan_mode}{Optional scan mode (\code{"auto"} or \code{"sequential"}).}
 
 \item{.params}{Optional data.frame with per-file parameter overrides.}
 

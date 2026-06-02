@@ -10,6 +10,7 @@ rduckhts_bed(
   path,
   region = NULL,
   index_path = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 }
@@ -23,6 +24,11 @@ rduckhts_bed(
 \item{region}{Optional genomic region for tabix-backed BED queries}
 
 \item{index_path}{Optional explicit path to a BED tabix index}
+
+\item{scan_mode}{Optional scan mode. Use \code{"auto"} (default extension
+behavior) or \code{"sequential"} to force full-file streaming/counting
+instead of index-backed count paths. Sequential mode is incompatible with
+\code{region}.}
 
 \item{overwrite}{Logical. If TRUE, overwrites an existing table}
 }

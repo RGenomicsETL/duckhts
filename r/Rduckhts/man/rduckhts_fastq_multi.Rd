@@ -13,6 +13,7 @@ rduckhts_fastq_multi(
   sequence_encoding = NULL,
   quality_representation = NULL,
   input_quality_encoding = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -33,6 +34,8 @@ rduckhts_fastq_multi(
 \item{quality_representation}{Optional quality representation.}
 
 \item{input_quality_encoding}{Optional input quality encoding override.}
+
+\item{scan_mode}{Optional scan mode (\code{"auto"} or \code{"sequential"}).}
 
 \item{.params}{Optional data.frame with per-file parameter overrides.}
 
