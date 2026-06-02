@@ -232,6 +232,38 @@ manifest[[length(manifest) + 1]] <- render_fixture(
   extra_lines = c("##duckhts_fixture_section=parallel_empty_contigs")
 )
 
+manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "phased_genotype_fields.vcf",
+  section = "mapping",
+  purpose = "Phased GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests",
+  contigs = c("chrP"),
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype"),
+    tag_def("PL", "G", "Integer", "Phred-scaled genotype likelihoods"),
+    tag_def("GP", "G", "Float", "Genotype probabilities"),
+    tag_def("DS", "A", "Float", "Alternate allele dosage"),
+    tag_def("PS", "1", "Integer", "Phase set")
+  ),
+  samples = c("S1", "S2"),
+  records = c(
+    paste(
+      "chrP\t10\tphased_multi\tA\tC,G\t.\tPASS\t.",
+      "GT:PL:GP:DS:PS",
+      "0|1:0,10,20,30,40,50:0.90,0.08,0.01,0.005,0.004,0.001:0.7,0.1:10",
+      "1|2:50,40,30,20,10,0:0.001,0.004,0.005,0.01,0.08,0.90:0.2,0.8:10",
+      sep = "\t"
+    ),
+    paste(
+      "chrP\t20\tphased_biallelic\tG\tT\t.\tPASS\t.",
+      "GT:PL:GP:DS:PS",
+      "1|0:20,0,30:0.10,0.85,0.05:0.5:20",
+      "0/1:10,0,40:0.20,0.70,0.10:0.4:.",
+      sep = "\t"
+    )
+  ),
+  extra_lines = c("##duckhts_fixture_section=phased_genotype_fields")
+)
+
 # ---------------------------------------------------------------------------
 # Section 4. Regression Fixtures
 # ---------------------------------------------------------------------------
