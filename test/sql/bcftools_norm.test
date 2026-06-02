@@ -47,6 +47,15 @@ FROM (VALUES
 ) AS t(case_id, chrom, pos, ref, alt, end_pos);
 
 statement ok
+CREATE OR REPLACE TEMP TABLE norm_fast_path AS
+SELECT *
+FROM (VALUES
+  ('plain_mnv_left_trim', 'chrS', 2, 'TT', 'TC', 6::BIGINT),
+  ('plain_mnv_no_common_head', 'chrS', 2, 'TT', 'CC', 6::BIGINT),
+  ('plain_snv_explicit_end', 'chrS', 2, 'T', 'C', 6::BIGINT)
+) AS t(case_id, chrom, pos, ref, alt, end_pos);
+
+statement ok
 CREATE OR REPLACE TEMP TABLE norm_empty_seq AS
 SELECT *
 FROM (VALUES
@@ -219,6 +228,25 @@ mixed_non_ref	1	1	G	[GT, <NON_REF>]	1	Normalized
 mixed_non_ref_band	1	6	G	[GT, <NON_REF>]	1	Normalized
 mixed_symbolic_star	1	1	G	[GT, <*>]	1	Normalized
 star_only	2	2	T	[*]	NULL	SpanningDeletion
+
+query TIITTIT
+SELECT case_id,
+       pos_normed,
+       end_pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       norm_status
+FROM duckhts_bcftools_norm(
+  'norm_fast_path',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  end_pos_col := 'end_pos'
+)
+ORDER BY case_id;
+----
+plain_mnv_left_trim	3	3	T	[C]	1	Normalized
+plain_mnv_no_common_head	2	3	TT	[CC]	0	Unchanged
+plain_snv_explicit_end	2	2	T	[C]	0	Unchanged
 
 query TIITTITR
 SELECT case_id,

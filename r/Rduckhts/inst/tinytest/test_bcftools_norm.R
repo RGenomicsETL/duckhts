@@ -55,6 +55,17 @@ test_bcftools_norm <- function() {
   DBI::dbExecute(
     con,
     paste(
+      "CREATE OR REPLACE TEMP TABLE norm_fast_path AS",
+      "SELECT * FROM (VALUES",
+      "('plain_mnv_left_trim', 'chrS', 2, 'TT', 'TC', 6::BIGINT),",
+      "('plain_mnv_no_common_head', 'chrS', 2, 'TT', 'CC', 6::BIGINT),",
+      "('plain_snv_explicit_end', 'chrS', 2, 'T', 'C', 6::BIGINT)",
+      ") AS t(case_id, chrom, pos, ref, alt, end_pos)"
+    )
+  )
+  DBI::dbExecute(
+    con,
+    paste(
       "CREATE OR REPLACE TEMP TABLE norm_empty_seq AS",
       "SELECT * FROM (VALUES",
       "('dot', 'chrS', 2, 'T', '.'),",
@@ -154,6 +165,18 @@ test_bcftools_norm <- function() {
   expect_equal(as.character(out_gvcf$alt_normed[[5]]), "*")
   expect_equal(as.logical(out_gvcf$normed), c(FALSE, TRUE, TRUE, TRUE, NA))
   expect_equal(out_gvcf$norm_status, c("GVCFReferenceBlock", "Normalized", "Normalized", "Normalized", "SpanningDeletion"))
+
+  out_fast_path <- rduckhts_bcftools_norm(con, "norm_fast_path", fasta_path, end_pos_col = "end_pos")
+  out_fast_path <- out_fast_path[order(out_fast_path$case_id), , drop = FALSE]
+  expect_equal(out_fast_path$case_id, c("plain_mnv_left_trim", "plain_mnv_no_common_head", "plain_snv_explicit_end"))
+  expect_equal(out_fast_path$pos_normed, c(3, 2, 2))
+  expect_equal(out_fast_path$end_pos_normed, c(3, 3, 2))
+  expect_equal(out_fast_path$ref_normed, c("T", "TT", "T"))
+  expect_equal(as.character(out_fast_path$alt_normed[[1]]), "C")
+  expect_equal(as.character(out_fast_path$alt_normed[[2]]), "CC")
+  expect_equal(as.character(out_fast_path$alt_normed[[3]]), "C")
+  expect_equal(as.logical(out_fast_path$normed), c(TRUE, FALSE, FALSE))
+  expect_equal(out_fast_path$norm_status, c("Normalized", "Unchanged", "Unchanged"))
 
   out_spanning_split <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path, split_multiallelic = TRUE)
   out_spanning_split <- out_spanning_split[order(out_spanning_split$alt_index), , drop = FALSE]
