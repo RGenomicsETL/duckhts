@@ -1,5 +1,7 @@
 
 # Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
+- add thin DBI wrappers `rduckhts_bcf_convert_parquet()`, `rduckhts_bam_convert_parquet()`, `rduckhts_gff_convert_parquet()`, and `rduckhts_tabix_convert_parquet()` around the bundled extension SQL builders `duckhts_*_convert_parquet_sql(...)`; these convert DuckHTS scans to Parquet with DuckHTS write-format metadata, preserved raw headers, optional corrected header text, SQL-filter provenance, selected-column/partition metadata, arbitrary user metadata via R named lists/extension `metadata := map(...)`, optional caller-managed JSON-file metadata when DuckDB's `json` extension is available, and partitioned-output support for DuckLake-style registration of premade Parquet files
+- include the final VCF `#CHROM`/sample header line in bundled `read_hts_header(..., mode := 'raw')`, so Parquet metadata written from VCF/BCF inputs has the complete header needed for future VCF/BCF regeneration
 - start the post-1.3.0 development cycle for the bundled duckhts extension
 
 # Rduckhts 1.3.0-0.1.0 (2026-05-29)

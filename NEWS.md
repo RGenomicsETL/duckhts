@@ -1,6 +1,8 @@
 # DuckHTS Extension News
 
 # duckhts 1.3.0.9000 (2026-05-30)
+- add extension-owned Parquet conversion SQL builders `duckhts_bcf_convert_parquet_sql(...)`, `duckhts_bam_convert_parquet_sql(...)`, `duckhts_gff_convert_parquet_sql(...)`, and `duckhts_tabix_convert_parquet_sql(...)`, plus thin R/DBI conversion wrappers that execute the generated `COPY ... TO ... (FORMAT PARQUET)` statements with DuckHTS write-format metadata, preserved raw headers (`vcf_header`, `sam_header`, `gff_header`, `tabix_header`), optional corrected header text, SQL-filter provenance, selected-column/partition metadata, arbitrary user metadata via `metadata := map(...)`/R named lists, optional caller-managed JSON-file metadata when DuckDB's `json` extension is available, and partitioned-output support for DuckLake-style registration of premade Parquet files
+- include the final VCF `#CHROM`/sample header line in `read_hts_header(..., mode := 'raw')`, so VCF/BCF header metadata is sufficient for future spec-compliant VCF/BCF regeneration
 - start the post-1.3.0 development cycle
 
 # duckhts 1.3.0 (2026-05-29)

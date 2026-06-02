@@ -498,7 +498,8 @@ Because DuckDB's `query()` cannot accept subquery expressions, use the
 SET VARIABLE q = hts_union_query('read_fastq', 'test/data/r*.fq');
 SELECT filename, count(*) AS n
 FROM query(getvariable('q'))
-GROUP BY ALL;
+GROUP BY ALL
+ORDER BY filename;
 ```
 
 Per-file parameters can be passed as the third argument (SQL literal):

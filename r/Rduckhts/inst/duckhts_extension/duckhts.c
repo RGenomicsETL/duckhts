@@ -165,6 +165,190 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "CASE WHEN x IS NULL THEN NULL ELSE '''' || replace(x, '''', '''''') || '''' END")) {
         return false;
     }
+    if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_json_path_key(x) AS "
+        "'$.\"' || replace(replace(x, '\\', '\\\\'), '\"', '\\\"') || '\"'")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_parquet_ident_list(cols) AS ("
+        "CASE WHEN len(cols) = 0 THEN '*' "
+        "ELSE (SELECT string_agg(duckhts_quote_ident(x), ', ') FROM unnest(cols) AS t(x)) END)")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_raw_header_text(path, format_hint) AS ("
+        "(SELECT coalesce(string_agg(raw, '\\n' ORDER BY idx), '') "
+        "FROM read_hts_header(path, format := format_hint, mode := 'raw')))")) {
+        return false;
+    }
+    {
+        static const char *const parquet_metadata_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_parquet_metadata_args(",
+            "source_format, reader, source_path, header_key, header_value, header_corrected, ",
+            "columns, partition_by, filter_sql, layout_metadata := map([]::VARCHAR[], []::VARCHAR[]), ",
+            "metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, write_format_version := '1') AS (",
+            "SELECT string_agg(duckhts_quote_ident(key) || ' := ' || duckhts_quote_string(value), ', ' ORDER BY key) ",
+            "FROM (SELECT key, value, row_number() OVER (PARTITION BY key ORDER BY priority DESC) AS rn ",
+            "FROM (",
+            "SELECT * FROM (VALUES ",
+            "('duckhts_write_format_version', write_format_version, 10), ",
+            "('duckhts_source_format', source_format, 10), ",
+            "('duckhts_reader', reader, 10), ",
+            "('duckhts_source_path', source_path, 10), ",
+            "('duckhts_header_corrected', header_corrected, 10), ",
+            "('duckhts_filter', coalesce(filter_sql, ''), 10), ",
+            "('duckhts_columns', CASE WHEN len(columns) = 0 THEN '*' ELSE array_to_string(columns, ',') END, 10), ",
+            "('duckhts_partition_by', CASE WHEN len(partition_by) = 0 THEN '' ELSE array_to_string(partition_by, ',') END, 10), ",
+            "(header_key, coalesce(header_value, ''), 10)) AS defaults(key, value, priority) ",
+            "UNION ALL SELECT e.key, e.value, 20 FROM unnest(map_entries(layout_metadata)) AS t(e) ",
+            "UNION ALL SELECT key, value, 30 FROM query(CASE WHEN metadata_json_file IS NULL THEN ",
+            "'SELECT NULL::VARCHAR AS key, NULL::VARCHAR AS value WHERE false' ELSE ",
+            "'SELECT key, CASE ",
+            "WHEN json_type(json_extract(content, duckhts_json_path_key(key))) IN (''OBJECT'', ''ARRAY'') THEN CAST(json_extract(content, duckhts_json_path_key(key)) AS VARCHAR) ",
+            "WHEN json_type(json_extract(content, duckhts_json_path_key(key))) = ''NULL'' THEN '''' ",
+            "ELSE json_extract_string(content, duckhts_json_path_key(key)) END AS value ",
+            "FROM read_text(' || duckhts_quote_string(metadata_json_file) || '), ",
+            "unnest(CASE WHEN json_type(content) = ''OBJECT'' THEN json_keys(content) ",
+            "ELSE error(''metadata_json_file must contain a top-level JSON object'') END) AS q(key)' END) ",
+            "UNION ALL SELECT e.key, e.value, 40 FROM unnest(map_entries(metadata)) AS t(e)",
+            ") all_metadata) ranked WHERE rn = 1)"
+        };
+        if (!run_sql_parts_or_fail(connection, parquet_metadata_sql,
+                                   sizeof(parquet_metadata_sql) / sizeof(parquet_metadata_sql[0]))) {
+            return false;
+        }
+    }
+    {
+        static const char *const parquet_copy_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_parquet_copy_sql(reader, path, output, reader_args := '', ",
+            "source_format := '', header_key := '', header_value := '', header_corrected := 'false', ",
+            "columns := []::VARCHAR[], partition_by := []::VARCHAR[], filter_sql := NULL, ",
+            "layout_metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata := map([]::VARCHAR[], []::VARCHAR[]), ",
+            "metadata_json_file := NULL, compression := 'zstd', row_group_size := 100000, include_metadata := true, overwrite := false, ",
+            "write_format_version := '1') AS (",
+            "'COPY (SELECT ' || duckhts_parquet_ident_list(columns) || ' FROM ' || reader || '(' || duckhts_quote_string(path) || ",
+            "CASE WHEN length(reader_args) > 0 THEN ', ' || reader_args ELSE '' END || ')' || ",
+            "CASE WHEN filter_sql IS NULL OR length(filter_sql) = 0 THEN '' ELSE ' WHERE (' || filter_sql || ')' END || ",
+            "') TO ' || duckhts_quote_string(output) || ' (FORMAT PARQUET, COMPRESSION ' || duckhts_quote_string(upper(compression)) || ",
+            "', ROW_GROUP_SIZE ' || CAST(row_group_size AS VARCHAR) || ', OVERWRITE ' || CASE WHEN overwrite THEN 'true' ELSE 'false' END || ",
+            "CASE WHEN len(partition_by) = 0 THEN '' ELSE ', PARTITION_BY (' || duckhts_parquet_ident_list(partition_by) || ')' END || ",
+            "CASE WHEN include_metadata THEN ', KV_METADATA struct_pack(' || ",
+            "duckhts_parquet_metadata_args(source_format, reader, path, header_key, header_value, header_corrected, columns, partition_by, filter_sql, layout_metadata, metadata, metadata_json_file, write_format_version) || ')' ",
+            "ELSE '' END || ')' )"
+        };
+        if (!run_sql_parts_or_fail(connection, parquet_copy_sql,
+                                   sizeof(parquet_copy_sql) / sizeof(parquet_copy_sql[0]))) {
+            return false;
+        }
+    }
+    {
+        static const char *const bcf_convert_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_bcf_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, ",
+            "tidy_format := false, additional_csq_column_types := NULL, decompression_threads := 0, where_sql := NULL, compression := 'zstd', ",
+            "row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, ",
+            "metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
+            "duckhts_parquet_copy_sql('read_bcf', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "', tidy_format := ' || CASE WHEN tidy_format THEN 'true' ELSE 'false' END || ",
+            "(CASE WHEN additional_csq_column_types IS NULL THEN '' ELSE ', additional_csq_column_types := ' || duckhts_quote_string(additional_csq_column_types) END) || ",
+            "', decompression_threads := ' || CAST(decompression_threads AS VARCHAR), ', '), ",
+            "source_format := 'vcf_bcf', header_key := 'vcf_header', ",
+            "header_value := coalesce(header_text, duckhts_raw_header_text(path, 'bcf')), ",
+            "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, ",
+            "columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
+            "layout_metadata := map(['duckhts_tidy_format', 'duckhts_region'], [CASE WHEN tidy_format THEN 'true' ELSE 'false' END, coalesce(region, '')]), ",
+            "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, ",
+            "include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
+        };
+        if (!run_sql_parts_or_fail(connection, bcf_convert_sql,
+                                   sizeof(bcf_convert_sql) / sizeof(bcf_convert_sql[0]))) {
+            return false;
+        }
+    }
+    {
+        static const char *const bam_convert_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_bam_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, ",
+            "reference := NULL, standard_tags := false, auxiliary_tags := false, sequence_encoding := NULL, quality_representation := NULL, ",
+            "cigar_representation := NULL, decompression_threads := 2, where_sql := NULL, compression := 'zstd', row_group_size := 100000, ",
+            "partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), ",
+            "metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
+            "duckhts_parquet_copy_sql('read_bam', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "(CASE WHEN reference IS NULL THEN '' ELSE ', reference := ' || duckhts_quote_string(reference) END) || ",
+            "', standard_tags := ' || CASE WHEN standard_tags THEN 'true' ELSE 'false' END || ",
+            "', auxiliary_tags := ' || CASE WHEN auxiliary_tags THEN 'true' ELSE 'false' END || ",
+            "(CASE WHEN sequence_encoding IS NULL THEN '' ELSE ', sequence_encoding := ' || duckhts_quote_string(sequence_encoding) END) || ",
+            "(CASE WHEN quality_representation IS NULL THEN '' ELSE ', quality_representation := ' || duckhts_quote_string(quality_representation) END) || ",
+            "(CASE WHEN cigar_representation IS NULL THEN '' ELSE ', cigar_representation := ' || duckhts_quote_string(cigar_representation) END) || ",
+            "', decompression_threads := ' || CAST(decompression_threads AS VARCHAR), ', '), ",
+            "source_format := 'sam_bam_cram', header_key := 'sam_header', ",
+            "header_value := coalesce(header_text, duckhts_raw_header_text(path, 'bam')), ",
+            "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, ",
+            "columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
+            "layout_metadata := map(['duckhts_region', 'duckhts_standard_tags', 'duckhts_auxiliary_tags', 'duckhts_sequence_encoding', 'duckhts_quality_representation', 'duckhts_cigar_representation'], ",
+            "[coalesce(region, ''), CASE WHEN standard_tags THEN 'true' ELSE 'false' END, CASE WHEN auxiliary_tags THEN 'true' ELSE 'false' END, coalesce(sequence_encoding, 'string'), coalesce(quality_representation, 'string'), coalesce(cigar_representation, 'string')]), ",
+            "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, ",
+            "include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
+        };
+        if (!run_sql_parts_or_fail(connection, bam_convert_sql,
+                                   sizeof(bam_convert_sql) / sizeof(bam_convert_sql[0]))) {
+            return false;
+        }
+    }
+    {
+        static const char *const gff_convert_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, ",
+            "header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], attributes_map := false, ",
+            "attributes_list := false, attributes_pairs := false, strict := false, where_sql := NULL, compression := 'zstd', row_group_size := 100000, ",
+            "partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
+            "duckhts_parquet_copy_sql('read_gff', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "(CASE WHEN header IS NULL THEN '' ELSE ', header := ' || CASE WHEN header THEN 'true' ELSE 'false' END END) || ",
+            "(CASE WHEN len(header_names) = 0 THEN '' ELSE ', header_names := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(header_names) AS t(x)) || ']' END) || ",
+            "(CASE WHEN auto_detect IS NULL THEN '' ELSE ', auto_detect := ' || CASE WHEN auto_detect THEN 'true' ELSE 'false' END END) || ",
+            "(CASE WHEN len(column_types) = 0 THEN '' ELSE ', column_types := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(column_types) AS t(x)) || ']' END) || ",
+            "', attributes_map := ' || CASE WHEN attributes_map THEN 'true' ELSE 'false' END || ",
+            "', attributes_list := ' || CASE WHEN attributes_list THEN 'true' ELSE 'false' END || ",
+            "', attributes_pairs := ' || CASE WHEN attributes_pairs THEN 'true' ELSE 'false' END || ",
+            "', strict := ' || CASE WHEN strict THEN 'true' ELSE 'false' END, ', '), ",
+            "source_format := 'gff', header_key := 'gff_header', header_value := coalesce(header_text, duckhts_raw_header_text(path, 'tabix')), ",
+            "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
+            "layout_metadata := map(['duckhts_region', 'duckhts_header', 'duckhts_header_names', 'duckhts_auto_detect', 'duckhts_column_types', 'duckhts_attributes_map', 'duckhts_attributes_list', 'duckhts_attributes_pairs', 'duckhts_strict'], ",
+            "[coalesce(region, ''), CASE WHEN header IS NULL THEN '' WHEN header THEN 'true' ELSE 'false' END, array_to_string(header_names, ','), CASE WHEN auto_detect IS NULL THEN '' WHEN auto_detect THEN 'true' ELSE 'false' END, array_to_string(column_types, ','), CASE WHEN attributes_map THEN 'true' ELSE 'false' END, CASE WHEN attributes_list THEN 'true' ELSE 'false' END, CASE WHEN attributes_pairs THEN 'true' ELSE 'false' END, CASE WHEN strict THEN 'true' ELSE 'false' END]), ",
+            "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
+        };
+        if (!run_sql_parts_or_fail(connection, gff_convert_sql,
+                                   sizeof(gff_convert_sql) / sizeof(gff_convert_sql[0]))) {
+            return false;
+        }
+    }
+    {
+        static const char *const tabix_convert_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_tabix_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, ",
+            "header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], where_sql := NULL, compression := 'zstd', row_group_size := 100000, ",
+            "partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
+            "duckhts_parquet_copy_sql('read_tabix', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "(CASE WHEN header IS NULL THEN '' ELSE ', header := ' || CASE WHEN header THEN 'true' ELSE 'false' END END) || ",
+            "(CASE WHEN len(header_names) = 0 THEN '' ELSE ', header_names := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(header_names) AS t(x)) || ']' END) || ",
+            "(CASE WHEN auto_detect IS NULL THEN '' ELSE ', auto_detect := ' || CASE WHEN auto_detect THEN 'true' ELSE 'false' END END) || ",
+            "(CASE WHEN len(column_types) = 0 THEN '' ELSE ', column_types := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(column_types) AS t(x)) || ']' END), ', '), ",
+            "source_format := 'tabix', header_key := 'tabix_header', header_value := coalesce(header_text, duckhts_raw_header_text(path, 'tabix')), ",
+            "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
+            "layout_metadata := map(['duckhts_region', 'duckhts_header', 'duckhts_header_names', 'duckhts_auto_detect', 'duckhts_column_types'], ",
+            "[coalesce(region, ''), CASE WHEN header IS NULL THEN '' WHEN header THEN 'true' ELSE 'false' END, array_to_string(header_names, ','), CASE WHEN auto_detect IS NULL THEN '' WHEN auto_detect THEN 'true' ELSE 'false' END, array_to_string(column_types, ',')]), ",
+            "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
+        };
+        if (!run_sql_parts_or_fail(connection, tabix_convert_sql,
+                                   sizeof(tabix_convert_sql) / sizeof(tabix_convert_sql[0]))) {
+            return false;
+        }
+    }
     {
         static const char *const hts_union_query_sql[] = {
             "CREATE OR REPLACE MACRO hts_union_query(reader, pattern, params := '') AS (",
