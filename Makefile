@@ -104,6 +104,9 @@ bench-score:
 bench-norm:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_norm.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
+stage-norm-1000g-dragen-gvcf:
+	scripts/stage_norm_1000g_dragen_gvcf.sh
+
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 

@@ -140,6 +140,20 @@ SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) TH
 ----
 1
 
+# --- read_bcf preserves phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields ---
+query T
+SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PS=' || coalesce(CAST(FORMAT_PS AS VARCHAR), 'NA'), ',' ORDER BY POS, SAMPLE_ID)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/phased_genotype_fields.vcf', tidy_format := true);
+----
+S1=0|1:PS=10,S2=1|2:PS=10,S1=1|0:PS=20,S2=0/1:PS=NA,S1=1:PS=30,S2=0|1|1:PS=30,S1=0|1|1|2:PS=40,S2=2|2:PS=40
+
+query T
+SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PL=' || length(FORMAT_PL) || ':GP=' || length(FORMAT_GP) || ':DS=' || length(FORMAT_DS), ',' ORDER BY POS, SAMPLE_ID)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/phased_genotype_fields.vcf', tidy_format := true)
+WHERE POS >= 30;
+----
+S1=1:PL=2:GP=2:DS=1,S2=0|1|1:PL=4:GP=4:DS=1,S1=0|1|1|2:PL=15:GP=15:DS=2,S2=2|2:PL=6:GP=6:DS=2
+
 # --- VEP/CSQ annotations (if present) ---
 query I
 SELECT CASE WHEN VEP_Allele IS NOT NULL THEN 1 ELSE 0 END

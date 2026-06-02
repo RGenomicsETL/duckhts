@@ -1,0 +1,41 @@
+# name: test/sql/bcftools_norm_threading.test
+# description: Threaded FASTA-backed bcftools_norm_row cache regression coverage
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+query IIIIII
+WITH normed AS (
+  SELECT
+    struct_extract(norm, 'pos_normed') AS pos_normed,
+    struct_extract(norm, 'end_pos_normed') AS end_pos_normed,
+    struct_extract(norm, 'normed') AS normed,
+    struct_extract(norm, 'norm_status') AS norm_status
+  FROM (
+    SELECT bcftools_norm_row(
+             'chrS',
+             2::BIGINT,
+             CASE WHEN i % 3 = 0 THEN 'T' ELSE 'TT' END,
+             CASE WHEN i % 3 = 0 THEN ['C'] WHEN i % 3 = 1 THEN ['TC'] ELSE ['CC'] END,
+             '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+             6::BIGINT,
+             NULL::BIGINT,
+             NULL,
+             NULL
+           ) AS norm
+    FROM range(200000) t(i)
+  ) q
+)
+SELECT
+  count(*),
+  sum(CASE WHEN normed THEN 1 ELSE 0 END),
+  sum(pos_normed),
+  sum(end_pos_normed),
+  sum(CASE WHEN norm_status = 'Normalized' THEN 1 ELSE 0 END),
+  sum(CASE WHEN norm_status = 'Unchanged' THEN 1 ELSE 0 END)
+FROM normed;
+----
+200000	66667	466667	533333	66667	133333

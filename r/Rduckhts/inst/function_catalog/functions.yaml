@@ -37,6 +37,7 @@
         "The extension also includes sequence utility UDFs, SAM flag predicate helpers, and HTS metadata helpers."
       ],
       "feature_notes": [
+        "Reader table functions accept scan_mode := 'sequential' to force full-file streaming/counting instead of index-backed count/parallel paths where applicable; region queries remain index-backed and are incompatible with sequential mode.",
         "Paired FASTQ is supported via `mate_path` or `interleaved := true`.",
         "CRAM reads are supported with an explicit reference file.",
         "GTF/GFF attributes can be returned as a parsed `MAP` with `attributes_map := true` via `read_gff` or `read_gtf`.",
@@ -154,10 +155,10 @@
       "name": "read_bcf",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, decompression_threads := 0)",
+      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0)",
       "returns": "table",
       "r_wrapper": "rduckhts_bcf",
-      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, and optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads).",
+      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), and optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads).",
       "examples": [
         "SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;"
       ]
@@ -166,10 +167,10 @@
       "name": "read_bam",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_bam(path, standard_tags := FALSE, auxiliary_tags := FALSE, region := NULL, index_path := NULL, reference := NULL, sequence_encoding := 'string', quality_representation := 'string', cigar_representation := 'string', decompression_threads := 2)",
+      "signature": "read_bam(path, standard_tags := FALSE, auxiliary_tags := FALSE, region := NULL, index_path := NULL, reference := NULL, sequence_encoding := 'string', quality_representation := 'string', cigar_representation := 'string', scan_mode := 'auto', decompression_threads := 2)",
       "returns": "table",
       "r_wrapper": "rduckhts_bam",
-      "description": "Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := 'nt16' to return SEQ as UTINYINT[], quality_representation := 'phred' to return QUAL as UTINYINT[], and cigar_representation := 'binary' to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.",
+      "description": "Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := 'nt16' to return SEQ as UTINYINT[], quality_representation := 'phred' to return QUAL as UTINYINT[], and cigar_representation := 'binary' to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. scan_mode := 'sequential' forces a full-file streaming scan instead of index-backed count/parallel paths and is incompatible with region. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.",
       "examples": [
         "SELECT QNAME, FLAG, RNAME, POS FROM read_bam('range.bam') LIMIT 5;"
       ]
@@ -238,10 +239,10 @@
       "name": "read_fasta",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_fasta(path, region := NULL, index_path := NULL, gzi_path := NULL, sequence_encoding := 'string')",
+      "signature": "read_fasta(path, region := NULL, index_path := NULL, gzi_path := NULL, sequence_encoding := 'string', scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_fasta",
-      "description": "Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] (htslib nt16 4-bit codes) instead of VARCHAR. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.",
+      "description": "Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] (htslib nt16 4-bit codes) instead of VARCHAR. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
       "examples": [
         "SELECT NAME, length(SEQUENCE) FROM read_fasta('ce.fa');"
       ]
@@ -250,10 +251,10 @@
       "name": "read_bed",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_bed(path, region := NULL, index_path := NULL)",
+      "signature": "read_bed(path, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_bed",
-      "description": "Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.",
+      "description": "Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
       "examples": [
         "SELECT chrom, start, \"end\", name FROM read_bed('targets.bed') LIMIT 5;"
       ]
@@ -406,10 +407,10 @@
       "name": "read_fastq",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_fastq(path, interleaved := FALSE, mate_path := NULL, sequence_encoding := 'string', quality_representation := 'string', input_quality_encoding := 'phred33')",
+      "signature": "read_fastq(path, interleaved := FALSE, mate_path := NULL, sequence_encoding := 'string', quality_representation := 'string', input_quality_encoding := 'phred33', scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_fastq",
-      "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'.",
+      "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.",
       "examples": [
         "SELECT NAME, MATE FROM read_fastq('r1.fq', mate_path := 'r2.fq') LIMIT 5;"
       ]
@@ -430,10 +431,10 @@
       "name": "read_gff",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, region := NULL, index_path := NULL)",
+      "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_gff",
-      "description": "Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering.",
+      "description": "Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gff('gff_file.gff.gz') LIMIT 5;"
       ]
@@ -442,10 +443,10 @@
       "name": "read_gtf",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, region := NULL, index_path := NULL)",
+      "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_gtf",
-      "description": "Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering.",
+      "description": "Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gtf('annotations.gtf.gz') LIMIT 5;"
       ]
@@ -454,10 +455,10 @@
       "name": "read_tabix",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_tabix(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, region := NULL, index_path := NULL)",
+      "signature": "read_tabix(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_tabix",
-      "description": "Read generic tabix-indexed text data with optional header handling and type inference.",
+      "description": "Read generic tabix-indexed text data with optional header handling and type inference. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
       "examples": [
         "SELECT * FROM read_tabix('meta_tabix.tsv.gz') LIMIT 5;"
       ]
@@ -950,7 +951,7 @@
       "signature": "bcftools_norm_row(chrom, pos, ref, alt, fasta_ref, end_pos := NULL, svlen := NULL, fasta_index_path := NULL, gzi_path := NULL)",
       "returns": "STRUCT",
       "r_wrapper": "",
-      "description": "Normalize one variant row with bcftools/vt-style left-alignment semantics against a FASTA reference. The alt argument may be either a comma-delimited VARCHAR or a VARCHAR[] list. The returned STRUCT contains pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), normed (TRUE/FALSE/NULL), and norm_status. Symbolic <DEL> rows can use end_pos, and symbolic <DUP> rows can use svlen.",
+      "description": "Normalize one variant row with bcftools/vt-style left-alignment semantics against a FASTA reference. The alt argument may be either a comma-delimited VARCHAR or a VARCHAR[] list. The returned STRUCT contains pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), normed (TRUE/FALSE/NULL), and norm_status. Symbolic <DEL> rows can use end_pos, and symbolic <DUP> rows can use svlen. gVCF <NON_REF>/<*> reference-block alleles pass through with GVCFReferenceBlock, and mixed real-plus-gVCF-symbolic alleles normalize the real alleles while preserving symbolic alleles and caller-supplied reference-block END in site-preserving output.",
       "examples": [
         "SELECT nr.pos_normed, nr.ref_normed, nr.alt_normed FROM (SELECT bcftools_norm_row('chr1', 100, 'AC', 'A', 'ref.fa', NULL::BIGINT, NULL::BIGINT, NULL, NULL) AS nr);"
       ]
@@ -962,7 +963,7 @@
       "signature": "duckhts_bcftools_norm(table_name, fasta_ref, chrom_col := 'chrom', pos_col := 'pos', ref_col := 'ref', alt_col := 'alt', split_multiallelic := FALSE, end_pos_col := NULL, svlen_col := NULL, fasta_index_path := NULL, gzi_path := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_bcftools_norm",
-      "description": "DuckDB table macro wrapper over bcftools_norm_row that normalizes variants from a table or derived-table expression while preserving the original columns. The input ALT column may be either VARCHAR or VARCHAR[]. The result appends pos_normed, end_pos_normed, ref_normed, alt_normed, normed, and norm_status; with split_multiallelic := TRUE, multiallelic sites are split before normalization and alt_normed becomes VARCHAR plus alt_index.",
+      "description": "DuckDB table macro wrapper over bcftools_norm_row that normalizes variants from a table or derived-table expression while preserving the original columns. The input ALT column may be either VARCHAR or VARCHAR[]. The result appends pos_normed, end_pos_normed, ref_normed, alt_normed, normed, and norm_status; with split_multiallelic := TRUE, multiallelic sites are split before normalization and alt_normed becomes VARCHAR plus alt_index. This is a vt/vcfnorm-style row/table transform, not a full-record VCF/BCF rewrite: genotype, PL/GP/DS, and PS fields are preserved as caller columns unless a separate full-record writer/remapper layer is used.",
       "examples": [
         "SELECT * FROM duckhts_bcftools_norm('variants', 'ref.fa');",
         "SELECT * FROM duckhts_bcftools_norm('(SELECT CHROM AS chrom, POS AS pos, REF AS ref, ALT AS alt FROM read_bcf(''cohort.vcf.gz'')) AS v', 'ref.fa', split_multiallelic := TRUE);"

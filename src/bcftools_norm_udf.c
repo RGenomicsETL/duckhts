@@ -17,7 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #define NORM_ALN_WIN 100
 #define NORM_CACHE_MAX_ENTRIES 8
-#define NORM_REF_FETCH_QUANTUM 8192
+#define NORM_REF_FETCH_QUANTUM 65536
 #define NORM_REF_FETCH_PAD 4096
 
 typedef struct norm_cache_entry {
@@ -32,8 +32,15 @@ typedef struct norm_cache_entry {
     struct norm_cache_entry *next;
 } norm_cache_entry_t;
 
+/*
+ * faidx_t and the cached reference window own mutable htslib/file state.  Never
+ * share a norm cache entry across DuckDB worker threads; issue #17/PR #18 fixed
+ * the same class of FASTA-cache race in munge/liftover.  The cache below is
+ * deliberately pthread-local, and reference fetches are serialized defensively.
+ */
 static pthread_key_t g_norm_cache_key;
 static pthread_once_t g_norm_cache_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t g_norm_fai_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 enum {
     NORM_OUT_POS = 0,
@@ -165,6 +172,12 @@ static int same_nullable_string(const char *a, const char *b) {
     return strcmp(a, b) == 0;
 }
 
+static int same_nullable_span(const char *a, const char *b, size_t b_len) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    return strlen(a) == b_len && memcmp(a, b, b_len) == 0;
+}
+
 static void seq_to_upper_ascii(char *seq) {
     if (!seq) return;
     while (*seq) {
@@ -208,6 +221,14 @@ static int is_symbolic_alt(const char *alt) {
     if (!alt) return 0;
     len = strlen(alt);
     return len >= 3 && alt[0] == '<' && alt[len - 1] == '>';
+}
+
+static int is_gvcf_symbolic_alt(const char *alt) {
+    return alt && (strcmp(alt, "<NON_REF>") == 0 || strcmp(alt, "<*>") == 0);
+}
+
+static int is_gvcf_ignored_alt(const char *alt) {
+    return is_gvcf_symbolic_alt(alt) || is_spanning_deletion_alt(alt);
 }
 
 static char *resolve_fasta_contig_name(faidx_t *fai, const char *chrom) {
@@ -341,7 +362,9 @@ static char *fetch_windowed_sequence(norm_cache_entry_t *entry,
     if (fetch_end < end0) fetch_end = end0;
     if (fetch_end >= contig_len) fetch_end = contig_len - 1;
 
+    pthread_mutex_lock(&g_norm_fai_fetch_mutex);
     fetched = faidx_fetch_seq64(entry->fai, resolved, fetch_beg, fetch_end, &seq_len);
+    pthread_mutex_unlock(&g_norm_fai_fetch_mutex);
     if (!fetched || seq_len != fetch_end - fetch_beg + 1) {
         free(fetched);
         free(resolved);
@@ -727,6 +750,109 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
         any_breakend |= is_breakend_alt(orig_alt[i]);
         any_spanning |= is_spanning_deletion_alt(orig_alt[i]);
     }
+
+    int n_gvcf_ignored = 0;
+    int has_gvcf_symbolic = 0;
+    for (int i = 0; i < n_orig_alt; i++) {
+        if (!is_gvcf_ignored_alt(orig_alt[i])) continue;
+        n_gvcf_ignored++;
+        if (is_gvcf_symbolic_alt(orig_alt[i])) has_gvcf_symbolic = 1;
+    }
+    if (n_gvcf_ignored > 0) {
+        if (n_gvcf_ignored == n_orig_alt) {
+            if (has_gvcf_symbolic) {
+                set_result_applicable(result, 0, "GVCFReferenceBlock", pos1, original_end, orig_ref, orig_alt, n_orig_alt);
+            } else {
+                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "SpanningDeletion");
+                free(orig_ref);
+                free_string_array(orig_alt, n_orig_alt);
+            }
+            return 1;
+        }
+
+        int n_real_alt = n_orig_alt - n_gvcf_ignored;
+        char **real_alt = (char **)calloc((size_t)n_real_alt, sizeof(char *));
+        int *real_to_orig = (int *)calloc((size_t)n_real_alt, sizeof(int));
+        norm_result_t real_result;
+        memset(&real_result, 0, sizeof(real_result));
+        if (!real_alt || !real_to_orig) {
+            free(real_alt);
+            free(real_to_orig);
+            goto oom;
+        }
+        int real_i = 0;
+        for (int i = 0; i < n_orig_alt; i++) {
+            if (is_gvcf_ignored_alt(orig_alt[i])) continue;
+            real_alt[real_i] = dup_cstr(orig_alt[i]);
+            if (!real_alt[real_i]) {
+                free_string_array(real_alt, n_real_alt);
+                free(real_to_orig);
+                goto oom;
+            }
+            real_to_orig[real_i] = i;
+            real_i++;
+        }
+
+        if (!normalize_variant_row(cache, chrom, pos1, orig_ref, real_alt, n_real_alt,
+                                   has_end_pos, end_pos_in, has_svlen, svlen_in,
+                                   &real_result, err)) {
+            free_string_array(real_alt, n_real_alt);
+            free(real_to_orig);
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
+            return 0;
+        }
+        free_string_array(real_alt, n_real_alt);
+        free(real_to_orig);
+
+        if (!real_result.applicable) {
+            set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                   real_result.status ? real_result.status : "GVCFMixedPassthrough");
+            free_norm_result(&real_result);
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
+            return 1;
+        }
+
+        char **merged_alt = (char **)calloc((size_t)n_orig_alt, sizeof(char *));
+        char *merged_ref = dup_cstr(real_result.ref);
+        if (!merged_alt || !merged_ref) {
+            free(merged_ref);
+            free_string_array(merged_alt, n_orig_alt);
+            free_norm_result(&real_result);
+            goto oom;
+        }
+        real_i = 0;
+        for (int i = 0; i < n_orig_alt; i++) {
+            const char *src_alt = NULL;
+            if (is_gvcf_ignored_alt(orig_alt[i])) {
+                src_alt = orig_alt[i];
+            } else {
+                src_alt = real_i < real_result.n_alt ? real_result.alts[real_i] : NULL;
+                real_i++;
+            }
+            merged_alt[i] = dup_cstr(src_alt);
+            if (!merged_alt[i]) {
+                free(merged_ref);
+                free_string_array(merged_alt, n_orig_alt);
+                free_norm_result(&real_result);
+                goto oom;
+            }
+        }
+        int64_t merged_end = (has_end_pos && has_gvcf_symbolic) ? original_end : real_result.end_pos1;
+        changed = real_result.pos1 != pos1 || merged_end != original_end ||
+                  strcmp(merged_ref, orig_ref) != 0 ||
+                  !compare_alt_arrays(merged_alt, n_orig_alt, orig_alt, n_orig_alt);
+        set_result_applicable(result, changed,
+                              changed ? "Normalized" : "Unchanged",
+                              real_result.pos1, merged_end,
+                              merged_ref, merged_alt, n_orig_alt);
+        free_norm_result(&real_result);
+        free(orig_ref);
+        free_string_array(orig_alt, n_orig_alt);
+        return 1;
+    }
+
     if (any_breakend) {
         set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "Breakend");
         free(orig_ref);
@@ -762,6 +888,48 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
     }
     free(ref_fetch);
     ref_fetch = NULL;
+
+    {
+        size_t ref_len = strlen(orig_ref);
+        size_t min_len = ref_len;
+        int tail = toupper((unsigned char)orig_ref[ref_len - 1]);
+        int head = toupper((unsigned char)orig_ref[0]);
+        int common_tail = 1;
+        int common_head = 1;
+        int can_skip_realign = 1;
+
+        for (int i = 0; i < n_orig_alt; i++) {
+            char *alt = orig_alt[i];
+            size_t alt_len;
+
+            if (is_symbolic_alt(alt)) {
+                can_skip_realign = 0;
+                break;
+            }
+            alt_len = strlen(alt);
+            if (has_non_acgtn(alt, (int)alt_len)) {
+                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidAltAllele");
+                free(orig_ref);
+                free_string_array(orig_alt, n_orig_alt);
+                return 1;
+            }
+            if (alt_len == ref_len && strcmp(alt, orig_ref) == 0) {
+                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "DuplicateAllele");
+                free(orig_ref);
+                free_string_array(orig_alt, n_orig_alt);
+                return 1;
+            }
+            if (alt_len < min_len) min_len = alt_len;
+            if (toupper((unsigned char)alt[alt_len - 1]) != tail) common_tail = 0;
+            if (toupper((unsigned char)alt[0]) != head) common_head = 0;
+        }
+
+        if (can_skip_realign && !common_tail && (!common_head || min_len <= 1)) {
+            set_result_applicable(result, 0, "Unchanged", pos1, pos1 + (int64_t)ref_len - 1,
+                                  orig_ref, orig_alt, n_orig_alt);
+            return 1;
+        }
+    }
 
     n_allele = n_orig_alt + 1;
     als = (kstring_t *)calloc((size_t)n_allele, sizeof(kstring_t));
@@ -988,47 +1156,47 @@ static void bcftools_norm_row_scalar(duckdb_function_info info,
             }
         }
 
-        fasta_key = dup_span(fasta_ref, fasta_len);
-        if (!fasta_key) {
-            free(chrom_key);
-            free(ref_key);
-            duckdb_scalar_function_set_error(info, "bcftools_norm_row: out of memory");
-            free(cached_fasta_path);
-            free(cached_fai_path);
-            free(cached_gzi_path);
-            return;
-        }
-        if (fai_path && fai_len > 0) {
-            fai_key = dup_span(fai_path, fai_len);
-            if (!fai_key) {
+        if (!cached_entry || !same_nullable_span(cached_fasta_path, fasta_ref, (size_t)fasta_len)
+            || !same_nullable_span(cached_fai_path, (fai_path && fai_len > 0) ? fai_path : NULL, (size_t)fai_len)
+            || !same_nullable_span(cached_gzi_path, (gzi_path && gzi_len > 0) ? gzi_path : NULL, (size_t)gzi_len)) {
+            fasta_key = dup_span(fasta_ref, fasta_len);
+            if (!fasta_key) {
                 free(chrom_key);
                 free(ref_key);
-                free(fasta_key);
                 duckdb_scalar_function_set_error(info, "bcftools_norm_row: out of memory");
                 free(cached_fasta_path);
                 free(cached_fai_path);
                 free(cached_gzi_path);
                 return;
             }
-        }
-        if (gzi_path && gzi_len > 0) {
-            gzi_key = dup_span(gzi_path, gzi_len);
-            if (!gzi_key) {
-                free(chrom_key);
-                free(ref_key);
-                free(fasta_key);
-                free(fai_key);
-                duckdb_scalar_function_set_error(info, "bcftools_norm_row: out of memory");
-                free(cached_fasta_path);
-                free(cached_fai_path);
-                free(cached_gzi_path);
-                return;
+            if (fai_path && fai_len > 0) {
+                fai_key = dup_span(fai_path, fai_len);
+                if (!fai_key) {
+                    free(chrom_key);
+                    free(ref_key);
+                    free(fasta_key);
+                    duckdb_scalar_function_set_error(info, "bcftools_norm_row: out of memory");
+                    free(cached_fasta_path);
+                    free(cached_fai_path);
+                    free(cached_gzi_path);
+                    return;
+                }
             }
-        }
+            if (gzi_path && gzi_len > 0) {
+                gzi_key = dup_span(gzi_path, gzi_len);
+                if (!gzi_key) {
+                    free(chrom_key);
+                    free(ref_key);
+                    free(fasta_key);
+                    free(fai_key);
+                    duckdb_scalar_function_set_error(info, "bcftools_norm_row: out of memory");
+                    free(cached_fasta_path);
+                    free(cached_fai_path);
+                    free(cached_gzi_path);
+                    return;
+                }
+            }
 
-        if (!cached_entry || !same_nullable_string(cached_fasta_path, fasta_key)
-            || !same_nullable_string(cached_fai_path, fai_key)
-            || !same_nullable_string(cached_gzi_path, gzi_key)) {
             cached_entry = get_norm_cache_entry(fasta_key, fai_key, gzi_key, &err);
             if (!cached_entry) {
                 duckdb_scalar_function_set_error(info, err ? err : "bcftools_norm_row: failed to load FASTA index");

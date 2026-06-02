@@ -131,6 +131,7 @@ typedef struct {
     char meta_char;
     int  line_skip;
     int  auto_detect;
+    int  scan_sequential;
     int  col_types_provided;
     int *col_types;
     uint64_t index_row_count;
@@ -695,6 +696,22 @@ static void parse_regions(const char *region_str, char ***out_regions, unsigned 
     *out_count = idx;
 }
 
+static int tabix_parse_scan_mode(const char *mode, int *scan_sequential) {
+    if (!scan_sequential) return 0;
+    *scan_sequential = 0;
+    if (!mode || mode[0] == '\0' || strcasecmp(mode, "auto") == 0) {
+        return 1;
+    }
+    if (strcasecmp(mode, "sequential") == 0 ||
+        strcasecmp(mode, "streaming") == 0 ||
+        strcasecmp(mode, "stream") == 0 ||
+        strcasecmp(mode, "seq") == 0) {
+        *scan_sequential = 1;
+        return 1;
+    }
+    return 0;
+}
+
 static int tabix_advance_region_iterator(tabix_init_data_t *id, tabix_bind_data_t *bd) {
     if (!id || !bd || !id->tbx || !bd->regions) return 0;
 
@@ -1109,6 +1126,31 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_destroy_value(&val);
     }
 
+    val = duckdb_bind_get_named_parameter(info, "scan_mode");
+    if (val && !duckdb_is_null_value(val)) {
+        char *scan_mode = duckdb_get_varchar(val);
+        if (!tabix_parse_scan_mode(scan_mode, &bd->scan_sequential)) {
+            const char *names[] = {"read_tabix", "read_gtf", "read_gff"};
+            char msg[128];
+            snprintf(msg, sizeof(msg), "%s: scan_mode must be 'auto' or 'sequential'", names[mode]);
+            duckdb_bind_set_error(info, msg);
+            if (scan_mode) duckdb_free(scan_mode);
+            duckdb_destroy_value(&val);
+            tabix_bind_data_destroy(bd);
+            return;
+        }
+        if (scan_mode) duckdb_free(scan_mode);
+    }
+    if (val) duckdb_destroy_value(&val);
+    if (bd->scan_sequential && bd->n_regions > 0) {
+        const char *names[] = {"read_tabix", "read_gtf", "read_gff"};
+        char msg[160];
+        snprintf(msg, sizeof(msg), "%s: scan_mode := 'sequential' is incompatible with region queries", names[mode]);
+        duckdb_bind_set_error(info, msg);
+        tabix_bind_data_destroy(bd);
+        return;
+    }
+
     /* Schema: GTF/GFF have fixed 9 columns; generic auto-detects */
     if (mode == TABIX_MODE_GTF || mode == TABIX_MODE_GFF) {
         /* File has 9 fixed columns; attributes_* columns are derived. */
@@ -1364,7 +1406,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         duckdb_destroy_logical_type(&varchar_type);
     }
 
-    if (bd->n_regions == 0) {
+    if (bd->n_regions == 0 && !bd->scan_sequential) {
         tbx_t *tbx_stats = tbx_index_load2(bd->file_path, bd->index_path);
         if (tbx_stats) {
             bd->index_row_count_valid =
@@ -1405,7 +1447,7 @@ static void tabix_init(duckdb_init_info info) {
         id->column_ids = NULL;
     }
 
-    if (id->n_projected_cols == 0 && bd->n_regions == 0 && bd->index_row_count_valid && !bd->strict) {
+    if (id->n_projected_cols == 0 && bd->n_regions == 0 && !bd->scan_sequential && bd->index_row_count_valid && !bd->strict) {
         id->count_only = 1;
         id->count_remaining = bd->index_row_count;
         id->finished = (id->count_remaining == 0);
@@ -1429,8 +1471,10 @@ static void tabix_init(duckdb_init_info info) {
             : DUCKHTS_HTS_IO_PROFILE_STREAMING
     );
 
-    /* Try to load tabix index */
-    id->tbx = tbx_index_load2(bd->file_path, bd->index_path);
+    /* Try to load tabix index when it is needed for region scans or auto metadata use. */
+    if (bd->n_regions > 0 || !bd->scan_sequential) {
+        id->tbx = tbx_index_load2(bd->file_path, bd->index_path);
+    }
 
     if (bd->n_regions > 0) {
         if (!id->tbx) {
@@ -1776,6 +1820,7 @@ static duckdb_table_function create_tabix_tf(const char *name,
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     if (include_attributes_map) {
