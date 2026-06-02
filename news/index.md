@@ -2,6 +2,35 @@
 
 ## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
 
+- expose bundled reader `scan_mode = "auto"|"sequential"` controls
+  through the R wrappers and multi-file helpers for `read_bcf`,
+  `read_bam`, `read_fasta`, `read_fastq`, `read_bed`, `read_gff`,
+  `read_gtf`, and `read_tabix`, so callers can force full-file
+  streaming/counting instead of index-backed count or parallel scan
+  paths where applicable; sequential mode is rejected for region queries
+- optimize bundled `bcftools_norm_row(...)` /
+  [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
+  for already-normalized plain ACGTN allele rows by skipping kstring
+  left-realignment setup when trim predicates prove the row is
+  unchanged; avoid per-row FASTA path duplication after the vector-local
+  cache is established, reuse larger bounded per-thread reference
+  windows, and document/defensively serialize htslib FASTA fetches while
+  keeping normalization reference caches thread-local to avoid the faidx
+  cache race class fixed in
+  <https://github.com/RGenomicsETL/duckhts/issues/17> /
+  <https://github.com/RGenomicsETL/duckhts/pull/18>
+- make bundled
+  [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
+  / `duckhts_bcftools_norm(...)` gVCF-aware for vt/vcfnorm-style row
+  normalization: `<NON_REF>` and `<*>` reference-block alleles now pass
+  through with `GVCFReferenceBlock`, and mixed real-plus-gVCF-symbolic
+  alleles normalize the real alleles while preserving symbolic alleles
+  and caller-supplied reference-block `END` in site-preserving output;
+  mixed `*` plus real alleles now follows the same ignored-symbolic
+  path, while `*`-only rows remain `SpanningDeletion`; bundled phased
+  GT/PL/GP/DS/PS FORMAT fixtures, including haploid/triploid/tetraploid
+  `Number=G` cardinality cases, and tinytests pin phase-separator
+  preservation through `read_bcf(...)`
 - add thin DBI wrappers
   [`rduckhts_bcf_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_convert_parquet.md),
   [`rduckhts_bam_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bam_convert_parquet.md),
