@@ -15,6 +15,7 @@ rduckhts_gtf(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -59,6 +60,13 @@ rduckhts_gtf(
 - column_types:
 
   Character vector of column types (e.g. "BIGINT", "VARCHAR")
+
+- scan_mode:
+
+  Optional scan mode. Use `"auto"` (default extension behavior) or
+  `"sequential"` to force full-file streaming/counting instead of
+  index-backed count paths. Sequential mode is incompatible with
+  `region`.
 
 - attributes_map:
 

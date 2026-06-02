@@ -16,6 +16,7 @@ rduckhts_fastq_multi(
   sequence_encoding = NULL,
   quality_representation = NULL,
   input_quality_encoding = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -54,6 +55,10 @@ rduckhts_fastq_multi(
 - input_quality_encoding:
 
   Optional input quality encoding override.
+
+- scan_mode:
+
+  Optional scan mode (`"auto"` or `"sequential"`).
 
 - .params:
 

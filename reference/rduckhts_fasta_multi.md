@@ -15,6 +15,7 @@ rduckhts_fasta_multi(
   index_path = NULL,
   gzi_path = NULL,
   sequence_encoding = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -49,6 +50,10 @@ rduckhts_fasta_multi(
 - sequence_encoding:
 
   Optional sequence encoding.
+
+- scan_mode:
+
+  Optional scan mode (`"auto"` or `"sequential"`).
 
 - .params:
 

@@ -50,6 +50,7 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  tidy_format <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  additional_csq_column_types <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -86,6 +87,12 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 <dt id="arg-additional-csq-column-types">additional_csq_column_types<a class="anchor" aria-label="anchor" href="#arg-additional-csq-column-types"></a></dt>
 <dd><p>Optional bcftools-style `PATTERN TYPE`
 overrides for CSQ/ANN/BCSQ subfield typing, separated by newlines or `;`</p></dd>
+
+
+<dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>
+<dd><p>Optional scan mode. Use <code>"auto"</code> (default extension
+behavior) or <code>"sequential"</code> to force full-file streaming instead of index-backed
+count/parallel scan paths. Sequential mode is incompatible with `region`.</p></dd>
 
 
 <dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>

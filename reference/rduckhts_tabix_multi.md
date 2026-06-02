@@ -17,6 +17,7 @@ rduckhts_tabix_multi(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -59,6 +60,10 @@ rduckhts_tabix_multi(
 - column_types:
 
   Character vector of column type names.
+
+- scan_mode:
+
+  Optional scan mode (`"auto"` or `"sequential"`).
 
 - .params:
 

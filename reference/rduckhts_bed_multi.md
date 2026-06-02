@@ -13,6 +13,7 @@ rduckhts_bed_multi(
   files,
   region = NULL,
   index_path = NULL,
+  scan_mode = NULL,
   .params = NULL,
   overwrite = FALSE
 )
@@ -39,6 +40,10 @@ rduckhts_bed_multi(
 - index_path:
 
   Optional index file path.
+
+- scan_mode:
+
+  Optional scan mode (`"auto"` or `"sequential"`).
 
 - .params:
 

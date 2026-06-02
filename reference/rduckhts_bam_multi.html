@@ -57,6 +57,7 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 <span>  sequence_encoding <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  quality_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  cigar_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  .params <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
@@ -110,6 +111,10 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 <dt id="arg-cigar-representation">cigar_representation<a class="anchor" aria-label="anchor" href="#arg-cigar-representation"></a></dt>
 <dd><p>Optional CIGAR representation; use
 <code>"binary"</code> for packed BAM operations.</p></dd>
+
+
+<dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>
+<dd><p>Optional scan mode (<code>"auto"</code> or <code>"sequential"</code>).</p></dd>
 
 
 <dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>

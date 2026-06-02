@@ -53,6 +53,7 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  tidy_format <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  additional_csq_column_types <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  .params <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
@@ -89,6 +90,10 @@ Each row includes a <code>filename</code> column identifying its source file.</p
 
 <dt id="arg-additional-csq-column-types">additional_csq_column_types<a class="anchor" aria-label="anchor" href="#arg-additional-csq-column-types"></a></dt>
 <dd><p>Optional CSQ type override string.</p></dd>
+
+
+<dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>
+<dd><p>Optional scan mode (`"auto"` or `"sequential"`).</p></dd>
 
 
 <dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>

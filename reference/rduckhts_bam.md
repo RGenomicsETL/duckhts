@@ -18,6 +18,7 @@ rduckhts_bam(
   sequence_encoding = NULL,
   quality_representation = NULL,
   cigar_representation = NULL,
+  scan_mode = NULL,
   decompression_threads = 2,
   overwrite = FALSE
 )
@@ -77,6 +78,13 @@ rduckhts_bam(
   (default) returns SAM text such as `"36M"`; `"binary"` returns packed
   BAM operations as `UINTEGER[]` where each element is
   `(len << 4) | op`.
+
+- scan_mode:
+
+  Optional scan mode. Use `"auto"` (default extension behavior) or
+  `"sequential"` to force full-file streaming instead of index-backed
+  count/parallel scan paths. Sequential mode is incompatible with
+  `region`.
 
 - decompression_threads:
 

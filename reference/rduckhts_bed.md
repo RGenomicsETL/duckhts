@@ -11,6 +11,7 @@ rduckhts_bed(
   path,
   region = NULL,
   index_path = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 ```
@@ -36,6 +37,13 @@ rduckhts_bed(
 - index_path:
 
   Optional explicit path to a BED tabix index
+
+- scan_mode:
+
+  Optional scan mode. Use `"auto"` (default extension behavior) or
+  `"sequential"` to force full-file streaming/counting instead of
+  index-backed count paths. Sequential mode is incompatible with
+  `region`.
 
 - overwrite:
 

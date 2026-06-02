@@ -47,6 +47,7 @@
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  gzi_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  sequence_encoding <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -84,6 +85,13 @@ bgzipped FASTA inputs when the sidecar is not colocated with the FASTA.</p></dd>
 <dd><p>Character. Sequence encoding for the SEQUENCE column:
 <code>"string"</code> (default) returns decoded bases as <code>VARCHAR</code>;
 <code>"nt16"</code> returns raw htslib nt16 4-bit codes as <code>UTINYINT[]</code>.</p></dd>
+
+
+<dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>
+<dd><p>Optional scan mode. Use <code>"auto"</code> (default extension
+behavior) or <code>"sequential"</code> to force full-file streaming/counting
+instead of index-backed count paths. Sequential mode is incompatible with
+<code>region</code>.</p></dd>
 
 
 <dt id="arg-overwrite">overwrite<a class="anchor" aria-label="anchor" href="#arg-overwrite"></a></dt>

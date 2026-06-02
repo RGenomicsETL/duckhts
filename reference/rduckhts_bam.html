@@ -51,6 +51,7 @@
 <span>  sequence_encoding <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  quality_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  cigar_representation <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -109,6 +110,13 @@
 <code>"string"</code> (default) returns SAM text such as <code>"36M"</code>;
 <code>"binary"</code> returns packed BAM operations as <code>UINTEGER[]</code> where each
 element is <code>(len &lt;&lt; 4) | op</code>.</p></dd>
+
+
+<dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>
+<dd><p>Optional scan mode. Use <code>"auto"</code> (default extension
+behavior) or <code>"sequential"</code> to force full-file streaming instead of
+index-backed count/parallel scan paths. Sequential mode is incompatible
+with <code>region</code>.</p></dd>
 
 
 <dt id="arg-decompression-threads">decompression_threads<a class="anchor" aria-label="anchor" href="#arg-decompression-threads"></a></dt>

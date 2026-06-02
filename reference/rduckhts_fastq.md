@@ -14,6 +14,7 @@ rduckhts_fastq(
   sequence_encoding = NULL,
   quality_representation = NULL,
   input_quality_encoding = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 ```
@@ -56,6 +57,12 @@ rduckhts_fastq(
 
   Character. Input FASTQ quality encoding: `"phred33"` (default FASTQ
   convention), `"auto"`, `"phred64"`, or `"solexa64"`.
+
+- scan_mode:
+
+  Optional scan mode. Use `"auto"` (default extension behavior) or
+  `"sequential"` to force raw streaming/counting instead of index-backed
+  count paths.
 
 - overwrite:
 

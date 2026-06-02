@@ -13,6 +13,7 @@ rduckhts_fasta(
   index_path = NULL,
   gzi_path = NULL,
   sequence_encoding = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 )
 ```
@@ -50,6 +51,13 @@ rduckhts_fasta(
   Character. Sequence encoding for the SEQUENCE column: `"string"`
   (default) returns decoded bases as `VARCHAR`; `"nt16"` returns raw
   htslib nt16 4-bit codes as `UTINYINT[]`.
+
+- scan_mode:
+
+  Optional scan mode. Use `"auto"` (default extension behavior) or
+  `"sequential"` to force full-file streaming/counting instead of
+  index-backed count paths. Sequential mode is incompatible with
+  `region`.
 
 - overwrite:
 

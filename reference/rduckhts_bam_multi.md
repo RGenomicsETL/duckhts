@@ -19,6 +19,7 @@ rduckhts_bam_multi(
   sequence_encoding = NULL,
   quality_representation = NULL,
   cigar_representation = NULL,
+  scan_mode = NULL,
   decompression_threads = 2,
   .params = NULL,
   overwrite = FALSE
@@ -71,6 +72,10 @@ rduckhts_bam_multi(
 
   Optional CIGAR representation; use `"binary"` for packed BAM
   operations.
+
+- scan_mode:
+
+  Optional scan mode (`"auto"` or `"sequential"`).
 
 - decompression_threads:
 

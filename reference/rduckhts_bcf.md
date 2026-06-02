@@ -15,6 +15,7 @@ rduckhts_bcf(
   index_path = NULL,
   tidy_format = FALSE,
   additional_csq_column_types = NULL,
+  scan_mode = NULL,
   decompression_threads = 0,
   overwrite = FALSE
 )
@@ -50,6 +51,13 @@ rduckhts_bcf(
 
   Optional bcftools-style \`PATTERN TYPE\` overrides for CSQ/ANN/BCSQ
   subfield typing, separated by newlines or \`;\`
+
+- scan_mode:
+
+  Optional scan mode. Use `"auto"` (default extension behavior) or
+  `"sequential"` to force full-file streaming instead of index-backed
+  count/parallel scan paths. Sequential mode is incompatible with
+  \`region\`.
 
 - decompression_threads:
 

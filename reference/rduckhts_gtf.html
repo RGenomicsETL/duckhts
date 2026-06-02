@@ -49,6 +49,7 @@
 <span>  header_names <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  auto_detect <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  column_types <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  attributes_map <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  attributes_list <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  attributes_pairs <span class="op">=</span> <span class="cn">FALSE</span>,</span>
@@ -94,6 +95,13 @@
 
 <dt id="arg-column-types">column_types<a class="anchor" aria-label="anchor" href="#arg-column-types"></a></dt>
 <dd><p>Character vector of column types (e.g. "BIGINT", "VARCHAR")</p></dd>
+
+
+<dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>
+<dd><p>Optional scan mode. Use <code>"auto"</code> (default extension
+behavior) or <code>"sequential"</code> to force full-file streaming/counting
+instead of index-backed count paths. Sequential mode is incompatible with
+<code>region</code>.</p></dd>
 
 
 <dt id="arg-attributes-map">attributes_map<a class="anchor" aria-label="anchor" href="#arg-attributes-map"></a></dt>
