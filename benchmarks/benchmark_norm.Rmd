@@ -181,14 +181,17 @@ write_norm_fixture <- function(dir_path, n_rows) {
   vcf_path <- file.path(dir_path, "norm_input.vcf")
   vcf_gz <- paste0(vcf_path, ".gz")
 
+  motif <- "GTTTTCT"
+  motif_width <- nchar(motif)
+  ref_seq <- paste(rep(motif, n_rows + 1L), collapse = "")
   writeLines(c(
     ">chrS",
-    "GTTTTCT"
+    substring(ref_seq, seq.int(1L, nchar(ref_seq), by = 80L), pmin(nchar(ref_seq), seq.int(80L, nchar(ref_seq) + 79L, by = 80L)))
   ), fasta_path)
 
   header_lines <- c(
     "##fileformat=VCFv4.2",
-    "##contig=<ID=chrS,length=7>",
+    sprintf("##contig=<ID=chrS,length=%d>", nchar(ref_seq)),
     "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
   )
 
@@ -213,7 +216,8 @@ write_norm_fixture <- function(dir_path, n_rows) {
 
   write_chunked(vcf_path, header_lines, n_rows, function(i) {
     allele <- variants[[(i - 1L) %% length(variants) + 1L]]
-    paste0("chrS\t2\tbench_", i, "\t", allele[[1]], "\t", allele[[2]], "\t.\tPASS\t.")
+    pos <- ((i - 1L) * motif_width) + 2L
+    paste0("chrS\t", pos, "\tbench_", i, "\t", allele[[1]], "\t", allele[[2]], "\t.\tPASS\t.")
   })
 
   DBI::dbGetQuery(
@@ -558,6 +562,7 @@ Synthetic fixture mix:
 - normalized insertions/deletions
 - a multiallelic `TT,TTT` row
 - a ref-only `ALT='.'` row that exercises split-mode row preservation
+- one variant per repeated reference motif, so the synthetic benchmark avoids same-position duplicate-path behavior and should be read as a compact kernel/conformance workload rather than a real cohort speed claim
 
 ## Synthetic conformance
 

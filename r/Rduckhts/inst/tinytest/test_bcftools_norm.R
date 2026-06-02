@@ -46,6 +46,7 @@ test_bcftools_norm <- function() {
       "SELECT * FROM (VALUES",
       "('band_non_ref', 'chrS', 2, 'T', '<NON_REF>', 6::BIGINT),",
       "('mixed_non_ref', 'chrS', 2, 'T', 'TT,<NON_REF>', NULL::BIGINT),",
+      "('mixed_non_ref_band', 'chrS', 2, 'T', 'TT,<NON_REF>', 6::BIGINT),",
       "('mixed_symbolic_star', 'chrS', 2, 'T', 'TT,<*>', NULL::BIGINT),",
       "('star_only', 'chrS', 2, 'T', '*', NULL::BIGINT)",
       ") AS t(case_id, chrom, pos, ref, alt, end_pos)"
@@ -142,16 +143,17 @@ test_bcftools_norm <- function() {
 
   out_gvcf <- rduckhts_bcftools_norm(con, "norm_gvcf", fasta_path, end_pos_col = "end_pos")
   out_gvcf <- out_gvcf[order(out_gvcf$case_id), , drop = FALSE]
-  expect_equal(out_gvcf$case_id, c("band_non_ref", "mixed_non_ref", "mixed_symbolic_star", "star_only"))
-  expect_equal(out_gvcf$pos_normed, c(2, 1, 1, 2))
-  expect_equal(out_gvcf$end_pos_normed, c(6, 1, 1, 2))
-  expect_equal(out_gvcf$ref_normed, c("T", "G", "G", "T"))
+  expect_equal(out_gvcf$case_id, c("band_non_ref", "mixed_non_ref", "mixed_non_ref_band", "mixed_symbolic_star", "star_only"))
+  expect_equal(out_gvcf$pos_normed, c(2, 1, 1, 1, 2))
+  expect_equal(out_gvcf$end_pos_normed, c(6, 1, 6, 1, 2))
+  expect_equal(out_gvcf$ref_normed, c("T", "G", "G", "G", "T"))
   expect_equal(as.character(out_gvcf$alt_normed[[1]]), "<NON_REF>")
   expect_equal(as.character(out_gvcf$alt_normed[[2]]), c("GT", "<NON_REF>"))
-  expect_equal(as.character(out_gvcf$alt_normed[[3]]), c("GT", "<*>"))
-  expect_equal(as.character(out_gvcf$alt_normed[[4]]), "*")
-  expect_equal(as.logical(out_gvcf$normed), c(FALSE, TRUE, TRUE, NA))
-  expect_equal(out_gvcf$norm_status, c("GVCFReferenceBlock", "Normalized", "Normalized", "SpanningDeletion"))
+  expect_equal(as.character(out_gvcf$alt_normed[[3]]), c("GT", "<NON_REF>"))
+  expect_equal(as.character(out_gvcf$alt_normed[[4]]), c("GT", "<*>"))
+  expect_equal(as.character(out_gvcf$alt_normed[[5]]), "*")
+  expect_equal(as.logical(out_gvcf$normed), c(FALSE, TRUE, TRUE, TRUE, NA))
+  expect_equal(out_gvcf$norm_status, c("GVCFReferenceBlock", "Normalized", "Normalized", "Normalized", "SpanningDeletion"))
 
   out_spanning_split <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path, split_multiallelic = TRUE)
   out_spanning_split <- out_spanning_split[order(out_spanning_split$alt_index), , drop = FALSE]

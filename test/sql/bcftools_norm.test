@@ -41,6 +41,7 @@ SELECT *
 FROM (VALUES
   ('band_non_ref', 'chrS', 2, 'T', '<NON_REF>', 6::BIGINT),
   ('mixed_non_ref', 'chrS', 2, 'T', 'TT,<NON_REF>', NULL::BIGINT),
+  ('mixed_non_ref_band', 'chrS', 2, 'T', 'TT,<NON_REF>', 6::BIGINT),
   ('mixed_symbolic_star', 'chrS', 2, 'T', 'TT,<*>', NULL::BIGINT),
   ('star_only', 'chrS', 2, 'T', '*', NULL::BIGINT)
 ) AS t(case_id, chrom, pos, ref, alt, end_pos);
@@ -215,6 +216,7 @@ ORDER BY case_id;
 ----
 band_non_ref	2	6	T	[<NON_REF>]	0	GVCFReferenceBlock
 mixed_non_ref	1	1	G	[GT, <NON_REF>]	1	Normalized
+mixed_non_ref_band	1	6	G	[GT, <NON_REF>]	1	Normalized
 mixed_symbolic_star	1	1	G	[GT, <*>]	1	Normalized
 star_only	2	2	T	[*]	NULL	SpanningDeletion
 
@@ -233,11 +235,13 @@ FROM duckhts_bcftools_norm(
   split_multiallelic := true,
   end_pos_col := 'end_pos'
 )
-WHERE case_id IN ('mixed_non_ref', 'mixed_symbolic_star')
+WHERE case_id IN ('mixed_non_ref', 'mixed_non_ref_band', 'mixed_symbolic_star')
 ORDER BY case_id, alt_index;
 ----
 mixed_non_ref	1	1	G	GT	1	Normalized	1
 mixed_non_ref	2	2	T	<NON_REF>	0	GVCFReferenceBlock	2
+mixed_non_ref_band	1	1	G	GT	1	Normalized	1
+mixed_non_ref_band	2	6	T	<NON_REF>	0	GVCFReferenceBlock	2
 mixed_symbolic_star	1	1	G	GT	1	Normalized	1
 mixed_symbolic_star	2	2	T	<*>	0	GVCFReferenceBlock	2
 

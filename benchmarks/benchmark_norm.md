@@ -87,16 +87,20 @@ knitr::kable(synthetic_bench, digits = 3)
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving    |    3 |      0.149 |   0.147 |   0.150 |      100000 |
-| bcftools_norm | site_preserving    |    3 |     65.353 |  64.468 |  67.641 |      100000 |
-| duckhts       | split_multiallelic |    3 |      0.204 |   0.204 |   0.208 |      120000 |
-| bcftools_norm | split_multiallelic |    3 |     98.022 |  97.557 |  98.329 |      120000 |
+| duckhts       | site_preserving    |    3 |      0.201 |   0.200 |   0.207 |      100000 |
+| bcftools_norm | site_preserving    |    3 |      0.598 |   0.591 |   0.707 |      100000 |
+| duckhts       | split_multiallelic |    3 |      0.387 |   0.387 |   0.391 |      120000 |
+| bcftools_norm | split_multiallelic |    3 |      0.762 |   0.750 |   0.772 |      120000 |
 
 Synthetic fixture mix:
 
 - normalized insertions/deletions
 - a multiallelic `TT,TTT` row
 - a ref-only `ALT='.'` row that exercises split-mode row preservation
+- one variant per repeated reference motif, so the synthetic benchmark
+  avoids same-position duplicate-path behavior and should be read as a
+  compact kernel/conformance workload rather than a real cohort speed
+  claim
 
 ## Synthetic conformance
 
@@ -106,9 +110,9 @@ Synthetic fixture mix:
 knitr::kable(site_case$compare_summary)
 ```
 
-| status |   n |
-|:-------|----:|
-| match  |   5 |
+| status |     n |
+|:-------|------:|
+| match  | 1e+05 |
 
 ``` r
 knitr::kable(site_case$duck_status)
@@ -132,9 +136,9 @@ knitr::kable(site_case$mismatches)
 knitr::kable(split_case$compare_summary)
 ```
 
-| status |   n |
-|:-------|----:|
-| match  |   4 |
+| status |      n |
+|:-------|-------:|
+| match  | 120000 |
 
 ``` r
 knitr::kable(split_case$duck_status)
@@ -231,8 +235,8 @@ if (!file.exists(gvcf_input_path) || !file.exists(gvcf_fasta)) {
 
 | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving |    1 |      1.467 |   1.467 |   1.467 |      677444 |
-| bcftools_norm | site_preserving |    1 |      5.887 |   5.887 |   5.887 |      677444 |
+| duckhts       | site_preserving |    1 |      1.473 |   1.473 |   1.473 |      677444 |
+| bcftools_norm | site_preserving |    1 |      5.946 |   5.946 |   5.946 |      677444 |
 
 | status |      n |
 |:-------|-------:|
@@ -309,8 +313,8 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG001 | duckhts       | site_preserving |    1 |     10.592 |  10.592 |  10.592 |     3891440 |              43 |
-| HG001 | bcftools_norm | site_preserving |    1 |      4.963 |   4.963 |   4.963 |          NA |              NA |
+| HG001 | duckhts       | site_preserving |    1 |      9.886 |   9.886 |   9.886 |     3891440 |              43 |
+| HG001 | bcftools_norm | site_preserving |    1 |      4.905 |   4.905 |   4.905 |          NA |              NA |
 
 | norm_status |       n |
 |:------------|--------:|
@@ -321,8 +325,8 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG002 | duckhts       | site_preserving |    1 |     11.025 |  11.025 |  11.025 |     4033796 |              18 |
-| HG002 | bcftools_norm | site_preserving |    1 |      5.477 |   5.477 |   5.477 |          NA |              NA |
+| HG002 | duckhts       | site_preserving |    1 |     10.792 |  10.792 |  10.792 |     4033796 |              18 |
+| HG002 | bcftools_norm | site_preserving |    1 |      5.433 |   5.433 |   5.433 |          NA |              NA |
 
 | norm_status |       n |
 |:------------|--------:|
@@ -333,8 +337,8 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG006 | duckhts       | site_preserving |    1 |      9.886 |   9.886 |   9.886 |     3878664 |              18 |
-| HG006 | bcftools_norm | site_preserving |    1 |      4.708 |   4.708 |   4.708 |          NA |              NA |
+| HG006 | duckhts       | site_preserving |    1 |      9.689 |   9.689 |   9.689 |     3878664 |              18 |
+| HG006 | bcftools_norm | site_preserving |    1 |      4.693 |   4.693 |   4.693 |          NA |              NA |
 
 | norm_status |       n |
 |:------------|--------:|
@@ -345,9 +349,9 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG001 | duckhts       | site_preserving |    1 |     10.592 |  10.592 |  10.592 |     3891440 |              43 |
-| HG001 | bcftools_norm | site_preserving |    1 |      4.963 |   4.963 |   4.963 |          NA |              NA |
-| HG002 | duckhts       | site_preserving |    1 |     11.025 |  11.025 |  11.025 |     4033796 |              18 |
-| HG002 | bcftools_norm | site_preserving |    1 |      5.477 |   5.477 |   5.477 |          NA |              NA |
-| HG006 | duckhts       | site_preserving |    1 |      9.886 |   9.886 |   9.886 |     3878664 |              18 |
-| HG006 | bcftools_norm | site_preserving |    1 |      4.708 |   4.708 |   4.708 |          NA |              NA |
+| HG001 | duckhts       | site_preserving |    1 |      9.886 |   9.886 |   9.886 |     3891440 |              43 |
+| HG001 | bcftools_norm | site_preserving |    1 |      4.905 |   4.905 |   4.905 |          NA |              NA |
+| HG002 | duckhts       | site_preserving |    1 |     10.792 |  10.792 |  10.792 |     4033796 |              18 |
+| HG002 | bcftools_norm | site_preserving |    1 |      5.433 |   5.433 |   5.433 |          NA |              NA |
+| HG006 | duckhts       | site_preserving |    1 |      9.689 |   9.689 |   9.689 |     3878664 |              18 |
+| HG006 | bcftools_norm | site_preserving |    1 |      4.693 |   4.693 |   4.693 |          NA |              NA |
