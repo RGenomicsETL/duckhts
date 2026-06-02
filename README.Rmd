@@ -52,6 +52,9 @@ LOAD 'build/release/duckhts.duckdb_extension';
 
 # DuckHTS
 
+[![CRAN Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)
+[![R-universe version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
+
 A [DuckDB](https://duckdb.org/) extension for reading high-throughput sequencing (HTS) file formats and running interval-oriented genomics workflows directly in SQL.
 
 DuckHTS brings sequencing alignments, variants, reference sequences, annotations, and interval text files into DuckDB through [htslib](https://github.com/samtools/htslib). Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, BED, and tabix-indexed files with standard SQL, then compose metadata inspection, compression/indexing, sequence utilities, and interval/reference helpers in the same session.
