@@ -27,6 +27,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdbool.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <strings.h>
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
@@ -235,6 +236,7 @@ typedef struct {
     int cigar_binary;   /* 1 if cigar_representation := 'binary'; CIGAR → LIST(UINTEGER)
                          * of raw BAM packed ops ((len << 4) | kind). */
     int decompression_threads;
+    int scan_sequential;
     duckhts_quality_representation qual_repr;
     uint64_t index_row_count;
     int index_row_count_valid;
@@ -418,6 +420,22 @@ static void qual_to_string(const uint8_t *qual, int len, char *buf) {
     buf[len] = '\0';
 }
 
+static int bam_parse_scan_mode(const char *mode, int *scan_sequential) {
+    if (!scan_sequential) return 0;
+    *scan_sequential = 0;
+    if (!mode || mode[0] == '\0' || strcasecmp(mode, "auto") == 0) {
+        return 1;
+    }
+    if (strcasecmp(mode, "sequential") == 0 ||
+        strcasecmp(mode, "streaming") == 0 ||
+        strcasecmp(mode, "stream") == 0 ||
+        strcasecmp(mode, "seq") == 0) {
+        *scan_sequential = 1;
+        return 1;
+    }
+    return 0;
+}
+
 static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
     if (!idx || !out_total) return 0;
 
@@ -463,6 +481,31 @@ static void bam_read_bind(duckdb_bind_info info) {
     if (index_val && !duckdb_is_null_value(index_val))
         index_path = duckdb_get_varchar(index_val);
     if (index_val) duckdb_destroy_value(&index_val);
+
+    /* Optional scan mode: auto (current index-aware behavior) or sequential streaming */
+    int scan_sequential = 0;
+    duckdb_value scan_mode_val = duckdb_bind_get_named_parameter(info, "scan_mode");
+    if (scan_mode_val && !duckdb_is_null_value(scan_mode_val)) {
+        char *scan_mode = duckdb_get_varchar(scan_mode_val);
+        if (!bam_parse_scan_mode(scan_mode, &scan_sequential)) {
+            duckdb_bind_set_error(info, "read_bam: scan_mode must be 'auto' or 'sequential'");
+            if (scan_mode) duckdb_free(scan_mode);
+            duckdb_destroy_value(&scan_mode_val);
+            duckdb_free(file_path);
+            if (index_path) duckdb_free(index_path);
+            if (region) duckdb_free(region);
+            return;
+        }
+        if (scan_mode) duckdb_free(scan_mode);
+    }
+    if (scan_mode_val) duckdb_destroy_value(&scan_mode_val);
+    if (scan_sequential && region && region[0] != '\0') {
+        duckdb_bind_set_error(info, "read_bam: scan_mode := 'sequential' is incompatible with region queries");
+        duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
+        if (region) duckdb_free(region);
+        return;
+    }
 
     /* Parse optional reference for CRAM */
     char *reference = NULL;
@@ -512,6 +555,7 @@ static void bam_read_bind(duckdb_bind_info info) {
     bind->aux_col_idx = -1;
     bind->qual_repr = DUCKHTS_QUALITY_REPR_STRING;
     bind->decompression_threads = DUCKHTS_DEFAULT_BAM_DECOMPRESSION_THREADS;
+    bind->scan_sequential = scan_sequential;
 
     /* Parse comma-separated regions (if any) */
     parse_regions(region, &bind->regions, &bind->n_regions);
@@ -584,12 +628,14 @@ static void bam_read_bind(duckdb_bind_info info) {
     }
     if (dthreads_val) duckdb_destroy_value(&dthreads_val);
 
-    /* Check for index availability */
-    hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, HTS_IDX_SILENT_FAIL);
-    if (idx) {
-        bind->has_index = 1;
-        bind->index_row_count_valid = bam_try_get_index_row_count(idx, &bind->index_row_count);
-        hts_idx_destroy(idx);
+    /* Check for index availability unless the caller explicitly requested a sequential scan. */
+    if (!bind->scan_sequential) {
+        hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, HTS_IDX_SILENT_FAIL);
+        if (idx) {
+            bind->has_index = 1;
+            bind->index_row_count_valid = bam_try_get_index_row_count(idx, &bind->index_row_count);
+            hts_idx_destroy(idx);
+        }
     }
 
     sam_hdr_destroy(hdr);
@@ -740,7 +786,7 @@ static void bam_read_local_init(duckdb_init_info info) {
         return;
     }
 
-    int is_parallel = (bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
+    int is_parallel = (!bind->scan_sequential && bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
     local->is_parallel = is_parallel;
     local->assigned_contig = -1;
     local->needs_next_contig = is_parallel;
@@ -1290,6 +1336,7 @@ void register_read_bam_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "sequence_encoding", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "quality_representation", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "cigar_representation", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);

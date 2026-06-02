@@ -1,0 +1,43 @@
+# name: test/sql/reader_scan_mode.test
+# description: Explicit scan_mode controls for reader table functions
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+# scan_mode := 'sequential' is accepted by the primary reader table functions
+# and preserves full-file results while disabling index-backed count/parallel paths.
+query IIIIIIII
+SELECT
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', index_path := '__WORKING_DIRECTORY__/test/data/vcf_file.bcf.csi', scan_mode := 'sequential')) AS bcf_n,
+  (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai', scan_mode := 'sequential')) AS bam_n,
+  (SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai', scan_mode := 'sequential')) AS fasta_n,
+  (SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', scan_mode := 'sequential')) AS fastq_n,
+  (SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed', scan_mode := 'sequential')) AS bed_n,
+  (SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', index_path := '__WORKING_DIRECTORY__/test/data/gff_file.gff.gz.tbi', scan_mode := 'sequential')) AS gff_n,
+  (SELECT count(*) FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_attrs.gtf', scan_mode := 'sequential')) AS gtf_n,
+  (SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', index_path := '__WORKING_DIRECTORY__/test/data/gff_file.gff.gz.tbi', scan_mode := 'sequential')) AS tabix_n;
+----
+15	112	7	5	4	62	1	62
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', scan_mode := 'parallel');
+----
+read_bcf: scan_mode must be 'auto' or 'sequential'
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I', scan_mode := 'sequential');
+----
+read_bam: scan_mode := 'sequential' is incompatible with region queries
+
+statement error
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I:1-10', scan_mode := 'sequential');
+----
+read_fasta: scan_mode := 'sequential' is incompatible with region queries
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190', scan_mode := 'sequential');
+----
+read_tabix: scan_mode := 'sequential' is incompatible with region queries

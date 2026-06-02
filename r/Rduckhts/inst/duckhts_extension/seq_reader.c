@@ -32,6 +32,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <strings.h>
 
 #include <htslib/sam.h>
 #include <htslib/hts.h>
@@ -72,6 +73,7 @@ typedef struct {
     int is_fastq;
     int interleaved;
     int paired;
+    int scan_sequential;
     int seq_nt16;       /* 1 if sequence_encoding := 'nt16'; SEQUENCE → LIST(UTINYINT) */
     duckhts_quality_representation qual_repr;
     duckhts_quality_encoding input_quality_encoding;
@@ -273,6 +275,22 @@ static void parse_regions_duckdb(const char *region_str, char ***out_regions, un
     *out_count = idx;
 }
 
+static int seq_parse_scan_mode(const char *mode, int *scan_sequential) {
+    if (!scan_sequential) return 0;
+    *scan_sequential = 0;
+    if (!mode || mode[0] == '\0' || strcasecmp(mode, "auto") == 0) {
+        return 1;
+    }
+    if (strcasecmp(mode, "sequential") == 0 ||
+        strcasecmp(mode, "streaming") == 0 ||
+        strcasecmp(mode, "stream") == 0 ||
+        strcasecmp(mode, "seq") == 0) {
+        *scan_sequential = 1;
+        return 1;
+    }
+    return 0;
+}
+
 static int fastq_line_is_header(const kstring_t *line) {
     return line && line->l > 0 && line->s && line->s[0] == '@';
 }
@@ -384,6 +402,23 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     bind->qual_repr = DUCKHTS_QUALITY_REPR_STRING;
     bind->input_quality_encoding = DUCKHTS_QUALITY_ENCODING_PHRED33;
 
+    duckdb_value scan_mode_val = duckdb_bind_get_named_parameter(info, "scan_mode");
+    if (scan_mode_val && !duckdb_is_null_value(scan_mode_val)) {
+        char *scan_mode = duckdb_get_varchar(scan_mode_val);
+        if (!seq_parse_scan_mode(scan_mode, &bind->scan_sequential)) {
+            duckdb_bind_set_error(info,
+                is_fastq
+                    ? "read_fastq: scan_mode must be 'auto' or 'sequential'"
+                    : "read_fasta: scan_mode must be 'auto' or 'sequential'");
+            if (scan_mode) duckdb_free(scan_mode);
+            duckdb_destroy_value(&scan_mode_val);
+            destroy_seq_bind(bind);
+            return;
+        }
+        if (scan_mode) duckdb_free(scan_mode);
+    }
+    if (scan_mode_val) duckdb_destroy_value(&scan_mode_val);
+
     if (is_fastq) {
         duckdb_value mate_val = duckdb_bind_get_named_parameter(info, "mate_path");
         if (mate_val && !duckdb_is_null_value(mate_val)) {
@@ -410,6 +445,12 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
             parse_regions_duckdb(bind->region, &bind->regions, &bind->n_regions);
         }
         if (region_val) duckdb_destroy_value(&region_val);
+
+        if (bind->scan_sequential && bind->region && bind->region[0] != '\0') {
+            duckdb_bind_set_error(info, "read_fasta: scan_mode := 'sequential' is incompatible with region queries");
+            destroy_seq_bind(bind);
+            return;
+        }
 
         duckdb_value index_val = duckdb_bind_get_named_parameter(info, "index_path");
         if (index_val && !duckdb_is_null_value(index_val)) {
@@ -573,7 +614,7 @@ static void seq_read_init(duckdb_init_info info) {
     init->regions = bind->regions;
 
     if (init->column_count == 0 && bind->n_regions == 0) {
-        if (bind->is_fastq && !bind->paired && !bind->interleaved) {
+        if (bind->is_fastq && !bind->paired && !bind->interleaved && !bind->scan_sequential) {
             faidx_t *fqi = fai_load3_format(bind->file_path, NULL, NULL, 0, FAI_FASTQ);
             if (fqi) {
                 init->count_only = 1;
@@ -585,8 +626,10 @@ static void seq_read_init(duckdb_init_info info) {
                 return;
             }
         } else if (!bind->is_fastq) {
-            faidx_t *fai_count = fai_load3_format(bind->file_path, bind->index_path,
-                                                  bind->gzi_path, 0, FAI_FASTA);
+            faidx_t *fai_count = bind->scan_sequential
+                ? NULL
+                : fai_load3_format(bind->file_path, bind->index_path,
+                                   bind->gzi_path, 0, FAI_FASTA);
             if (fai_count) {
                 init->count_only = 1;
                 init->count_remaining = (uint64_t)faidx_nseq(fai_count);
@@ -1155,6 +1198,7 @@ void register_read_fasta_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "gzi_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "sequence_encoding", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     duckdb_table_function_set_bind(tf, fasta_read_bind);
@@ -1273,6 +1317,7 @@ void register_read_fastq_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "sequence_encoding", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "quality_representation", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "input_quality_encoding", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
 
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
