@@ -22,6 +22,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #if defined(__x86_64__) && defined(HAVE_X86INTRIN_H) && HAVE_X86INTRIN_H
 #include <x86intrin.h>
@@ -74,6 +75,7 @@ typedef struct {
     char *file_path;
     char *index_path;
     char *region;
+    int scan_sequential;
     uint64_t index_row_count;
     int index_row_count_valid;
 } bed_bind_data_t;
@@ -158,6 +160,22 @@ static bool is_meta_bed_line(const char *s) {
     if (strncmp(s, "track", 5) == 0) return true;
     if (strncmp(s, "browser", 7) == 0) return true;
     return false;
+}
+
+static int bed_parse_scan_mode(const char *mode, int *scan_sequential) {
+    if (!scan_sequential) return 0;
+    *scan_sequential = 0;
+    if (!mode || mode[0] == '\0' || strcasecmp(mode, "auto") == 0) {
+        return 1;
+    }
+    if (strcasecmp(mode, "sequential") == 0 ||
+        strcasecmp(mode, "streaming") == 0 ||
+        strcasecmp(mode, "stream") == 0 ||
+        strcasecmp(mode, "seq") == 0) {
+        *scan_sequential = 1;
+        return 1;
+    }
+    return 0;
 }
 
 static int count_tab_fields(const char *s) {
@@ -293,6 +311,30 @@ static void read_bed_bind(duckdb_bind_info info) {
     }
     if (index_val) duckdb_destroy_value(&index_val);
 
+    int scan_sequential = 0;
+    duckdb_value scan_mode_val = duckdb_bind_get_named_parameter(info, "scan_mode");
+    if (scan_mode_val && !duckdb_is_null_value(scan_mode_val)) {
+        char *scan_mode = duckdb_get_varchar(scan_mode_val);
+        if (!bed_parse_scan_mode(scan_mode, &scan_sequential)) {
+            duckdb_bind_set_error(info, "read_bed: scan_mode must be 'auto' or 'sequential'");
+            if (scan_mode) duckdb_free(scan_mode);
+            duckdb_destroy_value(&scan_mode_val);
+            duckdb_free(file_path);
+            if (region) duckdb_free(region);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
+        if (scan_mode) duckdb_free(scan_mode);
+    }
+    if (scan_mode_val) duckdb_destroy_value(&scan_mode_val);
+    if (scan_sequential && region && region[0] != '\0') {
+        duckdb_bind_set_error(info, "read_bed: scan_mode := 'sequential' is incompatible with region queries");
+        duckdb_free(file_path);
+        duckdb_free(region);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
+
     htsFile *fp = hts_open(file_path, "r");
     if (!fp) {
         char err[512];
@@ -324,7 +366,8 @@ static void read_bed_bind(duckdb_bind_info info) {
     bind->file_path = file_path;
     bind->index_path = index_path;
     bind->region = region;
-    if (!region) {
+    bind->scan_sequential = scan_sequential;
+    if (!region && !bind->scan_sequential) {
         tbx_t *tbx_stats = tbx_index_load3(file_path, index_path, HTS_IDX_SILENT_FAIL);
         if (tbx_stats) {
             bind->index_row_count_valid =
@@ -348,7 +391,7 @@ static void read_bed_init(duckdb_init_info info) {
         }
     }
 
-    if (init->n_projected_cols == 0 && !bind->region && bind->index_row_count_valid) {
+    if (init->n_projected_cols == 0 && !bind->region && !bind->scan_sequential && bind->index_row_count_valid) {
         init->count_only = 1;
         init->count_remaining = bind->index_row_count;
         init->finished = (init->count_remaining == 0);
@@ -999,6 +1042,7 @@ void register_read_bed_function(duckdb_connection connection) {
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "region", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_table_function_set_bind(tf, read_bed_bind);
     duckdb_table_function_set_init(tf, read_bed_init);

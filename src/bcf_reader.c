@@ -39,6 +39,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <time.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <strings.h>
 
 // htslib headers
 #include <htslib/vcf.h>
@@ -99,6 +100,7 @@ typedef struct {
     char* region;              // Optional region filter
     char* additional_csq_column_types;  // Optional bcftools-style override rules
     int decompression_threads; // htslib decompression worker threads per file handle
+    int scan_sequential;       // Force full-file sequential streaming (no index count/parallel scan)
     char** regions;            // Parsed comma-separated regions
     unsigned int n_regions;
     int include_info;          // Include INFO fields
@@ -201,6 +203,22 @@ static void duckdb_vcf_warning(const char* msg, void* ctx) {
     // In DuckDB extensions, we can't easily emit warnings
     // For now, print to stderr
     fprintf(stderr, "[bcf_reader] %s\n", msg);
+}
+
+static int bcf_parse_scan_mode(const char* mode, int* scan_sequential) {
+    if (!scan_sequential) return 0;
+    *scan_sequential = 0;
+    if (!mode || mode[0] == '\0' || strcasecmp(mode, "auto") == 0) {
+        return 1;
+    }
+    if (strcasecmp(mode, "sequential") == 0 ||
+        strcasecmp(mode, "streaming") == 0 ||
+        strcasecmp(mode, "stream") == 0 ||
+        strcasecmp(mode, "seq") == 0) {
+        *scan_sequential = 1;
+        return 1;
+    }
+    return 0;
 }
 
 // =============================================================================
@@ -627,6 +645,31 @@ static void bcf_read_bind(duckdb_bind_info info) {
     }
     if (idx_val) duckdb_destroy_value(&idx_val);
     
+    // Optional scan mode: auto (current index-aware behavior) or sequential streaming
+    int scan_sequential = 0;
+    duckdb_value scan_mode_val = duckdb_bind_get_named_parameter(info, "scan_mode");
+    if (scan_mode_val && !duckdb_is_null_value(scan_mode_val)) {
+        char* scan_mode = duckdb_get_varchar(scan_mode_val);
+        if (!bcf_parse_scan_mode(scan_mode, &scan_sequential)) {
+            duckdb_bind_set_error(info, "read_bcf: scan_mode must be 'auto' or 'sequential'");
+            if (scan_mode) duckdb_free(scan_mode);
+            duckdb_destroy_value(&scan_mode_val);
+            duckdb_free(file_path);
+            if (index_path) duckdb_free(index_path);
+            if (region) duckdb_free(region);
+            return;
+        }
+        if (scan_mode) duckdb_free(scan_mode);
+    }
+    if (scan_mode_val) duckdb_destroy_value(&scan_mode_val);
+    if (scan_sequential && region && region[0] != '\0') {
+        duckdb_bind_set_error(info, "read_bcf: scan_mode := 'sequential' is incompatible with region queries");
+        duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
+        if (region) duckdb_free(region);
+        return;
+    }
+
     // Get optional tidy_format named parameter (default: false)
     int tidy_format = 0;
     duckdb_value tidy_val = duckdb_bind_get_named_parameter(info, "tidy_format");
@@ -703,6 +746,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->region = region;
     bind->additional_csq_column_types = additional_csq_column_types;
     bind->decompression_threads = decompression_threads;
+    bind->scan_sequential = scan_sequential;
     parse_regions_duckdb(region, &bind->regions, &bind->n_regions);
     bind->include_info = 1;
     bind->include_format = 1;
@@ -965,7 +1009,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->contig_names = NULL;
     
     // Only set up parallel scan if no user-specified region
-    if (bind->n_regions == 0) {
+    if (bind->n_regions == 0 && !bind->scan_sequential) {
         // Try to load index using *_load3 with minimal flags to avoid network timeouts
         // Only use HTS_IDX_SAVE_REMOTE for actual remote protocols
         int is_remote = (strncmp(file_path, "http://", 7) == 0 || 
@@ -1100,7 +1144,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     }
     
     // Check if we're in parallel mode based on bind data
-    int is_parallel = (bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
+    int is_parallel = (!bind->scan_sequential && bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
     
     // Initialize parallel scan state
     local->is_parallel = is_parallel;
@@ -2082,6 +2126,7 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);  // optional explicit index path
     duckdb_table_function_add_named_parameter(tf, "tidy_format", bool_type);  // optional tidy format
     duckdb_table_function_add_named_parameter(tf, "additional_csq_column_types", varchar_type);  // optional bcftools-style CSQ/ANN/BCSQ type overrides
+    duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);  // 'auto' or 'sequential'
     duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);  // optional htslib worker threads
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bool_type);

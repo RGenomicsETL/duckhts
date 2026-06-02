@@ -43,6 +43,17 @@ sql_quote_string <- function(x) {
   as.integer(value)
 }
 
+.validate_scan_mode_param <- function(value, name = "scan_mode") {
+  if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
+    stop(sprintf("%s must be 'auto' or 'sequential'", name), call. = FALSE)
+  }
+  value <- tolower(value)
+  if (!value %in% c("auto", "sequential")) {
+    stop(sprintf("%s must be 'auto' or 'sequential'", name), call. = FALSE)
+  }
+  value
+}
+
 sql_varchar_list_literal <- function(x, name = "value") {
   if (is.null(x) || length(x) == 0L) {
     return("[]::VARCHAR[]")
@@ -715,6 +726,9 @@ duckhts_extension_dir <- function() {
 #' @param tidy_format Logical. If TRUE, FORMAT columns are returned in tidy format
 #' @param additional_csq_column_types Optional bcftools-style `PATTERN TYPE`
 #'   overrides for CSQ/ANN/BCSQ subfield typing, separated by newlines or `;`
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming instead of index-backed
+#'   count/parallel scan paths. Sequential mode is incompatible with `region`.
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default `0`. Use `0` to keep BCF/VCF reads
 #'   single-threaded.
@@ -742,6 +756,7 @@ rduckhts_bcf <- function(
   index_path = NULL,
   tidy_format = FALSE,
   additional_csq_column_types = NULL,
+  scan_mode = NULL,
   decompression_threads = 0,
   overwrite = FALSE
 ) {
@@ -771,6 +786,9 @@ rduckhts_bcf <- function(
   }
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- sprintf("'%s'", additional_csq_column_types)
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
   }
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- sprintf(
@@ -825,6 +843,10 @@ rduckhts_bcf <- function(
 #'   \code{"string"} (default) returns SAM text such as \code{"36M"};
 #'   \code{"binary"} returns packed BAM operations as \code{UINTEGER[]} where each
 #'   element is \code{(len << 4) | op}.
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming instead of
+#'   index-backed count/parallel scan paths. Sequential mode is incompatible
+#'   with \code{region}.
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default \code{2}. Use \code{0} to disable worker
 #'   threads.
@@ -856,6 +878,7 @@ rduckhts_bam <- function(
   sequence_encoding = NULL,
   quality_representation = NULL,
   cigar_representation = NULL,
+  scan_mode = NULL,
   decompression_threads = 2,
   overwrite = FALSE
 ) {
@@ -896,6 +919,9 @@ rduckhts_bam <- function(
   }
   if (!is.null(cigar_representation)) {
     params$cigar_representation <- sprintf("'%s'", cigar_representation)
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
   }
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- sprintf(
@@ -1087,6 +1113,10 @@ normalize_tabix_types <- function(types) {
 #' @param sequence_encoding Character. Sequence encoding for the SEQUENCE column:
 #'   \code{"string"} (default) returns decoded bases as \code{VARCHAR};
 #'   \code{"nt16"} returns raw htslib nt16 4-bit codes as \code{UTINYINT[]}.
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming/counting
+#'   instead of index-backed count paths. Sequential mode is incompatible with
+#'   \code{region}.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -1100,6 +1130,7 @@ rduckhts_fasta <- function(
   index_path = NULL,
   gzi_path = NULL,
   sequence_encoding = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -1127,6 +1158,9 @@ rduckhts_fasta <- function(
   }
   if (!is.null(sequence_encoding)) {
     params$sequence_encoding <- sprintf("'%s'", sequence_encoding)
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
   }
   param_str <- build_param_str(params)
 
@@ -1158,6 +1192,10 @@ rduckhts_fasta <- function(
 #' @param path Path to the BED file
 #' @param region Optional genomic region for tabix-backed BED queries
 #' @param index_path Optional explicit path to a BED tabix index
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming/counting
+#'   instead of index-backed count paths. Sequential mode is incompatible with
+#'   \code{region}.
 #' @param overwrite Logical. If TRUE, overwrites an existing table
 #'
 #' @return Invisible TRUE on success
@@ -1169,6 +1207,7 @@ rduckhts_bed <- function(
   path,
   region = NULL,
   index_path = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -1190,6 +1229,9 @@ rduckhts_bed <- function(
   }
   if (!is.null(index_path)) {
     params$index_path <- sprintf("'%s'", index_path)
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
   }
   param_str <- build_param_str(params)
 
@@ -1732,6 +1774,9 @@ rduckhts_tabix_index <- function(
 #' @param input_quality_encoding Character. Input FASTQ quality encoding:
 #'   \code{"phred33"} (default FASTQ convention), \code{"auto"}, \code{"phred64"},
 #'   or \code{"solexa64"}.
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force raw streaming/counting instead
+#'   of index-backed count paths.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -1746,6 +1791,7 @@ rduckhts_fastq <- function(
   sequence_encoding = NULL,
   quality_representation = NULL,
   input_quality_encoding = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -1776,6 +1822,9 @@ rduckhts_fastq <- function(
   }
   if (!is.null(input_quality_encoding)) {
     params$input_quality_encoding <- sprintf("'%s'", input_quality_encoding)
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
   }
 
   param_str <- build_param_str(params)
@@ -1835,6 +1884,10 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming/counting
+#'   instead of index-backed count paths. Sequential mode is incompatible with
+#'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
@@ -1854,6 +1907,7 @@ rduckhts_gff <- function(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -1905,6 +1959,9 @@ rduckhts_gff <- function(
       paste(sprintf("'%s'", normalized_types), collapse = ", ")
     )
   }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+  }
   if (attributes_map) {
     params$attributes_map <- "true"
   }
@@ -1952,6 +2009,10 @@ rduckhts_gff <- function(
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming/counting
+#'   instead of index-backed count paths. Sequential mode is incompatible with
+#'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
@@ -1970,6 +2031,7 @@ rduckhts_gtf <- function(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -2020,6 +2082,9 @@ rduckhts_gtf <- function(
       paste(sprintf("'%s'", normalized_types), collapse = ", ")
     )
   }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+  }
   if (attributes_map) {
     params$attributes_map <- "true"
   }
@@ -2064,6 +2129,10 @@ rduckhts_gtf <- function(
 #' @param header_names Character vector to override column names
 #' @param auto_detect Logical. If TRUE, infer basic numeric column types
 #' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
+#' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
+#'   behavior) or \code{"sequential"} to force full-file streaming/counting
+#'   instead of index-backed count paths. Sequential mode is incompatible with
+#'   \code{region}.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -2079,6 +2148,7 @@ rduckhts_tabix <- function(
   header_names = NULL,
   auto_detect = NULL,
   column_types = NULL,
+  scan_mode = NULL,
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -2125,6 +2195,9 @@ rduckhts_tabix <- function(
       "[%s]",
       paste(sprintf("'%s'", normalized_types), collapse = ", ")
     )
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
   }
   param_str <- build_param_str(params)
 
@@ -2622,6 +2695,10 @@ rduckhts_score <- function(
     value <- .validate_nonnegative_integer_param(value, name)
     return(sprintf("%s := %d", name, value))
   }
+  if (identical(name, "scan_mode")) {
+    value <- .validate_scan_mode_param(value, name)
+    return(sprintf("%s := %s", name, sql_quote_string(value)))
+  }
 
   if (is.logical(value)) {
     return(sprintf("%s := %s", name, if (isTRUE(value)) "true" else "false"))
@@ -2768,6 +2845,7 @@ rduckhts_score <- function(
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default \code{2}. Use \code{0} to disable worker
 #'   threads.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #'   Must contain a \code{file} column; other columns override uniform parameters.
 #'   \code{NA} values use the uniform default.
@@ -2780,6 +2858,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
                                sequence_encoding = NULL,
                                quality_representation = NULL,
                                cigar_representation = NULL,
+                               scan_mode = NULL,
                                decompression_threads = 2,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
@@ -2791,6 +2870,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   if (!is.null(quality_representation)) params$quality_representation <- quality_representation
   if (!is.null(cigar_representation)) params$cigar_representation <- cigar_representation
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   if (!is.null(decompression_threads)) params$decompression_threads <- decompression_threads
   .hts_multi_read(con, table_name, "read_bam", files, params, .params, overwrite)
 }
@@ -2810,6 +2890,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 #' @param additional_csq_column_types Optional CSQ type override string.
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default `0`.
+#' @param scan_mode Optional scan mode (`"auto"` or `"sequential"`).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2817,6 +2898,7 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, tidy_format = FALSE,
                                additional_csq_column_types = NULL,
+                               scan_mode = NULL,
                                decompression_threads = 0,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
@@ -2826,6 +2908,7 @@ rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- additional_csq_column_types
   }
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- .validate_nonnegative_integer_param(
       decompression_threads,
@@ -2849,6 +2932,7 @@ rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
 #' @param sequence_encoding Optional sequence encoding.
 #' @param quality_representation Optional quality representation.
 #' @param input_quality_encoding Optional input quality encoding override.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2857,6 +2941,7 @@ rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
                                  interleaved = FALSE, sequence_encoding = NULL,
                                  quality_representation = NULL,
                                  input_quality_encoding = NULL,
+                                 scan_mode = NULL,
                                  .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(mate_path)) params$mate_path <- mate_path
@@ -2864,6 +2949,7 @@ rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
   if (!is.null(quality_representation)) params$quality_representation <- quality_representation
   if (!is.null(input_quality_encoding)) params$input_quality_encoding <- input_quality_encoding
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   .hts_multi_read(con, table_name, "read_fastq", files, params, .params, overwrite)
 }
 
@@ -2880,6 +2966,7 @@ rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
 #' @param index_path Optional index file path.
 #' @param gzi_path Optional explicit BGZF FASTA block index path (.gzi).
 #' @param sequence_encoding Optional sequence encoding.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2887,12 +2974,14 @@ rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
 rduckhts_fasta_multi <- function(con, table_name, files, region = NULL,
                                  index_path = NULL, gzi_path = NULL,
                                  sequence_encoding = NULL,
+                                 scan_mode = NULL,
                                  .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
   if (!is.null(gzi_path)) params$gzi_path <- gzi_path
   if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   .hts_multi_read(con, table_name, "read_fasta", files, params, .params, overwrite)
 }
 
@@ -2907,16 +2996,18 @@ rduckhts_fasta_multi <- function(con, table_name, files, region = NULL,
 #' @param files Character vector of file paths or glob patterns.
 #' @param region Optional region string.
 #' @param index_path Optional index file path.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
 rduckhts_bed_multi <- function(con, table_name, files, region = NULL,
-                               index_path = NULL, .params = NULL,
-                               overwrite = FALSE) {
+                               index_path = NULL, scan_mode = NULL,
+                               .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   .hts_multi_read(con, table_name, "read_bed", files, params, .params, overwrite)
 }
 
@@ -2935,6 +3026,7 @@ rduckhts_bed_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
@@ -2942,8 +3034,8 @@ rduckhts_bed_multi <- function(con, table_name, files, region = NULL,
 rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
                                  index_path = NULL, header = NULL,
                                  header_names = NULL, auto_detect = NULL,
-                                 column_types = NULL, .params = NULL,
-                                 overwrite = FALSE) {
+                                 column_types = NULL, scan_mode = NULL,
+                                 .params = NULL, overwrite = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- region
   if (!is.null(index_path)) params$index_path <- index_path
@@ -2957,6 +3049,7 @@ rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
     if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
     params$column_types <- normalize_tabix_types(column_types)
   }
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   .hts_multi_read(con, table_name, "read_tabix", files, params, .params, overwrite)
 }
 
@@ -2975,6 +3068,7 @@ rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param attributes_map Logical; return raw attributes as a scalar MAP.
 #' @param attributes_list Logical; return attributes as MAP(VARCHAR, VARCHAR[]).
 #' @param attributes_pairs Logical; return attributes as a LIST of key/value/index structs.
@@ -2986,7 +3080,8 @@ rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
 rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, header = NULL,
                                header_names = NULL, auto_detect = NULL,
-                               column_types = NULL, attributes_map = FALSE,
+                               column_types = NULL, scan_mode = NULL,
+                               attributes_map = FALSE,
                                attributes_list = FALSE, attributes_pairs = FALSE,
                                strict = FALSE,
                                .params = NULL, overwrite = FALSE) {
@@ -3003,6 +3098,7 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
     if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
     params$column_types <- normalize_tabix_types(column_types)
   }
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   if (isTRUE(attributes_map)) params$attributes_map <- TRUE
   if (isTRUE(attributes_list)) params$attributes_list <- TRUE
   if (isTRUE(attributes_pairs)) params$attributes_pairs <- TRUE
@@ -3025,6 +3121,7 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
 #' @param header_names Character vector of column names.
 #' @param auto_detect Logical or NULL; enable type auto-detection.
 #' @param column_types Character vector of column type names.
+#' @param scan_mode Optional scan mode (\code{"auto"} or \code{"sequential"}).
 #' @param attributes_map Logical; return raw attributes as a scalar MAP.
 #' @param attributes_list Logical; return attributes as MAP(VARCHAR, VARCHAR[]).
 #' @param attributes_pairs Logical; return attributes as a LIST of key/value/index structs.
@@ -3035,7 +3132,8 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
 rduckhts_gtf_multi <- function(con, table_name, files, region = NULL,
                                index_path = NULL, header = NULL,
                                header_names = NULL, auto_detect = NULL,
-                               column_types = NULL, attributes_map = FALSE,
+                               column_types = NULL, scan_mode = NULL,
+                               attributes_map = FALSE,
                                attributes_list = FALSE, attributes_pairs = FALSE,
                                .params = NULL, overwrite = FALSE) {
   params <- list()
@@ -3051,6 +3149,7 @@ rduckhts_gtf_multi <- function(con, table_name, files, region = NULL,
     if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
     params$column_types <- normalize_tabix_types(column_types)
   }
+  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
   if (isTRUE(attributes_map)) params$attributes_map <- TRUE
   if (isTRUE(attributes_list)) params$attributes_list <- TRUE
   if (isTRUE(attributes_pairs)) params$attributes_pairs <- TRUE
