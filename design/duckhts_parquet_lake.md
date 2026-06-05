@@ -1,6 +1,6 @@
 # DuckHTS Parquet lake round-trip format and DuckLake registration notes
 
-Status: design note plus the initial R/DBI Parquet converter helper surface. Native VCF/BCF/BAM/GFF/tabix writers remain future work.
+Status: current design note for the implemented R/DBI Parquet converter helper surface (`duckhts_*_convert_parquet_sql(...)` plus R wrappers) and future DuckLake/native-writer work. Native VCF/BCF/BAM/GFF/tabix writers remain future work.
 
 ## Design stance
 

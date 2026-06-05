@@ -1,12 +1,11 @@
 # FASTQ Throughput Notes
 
+Status: open performance investigation. The direct htslib-transport FASTQ parser and packed pipeline described here remain future work; check `functions.yaml` before assuming any proposed parameter has landed.
+
 This file captures the current understanding of why `.sync/fastp` can achieve
 much higher FASTQ throughput than `read_fastq(...)`, how `fastp` uses threads,
 and what changes are realistic for duckhts without breaking remote file
 support.
-
-This is a design note only. It does not imply that the changes below have been
-implemented yet.
 
 ## 1. Verified: how `fastp` gets its throughput
 

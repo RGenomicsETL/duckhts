@@ -1,5 +1,7 @@
 # Future DuckHTS SIMD Kernel Proposals
 
+Status: future proposal backlog. Nothing in this file is an implementation contract until it is reflected in `src/include/duckhts_simd_kernels.def`, source, tests, and `functions.yaml` where public.
+
 Date: 2026-05-29
 
 This note captures code-grounded SIMD opportunities for later review. The intent is to treat SIMD as a general data-parallel kernel layer for packed sequence data, byte classification, quality-score math, integer reductions, delimiter parsing, and allele string comparison.

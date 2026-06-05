@@ -1,6 +1,6 @@
 # Coverage / Reader Memory Footprint — Audit and Plan
 
-Status: open
+Status: current backlog. `duckhts_bam_bed_coverage` step 1 tiling is implemented; mosdepth tiling and `bam_bin_counts` streaming remain open; the earlier `bcf_reader.c` memory concern is closed as a false alarm.
 Scope: `src/bam_bed_coverage.c`, `src/mosdepth_table.c`, `src/bam_bin_counts.c`, `src/bcf_reader.c`
 
 ## Motivation

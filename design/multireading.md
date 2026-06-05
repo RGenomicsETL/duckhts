@@ -1,10 +1,14 @@
 # Multi-File Reading in duckhts
 
+Status: current guidance for generated SQL multi-file reads, plus research notes for a possible native C-level multi-file reader. The shipped helper is `hts_union_query(...)`, which builds the `UNION ALL BY NAME` reader query string; manual `SET VARIABLE`/`query()` examples below remain useful for understanding the pattern.
+
 ## Part 1: Macro-Based Multi-File API (Works Today)
 
 The `SET VARIABLE` + `query()` + `string_agg` + `UNION ALL BY NAME` pattern
-provides comprehensive multi-file reading with no extension changes. All
-examples below are verified against DuckDB v1.5.1 with the duckhts extension.
+provides comprehensive multi-file reading. Use the public `hts_union_query(...)`
+helper when one uniform reader/parameter string is enough; hand-generated SQL
+is still useful when each file needs distinct arguments. Examples below were
+verified against DuckDB v1.5.1 with the duckhts extension.
 
 ### Core Pattern
 
@@ -231,13 +235,13 @@ handle. In the macro API, they are per-file (arbitrary SQL per arm). In a
 C-level reader, they would either be uniform across all files or require
 a new parameter model (e.g., parallel lists).
 
-- **read_bam**: `region`, `index_path`, `reference`, `sequence_encoding`, `quality_representation`, `standard_tags`, `auxiliary_tags`
-- **read_bcf**: `region`, `index_path`, `tidy_format`, `additional_csq_column_types`
-- **read_tabix**: `region`, `index_path`, `header`, `header_names`, `auto_detect`, `column_types`
-- **read_gff/gtf**: same as tabix + `attributes_map`
-- **read_fasta**: `region`, `index_path`, `sequence_encoding`
-- **read_fastq**: `mate_path`, `sequence_encoding`, `quality_representation`, `input_quality_encoding`, `interleaved`
-- **read_bed**: `region`, `index_path`
+- **read_bam**: `standard_tags`, `auxiliary_tags`, `region`, `index_path`, `reference`, `sequence_encoding`, `quality_representation`, `cigar_representation`, `scan_mode`, `decompression_threads`
+- **read_bcf**: `region`, `index_path`, `tidy_format`, `additional_csq_column_types`, `scan_mode`, `decompression_threads`
+- **read_tabix**: `header_names`, `header`, `column_types`, `auto_detect`, `region`, `index_path`, `scan_mode`
+- **read_gff/gtf**: same as tabix plus `attributes_map`, `attributes_list`, `attributes_pairs`, and for GFF `strict`
+- **read_fasta**: `region`, `index_path`, `gzi_path`, `sequence_encoding`, `scan_mode`
+- **read_fastq**: `interleaved`, `mate_path`, `sequence_encoding`, `quality_representation`, `input_quality_encoding`, `scan_mode`
+- **read_bed**: `region`, `index_path`, `scan_mode`
 
 ### What a C-Level Implementation Would Buy
 

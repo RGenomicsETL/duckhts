@@ -1,7 +1,6 @@
 # `duckhts_mosdepth` Rewrite Plan
 
-This file is the implementation plan for a native `duckhts_mosdepth(...)`
-rewrite inside duckhts.
+Status: compatibility contract plus backlog for the implemented native `duckhts_mosdepth(...)` table function. Sections that describe files to add or a proposed API are historical implementation-plan context; use `functions.yaml`, `src/mosdepth_table.c`, SQL tests, and R tinytests as the current implementation source of truth.
 
 The goal is not "a coverage function inspired by mosdepth". The goal is a
 rewrite that follows the principles in [`.sync/rewrite.bio.txt`](/root/duckhts/.sync/rewrite.bio.txt):
@@ -114,12 +113,13 @@ The rewrite must preserve:
 
 The rewrite must not silently "improve" outputs.
 
-## 3. Recommended public API
+## 3. Current public API
 
-Implement as a DuckDB table function with side effects, similar in spirit to
-existing `bgzip(...)` and `bam_index(...)`.
+Implemented as a DuckDB table function with side effects, similar in spirit to
+existing `bgzip(...)` and `bam_index(...)`. `functions.yaml` is authoritative;
+keep this sketch aligned with it.
 
-### Proposed SQL signature
+### Current SQL signature
 
 ```sql
 duckhts_mosdepth(
@@ -127,28 +127,30 @@ duckhts_mosdepth(
   path,
   chrom := NULL,
   by := NULL,
-  no_per_base := FALSE,
   fasta := NULL,
-  threads := 0,
+  read_groups := NULL,
+  no_per_base := FALSE,
+  threads := 2,
+  processing_threads := 2,
   flag := 1796,
   include_flag := 0,
   fast_mode := FALSE,
   fragment_mode := FALSE,
-  quantize := NULL,
+  use_median := FALSE,
   mapq := 0,
   min_frag_len := -1,
   max_frag_len := -1,
+  precision_digits := 2,
+  quantize := NULL,
   thresholds := NULL,
-  use_median := FALSE,
-  read_groups := NULL,
   index_path := NULL,
   overwrite := FALSE
 )
 ```
 
-### Proposed returned columns
+### Returned columns
 
-Return one row with:
+Returns one row with:
 
 - `success BOOLEAN`
 - `prefix VARCHAR`
@@ -160,7 +162,7 @@ Return one row with:
 - `quantized_path VARCHAR`
 - `thresholds_path VARCHAR`
 
-Use `NULL` for outputs that were not requested.
+Uses `NULL` for outputs that were not requested.
 
 ### Why a dedicated function
 
@@ -175,75 +177,42 @@ Reason:
 
 These are different products and should not share a public surface in v1.
 
-## 4. Source files to add or change
+## 4. Current implementation files
 
-### New extension source files
+Current source of truth:
 
-Add:
+- implementation: `src/mosdepth_table.c`
+- registration: `src/duckhts.c`
+- extension build wiring: `CMakeLists.txt`
+- R package build wiring: `r/Rduckhts/R/bootstrap.R`, `r/Rduckhts/configure`, `r/Rduckhts/configure.win`
+- public catalog/docs: `functions.yaml` plus generated `r/Rduckhts/inst/function_catalog/functions.*`
+- SQL tests: `test/sql/mosdepth.test`
+- R tests: `r/Rduckhts/inst/tinytest/test_mosdepth.R`
+- release notes: `NEWS.md`, `r/Rduckhts/NEWS.md`
 
-- `src/mosdepth_table.c`
-- `src/include/mosdepth_table.h`
-
-Optional split if the file gets too large:
+Potential future splits, only if the implementation becomes unwieldy:
 
 - `src/mosdepth_engine.c`
 - `src/include/mosdepth_engine.h`
 - `src/mosdepth_output.c`
 - `src/include/mosdepth_output.h`
 
-### Existing files to update
-
-Build wiring:
-
-- `CMakeLists.txt`
-- `r/Rduckhts/bootstrap.R`
-- `r/Rduckhts/configure`
-- `r/Rduckhts/configure.win`
-
-Docs / wrappers:
-
-- `functions.yaml`
-- `r/Rduckhts/R/duckhts.R`
-- `r/Rduckhts/inst/function_catalog/functions.yaml`
-- `r/Rduckhts/inst/function_catalog/functions.tsv`
-- `r/Rduckhts/inst/function_catalog/functions.md`
-
-Tests:
-
-- `test/sql/mosdepth.test`
-- `r/Rduckhts/inst/tinytest/test_mosdepth.R`
-
-Release notes:
-
-- `NEWS.md`
-- `r/Rduckhts/NEWS.md`
-
-Validation docs:
-
-- `VALIDATION.md` or `benchmark_mosdepth.md`
-
 ## 5. Core implementation design
 
 ### 5.1 Bind / init / execute model
 
-Implement as a normal DuckDB table function:
+Implemented as a normal DuckDB table function:
 
-- bind validates arguments and constructs immutable options
-- init sets `duckdb_init_set_max_threads(info, 1)`
-- function body performs the rewrite once and emits a single result row
+- bind validates arguments and constructs immutable options;
+- the function body performs the rewrite once and emits a single result row;
+- `threads` is the htslib decompression thread count;
+- `processing_threads` is DuckHTS-owned contig-processing parallelism and is distinct from upstream mosdepth's `--threads`.
 
-This function should not use DuckDB scan parallelism.
+One call owns the whole output set and preserves mosdepth-compatible filenames and output ordering. Do not reinterpret `threads` as DuckDB worker parallelism.
 
-Reason:
+### 5.2 Historical C struct sketch
 
-- mosdepth's `threads` parameter is for htslib decompression, not for external
-  compute workers
-- exact compatibility is easier if one call owns the whole output set and emits
-  files in mosdepth-compatible order
-
-### 5.2 Proposed C structs
-
-Add a bind-data struct:
+The sketch below is retained for design history only. `src/mosdepth_table.c` is authoritative and now includes additional fields such as `processing_threads` and `precision_digits`.
 
 ```c
 typedef struct {
@@ -554,7 +523,7 @@ Thresholds output is also post-processing over region intervals:
 - count bases with depth `>=` each requested threshold
 - write one extra output column per threshold
 
-This should be implemented after basic region means are exact.
+This is implemented; keep threshold semantics tied to the same region intervals used for mean/median output.
 
 ### 7.7 Compression and indexing
 
@@ -571,150 +540,59 @@ Use:
 
 Do not shell out to `bgzip` or `tabix` from the extension.
 
-## 8. Scope phases
+## 8. Implemented scope and remaining backlog
 
-### Phase 1: minimal compatible rewrite
+Implemented public scope includes:
 
-Implement:
+- indexed BAM input;
+- CRAM input when a reference FASTA is supplied as needed by htslib;
+- `chrom`, `by := <window>`, and `by := <bed>` selection;
+- `threads` for htslib decompression;
+- `processing_threads` for DuckHTS-owned contig processing;
+- `flag`, `include_flag`, `mapq`, `min_frag_len`, `max_frag_len`, `read_groups`;
+- `fast_mode`, default CIGAR-aware mode, mate-overlap correction, and `fragment_mode`;
+- `no_per_base`, `use_median`, `precision_digits`;
+- summary and global distribution outputs;
+- per-base BED.gz + CSI;
+- regions BED.gz + CSI and region distribution output;
+- quantized BED.gz + CSI;
+- thresholds BED.gz + CSI for `by` outputs.
 
-- indexed BAM input
-- optional CRAM input with explicit reference
-- `chrom`
-- `threads`
-- `flag`
-- `include_flag`
-- `mapq`
-- `fast_mode`
-- `no_per_base`
-- summary
-- global distribution
-- `by := <window>`
-- `by := <bed>`
-- `regions.bed.gz`
-- `mosdepth.region.dist.txt`
+Remaining backlog:
 
-Validation target:
-
-- exact match to mosdepth `0.3.13` for those features
-
-### Phase 2: default mode exactness
-
-Implement:
-
-- CIGAR-aware default mode
-- exact mate-overlap correction
-
-This is the key phase because the benchmark shows SQL fast mode is already
-competitive, while SQL default mode is still slower than mosdepth.
-
-### Phase 3: remaining mosdepth features
-
-Implement:
-
-- `quantize`
-- `thresholds`
-- `use_median`
-- `read_groups`
-
-### Explicitly deferred
-
-Do not implement in v1 unless a real downstream need appears:
-
-- D4 output
-- unsupported experimental flags not used in current workflows
+- tiled/streaming coverage scratch for `processing_threads > 1` memory control, tracked in `coverage_memory_footprint.md`;
+- broader real-data conformance/performance refreshes when changing engine internals;
+- D4 output and unsupported experimental flags only if a real downstream need appears.
 
 ## 9. Validation and tests
 
-### 9.1 Keep the current SQL scripts
+Current automated coverage lives in:
 
-The current scripts are not throwaway prototypes. They are the executable spec:
+- SQL tests: `test/sql/mosdepth.test`;
+- R tests: `r/Rduckhts/inst/tinytest/test_mosdepth.R`;
+- upstream comparison/benchmark scripts: `scripts/mosdepth_conformance.py` and `scripts/mosdepth_benchmark.py`.
 
-- `scripts/mosdepth_conformance.py`
-- `scripts/mosdepth_benchmark.py`
+Tests should cover fast/default/fragment modes, CRAM reference behavior, `by` window/BED outputs, quantize, thresholds, median, read-group and fragment-length filters, output path creation, and bad-argument validation.
 
-Native code should be validated against upstream mosdepth using those scripts
-or native equivalents.
+When claiming upstream compatibility or performance, record:
 
-### 9.2 New SQL and R tests
-
-Add SQL tests:
-
-- `test/sql/mosdepth.test`
-
-Cover:
-
-- fast mode single chromosome
-- default mode single chromosome
-- `by := 10000`
-- `by := bed`
-- output path creation
-- bad-argument validation
-- CRAM reference requirement
-
-Add R tests:
-
-- `r/Rduckhts/inst/tinytest/test_mosdepth.R`
-
-Cover:
-
-- wrapper signature and defaults
-- output path existence
-- end-to-end invocation from DBI
-
-### 9.3 Golden-data validation
-
-Keep validated outputs under a repo-controlled location only if they are small
-enough and stable.
-
-At minimum, record:
-
-- BAM / CRAM used
-- exact mosdepth version
-- exact commands
-- exact expected output files
-
-This belongs in a repo doc, not just CI logs.
+- BAM/CRAM used;
+- exact mosdepth version/commit;
+- exact commands;
+- validation date;
+- known unsupported features.
 
 ## 10. Documentation and attribution
 
-### README requirements
+Docs for `duckhts_mosdepth(...)` must continue to state:
 
-When `duckhts_mosdepth(...)` is added publicly, README/docs must include:
+- it is a native rewrite of mosdepth behavior for the documented scope;
+- users should cite upstream mosdepth when mosdepth-compatible output semantics are used in scientific work;
+- validation scope is pinned and not a claim about arbitrary future mosdepth versions.
 
-- that it is a native rewrite of mosdepth behavior
-- explicit credit and citation guidance for upstream mosdepth
-- an AI assistance disclosure consistent with `rewrites.bio`
-- exact validation scope and version
+## 11. Native implementation rationale
 
-### Suggested attribution text
-
-Document that users of `duckhts_mosdepth(...)` should cite upstream mosdepth
-when the output semantics are used in scientific work.
-
-Do not bury this in a footer; make it visible in README and function docs.
-
-## 11. Why this should be done natively
-
-Current status:
-
-- SQL already proves correctness
-- SQL fast mode is already very good
-- SQL default mode is slower than mosdepth because SQL must:
-  - explode CIGAR into rows
-  - join mates for overlap correction
-  - materialize large intermediate relations
-
-Native code can beat that by:
-
-- keeping per-contig depth in one dense in-memory array
-- applying overlap correction during the scan
-- computing summary/distribution/region outputs from the same pass
-- avoiding relational materialization of internal state
-
-That is the exact "think big, work small" path from `rewrites.bio`:
-
-- big architecture idea: one native pass produces the full mosdepth output set
-- small iteration loop: implement fast mode first, validate, then default mode
+The native path remains justified because one scan can produce summary, distribution, region, per-base, quantized, and threshold outputs while applying CIGAR handling and overlap correction without SQL materializing internal depth/mate state. Preserve that one-pass/fused-output design when refactoring.
 
 ## 12. Non-goals
 

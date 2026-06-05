@@ -1,4 +1,6 @@
-ad# DuckDB C API deprecation scan
+# DuckDB C API deprecation scan
+
+Status: historical scan. Re-run and update this note after bundled DuckDB header/runtime bumps or broad extension C API refactors.
 
 Date: 2026-04-21
 

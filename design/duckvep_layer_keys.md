@@ -1,8 +1,10 @@
 # DuckVEP keying notes: VariantKey, RegionKey, and overlap kernels
 
+Status: future DuckVEP/keying design. VariantKey, RegionKey, and cgranges/overlap primitives exist; a full DuckVEP consequence engine and annotation-store layer remain future work.
+
 ## Purpose
 
-This note records how DuckHTS's new VariantKey / RegionKey support should fit a future DuckVEP-style annotation layer.
+This note records how DuckHTS's VariantKey / RegionKey support should fit a future DuckVEP-style annotation layer.
 
 The core split is:
 

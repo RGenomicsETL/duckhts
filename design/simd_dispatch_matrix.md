@@ -1,5 +1,7 @@
 # DuckHTS SIMD dispatch matrix
 
+Status: current implementation contract for byte-oriented DuckHTS SIMD dispatch. Update this file when backend-selection semantics, diagnostics, or logical-kernel dispatch behavior change.
+
 This note tracks the long-term SIMD dispatch infrastructure introduced for byte-oriented DuckHTS kernels.
 
 ## Architecture

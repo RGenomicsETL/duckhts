@@ -1,7 +1,6 @@
 # Better Scan Planning Notes
 
-This file captures the code changes needed for better indexed scan planning
-without implementing them yet.
+Status: open scan-planning backlog. Explicit `scan_mode := 'sequential'` has landed for the supported readers; this note now tracks the remaining indexed full-scan scheduling work and the deferred BCF/VCF record-offset design.
 
 Current decision:
 
@@ -10,6 +9,7 @@ Current decision:
 - Do not implement yet: expose a BCF/VCF record-offset column. That is a
   significant downstream-facing surface change and needs explicit sign-off on
   semantics first.
+- Do not use symlink/no-index tricks as public API semantics; they are only diagnostics now that explicit sequential scan mode exists.
 
 ## 1. Tail latency: weighted contig claiming
 
@@ -133,7 +133,7 @@ internal helper module that:
 If this is shared across readers, wire the new source file through:
 
 - `CMakeLists.txt`
-- `r/Rduckhts/bootstrap.R`
+- `r/Rduckhts/R/bootstrap.R`
 - `r/Rduckhts/configure`
 - `r/Rduckhts/configure.win`
 
