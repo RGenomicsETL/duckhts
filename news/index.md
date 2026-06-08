@@ -2,6 +2,16 @@
 
 ## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
 
+- simplify the bundled
+  [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
+  / `duckhts_bcftools_norm(...)` site-preserving table-macro query shape
+  by removing the extra correlated scalar `LATERAL` subquery around
+  `bcftools_norm_row(...)`, eliminating the site-preserving
+  `LEFT_DELIM_JOIN` plan overhead while preserving split-mode ALT row
+  semantics and caller columns whose names collide with DuckHTS
+  helper-column names used internally by earlier macro forms; add
+  tinytest coverage for DuckDB’s suffixed behavior when callers already
+  have normalized-output column names
 - expose bundled reader `scan_mode = "auto"|"sequential"` controls
   through the R wrappers and multi-file helpers for `read_bcf`,
   `read_bam`, `read_fasta`, `read_fastq`, `read_bed`, `read_gff`,
