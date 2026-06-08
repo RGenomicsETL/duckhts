@@ -26,8 +26,10 @@ Useful overrides:
 - `NORM_BENCH_RUNS`: timed repeats, default `3`
 - `BCFTOOLS_BIN`: optional override for the bcftools executable
 - `NORM_DUCK_THREADS`: DuckDB execution threads for DuckHTS, default `1`
+- `NORM_DUCK_SCAN_MODE`: `read_bcf(...)` scan mode for DuckHTS inputs,
+  default `sequential`
 - `NORM_DUCK_DECOMPRESSION_THREADS`: `read_bcf(...)` htslib worker
-  threads, default `0`
+  threads, default `1`
 - `NORM_BCFTOOLS_THREADS`: optional `bcftools norm --threads`, default
   `0`
 - `NORM_REAL_VCF`, `NORM_REAL_REGION`, `NORM_REAL_FASTA`: optional
@@ -63,7 +65,8 @@ knitr::kable(benchmark_settings)
 | setting                        | value                                                                            |
 |:-------------------------------|:---------------------------------------------------------------------------------|
 | duckdb_threads                 | 1                                                                                |
-| read_bcf_decompression_threads | 0                                                                                |
+| read_bcf_scan_mode             | sequential                                                                       |
+| read_bcf_decompression_threads | 1                                                                                |
 | bcftools_threads               | 0                                                                                |
 | bcftools_output_mode           | -Ou                                                                              |
 | gvcf_input_path                | .tmp/1000g_dragen_hg00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz |
@@ -87,10 +90,10 @@ knitr::kable(synthetic_bench, digits = 3)
 
 | engine        | mode               | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:-------------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving    |    3 |      0.193 |   0.190 |   0.200 |      100000 |
-| bcftools_norm | site_preserving    |    3 |      0.604 |   0.595 |   0.728 |      100000 |
-| duckhts       | split_multiallelic |    3 |      0.374 |   0.373 |   0.379 |      120000 |
-| bcftools_norm | split_multiallelic |    3 |      0.776 |   0.755 |   0.792 |      120000 |
+| duckhts       | site_preserving    |    3 |      0.285 |   0.282 |   0.291 |      100000 |
+| bcftools_norm | site_preserving    |    3 |      0.596 |   0.595 |   0.731 |      100000 |
+| duckhts       | split_multiallelic |    3 |      0.436 |   0.435 |   0.444 |      120000 |
+| bcftools_norm | split_multiallelic |    3 |      0.776 |   0.752 |   0.785 |      120000 |
 
 Synthetic fixture mix:
 
@@ -235,8 +238,8 @@ if (!file.exists(gvcf_input_path) || !file.exists(gvcf_fasta)) {
 
 | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows |
 |:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|
-| duckhts       | site_preserving |    1 |      1.458 |   1.458 |   1.458 |      677444 |
-| bcftools_norm | site_preserving |    1 |      6.043 |   6.043 |   6.043 |      677444 |
+| duckhts       | site_preserving |    1 |      1.209 |   1.209 |   1.209 |      677444 |
+| bcftools_norm | site_preserving |    1 |      6.133 |   6.133 |   6.133 |      677444 |
 
 | status |      n |
 |:-------|-------:|
@@ -313,8 +316,8 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG001 | duckhts       | site_preserving |    1 |      8.408 |   8.408 |   8.408 |     3891440 |              43 |
-| HG001 | bcftools_norm | site_preserving |    1 |      4.960 |   4.960 |   4.960 |          NA |              NA |
+| HG001 | duckhts       | site_preserving |    1 |      5.809 |   5.809 |   5.809 |     3891440 |              43 |
+| HG001 | bcftools_norm | site_preserving |    1 |      5.003 |   5.003 |   5.003 |          NA |              NA |
 
 | norm_status |       n |
 |:------------|--------:|
@@ -325,8 +328,8 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG002 | duckhts       | site_preserving |    1 |      9.366 |   9.366 |   9.366 |     4033796 |              18 |
-| HG002 | bcftools_norm | site_preserving |    1 |      5.556 |   5.556 |   5.556 |          NA |              NA |
+| HG002 | duckhts       | site_preserving |    1 |      6.195 |   6.195 |   6.195 |     4033796 |              18 |
+| HG002 | bcftools_norm | site_preserving |    1 |      5.691 |   5.691 |   5.691 |          NA |              NA |
 
 | norm_status |       n |
 |:------------|--------:|
@@ -337,8 +340,8 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG006 | duckhts       | site_preserving |    1 |      8.998 |   8.998 |   8.998 |     3878664 |              18 |
-| HG006 | bcftools_norm | site_preserving |    1 |      4.718 |   4.718 |   4.718 |          NA |              NA |
+| HG006 | duckhts       | site_preserving |    1 |       6.42 |    6.42 |    6.42 |     3878664 |              18 |
+| HG006 | bcftools_norm | site_preserving |    1 |       5.04 |    5.04 |    5.04 |          NA |              NA |
 
 | norm_status |       n |
 |:------------|--------:|
@@ -349,9 +352,9 @@ if (!giab_ready) {
 
 | case  | engine        | mode            | runs | median_sec | min_sec | max_sec | output_rows | normalized_rows |
 |:------|:--------------|:----------------|-----:|-----------:|--------:|--------:|------------:|----------------:|
-| HG001 | duckhts       | site_preserving |    1 |      8.408 |   8.408 |   8.408 |     3891440 |              43 |
-| HG001 | bcftools_norm | site_preserving |    1 |      4.960 |   4.960 |   4.960 |          NA |              NA |
-| HG002 | duckhts       | site_preserving |    1 |      9.366 |   9.366 |   9.366 |     4033796 |              18 |
-| HG002 | bcftools_norm | site_preserving |    1 |      5.556 |   5.556 |   5.556 |          NA |              NA |
-| HG006 | duckhts       | site_preserving |    1 |      8.998 |   8.998 |   8.998 |     3878664 |              18 |
-| HG006 | bcftools_norm | site_preserving |    1 |      4.718 |   4.718 |   4.718 |          NA |              NA |
+| HG001 | duckhts       | site_preserving |    1 |      5.809 |   5.809 |   5.809 |     3891440 |              43 |
+| HG001 | bcftools_norm | site_preserving |    1 |      5.003 |   5.003 |   5.003 |          NA |              NA |
+| HG002 | duckhts       | site_preserving |    1 |      6.195 |   6.195 |   6.195 |     4033796 |              18 |
+| HG002 | bcftools_norm | site_preserving |    1 |      5.691 |   5.691 |   5.691 |          NA |              NA |
+| HG006 | duckhts       | site_preserving |    1 |      6.420 |   6.420 |   6.420 |     3878664 |              18 |
+| HG006 | bcftools_norm | site_preserving |    1 |      5.040 |   5.040 |   5.040 |          NA |              NA |

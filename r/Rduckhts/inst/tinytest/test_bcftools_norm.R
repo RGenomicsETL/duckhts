@@ -9,6 +9,7 @@ test_bcftools_norm <- function() {
   expect_silent(rduckhts_load(con))
 
   fasta_path <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts", mustWork = TRUE)
+  quoted_fasta <- DBI::dbQuoteString(con, fasta_path)
 
   DBI::dbExecute(
     con,
@@ -215,6 +216,211 @@ test_bcftools_norm <- function() {
   )
   expect_equal(nrow(out_query), 1)
   expect_equal(out_query$ref_normed[1], "G")
+
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_shadow_text AS",
+      "SELECT * FROM (VALUES",
+      "('keep_text', 'chrS', 2, 'T', 'TT', 'user_norm', 'user_item', 99)",
+      ") AS t(case_id, chrom, pos, ref, alt, __duckhts_norm, __duckhts_alt_item, __duckhts_alt_index)"
+    )
+  )
+  shadow_site <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT __duckhts_norm, pos_normed, ref_normed, alt_normed ",
+        "FROM duckhts_bcftools_norm('norm_shadow_text', %s) ORDER BY case_id"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_site$`__duckhts_norm`[1], "user_norm")
+  expect_equal(shadow_site$pos_normed[1], 1)
+  expect_equal(shadow_site$ref_normed[1], "G")
+  expect_equal(as.character(shadow_site$alt_normed[[1]]), "GT")
+
+  shadow_split <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT __duckhts_alt_item, __duckhts_alt_index, pos_normed, ref_normed, alt_normed, alt_index ",
+        "FROM duckhts_bcftools_norm('norm_shadow_text', %s, split_multiallelic := true) ORDER BY case_id"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_split$`__duckhts_alt_item`[1], "user_item")
+  expect_equal(shadow_split$`__duckhts_alt_index`[1], 99)
+  expect_equal(shadow_split$pos_normed[1], 1)
+  expect_equal(shadow_split$ref_normed[1], "G")
+  expect_equal(shadow_split$alt_normed[1], "GT")
+  expect_equal(shadow_split$alt_index[1], 1)
+
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_shadow_helpers AS",
+      "SELECT * FROM (VALUES",
+      "('chrS', 2, 'T', 'TT', 'bad_contig', 999, 'BADREF', 'BADALT', 123, 456)",
+      ") AS t(chrom, pos, ref, alt, __duckhts_chrom, __duckhts_pos, __duckhts_ref, __duckhts_alt, __duckhts_end_pos, __duckhts_svlen)"
+    )
+  )
+  shadow_helpers <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT __duckhts_chrom, __duckhts_pos, __duckhts_ref, __duckhts_alt, __duckhts_end_pos, __duckhts_svlen, ",
+        "pos_normed, ref_normed, alt_normed, norm_status ",
+        "FROM duckhts_bcftools_norm('norm_shadow_helpers', %s)"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_helpers$`__duckhts_chrom`[1], "bad_contig")
+  expect_equal(shadow_helpers$`__duckhts_pos`[1], 999)
+  expect_equal(shadow_helpers$`__duckhts_ref`[1], "BADREF")
+  expect_equal(shadow_helpers$`__duckhts_alt`[1], "BADALT")
+  expect_equal(shadow_helpers$`__duckhts_end_pos`[1], 123)
+  expect_equal(shadow_helpers$`__duckhts_svlen`[1], 456)
+  expect_equal(shadow_helpers$pos_normed[1], 1)
+  expect_equal(shadow_helpers$ref_normed[1], "G")
+  expect_equal(as.character(shadow_helpers$alt_normed[[1]]), "GT")
+  expect_equal(shadow_helpers$norm_status[1], "Normalized")
+
+  shadow_helpers_split <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT __duckhts_chrom, __duckhts_pos, pos_normed, ref_normed, alt_normed, alt_index ",
+        "FROM duckhts_bcftools_norm('norm_shadow_helpers', %s, split_multiallelic := true)"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_helpers_split$`__duckhts_chrom`[1], "bad_contig")
+  expect_equal(shadow_helpers_split$`__duckhts_pos`[1], 999)
+  expect_equal(shadow_helpers_split$pos_normed[1], 1)
+  expect_equal(shadow_helpers_split$ref_normed[1], "G")
+  expect_equal(shadow_helpers_split$alt_normed[1], "GT")
+  expect_equal(shadow_helpers_split$alt_index[1], 1)
+
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_shadow_struct AS",
+      "SELECT * FROM (VALUES",
+      "('chrS', 2, 'T', 'TT', struct_pack(pos_normed := 999::BIGINT, end_pos_normed := 999::BIGINT, ref_normed := 'BAD', alt_normed := ['BAD'], normed := false, norm_status := 'BAD'))",
+      ") AS t(chrom, pos, ref, alt, __duckhts_norm)"
+    )
+  )
+  shadow_struct <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT __duckhts_norm.pos_normed AS user_pos_normed, pos_normed, ref_normed, alt_normed ",
+        "FROM duckhts_bcftools_norm('norm_shadow_struct', %s)"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_struct$user_pos_normed[1], 999)
+  expect_equal(shadow_struct$pos_normed[1], 1)
+  expect_equal(shadow_struct$ref_normed[1], "G")
+  expect_equal(as.character(shadow_struct$alt_normed[[1]]), "GT")
+
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_shadow_outputs AS",
+      "SELECT * FROM (VALUES",
+      "('chrS', 2, 'T', 'TT', 900::BIGINT, 901::BIGINT, 'USER_REF', ['USER_ALT']::VARCHAR[], false, 'USER_STATUS', 99::BIGINT)",
+      ") AS t(chrom, pos, ref, alt, pos_normed, end_pos_normed, ref_normed, alt_normed, normed, norm_status, alt_index)"
+    )
+  )
+  shadow_outputs <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT pos_normed, pos_normed_1, end_pos_normed, end_pos_normed_1, normed, normed_1, ",
+        "ref_normed, ref_normed_1, alt_normed, alt_normed_1, norm_status, norm_status_1 ",
+        "FROM duckhts_bcftools_norm('norm_shadow_outputs', %s)"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_outputs$pos_normed[1], 900)
+  expect_equal(shadow_outputs$pos_normed_1[1], 1)
+  expect_equal(shadow_outputs$end_pos_normed[1], 901)
+  expect_equal(shadow_outputs$end_pos_normed_1[1], 1)
+  expect_false(shadow_outputs$normed[1])
+  expect_true(shadow_outputs$normed_1[1])
+  expect_equal(shadow_outputs$ref_normed[1], "USER_REF")
+  expect_equal(shadow_outputs$ref_normed_1[1], "G")
+  expect_equal(as.character(shadow_outputs$alt_normed[[1]]), "USER_ALT")
+  expect_equal(as.character(shadow_outputs$alt_normed_1[[1]]), "GT")
+  expect_equal(shadow_outputs$norm_status[1], "USER_STATUS")
+  expect_equal(shadow_outputs$norm_status_1[1], "Normalized")
+
+  shadow_outputs_split <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT alt_index, alt_index_1, pos_normed, pos_normed_1, end_pos_normed, end_pos_normed_1, ",
+        "normed, normed_1, alt_normed, alt_normed_1, norm_status, norm_status_1 ",
+        "FROM duckhts_bcftools_norm('norm_shadow_outputs', %s, split_multiallelic := true)"
+      ),
+      quoted_fasta
+    )
+  )
+  expect_equal(shadow_outputs_split$alt_index[1], 99)
+  expect_equal(shadow_outputs_split$alt_index_1[1], 1)
+  expect_equal(shadow_outputs_split$pos_normed[1], 900)
+  expect_equal(shadow_outputs_split$pos_normed_1[1], 1)
+  expect_equal(shadow_outputs_split$end_pos_normed[1], 901)
+  expect_equal(shadow_outputs_split$end_pos_normed_1[1], 1)
+  expect_false(shadow_outputs_split$normed[1])
+  expect_true(shadow_outputs_split$normed_1[1])
+  expect_equal(as.character(shadow_outputs_split$alt_normed[[1]]), "USER_ALT")
+  expect_equal(shadow_outputs_split$alt_normed_1[1], "GT")
+  expect_equal(shadow_outputs_split$norm_status[1], "USER_STATUS")
+  expect_equal(shadow_outputs_split$norm_status_1[1], "Normalized")
+
+  DBI::dbExecute(
+    con,
+    paste(
+      "CREATE OR REPLACE TEMP TABLE norm_plan_wide AS",
+      "SELECT 'chrS'::VARCHAR AS chrom, 2::BIGINT AS pos, 'T'::VARCHAR AS ref, 'TT'::VARCHAR AS alt,",
+      "repeat('x', 1000) AS payload, 'bad_contig' AS __duckhts_chrom"
+    )
+  )
+  plan_site <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "EXPLAIN SELECT chrom, pos_normed FROM duckhts_bcftools_norm('norm_plan_wide', %s)",
+      quoted_fasta
+    )
+  )
+  plan_site_text <- paste(plan_site$explain_value, collapse = "\n")
+  expect_false(grepl("LEFT_DELIM_JOIN", plan_site_text, fixed = TRUE))
+  expect_false(grepl("payload", plan_site_text, fixed = TRUE))
+  expect_false(grepl("__duckhts_chrom", plan_site_text, fixed = TRUE))
+
+  plan_split <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "EXPLAIN SELECT * FROM duckhts_bcftools_norm('norm_seq', %s, split_multiallelic := true)",
+      quoted_fasta
+    )
+  )
+  plan_split_text <- paste(plan_split$explain_value, collapse = "\n")
+  fixed_count <- function(pattern, text) {
+    match_positions <- gregexpr(pattern, text, fixed = TRUE)[[1]]
+    if (length(match_positions) == 1L && match_positions[1] == -1L) 0L else length(match_positions)
+  }
+  expect_equal(fixed_count("LEFT_DELIM_JOIN", plan_split_text), 1)
+  expect_equal(fixed_count("bcftools_norm_row", plan_split_text), 1)
 
   phased_fields_path <- system.file("extdata", "phased_genotype_fields.vcf", package = "Rduckhts", mustWork = TRUE)
   quoted_phased <- DBI::dbQuoteString(con, phased_fields_path)
