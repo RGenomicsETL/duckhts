@@ -11,6 +11,21 @@ test_table_creation <- function() {
   # Ensure bundled extension can be loaded
   expect_silent(rduckhts_load(con))
 
+  runtime_probe <- dbGetQuery(
+    con,
+    paste(
+      "SELECT",
+      "duckhts_duckdb_type_supported('VARCHAR') AS has_varchar,",
+      "duckhts_duckdb_type_supported('variant') = duckhts_duckdb_supports_variant() AS variant_consistent,",
+      "duckhts_duckdb_type_supported('geometry') = duckhts_duckdb_supports_geometry() AS geometry_consistent,",
+      "NOT duckhts_duckdb_type_supported('__duckhts_no_such_type__') AS missing_is_false"
+    )
+  )
+  expect_true(runtime_probe$has_varchar)
+  expect_true(runtime_probe$variant_consistent)
+  expect_true(runtime_probe$geometry_consistent)
+  expect_true(runtime_probe$missing_is_false)
+
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
   bcf_index_path <- system.file("extdata", "vcf_file.bcf.csi", package = "Rduckhts")
   formatcols_vcf_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")

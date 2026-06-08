@@ -171,6 +171,21 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return false;
     }
     if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_duckdb_type_supported(candidate_type_name) AS ("
+        "EXISTS (SELECT 1 FROM duckdb_types() AS dt WHERE lower(dt.type_name) = lower(candidate_type_name)))")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_duckdb_supports_variant() AS ("
+        "duckhts_duckdb_type_supported('VARIANT'))")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
+        "CREATE OR REPLACE MACRO duckhts_duckdb_supports_geometry() AS ("
+        "duckhts_duckdb_type_supported('GEOMETRY'))")) {
+        return false;
+    }
+    if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckhts_parquet_ident_list(cols) AS ("
         "CASE WHEN len(cols) = 0 THEN '*' "
         "ELSE (SELECT string_agg(duckhts_quote_ident(x), ', ') FROM unnest(cols) AS t(x)) END)")) {

@@ -152,6 +152,43 @@
       ]
     },
     {
+      "name": "duckhts_duckdb_type_supported",
+      "kind": "scalar_macro",
+      "category": "Diagnostics",
+      "signature": "duckhts_duckdb_type_supported(type_name)",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Return whether the currently open DuckDB runtime advertises a logical type with the given name through duckdb_types(). This is a catalog-level runtime probe for feature gating SQL/macros across DuckDB versions.",
+      "examples": [
+        "SELECT duckhts_duckdb_type_supported('VARIANT');",
+        "SELECT duckhts_duckdb_type_supported('GEOMETRY');"
+      ]
+    },
+    {
+      "name": "duckhts_duckdb_supports_variant",
+      "kind": "scalar_macro",
+      "category": "Diagnostics",
+      "signature": "duckhts_duckdb_supports_variant()",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Return whether the currently open DuckDB runtime advertises the VARIANT logical type. Use this to gate optional SQL that depends on DuckDB VARIANT support.",
+      "examples": [
+        "SELECT duckhts_duckdb_supports_variant();"
+      ]
+    },
+    {
+      "name": "duckhts_duckdb_supports_geometry",
+      "kind": "scalar_macro",
+      "category": "Diagnostics",
+      "signature": "duckhts_duckdb_supports_geometry()",
+      "returns": "BOOLEAN",
+      "r_wrapper": "",
+      "description": "Return whether the currently open DuckDB runtime advertises the GEOMETRY logical type. Use this to gate optional SQL that depends on DuckDB GEOMETRY support.",
+      "examples": [
+        "SELECT duckhts_duckdb_supports_geometry();"
+      ]
+    },
+    {
       "name": "read_bcf",
       "kind": "table",
       "category": "Readers",

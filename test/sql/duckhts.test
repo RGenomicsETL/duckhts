@@ -1,11 +1,25 @@
 # name: test/sql/duckhts.test
-# description: Test duckhts extension – read_bcf, read_bam, read_fasta, read_fastq, read_gff, read_gtf, read_tabix
+# description: Test duckhts extension - read_bcf, read_bam, read_fasta, read_fastq, read_gff, read_gtf, read_tabix
 # group: [duckhts]
 #
 # Test data lives in test/data/ and is prepared by test/scripts/prepare_test_data.sh
 # which copies files from vendored htslib and builds the required indexes.
 
 require duckhts
+
+# ==============================================================
+# DuckDB runtime feature probes
+# ==============================================================
+
+query IIIII
+SELECT
+  CASE WHEN duckhts_duckdb_type_supported('VARCHAR') THEN 1 ELSE 0 END,
+  CASE WHEN duckhts_duckdb_type_supported('variant') = duckhts_duckdb_supports_variant() THEN 1 ELSE 0 END,
+  CASE WHEN duckhts_duckdb_type_supported('geometry') = duckhts_duckdb_supports_geometry() THEN 1 ELSE 0 END,
+  CASE WHEN duckhts_duckdb_type_supported('__duckhts_no_such_type__') THEN 0 ELSE 1 END,
+  CASE WHEN duckhts_duckdb_type_supported(NULL) THEN 0 ELSE 1 END;
+----
+1	1	1	1	1
 
 # ==============================================================
 # read_bcf – VCF/BCF reader
@@ -198,7 +212,7 @@ LIMIT 1;
 VARCHAR[]
 
 # ==============================================================
-# read_bam – SAM/BAM/CRAM reader
+# read_bam - SAM/BAM/CRAM reader
 # ==============================================================
 
 # --- record count ---
@@ -328,7 +342,7 @@ FROM windowed;
 0
 
 # ==============================================================
-# read_fasta – FASTA reader
+# read_fasta - FASTA reader
 # ==============================================================
 
 # --- record count ---
@@ -491,7 +505,7 @@ LIMIT 1;
 0.3333333333333333	0.6666666666666666	1	2	2	1	4
 
 # ==============================================================
-# read_fastq – FASTQ reader
+# read_fastq - FASTQ reader
 # ==============================================================
 
 # --- record count ---
@@ -571,7 +585,7 @@ SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/odd_interleaved
 read_fastq: interleaved file has an unpaired record
 
 # ==============================================================
-# read_bcf – VCF/BCF reader
+# read_bcf - VCF/BCF reader
 # ==============================================================
 
 # --- non-conforming VCF without ##contig ---
@@ -587,7 +601,7 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/no_contig.vcf.gz'
 0
 
 # ==============================================================
-# read_gff – GFF3 reader (bgzipped + tabix indexed)
+# read_gff - GFF3 reader (bgzipped + tabix indexed)
 # ==============================================================
 
 # --- record count ---
@@ -603,7 +617,7 @@ SELECT seqname, source, feature, start, "end" FROM read_gff('__WORKING_DIRECTORY
 X	Vega	exon	2934816	2935190
 
 # ==============================================================
-# read_tabix – generic reader (header/meta)
+# read_tabix - generic reader (header/meta)
 # ==============================================================
 
 # --- respect meta header lines in generic tabix ---
@@ -751,7 +765,7 @@ FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_attrs.gtf', attributes_list :
 weird; semi	3	1
 
 # ==============================================================
-# read_tabix – generic tabix reader (bgzipped + tabix indexed)
+# read_tabix - generic tabix reader (bgzipped + tabix indexed)
 # ==============================================================
 
 # --- record count ---
@@ -1438,7 +1452,7 @@ SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', sequence_encod
 sequence_encoding must be 'string' or 'nt16'
 
 # ==============================================================
-# hts_union_query – multi-file UNION ALL BY NAME macro
+# hts_union_query - multi-file UNION ALL BY NAME macro
 # ==============================================================
 
 # --- hts_union_query: generates valid SQL for a single BAM file ---

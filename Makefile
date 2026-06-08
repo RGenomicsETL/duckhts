@@ -14,7 +14,7 @@ USE_UNSTABLE_C_API=0
 TARGET_DUCKDB_VERSION=v1.2.0
 
 # The DuckDB release to fetch headers from
-DUCKDB_HEADER_VERSION=v1.4.3
+DUCKDB_HEADER_VERSION=v1.5.3
 
 # For MinGW/Rtools we build vendored htslib ourselves.
 # Do not inherit the generic DuckDB CI vcpkg + Ninja path here.
