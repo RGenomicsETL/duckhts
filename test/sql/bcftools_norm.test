@@ -344,3 +344,134 @@ ORDER BY case_id;
 empty_list	NULL	0	-1	RefOnly
 null_item	NULL	NULL	1	NullInput
 null_list	NULL	0	-1	RefOnly
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_shadow_text AS
+SELECT *
+FROM (VALUES
+  ('keep_text', 'chrS', 2, 'T', 'TT', 'user_norm', 'user_item', 99)
+) AS t(case_id, chrom, pos, ref, alt, __duckhts_norm, __duckhts_alt_item, __duckhts_alt_index);
+
+query TITT
+SELECT __duckhts_norm,
+       pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR
+FROM duckhts_bcftools_norm('norm_shadow_text', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa')
+ORDER BY case_id;
+----
+user_norm	1	G	[GT]
+
+query TIITTR
+SELECT __duckhts_alt_item,
+       __duckhts_alt_index,
+       pos_normed,
+       ref_normed,
+       alt_normed,
+       alt_index
+FROM duckhts_bcftools_norm(
+  'norm_shadow_text',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+)
+ORDER BY case_id;
+----
+user_item	99	1	G	GT	1
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_shadow_helpers AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', 'TT', 'bad_contig', 999, 'BADREF', 'BADALT', 123, 456)
+) AS t(chrom, pos, ref, alt, __duckhts_chrom, __duckhts_pos, __duckhts_ref, __duckhts_alt, __duckhts_end_pos, __duckhts_svlen);
+
+query TITTIIITTT
+SELECT __duckhts_chrom,
+       __duckhts_pos,
+       __duckhts_ref,
+       __duckhts_alt,
+       __duckhts_end_pos,
+       __duckhts_svlen,
+       pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR,
+       norm_status
+FROM duckhts_bcftools_norm('norm_shadow_helpers', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa');
+----
+bad_contig	999	BADREF	BADALT	123	456	1	G	[GT]	Normalized
+
+query TIITTR
+SELECT __duckhts_chrom,
+       __duckhts_pos,
+       pos_normed,
+       ref_normed,
+       alt_normed,
+       alt_index
+FROM duckhts_bcftools_norm(
+  'norm_shadow_helpers',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+);
+----
+bad_contig	999	1	G	GT	1
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_shadow_struct AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', 'TT', struct_pack(pos_normed := 999::BIGINT, end_pos_normed := 999::BIGINT, ref_normed := 'BAD', alt_normed := ['BAD'], normed := false, norm_status := 'BAD'))
+) AS t(chrom, pos, ref, alt, __duckhts_norm);
+
+query IITT
+SELECT __duckhts_norm.pos_normed,
+       pos_normed,
+       ref_normed,
+       alt_normed::VARCHAR
+FROM duckhts_bcftools_norm('norm_shadow_struct', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa');
+----
+999	1	G	[GT]
+
+statement ok
+CREATE OR REPLACE TEMP TABLE norm_shadow_outputs AS
+SELECT *
+FROM (VALUES
+  ('chrS', 2, 'T', 'TT', 900::BIGINT, 901::BIGINT, 'USER_REF', ['USER_ALT']::VARCHAR[], false, 'USER_STATUS', 99::BIGINT)
+) AS t(chrom, pos, ref, alt, pos_normed, end_pos_normed, ref_normed, alt_normed, normed, norm_status, alt_index);
+
+query IIIIIITTTTTT
+SELECT pos_normed,
+       pos_normed_1,
+       end_pos_normed,
+       end_pos_normed_1,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       CASE WHEN normed_1 THEN 1 WHEN normed_1 IS NULL THEN NULL ELSE 0 END,
+       ref_normed,
+       ref_normed_1,
+       alt_normed::VARCHAR,
+       alt_normed_1::VARCHAR,
+       norm_status,
+       norm_status_1
+FROM duckhts_bcftools_norm('norm_shadow_outputs', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa');
+----
+900	1	901	1	0	1	USER_REF	G	[USER_ALT]	[GT]	USER_STATUS	Normalized
+
+query IIIIIIIITTTT
+SELECT alt_index,
+       alt_index_1,
+       pos_normed,
+       pos_normed_1,
+       end_pos_normed,
+       end_pos_normed_1,
+       CASE WHEN normed THEN 1 WHEN normed IS NULL THEN NULL ELSE 0 END,
+       CASE WHEN normed_1 THEN 1 WHEN normed_1 IS NULL THEN NULL ELSE 0 END,
+       alt_normed::VARCHAR,
+       alt_normed_1,
+       norm_status,
+       norm_status_1
+FROM duckhts_bcftools_norm(
+  'norm_shadow_outputs',
+  '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+  split_multiallelic := true
+);
+----
+99	1	900	1	901	1	0	1	[USER_ALT]	GT	USER_STATUS	Normalized

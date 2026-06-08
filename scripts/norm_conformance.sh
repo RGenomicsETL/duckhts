@@ -7,9 +7,11 @@ set -euo pipefail
 #   bash scripts/norm_conformance.sh INPUT_VCF FASTA [OUT_PREFIX]
 #
 # Environment variables:
-#   DUCKHTS_EXT   path to duckhts.duckdb_extension
-#   BCFTOOLS_BIN  path to bcftools binary (defaults to RBCFTools::bcftools_path())
-#   NORM_REGION   optional region string to slice before comparison
+#   DUCKHTS_EXT                  path to duckhts.duckdb_extension
+#   DUCKHTS_SCAN_MODE            read_bcf scan_mode for the materialized slice (default: sequential)
+#   DUCKHTS_DECOMPRESSION_THREADS read_bcf htslib decompression worker threads (default: 1)
+#   BCFTOOLS_BIN                 path to bcftools binary (defaults to RBCFTools::bcftools_path())
+#   NORM_REGION                  optional region string to slice before comparison
 #   NORM_SPLIT    1 => compare split multiallelic normalization (`bcftools norm -m -any`)
 #                 0 => compare site-preserving normalization (default)
 #   KEEP_SLICE    1 to keep the materialized local VCF slice
@@ -23,6 +25,8 @@ INPUT_VCF="$1"
 FASTA="$2"
 OUT_PREFIX="${3:-norm_conformance}"
 DUCKHTS_EXT="${DUCKHTS_EXT:-build/release/duckhts.duckdb_extension}"
+DUCKHTS_SCAN_MODE="${DUCKHTS_SCAN_MODE:-sequential}"
+DUCKHTS_DECOMPRESSION_THREADS="${DUCKHTS_DECOMPRESSION_THREADS:-1}"
 NORM_REGION="${NORM_REGION:-}"
 NORM_SPLIT="${NORM_SPLIT:-0}"
 KEEP_SLICE="${KEEP_SLICE:-0}"
@@ -34,6 +38,14 @@ if [[ -z "${BCFTOOLS_BIN:-}" ]]; then
   }
 fi
 
+if [[ "$DUCKHTS_SCAN_MODE" != "auto" && "$DUCKHTS_SCAN_MODE" != "sequential" ]]; then
+  echo "DUCKHTS_SCAN_MODE must be 'auto' or 'sequential'" >&2
+  exit 1
+fi
+if ! [[ "$DUCKHTS_DECOMPRESSION_THREADS" =~ ^[0-9]+$ ]]; then
+  echo "DUCKHTS_DECOMPRESSION_THREADS must be a non-negative integer" >&2
+  exit 1
+fi
 if [[ ! -f "$FASTA" ]]; then
   echo "FASTA not found: $FASTA" >&2
   exit 1
@@ -86,7 +98,11 @@ SELECT CHROM AS chrom,
        POS AS pos,
        REF AS ref,
        ALT
-FROM read_bcf('${INPUT_SLICE_GZ}');
+FROM read_bcf(
+  '${INPUT_SLICE_GZ}',
+  scan_mode := '${DUCKHTS_SCAN_MODE}',
+  decompression_threads := ${DUCKHTS_DECOMPRESSION_THREADS}
+);
 
 CREATE TEMP TABLE normed AS
 SELECT *
@@ -196,6 +212,8 @@ echo "  input_vcf:    ${INPUT_VCF}"
 echo "  fasta:        ${FASTA}"
 echo "  region:       ${NORM_REGION:-full_input}"
 echo "  split:        ${NORM_SPLIT}"
+echo "  duck_scan:    ${DUCKHTS_SCAN_MODE}"
+echo "  duck_dthreads: ${DUCKHTS_DECOMPRESSION_THREADS}"
 echo "  bcftools_bin: ${BCFTOOLS_BIN}"
 echo ""
 echo "Output files:"

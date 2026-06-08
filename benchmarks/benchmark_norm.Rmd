@@ -28,7 +28,8 @@ Useful overrides:
 - `NORM_BENCH_RUNS`: timed repeats, default `3`
 - `BCFTOOLS_BIN`: optional override for the bcftools executable
 - `NORM_DUCK_THREADS`: DuckDB execution threads for DuckHTS, default `1`
-- `NORM_DUCK_DECOMPRESSION_THREADS`: `read_bcf(...)` htslib worker threads, default `0`
+- `NORM_DUCK_SCAN_MODE`: `read_bcf(...)` scan mode for DuckHTS inputs, default `sequential`
+- `NORM_DUCK_DECOMPRESSION_THREADS`: `read_bcf(...)` htslib worker threads, default `1`
 - `NORM_BCFTOOLS_THREADS`: optional `bcftools norm --threads`, default `0`
 - `NORM_REAL_VCF`, `NORM_REAL_REGION`, `NORM_REAL_FASTA`: optional real-callset conformance case
 - `NORM_REAL_SPLIT`: `1` to run the optional real-callset case in split mode too
@@ -59,7 +60,8 @@ if (!file.exists(bcftools_bin)) stop("bcftools binary not found: ", bcftools_bin
 bench_rows <- as.integer(Sys.getenv("NORM_BENCH_ROWS", unset = "100000"))
 bench_runs <- as.integer(Sys.getenv("NORM_BENCH_RUNS", unset = "3"))
 duck_threads <- as.integer(Sys.getenv("NORM_DUCK_THREADS", unset = "1"))
-duck_decompression_threads <- as.integer(Sys.getenv("NORM_DUCK_DECOMPRESSION_THREADS", unset = "0"))
+duck_scan_mode <- Sys.getenv("NORM_DUCK_SCAN_MODE", unset = "sequential")
+duck_decompression_threads <- as.integer(Sys.getenv("NORM_DUCK_DECOMPRESSION_THREADS", unset = "1"))
 bcftools_threads <- as.integer(Sys.getenv("NORM_BCFTOOLS_THREADS", unset = "0"))
 real_input_path <- Sys.getenv("NORM_REAL_VCF", unset = "")
 real_region <- Sys.getenv("NORM_REAL_REGION", unset = "")
@@ -94,6 +96,7 @@ for (nm in c("NORM_BENCH_ROWS", "NORM_BENCH_RUNS", "NORM_DUCK_THREADS", "NORM_DU
 if (bench_rows < 1L) stop("NORM_BENCH_ROWS must be positive", call. = FALSE)
 if (bench_runs < 1L) stop("NORM_BENCH_RUNS must be positive", call. = FALSE)
 if (duck_threads < 1L) stop("NORM_DUCK_THREADS must be positive", call. = FALSE)
+if (!duck_scan_mode %in% c("auto", "sequential")) stop("NORM_DUCK_SCAN_MODE must be 'auto' or 'sequential'", call. = FALSE)
 if (gvcf_runs < 1L) stop("NORM_GVCF_RUNS must be positive", call. = FALSE)
 if (giab_runs < 1L) stop("NORM_GIAB_RUNS must be positive", call. = FALSE)
 
@@ -107,6 +110,7 @@ DBI::dbExecute(con, sprintf("PRAGMA threads=%d;", duck_threads))
 benchmark_settings <- data.frame(
   setting = c(
     "duckdb_threads",
+    "read_bcf_scan_mode",
     "read_bcf_decompression_threads",
     "bcftools_threads",
     "bcftools_output_mode",
@@ -120,6 +124,7 @@ benchmark_settings <- data.frame(
   ),
   value = c(
     as.character(duck_threads),
+    duck_scan_mode,
     as.character(duck_decompression_threads),
     as.character(bcftools_threads),
     "-Ou",
@@ -280,8 +285,9 @@ prepare_duckdb_input_view <- function(input_path) {
     paste0(
       "CREATE TEMP VIEW bench_input AS ",
       "SELECT CHROM, POS, REF, ALT, ", end_expr, " AS END_POS FROM read_bcf(",
-      sql_string(input_path), ", decompression_threads := ",
-      duck_decompression_threads,
+      sql_string(input_path),
+      ", scan_mode := ", sql_string(duck_scan_mode),
+      ", decompression_threads := ", duck_decompression_threads,
       ")"
     )
   )
