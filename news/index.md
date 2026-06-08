@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
 
+- update the bundled DuckDB C API headers to DuckDB v1.5.3 while keeping
+  stable extension ABI metadata at v1.2.0; bundled SQL sessions loaded
+  through
+  [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
+  now expose DuckDB runtime type-support probes for `VARIANT` and
+  `GEOMETRY`
 - simplify the bundled
   [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
   / `duckhts_bcftools_norm(...)` site-preserving table-macro query shape
