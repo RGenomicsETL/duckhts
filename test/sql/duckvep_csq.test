@@ -1,0 +1,62 @@
+# name: test/sql/duckvep_csq.test
+# description: DuckVEP/bcftools csq fixture plumbing over DuckDB-native BCSQ, exact, and region annotations
+# group: [duckhts]
+
+require duckhts
+
+# --- bcftools csq BCSQ header schema is parsed into VEP_* list columns ---
+query TTTTT
+SELECT
+  list_extract(VEP_Consequence, 1),
+  list_extract(VEP_gene, 1),
+  list_extract(VEP_transcript, 1),
+  list_extract(VEP_strand, 1),
+  list_extract(VEP_dna_change, 1)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/duckvep/minimal_bcsq.vcf')
+WHERE POS = 125;
+----
+missense_variant	DUCK1	DUCK1-201	+	125A>C
+
+# --- BCSQ fields keep the same typed list surface used for CSQ/ANN parsing ---
+query TT
+SELECT typeof(VEP_Consequence), typeof(VEP_dna_change)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/duckvep/minimal_bcsq.vcf')
+LIMIT 1;
+----
+VARCHAR[]	VARCHAR[]
+
+# --- exact annotations can use ordinary DuckDB joins on VCF keys ---
+query TT
+WITH variants AS (
+  SELECT CHROM, POS, REF, list_extract(ALT, 1) AS ALT, ID
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/duckvep/minimal_bcsq.vcf')
+), exact_annotations(chrom, pos, ref, alt, label) AS (
+  VALUES ('chrDuck', 125::BIGINT, 'A', 'C', 'pinned_exact_missense')
+)
+SELECT v.ID, a.label
+FROM variants v
+JOIN exact_annotations a
+  ON v.CHROM = a.chrom
+ AND v.POS = a.pos
+ AND v.REF = a.ref
+ AND v.ALT = a.alt;
+----
+duck_missense	pinned_exact_missense
+
+# --- region candidate annotations can use DuckDB range joins over GFF3 rows ---
+query T
+WITH variants AS (
+  SELECT CHROM, POS, ID
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/duckvep/minimal_bcsq.vcf')
+), genes AS (
+  SELECT seqname, start, "end", map_extract_value(attributes_map, 'ID') AS gene_id
+  FROM read_gff('__WORKING_DIRECTORY__/test/data/duckvep/minimal.gff3', attributes_map := true)
+  WHERE feature = 'gene'
+)
+SELECT string_agg(v.ID || ':' || coalesce(g.gene_id, 'NA'), ',' ORDER BY v.POS)
+FROM variants v
+LEFT JOIN genes g
+  ON v.CHROM = g.seqname
+ AND v.POS BETWEEN g.start AND g."end";
+----
+duck_missense:gene:DUCK1,duck_intron:gene:DUCK1,duck_intergenic:NA

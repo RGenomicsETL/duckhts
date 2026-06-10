@@ -74,6 +74,19 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  WisecondorX fixed-bin counting fixtures + indexes"
 
+# ---- Malformed VCF regression fixture ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/malformed_bad_pos.vcf" <<'EOF'
+##fileformat=VCFv4.2
+##contig=<ID=1,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+1	10	.	A	C	.	PASS	.	GT	0/1
+1	bad	.	A	G	.	PASS	.	GT	0/1
+EOF
+done
+echo "  malformed_bad_pos.vcf"
+
 # ---- VCF → bgzipped VCF + index ----
 bcftools view "$SRC/formatcols.vcf" -Oz -o "$DST/formatcols.vcf.gz"
 bcftools index "$DST/formatcols.vcf.gz"
@@ -233,6 +246,68 @@ echo "  liftover spanning-deletion swap / ref-add fixtures + .fai"
 # ---- vcfppR-generated VCF fixtures (spec/mapping/regression) + manifest ----
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"
+
+# ---- read_bcf_v2 regression fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  printf 'S1\n' > "$out_dir/samples_s1.txt"
+
+  cat > "$out_dir/genotype_ploidy_edge_cases.vcf" <<'EOF'
+##fileformat=VCFv4.3
+##contig=<ID=chr1,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	BIG	DIP	HAP	TET	TRI
+chr1	1	ploidy_edges	A	C,G,T,AA,AC,AG,AT,CA,CC,CG	.	PASS	.	GT	0/10	0|1	1	0/1/2/3	0/1/2
+EOF
+
+  cat > "$out_dir/test_vep_tidy.vcf" <<'EOF'
+##fileformat=VCFv4.3
+##contig=<ID=1,length=1000>
+##INFO=<ID=CSQ,Number=.,Type=String,Description="Consequence annotations from Ensembl VEP. Format: Allele|Consequence|SYMBOL|DISTANCE">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+1	100	vep_tidy	A	C	.	PASS	CSQ=C|missense_variant|GENE1|12	GT	0/1	1/1
+EOF
+done
+
+Rscript --vanilla - "$DST/tidy_chunk_boundary.vcf" "$PKG_DST/tidy_chunk_boundary.vcf" <<'RS'
+args <- commandArgs(TRUE)
+samples <- sprintf("S%04d", seq_len(2053))
+lines <- c(
+  "##fileformat=VCFv4.3",
+  "##contig=<ID=chr1,length=1000>",
+  "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+  paste(c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", samples), collapse = "\t"),
+  paste(c("chr1", "10", "tidy_chunk", "A", "C", ".", "PASS", ".", "GT", rep("0/1", length(samples))), collapse = "\t")
+)
+for (path in args) writeLines(lines, path)
+RS
+
+echo "  read_bcf_v2 sample/filter/projection regression fixtures"
+
+# ---- DuckVEP / bcftools csq fixture plumbing ----
+mkdir -p "$DST/duckvep"
+cat > "$DST/duckvep/minimal.fa" <<'EOF'
+>chrDuck
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+EOF
+cat > "$DST/duckvep/minimal.gff3" <<'EOF'
+##gff-version 3
+chrDuck	duckvep	gene	100	300	.	+	.	ID=gene:DUCK1;Name=DUCK1;biotype=protein_coding
+chrDuck	duckvep	mRNA	100	300	.	+	.	ID=transcript:DUCK1-201;Parent=gene:DUCK1;Name=DUCK1-201;biotype=protein_coding
+chrDuck	duckvep	exon	100	150	.	+	.	ID=exon:DUCK1-1;Parent=transcript:DUCK1-201;rank=1
+chrDuck	duckvep	CDS	120	240	.	+	0	ID=CDS:DUCK1;Parent=transcript:DUCK1-201
+chrDuck	duckvep	exon	200	300	.	+	.	ID=exon:DUCK1-2;Parent=transcript:DUCK1-201;rank=2
+EOF
+cat > "$DST/duckvep/minimal_bcsq.vcf" <<'EOF'
+##fileformat=VCFv4.2
+##contig=<ID=chrDuck,length=256>
+##INFO=<ID=BCSQ,Number=.,Type=String,Description="Local consequence annotation from BCFtools/csq fixture. Format: Consequence|gene|transcript|biotype|strand|amino_acid_change|dna_change">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrDuck	125	duck_missense	A	C	.	PASS	BCSQ=missense_variant|DUCK1|DUCK1-201|protein_coding|+|M1T|125A>C
+chrDuck	160	duck_intron	C	T	.	PASS	BCSQ=intron_variant|DUCK1|DUCK1-201|protein_coding|+||160C>T
+chrDuck	350	duck_intergenic	G	A	.	PASS	BCSQ=intergenic_variant||||||350G>A
+EOF
+echo "  DuckVEP/csq minimal FASTA/GFF3/BCSQ fixtures"
 
 # ---- Parallel empty-contig VCF regression fixture (bgzip + tabix) ----
 for out_dir in "$DST" "$PKG_DST"; do

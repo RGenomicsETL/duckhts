@@ -79,7 +79,11 @@ vep_field_type_t vep_infer_type(const char* tag_name, const char* field_name, co
 const char* vep_type_name(vep_field_type_t type);
 int vep_validate_column_type_rules(const char* rules_text, char* errbuf, size_t errbuf_size);
 vep_record_t* vep_record_parse(const vep_schema_t* schema, const char* csq_value);
+vep_record_t* vep_record_parse_selected(const vep_schema_t* schema, const char* csq_value,
+                                         const int* selected_indices, int n_selected);
 vep_record_t* vep_record_parse_bcf(const vep_schema_t* schema, const bcf_hdr_t* hdr, bcf1_t* rec);
+vep_record_t* vep_record_parse_selected_bcf(const vep_schema_t* schema, const bcf_hdr_t* hdr,
+                                             bcf1_t* rec, const int* selected_indices, int n_selected);
 void vep_record_destroy(vep_record_t* record);
 const vep_value_t* vep_record_get_value(const vep_record_t* record, int transcript_idx, int field_idx);
 const char* vep_detect_tag(const bcf_hdr_t* hdr);

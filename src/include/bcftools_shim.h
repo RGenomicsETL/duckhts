@@ -43,11 +43,17 @@ static inline double calc_binom_two_sided(int na, int nb, double aprob) {
 }
 
 char *bcftools_version(void);
-void duckhts_bcftools_error(const char *format, ...) HTS_NORETURN HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
-void duckhts_bcftools_error_errno(const char *format, ...) HTS_NORETURN HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
+void duckhts_bcftools_error(const char *format, ...) HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
+void duckhts_bcftools_error_errno(const char *format, ...) HTS_FORMAT(HTS_PRINTF_FMT, 1, 2);
 
-int duckhts_filter_try_begin(void);
+int duckhts_filter_try_begin_impl(void);
+jmp_buf *duckhts_filter_try_current_env(void);
 void duckhts_filter_try_end(void);
 const char *duckhts_filter_last_error(void);
+
+#ifndef DUCKHTS_BCFTOOLS_SHIM_IMPLEMENTATION
+#define duckhts_filter_try_begin() \
+    (duckhts_filter_try_begin_impl() ? 1 : setjmp(*duckhts_filter_try_current_env()))
+#endif
 
 #endif

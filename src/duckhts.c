@@ -18,6 +18,8 @@ DUCKDB_EXTENSION_EXTERN
 
 /* bcf_reader.c */
 extern void register_read_bcf_function(duckdb_connection connection);
+extern void register_read_bcf_v2_function(duckdb_connection connection);
+extern void register_read_bcf_appender_function(duckdb_connection connection, duckdb_database database);
 /* bam_reader.c */
 extern void register_read_bam_function(duckdb_connection connection);
 /* bam_pileup.c */
@@ -125,6 +127,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
 
     register_duckhts_simd_functions(connection);
     register_read_bcf_function(connection);
+    register_read_bcf_v2_function(connection);
+    register_read_bcf_appender_function(connection, *access->get_database(info));
     register_read_bam_function(connection);
     register_read_pileup_function(connection);
     register_bcftools_norm_functions(connection);
@@ -378,6 +382,26 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         };
         if (!run_sql_parts_or_fail(connection, hts_union_query_sql,
                                     sizeof(hts_union_query_sql) / sizeof(hts_union_query_sql[0]))) {
+            return false;
+        }
+    }
+    {
+        static const char *const hts_region_union_query_sql[] = {
+            "CREATE OR REPLACE MACRO hts_region_union_query(reader, path, regions, params := '') AS (",
+            "(SELECT string_agg(",
+            "'SELECT ' || CAST(ord AS VARCHAR) || ' AS duckhts_region_shard_id, ' ",
+            "|| duckhts_quote_string(region) || ' AS duckhts_region_shard, ' ",
+            "|| duckhts_quote_string(path) || ' AS filename, * FROM ' ",
+            "|| reader || '(' || duckhts_quote_string(path) ",
+            "|| ', region := ' || duckhts_quote_string(region) ",
+            "|| CASE WHEN length(params) > 0 THEN ', ' || params ELSE '' END ",
+            "|| ')', ",
+            "' UNION ALL BY NAME ' ORDER BY ord",
+            ") FROM unnest(regions) WITH ORDINALITY AS t(region, ord))",
+            ")"
+        };
+        if (!run_sql_parts_or_fail(connection, hts_region_union_query_sql,
+                                    sizeof(hts_region_union_query_sql) / sizeof(hts_region_union_query_sql[0]))) {
             return false;
         }
     }

@@ -311,12 +311,20 @@ static int duckhts_simd_table_resolved(const duckhts_simd_dispatch_table_t *tabl
     return 1;
 }
 
-static void duckhts_simd_require_table_resolved(const duckhts_simd_dispatch_table_t *table) {
-    if (duckhts_simd_table_resolved(table)) return;
+static void duckhts_simd_require_table_resolved(duckhts_simd_dispatch_table_t *table) {
+    const char *requested = table && table->requested_backend ? table->requested_backend : "unknown";
+    duckhts_simd_builder_t builder;
+    if (!table || duckhts_simd_table_resolved(table)) return;
+
     fprintf(stderr,
-            "duckhts SIMD dispatch table for request '%s' is missing a scalar fallback for at least one logical kernel\n",
-            table && table->requested_backend ? table->requested_backend : "unknown");
-    abort();
+            "duckhts SIMD dispatch table for request '%s' is missing entries; falling back to scalar backend\n",
+            requested);
+
+    // Defensive fallback: rebuild the whole table from scalar registrations so
+    // future kernels cannot retain NULL function pointers after a partial miss.
+    duckhts_simd_builder_init(&builder, table, requested, DUCKHTS_SIMD_CAP_SCALAR);
+    duckhts_simd_scalar_register(&builder);
+    table->selected_backend = "scalar";
 }
 
 static void duckhts_simd_build_table(duckhts_simd_dispatch_table_t *table,

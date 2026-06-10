@@ -201,6 +201,31 @@
       ]
     },
     {
+      "name": "read_bcf_v2",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bcf_v2(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, samples := NULL, samples_file := NULL, exclude_samples := NULL, exclude_samples_file := NULL, force_samples := FALSE, include_info := TRUE, include_format := TRUE, include_vep := TRUE, info_fields := NULL, format_fields := NULL, vep_fields := NULL)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Experimental clone of read_bcf(...) for non-destructive benchmarking of current-schema scan optimizations. It preserves the read_bcf wide/tidy output schema by default, streams full-file scans by default instead of auto-iterating indexed contigs, accepts the same scan_mode contract as read_bcf for explicit sequential/count behavior, sets htslib VCF text max_unpack from DuckDB projection pushdown so unprojected INFO/FORMAT text can be skipped earlier, keeps INFO/FORMAT/GT decode buffers and parsed VEP/CSQ records in local scan state across output chunks, repeats VEP-derived values correctly across tidy sample rows, supports v2-only htslib sample pushdown via comma-separated samples/exclude_samples strings or samples_file/exclude_samples_file lists, can bind only requested INFO/FORMAT/VEP fields through include_info/include_format/include_vep and comma-separated info_fields/format_fields/vep_fields controls, rejects format_fields when no samples are selected, treats tidy_format := true with include_format := false as one row per variant because no SAMPLE_ID/FORMAT columns are bound, and counts VCF text rows without parsing when no columns are projected.",
+      "examples": [
+        "SELECT CHROM, POS, REF, ALT FROM read_bcf_v2('vcf_file.bcf') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_bcf_appender",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bcf_appender(path, target_table, region := NULL, tidy_format := TRUE, overwrite := TRUE, include_file_offset := FALSE, region_threads := 1, decompression_threads := 0)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Experimental side-effecting benchmark helper that reads BCF/VCF with htslib and appends a narrow scalar tidy table through DuckDB's chunk appender API. The target table is created in the default schema with columns CHROM, POS, REF, ALT, SAMPLE_ID, and FORMAT_GT; set include_file_offset := TRUE to also add FILE_OFFSET. For comma-separated region queries, region_threads > 1 claims regions in parallel and adds duckhts_region_idx so callers can restore requested-region order with ORDER BY duckhts_region_idx, POS. The single-stream (region_threads = 1) path runs inside an internal transaction and surfaces malformed-record errors as DuckDB errors; the parallel path instead shares one DuckDB connection across worker appenders and is best-effort benchmarking only, with no per-record error surfacing or transactional rollback. target_table must be an unqualified SQL identifier. This is intended to compare appender-based materialization against read_bcf(...) query pipelines, not as a full replacement for the typed read_bcf surface.",
+      "examples": [
+        "SELECT * FROM read_bcf_appender('vcf_file.bcf', 'bcf_app', region := '1:1-1000000');",
+        "SELECT count(*) FROM bcf_app;"
+      ]
+    },
+    {
       "name": "read_bam",
       "kind": "table",
       "category": "Readers",
@@ -1069,6 +1094,19 @@
       "examples": [
         "SET VARIABLE q = hts_union_query('read_bam', 'samples/*.bam'); SELECT * FROM query(getvariable('q'));",
         "SET VARIABLE q = hts_union_query('read_bcf', 'cohort/*.vcf.gz', 'tidy_format := true'); SELECT * FROM query(getvariable('q'));"
+      ]
+    },
+    {
+      "name": "hts_region_union_query",
+      "kind": "scalar_macro",
+      "category": "Readers",
+      "signature": "hts_region_union_query(reader, path, regions, params := '')",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Generate a UNION ALL BY NAME query string that reads one HTS file through separate per-region table-function scans. The result adds filename, duckhts_region_shard_id, and duckhts_region_shard columns so benchmark queries can compare region-sharded execution and explicit ordered writes. Pass regions as a DuckDB list of region strings; params is appended to each reader call and should not include region. The generated UNION ALL does not deduplicate records; adjacent or overlapping shards can duplicate BAM alignments or BCF/VCF records that span shard boundaries, so add explicit shard-local filters or downstream deduplication when exact once-only semantics are required.",
+      "examples": [
+        "SET VARIABLE q = hts_region_union_query('read_bam', 'sample.bam', ['chr1:1-1000000','chr1:1000001-2000000']); SELECT * FROM query(getvariable('q'));",
+        "SET VARIABLE q = hts_region_union_query('read_bcf', 'cohort.vcf.gz', string_split('22:16000000-16999999,22:17000000-17999999', ','), 'tidy_format := true'); SELECT * FROM query(getvariable('q'));"
       ]
     },
     {

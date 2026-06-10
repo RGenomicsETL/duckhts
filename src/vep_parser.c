@@ -444,40 +444,55 @@ static int count_char(const char* s, char c) {
     return count;
 }
 
-static vep_transcript_t* parse_single_transcript(const vep_schema_t* schema, const char* transcript_str) {
+static int vep_field_selected(int field_idx, const int* selected_indices, int n_selected) {
+    if (!selected_indices || n_selected <= 0) return 1;
+    for (int i = 0; i < n_selected; i++) {
+        if (selected_indices[i] == field_idx) return 1;
+    }
+    return 0;
+}
+
+static vep_transcript_t* parse_single_transcript_selected(const vep_schema_t* schema,
+                                                          const char* transcript_str,
+                                                          const int* selected_indices,
+                                                          int n_selected) {
     if (!schema || !transcript_str) return NULL;
     vep_transcript_t* transcript = (vep_transcript_t*)vep_malloc(sizeof(vep_transcript_t));
     if (!transcript) return NULL;
     transcript->n_values = schema->n_fields;
     transcript->values = (vep_value_t*)vep_malloc(schema->n_fields * sizeof(vep_value_t));
     if (!transcript->values) { vep_free(transcript); return NULL; }
-    
+
     for (int i = 0; i < schema->n_fields; i++) {
         transcript->values[i].str_value = NULL;
         transcript->values[i].int_value = INT32_MIN;
         transcript->values[i].float_value = NAN;
         transcript->values[i].is_missing = 1;
     }
-    
+
     char* copy = vep_strdup(transcript_str);
     if (!copy) { vep_free(transcript->values); vep_free(transcript); return NULL; }
-    
+
     int field_idx = 0;
     char* token = copy;
     char* next_pipe;
     while (field_idx < schema->n_fields) {
         next_pipe = strchr(token, '|');
         if (next_pipe) *next_pipe = '\0';
-        while (*token && isspace((unsigned char)*token)) token++;
-        char* end = token + strlen(token) - 1;
-        while (end > token && isspace((unsigned char)*end)) *end-- = '\0';
-        
-        if (*token && strcmp(token, ".") != 0) {
-            transcript->values[field_idx].str_value = vep_strdup(token);
-            transcript->values[field_idx].is_missing = 0;
-            const vep_field_t* field = &schema->fields[field_idx];
-            if (field->type == VEP_TYPE_INTEGER) vep_parse_int(token, &transcript->values[field_idx].int_value);
-            else if (field->type == VEP_TYPE_FLOAT) vep_parse_float(token, &transcript->values[field_idx].float_value);
+        if (vep_field_selected(field_idx, selected_indices, n_selected)) {
+            while (*token && isspace((unsigned char)*token)) token++;
+            size_t token_len = strlen(token);
+            while (token_len > 0 && isspace((unsigned char)token[token_len - 1])) {
+                token[--token_len] = '\0';
+            }
+
+            if (token_len > 0 && strcmp(token, ".") != 0) {
+                transcript->values[field_idx].str_value = vep_strdup(token);
+                transcript->values[field_idx].is_missing = 0;
+                const vep_field_t* field = &schema->fields[field_idx];
+                if (field->type == VEP_TYPE_INTEGER) vep_parse_int(token, &transcript->values[field_idx].int_value);
+                else if (field->type == VEP_TYPE_FLOAT) vep_parse_float(token, &transcript->values[field_idx].float_value);
+            }
         }
         field_idx++;
         if (!next_pipe) break;
@@ -487,7 +502,12 @@ static vep_transcript_t* parse_single_transcript(const vep_schema_t* schema, con
     return transcript;
 }
 
-vep_record_t* vep_record_parse(const vep_schema_t* schema, const char* csq_value) {
+static vep_transcript_t* parse_single_transcript(const vep_schema_t* schema, const char* transcript_str) {
+    return parse_single_transcript_selected(schema, transcript_str, NULL, 0);
+}
+
+vep_record_t* vep_record_parse_selected(const vep_schema_t* schema, const char* csq_value,
+                                         const int* selected_indices, int n_selected) {
     if (!schema || !csq_value || !*csq_value) return NULL;
     int n_transcripts = count_char(csq_value, ',') + 1;
     vep_record_t* record = (vep_record_t*)vep_malloc(sizeof(vep_record_t));
@@ -495,13 +515,13 @@ vep_record_t* vep_record_parse(const vep_schema_t* schema, const char* csq_value
     record->n_transcripts = 0;
     record->transcripts = (vep_transcript_t*)vep_malloc(n_transcripts * sizeof(vep_transcript_t));
     if (!record->transcripts) { vep_free(record); return NULL; }
-    
+
     char* copy = vep_strdup(csq_value);
     if (!copy) { vep_free(record->transcripts); vep_free(record); return NULL; }
     char* saveptr = NULL;
     char* token = strtok_r(copy, ",", &saveptr);
     while (token && record->n_transcripts < n_transcripts) {
-        vep_transcript_t* transcript = parse_single_transcript(schema, token);
+        vep_transcript_t* transcript = parse_single_transcript_selected(schema, token, selected_indices, n_selected);
         if (transcript) {
             record->transcripts[record->n_transcripts] = *transcript;
             vep_free(transcript);
@@ -518,13 +538,22 @@ vep_record_t* vep_record_parse(const vep_schema_t* schema, const char* csq_value
     return record;
 }
 
+vep_record_t* vep_record_parse(const vep_schema_t* schema, const char* csq_value) {
+    return vep_record_parse_selected(schema, csq_value, NULL, 0);
+}
+
 vep_record_t* vep_record_parse_bcf(const vep_schema_t* schema, const bcf_hdr_t* hdr, bcf1_t* rec) {
+    return vep_record_parse_selected_bcf(schema, hdr, rec, NULL, 0);
+}
+
+vep_record_t* vep_record_parse_selected_bcf(const vep_schema_t* schema, const bcf_hdr_t* hdr,
+                                             bcf1_t* rec, const int* selected_indices, int n_selected) {
     if (!schema || !hdr || !rec) return NULL;
     char* csq_value = NULL;
     int n_csq = 0;
     int ret = bcf_get_info_string(hdr, rec, schema->tag_name, &csq_value, &n_csq);
     if (ret <= 0 || !csq_value) { free(csq_value); return NULL; }
-    vep_record_t* record = vep_record_parse(schema, csq_value);
+    vep_record_t* record = vep_record_parse_selected(schema, csq_value, selected_indices, n_selected);
     free(csq_value);
     return record;
 }
