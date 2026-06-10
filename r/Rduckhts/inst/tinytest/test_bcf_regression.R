@@ -68,4 +68,60 @@ test_bcf_filter_list_fetch_regression <- function() {
   expect_equal(mismatch$n[1], 0)
 }
 
+test_bcf_malformed_record_errors <- function() {
+  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+  con <- dbConnect(drv)
+  on.exit({
+    dbDisconnect(con, shutdown = TRUE)
+  }, add = TRUE)
+
+  expect_silent(rduckhts_load(con))
+
+  bcf_path <- system.file("extdata", "malformed_bad_pos.vcf", package = "Rduckhts")
+  expect_true(file.exists(bcf_path))
+  quoted_bcf <- DBI::dbQuoteString(con, bcf_path)
+
+  expect_error(
+    dbGetQuery(
+      con,
+      sprintf("SELECT count(*) FROM read_bcf(%s, tidy_format := true)", quoted_bcf)
+    ),
+    pattern = "read_bcf: failed to read or parse BCF/VCF record"
+  )
+
+  expect_error(
+    dbGetQuery(
+      con,
+      sprintf("SELECT sum(POS) FROM read_bcf_v2(%s, tidy_format := true)", quoted_bcf)
+    ),
+    pattern = "read_bcf_v2: failed to read or parse BCF/VCF record"
+  )
+
+  DBI::dbExecute(con, "DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos")
+  expect_error(
+    dbGetQuery(
+      con,
+      sprintf(
+        paste0(
+          "SELECT rows_written FROM read_bcf_appender(",
+          "%s, 'bcf_appender_malformed_bad_pos', tidy_format := true, overwrite := true)"
+        ),
+        quoted_bcf
+      )
+    ),
+    pattern = "read_bcf_appender: failed to read or parse BCF/VCF record"
+  )
+  appender_tables <- dbGetQuery(
+    con,
+    paste0(
+      "SELECT count(*) AS n FROM information_schema.tables ",
+      "WHERE table_name = 'bcf_appender_malformed_bad_pos'"
+    )
+  )
+  expect_equal(appender_tables$n[1], 0)
+
+  DBI::dbExecute(con, "DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos")
+}
+
 test_bcf_filter_list_fetch_regression()
+test_bcf_malformed_record_errors()

@@ -1,0 +1,30 @@
+# name: test/sql/bcf_malformed_error.test
+# description: BCF/VCF readers must surface malformed-record read errors instead of treating them as EOF.
+
+require duckhts
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/malformed_bad_pos.vcf', tidy_format := true);
+----
+read_bcf: failed to read or parse BCF/VCF record
+
+statement error
+SELECT sum(POS) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/malformed_bad_pos.vcf', tidy_format := true);
+----
+read_bcf_v2: failed to read or parse BCF/VCF record
+
+statement ok
+DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos;
+
+statement error
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/malformed_bad_pos.vcf', 'bcf_appender_malformed_bad_pos', tidy_format := true, overwrite := true);
+----
+read_bcf_appender: failed to read or parse BCF/VCF record
+
+query I
+SELECT count(*) FROM information_schema.tables WHERE table_name = 'bcf_appender_malformed_bad_pos';
+----
+0
+
+statement ok
+DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos;

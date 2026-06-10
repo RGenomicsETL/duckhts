@@ -8,4 +8,5 @@ mapping	genotype_ploidy_edge_cases.vcf	Compact GT-only haploid/phased/polyploid/
 mapping	tidy_chunk_boundary.vcf	Single-record 2053-sample fixture that exercises tidy read_bcf_v2 sample-run emission across DuckDB chunk boundaries
 mapping	test_vep_tidy.vcf	Compact CSQ plus two-sample FORMAT fixture for read_bcf_v2 VEP-cache reuse across tidy sample rows
 regression	bcf_filter_list_regression.vcf	read_bcf FILTER list-materialization regression for multi-entry and PASS values
+regression	malformed_bad_pos.vcf	Valid first record followed by malformed POS to verify BCF/VCF scan errors are surfaced instead of treated as EOF
 spec	spec_standard_corrections.vcf	Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic

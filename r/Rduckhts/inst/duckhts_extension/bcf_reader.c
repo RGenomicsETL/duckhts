@@ -2987,6 +2987,15 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 }
             }
 
+            if (ret < -1) {
+                char err[256];
+                const char *reader_name = bind->reader_version >= 2 ? "read_bcf_v2" : "read_bcf";
+                snprintf(err, sizeof(err), "%s: failed to read or parse BCF/VCF record", reader_name);
+                duckdb_function_set_error(info, err);
+                init->done = 1;
+                break;
+            }
+
             if (ret < 0) {
                 // End of current contig/file
                 if (init->is_parallel) {
@@ -3795,7 +3804,8 @@ static int bcf_appender_next_record(htsFile *fp, bcf_hdr_t *hdr, bcf1_t *rec,
                                     char **regions, unsigned int n_regions,
                                     unsigned int *next_region_idx, kstring_t *line,
                                     int want_file_offset,
-                                    uint64_t *file_offset, int *has_file_offset) {
+                                    uint64_t *file_offset, int *has_file_offset,
+                                    char *err, size_t err_size) {
     for (;;) {
         int ret;
         if (*itr) {
@@ -3827,6 +3837,11 @@ static int bcf_appender_next_record(htsFile *fp, bcf_hdr_t *hdr, bcf1_t *rec,
                 *has_file_offset = 0;
             }
             return 1;
+        }
+
+        if (ret < -1) {
+            snprintf(err, err_size, "read_bcf_appender: failed to read or parse BCF/VCF record");
+            return -1;
         }
 
         if (n_regions == 0 || *next_region_idx >= n_regions) return 0;
@@ -4156,6 +4171,7 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
     int gt_arr_n = 0;
     bcf_appender_chunk_t chunk;
     int chunk_initialized = 0;
+    int transaction_started = 0;
     struct timespec t0, t1;
     int ok = 0;
 
@@ -4168,10 +4184,16 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
         snprintf(err, err_size, "read_bcf_appender: missing internal DuckDB connection");
         goto cleanup;
     }
+    if (!bcf_appender_exec_sql(con, "BEGIN TRANSACTION", err, err_size)) goto cleanup;
+    transaction_started = 1;
     if (!bcf_appender_create_target(con, bind, err, err_size)) goto cleanup;
 
     if (bind->n_regions > 1 && bind->region_threads > 1) {
         if (!bcf_appender_run_parallel_regions(bind, rows_written, err, err_size)) goto cleanup;
+        if (transaction_started) {
+            if (!bcf_appender_exec_sql(con, "COMMIT", err, err_size)) goto cleanup;
+            transaction_started = 0;
+        }
         ok = 1;
         goto cleanup;
     }
@@ -4243,11 +4265,14 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
     for (;;) {
         uint64_t file_offset = 0;
         int has_file_offset = 0;
-        if (!bcf_appender_next_record(fp, hdr, rec, tbx, idx, &itr,
-                                      bind->regions, bind->n_regions,
-                                      &next_region_idx, &line,
-                                      bind->include_file_offset,
-                                      &file_offset, &has_file_offset)) {
+        int next_record = bcf_appender_next_record(fp, hdr, rec, tbx, idx, &itr,
+                                                   bind->regions, bind->n_regions,
+                                                   &next_region_idx, &line,
+                                                   bind->include_file_offset,
+                                                   &file_offset, &has_file_offset,
+                                                   err, err_size);
+        if (next_record < 0) goto cleanup;
+        if (next_record == 0) {
             break;
         }
         if (!bcf_appender_append_record(appender, &chunk, hdr, rec,
@@ -4264,6 +4289,11 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
         const char *msg = duckdb_appender_error(appender);
         snprintf(err, err_size, "%s", msg ? msg : "duckdb_appender_close failed");
         goto cleanup;
+    }
+    duckdb_appender_destroy(&appender);
+    if (transaction_started) {
+        if (!bcf_appender_exec_sql(con, "COMMIT", err, err_size)) goto cleanup;
+        transaction_started = 0;
     }
     ok = 1;
 
@@ -4282,6 +4312,11 @@ cleanup:
     if (fp) hts_close(fp);
     if (chunk_initialized) bcf_appender_chunk_destroy(&chunk);
     if (appender) duckdb_appender_destroy(&appender);
+    if (transaction_started) {
+        char rollback_err[256];
+        rollback_err[0] = '\0';
+        (void)bcf_appender_exec_sql(con, "ROLLBACK", rollback_err, sizeof(rollback_err));
+    }
     return ok;
 }
 

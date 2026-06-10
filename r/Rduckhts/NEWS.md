@@ -1,5 +1,6 @@
 
 # Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
+- surface malformed-record BCF/VCF scan failures from bundled `read_bcf(...)`, projected `read_bcf_v2(...)` scans, and non-parallel `read_bcf_appender(...)` as DuckDB/R errors instead of treating htslib parse/read failures as EOF; run bundled `read_bcf_appender(...)` writes in an internal transaction so malformed input rolls back target-table side effects; add a malformed-POS fixture plus tinytest coverage
 - bundle the restored experimental `read_bcf_v2(...)` table function for DBI users, preserving `read_bcf(...)` schema compatibility while adding sample pushdown, INFO/FORMAT/VEP field filters, projection-aware VCF unpacking, persistent decode caches, and count-only shortcuts for benchmarking
 - add bundled tinytest coverage for malformed `additional_csq_column_types` so invalid CSQ/ANN/BCSQ type override rules fail as DuckDB/R errors instead of proceeding with ambiguous parsed-annotation typing
 - update the bundled DuckDB C API headers to DuckDB v1.5.3 while keeping stable extension ABI metadata at v1.2.0; bundled SQL sessions loaded through `rduckhts_load()` now expose DuckDB runtime type-support probes for `VARIANT` and `GEOMETRY`

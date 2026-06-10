@@ -74,6 +74,19 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  WisecondorX fixed-bin counting fixtures + indexes"
 
+# ---- Malformed VCF regression fixture ----
+for out_dir in "$DST" "$PKG_DST"; do
+  cat > "$out_dir/malformed_bad_pos.vcf" <<'EOF'
+##fileformat=VCFv4.2
+##contig=<ID=1,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+1	10	.	A	C	.	PASS	.	GT	0/1
+1	bad	.	A	G	.	PASS	.	GT	0/1
+EOF
+done
+echo "  malformed_bad_pos.vcf"
+
 # ---- VCF → bgzipped VCF + index ----
 bcftools view "$SRC/formatcols.vcf" -Oz -o "$DST/formatcols.vcf.gz"
 bcftools index "$DST/formatcols.vcf.gz"
