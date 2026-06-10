@@ -67,6 +67,13 @@ int duckhts_filter_try_begin_impl(void) {
     g_filter_last_error[0] = '\0';
     if (g_filter_try.depth >= (int)(sizeof(g_filter_try.env_stack) / sizeof(g_filter_try.env_stack[0]))) {
         snprintf(g_filter_last_error, sizeof(g_filter_last_error), "bcftools_score: filter try depth exceeded");
+        // Overflow did not push an env, so the caller must not run its
+        // longjmp/try_end recovery against a frame it never owns. Unwind to the
+        // nearest active env when one exists; only signal a plain error return
+        // when there is no enclosing try to recover into.
+        if (g_filter_try.depth > 0) {
+            longjmp(g_filter_try.env_stack[g_filter_try.depth - 1], 1);
+        }
         return 1;
     }
     g_filter_try.depth++;

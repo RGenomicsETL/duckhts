@@ -1,5 +1,7 @@
 # TigerStyle audit: DuckHTS + Rduckhts (2026-06-08)
 
+Status: historical review / open cleanup backlog. Captures a point-in-time TigerStyle audit and the cleanup items it surfaced; not current implementation guidance and not a binding contract.
+
 ## Scope
 - **In scope:**
   - `src/*.c` (DuckHTS extension implementation)
