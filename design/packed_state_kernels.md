@@ -31,36 +31,47 @@ Two non-negotiable properties, both fixing real defects in today's `base_counts`
 
 The kernel is a **byte/element oracle**: it returns per-class counts. **Policy lives in the SQL layer above** (does soft-mask count as called? do `S`/`W` contribute to GC? is `other` an error?). Scalar is the correctness oracle; `auto` must match it bit-for-bit on every class.
 
+## Caliber: htslib is the sequence-semantics oracle
+
+We do not invent base semantics; htslib owns them. The authority is three tables, **defined in the linked vendored htslib (`third_party/htslib/hts.c`) and exported as symbols via `htslib/hts.h`**:
+
+- `seq_nt16_table[256]` — ASCII byte → nt16 4-bit code. **Case-folded** (lowercase ≡ uppercase), and **every unrepresentable byte folds to `15` (N)** — there is no "invalid" or "other" in htslib's model; `*`, `-`, digits, punctuation, NUL all become N. (`=`→0, `U`→T, `0-3`→A,C,G,T are htslib quirks we inherit by using the table.)
+- `seq_nt16_str[] = "=ACMGRSVTWYHKDBN"` — nt16 code → canonical uppercase char.
+- `seq_nt16_int[] = {4,0,1,4,2,4,4,4,3,4,4,4,4,4,4,4}` — nt16 code → 2-bit (`A=0,C=1,G=2,T=3`, everything else `=4`). This is htslib's own "is it ACGT" authority: `called` ⇔ `seq_nt16_int[code] != 4`.
+
+Source-of-truth discipline: C code uses these **exported symbols** (`#include "htslib/hts.h"`); it must not hardcode the 256 values and must not reference `r/Rduckhts/inst/duckhts_extension/htslib`, which is bootstrap-generated output, never a source or caliber. The values quoted above are documentation only.
+
+**Mandate: the text classifier is a vectorized replica of htslib's `seq_nt16_table`, not a reinvention, and is derived from the linked symbol at init** (not a baked-in copy), so it tracks whatever htslib version the build links. Each text byte is mapped to its nt16 code first, then classified by code. This guarantees (a) htslib-faithfulness by construction, (b) that the text path and the BAM path — which already starts from nt16 via `bam_get_seq` — agree exactly, and (c) a trivial conformance oracle: the SIMD LUT must reproduce `seq_nt16_table` for all 256 bytes and the per-class reduction must reconcile to `seq_nt16_int` buckets. The current `& 0xDF` fold and abort-on-non-ACGTN are the two existing divergences this removes (htslib never errors; it folds to N).
+
 ## Kernel 1 — `seq_base_counts` rewrite (text nucleotides)
 
 Replaces the current scalar/AVX2 5-compare classifier in `src/simd/duckhts_simd_{scalar,avx2,...}.c`.
 
 ### Classification
 
-ASCII letters classify by **high-nibble gate** (`0x40` upper, `0x60` lower → mask state) plus a **low-nibble LUT** that maps `A..Z` to a class code. Classes:
+Map each byte through the `seq_nt16_table` replica, then partition the 16 nt16 codes. Classes (all sub-partitions of htslib's space, so totals reconcile to `seq_nt16_int`):
 
-- `gc` — `C`,`G`
-- `at` — `A`,`T`
-- `n` — `N`
-- `iupac_sw` — `S` (∈{C,G}), `W` (∈{A,T}) — the only GC-*determinate* ambiguity codes
-- `iupac_other` — `R Y K M B D H V` — GC-ambiguous ambiguity codes
-- `masked` — set additionally when the source byte was lowercase (independent of base class)
-- `other` — anything else (digits, `*`, `-`, `.`, junk)
+- `gc` — codes `C(2)`, `G(4)`
+- `at` — codes `A(1)`, `T(8)`
+- `n` — code `15` (true N **and** every byte htslib folds to N; we do not separate them, because htslib cannot either)
+- `iupac` — the ambiguity codes `{M3,R5,S6,V7,W9,Y10,H11,K12,D13,B14}` (optionally expose `S`/`W` separately as the only GC-*determinate* pair; the rest are GC-ambiguous)
+- `equals` — code `0` (`=`, the equals-reference symbol)
+- `masked` — overlay: source byte was lowercase. **The one intentional superset over htslib** (which case-folds); additive only, changes no base-identity count, and reconciles to htslib exactly when ignored.
 
-`called = gc + at` (ACGT only). `masked` is an overlay count (how many of the classified bases were soft-masked), not a separate partition, so policy can choose to include or exclude it.
+`called = gc + at` (⇔ `seq_nt16_int != 4`), bit-identical to what samtools/htslib would call ACGT. There is **no `other` class** — htslib has none.
 
 ### Output struct (richer; supersedes the 3-field struct)
 
 ```c
 typedef struct {
-    uint64_t gc;            /* C,G (upper+lower) */
-    uint64_t at;            /* A,T (upper+lower) */
-    uint64_t n;             /* N,n */
-    uint64_t iupac_sw;      /* S,W,s,w */
-    uint64_t iupac_other;   /* other IUPAC ambiguity codes */
-    uint64_t masked;        /* overlay: bases that were lowercase */
-    uint64_t other;         /* non-nucleotide bytes */
+    uint64_t gc;       /* nt16 C,G */
+    uint64_t at;       /* nt16 A,T */
+    uint64_t n;        /* nt16 15 (N + htslib-unrepresentable) */
+    uint64_t iupac;    /* nt16 ambiguity codes (not N, not =) */
+    uint64_t equals;   /* nt16 0 (=) */
+    uint64_t masked;   /* overlay: bytes that were lowercase */
 } duckhts_simd_base_class_counts_t;
+/* called = gc + at; total = gc+at+n+iupac+equals (== len) */
 ```
 
 ### Backward compatibility with `seq_gc_content` (mandatory)
