@@ -39,7 +39,7 @@ void duckhts_bcftools_error(const char *format, ...) {
         longjmp(g_filter_try.env_stack[g_filter_try.depth - 1], 1);
     }
     fputs(g_filter_last_error, stderr);
-    abort();
+    fputc('\n', stderr);
 }
 
 void duckhts_bcftools_error_errno(const char *format, ...) {
@@ -60,7 +60,6 @@ void duckhts_bcftools_error_errno(const char *format, ...) {
     }
     fputs(g_filter_last_error, stderr);
     fputc('\n', stderr);
-    abort();
 }
 
 int duckhts_filter_try_begin(void) {

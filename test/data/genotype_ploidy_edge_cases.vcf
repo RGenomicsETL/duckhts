@@ -1,0 +1,5 @@
+##fileformat=VCFv4.3
+##contig=<ID=chr1,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	BIG	DIP	HAP	TET	TRI
+chr1	1	ploidy_edges	A	C,G,T,AA,AC,AG,AT,CA,CC,CG	.	PASS	.	GT	0/10	0|1	1	0/1/2/3	0/1/2
