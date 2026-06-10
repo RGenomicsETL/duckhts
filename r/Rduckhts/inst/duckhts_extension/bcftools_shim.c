@@ -1,3 +1,4 @@
+#define DUCKHTS_BCFTOOLS_SHIM_IMPLEMENTATION
 #include "bcftools_shim.h"
 
 #include <errno.h>
@@ -62,14 +63,19 @@ void duckhts_bcftools_error_errno(const char *format, ...) {
     fputc('\n', stderr);
 }
 
-int duckhts_filter_try_begin(void) {
+int duckhts_filter_try_begin_impl(void) {
     g_filter_last_error[0] = '\0';
     if (g_filter_try.depth >= (int)(sizeof(g_filter_try.env_stack) / sizeof(g_filter_try.env_stack[0]))) {
         snprintf(g_filter_last_error, sizeof(g_filter_last_error), "bcftools_score: filter try depth exceeded");
         return 1;
     }
     g_filter_try.depth++;
-    return setjmp(g_filter_try.env_stack[g_filter_try.depth - 1]);
+    return 0;
+}
+
+jmp_buf *duckhts_filter_try_current_env(void) {
+    if (g_filter_try.depth <= 0) return NULL;
+    return &g_filter_try.env_stack[g_filter_try.depth - 1];
 }
 
 void duckhts_filter_try_end(void) {
