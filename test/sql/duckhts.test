@@ -537,6 +537,39 @@ SELECT count(*), count(DISTINCT duckhts_region_idx), count(*) FILTER (WHERE duck
 ----
 8	2	0
 
+# --- read_bcf_appender: empty region scan still creates and commits the target ---
+statement ok
+DROP TABLE IF EXISTS bcf_appender_empty_test;
+
+# Absent contig yields no iterator; the helper must report 0 rows, not error.
+query I
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_empty_test', region := 'absent_contig:1-1000', tidy_format := true, overwrite := true);
+----
+0
+
+# The empty target table must exist (transaction committed, not rolled back).
+query I
+SELECT count(*) FROM bcf_appender_empty_test;
+----
+0
+
+# overwrite := true with an empty region must replace a populated table, not
+# leave the stale prior rows behind.
+query I
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_empty_test', region := '1:3000150-3000151', tidy_format := true, overwrite := true);
+----
+4
+
+query I
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_empty_test', region := 'absent_contig:1-1000', tidy_format := true, overwrite := true);
+----
+0
+
+query I
+SELECT count(*) FROM bcf_appender_empty_test;
+----
+0
+
 # --- VEP/CSQ annotations (if present) ---
 query I
 SELECT CASE WHEN VEP_Allele IS NOT NULL THEN 1 ELSE 0 END

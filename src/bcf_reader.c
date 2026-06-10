@@ -4249,6 +4249,7 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
     }
 
     unsigned int next_region_idx = 0;
+    int region_scan_empty = 0;
     if (bind->n_regions > 0) {
         while (next_region_idx < bind->n_regions) {
             const char *region = bind->regions[next_region_idx++];
@@ -4256,31 +4257,34 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
             else if (tbx) itr = tbx_itr_querys(tbx, region);
             if (itr) break;
         }
-        if (!itr) {
-            ok = 1;
-            goto cleanup;
-        }
+        // No requested region produced an iterator (absent contig or
+        // out-of-range coordinates). Skip the read loop, but still finalize and
+        // commit so the empty target table is created/replaced rather than
+        // rolled back by cleanup with the transaction left open.
+        if (!itr) region_scan_empty = 1;
     }
 
-    for (;;) {
-        uint64_t file_offset = 0;
-        int has_file_offset = 0;
-        int next_record = bcf_appender_next_record(fp, hdr, rec, tbx, idx, &itr,
-                                                   bind->regions, bind->n_regions,
-                                                   &next_region_idx, &line,
-                                                   bind->include_file_offset,
-                                                   &file_offset, &has_file_offset,
-                                                   err, err_size);
-        if (next_record < 0) goto cleanup;
-        if (next_record == 0) {
-            break;
-        }
-        if (!bcf_appender_append_record(appender, &chunk, hdr, rec,
-                                        bind->tidy_format, 0,
-                                        has_file_offset, file_offset,
-                                        &alt, &gt, &gt_arr, &gt_arr_n,
-                                        rows_written, err, err_size)) {
-            goto cleanup;
+    if (!region_scan_empty) {
+        for (;;) {
+            uint64_t file_offset = 0;
+            int has_file_offset = 0;
+            int next_record = bcf_appender_next_record(fp, hdr, rec, tbx, idx, &itr,
+                                                       bind->regions, bind->n_regions,
+                                                       &next_region_idx, &line,
+                                                       bind->include_file_offset,
+                                                       &file_offset, &has_file_offset,
+                                                       err, err_size);
+            if (next_record < 0) goto cleanup;
+            if (next_record == 0) {
+                break;
+            }
+            if (!bcf_appender_append_record(appender, &chunk, hdr, rec,
+                                            bind->tidy_format, 0,
+                                            has_file_offset, file_offset,
+                                            &alt, &gt, &gt_arr, &gt_arr_n,
+                                            rows_written, err, err_size)) {
+                goto cleanup;
+            }
         }
     }
 
