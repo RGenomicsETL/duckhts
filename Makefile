@@ -127,3 +127,13 @@ bench-simd-seq-gc:
 
 bench-simd-bam-gc:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_bam_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+# Standalone C microbenchmark for the byte-oriented SIMD kernels: isolates each
+# kernel from DuckDB/R, gates correctness against the scalar oracle, and reports
+# scalar-relative throughput.  Built at -O2 to match the CRAN R package's
+# optimization level (the extension itself ships -O3; the SIMD win holds at
+# both).  The per-backend kernels carry their own ISA target attributes, so the
+# baseline -O2 here does not gate the AVX2 path.  Optional: BENCH_ARGS="bases iters".
+bench-simd-kernels:
+	cc -O2 -I src/include -o build/bench_simd_kernels test/scripts/bench_simd_kernels.c
+	./build/bench_simd_kernels $(BENCH_ARGS)

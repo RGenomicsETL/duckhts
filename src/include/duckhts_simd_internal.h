@@ -22,6 +22,12 @@ typedef void (*duckhts_base_counts_fn)(const char *seq, size_t len,
 
 #define DUCKHTS_SIMD_FN_BASE_COUNTS duckhts_base_counts_fn
 
+typedef void (*duckhts_bam_nt16_counts_fn)(const uint8_t *packed_seq,
+                                           int32_t n_bases,
+                                           duckhts_simd_bam_nt16_counts_t *out);
+
+#define DUCKHTS_SIMD_FN_BAM_NT16_COUNTS duckhts_bam_nt16_counts_fn
+
 typedef enum {
 #define DUCKHTS_SIMD_KERNEL(id, field, sig, name) DUCKHTS_KERNEL_##id,
 #include "duckhts_simd_kernels.def"
@@ -59,12 +65,21 @@ void duckhts_simd_base_counts_with_table(const duckhts_simd_dispatch_table_t *ta
                                          const char *seq,
                                          size_t len,
                                          duckhts_simd_base_counts_t *out);
+void duckhts_simd_bam_nt16_counts_with_table(const duckhts_simd_dispatch_table_t *table,
+                                             const uint8_t *packed_seq,
+                                             int32_t n_bases,
+                                             duckhts_simd_bam_nt16_counts_t *out);
 
 void duckhts_simd_builder_consider_base_counts(duckhts_simd_builder_t *builder,
                                                duckhts_simd_cap_t cap,
                                                const char *backend,
                                                int priority,
                                                duckhts_base_counts_fn fn);
+void duckhts_simd_builder_consider_bam_nt16_counts(duckhts_simd_builder_t *builder,
+                                                   duckhts_simd_cap_t cap,
+                                                   const char *backend,
+                                                   int priority,
+                                                   duckhts_bam_nt16_counts_fn fn);
 
 void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder);
 void duckhts_simd_avx2_register(duckhts_simd_builder_t *builder);

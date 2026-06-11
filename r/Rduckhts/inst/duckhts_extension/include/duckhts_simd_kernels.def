@@ -9,3 +9,4 @@
  * capability mask.
  */
 DUCKHTS_SIMD_KERNEL(SEQ_BASE_COUNTS, base_counts, BASE_COUNTS, "seq_base_counts")
+DUCKHTS_SIMD_KERNEL(BAM_NT16_COUNTS, bam_nt16_counts, BAM_NT16_COUNTS, "bam_nt16_counts")

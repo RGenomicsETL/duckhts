@@ -146,6 +146,18 @@ Backend-agnostic, scalar-as-oracle, per the dispatch-matrix doc:
 - `seq_gc_content` regression: existing SQL/R tests stay green unchanged (the bit-identical default), proving the rewrite is non-breaking.
 - chunk-boundary tests (lengths not multiples of 16/32; odd nt16 base counts; sample counts not multiples of 4).
 
+## Performance harness and methodology
+
+Proving a kernel is faster is a first-class deliverable, not an afterthought. The harness is a DuckDB/R-free C microbenchmark, `test/scripts/bench_simd_kernels.c`, run via `make bench-simd-kernels` (built `-O2` to match the CRAN R package; the extension itself ships `-O3` and the win holds at both). It isolates the kernel from query/transport/decode overhead, gates every compiled+cpu-supported backend against the scalar oracle (a divergence fails the run), and reports scalar-relative throughput.
+
+A speedup number is only honest once it survives three checks; record them with the result:
+
+1. **It is vectorization, not the optimizer.** Disassemble (`objdump -d`) and confirm the SIMD kernel actually emits vector instructions and the scalar does not. For `bam_nt16_counts` the AVX2 body shows `vpcmpeqb`/`vpmovmskb`/`popcnt` on `ymm` registers (5 ACGTN codes × 2 nibbles = 10 compares); the scalar shows only `movzbl`/`add`.
+2. **It is not an `-O3` unrolling artifact.** Sweep `-O0/-O2/-O3`; the win must be stable at the shipping levels. `bam_nt16_counts` measures ~4.6× at `-O0` (nothing else optimized) but ~10.4× at `-O2` and ~10.7× at `-O3` — stable where it ships.
+3. **The scalar baseline is fair.** The oracle must be a real branchless classifier, not a mispredict-bound `switch`; a branchy baseline inflates the ratio (the same kernel showed a spurious ~125× against a `switch` scalar on random input). `bam_nt16_counts` uses a branchless nt16→class histogram.
+
+Recorded result (this host, `-O2`): `bam_nt16_counts` ≈ 1.75 → 18.2 Gbase/s, **~10.4× over the scalar reference**, AVX2 bit-identical to scalar. Numbers are workload- and host-dependent; the microbench isolates the kernel, while the end-to-end win through `bam_bin_counts` is diluted by BAM decode (`benchmark_simd_bam_gc.Rmd`). Do not advertise the microbench multiplier as an end-to-end speedup.
+
 ## Out of scope here
 
 - The `read_bcf_gt` reader schema and matrix decode — `genotype_matrix_reader.md` (planned).

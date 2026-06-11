@@ -26,6 +26,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/hts_io_tuning.h"
+#include "duckhts_simd_internal.h"
 
 #define DUCKHTS_DEFAULT_BINCOUNT_DECOMPRESSION_THREADS 2
 #define DUCKHTS_MAX_BINCOUNT_THREADS 16
@@ -136,6 +137,10 @@ typedef struct {
     bam_bin_row_t *rows;
     size_t row_count;
     size_t emitted;
+
+    /* Immutable SIMD dispatch table, snapshotted once at bind; shared read-only
+     * across worker threads.  Used by the GC base-count hot loop. */
+    const duckhts_simd_dispatch_table_t *simd_table;
 } bam_bin_bind_t;
 
 typedef struct {
@@ -369,15 +374,12 @@ static int ensure_contig_capacity(bam_bin_bind_t *bind, bam_bin_contig_t *contig
     return 0;
 }
 
-static inline uint64_t count_read_gc_bases(const bam1_t *rec) {
-    uint64_t gc = 0;
-    const uint8_t *seq = bam_get_seq(rec);
-    int len = rec->core.l_qseq;
-    for (int i = 0; i < len; i++) {
-        int code = bam_seqi(seq, i);
-        if (code == 2 || code == 4) gc++;
-    }
-    return gc;
+static inline uint64_t count_read_gc_bases(const duckhts_simd_dispatch_table_t *simd_table,
+                                           const bam1_t *rec) {
+    duckhts_simd_bam_nt16_counts_t counts;
+    duckhts_simd_bam_nt16_counts_with_table(simd_table, bam_get_seq(rec),
+                                            rec->core.l_qseq, &counts);
+    return counts.gc;
 }
 
 static int record_is_streaming_dup(const bam_bin_stream_state_t *state,
@@ -473,7 +475,7 @@ static int process_record_into_contig(bam_bin_bind_t *bind,
     }
     if (bind->want_gc) {
         read_bases = (uint64_t)rec->core.l_qseq;
-        gc_bases = count_read_gc_bases(rec);
+        gc_bases = count_read_gc_bases(bind->simd_table, rec);
         contig->gc_bases_pre[bin_id] += gc_bases;
         contig->bases_pre[bin_id] += read_bases;
     }
@@ -555,7 +557,7 @@ static int process_unmapped_record(bam_bin_bind_t *bind, bam1_t *rec) {
     }
     if (bind->want_gc) {
         read_bases = (uint64_t)rec->core.l_qseq;
-        gc_bases = count_read_gc_bases(rec);
+        gc_bases = count_read_gc_bases(bind->simd_table, rec);
         bind->unmapped_gc_bases_pre += gc_bases;
         bind->unmapped_bases_pre += read_bases;
     }
@@ -1275,6 +1277,7 @@ static void bam_bin_counts_bind(duckdb_bind_info info) {
         return;
     }
     memset(bind, 0, sizeof(*bind));
+    bind->simd_table = duckhts_simd_dispatch_snapshot();
     bind->path = duckdb_get_varchar(path_val);
     bind->bin_width = duckdb_get_int64(bw_val);
     bind->mapq = 0;
