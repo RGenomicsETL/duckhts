@@ -137,3 +137,10 @@ bench-simd-bam-gc:
 bench-simd-kernels:
 	cc -O2 -I src/include -o build/bench_simd_kernels test/scripts/bench_simd_kernels.c
 	./build/bench_simd_kernels $(BENCH_ARGS)
+
+# Build the duckdb-wasm extension (Docker) and run the headless Playwright smoke
+# test that loads it in a real browser and asserts the SIMD kernels resolve on
+# wasm (scalar fallback).  Same build path as CI's wasm-playwright workflow.
+wasm-playwright-test:
+	SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh
+	cd test/wasm && npm ci && npx playwright install --with-deps chromium && npx playwright test

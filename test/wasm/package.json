@@ -1,0 +1,12 @@
+{
+  "name": "duckhts-wasm-playwright",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Headless Playwright smoke test for the DuckHTS duckdb-wasm extension build.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

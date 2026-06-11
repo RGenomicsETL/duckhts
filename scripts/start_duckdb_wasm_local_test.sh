@@ -9,6 +9,10 @@ LOCAL_WASM_DOCKERFILE=${LOCAL_WASM_DOCKERFILE:-scripts/docker/duckdb-wasm-local.
 # duckdb-wasm 1.29.0 is based on DuckDB v1.1.1 and traps while loading our
 # current extension build; use the first 1.4.x-aligned runtime by default.
 DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.31.0}
+# SERVE=1 (default) builds the site then serves it with python http.server.
+# SERVE=0 builds the site and exits, printing SITE_ROOT/PORT so an external
+# driver (e.g. Playwright's webServer) can own the HTTP server lifecycle.
+SERVE=${SERVE:-1}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.duckdb-wasm-local-artifacts}
 SITE_ROOT=${SITE_ROOT:-${ARTIFACT_ROOT}/site}
 WASM_BUILD_DIR=${WASM_BUILD_DIR:-${ARTIFACT_ROOT}/build/wasm_eh/extension/duckhts}
@@ -99,6 +103,14 @@ Served files:
   /extdata/header_tabix.tsv.gz
   /extdata/header_tabix.tsv.gz.tbi
 EOF
+
+if [ "${SERVE}" = "0" ]; then
+  echo "SERVE=0: site built, not starting HTTP server."
+  echo "DUCKHTS_WASM_SITE_ROOT=${SITE_ROOT}"
+  echo "DUCKHTS_WASM_PORT=${PORT}"
+  echo "DUCKHTS_WASM_HOST=${HOST}"
+  exit 0
+fi
 
 cd "${SITE_ROOT}"
 exec python3 -m http.server "${PORT}" --bind "${HOST}"
