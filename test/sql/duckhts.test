@@ -1482,6 +1482,17 @@ FROM duckhts_simd_kernel_info();
 ----
 true	true	true	true
 
+# bam_nt16_counts logical kernel is registered and resolved to one backend.
+query TTT
+SELECT
+  sum(CASE WHEN kernel = 'bam_nt16_counts' THEN 1 ELSE 0 END) = 1,
+  bool_and(length(selected_backend) > 0),
+  (SELECT selected_backend IN (SELECT backend FROM duckhts_simd_info() WHERE selected)
+   FROM duckhts_simd_kernel_info() WHERE kernel = 'bam_nt16_counts')
+FROM duckhts_simd_kernel_info();
+----
+true	true	true
+
 query TTTT
 SELECT
   duckhts_simd_backend_compiled('scalar'),

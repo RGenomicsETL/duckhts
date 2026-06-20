@@ -80,6 +80,69 @@ static void duckhts_base_counts_avx2(const char *seq, size_t len,
     out->called = called;
 }
 
+/* BAM nt16 packed sequence: two 4-bit codes per byte.  Vectorize the body in
+ * 64-base (32-byte) blocks where both nibbles of every byte are valid bases,
+ * then clean up the tail (and any odd final base) in scalar.  Split each byte
+ * into its high and low nibble, compare against the five ACGTN codes, and
+ * popcount the compare masks; IUPAC/`=` is the processed remainder. */
+__attribute__((target("avx2,popcnt")))
+static void duckhts_bam_nt16_counts_avx2(const uint8_t *packed_seq,
+                                         int32_t n_bases,
+                                         duckhts_simd_bam_nt16_counts_t *out) {
+    const __m256i lo_mask = _mm256_set1_epi8(0x0F);
+    const __m256i v_a = _mm256_set1_epi8(1);
+    const __m256i v_c = _mm256_set1_epi8(2);
+    const __m256i v_g = _mm256_set1_epi8(4);
+    const __m256i v_t = _mm256_set1_epi8(8);
+    const __m256i v_n = _mm256_set1_epi8(15);
+    uint64_t a = 0, c = 0, g = 0, t = 0, n = 0;
+    int32_t i = 0;
+
+    out->a = out->c = out->g = out->t = 0;
+    out->n = out->iupac = out->gc = out->called = 0;
+    if (!packed_seq || n_bases <= 0) return;
+
+    for (; i + 64 <= n_bases; i += 64) {
+        __m256i bytes = _mm256_loadu_si256((const __m256i *)(const void *)(packed_seq + (i >> 1)));
+        __m256i hi = _mm256_and_si256(_mm256_srli_epi16(bytes, 4), lo_mask);
+        __m256i lo = _mm256_and_si256(bytes, lo_mask);
+        a += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, v_a)));
+        a += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, v_a)));
+        c += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, v_c)));
+        c += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, v_c)));
+        g += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, v_g)));
+        g += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, v_g)));
+        t += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, v_t)));
+        t += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, v_t)));
+        n += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, v_n)));
+        n += (uint64_t)DUCKHTS_POPCOUNT32((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, v_n)));
+    }
+
+    /* IUPAC/`=` for the vectorized region is the processed remainder. */
+    out->iupac = (uint64_t)i - (a + c + g + t + n);
+
+    for (; i < n_bases; i++) {
+        uint8_t byte = packed_seq[i >> 1];
+        unsigned code = (i & 1) ? (byte & 0x0Fu) : (unsigned)(byte >> 4);
+        switch (code) {
+        case 1: a++; break;
+        case 2: c++; break;
+        case 4: g++; break;
+        case 8: t++; break;
+        case 15: n++; break;
+        default: out->iupac++; break;
+        }
+    }
+
+    out->a = a;
+    out->c = c;
+    out->g = g;
+    out->t = t;
+    out->n = n;
+    out->gc = c + g;
+    out->called = a + c + g + t;
+}
+
 static int duckhts_cpu_has_avx2(void) {
     __builtin_cpu_init();
     return __builtin_cpu_supports("avx2") != 0 && __builtin_cpu_supports("popcnt") != 0;
@@ -91,6 +154,11 @@ void duckhts_simd_avx2_register(duckhts_simd_builder_t *builder) {
                                               "avx2",
                                               20,
                                               duckhts_base_counts_avx2);
+    duckhts_simd_builder_consider_bam_nt16_counts(builder,
+                                                  DUCKHTS_SIMD_CAP_AVX2,
+                                                  "avx2",
+                                                  20,
+                                                  duckhts_bam_nt16_counts_avx2);
 }
 
 int duckhts_simd_avx2_compiled(void) { return 1; }

@@ -37,10 +37,50 @@ static void duckhts_base_counts_scalar(const char *seq, size_t len,
     out->called = called;
 }
 
+/* BAM nt16 packed sequence: two bases per byte, even index in the high nibble
+ * (matching htslib `bam_seqi`).  Classes are the BAM nt16 codes (A=1, C=2,
+ * G=4, T=8, N=15); every other code (0 `=` and the IUPAC ambiguity codes)
+ * lands in `iupac`, reconciling to htslib `seq_nt16_int != 4` for `called`. */
+static void duckhts_bam_nt16_counts_scalar(const uint8_t *packed_seq,
+                                           int32_t n_bases,
+                                           duckhts_simd_bam_nt16_counts_t *out) {
+    /* nt16 code (0..15) -> class bucket: 0=A 1=C 2=G 3=T 4=N 5=IUPAC/'='.
+     * Branchless histogram (no data-dependent branch) so the oracle reflects a
+     * real classifier rather than a mispredict-bound switch. */
+    static const uint8_t cls[16] = {
+        5, 0, 1, 5, 2, 5, 5, 5, 3, 5, 5, 5, 5, 5, 5, 4
+    };
+    uint64_t h[6] = {0, 0, 0, 0, 0, 0};
+
+    out->a = out->c = out->g = out->t = 0;
+    out->n = out->iupac = out->gc = out->called = 0;
+    if (!packed_seq || n_bases <= 0) return;
+
+    for (int32_t i = 0; i < n_bases; i++) {
+        uint8_t byte = packed_seq[i >> 1];
+        unsigned code = (i & 1) ? (byte & 0x0Fu) : (unsigned)(byte >> 4);
+        h[cls[code]]++;
+    }
+
+    out->a = h[0];
+    out->c = h[1];
+    out->g = h[2];
+    out->t = h[3];
+    out->n = h[4];
+    out->iupac = h[5];
+    out->gc = h[1] + h[2];
+    out->called = h[0] + h[1] + h[2] + h[3];
+}
+
 void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder) {
     duckhts_simd_builder_consider_base_counts(builder,
                                               DUCKHTS_SIMD_CAP_SCALAR,
                                               "scalar",
                                               1000,
                                               duckhts_base_counts_scalar);
+    duckhts_simd_builder_consider_bam_nt16_counts(builder,
+                                                  DUCKHTS_SIMD_CAP_SCALAR,
+                                                  "scalar",
+                                                  1000,
+                                                  duckhts_bam_nt16_counts_scalar);
 }

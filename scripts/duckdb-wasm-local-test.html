@@ -74,7 +74,7 @@
 <body>
   <main>
     <h1>duckdb-wasm Local DuckHTS Test</h1>
-    <p>This harness loads the local DuckHTS wasm extension in duckdb-wasm and runs same-origin HTTP smoke tests.</p>
+    <p>This harness loads the local DuckHTS wasm extension in duckdb-wasm, asserts the SIMD dispatch kernels resolve correctly on wasm (scalar fallback), and runs same-origin HTTP smoke tests.</p>
 
     <div class="controls">
       <button id="run">Run Setup + Smoke Test</button>
@@ -175,6 +175,29 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
       log("Cleared Module.duckhtsWasmHttpConfig");
     }
 
+    // Validate that this build's SIMD optimization landed on wasm.  The AVX2
+    // bam_nt16_counts kernel is x86-gated, so on wasm the logical kernel must
+    // still be registered and resolve to the scalar fallback, and the dispatch
+    // path must compute correct results.  Throws on mismatch -> status "Failed".
+    async function assertSimd() {
+      log("Asserting DuckHTS SIMD kernel on wasm...");
+      const kt = await conn.query(
+        "SELECT count(*)::INT AS n, max(selected_backend) AS backend " +
+        "FROM duckhts_simd_kernel_info() WHERE kernel = 'bam_nt16_counts'");
+      const krow = kt.toArray()[0];
+      const n = Number(krow.n);
+      const backend = String(krow.backend);
+      log(`  bam_nt16_counts rows=${n} backend=${backend}`);
+      if (n !== 1) throw new Error(`expected 1 bam_nt16_counts kernel row, got ${n}`);
+      if (backend !== "scalar") throw new Error(`expected scalar backend on wasm, got ${backend}`);
+
+      const gt = await conn.query("SELECT printf('%.3f', seq_gc_content('acgtnn')) AS gc");
+      const gc = String(gt.toArray()[0].gc);
+      log(`  seq_gc_content('acgtnn') = ${gc}`);
+      if (gc !== "0.500") throw new Error(`expected seq_gc_content 0.500, got ${gc}`);
+      log("  SIMD assertions passed");
+    }
+
     async function main() {
       statusNode.textContent = "Preparing";
       runButton.disabled = true;
@@ -197,6 +220,8 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
         await conn.query("PRAGMA platform");
         await conn.query("LOAD '/duckdb-wasm/duckhts.duckdb_extension.wasm'");
         log("Loaded extension:", extUrl);
+
+        await assertSimd();
 
         const fastqUrl = defaultOriginUrl("/extdata/r1.fq");
         const tabixUrl = defaultOriginUrl("/extdata/header_tabix.tsv.gz");
