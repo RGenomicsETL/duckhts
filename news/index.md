@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
 
+- bundled
+  [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
+  now reports an additional `bam_nt16_counts` logical kernel, and
+  bundled `bam_bin_counts(...)` GC base counting is routed through the
+  SIMD dispatch framework; GC results are unchanged (a scalar reference
+  backend is the correctness oracle)
 - surface malformed-record BCF/VCF scan failures from bundled
   `read_bcf(...)`, projected `read_bcf_v2(...)` scans, and non-parallel
   `read_bcf_appender(...)` as DuckDB/R errors instead of treating htslib
