@@ -23,6 +23,9 @@ export default defineConfig({
     baseURL: BASE_URL,
     headless: true,
     trace: "retain-on-failure",
+    // --no-sandbox: required when Chromium runs as root (local dev containers,
+    // some CI). Cross-origin-isolation headers are served by the harness host.
+    launchOptions: { args: ["--no-sandbox"] },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

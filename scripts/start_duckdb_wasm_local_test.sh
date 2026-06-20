@@ -30,6 +30,7 @@ rsync -a --delete \
   --exclude '.git/' \
   --exclude 'build/' \
   --exclude 'cmake_build/' \
+  --exclude 'configure/venv/' \
   --exclude 'duckdb-wasm-local-site/' \
   --exclude '.duckdb-wasm-local-artifacts/' \
   --exclude '.webr-local-artifacts/' \
@@ -52,6 +53,12 @@ find third_party/htslib -type f \( \
   -name "config.h" -o -name "config.mk" -o -name "config_vars.h" -o \
   -name "htslib.pc.tmp" -o -name "a.wasm" \
 \) -delete || true
+# Always build the venv fresh inside the container: a host configure/venv (its
+# python symlinks point at host paths absent here) is excluded from the rsync,
+# but rsync --delete cannot remove an excluded path, so a stale copy from a
+# prior run could shadow recreation.  Removing it lets `make configure` build a
+# working venv with the container python.
+rm -rf configure/venv
 make DUCKDB_PLATFORM=wasm_eh configure release move_wasm_extension
 '
 
