@@ -44,7 +44,8 @@ expect_identical(
 expect_identical(
   names(formals(rduckhts_bcf)),
   c("con", "table_name", "path", "region", "index_path", "tidy_format",
-    "additional_csq_column_types", "scan_mode", "decompression_threads", "overwrite")
+    "additional_csq_column_types", "scan_mode", "decompression_threads",
+    "decode_error_policy", "overwrite")
 )
 expect_identical(
   names(formals(rduckhts_bam)),

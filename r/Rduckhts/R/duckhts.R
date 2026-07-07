@@ -732,6 +732,10 @@ duckhts_extension_dir <- function() {
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads per file handle. Default `0`. Use `0` to keep BCF/VCF reads
 #'   single-threaded.
+#' @param decode_error_policy Character. Dirty/corrupt BCF decode policy:
+#'   \code{"null"} returns NULL for header-vs-payload type clashes,
+#'   \code{"warn"} emits a DuckHTS warning and returns NULL, and
+#'   \code{"error"} raises a DuckDB/R error.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
 #' @return Invisible TRUE on success
@@ -758,6 +762,7 @@ rduckhts_bcf <- function(
   additional_csq_column_types = NULL,
   scan_mode = NULL,
   decompression_threads = 0,
+  decode_error_policy = "null",
   overwrite = FALSE
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
@@ -798,6 +803,17 @@ rduckhts_bcf <- function(
         "decompression_threads"
       )
     )
+  }
+  if (!is.null(decode_error_policy)) {
+    if (!is.character(decode_error_policy) || length(decode_error_policy) != 1L ||
+        is.na(decode_error_policy) || !nzchar(decode_error_policy)) {
+      stop("decode_error_policy must be 'null', 'warn', or 'error'", call. = FALSE)
+    }
+    decode_error_policy <- tolower(decode_error_policy)
+    if (!decode_error_policy %in% c("null", "warn", "error")) {
+      stop("decode_error_policy must be 'null', 'warn', or 'error'", call. = FALSE)
+    }
+    params$decode_error_policy <- sql_quote_string(decode_error_policy)
   }
 
   param_str <- build_param_str(params)

@@ -28,3 +28,77 @@ SELECT count(*) FROM information_schema.tables WHERE table_name = 'bcf_appender_
 
 statement ok
 DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos;
+
+query T
+SELECT INFO_DP IS NULL FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_info_type_clash.bcf');
+----
+true
+
+query T
+SELECT INFO_DP IS NULL FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_info_type_clash.bcf', info_fields := 'DP');
+----
+true
+
+# Reverse clash: INFO header claims String but the payload is numeric.  htslib's
+# string decode path copies the payload without checking info->type, so the INFO
+# preflight must run under the default 'null' policy too (mirroring FORMAT) or
+# this leaks raw bytes instead of NULL.
+query T
+SELECT INFO_NN IS NULL FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_info_str_clash.bcf');
+----
+true
+
+query T
+SELECT INFO_NN IS NULL FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_info_str_clash.bcf', info_fields := 'NN');
+----
+true
+
+query T
+SELECT INFO_NN IS NULL FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_info_str_clash.bcf', decode_error_policy := 'warn');
+----
+true
+
+statement error
+SELECT INFO_NN FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_info_str_clash.bcf', decode_error_policy := 'error');
+----
+read_bcf: INFO/NN encoded BCF type INT8 does not match header Type=String at chr1:10
+
+query TT
+SELECT FORMAT_XX_S1 IS NULL, FORMAT_XX_S2 IS NULL FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf');
+----
+true	true
+
+query TT
+SELECT FORMAT_XX_S1 IS NULL, FORMAT_XX_S2 IS NULL FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf', format_fields := 'XX');
+----
+true	true
+
+query TT
+SELECT FORMAT_XX_S1 IS NULL, FORMAT_XX_S2 IS NULL FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf', decode_error_policy := 'warn');
+----
+true	true
+
+statement error
+SELECT INFO_DP FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_info_type_clash.bcf', decode_error_policy := 'error');
+----
+read_bcf: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10
+
+statement error
+SELECT INFO_DP FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_info_type_clash.bcf', info_fields := 'DP', decode_error_policy := 'error');
+----
+read_bcf_v2: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10
+
+statement error
+SELECT FORMAT_XX_S1 FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf', decode_error_policy := 'error');
+----
+read_bcf: FORMAT/XX encoded BCF type CHAR does not match header Type=Integer at chr1:10
+
+statement error
+SELECT FORMAT_XX_S1 FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf', format_fields := 'XX', decode_error_policy := 'error');
+----
+read_bcf_v2: FORMAT/XX encoded BCF type CHAR does not match header Type=Integer at chr1:10
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', decode_error_policy := 'strictish');
+----
+read_bcf: decode_error_policy must be 'null', 'warn', or 'error'
