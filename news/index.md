@@ -2,6 +2,20 @@
 
 ## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
 
+- bundled `read_bcf(...)`, `read_bcf_v2(...)`, and
+  `read_bcf_appender(...)` gain
+  `decode_error_policy := 'null'|'warn'|'error'` for corrupt BCF
+  FORMAT/INFO header-vs-payload type clashes; the default `null` policy
+  materializes NULLs, `warn` emits a DuckHTS warning and materializes
+  NULLs, and `error` raises a DuckDB/R error. FORMAT and INFO decode now
+  preflight under every policy (including the default `null`), so
+  corrupt inputs neither trigger htslib `exit(1)` termination nor leak
+  raw bytes; an INFO field whose header claims `Type=String` over a
+  numeric payload previously returned truncated garbage under the
+  default policy and now materializes NULL. Add bundled corrupt-BCF
+  fixtures (including a reverse String-header/numeric-payload clash)
+  plus tinytest coverage while keeping valid mixed-ploidy `Number=G`
+  FORMAT records accepted
 - bundled
   [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
   now reports an additional `bam_nt16_counts` logical kernel, and

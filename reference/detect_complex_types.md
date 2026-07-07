@@ -31,6 +31,9 @@ library(DBI)
 library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+#> duckdb: caching downloaded extensions in the package library:
+#> ℹ /home/runner/work/_temp/Library/duckdb/extensions
+#> ℹ This is removed when the package is re-installed; see `?duckdb_storage` to choose a different location.
 rduckhts_load(con)
 #> [1] TRUE
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
