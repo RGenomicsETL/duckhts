@@ -134,14 +134,25 @@ test_bcf_type_clash_errors <- function() {
 
   info_path <- system.file("extdata", "bcf_info_type_clash.bcf", package = "Rduckhts")
   format_path <- system.file("extdata", "bcf_format_type_clash.bcf", package = "Rduckhts")
+  str_path <- system.file("extdata", "bcf_info_str_clash.bcf", package = "Rduckhts")
   expect_true(file.exists(info_path))
   expect_true(file.exists(format_path))
+  expect_true(file.exists(str_path))
 
   quoted_info <- DBI::dbQuoteString(con, info_path)
   quoted_format <- DBI::dbQuoteString(con, format_path)
+  quoted_str <- DBI::dbQuoteString(con, str_path)
 
   null_policy_info <- dbGetQuery(con, sprintf("SELECT INFO_DP IS NULL AS is_null FROM read_bcf(%s)", quoted_info))
   expect_true(null_policy_info$is_null[1])
+
+  # Reverse clash: String header over numeric payload. htslib's string decode
+  # does not type-check, so both readers must NULL this under the default policy
+  # rather than leak raw bytes.
+  null_str_info <- dbGetQuery(con, sprintf("SELECT INFO_NN IS NULL AS is_null FROM read_bcf(%s)", quoted_str))
+  expect_true(null_str_info$is_null[1])
+  null_str_info_v2 <- dbGetQuery(con, sprintf("SELECT INFO_NN IS NULL AS is_null FROM read_bcf_v2(%s, info_fields := 'NN')", quoted_str))
+  expect_true(null_str_info_v2$is_null[1])
 
   null_policy_format <- dbGetQuery(
     con,
@@ -173,6 +184,10 @@ test_bcf_type_clash_errors <- function() {
   expect_error(
     dbGetQuery(con, sprintf("SELECT INFO_DP FROM read_bcf_v2(%s, info_fields := 'DP', decode_error_policy := 'error')", quoted_info)),
     pattern = "read_bcf_v2: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10"
+  )
+  expect_error(
+    dbGetQuery(con, sprintf("SELECT INFO_NN FROM read_bcf(%s, decode_error_policy := 'error')", quoted_str)),
+    pattern = "read_bcf: INFO/NN encoded BCF type INT8 does not match header Type=String at chr1:10"
   )
   expect_error(
     dbGetQuery(con, sprintf("SELECT FORMAT_XX_S1 FROM read_bcf(%s, decode_error_policy := 'error')", quoted_format)),

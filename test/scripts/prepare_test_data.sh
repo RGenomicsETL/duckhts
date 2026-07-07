@@ -110,13 +110,28 @@ EOF
 bcftools view --no-version -Ob -o "$TMP_BCF_CLASH_DIR/format_string.bcf" "$TMP_BCF_CLASH_DIR/format_string.vcf"
 bcftools view --no-version -h "$TMP_BCF_CLASH_DIR/format_string.bcf" | perl -pe 's/##FORMAT=<ID=XX,Number=1,Type=String,Description="format encoded as string">/##FORMAT=<ID=XX,Number=1,Type=Integer,Description="format claimed as integer">/' > "$TMP_BCF_CLASH_DIR/format_int.hdr"
 bcftools reheader -h "$TMP_BCF_CLASH_DIR/format_int.hdr" -o "$TMP_BCF_CLASH_DIR/bcf_format_type_clash.bcf" "$TMP_BCF_CLASH_DIR/format_string.bcf"
+# Reverse clash: numeric payload with the header reheadered to claim String.
+# htslib's string decode path copies the payload without checking info->type,
+# so unless the INFO string preflight runs under every policy this returns raw
+# bytes instead of NULL under the default 'null' policy.
+cat > "$TMP_BCF_CLASH_DIR/info_int.vcf" <<'EOF'
+##fileformat=VCFv4.3
+##contig=<ID=chr1,length=1000>
+##INFO=<ID=NN,Number=1,Type=Integer,Description="value encoded as integer">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	10	.	A	C	.	PASS	NN=42
+EOF
+bcftools view --no-version -Ob -o "$TMP_BCF_CLASH_DIR/info_int_payload.bcf" "$TMP_BCF_CLASH_DIR/info_int.vcf"
+bcftools view --no-version -h "$TMP_BCF_CLASH_DIR/info_int_payload.bcf" | perl -pe 's/##INFO=<ID=NN,Number=1,Type=Integer,Description="value encoded as integer">/##INFO=<ID=NN,Number=1,Type=String,Description="value claimed as string">/' > "$TMP_BCF_CLASH_DIR/info_str.hdr"
+bcftools reheader -h "$TMP_BCF_CLASH_DIR/info_str.hdr" -o "$TMP_BCF_CLASH_DIR/bcf_info_str_clash.bcf" "$TMP_BCF_CLASH_DIR/info_int_payload.bcf"
 for out_dir in "$DST" "$PKG_DST"; do
   cp "$TMP_BCF_CLASH_DIR/bcf_info_type_clash.bcf" "$out_dir/bcf_info_type_clash.bcf"
   cp "$TMP_BCF_CLASH_DIR/bcf_format_type_clash.bcf" "$out_dir/bcf_format_type_clash.bcf"
+  cp "$TMP_BCF_CLASH_DIR/bcf_info_str_clash.bcf" "$out_dir/bcf_info_str_clash.bcf"
 done
 rm -rf "$TMP_BCF_CLASH_DIR"
 trap - EXIT
-echo "  bcf_info_type_clash.bcf + bcf_format_type_clash.bcf"
+echo "  bcf_info_type_clash.bcf + bcf_format_type_clash.bcf + bcf_info_str_clash.bcf"
 
 # ---- VCF → bgzipped VCF + index ----
 bcftools view "$SRC/formatcols.vcf" -Oz -o "$DST/formatcols.vcf.gz"

@@ -3714,8 +3714,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (!info_loaded[field_idx]) {
                             if (!bcf_record_has_info_field(init->rec, field)) {
                                 info_ret[field_idx] = -3;
-                            } else if (bind->decode_error_policy != BCF_DECODE_ERROR_NULL &&
-                                       bcf_reader_input_is_bcf(init->fp) &&
+                            } else if (bcf_reader_input_is_bcf(init->fp) &&
                                        !bcf_preflight_info_encoded_type(init->hdr, init->rec, field,
                                                                        bcf_reader_name(bind),
                                                                        scan_err, sizeof(scan_err))) {
@@ -3751,8 +3750,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (!info_loaded[field_idx]) {
                             if (!bcf_record_has_info_field(init->rec, field)) {
                                 info_ret[field_idx] = -3;
-                            } else if (bind->decode_error_policy != BCF_DECODE_ERROR_NULL &&
-                                       bcf_reader_input_is_bcf(init->fp) &&
+                            } else if (bcf_reader_input_is_bcf(init->fp) &&
                                        !bcf_preflight_info_encoded_type(init->hdr, init->rec, field,
                                                                        bcf_reader_name(bind),
                                                                        scan_err, sizeof(scan_err))) {
@@ -3789,8 +3787,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (!info_loaded[field_idx]) {
                             if (!bcf_record_has_info_field(init->rec, field)) {
                                 info_ret[field_idx] = -3;
-                            } else if (bind->decode_error_policy != BCF_DECODE_ERROR_NULL &&
-                                       bcf_reader_input_is_bcf(init->fp) &&
+                            } else if (bcf_reader_input_is_bcf(init->fp) &&
                                        !bcf_preflight_info_encoded_type(init->hdr, init->rec, field,
                                                                        bcf_reader_name(bind),
                                                                        scan_err, sizeof(scan_err))) {
