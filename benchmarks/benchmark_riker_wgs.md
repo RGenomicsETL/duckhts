@@ -133,17 +133,25 @@ machinery already shipped in `duckhts_bam_bed_coverage`.
 ## Reproduce
 
 The harness stages the exact Fulcrum sample, drops the page cache before
-each run, pins to physical P-cores, and records `/usr/bin/time -v`:
+each run, pins to distinct physical cores, and records
+`/usr/bin/time -v`. Both scripts live under `scripts/`; build the
+extension and a `riker` binary first.
 
 ``` sh
-# stage HG00188 (ERR3240174): download CRAM, transcode to BAM vs the
-# GRCh38 decoy/HLA reference, index — see .sync/riker-bench/stage.sh
-python3 .sync/riker-bench/bench.py \
-  --bam   stage/HG00188_30x/input.bam \
-  --ref   ref/GRCh38_full_analysis_set_plus_decoy_hla.fa \
-  --ext   build/release/duckhts.duckdb_extension \
-  --riker-bin .sync/riker/target-native/dist/riker \
-  --tools mosdepth,duckhts,riker,riker-bq0 --threads 1,2,4 --reps 3
+# 1. download the NYGC 1000G CRAM + GRCh38 decoy/HLA reference, transcode to
+#    BAM, index (network is used only in this staging step, never the build):
+scripts/stage_riker_wgs_bam.sh riker-bench-data
+
+# 2. run the 3-way sweep (root needed to drop the page cache each run):
+sudo python3 scripts/riker_wgs_benchmark.py \
+  --bam       riker-bench-data/stage/HG00188_30x/input.bam \
+  --ref       riker-bench-data/ref/GRCh38_full_analysis_set_plus_decoy_hla.fa \
+  --ext       build/release/duckhts.duckdb_extension \
+  --riker-bin riker \
+  --outdir    riker-bench-data/results \
+  --tsv       riker-bench-data/results/bench.tsv \
+  --tools mosdepth,duckhts,riker,riker-bq0 --threads 1,2,4 --reps 3 \
+  --cpus 0,2,4,6,8,10   # one distinct physical core per thread of the max budget
 ```
 
 ## Attribution
