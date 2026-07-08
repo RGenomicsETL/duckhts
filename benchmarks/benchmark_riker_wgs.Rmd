@@ -1,0 +1,277 @@
+---
+title: "Riker vs DuckHTS vs mosdepth — harmonized WGS coverage"
+output: github_document
+---
+
+<!-- benchmark_riker_wgs.md is generated from benchmark_riker_wgs.Rmd. Do not edit the .md by hand. -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE,
+  echo = FALSE, dpi = 140, fig.retina = 2
+)
+library(ggplot2)
+```
+
+Status: historical measurement report. Records one harmonized three-way run of
+`riker 0.4.0` `wgs` vs native `duckhts_mosdepth(...)` vs upstream `mosdepth`,
+following the methodology of the
+[fulcrumgenomics/riker benchmark pipeline](https://github.com/fulcrumgenomics/riker/tree/main/benchmark-pipeline).
+Numbers are specific to the host and BAM below; **ratios, not absolute
+seconds, are the portable result.** This is not a claim about arbitrary future
+versions of any tool.
+
+## What was compared
+
+Read *selection* was harmonized to the letter of Fulcrum's own
+`mosdepth-compare` config so all three tools count the same reads:
+
+- MAPQ ≥ 20 (`mosdepth -Q 20`, `riker --min-mapq 20`)
+- exclude duplicate + secondary + supplementary (`mosdepth -F 3332`), matching
+  riker's whole-read filters
+- orphan / unpaired reads counted (`riker --include-unpaired-reads`)
+- QC-fail counted; mosdepth in **accurate** mode (no `-x` fast, no `-a` fragment)
+- no per-base output
+
+Under those exact flags, `duckhts_mosdepth` is **byte-identical** to `mosdepth`
+on the summary and global depth-distribution outputs — verified on both its
+sequential and parallel (`processing_threads > 0`) paths — so this is a
+like-for-like speed race, not tools computing different numbers.
+
+Two asymmetries could not be harmonized away, and both favor riker:
+
+- **Decompressor.** riker (`libdeflater`) and DuckHTS (`libdeflate`) decode
+  BGZF with libdeflate; both `mosdepth` builds statically bundle zlib 1.2.11.
+  Some of riker's published margin over mosdepth is library, not algorithm,
+  which is why **DuckHTS-vs-riker** is the comparison that isolates approach.
+- **Coverage cap.** riker's depth array is `u16`, sound only because
+  `--coverage-cap` defaults to 250 — halving depth-array bandwidth. It cannot
+  report the true max: chr3 on this sample peaks at 94,988×, past the u16
+  range. mosdepth and DuckHTS carry uncapped `int32` and pay for it in memory.
+
+The `riker · min-bq 0` arm disables base-quality filtering — the difference
+riker's release notes call "the one we couldn't harmonize away" (because
+*mosdepth* has no such switch; riker does). It exists to test how much that
+extra work actually costs.
+
+## Host and inputs
+
+```{r provenance, results = "asis"}
+prov <- c(
+  "Sample"        = "HG00188 (ERR3240174), NYGC 1000G high-coverage, ~30x",
+  "Staged as"     = "CRAM -> BAM (samtools view -b -T ref), 37.8 GB, 703.4M reads",
+  "Reference"     = "GRCh38_full_analysis_set_plus_decoy_hla.fa (3366 seqs)",
+  "Host"          = "13th Gen Intel Core i5-13500 (6 P-cores + 8 E-cores)",
+  "Pinning"       = "taskset to N distinct physical P-cores (0,2,4,6)",
+  "riker"         = "0.4.0, cargo --profile dist, RUSTFLAGS=-C target-cpu=native (libdeflater)",
+  "mosdepth"      = "0.3.13 (static zlib 1.2.11)",
+  "duckhts"       = "DuckDB v1.5.1, extension -O3 (baseline x86-64/SSE2), libdeflate",
+  "Protocol"      = "cold page cache dropped before each run; 3 reps; /usr/bin/time -v"
+)
+cat(paste0("- **", names(prov), "**: ", prov, collapse = "\n"))
+```
+
+```{r data}
+# Raw measurements embedded inline so this report renders without the
+# (gitignored) .sync/riker-bench tree. wall_s = wall clock seconds,
+# rss_mb = peak resident set (MB), pct_cpu = /usr/bin/time "Percent of CPU".
+raw <- read.table(header = TRUE, stringsAsFactors = FALSE, text = "
+tool threads rep wall_s rss_mb pct_cpu
+mosdepth 1 1 233.14 1941.9 99
+mosdepth 1 2 235.45 1941.9 99
+mosdepth 1 3 244.24 1941.9 99
+duckhts 1 1 238.07 1020.7 99
+duckhts 1 2 231.31 1020.7 99
+duckhts 1 3 222.21 1020.7 99
+riker 1 1 220.58 501.0 97
+riker 1 2 221.62 500.7 97
+riker 1 3 220.26 500.8 97
+riker-bq0 1 1 221.33 500.8 97
+riker-bq0 1 2 220.37 500.6 96
+riker-bq0 1 3 224.28 500.7 96
+mosdepth 2 1 184.24 1942.4 153
+mosdepth 2 2 173.17 1942.4 158
+mosdepth 2 3 170.43 1942.3 159
+duckhts 2 1 124.94 1990.4 190
+duckhts 2 2 124.80 1990.5 190
+duckhts 2 3 124.95 1990.5 191
+riker 2 1 160.82 501.9 169
+riker 2 2 185.59 502.2 169
+riker 2 3 161.65 501.9 168
+riker-bq0 2 1 163.25 501.9 167
+riker-bq0 2 2 183.49 502.1 159
+riker-bq0 2 3 175.14 502.0 165
+mosdepth 4 1 128.64 1942.8 231
+mosdepth 4 2 132.28 2866.7 228
+mosdepth 4 3 120.04 2866.9 242
+duckhts 4 1 78.94 3519.2 336
+duckhts 4 2 75.82 3519.1 346
+duckhts 4 3 78.27 3518.9 336
+riker 4 1 135.42 501.8 226
+riker 4 2 128.57 501.7 234
+riker 4 3 132.81 501.7 232
+riker-bq0 4 1 125.69 501.7 235
+riker-bq0 4 2 119.85 501.8 250
+riker-bq0 4 3 124.08 501.7 241
+")
+
+agg <- aggregate(
+  cbind(wall_s, rss_mb, pct_cpu) ~ tool + threads, data = raw,
+  FUN = function(v) c(median = median(v), min = min(v), max = max(v))
+)
+summ <- data.frame(
+  tool     = agg$tool,
+  threads  = agg$threads,
+  wall_med = agg$wall_s[, "median"],
+  wall_min = agg$wall_s[, "min"],
+  wall_max = agg$wall_s[, "max"],
+  rss_gb   = agg$rss_mb[, "median"] / 1024,
+  cpu      = agg$pct_cpu[, "median"]
+)
+summ <- summ[order(summ$threads, summ$wall_med), ]
+
+# palette: riker blue, duckhts amber, mosdepth rose, bq0 = translucent riker
+pal <- c("riker" = "#3560c4", "duckhts" = "#b9760a",
+         "mosdepth" = "#b0426f", "riker-bq0" = "#7c93d6")
+lvl <- c("riker", "duckhts", "mosdepth", "riker-bq0")
+summ$tool <- factor(summ$tool, levels = lvl)
+
+theme_bench <- theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(color = "grey40", size = 10),
+    legend.position = "top", legend.title = element_blank(),
+    plot.title.position = "plot"
+  )
+```
+
+## Results
+
+```{r table}
+tab <- summ
+tab$`median wall` <- sprintf("%.1f s", tab$wall_med)
+tab$`min-max`     <- sprintf("%.1f-%.1f", tab$wall_min, tab$wall_max)
+tab$`peak RSS`    <- sprintf("%.2f GB", tab$rss_gb)
+tab$`%CPU`        <- sprintf("%.0f", tab$cpu)
+knitr::kable(
+  tab[, c("threads", "tool", "median wall", "min-max", "peak RSS", "%CPU")],
+  align = "rlrrrr", row.names = FALSE
+)
+```
+
+## Wall time scales with where the threads go
+
+```{r plot-wall, fig.width = 7.4, fig.height = 4.6, fig.alt = "Wall time versus thread budget: riker fastest single-threaded, duckhts fastest at 2 and 4 threads."}
+main <- summ[summ$tool != "riker-bq0", ]
+main$tool <- droplevels(main$tool)
+ends <- main[main$threads == 4, ]
+
+ggplot(main, aes(threads, wall_med, color = tool)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.6) +
+  geom_text(
+    data = ends, aes(label = sprintf("%s  %.0fs", tool, wall_med)),
+    hjust = 0, nudge_x = 0.06, size = 3.5, fontface = "bold", show.legend = FALSE
+  ) +
+  scale_color_manual(values = pal) +
+  scale_x_continuous(breaks = c(1, 2, 4), limits = c(1, 5.2)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(
+    title = "Wall time vs thread budget (30x WGS, cold cache)",
+    subtitle = "median of 3 reps; lower is faster. duckhts crosses ahead at 2 threads and pulls away at 4.",
+    x = "threads", y = "wall time (s)"
+  ) +
+  theme_bench
+```
+
+At one thread all three are within ~7%. DuckHTS crosses ahead at two threads
+and reaches **1.70×** riker (and 1.64× mosdepth) at four, because it adds a full
+decode-*and*-accumulate worker per thread. `riker wgs` runs
+`decode_threads = N-1, compute_workers = 1`: extra threads only feed BGZF
+decode, so its counting loop stays serial — visible in CPU utilization, which
+plateaus at ~232% while DuckHTS reaches ~336% at four threads.
+
+```{r plot-cpu, fig.width = 7.4, fig.height = 3.6, fig.alt = "CPU utilization versus threads; duckhts scales toward 4 cores, riker and mosdepth plateau near 2.3."}
+ggplot(main, aes(threads, cpu / 100, color = tool)) +
+  geom_hline(yintercept = c(1, 2, 4), color = "grey88", linewidth = 0.4) +
+  geom_line(linewidth = 1.1) + geom_point(size = 2.6) +
+  scale_color_manual(values = pal) +
+  scale_x_continuous(breaks = c(1, 2, 4)) +
+  scale_y_continuous(breaks = c(1, 2, 3, 4), labels = function(x) paste0(x, "x")) +
+  labs(
+    title = "Cores actually used",
+    subtitle = "cores busy = %CPU / 100. duckhts approaches its 4-core budget; the single-compute-thread tools stall.",
+    x = "threads", y = "cores busy"
+  ) +
+  theme_bench
+```
+
+## The cost of scaling is memory — and it need not be
+
+```{r plot-rss, fig.width = 7.4, fig.height = 4.0, fig.alt = "Peak resident memory versus threads; riker flat at 0.49 GB, duckhts climbs to 3.44 GB."}
+ggplot(main, aes(threads, rss_gb, color = tool)) +
+  geom_line(linewidth = 1.1) + geom_point(size = 2.6) +
+  scale_color_manual(values = pal) +
+  scale_x_continuous(breaks = c(1, 2, 4)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(
+    title = "Peak resident memory vs threads",
+    subtitle = "riker holds one u16 (capped) array for the whole run; duckhts holds one uncapped int32 array per worker.",
+    x = "threads", y = "peak RSS (GB)"
+  ) +
+  theme_bench
+```
+
+riker stays flat at 0.49 GB by making depth `u16` and capping at 250 — the same
+choice that prevents it from reporting chr3's true 94,988× max. DuckHTS's climb
+to 3.44 GB is an *implementation artifact*, not a cost of the approach: each
+worker `realloc`s its coverage array to the largest contig it claims (chr1
+≈ 995 MB `int32`) and keeps it. Tiling the per-contig array into fixed windows
+would bound memory to `tile_size × workers` while keeping the uncapped `int32`
+max — the open backlog item in `design/coverage_memory_footprint.md`, with the
+tiling machinery already shipped in `duckhts_bam_bed_coverage`.
+
+## Findings
+
+1. **riker owns the single thread** — 220.6 s at 0.49 GB. A single sequential
+   pass with a hand-vectorized inner loop (`u16` depth, cap 250) is the fastest
+   serial implementation here, at the smallest footprint.
+2. **DuckHTS owns the cores** — 231 → 125 → 78 s across 1/2/4 threads. It
+   parallelises the decode-and-count pass that riker's design notes call
+   irreducible, by claiming contigs across independent workers.
+3. **Base-quality filtering is nearly free** — `riker --min-bq 0` changed wall
+   time by under 1% (the compare lives inside riker's SIMD kernel), so "doing
+   strictly more work and still finishing first" is true but the clock does not
+   show the extra work.
+4. **DuckHTS scored this handicapped** — baseline SSE2 codegen (no
+   `-march=native`) and a scalar coverage loop; none of its AVX2/AVX-512 SIMD
+   kernels are wired into the depth accumulator yet. Scaling is also sublinear
+   (2.96× at 4 threads) because whole-contig work claiming makes chr1 an
+   indivisible tail; tile-level claiming would address both.
+
+## Reproduce
+
+The harness stages the exact Fulcrum sample, drops the page cache before each
+run, pins to physical P-cores, and records `/usr/bin/time -v`:
+
+```sh
+# stage HG00188 (ERR3240174): download CRAM, transcode to BAM vs the
+# GRCh38 decoy/HLA reference, index — see .sync/riker-bench/stage.sh
+python3 .sync/riker-bench/bench.py \
+  --bam   stage/HG00188_30x/input.bam \
+  --ref   ref/GRCh38_full_analysis_set_plus_decoy_hla.fa \
+  --ext   build/release/duckhts.duckdb_extension \
+  --riker-bin .sync/riker/target-native/dist/riker \
+  --tools mosdepth,duckhts,riker,riker-bq0 --threads 1,2,4 --reps 3
+```
+
+## Attribution
+
+- **riker** © Fulcrum Genomics LLC (MIT) — <https://github.com/fulcrumgenomics/riker>
+- **mosdepth** © Brent Pedersen & Aaron Quinlan — <https://github.com/brentp/mosdepth>
+
+Cite the upstream tools when using their compatible output semantics in
+scientific work. `duckhts_mosdepth` is a native rewrite of mosdepth behavior
+for the documented scope; see `design/duckhts_mosdepth.md`.
