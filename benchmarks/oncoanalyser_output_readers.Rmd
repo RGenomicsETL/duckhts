@@ -1,0 +1,438 @@
+---
+output: github_document
+---
+
+<!-- Render from the repository root with: Rscript -e 'rmarkdown::render("benchmarks/oncoanalyser_output_readers.Rmd")' -->
+
+```{r, include = FALSE}
+library(duckknit)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "benchmarks/figures/oncoanalyser-output-",
+  out.width = "100%"
+)
+
+repo_root <- if (file.exists("AGENTS.md")) "." else ".."
+repo_root <- normalizePath(repo_root, winslash = "/", mustWork = TRUE)
+knitr::opts_knit$set(root.dir = repo_root)
+
+# Rewrite duckknit's ``` duckdb fences to ``` sql so rendered markdown gets
+# SQL highlighting on GitHub.
+knitr::knit_hooks$set(document = function(x) {
+  gsub("(?m)^``` duckdb", "``` sql", x, perl = TRUE)
+})
+
+# Use duckknit's DuckDB CLI engine for sql chunks.
+knitr::knit_engines$set(sql = knitr::knit_engines$get("duckdb"))
+
+duckdb_bin <- Sys.which("duckdb")
+if (!nzchar(duckdb_bin) && file.exists("/root/.local/bin/duckdb")) {
+  duckdb_bin <- "/root/.local/bin/duckdb"
+}
+if (!nzchar(duckdb_bin)) stop("duckdb CLI not found", call. = FALSE)
+options(duckknit.duckdb = duckdb_bin)
+
+# Pre-start the duckknit session with -unsigned so the local DuckHTS extension can
+# be loaded. This mirrors the top-level README.Rmd pattern.
+local({
+  ns  <- asNamespace("duckknit")
+  cmd <- duckknit:::find_duckdb()
+  proc <- processx::process$new(
+    command = cmd,
+    args = c("-unsigned", ":memory:"),
+    stdin = "|", stdout = "|", stderr = "|",
+    wd = repo_root,
+    cleanup = TRUE, cleanup_tree = TRUE
+  )
+  unlockBinding(".sessions", ns)
+  ns$.sessions[["oncoanalyser"]] <- proc
+  lockBinding(".sessions", ns)
+  unlockBinding(".state", ns)
+  ns$.state$last_session <- "oncoanalyser"
+  lockBinding(".state", ns)
+})
+```
+
+```{duckdb, include = FALSE}
+LOAD httpfs;
+SET s3_region='eu-west-1';
+SET allow_extensions_metadata_mismatch=true;
+LOAD 'build/release/duckhts.duckdb_extension';
+```
+
+# Reading Oncoanalyser outputs from S3 with DuckHTS
+
+This report is a runnable DuckDB script wrapped in R Markdown. It demonstrates
+a minimal loader plan for the public nf-core Oncoanalyser 2.3.0 example output.
+
+The report runs in this order:
+
+1. start DuckDB through `duckknit` and load `httpfs` plus DuckHTS;
+2. define one S3 root macro and thin reader macros;
+3. list the S3 prefix with `glob()` and classify files by suffix;
+4. run representative reads for tables, JSON, HTS files, report blobs, and
+   provenance text;
+5. summarize which reader covers each output family.
+
+Source data:
+
+```text
+s3://nf-core-awsmegatests/oncoanalyser/results-234fd82acc16a3beb01bf301900d83346b6ec812/
+```
+
+All file reads below use `s3://` paths. Large BAM examples use `read_bam(...)
+LIMIT ...` for row previews and `read_hts_header()` for metadata; use unbounded
+scans such as `count(*)` only when full streaming is intended.
+
+The setup chunk loads:
+
+```sql
+LOAD httpfs;
+SET s3_region='eu-west-1';
+SET allow_extensions_metadata_mismatch=true;
+LOAD 'build/release/duckhts.duckdb_extension';
+```
+
+## Reader macros
+
+```{sql define-reader-macros, collapse=FALSE, comment=""}
+CREATE OR REPLACE MACRO onco_root() AS
+  's3://nf-core-awsmegatests/oncoanalyser/results-234fd82acc16a3beb01bf301900d83346b6ec812/';
+
+CREATE OR REPLACE MACRO onco_rel(path) AS onco_root() || path;
+
+CREATE OR REPLACE MACRO onco_file_suffix(path) AS
+CASE
+  WHEN lower(path) LIKE '%.vcf.gz.tbi' THEN '.vcf.gz.tbi'
+  WHEN lower(path) LIKE '%.vcf.gz' THEN '.vcf.gz'
+  WHEN lower(path) LIKE '%.bam.bai' THEN '.bam.bai'
+  WHEN lower(path) LIKE '%.tsv.gz' THEN '.tsv.gz'
+  WHEN lower(path) LIKE '%.layout.gz' THEN '.layout.gz'
+  WHEN lower(path) LIKE '%.tar.gz' THEN '.tar.gz'
+  WHEN strpos(regexp_extract(path, '[^/]+$', 0), '.') > 0
+    THEN '.' || regexp_extract(lower(path), '[.]([^.]+)$', 1)
+  ELSE '(none)'
+END;
+
+CREATE OR REPLACE MACRO onco_file_kind(path) AS
+CASE
+  WHEN onco_file_suffix(path) IN ('.vcf', '.vcf.gz') THEN 'variant_vcf'
+  WHEN onco_file_suffix(path) = '.vcf.gz.tbi' THEN 'variant_index'
+  WHEN onco_file_suffix(path) = '.bam' THEN 'alignment_bam'
+  WHEN onco_file_suffix(path) = '.bam.bai' THEN 'alignment_index'
+  WHEN onco_file_suffix(path) IN ('.tsv', '.tsv.gz', '.csv', '.pcf', '.circos') THEN 'tabular_text'
+  WHEN onco_file_suffix(path) = '.json' THEN 'json_document'
+  WHEN onco_file_suffix(path) IN ('.html', '.png', '.pdf') THEN 'report_blob'
+  WHEN onco_file_suffix(path) IN ('.log', '.out', '.err', '.run', '.sh', '.conf', '.txt', '.version', '.qc', '.metrics', '.yml') THEN 'provenance_text'
+  WHEN onco_file_suffix(path) = '.layout.gz' THEN 'gzip_text'
+  ELSE 'other'
+END;
+
+CREATE OR REPLACE MACRO onco_read_tsv(path) AS TABLE
+SELECT *
+FROM read_csv(
+  path,
+  delim = '\t',
+  header = true,
+  union_by_name = true,
+  filename = true,
+  all_varchar = true,
+  nullstr = ['', 'NA', 'null'],
+  strict_mode = false,
+  null_padding = true,
+  ignore_errors = true
+);
+
+CREATE OR REPLACE MACRO onco_read_csv(path) AS TABLE
+SELECT *
+FROM read_csv(
+  path,
+  header = true,
+  union_by_name = true,
+  filename = true,
+  all_varchar = true,
+  nullstr = ['', 'NA', 'null'],
+  strict_mode = false,
+  null_padding = true,
+  ignore_errors = true
+);
+
+CREATE OR REPLACE MACRO onco_read_json(path) AS TABLE
+SELECT *
+FROM read_json_auto(
+  path,
+  filename = true,
+  union_by_name = true,
+  maximum_object_size = 134217728
+);
+
+CREATE OR REPLACE MACRO onco_read_vcf(path) AS TABLE
+SELECT * FROM read_bcf(path);
+
+CREATE OR REPLACE MACRO onco_read_bam(path) AS TABLE
+SELECT * FROM read_bam(path);
+
+CREATE OR REPLACE MACRO onco_read_blob(path) AS TABLE
+SELECT
+  filename,
+  size,
+  md5(content) AS md5,
+  left(hex(content), 32) AS magic_hex,
+  content
+FROM read_blob(path);
+
+CREATE OR REPLACE MACRO onco_read_text_lines(path) AS TABLE
+WITH docs AS (
+  SELECT filename, string_split(content, chr(10)) AS lines
+  FROM read_text(path)
+)
+SELECT
+  filename,
+  i AS line_no,
+  regexp_replace(lines[i], chr(13) || '$', '') AS line
+FROM docs, range(1, len(lines) + 1) AS r(i)
+WHERE regexp_replace(lines[i], chr(13) || '$', '') <> '';
+
+CREATE OR REPLACE MACRO onco_read_gzip_lines(path) AS TABLE
+SELECT filename, row_number() OVER (PARTITION BY filename) AS line_no, column0 AS line
+FROM read_csv(
+  path,
+  header = false,
+  columns = {'column0': 'VARCHAR'},
+  compression = 'gzip',
+  delim = '\t',
+  strict_mode = false,
+  ignore_errors = true,
+  max_line_size = 10000000,
+  filename = true
+);
+
+CREATE OR REPLACE MACRO onco_read_key_value(path) AS TABLE
+SELECT
+  filename,
+  line_no,
+  trim(CASE WHEN strpos(line, chr(9)) > 0 THEN split_part(line, chr(9), 1) ELSE split_part(line, '=', 1) END) AS key,
+  trim(CASE WHEN strpos(line, chr(9)) > 0 THEN split_part(line, chr(9), 2) ELSE regexp_extract(line, '^[^=]+=(.*)$', 1) END) AS value
+FROM onco_read_text_lines(path)
+WHERE line NOT LIKE '#%' AND line NOT LIKE '<%' AND (strpos(line, chr(9)) > 0 OR strpos(line, '=') > 0);
+
+CREATE OR REPLACE MACRO onco_read_nextflow_trace(path) AS TABLE
+SELECT *
+FROM read_csv(
+  path,
+  delim = '\t',
+  header = true,
+  filename = true,
+  all_varchar = true,
+  union_by_name = true,
+  strict_mode = false,
+  null_padding = true,
+  ignore_errors = true
+);
+
+CREATE OR REPLACE MACRO onco_read_conf_assignments(path) AS TABLE
+SELECT
+  filename,
+  line_no,
+  trim(split_part(line, '=', 1)) AS key,
+  trim(regexp_replace(regexp_extract(line, '^[^=]+=(.*)$', 1), '#.*$', '')) AS value
+FROM onco_read_text_lines(path)
+WHERE regexp_matches(line, '^[A-Za-z0-9_.-]+[[:space:]]*=');
+```
+
+## S3 inventory without downloading objects
+
+`glob()` lists the public S3 prefix through DuckDB/httpfs. This is key
+inventory only; it does not materialize the BAM/VCF/table/report payloads.
+
+```{sql s3-inventory, collapse=FALSE, comment=""}
+CREATE OR REPLACE TEMP TABLE onco_s3_files AS
+SELECT
+  file AS s3_uri,
+  regexp_replace(file, '^s3://nf-core-awsmegatests/oncoanalyser/results-[^/]+/', '') AS rel_path,
+  onco_file_suffix(file) AS suffix,
+  onco_file_kind(file) AS kind
+FROM glob(onco_root() || '**/*');
+
+SELECT suffix, kind, count(*) AS files
+FROM onco_s3_files
+GROUP BY suffix, kind
+ORDER BY files DESC, suffix;
+```
+
+Large BAMs are visible in the inventory but are not read wholesale here:
+
+```{sql bam-inventory, collapse=FALSE, comment=""}
+SELECT rel_path, suffix
+FROM onco_s3_files
+WHERE kind = 'alignment_bam'
+ORDER BY rel_path;
+```
+
+## Table-like outputs
+
+`cider` in names such as `*.cider.vdj.tsv.gz` is the Oncoanalyser/CIDER tool
+prefix, not a separate file format. The files themselves are ordinary BAM,
+TSV/TSV.GZ, and gzipped text outputs for immune-receptor / V(D)J calls and
+supporting alignments/layouts.
+
+```{sql table-like-examples, collapse=FALSE, comment=""}
+SELECT 'tsv' AS reader, count(*) AS rows
+FROM onco_read_tsv(onco_rel('HCC1395/bamtools/HCC1395.normal_dna/HCC1395.normal_dna.bam_metric.summary.tsv'))
+UNION ALL
+SELECT 'tsv.gz' AS reader, count(*) AS rows
+FROM onco_read_tsv(onco_rel('HCC1395/cider/HCC1395.tumor_rna.cider.alignment_match.tsv.gz'))
+UNION ALL
+SELECT 'csv' AS reader, count(*) AS rows
+FROM onco_read_csv(onco_rel('HCC1395/isofox/HCC1395.tumor_rna.isf.summary.csv'))
+UNION ALL
+SELECT 'pcf' AS reader, count(*) AS rows
+FROM onco_read_tsv(onco_rel('HCC1395/amber/HCC1395.tumor_dna.amber.baf.pcf'))
+UNION ALL
+SELECT 'circos' AS reader, count(*) AS rows
+FROM onco_read_tsv(onco_rel('HCC1395/purple/circos/HCC1395.tumor_dna.link.circos'));
+```
+
+Key/value QC files are line-oriented text:
+
+```{sql qc-key-value, collapse=FALSE, comment=""}
+SELECT regexp_extract(filename, '[^/]+$', 0) AS file, key, value
+FROM onco_read_key_value(onco_rel('HCC1395/purple/HCC1395.tumor_dna.purple.qc'))
+ORDER BY line_no
+LIMIT 10;
+```
+
+Picard-style metrics can be landed as text first; table splitting is a
+second-stage, tool-specific view.
+
+```{sql metrics-text, collapse=FALSE, comment=""}
+SELECT regexp_extract(filename, '[^/]+$', 0) AS file, line_no, left(line, 100) AS line
+FROM onco_read_text_lines(onco_rel('HCC1395/alignments/rna/HCC1395.tumor_rna.md.metrics'))
+ORDER BY line_no
+LIMIT 8;
+```
+
+`*.cider.layout.gz` files are CIDER diagnostic layouts: compressed plain-text
+read pileups around CIDER immune-receptor calls. They interleave call headers
+such as `type: IGHV`, ANSI-coloured nucleotide/quality strings, and `read:`
+alignment lines. Treat them as provenance/debug text; use `*.cider.vdj.tsv.gz`
+for structured V(D)J calls.
+
+They are directly readable from S3 too:
+
+```{sql layout-gzip, collapse=FALSE, comment=""}
+SELECT regexp_extract(filename, '[^/]+$', 0) AS file, line_no, left(line, 120) AS line
+FROM onco_read_gzip_lines(onco_rel('HCC1395/cider/HCC1395.tumor_dna.cider.layout.gz'))
+ORDER BY line_no
+LIMIT 5;
+```
+
+## JSON outputs
+
+```{sql json-example, collapse=FALSE, comment=""}
+SELECT regexp_extract(filename, '[^/]+$', 0) AS file, count(*) AS rows
+FROM onco_read_json(onco_rel('pipeline_info/params_2026-05-11_23-24-56.json'))
+GROUP BY filename;
+```
+
+## HTS outputs through DuckHTS
+
+VCF and BAM examples use the `s3://` URLs directly. `LIMIT` is enough for a
+BAM row preview; do not turn this into an unbounded scan on the 80+ GB BAMs
+unless you actually want to stream them.
+
+```{sql vcf-peek, collapse=FALSE, comment=""}
+SELECT CHROM, POS, REF, ALT, FILTER
+FROM onco_read_vcf(onco_rel('HCC1395/sage/somatic/HCC1395.tumor_dna.sage.somatic.vcf.gz'))
+LIMIT 5;
+```
+
+```{sql bam-peek, collapse=FALSE, comment=""}
+SELECT qname, flag, rname, pos, mapq, cigar
+FROM onco_read_bam(onco_rel('HCC1395/alignments/dna/HCC1395.normal_dna.redux.bam'))
+LIMIT 5;
+```
+
+For metadata, use header or region/index-aware peeks instead of whole-file
+reads:
+
+```{sql large-bam-header, collapse=FALSE, comment=""}
+SELECT record_type, id, length, key_values
+FROM read_hts_header(onco_rel('HCC1395/alignments/dna/HCC1395.normal_dna.redux.bam'))
+WHERE record_type IN ('HD', 'SQ')
+LIMIT 6;
+```
+
+## Reports, images, and other blobs
+
+```{sql blob-example, collapse=FALSE, comment=""}
+SELECT
+  onco_file_suffix(filename) AS suffix,
+  size,
+  md5,
+  magic_hex
+FROM onco_read_blob(onco_rel('HCC1395/linx/somatic_plots/all/HCC1395.tumor_dna.chrX.071.png'));
+```
+
+HTML reports can be read as text when metadata is enough:
+
+```{sql html-title, collapse=FALSE, comment=""}
+SELECT
+  regexp_extract(filename, '[^/]+$', 0) AS file,
+  regexp_extract(content, '<title>([^<]+)</title>', 1) AS title
+FROM read_text(onco_rel('pipeline_info/execution_report_2026-05-11_23-23-53.html'));
+```
+
+## Nextflow provenance and config-like files
+
+```{sql nextflow-trace, collapse=FALSE, comment=""}
+SELECT
+  regexp_extract(filename, '[^/]+$', 0) AS trace_file,
+  count(*) AS tasks,
+  count(*) FILTER (WHERE status = 'COMPLETED') AS completed,
+  count(*) FILTER (WHERE status = 'CACHED') AS cached
+FROM onco_read_nextflow_trace(onco_rel('pipeline_info/execution_trace_2026-05-11_23-23-53.txt'))
+GROUP BY filename;
+```
+
+```{sql text-log-lines, collapse=FALSE, comment=""}
+SELECT onco_file_suffix(filename) AS suffix, count(*) AS lines
+FROM onco_read_text_lines([
+  onco_rel('HCC1395/logs/HCC1395.teal_pipeline.command.log'),
+  onco_rel('HCC1395/logs/HCC1395.teal_pipeline.command.out'),
+  onco_rel('HCC1395/logs/HCC1395.teal_pipeline.command.err'),
+  onco_rel('HCC1395/logs/HCC1395.teal_pipeline.command.run'),
+  onco_rel('HCC1395/logs/HCC1395.teal_pipeline.command.sh')
+])
+GROUP BY suffix
+ORDER BY lines DESC;
+```
+
+```{sql conf-assignments, collapse=FALSE, comment=""}
+SELECT regexp_extract(filename, '[^/]+$', 0) AS file, key, value
+FROM onco_read_conf_assignments(onco_rel('HCC1395/purple/circos/HCC1395.tumor_dna.circos.conf'))
+ORDER BY line_no
+LIMIT 10;
+```
+
+## Coverage summary
+
+```{sql reader-summary, collapse=FALSE, comment=""}
+SELECT *
+FROM (VALUES
+  ('BAM / BAI', 'read_bam(), read_hts_header()', 'remote S3 works; avoid whole-file scans on huge BAMs unless intended'),
+  ('VCF / VCF.GZ / TBI', 'read_bcf()', 'remote S3 works through DuckHTS/htslib'),
+  ('TSV / TSV.GZ / CSV', 'read_csv()', 'remote S3 works through DuckDB/httpfs'),
+  ('JSON', 'read_json_auto()', 'remote S3 works; ORANGE may need larger maximum_object_size'),
+  ('PCF / QC / VERSION', 'read_csv() or key/value macro', 'covered by simple SQL macros'),
+  ('CIRCOS / CONF', 'read_csv() or text assignment macro', 'covered by simple SQL macros'),
+  ('LOG / OUT / ERR / RUN / SH', 'read_text() line macro', 'covered as provenance text'),
+  ('LAYOUT.GZ', 'read_csv(... compression=gzip) line macro', 'covered as gzip text'),
+  ('PNG / PDF / HTML', 'read_blob(); read_text() for HTML', 'covered as artefact blobs plus metadata')
+) AS t(output_family, reader, status);
+```
+
+Conclusion: no new C reader is needed for the initial Oncoanalyser loader. A
+small, organized SQL macro pack on top of DuckHTS plus DuckDB/httpfs covers the
+observed output families directly on S3.
