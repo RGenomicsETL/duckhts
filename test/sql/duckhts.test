@@ -1430,6 +1430,22 @@ SELECT printf('%.3f', seq_gc_content('ACGTNN')), seq_gc_content('NNNN') IS NULL;
 ----
 0.500	true
 
+# --- nt16 overload: LIST(UTINYINT) of htslib nt16 codes, bit-identical to text ---
+# codes: A=1 C=2 G=4 T=8 N=15
+query TTT
+SELECT printf('%.3f', seq_gc_content([1, 2, 4, 8, 15, 15]::UTINYINT[])),
+       seq_gc_content([15, 15, 15, 15]::UTINYINT[]) IS NULL,
+       seq_gc_content([1, 2, 4, 8, 15, 15]::UTINYINT[]) = seq_gc_content('ACGTNN');
+----
+0.500	true	true
+
+# --- nt16 overload matches text for a GC-skewed sequence and handles empty as NULL ---
+query TT
+SELECT seq_gc_content([2, 4, 2, 4, 1]::UTINYINT[]) = seq_gc_content('CGCGA'),
+       seq_gc_content([]::UTINYINT[]) IS NULL;
+----
+true	true
+
 # --- SIMD backend diagnostics are backend-agnostic and GC accepts lower-case bases ---
 query T
 SELECT backend FROM duckhts_simd_set_backend('scalar');

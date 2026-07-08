@@ -143,7 +143,7 @@ This section is generated from `functions.yaml`.
 | `seq_hash_2bit` | scalar | UBIGINT |  | Encode a short DNA sequence as a 2-bit unsigned integer hash. |
 | `seq_encode_4bit` | scalar | UTINYINT[] |  | Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N. |
 | `seq_decode_4bit` | scalar | VARCHAR |  | Decode a list of 4-bit IUPAC DNA base codes back into a sequence string. |
-| `seq_gc_content` | scalar | DOUBLE |  | Compute GC fraction for a DNA sequence as a value between 0 and 1. |
+| `seq_gc_content` | scalar | DOUBLE |  | Compute GC fraction for a DNA sequence as a value between 0 and 1. Overloaded: accepts either a VARCHAR text sequence or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16'); the nt16 overload classifies codes directly and is bit-identical to the text path, so BAM pipelines can compute GC without decoding sequences back to text. |
 | `seq_kmers` | table | table |  | Expand a sequence into positional k-mers with optional canonicalization. |
 
 ### SAM Flag UDFs
