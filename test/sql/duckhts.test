@@ -1446,6 +1446,16 @@ SELECT seq_gc_content([2, 4, 2, 4, 1]::UTINYINT[]) = seq_gc_content('CGCGA'),
 ----
 true	true
 
+# --- nt16 overload matches the text path's alphabet: any non-ACGTN code
+#     (here M=3, and '='=0) is invalid and yields NULL, exactly as text does ---
+query TTTT
+SELECT seq_gc_content([1, 3]::UTINYINT[]) IS NULL,          -- A,M -> NULL (matches 'AM')
+       seq_gc_content('AM') IS NULL,
+       seq_gc_content([1, 2, 4, 8, 3]::UTINYINT[]) IS NULL, -- ACGT,M -> NULL
+       seq_gc_content([0]::UTINYINT[]) IS NULL;             -- '=' -> NULL
+----
+true	true	true	true
+
 # --- SIMD backend diagnostics are backend-agnostic and GC accepts lower-case bases ---
 query T
 SELECT backend FROM duckhts_simd_set_backend('scalar');

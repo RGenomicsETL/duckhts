@@ -64,6 +64,15 @@ test_seq_ops <- function() {
   expect_true(abs(gc_nt16$gc[1] - 0.5) < 1e-6)
   expect_true(gc_nt16$all_n[1])
   expect_true(gc_nt16$matches_text[1])
+  # nt16 tolerates only A/C/G/T/N, matching the text path: any IUPAC ambiguity
+  # code (M=3) or '='=0 is invalid and yields NULL, as decoded text would
+  gc_iupac <- DBI::dbGetQuery(con, paste(
+    "SELECT seq_gc_content([1, 3]::UTINYINT[]) IS NULL AS a_m_null,",
+    "seq_gc_content('AM') IS NULL AS text_am_null,",
+    "seq_gc_content([0]::UTINYINT[]) IS NULL AS eq_null"))
+  expect_true(gc_iupac$a_m_null[1])
+  expect_true(gc_iupac$text_am_null[1])
+  expect_true(gc_iupac$eq_null[1])
   simd <- DBI::dbGetQuery(con,
     "SELECT duckhts_simd_backend() AS selected, duckhts_simd_requested_backend() AS requested, duckhts_simd_backend_available('scalar') AS has_scalar")
   expect_true(nzchar(simd$selected[1]))

@@ -511,8 +511,19 @@ static void seq_gc_content_scalar(duckdb_function_info info, duckdb_data_chunk i
    seq_gc_content over the decoded text of the same read. */
 static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     (void)info;
-    static const uint8_t nt16_called[16] = {0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0};
-    static const uint8_t nt16_gc[16]     = {0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    /* nt16 code (0..15) -> class, matching the VARCHAR path's alphabet exactly:
+       the text kernel counts A/C/G/T, ignores N, and marks ANY other byte
+       invalid (making seq_gc_content return NULL). So only A/C/G/T/N are
+       tolerated here; `=` (code 0) and the IUPAC ambiguity codes are invalid.
+         0 = invalid (=, M, R, S, V, W, Y, H, K, D, B)
+         1 = N        (valid, not called)
+         2 = A or T   (called)
+         3 = C or G   (called + gc) */
+    static const uint8_t nt16_class[16] = {
+        /* = */ 0, /* A */ 2, /* C */ 3, /* M */ 0,
+        /* G */ 3, /* R */ 0, /* S */ 0, /* V */ 0,
+        /* T */ 2, /* W */ 0, /* Y */ 0, /* H */ 0,
+        /* K */ 0, /* D */ 0, /* B */ 0, /* N */ 1};
 
     duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(seq_vec);
@@ -543,12 +554,15 @@ static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_ch
                 break;
             }
             uint8_t code = child_data[ci];
-            if (code > 15) {
+            uint8_t klass = (code < 16) ? nt16_class[code] : 0;
+            if (klass == 0) { /* non-ACGTN: NULL, like the text default case */
                 invalid = 1;
                 break;
             }
-            called += nt16_called[code];
-            gc += nt16_gc[code];
+            if (klass >= 2) {
+                called++;
+                if (klass == 3) gc++;
+            }
         }
 
         if (invalid || called == 0) {
