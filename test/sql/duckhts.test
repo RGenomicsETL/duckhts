@@ -1399,6 +1399,15 @@ SELECT seq_hash_2bit('ACNT') IS NULL;
 ----
 1
 
+# --- seq_hash_2bit nt16 overload (UTINYINT[]) is bit-identical to the text path;
+#     any non-ACGT code (N=15) yields NULL, exactly as the text path ---
+query III
+SELECT seq_hash_2bit([1, 2, 4, 8]::UTINYINT[]),
+       (seq_hash_2bit([1, 2, 4, 8]::UTINYINT[]) = seq_hash_2bit('ACGT'))::INTEGER,
+       (seq_hash_2bit([1, 2, 15, 8]::UTINYINT[]) IS NULL)::INTEGER;
+----
+27	1	1
+
 # --- 4-bit encoding supports IUPAC DNA codes including N ---
 query T
 SELECT string_agg(CAST(code AS VARCHAR), ',' ORDER BY ord)
@@ -1804,6 +1813,31 @@ SELECT
   CAST(cigar_has_op('90M5D', 'I') AS VARCHAR);
 ----
 true	true	true	5	5	100	90	95	false
+
+# --- binary CIGAR overload (UINTEGER[], oplen<<4|op; M=0 S=4 D=2 I=1) is
+#     bit-identical to the text path. '5S90M5S' = [84, 1440, 84]; '90M5D' = [1440, 82] ---
+query TTTIIIIIT
+SELECT
+  CAST(cigar_has_soft_clip([84, 1440, 84]::UINTEGER[]) AS VARCHAR),
+  CAST(cigar_has_hard_clip([85, 1520]::UINTEGER[]) AS VARCHAR),
+  CAST(cigar_has_op([84, 1440, 84]::UINTEGER[], 'S') AS VARCHAR),
+  cigar_left_soft_clip([84, 1440, 84]::UINTEGER[]),
+  cigar_right_soft_clip([84, 1440, 84]::UINTEGER[]),
+  cigar_query_length([84, 1440, 81]::UINTEGER[]),
+  cigar_aligned_query_length([84, 1440, 81]::UINTEGER[]),
+  cigar_reference_length([1440, 82]::UINTEGER[]),
+  CAST(cigar_has_op([1440, 82]::UINTEGER[], 'I') AS VARCHAR);
+----
+true	true	true	5	5	100	90	95	false
+
+# --- empty binary CIGAR is NULL (like text '*'); a NULL child element makes the
+#     whole row NULL (the packed value under a NULL is unspecified) ---
+query III
+SELECT (cigar_query_length([]::UINTEGER[]) IS NULL)::INTEGER,
+       (cigar_reference_length([1440, 82]::UINTEGER[]) = cigar_reference_length('90M5D'))::INTEGER,
+       (cigar_query_length([1600, NULL, 20]::UINTEGER[]) IS NULL)::INTEGER;
+----
+1	1	1
 
 # --- CIGAR utility helpers on BAM CIGAR values ---
 query TTT

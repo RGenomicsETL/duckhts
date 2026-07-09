@@ -258,6 +258,132 @@ static int cigar_has_operator_text(const char *cigar, idx_t cigar_len, char op) 
     return 0;
 }
 
+/* Binary BAM CIGAR: each UINTEGER is (oplen << 4) | op, with htslib BAM_CIGAR
+   op codes M=0 I=1 D=2 N=3 S=4 H=5 P=6 ==7 X=8 B=9 (as read_bam(
+   cigar_representation := 'binary') emits). Fill metrics exactly as
+   parse_cigar_metrics does for the text form; return 0 (invalid -> NULL) for an
+   empty list or a bad op/zero length, matching '*'/empty/malformed text. */
+static int binary_cigar_metrics(const uint32_t *ops, idx_t n, cigar_metrics_t *metrics) {
+    char first_op = '\0';
+    char last_op = '\0';
+    int64_t first_len = 0;
+
+    memset(metrics, 0, sizeof(*metrics));
+    if (!ops || n == 0) {
+        return 0;
+    }
+    for (idx_t i = 0; i < n; i++) {
+        uint32_t c = ops[i];
+        int op = (int)(c & 0xFu);
+        int64_t oplen = (int64_t)(c >> 4);
+        char opc;
+
+        if (oplen <= 0) {
+            return 0;
+        }
+        switch (op) {
+        case 0: opc = 'M'; break;   /* M */
+        case 7: opc = '='; break;   /* = */
+        case 8: opc = 'X'; break;   /* X */
+        case 1: opc = 'I'; break;   /* I */
+        case 4: opc = 'S'; break;   /* S */
+        case 5: opc = 'H'; break;   /* H */
+        case 2: opc = 'D'; break;   /* D */
+        case 3: opc = 'N'; break;   /* N */
+        case 6: opc = 'P'; break;   /* P */
+        default: return 0;          /* B (9) or unknown: text path rejects too */
+        }
+        switch (opc) {
+        case 'M':
+        case '=':
+        case 'X':
+            metrics->query_length += oplen;
+            metrics->aligned_query_length += oplen;
+            metrics->reference_length += oplen;
+            break;
+        case 'I':
+            metrics->query_length += oplen;
+            break;
+        case 'S':
+            metrics->query_length += oplen;
+            metrics->has_soft_clip = 1;
+            break;
+        case 'H':
+            metrics->has_hard_clip = 1;
+            break;
+        case 'D':
+        case 'N':
+            metrics->reference_length += oplen;
+            break;
+        case 'P':
+        default:
+            break;
+        }
+        if (i == 0) {
+            first_op = opc;
+            first_len = oplen;
+        }
+        last_op = opc;
+    }
+    if (first_op == 'S') {
+        metrics->left_soft_clip = first_len;
+    }
+    if (last_op == 'S') {
+        /* right soft clip length = oplen of the last element (it is S) */
+        metrics->right_soft_clip = (int64_t)(ops[n - 1] >> 4);
+    }
+    metrics->valid = 1;
+    return 1;
+}
+
+/* True if every element in [offset, offset+length) of a list child vector is
+   non-NULL. A NULL child element means the packed value is unspecified, so the
+   binary-CIGAR paths treat such a row as invalid (-> NULL), like the nt16
+   overloads do. `validity` NULL means the child has no NULLs (all valid). */
+static int list_child_range_valid(uint64_t *validity, idx_t offset, idx_t length) {
+    if (!validity) {
+        return 1;
+    }
+    for (idx_t i = 0; i < length; i++) {
+        if (!duckdb_validity_row_is_valid(validity, offset + i)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Binary-CIGAR analogue of cigar_has_operator_text: return 1 if op present,
+   0 if absent (incl. empty), -1 on malformed (zero-length element). `op` is a
+   validated CIGAR op char. */
+static int binary_cigar_has_op(const uint32_t *ops, idx_t n, char op) {
+    int want;
+
+    switch (op) {
+    case 'M': want = 0; break;
+    case 'I': want = 1; break;
+    case 'D': want = 2; break;
+    case 'N': want = 3; break;
+    case 'S': want = 4; break;
+    case 'H': want = 5; break;
+    case 'P': want = 6; break;
+    case '=': want = 7; break;
+    case 'X': want = 8; break;
+    default:  return -1;
+    }
+    if (!ops || n == 0) {
+        return 0;
+    }
+    for (idx_t i = 0; i < n; i++) {
+        if ((int64_t)(ops[i] >> 4) <= 0) {
+            return -1;
+        }
+        if ((int)(ops[i] & 0xFu) == want) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void seq_revcomp_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     (void)info;
     duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
@@ -499,6 +625,55 @@ static void seq_hash_2bit_scalar(duckdb_function_info info, duckdb_data_chunk in
             continue;
         }
 
+        out_data[row] = h;
+    }
+}
+
+/* nt16 (UTINYINT[]) overload of seq_hash_2bit. Packs A/C/G/T -> 2 bits/base
+   into a uint64, like the text path; sequences longer than 32 bases or with a
+   non-ACGT (N/IUPAC/=) code return NULL. nt16 code -> 2-bit: A=1->0, C=2->1,
+   G=4->2, T=8->3; every other code is -1 (invalid), matching dna_to_2bit. */
+static void seq_hash_2bit_nt16_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    static const int8_t nt16_2bit[16] = {-1, 0, 1, -1, 2, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1};
+    duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(seq_vec);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(seq_vec);
+    uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
+    uint64_t *out_data = (uint64_t *)duckdb_vector_get_data(output);
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(seq_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        duckdb_list_entry entry = list_data[row];
+        if (entry.length > 32) {
+            set_null_at(output, row);
+            continue;
+        }
+        uint64_t h = 0;
+        int valid = 1;
+        for (idx_t i = 0; i < entry.length; i++) {
+            idx_t ci = entry.offset + i;
+            if (child_validity && !duckdb_validity_row_is_valid(child_validity, ci)) {
+                valid = 0;
+                break;
+            }
+            uint8_t c = child_data[ci];
+            int code = (c < 16) ? nt16_2bit[c] : -1;
+            if (code < 0) {
+                valid = 0;
+                break;
+            }
+            h = (h << 2) | (uint64_t)code;
+        }
+        if (!valid) {
+            set_null_at(output, row);
+            continue;
+        }
         out_data[row] = h;
     }
 }
@@ -918,6 +1093,94 @@ static void cigar_has_op_scalar(duckdb_function_info info, duckdb_data_chunk inp
     }
 }
 
+/* Binary (UINTEGER[]) overload of cigar_metric_scalar. Same metrics, computed
+   from the packed BAM CIGAR list read_bam(cigar_representation := 'binary')
+   emits; bit-identical to the text path for the same read. */
+static void cigar_metric_binary_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    uintptr_t metric_id = (uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
+    uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    cigar_metrics_t metrics;
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        duckdb_list_entry entry = list_data[row];
+        if (!list_child_range_valid(child_validity, entry.offset, entry.length) ||
+            !binary_cigar_metrics(child_data + entry.offset, entry.length, &metrics)) {
+            set_null_at(output, row);
+            continue;
+        }
+        if (metric_id == CIGAR_METRIC_HAS_SOFT_CLIP || metric_id == CIGAR_METRIC_HAS_HARD_CLIP) {
+            bool *out_data = (bool *)duckdb_vector_get_data(output);
+            out_data[row] = (metric_id == CIGAR_METRIC_HAS_SOFT_CLIP) ? (metrics.has_soft_clip != 0)
+                                                                       : (metrics.has_hard_clip != 0);
+        } else {
+            int64_t *out_data = (int64_t *)duckdb_vector_get_data(output);
+            switch (metric_id) {
+            case CIGAR_METRIC_LEFT_SOFT_CLIP:      out_data[row] = metrics.left_soft_clip; break;
+            case CIGAR_METRIC_RIGHT_SOFT_CLIP:     out_data[row] = metrics.right_soft_clip; break;
+            case CIGAR_METRIC_QUERY_LENGTH:        out_data[row] = metrics.query_length; break;
+            case CIGAR_METRIC_ALIGNED_QUERY_LENGTH:out_data[row] = metrics.aligned_query_length; break;
+            case CIGAR_METRIC_REFERENCE_LENGTH:    out_data[row] = metrics.reference_length; break;
+            default: set_null_at(output, row); break;
+            }
+        }
+    }
+}
+
+/* Binary (UINTEGER[] cigar, VARCHAR op) overload of cigar_has_op_scalar. */
+static void cigar_has_op_binary_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector op_vec = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
+    uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
+    bool *out_data = (bool *)duckdb_vector_get_data(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(op_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        idx_t op_len = 0;
+        const char *op_text = get_string_at(op_vec, row, &op_len);
+        if (op_len != 1) {
+            set_null_at(output, row);
+            continue;
+        }
+        char op = (char)toupper((unsigned char)op_text[0]);
+        switch (op) {
+        case 'M': case 'I': case 'D': case 'N':
+        case 'S': case 'H': case 'P': case '=': case 'X':
+            break;
+        default:
+            set_null_at(output, row);
+            continue;
+        }
+        duckdb_list_entry entry = list_data[row];
+        if (!list_child_range_valid(child_validity, entry.offset, entry.length)) {
+            set_null_at(output, row);
+            continue;
+        }
+        int has_op = binary_cigar_has_op(child_data + entry.offset, entry.length, op);
+        if (has_op < 0) {
+            set_null_at(output, row);
+            continue;
+        }
+        out_data[row] = (has_op != 0);
+    }
+}
+
 typedef struct {
     char *sequence;
     idx_t seq_len;
@@ -1169,20 +1432,37 @@ static void register_seq_canonical_function(duckdb_connection connection) {
 }
 
 static void register_seq_hash_2bit_function(duckdb_connection connection) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "seq_hash_2bit");
-
+    /* Overload set: VARCHAR and LIST(UTINYINT) (BAM nt16 codes). */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+    duckdb_logical_type list_type = duckdb_create_list_type(utinyint_type);
     duckdb_logical_type ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, ubigint_type);
-    duckdb_scalar_function_set_function(fn, seq_hash_2bit_scalar);
 
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set("seq_hash_2bit");
 
+    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_txt, "seq_hash_2bit");
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_txt, ubigint_type);
+    duckdb_scalar_function_set_function(fn_txt, seq_hash_2bit_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_txt);
+
+    duckdb_scalar_function fn_nt16 = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_nt16, "seq_hash_2bit");
+    duckdb_scalar_function_add_parameter(fn_nt16, list_type);
+    duckdb_scalar_function_set_return_type(fn_nt16, ubigint_type);
+    duckdb_scalar_function_set_function(fn_nt16, seq_hash_2bit_nt16_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_nt16);
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function(&fn_txt);
+    duckdb_destroy_scalar_function(&fn_nt16);
+    duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&utinyint_type);
+    duckdb_destroy_logical_type(&list_type);
     duckdb_destroy_logical_type(&ubigint_type);
-    duckdb_destroy_scalar_function(&fn);
 }
 
 static void register_seq_encode_4bit_function(duckdb_connection connection) {
@@ -1345,39 +1625,77 @@ static void register_cigar_metric_function(duckdb_connection connection,
                                            const char *name,
                                            uintptr_t metric_id,
                                            duckdb_type return_type_id) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, name);
-
+    /* Overload set: VARCHAR (text CIGAR) and UINTEGER[] (binary CIGAR as
+       read_bam(cigar_representation := 'binary') emits). Both carry the same
+       metric_id in extra_info; results are bit-identical for the same read. */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+    duckdb_logical_type list_type = duckdb_create_list_type(uinteger_type);
     duckdb_logical_type return_type = duckdb_create_logical_type(return_type_id);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, return_type);
-    duckdb_scalar_function_set_function(fn, cigar_metric_scalar);
-    duckdb_scalar_function_set_extra_info(fn, (void *)metric_id, NULL);
 
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set(name);
 
+    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_txt, name);
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_txt, return_type);
+    duckdb_scalar_function_set_function(fn_txt, cigar_metric_scalar);
+    duckdb_scalar_function_set_extra_info(fn_txt, (void *)metric_id, NULL);
+    duckdb_add_scalar_function_to_set(set, fn_txt);
+
+    duckdb_scalar_function fn_bin = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_bin, name);
+    duckdb_scalar_function_add_parameter(fn_bin, list_type);
+    duckdb_scalar_function_set_return_type(fn_bin, return_type);
+    duckdb_scalar_function_set_function(fn_bin, cigar_metric_binary_scalar);
+    duckdb_scalar_function_set_extra_info(fn_bin, (void *)metric_id, NULL);
+    duckdb_add_scalar_function_to_set(set, fn_bin);
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function(&fn_txt);
+    duckdb_destroy_scalar_function(&fn_bin);
+    duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&uinteger_type);
+    duckdb_destroy_logical_type(&list_type);
     duckdb_destroy_logical_type(&return_type);
-    duckdb_destroy_scalar_function(&fn);
 }
 
 static void register_cigar_has_op_function(duckdb_connection connection) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "cigar_has_op");
-
+    /* Overload set: (VARCHAR cigar, VARCHAR op) and (UINTEGER[] cigar, VARCHAR op). */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+    duckdb_logical_type list_type = duckdb_create_list_type(uinteger_type);
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_function(fn, cigar_has_op_scalar);
 
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set("cigar_has_op");
 
+    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_txt, "cigar_has_op");
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_txt, bool_type);
+    duckdb_scalar_function_set_function(fn_txt, cigar_has_op_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_txt);
+
+    duckdb_scalar_function fn_bin = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_bin, "cigar_has_op");
+    duckdb_scalar_function_add_parameter(fn_bin, list_type);
+    duckdb_scalar_function_add_parameter(fn_bin, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_bin, bool_type);
+    duckdb_scalar_function_set_function(fn_bin, cigar_has_op_binary_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_bin);
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function(&fn_txt);
+    duckdb_destroy_scalar_function(&fn_bin);
+    duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&uinteger_type);
+    duckdb_destroy_logical_type(&list_type);
     duckdb_destroy_logical_type(&bool_type);
-    duckdb_destroy_scalar_function(&fn);
 }
 
 static void register_seq_kmers_function(duckdb_connection connection) {
