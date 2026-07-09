@@ -529,6 +529,11 @@ static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_ch
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(seq_vec);
     duckdb_vector child_vec = duckdb_list_vector_get_child(seq_vec);
     uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
+    /* Fetch the child validity mask once: it is loop-invariant, and BAM SEQ has
+       no NULL bases, so the common case is a NULL mask and the per-base branch
+       below folds away — instead of calling duckdb_vector_get_validity() per
+       base as row_is_valid() would. */
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
     double *out_data = (double *)duckdb_vector_get_data(output);
     idx_t row_count = duckdb_data_chunk_get_size(input);
 
@@ -549,7 +554,7 @@ static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_ch
         int invalid = 0;
         for (idx_t i = 0; i < entry.length; i++) {
             idx_t ci = entry.offset + i;
-            if (!row_is_valid(child_vec, ci)) {
+            if (child_validity && !duckdb_validity_row_is_valid(child_validity, ci)) {
                 invalid = 1;
                 break;
             }
