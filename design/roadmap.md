@@ -29,6 +29,14 @@ Two guardrails, both from `AGENTS.md` discipline:
 | Ensembl VEP | `/root/ensembl-vep` | `release/115` (SO + HGVS oracle); duckvep-c kernel grounded in 116 — see reconciliation doc for the pin decision |
 | fastVEP (contrast, NOT a source) | `/root/fastVEP`, github.com/Huang-lab/fastVEP | `785922e` (v0.2.0) |
 | duckvep-c (consequence engine to fold in) | `/root/duckvep-c` | `9f922c8` |
+| Ensembl schema (Model A shape) | github.com/Ensembl/ensembl `sql/table.sql` (core); `/root/ensembl-variation/sql/table.sql` (variation) | pin to a release tag |
+| GENCODE (MANE tags, GRCh37 via lift) | v46lift37 (basic, MANE-tagged); see `/root/bioconnect-sprint-py/docs/data_versions.md` | pin per import |
+| ACMG SQL engine (M8 reference) | `/root/bioconnect-acmg/manifests/*.sql` | — |
+
+**Assemblies & species (M6/M8):** GRCh38 **and** GRCh37 are first-class — GRCh37/hg19
+is clinically load-bearing (Ensembl archive DB / VEP `--grch37` / GENCODE lift37,
+FASTA `/root/GRCh37/human_g1k_v37.fasta`). Model A import is assembly-parameterized and
+species-agnostic (the kernel reads `tx_flags`, never a species biotype string).
 
 ## Primitive verdicts (reconciled)
 
@@ -122,6 +130,22 @@ Risk: transcript-model preparation (Model A import) — the pivot.
 Oracle: VEP `release/115` (SO/HGVS) + ClinVar `CLNHGVS`; bcftools 1.23 (BCSQ subset);
 brute-force genetic-code property tests for the kernel.
 
+### M8 — Clinical SQL layer: configurable ACMG/AMP engine
+Sits on M6 (consequence) + supplementary-annotation Parquet/DuckLake joins
+(gnomAD / dbNSFP-REVEL / SpliceAI / ClinVar). The classification is *already pure
+SQL* — a direct validation of the SQL-composition thesis. See
+`design/duckvep_reconciliation.md` ("clinical layer") and the reference engine
+`/root/bioconnect-acmg/manifests/{00_spec,01_acmg_rules,02_combine}.sql`.
+Rules as one SQL kernel over an `annotations_spec` relation; **configurability is
+data rows** (per-gene/VCEP thresholds, exception lists, gene-disease validity caps);
+Tavtigian-2020 signed points; single calibrated predictor per axis (REVEL, SpliceAI);
+CNV/SV are a separate kernel (Riggs 2020). Requires GRCh37 support (clinically
+load-bearing) end to end.
+Risk: supplementary-annotation ingestion + calibrated-threshold provenance, not the
+SQL rules.
+Oracle: ClinVar 2-star+ assertions; ClinGen VCEP-curated variants; calibration
+sources pinned in M1 (Pejaver 2022 REVEL, Walker 2023 SpliceAI).
+
 ### M7 — minibwa `seq_align` (GATED / optional)
 Only if M1's portability spike promotes; never a dependency, never delays M2–M6.
 Vendor lh3 minibwa; fold ksw2 banded Smith-Waterman as a new SIMD kernel family
@@ -138,5 +162,8 @@ Oracle: bwa / minimap2 SAM + brute-force SW property tests.
 M1 contracts ┼─ per-cycle SIMD aggs (M2) ─→ QC-DNA metrics (M4)
 + oracles    ├─ mosdepth streaming (M3) ──→ duckhts_riker fused pass (M4)
              ├─ Model A import (M6 pivot) → duckvep fuzzer can reach rare classes
+             │        (schema-from-repo · GRCh38+GRCh37 · all species · MANE-from-GENCODE)
+             │                              └─→ consequence (M6) ─┐
+             │   supplementary-anno Parquet (gnomAD/REVEL/SpliceAI)┼─→ ACMG SQL layer (M8)
              └─ minibwa ksw2 spike (M1) ──→ [gated] seq_align (M7)
 ```

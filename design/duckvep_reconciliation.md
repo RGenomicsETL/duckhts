@@ -129,13 +129,74 @@ Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
    public function is incomplete until wired on Unix + Windows + R package).
 5. Public surface: one `duckhts_csq(...)` / annotate table function reusing DuckHTS
    `read_gtf` / `fasta_nuc` / cgranges / VariantKey.
-6. Land the **Model A import** (the pivot) as a first-class DuckHTS surface:
-   server-free Ensembl MySQL-dump → DuckDB SQL (`transcript_attrib ⋈ attrib_type`,
-   `translation_attrib ⋈ translation`) → flat Model A relation + `tx_flags`;
-   extract spliced CDS from FASTA and **apply seq-edits / selenocysteine / RNA-edit
-   / readthrough BEFORE translation** → `cds_seq`; emit side relations
-   (`mature_mirna`, regulatory). Only then does the fuzzer reach the rare clinical
-   classes.
+6. Land the **Model A import** (the pivot) as a first-class DuckHTS surface —
+   schema pinned from `github.com/Ensembl/ensembl` (see "Model A data provenance"
+   below), assembly-parameterized (GRCh38 + GRCh37), species-agnostic. Ensembl
+   MySQL-dump/scanner → DuckDB SQL (`transcript_attrib ⋈ attrib_type`,
+   `translation_attrib ⋈ translation`) → flat Model A relation + `tx_flags`
+   (MANE flags may come from GENCODE GTF tags instead); extract spliced CDS from
+   FASTA and **apply seq-edits / selenocysteine / RNA-edit / readthrough BEFORE
+   translation** → `cds_seq`; emit side relations (`mature_mirna`, regulatory).
+   Only then does the fuzzer reach the rare clinical classes.
+
+## Model A data provenance, schema source, species, and assemblies
+
+The Model A import is a data-engineering problem; get its *inputs* right.
+
+- **Schema from the Ensembl API repo, not a live MySQL instance.** The authoritative
+  DDL is versioned in `github.com/Ensembl/ensembl` (`sql/table.sql`, core: transcript
+  / translation / exon / exon_transcript / *_attrib / attrib_type / seq_region) and
+  `github.com/Ensembl/ensembl-variation` (`sql/table.sql`, variation; local copy at
+  `/root/ensembl-variation/sql/table.sql`). Pin the schema to a release tag and build
+  the Model A SQL against *that* file — reverse-engineering a live DB is fragile and
+  version-ambiguous. The DuckDB `mysql` scanner (or a server-free dump) supplies the
+  *rows*; the repo supplies the *shape*.
+- **All Ensembl species, by construction.** The kernel already reads `tx_flags`, never
+  a species biotype string (`duckvep_annotate_input_contract.md`), so a species is
+  just another Model A relation. Keep it that way: no per-species branches in the
+  engine, only per-species import runs.
+- **GRCh38 AND GRCh37 — GRCh37 is clinically load-bearing.** Clinical genomics still
+  runs on GRCh37/hg19. Ensembl serves GRCh37 from a separate archive DB
+  (grch37.ensembl.org); VEP has `--grch37`. Model A import must be assembly-parameterized
+  and both assemblies are first-class, not GRCh38-only. Reference FASTA for GRCh37 is
+  `human_g1k_v37.fasta` (see `/root/GRCh37/`).
+- **MANE tx_flags from GENCODE, not only Ensembl attribs.** GENCODE ships MANE-tagged
+  GTF (`tag "MANE_Select"` / `"MANE_Plus_Clinical"`); `v46lift37` carries MANE onto
+  GRCh37 (MANE ENST/NM share identical CDS by construction, so it is robust across an
+  Ensembl-release gap). This is a simpler, version-stable source for `MANE_SELECT` /
+  `MANE_PLUS_CLINICAL` than the core `transcript_attrib` join, and it works on GRCh37.
+  Reference: `/root/bioconnect-sprint-py/docs/data_versions.md` (GENCODE v46lift37,
+  `--mane_select --pick`).
+
+## The clinical layer above consequence: a configurable SQL ACMG engine
+
+The endgame is not consequence annotation alone — it is a clinical stack:
+**consequence (duckvep) → supplementary-annotation joins (gnomAD / REVEL / SpliceAI /
+ClinVar as Parquet/DuckLake) → ACMG/AMP classification.** The classification layer is
+*already pure SQL* and composes natively on DuckDB — a direct validation of the
+"everything composes in SQL" thesis. Reference implementation:
+`/root/bioconnect-acmg/manifests/{00_spec,01_acmg_rules,02_combine}.sql`.
+
+Design principles to adopt (from that engine):
+- **Rules as one SQL kernel** over an `annotations_spec` relation (annotations +
+  per-gene resolved thresholds) emitting `applied_criteria(variant_key, criterion,
+  direction, points, evidence)`; combine = signed-point sum (Tavtigian 2020:
+  Supporting/Moderate/Strong/Very-Strong = ±1/2/4/8) → band → gates.
+- **Configurability is DATA, not code.** Per-gene / VCEP threshold exceptions
+  (`ba1_maf`/`bs1_maf`/`pm2_maf`), known-pathogenic common-variant exception lists,
+  and gene-disease validity caps are *rows*, so a panel/VCEP override never touches
+  the engine. This is the "configurable SQL ACMG engine."
+- **Discipline the engine encodes** (keep these): NULL frequency → PM2 *abstains*
+  ("no data" ≠ "rare"); a *single* calibrated predictor per axis (REVEL for missense
+  PP3/BP4, SpliceAI for splicing) with ClinGen-calibrated thresholds — never a
+  consensus stack (documented bias); CNV/SV are a *separate* kernel (Riggs 2020), not
+  this one; gene-disease validity caps the strength.
+
+This becomes roadmap **M8** (clinical SQL layer), sitting on M6 (consequence) +
+supplementary-annotation Parquet joins. It is SQL-native, so most of it is manifests,
+not C — but the supplementary-annotation ingestion (dbNSFP/gnomAD/ClinVar/SpliceAI →
+Parquet, filtering-AF max-pop computation) is real prep work, and calibrated-threshold
+provenance (Pejaver 2022, Walker 2023) belongs in the M1 manifest, versioned.
 
 ## The ERRATA + manifest discipline (why a flat ERRATA.md is not enough)
 
