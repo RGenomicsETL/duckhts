@@ -336,6 +336,22 @@ static int binary_cigar_metrics(const uint32_t *ops, idx_t n, cigar_metrics_t *m
     return 1;
 }
 
+/* True if every element in [offset, offset+length) of a list child vector is
+   non-NULL. A NULL child element means the packed value is unspecified, so the
+   binary-CIGAR paths treat such a row as invalid (-> NULL), like the nt16
+   overloads do. `validity` NULL means the child has no NULLs (all valid). */
+static int list_child_range_valid(uint64_t *validity, idx_t offset, idx_t length) {
+    if (!validity) {
+        return 1;
+    }
+    for (idx_t i = 0; i < length; i++) {
+        if (!duckdb_validity_row_is_valid(validity, offset + i)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Binary-CIGAR analogue of cigar_has_operator_text: return 1 if op present,
    0 if absent (incl. empty), -1 on malformed (zero-length element). `op` is a
    validated CIGAR op char. */
@@ -1086,6 +1102,7 @@ static void cigar_metric_binary_scalar(duckdb_function_info info, duckdb_data_ch
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
     duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
     uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
     idx_t row_count = duckdb_data_chunk_get_size(input);
     cigar_metrics_t metrics;
 
@@ -1095,7 +1112,8 @@ static void cigar_metric_binary_scalar(duckdb_function_info info, duckdb_data_ch
             continue;
         }
         duckdb_list_entry entry = list_data[row];
-        if (!binary_cigar_metrics(child_data + entry.offset, entry.length, &metrics)) {
+        if (!list_child_range_valid(child_validity, entry.offset, entry.length) ||
+            !binary_cigar_metrics(child_data + entry.offset, entry.length, &metrics)) {
             set_null_at(output, row);
             continue;
         }
@@ -1125,6 +1143,7 @@ static void cigar_has_op_binary_scalar(duckdb_function_info info, duckdb_data_ch
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
     duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
     uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
     bool *out_data = (bool *)duckdb_vector_get_data(output);
     idx_t row_count = duckdb_data_chunk_get_size(input);
 
@@ -1149,6 +1168,10 @@ static void cigar_has_op_binary_scalar(duckdb_function_info info, duckdb_data_ch
             continue;
         }
         duckdb_list_entry entry = list_data[row];
+        if (!list_child_range_valid(child_validity, entry.offset, entry.length)) {
+            set_null_at(output, row);
+            continue;
+        }
         int has_op = binary_cigar_has_op(child_data + entry.offset, entry.length, op);
         if (has_op < 0) {
             set_null_at(output, row);

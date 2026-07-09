@@ -1403,10 +1403,10 @@ SELECT seq_hash_2bit('ACNT') IS NULL;
 #     any non-ACGT code (N=15) yields NULL, exactly as the text path ---
 query III
 SELECT seq_hash_2bit([1, 2, 4, 8]::UTINYINT[]),
-       seq_hash_2bit([1, 2, 4, 8]::UTINYINT[]) = seq_hash_2bit('ACGT'),
-       seq_hash_2bit([1, 2, 15, 8]::UTINYINT[]) IS NULL;
+       (seq_hash_2bit([1, 2, 4, 8]::UTINYINT[]) = seq_hash_2bit('ACGT'))::INTEGER,
+       (seq_hash_2bit([1, 2, 15, 8]::UTINYINT[]) IS NULL)::INTEGER;
 ----
-27	true	true
+27	1	1
 
 # --- 4-bit encoding supports IUPAC DNA codes including N ---
 query T
@@ -1830,12 +1830,14 @@ SELECT
 ----
 true	true	true	5	5	100	90	95	false
 
-# --- empty binary CIGAR is NULL (like text '*'); malformed (zero-length op) NULL ---
-query II
-SELECT cigar_query_length([]::UINTEGER[]) IS NULL,
-       cigar_reference_length([1440, 82]::UINTEGER[]) = cigar_reference_length('90M5D');
+# --- empty binary CIGAR is NULL (like text '*'); a NULL child element makes the
+#     whole row NULL (the packed value under a NULL is unspecified) ---
+query III
+SELECT (cigar_query_length([]::UINTEGER[]) IS NULL)::INTEGER,
+       (cigar_reference_length([1440, 82]::UINTEGER[]) = cigar_reference_length('90M5D'))::INTEGER,
+       (cigar_query_length([1600, NULL, 20]::UINTEGER[]) IS NULL)::INTEGER;
 ----
-true	true
+1	1	1
 
 # --- CIGAR utility helpers on BAM CIGAR values ---
 query TTT
