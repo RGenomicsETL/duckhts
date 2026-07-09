@@ -108,6 +108,17 @@ test_seq_ops <- function() {
   expect_true(is.data.frame(kernel_info))
   expect_true(all(c("kernel", "selected_backend", "selected_capability", "requested_backend", "scalar_fallback") %in% names(kernel_info)))
   expect_true("seq_base_counts" %in% kernel_info$kernel)
+  expect_true("nt16_gc_counts" %in% kernel_info$kernel)
+  # nt16 seq_gc_content kernel: forced scalar and auto agree on a 64-code
+  # sequence long enough to exercise the AVX2/NEON vector loop
+  expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
+  gc_nt16_scalar <- DBI::dbGetQuery(con,
+    "SELECT seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))) AS gc")$gc[1]
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
+  gc_nt16_auto <- DBI::dbGetQuery(con,
+    "SELECT seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))) AS gc")$gc[1]
+  expect_equal(gc_nt16_scalar, gc_nt16_auto)
+  expect_true(abs(gc_nt16_auto - 0.5) < 1e-6)
   expect_true(all(nzchar(kernel_info$selected_backend)))
   expect_error(rduckhts_simd_backend_available(con, character()), "single non-missing")
   expect_error(rduckhts_simd_set_backend(con, c("scalar", "auto")), "single non-missing")

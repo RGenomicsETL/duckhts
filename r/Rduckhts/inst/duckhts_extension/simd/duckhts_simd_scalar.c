@@ -72,6 +72,38 @@ static void duckhts_bam_nt16_counts_scalar(const uint8_t *packed_seq,
     out->called = h[0] + h[1] + h[2] + h[3];
 }
 
+/* Unpacked nt16 GC classify (reference oracle). One nt16 code per byte.
+   class LUT: 0 = invalid (=, IUPAC), 1 = N, 2 = A/T (called), 3 = C/G
+   (called + gc). Any invalid code sets out->invalid and returns early, so
+   the result matches the text seq_gc_content path (which returns NULL). */
+static void duckhts_nt16_gc_counts_scalar(const uint8_t *codes, size_t n,
+                                          duckhts_simd_base_counts_t *out) {
+    static const uint8_t nt16_class[16] = {0, 2, 3, 0, 3, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1};
+    uint64_t gc = 0;
+    uint64_t called = 0;
+    size_t i;
+
+    out->gc = 0;
+    out->called = 0;
+    out->invalid = 0;
+    if (!codes) return;
+
+    for (i = 0; i < n; i++) {
+        uint8_t code = codes[i];
+        uint8_t klass = (code < 16) ? nt16_class[code] : 0;
+        if (klass == 0) {
+            out->invalid = 1;
+            return;
+        }
+        if (klass >= 2) {
+            called++;
+            if (klass == 3) gc++;
+        }
+    }
+    out->gc = gc;
+    out->called = called;
+}
+
 void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder) {
     duckhts_simd_builder_consider_base_counts(builder,
                                               DUCKHTS_SIMD_CAP_SCALAR,
@@ -83,4 +115,9 @@ void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder) {
                                                   "scalar",
                                                   1000,
                                                   duckhts_bam_nt16_counts_scalar);
+    duckhts_simd_builder_consider_nt16_gc_counts(builder,
+                                                 DUCKHTS_SIMD_CAP_SCALAR,
+                                                 "scalar",
+                                                 1000,
+                                                 duckhts_nt16_gc_counts_scalar);
 }
