@@ -1142,7 +1142,7 @@
       "signature": "seq_hash_2bit(sequence)",
       "returns": "UBIGINT",
       "r_wrapper": "",
-      "description": "Encode a short DNA sequence as a 2-bit unsigned integer hash.",
+      "description": "Encode a short DNA sequence as a 2-bit unsigned integer hash. Overloaded to also accept a UTINYINT[] of htslib nt16 codes (from read_bam(sequence_encoding := 'nt16')); non-ACGT codes yield NULL, bit-identical to the text path.",
       "examples": [
         "SELECT seq_hash_2bit('ACGT');"
       ]
@@ -1239,7 +1239,7 @@
       "signature": "cigar_has_soft_clip(cigar)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether a CIGAR string contains any soft-clipped segment (`S`).",
+      "description": "Test whether a CIGAR string contains any soft-clipped segment (`S`). Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_has_soft_clip('5S90M5S');"
       ]
@@ -1251,7 +1251,7 @@
       "signature": "cigar_has_hard_clip(cigar)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether a CIGAR string contains any hard-clipped segment (`H`).",
+      "description": "Test whether a CIGAR string contains any hard-clipped segment (`H`). Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_has_hard_clip('5H95M');"
       ]
@@ -1263,7 +1263,7 @@
       "signature": "cigar_left_soft_clip(cigar)",
       "returns": "BIGINT",
       "r_wrapper": "",
-      "description": "Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`.",
+      "description": "Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_left_soft_clip('5S90M5S');"
       ]
@@ -1275,7 +1275,7 @@
       "signature": "cigar_right_soft_clip(cigar)",
       "returns": "BIGINT",
       "r_wrapper": "",
-      "description": "Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`.",
+      "description": "Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_right_soft_clip('5S90M5S');"
       ]
@@ -1287,7 +1287,7 @@
       "signature": "cigar_query_length(cigar)",
       "returns": "BIGINT",
       "r_wrapper": "",
-      "description": "Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`.",
+      "description": "Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_query_length('5S90M5I');"
       ]
@@ -1299,7 +1299,7 @@
       "signature": "cigar_aligned_query_length(cigar)",
       "returns": "BIGINT",
       "r_wrapper": "",
-      "description": "Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions.",
+      "description": "Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_aligned_query_length('5S90M5I');"
       ]
@@ -1311,7 +1311,7 @@
       "signature": "cigar_reference_length(cigar)",
       "returns": "BIGINT",
       "r_wrapper": "",
-      "description": "Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`.",
+      "description": "Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_reference_length('90M5D');"
       ]
@@ -1323,7 +1323,7 @@
       "signature": "cigar_has_op(cigar, op)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
-      "description": "Test whether a CIGAR string contains at least one instance of the requested operator.",
+      "description": "Test whether a CIGAR string contains at least one instance of the requested operator. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.",
       "examples": [
         "SELECT cigar_has_op('5S90M5S', 'S');"
       ]

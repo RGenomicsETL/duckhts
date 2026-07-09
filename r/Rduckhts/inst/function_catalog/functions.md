@@ -140,7 +140,7 @@ This section is generated from `functions.yaml`.
 | --- | --- | --- | --- | --- |
 | `seq_revcomp` | scalar | VARCHAR |  | Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload is bit-identical to the text path after decoding, so BAM pipelines can reverse-complement without leaving the nt16 encoding. |
 | `seq_canonical` | scalar | VARCHAR |  | Return the lexicographically smaller of a sequence and its reverse complement. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload compares by decoded base order and is bit-identical to the text path after decoding. |
-| `seq_hash_2bit` | scalar | UBIGINT |  | Encode a short DNA sequence as a 2-bit unsigned integer hash. |
+| `seq_hash_2bit` | scalar | UBIGINT |  | Encode a short DNA sequence as a 2-bit unsigned integer hash. Overloaded to also accept a UTINYINT[] of htslib nt16 codes (from read_bam(sequence_encoding := 'nt16')); non-ACGT codes yield NULL, bit-identical to the text path. |
 | `seq_encode_4bit` | scalar | UTINYINT[] |  | Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N. |
 | `seq_decode_4bit` | scalar | VARCHAR |  | Decode a list of 4-bit IUPAC DNA base codes back into a sequence string. |
 | `seq_gc_content` | scalar | DOUBLE |  | Compute GC fraction for a DNA sequence as a value between 0 and 1. Overloaded: accepts either a VARCHAR text sequence or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16'); the nt16 overload classifies codes directly and is bit-identical to the text path, so BAM pipelines can compute GC without decoding sequences back to text. |
@@ -170,12 +170,12 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | Returns | R helper | Description |
 | --- | --- | --- | --- | --- |
-| `cigar_has_soft_clip` | scalar | BOOLEAN |  | Test whether a CIGAR string contains any soft-clipped segment (`S`). |
-| `cigar_has_hard_clip` | scalar | BOOLEAN |  | Test whether a CIGAR string contains any hard-clipped segment (`H`). |
-| `cigar_left_soft_clip` | scalar | BIGINT |  | Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`. |
-| `cigar_right_soft_clip` | scalar | BIGINT |  | Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`. |
-| `cigar_query_length` | scalar | BIGINT |  | Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`. |
-| `cigar_aligned_query_length` | scalar | BIGINT |  | Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. |
-| `cigar_reference_length` | scalar | BIGINT |  | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`. |
-| `cigar_has_op` | scalar | BOOLEAN |  | Test whether a CIGAR string contains at least one instance of the requested operator. |
+| `cigar_has_soft_clip` | scalar | BOOLEAN |  | Test whether a CIGAR string contains any soft-clipped segment (`S`). Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_has_hard_clip` | scalar | BOOLEAN |  | Test whether a CIGAR string contains any hard-clipped segment (`H`). Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_left_soft_clip` | scalar | BIGINT |  | Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_right_soft_clip` | scalar | BIGINT |  | Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_query_length` | scalar | BIGINT |  | Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_aligned_query_length` | scalar | BIGINT |  | Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_reference_length` | scalar | BIGINT |  | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
+| `cigar_has_op` | scalar | BOOLEAN |  | Test whether a CIGAR string contains at least one instance of the requested operator. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path. |
 
