@@ -178,6 +178,18 @@ test_seq_ops <- function() {
   rc2 <- DBI::dbGetQuery(con, "SELECT seq_revcomp('AAACCC') AS rc")
   expect_equal(rc2$rc[1], "GGGTTT")
 
+  # seq_revcomp / seq_canonical nt16 overloads (UTINYINT[] in and out) are
+  # bit-identical to the text path after decoding; non-ACGTN codes -> NULL
+  rc_nt16 <- DBI::dbGetQuery(con, paste(
+    "SELECT seq_decode_4bit(seq_revcomp([1,2,4,8,15]::UTINYINT[])) AS rc,",   # revcomp('ACGTN')
+    "seq_decode_4bit(seq_canonical([8,4]::UTINYINT[])) AS canon,",            # canonical('TG') -> 'CA'
+    "seq_revcomp([1,3]::UTINYINT[]) IS NULL AS rc_iupac_null,",               # A,M -> NULL
+    "seq_canonical([1,3]::UTINYINT[]) IS NULL AS canon_iupac_null"))
+  expect_equal(rc_nt16$rc[1], "NACGT")
+  expect_equal(rc_nt16$canon[1], "CA")
+  expect_true(rc_nt16$rc_iupac_null[1])
+  expect_true(rc_nt16$canon_iupac_null[1])
+
   # seq_kmers (k is positional, not named)
   km <- DBI::dbGetQuery(con,
     "SELECT kmer FROM seq_kmers('ACGTAC', 3) ORDER BY pos")
