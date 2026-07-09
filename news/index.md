@@ -2,6 +2,17 @@
 
 ## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
 
+- bundled `cigar_*` helpers (`cigar_has_soft_clip`,
+  `cigar_has_hard_clip`, `cigar_left_soft_clip`,
+  `cigar_right_soft_clip`, `cigar_query_length`,
+  `cigar_aligned_query_length`, `cigar_reference_length`,
+  `cigar_has_op`) are overloaded to accept a `UINTEGER[]` binary CIGAR
+  from `read_bam(cigar_representation = 'binary')`, and bundled
+  `seq_hash_2bit(...)` is overloaded to accept a `UTINYINT[]` of htslib
+  nt16 codes from `read_bam(sequence_encoding = 'nt16')`. Both are
+  bit-identical to the text path, so DBI pipelines analyze the
+  projection-pushed binary columns without decoding to text; add bundled
+  tinytest coverage
 - bundled
   [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
   now reports an additional `nt16_gc_counts` logical kernel, and the
