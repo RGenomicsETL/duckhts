@@ -34,6 +34,39 @@ test_cigar_utils <- function() {
   expect_true(isTRUE(literal_metrics$has_hard[[1]]))
   expect_true(isTRUE(literal_metrics$has_d[[1]]))
 
+  # binary CIGAR overload (UINTEGER[], oplen<<4|op): '5S90M5I' = [84, 1440, 81],
+  # '90M5D' = [1440, 82]; bit-identical to the text path, empty -> NULL like '*'
+  bin_metrics <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT",
+      "cigar_query_length([84, 1440, 81]::UINTEGER[]) AS q,",
+      "cigar_query_length([84, 1440, 81]::UINTEGER[]) = cigar_query_length('5S90M5I') AS q_eq,",
+      "cigar_left_soft_clip([84, 1440, 81]::UINTEGER[]) AS lsc,",
+      "cigar_reference_length([1440, 82]::UINTEGER[]) = cigar_reference_length('90M5D') AS ref_eq,",
+      "cigar_has_op([84, 1440, 81]::UINTEGER[], 'S') = cigar_has_op('5S90M5I', 'S') AS hop_eq,",
+      "cigar_query_length([]::UINTEGER[]) IS NULL AS empty_null"
+    )
+  )
+  expect_equal(bin_metrics$q[[1]], 100)
+  expect_true(isTRUE(bin_metrics$q_eq[[1]]))
+  expect_equal(bin_metrics$lsc[[1]], 5)
+  expect_true(isTRUE(bin_metrics$ref_eq[[1]]))
+  expect_true(isTRUE(bin_metrics$hop_eq[[1]]))
+  expect_true(isTRUE(bin_metrics$empty_null[[1]]))
+
+  # seq_hash_2bit nt16 overload (UTINYINT[]) is bit-identical; non-ACGT -> NULL
+  hash_nt16 <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT",
+      "seq_hash_2bit([1, 2, 4, 8]::UTINYINT[]) = seq_hash_2bit('ACGT') AS eq,",
+      "seq_hash_2bit([1, 2, 15, 8]::UTINYINT[]) IS NULL AS n_null"
+    )
+  )
+  expect_true(isTRUE(hash_nt16$eq[[1]]))
+  expect_true(isTRUE(hash_nt16$n_null[[1]]))
+
   flag_bits <- DBI::dbGetQuery(
     con,
     paste(
