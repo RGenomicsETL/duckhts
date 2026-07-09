@@ -351,6 +351,119 @@ static void seq_canonical_scalar(duckdb_function_info info, duckdb_data_chunk in
     }
 }
 
+/* nt16 code -> complemented nt16 code; 0xFF marks a code the text path would
+   reject (dna_complement returns 0 for anything but A/C/G/T/N). A=1<->T=8,
+   C=2<->G=4, N=15 self-complements; '=' (0) and IUPAC codes are invalid. */
+static const uint8_t nt16_complement[16] = {
+    0xFF, 8, 4, 0xFF, 2, 0xFF, 0xFF, 0xFF, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 15};
+/* nt16 code -> uppercase base char, for canonical's char-order comparison
+   (nt16 code order is A<C<G<T<N but char order is A<C<G<N<T, so we must
+   compare decoded chars, not codes). Only A/C/G/T/N are reachable. */
+static const unsigned char nt16_upper_char[16] = {
+    0, 'A', 'C', 0, 'G', 0, 0, 0, 'T', 0, 0, 0, 0, 0, 0, 'N'};
+
+/* Validate that every nt16 code in [off, off+len) is A/C/G/T/N (what the
+   VARCHAR path tolerates) and non-NULL. Returns 1 if valid. */
+static int nt16_all_acgtn(duckdb_vector child_vec, const uint8_t *child_data,
+                          idx_t off, idx_t len) {
+    for (idx_t i = 0; i < len; i++) {
+        idx_t ci = off + i;
+        if (!row_is_valid(child_vec, ci)) return 0;
+        uint8_t code = child_data[ci];
+        if (code >= 16 || nt16_complement[code] == 0xFF) return 0;
+    }
+    return 1;
+}
+
+/* nt16 overload of seq_revcomp: reverse-complement a UTINYINT[] of nt16 codes,
+   returning nt16 codes. Bit-identical to seq_revcomp over the decoded text. */
+static void seq_revcomp_nt16_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *in_list = (duckdb_list_entry *)duckdb_vector_get_data(seq_vec);
+    duckdb_vector in_child = duckdb_list_vector_get_child(seq_vec);
+    uint8_t *in_data = (uint8_t *)duckdb_vector_get_data(in_child);
+    duckdb_list_entry *out_list = (duckdb_list_entry *)duckdb_vector_get_data(output);
+    duckdb_vector out_child = duckdb_list_vector_get_child(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    idx_t child_offset = duckdb_list_vector_get_size(output);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        out_list[row].offset = child_offset;
+        out_list[row].length = 0;
+        if (!row_is_valid(seq_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        duckdb_list_entry e = in_list[row];
+        if (!nt16_all_acgtn(in_child, in_data, e.offset, e.length)) {
+            set_null_at(output, row);
+            continue;
+        }
+        if (duckdb_list_vector_reserve(output, child_offset + e.length) != DuckDBSuccess ||
+            duckdb_list_vector_set_size(output, child_offset + e.length) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "seq_revcomp: failed to grow list storage");
+            return;
+        }
+        uint8_t *out_data = (uint8_t *)duckdb_vector_get_data(out_child);
+        for (idx_t i = 0; i < e.length; i++) {
+            out_data[child_offset + i] = nt16_complement[in_data[e.offset + e.length - 1 - i]];
+        }
+        out_list[row].length = e.length;
+        child_offset += e.length;
+    }
+}
+
+/* nt16 overload of seq_canonical: min(seq, revcomp(seq)) by decoded-char order,
+   returning nt16 codes. Bit-identical to seq_canonical over the decoded text. */
+static void seq_canonical_nt16_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *in_list = (duckdb_list_entry *)duckdb_vector_get_data(seq_vec);
+    duckdb_vector in_child = duckdb_list_vector_get_child(seq_vec);
+    uint8_t *in_data = (uint8_t *)duckdb_vector_get_data(in_child);
+    duckdb_list_entry *out_list = (duckdb_list_entry *)duckdb_vector_get_data(output);
+    duckdb_vector out_child = duckdb_list_vector_get_child(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    idx_t child_offset = duckdb_list_vector_get_size(output);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        out_list[row].offset = child_offset;
+        out_list[row].length = 0;
+        if (!row_is_valid(seq_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+        duckdb_list_entry e = in_list[row];
+        if (!nt16_all_acgtn(in_child, in_data, e.offset, e.length)) {
+            set_null_at(output, row);
+            continue;
+        }
+        /* Choose forward vs reverse-complement by first differing decoded char;
+           ties keep forward, matching the text path's memcmp(fwd, rev) <= 0. */
+        int use_rev = 0;
+        for (idx_t i = 0; i < e.length; i++) {
+            unsigned char fc = nt16_upper_char[in_data[e.offset + i]];
+            unsigned char rc = nt16_upper_char[nt16_complement[in_data[e.offset + e.length - 1 - i]]];
+            if (fc != rc) {
+                use_rev = (rc < fc);
+                break;
+            }
+        }
+        if (duckdb_list_vector_reserve(output, child_offset + e.length) != DuckDBSuccess ||
+            duckdb_list_vector_set_size(output, child_offset + e.length) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "seq_canonical: failed to grow list storage");
+            return;
+        }
+        uint8_t *out_data = (uint8_t *)duckdb_vector_get_data(out_child);
+        for (idx_t i = 0; i < e.length; i++) {
+            out_data[child_offset + i] = use_rev
+                ? nt16_complement[in_data[e.offset + e.length - 1 - i]]
+                : in_data[e.offset + i];
+        }
+        out_list[row].length = e.length;
+        child_offset += e.length;
+    }
+}
+
 static void seq_hash_2bit_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     (void)info;
     duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
@@ -499,6 +612,100 @@ static void seq_gc_content_scalar(duckdb_function_info info, duckdb_data_chunk i
             continue;
         }
         out_data[row] = (double)counts.gc / (double)counts.called;
+    }
+}
+
+/* nt16 overload of seq_gc_content. `read_bam(sequence_encoding := 'nt16')`
+   yields SEQ as LIST(UTINYINT), one htslib nt16 code per base, so we classify
+   the codes directly instead of round-tripping through text. htslib's nt16
+   encoding is fixed (A=1, C=2, G=4, T=8), and `called`/`gc` follow the same
+   `seq_nt16_int` authority the VARCHAR path reconciles to: a base is called
+   iff its code is A/C/G/T, GC iff C/G. Result is bit-identical to
+   seq_gc_content over the decoded text of the same read. */
+static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    (void)info;
+    /* nt16 code (0..15) -> class, matching the VARCHAR path's alphabet exactly:
+       the text kernel counts A/C/G/T, ignores N, and marks ANY other byte
+       invalid (making seq_gc_content return NULL). So only A/C/G/T/N are
+       tolerated here; `=` (code 0) and the IUPAC ambiguity codes are invalid.
+         0 = invalid (=, M, R, S, V, W, Y, H, K, D, B)
+         1 = N        (valid, not called)
+         2 = A or T   (called)
+         3 = C or G   (called + gc) */
+    static const uint8_t nt16_class[16] = {
+        /* = */ 0, /* A */ 2, /* C */ 3, /* M */ 0,
+        /* G */ 3, /* R */ 0, /* S */ 0, /* V */ 0,
+        /* T */ 2, /* W */ 0, /* Y */ 0, /* H */ 0,
+        /* K */ 0, /* D */ 0, /* B */ 0, /* N */ 1};
+
+    duckdb_vector seq_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(seq_vec);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(seq_vec);
+    uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
+    /* Fetch the child validity mask once: it is loop-invariant, and BAM SEQ has
+       no NULL bases, so the common case is a NULL mask (handled by the
+       vectorized kernel below) and the rare per-base branch never runs. */
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
+    double *out_data = (double *)duckdb_vector_get_data(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    /* Snapshot the SIMD dispatch table once per chunk for a stable view. */
+    const duckhts_simd_dispatch_table_t *simd = duckhts_simd_dispatch_snapshot();
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(seq_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        duckdb_list_entry entry = list_data[row];
+        if (entry.length == 0) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        uint64_t gc;
+        uint64_t called;
+        int invalid;
+
+        if (!child_validity) {
+            /* Common path: no NULL bases, so classify the row's contiguous nt16
+               codes through the dispatched (scalar/AVX2/...) kernel. */
+            duckhts_simd_base_counts_t counts;
+            duckhts_simd_nt16_gc_counts_with_table(simd, child_data + entry.offset,
+                                                   (size_t)entry.length, &counts);
+            gc = counts.gc;
+            called = counts.called;
+            invalid = counts.invalid;
+        } else {
+            /* Rare path: a child element may be NULL. Classify scalar with a
+               per-base validity check; a NULL base is invalid -> NULL result. */
+            gc = 0;
+            called = 0;
+            invalid = 0;
+            for (idx_t i = 0; i < entry.length; i++) {
+                idx_t ci = entry.offset + i;
+                if (!duckdb_validity_row_is_valid(child_validity, ci)) {
+                    invalid = 1;
+                    break;
+                }
+                uint8_t code = child_data[ci];
+                uint8_t klass = (code < 16) ? nt16_class[code] : 0;
+                if (klass == 0) {
+                    invalid = 1;
+                    break;
+                }
+                if (klass >= 2) {
+                    called++;
+                    if (klass == 3) gc++;
+                }
+            }
+        }
+
+        if (invalid || called == 0) {
+            set_null_at(output, row);
+            continue;
+        }
+        out_data[row] = (double)gc / (double)called;
     }
 }
 
@@ -896,33 +1103,69 @@ static void seq_kmers_function(duckdb_function_info info, duckdb_data_chunk outp
 }
 
 static void register_seq_revcomp_function(duckdb_connection connection) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "seq_revcomp");
-
+    /* Overload set: VARCHAR->VARCHAR and LIST(UTINYINT)->LIST(UTINYINT) (BAM
+       nt16 codes), so read_bam(sequence_encoding := 'nt16') stays in nt16. */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, varchar_type);
-    duckdb_scalar_function_set_function(fn, seq_revcomp_scalar);
+    duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+    duckdb_logical_type list_type = duckdb_create_list_type(utinyint_type);
 
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set("seq_revcomp");
 
+    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_txt, "seq_revcomp");
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_txt, varchar_type);
+    duckdb_scalar_function_set_function(fn_txt, seq_revcomp_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_txt);
+
+    duckdb_scalar_function fn_nt16 = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_nt16, "seq_revcomp");
+    duckdb_scalar_function_add_parameter(fn_nt16, list_type);
+    duckdb_scalar_function_set_return_type(fn_nt16, list_type);
+    duckdb_scalar_function_set_function(fn_nt16, seq_revcomp_nt16_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_nt16);
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function(&fn_txt);
+    duckdb_destroy_scalar_function(&fn_nt16);
+    duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
-    duckdb_destroy_scalar_function(&fn);
+    duckdb_destroy_logical_type(&utinyint_type);
+    duckdb_destroy_logical_type(&list_type);
 }
 
 static void register_seq_canonical_function(duckdb_connection connection) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "seq_canonical");
-
+    /* Overload set: VARCHAR->VARCHAR and LIST(UTINYINT)->LIST(UTINYINT) (BAM
+       nt16 codes), so read_bam(sequence_encoding := 'nt16') stays in nt16. */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, varchar_type);
-    duckdb_scalar_function_set_function(fn, seq_canonical_scalar);
+    duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+    duckdb_logical_type list_type = duckdb_create_list_type(utinyint_type);
 
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set("seq_canonical");
 
+    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_txt, "seq_canonical");
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_txt, varchar_type);
+    duckdb_scalar_function_set_function(fn_txt, seq_canonical_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_txt);
+
+    duckdb_scalar_function fn_nt16 = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_nt16, "seq_canonical");
+    duckdb_scalar_function_add_parameter(fn_nt16, list_type);
+    duckdb_scalar_function_set_return_type(fn_nt16, list_type);
+    duckdb_scalar_function_set_function(fn_nt16, seq_canonical_nt16_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_nt16);
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function(&fn_txt);
+    duckdb_destroy_scalar_function(&fn_nt16);
+    duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
-    duckdb_destroy_scalar_function(&fn);
+    duckdb_destroy_logical_type(&utinyint_type);
+    duckdb_destroy_logical_type(&list_type);
 }
 
 static void register_seq_hash_2bit_function(duckdb_connection connection) {
@@ -981,20 +1224,39 @@ static void register_seq_decode_4bit_function(duckdb_connection connection) {
 }
 
 static void register_seq_gc_content_function(duckdb_connection connection) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "seq_gc_content");
-
+    /* Overload set: VARCHAR (text sequence) and LIST(UTINYINT) (BAM nt16 codes
+       from read_bam(sequence_encoding := 'nt16')). DuckDB resolves by argument
+       type, so decode-free BAM pipelines skip the text round-trip. */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+    duckdb_logical_type list_type = duckdb_create_list_type(utinyint_type);
     duckdb_logical_type double_type = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, double_type);
-    duckdb_scalar_function_set_function(fn, seq_gc_content_scalar);
 
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set("seq_gc_content");
 
+    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_txt, "seq_gc_content");
+    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
+    duckdb_scalar_function_set_return_type(fn_txt, double_type);
+    duckdb_scalar_function_set_function(fn_txt, seq_gc_content_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_txt);
+
+    duckdb_scalar_function fn_nt16 = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn_nt16, "seq_gc_content");
+    duckdb_scalar_function_add_parameter(fn_nt16, list_type);
+    duckdb_scalar_function_set_return_type(fn_nt16, double_type);
+    duckdb_scalar_function_set_function(fn_nt16, seq_gc_content_nt16_scalar);
+    duckdb_add_scalar_function_to_set(set, fn_nt16);
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function(&fn_txt);
+    duckdb_destroy_scalar_function(&fn_nt16);
+    duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_logical_type(&utinyint_type);
+    duckdb_destroy_logical_type(&list_type);
     duckdb_destroy_logical_type(&double_type);
-    duckdb_destroy_scalar_function(&fn);
 }
 
 static void register_sam_flag_predicate_function(duckdb_connection connection,

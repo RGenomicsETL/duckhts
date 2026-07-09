@@ -55,6 +55,24 @@ test_seq_ops <- function() {
   expect_true(gc$all_n[1])
   gc_lower <- DBI::dbGetQuery(con, "SELECT seq_gc_content('acgtnn') AS gc")
   expect_true(abs(gc_lower$gc[1] - 0.5) < 1e-6)
+  # nt16 overload (UTINYINT[] of htslib nt16 codes A=1 C=2 G=4 T=8 N=15) is
+  # bit-identical to the text path and resolves by argument type
+  gc_nt16 <- DBI::dbGetQuery(con, paste(
+    "SELECT seq_gc_content([1, 2, 4, 8, 15, 15]::UTINYINT[]) AS gc,",
+    "seq_gc_content([15, 15, 15, 15]::UTINYINT[]) IS NULL AS all_n,",
+    "seq_gc_content([1, 2, 4, 8, 15, 15]::UTINYINT[]) = seq_gc_content('ACGTNN') AS matches_text"))
+  expect_true(abs(gc_nt16$gc[1] - 0.5) < 1e-6)
+  expect_true(gc_nt16$all_n[1])
+  expect_true(gc_nt16$matches_text[1])
+  # nt16 tolerates only A/C/G/T/N, matching the text path: any IUPAC ambiguity
+  # code (M=3) or '='=0 is invalid and yields NULL, as decoded text would
+  gc_iupac <- DBI::dbGetQuery(con, paste(
+    "SELECT seq_gc_content([1, 3]::UTINYINT[]) IS NULL AS a_m_null,",
+    "seq_gc_content('AM') IS NULL AS text_am_null,",
+    "seq_gc_content([0]::UTINYINT[]) IS NULL AS eq_null"))
+  expect_true(gc_iupac$a_m_null[1])
+  expect_true(gc_iupac$text_am_null[1])
+  expect_true(gc_iupac$eq_null[1])
   simd <- DBI::dbGetQuery(con,
     "SELECT duckhts_simd_backend() AS selected, duckhts_simd_requested_backend() AS requested, duckhts_simd_backend_available('scalar') AS has_scalar")
   expect_true(nzchar(simd$selected[1]))
@@ -90,6 +108,17 @@ test_seq_ops <- function() {
   expect_true(is.data.frame(kernel_info))
   expect_true(all(c("kernel", "selected_backend", "selected_capability", "requested_backend", "scalar_fallback") %in% names(kernel_info)))
   expect_true("seq_base_counts" %in% kernel_info$kernel)
+  expect_true("nt16_gc_counts" %in% kernel_info$kernel)
+  # nt16 seq_gc_content kernel: forced scalar and auto agree on a 64-code
+  # sequence long enough to exercise the AVX2/NEON vector loop
+  expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
+  gc_nt16_scalar <- DBI::dbGetQuery(con,
+    "SELECT seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))) AS gc")$gc[1]
+  expect_true(nzchar(rduckhts_simd_set_backend(con, "auto")))
+  gc_nt16_auto <- DBI::dbGetQuery(con,
+    "SELECT seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))) AS gc")$gc[1]
+  expect_equal(gc_nt16_scalar, gc_nt16_auto)
+  expect_true(abs(gc_nt16_auto - 0.5) < 1e-6)
   expect_true(all(nzchar(kernel_info$selected_backend)))
   expect_error(rduckhts_simd_backend_available(con, character()), "single non-missing")
   expect_error(rduckhts_simd_set_backend(con, c("scalar", "auto")), "single non-missing")
@@ -148,6 +177,18 @@ test_seq_ops <- function() {
 
   rc2 <- DBI::dbGetQuery(con, "SELECT seq_revcomp('AAACCC') AS rc")
   expect_equal(rc2$rc[1], "GGGTTT")
+
+  # seq_revcomp / seq_canonical nt16 overloads (UTINYINT[] in and out) are
+  # bit-identical to the text path after decoding; non-ACGTN codes -> NULL
+  rc_nt16 <- DBI::dbGetQuery(con, paste(
+    "SELECT seq_decode_4bit(seq_revcomp([1,2,4,8,15]::UTINYINT[])) AS rc,",   # revcomp('ACGTN')
+    "seq_decode_4bit(seq_canonical([8,4]::UTINYINT[])) AS canon,",            # canonical('TG') -> 'CA'
+    "seq_revcomp([1,3]::UTINYINT[]) IS NULL AS rc_iupac_null,",               # A,M -> NULL
+    "seq_canonical([1,3]::UTINYINT[]) IS NULL AS canon_iupac_null"))
+  expect_equal(rc_nt16$rc[1], "NACGT")
+  expect_equal(rc_nt16$canon[1], "CA")
+  expect_true(rc_nt16$rc_iupac_null[1])
+  expect_true(rc_nt16$canon_iupac_null[1])
 
   # seq_kmers (k is positional, not named)
   km <- DBI::dbGetQuery(con,

@@ -1369,6 +1369,24 @@ SELECT seq_canonical('TTA');
 ----
 TAA
 
+# --- nt16 overloads: LIST(UTINYINT) in, LIST(UTINYINT) out, bit-identical to
+#     the text path after decoding. codes: A=1 C=2 G=4 T=8 N=15 ---
+query TT
+SELECT seq_decode_4bit(seq_revcomp([1, 2, 4, 8, 15]::UTINYINT[])),   -- revcomp('ACGTN')
+       seq_decode_4bit(seq_canonical([8, 4]::UTINYINT[]));           -- canonical('TG') -> 'CA' (rev wins)
+----
+NACGT	CA
+
+# --- nt16 overloads reject non-ACGTN codes as NULL, like the text path,
+#     and preserve empty-as-empty (not NULL) ---
+query TTTT
+SELECT seq_revcomp([1, 3]::UTINYINT[]) IS NULL,        -- A,M -> NULL
+       seq_canonical([1, 3]::UTINYINT[]) IS NULL,
+       seq_revcomp([]::UTINYINT[]) IS NULL,             -- empty -> empty, not NULL
+       length(seq_canonical([]::UTINYINT[]));
+----
+true	true	false	0
+
 # --- 2-bit hash encoding (A=0,C=1,G=2,T=3) ---
 query I
 SELECT seq_hash_2bit('ACGT');
@@ -1429,6 +1447,32 @@ query TT
 SELECT printf('%.3f', seq_gc_content('ACGTNN')), seq_gc_content('NNNN') IS NULL;
 ----
 0.500	true
+
+# --- nt16 overload: LIST(UTINYINT) of htslib nt16 codes, bit-identical to text ---
+# codes: A=1 C=2 G=4 T=8 N=15
+query TTT
+SELECT printf('%.3f', seq_gc_content([1, 2, 4, 8, 15, 15]::UTINYINT[])),
+       seq_gc_content([15, 15, 15, 15]::UTINYINT[]) IS NULL,
+       seq_gc_content([1, 2, 4, 8, 15, 15]::UTINYINT[]) = seq_gc_content('ACGTNN');
+----
+0.500	true	true
+
+# --- nt16 overload matches text for a GC-skewed sequence and handles empty as NULL ---
+query TT
+SELECT seq_gc_content([2, 4, 2, 4, 1]::UTINYINT[]) = seq_gc_content('CGCGA'),
+       seq_gc_content([]::UTINYINT[]) IS NULL;
+----
+true	true
+
+# --- nt16 overload matches the text path's alphabet: any non-ACGTN code
+#     (here M=3, and '='=0) is invalid and yields NULL, exactly as text does ---
+query TTTT
+SELECT seq_gc_content([1, 3]::UTINYINT[]) IS NULL,          -- A,M -> NULL (matches 'AM')
+       seq_gc_content('AM') IS NULL,
+       seq_gc_content([1, 2, 4, 8, 3]::UTINYINT[]) IS NULL, -- ACGT,M -> NULL
+       seq_gc_content([0]::UTINYINT[]) IS NULL;             -- '=' -> NULL
+----
+true	true	true	true
 
 # --- SIMD backend diagnostics are backend-agnostic and GC accepts lower-case bases ---
 query T
@@ -1492,6 +1536,31 @@ SELECT
 FROM duckhts_simd_kernel_info();
 ----
 true	true	true
+
+# nt16_gc_counts logical kernel (backs the nt16 seq_gc_content overload) is
+# registered, and forced scalar vs auto agree on a 64-code sequence long
+# enough to exercise the AVX2/NEON vector loop (>32 codes). seq_encode_4bit
+# turns 'CGATCGAT...' into nt16 codes; GC = 0.5.
+query I
+SELECT sum(CASE WHEN kernel = 'nt16_gc_counts' THEN 1 ELSE 0 END) FROM duckhts_simd_kernel_info();
+----
+1
+
+statement ok
+SELECT backend FROM duckhts_simd_set_backend('scalar');
+
+query T
+SELECT printf('%.3f', seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))));
+----
+0.500
+
+statement ok
+SELECT backend FROM duckhts_simd_set_backend('auto');
+
+query T
+SELECT printf('%.3f', seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))));
+----
+0.500
 
 query TTTT
 SELECT

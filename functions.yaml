@@ -1116,9 +1116,10 @@
       "signature": "seq_revcomp(sequence)",
       "returns": "VARCHAR",
       "r_wrapper": "",
-      "description": "Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases.",
+      "description": "Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload is bit-identical to the text path after decoding, so BAM pipelines can reverse-complement without leaving the nt16 encoding.",
       "examples": [
-        "SELECT seq_revcomp('ACGTN');"
+        "SELECT seq_revcomp('ACGTN');",
+        "SELECT seq_revcomp(SEQ) FROM read_bam('reads.bam', sequence_encoding := 'nt16');"
       ]
     },
     {
@@ -1128,9 +1129,10 @@
       "signature": "seq_canonical(sequence)",
       "returns": "VARCHAR",
       "r_wrapper": "",
-      "description": "Return the lexicographically smaller of a sequence and its reverse complement.",
+      "description": "Return the lexicographically smaller of a sequence and its reverse complement. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload compares by decoded base order and is bit-identical to the text path after decoding.",
       "examples": [
-        "SELECT seq_canonical('ACGTN');"
+        "SELECT seq_canonical('ACGTN');",
+        "SELECT seq_canonical(SEQ) FROM read_bam('reads.bam', sequence_encoding := 'nt16');"
       ]
     },
     {
@@ -1176,9 +1178,10 @@
       "signature": "seq_gc_content(sequence)",
       "returns": "DOUBLE",
       "r_wrapper": "",
-      "description": "Compute GC fraction for a DNA sequence as a value between 0 and 1.",
+      "description": "Compute GC fraction for a DNA sequence as a value between 0 and 1. Overloaded: accepts either a VARCHAR text sequence or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16'); the nt16 overload classifies codes directly and is bit-identical to the text path, so BAM pipelines can compute GC without decoding sequences back to text.",
       "examples": [
-        "SELECT seq_gc_content('ACGT');"
+        "SELECT seq_gc_content('ACGT');",
+        "SELECT seq_gc_content(SEQ) FROM read_bam('reads.bam', sequence_encoding := 'nt16');"
       ]
     },
     {

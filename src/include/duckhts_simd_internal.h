@@ -28,6 +28,15 @@ typedef void (*duckhts_bam_nt16_counts_fn)(const uint8_t *packed_seq,
 
 #define DUCKHTS_SIMD_FN_BAM_NT16_COUNTS duckhts_bam_nt16_counts_fn
 
+/* Unpacked nt16 GC classify: input is one nt16 code per byte (as read_bam
+   sequence_encoding := 'nt16' emits), reusing the base_counts result. `gc`
+   counts C/G, `called` counts A/C/G/T, and `invalid` is set if any code is
+   not A/C/G/T/N (matching the text seq_gc_content path, which returns NULL). */
+typedef void (*duckhts_nt16_gc_counts_fn)(const uint8_t *codes, size_t n,
+                                          duckhts_simd_base_counts_t *out);
+
+#define DUCKHTS_SIMD_FN_NT16_GC_COUNTS duckhts_nt16_gc_counts_fn
+
 typedef enum {
 #define DUCKHTS_SIMD_KERNEL(id, field, sig, name) DUCKHTS_KERNEL_##id,
 #include "duckhts_simd_kernels.def"
@@ -69,6 +78,10 @@ void duckhts_simd_bam_nt16_counts_with_table(const duckhts_simd_dispatch_table_t
                                              const uint8_t *packed_seq,
                                              int32_t n_bases,
                                              duckhts_simd_bam_nt16_counts_t *out);
+void duckhts_simd_nt16_gc_counts_with_table(const duckhts_simd_dispatch_table_t *table,
+                                            const uint8_t *codes,
+                                            size_t n,
+                                            duckhts_simd_base_counts_t *out);
 
 void duckhts_simd_builder_consider_base_counts(duckhts_simd_builder_t *builder,
                                                duckhts_simd_cap_t cap,
@@ -80,6 +93,11 @@ void duckhts_simd_builder_consider_bam_nt16_counts(duckhts_simd_builder_t *build
                                                    const char *backend,
                                                    int priority,
                                                    duckhts_bam_nt16_counts_fn fn);
+void duckhts_simd_builder_consider_nt16_gc_counts(duckhts_simd_builder_t *builder,
+                                                  duckhts_simd_cap_t cap,
+                                                  const char *backend,
+                                                  int priority,
+                                                  duckhts_nt16_gc_counts_fn fn);
 
 void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder);
 void duckhts_simd_avx2_register(duckhts_simd_builder_t *builder);
