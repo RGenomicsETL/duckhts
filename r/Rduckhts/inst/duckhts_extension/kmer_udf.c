@@ -530,12 +530,13 @@ static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_ch
     duckdb_vector child_vec = duckdb_list_vector_get_child(seq_vec);
     uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
     /* Fetch the child validity mask once: it is loop-invariant, and BAM SEQ has
-       no NULL bases, so the common case is a NULL mask and the per-base branch
-       below folds away — instead of calling duckdb_vector_get_validity() per
-       base as row_is_valid() would. */
+       no NULL bases, so the common case is a NULL mask (handled by the
+       vectorized kernel below) and the rare per-base branch never runs. */
     uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
     double *out_data = (double *)duckdb_vector_get_data(output);
     idx_t row_count = duckdb_data_chunk_get_size(input);
+    /* Snapshot the SIMD dispatch table once per chunk for a stable view. */
+    const duckhts_simd_dispatch_table_t *simd = duckhts_simd_dispatch_snapshot();
 
     for (idx_t row = 0; row < row_count; row++) {
         if (!row_is_valid(seq_vec, row)) {
@@ -549,24 +550,41 @@ static void seq_gc_content_nt16_scalar(duckdb_function_info info, duckdb_data_ch
             continue;
         }
 
-        uint64_t gc = 0;
-        uint64_t called = 0;
-        int invalid = 0;
-        for (idx_t i = 0; i < entry.length; i++) {
-            idx_t ci = entry.offset + i;
-            if (child_validity && !duckdb_validity_row_is_valid(child_validity, ci)) {
-                invalid = 1;
-                break;
-            }
-            uint8_t code = child_data[ci];
-            uint8_t klass = (code < 16) ? nt16_class[code] : 0;
-            if (klass == 0) { /* non-ACGTN: NULL, like the text default case */
-                invalid = 1;
-                break;
-            }
-            if (klass >= 2) {
-                called++;
-                if (klass == 3) gc++;
+        uint64_t gc;
+        uint64_t called;
+        int invalid;
+
+        if (!child_validity) {
+            /* Common path: no NULL bases, so classify the row's contiguous nt16
+               codes through the dispatched (scalar/AVX2/...) kernel. */
+            duckhts_simd_base_counts_t counts;
+            duckhts_simd_nt16_gc_counts_with_table(simd, child_data + entry.offset,
+                                                   (size_t)entry.length, &counts);
+            gc = counts.gc;
+            called = counts.called;
+            invalid = counts.invalid;
+        } else {
+            /* Rare path: a child element may be NULL. Classify scalar with a
+               per-base validity check; a NULL base is invalid -> NULL result. */
+            gc = 0;
+            called = 0;
+            invalid = 0;
+            for (idx_t i = 0; i < entry.length; i++) {
+                idx_t ci = entry.offset + i;
+                if (!duckdb_validity_row_is_valid(child_validity, ci)) {
+                    invalid = 1;
+                    break;
+                }
+                uint8_t code = child_data[ci];
+                uint8_t klass = (code < 16) ? nt16_class[code] : 0;
+                if (klass == 0) {
+                    invalid = 1;
+                    break;
+                }
+                if (klass >= 2) {
+                    called++;
+                    if (klass == 3) gc++;
+                }
             }
         }
 

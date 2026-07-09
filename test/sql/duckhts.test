@@ -1519,6 +1519,31 @@ FROM duckhts_simd_kernel_info();
 ----
 true	true	true
 
+# nt16_gc_counts logical kernel (backs the nt16 seq_gc_content overload) is
+# registered, and forced scalar vs auto agree on a 64-code sequence long
+# enough to exercise the AVX2/NEON vector loop (>32 codes). seq_encode_4bit
+# turns 'CGATCGAT...' into nt16 codes; GC = 0.5.
+query I
+SELECT sum(CASE WHEN kernel = 'nt16_gc_counts' THEN 1 ELSE 0 END) FROM duckhts_simd_kernel_info();
+----
+1
+
+statement ok
+SELECT backend FROM duckhts_simd_set_backend('scalar');
+
+query T
+SELECT printf('%.3f', seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))));
+----
+0.500
+
+statement ok
+SELECT backend FROM duckhts_simd_set_backend('auto');
+
+query T
+SELECT printf('%.3f', seq_gc_content(seq_encode_4bit(repeat('CGAT', 16))));
+----
+0.500
+
 query TTTT
 SELECT
   duckhts_simd_backend_compiled('scalar'),
