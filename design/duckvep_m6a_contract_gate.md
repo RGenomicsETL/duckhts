@@ -68,8 +68,11 @@ routing change shared by `stop_lost`/`stop_retained`; plus one real behavioral h
 `Sequence.pm` (the `get_3prime_seq_offset` 3′-shift cap — 115 under-shifts indels before long
 repeats) and `TranscriptVariationAllele.pm` (`_var2transcript_slice_coords` now *clamps*
 boundary-crossing variants instead of returning `undef`, so 116 emits `c./n.` where 115 emitted
-none, for **all** transcripts). Two hunks (the dead-looking `$consider_ins_len` param; whether
-the 3′-shift cap change touches `c./n.` or only `g.`) are escalated to gpt-5.6-sol.
+none, for **all** transcripts). Two hunks were resolved by gpt-5.6-sol: `$consider_ins_len` is
+**dead scaffolding** (the live path is the `_cil` pair used by `stop_retained`); and the
+`get_3prime_seq_offset` 3′-shift cap change affects **`g./m.` only** — `c./n.` HGVS uses a
+*separate, unchanged* `perform_shift` routine, so **M6b must implement the two 3′-shift routines
+distinctly** (an engine assuming one shared routine gets `c./n.` wrong).
 
 **Decision:** **pin VEP 116.** The salvaged kernel, conformance data, and controlled GFF are
 116-shaped. If GRCh37/clinical requires 115, make it an explicitly *named* compatibility

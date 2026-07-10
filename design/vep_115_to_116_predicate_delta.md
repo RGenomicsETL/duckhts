@@ -5,7 +5,8 @@ consequence-predicate delta (`VariationEffect.pm` / `Sequence.pm` / `TranscriptV
 grounding the "pin VEP 116" decision in `duckvep_m6a_contract_gate.md` and telling M6b
 implementers exactly which predicates moved. 17 meaningful hunks, 13 on the coding frontier;
 the "Implications for pinning 116" section is the actionable output. Two hunks were escalated
-to gpt-5.6-sol — see the "UNRESOLVED hunks" section (and its folded resolution).
+to gpt-5.6-sol and resolved — see "Escalated hunks — RESOLVED" (dead `$consider_ins_len` param;
+`c./n.` uses a separate unchanged 3′-shift routine from `g./m.`).
 
 Sources diffed (byte diff, not `git diff`, since 115/116 live in unrelated trees):
 
@@ -129,9 +130,31 @@ post-stop guard, and the `X` (incomplete/ambiguous peptide) routing change share
 
 ---
 
-## UNRESOLVED hunks
+## Escalated hunks — RESOLVED by gpt-5.6-sol (2026-07-10)
 
-Two items below are flagged UNRESOLVED per the task's instruction not to guess; both are single, precisely-located
+Both items were escalated to gpt-5.6-sol (max) on the persistent review session and resolved with full
+call-chain evidence over the whole 115/116 tree:
+
+**Q1 verdict — `$consider_ins_len` is DEAD scaffolding in VEP 116.** The only executable call to
+`_ins_del_stop_altered` is `stop_lost`'s fallback, passing the bare 4-arg `@_`; the predicate dispatcher
+(`BaseVariationFeatureOverlapAllele.pm:273`) invokes every predicate with exactly 4 args; the forwarded 5th
+value reaches `_overlaps_stop_codon`, which destructures only 4 and silently drops extras. The live
+insertion-length-aware logic is the *separate* `_cil` pair (`_overlaps_stop_codon_cil` /
+`_ins_del_stop_altered_cil`) used by `stop_retained`. **Porting: implement the `_cil` path; ignore
+`$consider_ins_len`.**
+
+**Q2 verdict — the `get_3prime_seq_offset` cap change affects `g.`/`m.` HGVS ONLY, not `c./n.`** Transcript
+HGVS uses a *separate, 115↔116-byte-identical* shift routine:
+`hgvs_transcript → _return_3prime → _genomic_shift → perform_shift`, and `perform_shift` keeps its own
+subtractive cap `length($post_seq) - $indel_length` (`TranscriptVariationAllele.pm:303`, unchanged). The only
+executable call to `get_3prime_seq_offset` is `VariationFeature::hgvs_genomic` (`:2003`, the `g.` path); the
+`TranscriptVariationAllele.pm:76` import is unused. **Porting rule: the two HGVS shift routines are DIFFERENT —
+apply the changed `get_3prime_seq_offset` cap to `g./m.` only; `c./n.` retains the separate unchanged
+`perform_shift` cap. An engine assuming one shared 3′-shift routine will get `c./n.` wrong.**
+
+### Original questions (kept for context)
+
+Two items below were flagged UNRESOLVED per the task's instruction not to guess; both are single, precisely-located
 questions, not general uncertainty about the catalog as a whole.
 
 1. **VariationEffect.pm hunk #11 — `_ins_del_stop_altered`'s new `$consider_ins_len` parameter is unused dead code
