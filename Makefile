@@ -143,14 +143,15 @@ bench-simd-kernels:
 # VEP-116 differing-region compatibility view.  This deliberately has no
 # DuckDB dependency so sanitizers and alternate C compilers can exercise it.
 test-duckvep-allele:
-	mkdir -p build
+	@tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/duckhts-duckvep-allele.XXXXXX"); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	$(CC) -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror \
 		-Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes \
 		-I src/duckvep \
 		src/duckvep/duckvep_allele.c \
 		test/duckvep/test_duckvep_allele.c \
-		-o build/test_duckvep_allele
-	./build/test_duckvep_allele
+		-o "$$tmp/test_duckvep_allele"; \
+	"$$tmp/test_duckvep_allele"
 
 test-duckvep-model:
 	Rscript test/duckvep_model.R
