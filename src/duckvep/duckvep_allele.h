@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(__GNUC__) || defined(__clang__)
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32)
 #define DUCKVEP_INTERNAL __attribute__((__visibility__("hidden")))
 #else
 #define DUCKVEP_INTERNAL
