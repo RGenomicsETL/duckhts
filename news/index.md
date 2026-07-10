@@ -4,6 +4,14 @@
 
 CRAN release: 2026-07-10
 
+- accelerate the bundled `bam_nt16_counts` and `nt16_gc_counts` logical
+  kernels on AArch64 with NEON, so Apple Silicon and other arm64 package
+  builds no longer fall back to scalar for BAM-bin GC counting or nt16
+  `seq_gc_content(...)`; add conditional tinytests that require every
+  reported complete backend to own all three sequence-kernel slots and
+  match scalar results. Emscripten package builds now keep
+  `bam_bin_counts(...)` on its synchronous no-index path by disabling
+  unavailable htslib worker threads
 - bundled `cigar_*` helpers (`cigar_has_soft_clip`,
   `cigar_has_hard_clip`, `cigar_left_soft_clip`,
   `cigar_right_soft_clip`, `cigar_query_length`,
