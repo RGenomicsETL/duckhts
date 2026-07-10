@@ -1,17 +1,26 @@
 # DuckVEP salvage inventory audit
 
-Status: **reference audit (2026-07-10).** Verified, evidence-backed companion to
+Status: **reference audit (2026-07-10; calibrated after commit-tree check).** Companion to
 `duckvep_reconciliation.md`'s "Salvage inventory" section — file-by-file existence, line
 counts, per-file dedupe diffs against DuckHTS, and gaps. Produced by a Sonnet 5 subagent and
 spot-verified against the trees (`bcf_reader.c` divergence, the three gap files, the SIMD
 kernel delta). Use when planning the actual duckvep-c fold (roadmap M6b); corrections from
-this audit are already folded into `duckvep_reconciliation.md`.
+this audit are folded into `duckvep_reconciliation.md`.
+
+**Calibration:** the original "39 conformance files / in full" count described the dirty
+filesystem, not commit `9f922c8`. `git ls-tree -r 9f922c8 conformance` contains **28 tracked
+files**. The working tree has a modified witness CSV, three untracked result CSVs, and
+ignored generated Parquet/pair outputs. Salvage tracked source and seed fixtures from the
+commit; select any generated oracle artifact explicitly under the one-manifest/checksum
+rule. The filesystem existence/dedupe findings below remain useful, but "copy the directory
+in full" is withdrawn.
 
 Audited against `/root/duckvep-c` at commit `9f922c88f4feb618165778e77c3158ed591e76d7` (2026-07-07,
 matches the `9f922c8` short hash cited in `duckvep_reconciliation.md:4`), working tree has minor
 untracked/modified conformance data files only (no source changes). Compared against
-`/root/duckhts` (this repo, branch `develop`). All commands and diffs below were run directly
-against the filesystem; nothing here is inferred from memory of the design docs.
+`/root/duckhts` (this repo, branch `develop`). The original commands and diffs were run
+directly against the filesystem; the calibration above additionally checks the committed
+tree.
 
 Methodology for Tier C dedupe verdicts: raw `diff`, then a second pass with
 `sed 's/duckvep/duckhts/g; s/DUCKVEP/DUCKHTS/g'` applied to the duckvep-c copy before re-diffing,
@@ -26,7 +35,7 @@ empty or trivial; SUBSTANTIALLY DIVERGED if real logic differs after normalizing
 
 | File | Tier | Exists? | Lines | Dedupe verdict | Notes |
 |---|---|---|---|---|---|
-| `conformance/` (all 39 files, incl. `data/`) | A | yes | n/a | N/A (unique to duckvep-c) | Verified full tree; matches "in full" framing. See explicit sub-list below. |
+| `conformance/` (28 tracked files at `9f922c8`; 39 in dirty filesystem) | A | yes | n/a | N/A (unique to duckvep-c) | Salvage tracked programs/bindings/seed fixtures by commit. Generated results require explicit manifest selection; do not copy the directory wholesale. |
 | `conformance/generate_effect_rules.pl` | A | yes | 97 | N/A | |
 | `conformance/extract_so_spec.pl` | A | yes | 28 | N/A | |
 | `conformance/generate_so_metadata.pl` | A | yes | 101 | N/A | |
@@ -44,7 +53,7 @@ empty or trivial; SUBSTANTIALLY DIVERGED if real logic differs after normalizing
 | `kernel/src/duckvep_projection.c` | A | yes | 193 | N/A | |
 | `kernel/src/duckvep_kernel.c` | A | yes | 1054 | N/A | |
 | `kernel/src/duckvep_so.c` | A | yes | 92 | N/A | |
-| `kernel/include/duckvep_kernel.h` | A | yes | 396 | N/A | |
+| `kernel/include/duckvep_kernel.h` | A-reference | yes | 396 | **ABI rewrite required** | Preserves useful source context, but lines 207-242 encode HGVS-from-compact-consequence rows and scalar coordinates rejected by M6a. Do not lift as the new ABI. |
 | `kernel/include/duckvep_so.h` | A | yes | 122 | N/A | |
 | `design/duckvep_effect_ctx_architecture.md` | A | yes | 277 | N/A (unique) | |
 | `design/vep_consequence_state_machine.md` | A | yes | 122 | N/A | |
@@ -54,7 +63,9 @@ empty or trivial; SUBSTANTIALLY DIVERGED if real logic differs after normalizing
 | `design/duckvep_bcftools_csq_port_plan_2026-06-09.md` | A | yes | 194 | Already copied into duckhts | `/root/duckhts/design/duckvep_bcftools_csq_port_plan_2026-06-09.md` already exists (per `design/README.md` map) — confirm it's the same content before "salvaging" again. |
 | `design/duckvep_layer_keys.md` | A | yes | 163 | Already copied into duckhts | `/root/duckhts/design/duckvep_layer_keys.md` already exists — same note. |
 
-Verdict: **every Tier A file exists exactly as named.** No misnamed or missing files in Tier A.
+Verdict: every individually named Tier A path exists. That is an existence result, not a
+verbatim-lift verdict: the rule/classifier/delta/sweep algorithms are salvageable, while the
+kernel ABI/model/context boundary must conform to `duckvep_model_a_v2.md`.
 Two of the seven "design docs" (`duckvep_bcftools_csq_port_plan_2026-06-09.md`,
 `duckvep_layer_keys.md`) are **already present in `/root/duckhts/design/`** (confirmed by listing
 `/root/duckhts/design/`), so calling them "salvage" targets is stale bookkeeping — they were
@@ -66,19 +77,21 @@ follow-up content check before assuming they're current.)
 | File | Tier | Exists? | Lines | Dedupe verdict | Notes |
 |---|---|---|---|---|---|
 | `src/consequence_udf.c` | B | yes | 95 | N/A (unique) | No dedicated header (verified via `#include`); "their include/ headers" doesn't apply to this file. |
-| `src/annotate_table.c` | B | yes | 511 | N/A | No dedicated header either; includes `duckvep_chunk_reader.h`, `duckvep_model_reader.h`, `duckvep_relation_cursor.h`, `duckvep_variant_tile.h`, `duckvep_kernel.h`, `duckvep_so.h` (all separately listed). |
+| `src/annotate_table.c` | B-reference | yes | 511 | **Adapt/rewrite** | Useful execution/cursor reference, but bound to the rejected result ABI and old model reader. No dedicated header. |
 | `src/duckvep_variant_tile.c` | B | yes | 399 | N/A | |
-| `src/duckvep_model_reader.c` | B | yes | 552 | N/A | |
+| `src/duckvep_model_reader.c` | B-reference | yes | 552 | **Rewrite for Model A v2** | Reads the old fused nested row + optional scalar `cds_seq`; it cannot preserve the v2 relation pack, edit slices, five sequence states, or piecewise context. |
 | `src/duckvep_relation_cursor.c` | B | yes | 120 | N/A | |
 | `src/duckvep_chunk_reader.c` | B | yes | 52 | N/A | |
 | `src/chrom_interner.c` | B | yes | 150 | N/A | |
 | `src/include/duckvep_variant_tile.h` | B | yes | 88 | N/A | |
-| `src/include/duckvep_model_reader.h` | B | yes | 77 | N/A | |
+| `src/include/duckvep_model_reader.h` | B-reference | yes | 77 | **Rewrite for Model A v2** | Header documents the old fused/prepared-model contract. |
 | `src/include/duckvep_relation_cursor.h` | B | yes | 65 | N/A | |
 | `src/include/duckvep_chunk_reader.h` | B | yes | 41 | N/A | |
 | `src/include/duckvep_chrom_interner.h` | B | yes | 46 | N/A | Header is named `duckvep_chrom_interner.h`, not `chrom_interner.h` — the reconciliation doc's phrase "+ their include/ headers" doesn't spell out the name, so this isn't a doc error, just worth recording exactly. |
 
-Verdict: **every Tier B file exists.** No misnamed/missing files.
+Verdict: every Tier B path exists. Existence does not mean "lift + rename": cursor/chunk
+helpers are reusable, while annotate/model-reader glue must be adapted or rewritten around
+the M6a contract.
 
 ### Tier C — claimed near-duplicates (verified by diff against DuckHTS)
 
@@ -208,16 +221,18 @@ completeness gap, not a correctness error (they will obviously be needed for a w
 | `docs/HANDOFF.md` (239 lines), `docs/VEP_SOURCE_AUDIT.md` (98 lines) | **Historical/provenance, not source** — recommend archiving as a reference, not folding into `src/duckvep/` | `HANDOFF.md` is directly quoted as evidence in `duckvep_m6a_contract_gate.md:13` ("the stalled handoff") and `duckvep_reconciliation.md:37,256`; it and `VEP_SOURCE_AUDIT.md` have real provenance value (what was tried, why it stalled, VEP-source citations) but aren't code to lift into `src/duckvep/`. Worth a one-line disposition decision (keep a copy under `design/` vs. let it die with the archived repo) rather than silence. |
 | `design/README.md`, `better_scans.md`, `duckdb_c_api_deprecation_scan_2026-04-21.md`, `multireading.md`, `simd_dispatch_matrix.md`, `simd_future_kernel_proposals.md`, `tigerstyle_audit_2026-06-08.md`, `read_bcf_v2_optimization_comparison_2026-06-09.md` | **Correctly excluded — verified, not a gap** | All eight already exist under `/root/duckhts/design/` with the same names. Five are byte-identical (`better_scans.md`, `duckdb_c_api_deprecation_scan_2026-04-21.md`, `multireading.md`, `simd_future_kernel_proposals.md`, plus `tigerstyle_audit_2026-06-08.md`/`read_bcf_v2_optimization_comparison_2026-06-09.md` present by name, not diffed). `simd_dispatch_matrix.md` differs by 33 lines (DuckHTS's is newer, post-nt16-gap-ledger). None need salvaging; DuckHTS's copies are current or ahead. Recorded here only so the "no-mention = overlooked" reading doesn't get raised as a false gap later. |
 
-Conformance's `data/` subtree (clinvar parquet/csv snapshots, `so_consequences.tsv`,
-`effect_rule_bindings.tsv`, etc.) is covered by Tier A's "conformance/ in full" wording — verified
-present, not a gap.
+Conformance's tracked bindings and seed fixtures are Tier A. Generated/ignored Parquet and
+pair outputs plus untracked run CSVs are not implicitly covered; freeze only artifacts named
+by a checksummed authoritative manifest.
 
 ## Summary of verification scope
 
 - Tier A: 13 kernel files + 6 explicitly-named conformance files + 7 design docs = all 26
   individually named files confirmed present with line counts recorded above. `conformance/`
-  "in full" verified as 39 files, all present.
-- Tier B: 7 `.c` + 5 headers (2 of the 7 `.c` files have no header) = all 12 confirmed present.
+  contains 28 tracked files at `9f922c8`; the former 39-file statement counted dirty/generated
+  state and is not a salvage instruction.
+- Tier B: 7 `.c` + 5 headers (2 of the 7 `.c` files have no header) = all 12 confirmed present;
+  the old model reader/annotation glue are reference material, not verbatim lift targets.
 - Tier C: 11 `.c` + 2 headers = all 13 confirmed present and diffed against DuckHTS; 1 file
   (`bcf_reader.c`) reclassified from NEAR-DUP to SUBSTANTIALLY DIVERGED; SIMD sub-claim corrected
   (3 of 6 backends have zero unique content, the other 3 have zero unique content *for DuckHTS's

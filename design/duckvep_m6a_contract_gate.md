@@ -1,12 +1,14 @@
 # DuckVEP M6a: the contract gate before folding duckvep-c
 
-Status: **open design / implementation contract.** M6a is the "contract gate" that must
-land *before* any `/root/duckvep-c` code is folded into `src/duckvep/`. It records the
-reframe and the verified findings of an adversarial gpt-5.6-sol (max) review (2026-07-10)
+Status: **current implementation contract; M6a design gate specified.** M6a is the
+"contract gate" that must land *before* any `/root/duckvep-c` code is folded into
+`src/duckvep/`. It records the reframe and the verified findings of an adversarial
+gpt-5.6-sol (max) review (2026-07-10)
 of the duckvep + duckhgvs plan, cross-checked against actual source in `/root/duckvep-c`,
 `/root/duckhgvs-0.4.0`, and Ensembl VEP 115/116. Companion to `roadmap.md` (M6a–M6d) and
-`duckvep_reconciliation.md` (salvage plan). **Where this note disagrees with those two on
-the edit model or the VEP pin, THIS note wins** — it corrects them.
+`duckvep_reconciliation.md` (salvage plan). The concrete relation/context schema is
+`duckvep_model_a_v2.md`. **Where these M6a notes disagree with the older plans on the edit
+model, ABI boundary, or pins, the M6a notes win.**
 
 ## The reframe: SO and HGVS are sibling consumers, not a pipeline
 
@@ -18,10 +20,12 @@ sequence context: general indels, exon-boundary crossings, intronic coordinates,
 delins, frameshift/extension termini, duplication recognition, uncertainty.
 
 **Decision:** introduce an internal immutable **`allele_transcript_context`** that both SO
-evaluation and HGVS rendering consume as *siblings*. It carries: original VCF allele;
-trimmed semantic edit; raw + projected genomic/transcript ranges; transcript-oriented
-alleles; cDNA/CDS/peptide ranges; full sequence-provider identity; edit provenance;
-normalization offsets. HGVS is **not** derived from `duckvep_consequence_t`.
+evaluation and HGVS rendering consume as *siblings*. It preserves the original VCF allele,
+the trimmed semantic envelope plus the exact VEP-compatibility differing-region view,
+piecewise exon/intron/outside projection, raw and edited transcript axes, phase-padded CDS,
+peptide ranges, given/used alleles, full sequence-provider identity, edit provenance, and
+immutable normalization views. HGVS is **not** derived from `duckvep_consequence_t`; see
+`duckvep_model_a_v2.md` for the binding shape and ownership rules.
 
 ## Model A v2: represent the right biological object
 
@@ -34,17 +38,21 @@ A boolean flag like `SELENOCYSTEINE` carries neither position nor replacement, s
 drive the peptide edit; rare-class SO terms and every HGVSp would use the wrong reference
 protein.
 
-**Decision:** **typed edit relations** `(scope, transcript_or_translation_id, code, start,
-end, alt_seq)`. Keep `tx_flags` for boolean predicates + selection metadata only, never edit
-payloads. Store or reproducibly derive BOTH the edited spliced transcript sequence AND the
-final edited reference peptide. Model A v2 also carries identity: `model_id`, provider,
-release, assembly, transcript stable-ID/version, translation ID/version, RefSeq aliases,
-reference accession/version (e.g. `NC_…`), and sequence hashes. GENCODE MANE tags are
-*selection annotations*, not proof of sequence identity — crosswalk and hash-verify.
+**Decision:** use separate typed transcript- and translation-edit relations, preserving the
+raw owner-scoped attribute row, coordinate basis, replacement, application order, and
+status. Keep `tx_flags` only as a derived runtime predicate cache, never as edit payload or
+persistent truth. Store/deduplicate five distinct sequence states: raw spliced transcript,
+RNA-edited spliced transcript, phase-padded translatable CDS, unedited peptide, and final
+post-edit peptide. Model A v2 also carries content-derived `model_id`, source/provider,
+annotation-set release, assembly/accession, source-internal object keys, stable-ID/version
+metadata, a separate reproducible build receipt, RefSeq aliases, reference
+accession/version, and sequence hashes. GENCODE MANE tags are *selection annotations*, not
+proof of sequence identity — crosswalk and hash-verify.
 
-**M6a exit evidence:** for release 116 export each transcript's raw spliced, edited spliced,
-translatable CDS, unedited translation, and final edited peptide from the Ensembl API;
-compare hashes to the importer, stratified by edit code / phase / partiality / codon table.
+**M6b import gate:** export those five states from fresh objects in the pinned API and
+compare logical lengths/hashes to the importer, stratified by edit code, phase, partiality,
+codon table, source, and assembly. M6a specifies that evidence; it cannot compare an
+importer that M6b has not implemented.
 
 ## VEP pin: RESOLVED to 116
 
@@ -71,13 +79,17 @@ boundary-crossing variants instead of returning `undef`, so 116 emits `c./n.` wh
 none, for **all** transcripts). Two hunks were resolved by gpt-5.6-sol: `$consider_ins_len` is
 **dead scaffolding** (the live path is the `_cil` pair used by `stop_retained`); and the
 `get_3prime_seq_offset` 3′-shift cap change affects **`g./m.` only** — `c./n.` HGVS uses a
-*separate, unchanged* `perform_shift` routine, so **M6b must implement the two 3′-shift routines
-distinctly** (an engine assuming one shared routine gets `c./n.` wrong).
+*separate, unchanged* `perform_shift` routine. **M6c must keep the `g.` and `c./n.` routines
+distinct; M6d adds `m.`.** M6b preserves the raw/shifted context but makes no HGVS claim.
 
-**Decision:** **pin VEP 116.** The salvaged kernel, conformance data, and controlled GFF are
-116-shaped. If GRCh37/clinical requires 115, make it an explicitly *named* compatibility
-target with consciously back-ported predicate behavior — never a 115 wrapper on 116
-assumptions. Record loaded-module hashes, not `vep --version`.
+**Decision:** **pin VEP 116.** Exact source pins are VEP `release/116.0` commit
+`57ea5c52340acc1f156267f810ad162e26597082`, core
+`c0cf13daa961d80584bad797b2eb0ff3a7500ef3`, and variation
+`2fb834b987ede3824e200197a838ce11e91aeb4b`; the remaining embedded API pins are recorded in
+`duckvep_model_a_v2.md`. The salvaged algorithms and controlled fixtures are 116-shaped. If
+GRCh37/clinical requires 115, make it an explicitly *named* compatibility target with
+consciously back-ported predicate behavior — never a 115 wrapper on 116 assumptions.
+Record loaded-module hashes, not `vep --version`.
 
 ## Two oracle lanes
 
@@ -105,7 +117,13 @@ stratified file rather than one manifest-bound run.
 - Primary uncertainty unit = independently sampled variant/locus (discordant if *any*
   supported transcript pair disagrees); report pair rates descriptively with cluster-aware
   (design-effect / bootstrap) intervals.
-- One manifest selects one authoritative run.
+- One machine-readable manifest selects one authoritative run and binds `model_id` plus
+  `model_build_id`, engine binary/rule-program hashes, oracle container/command/module/input
+  hashes, numeric allele/span limits, oracle lane, exact supported allele/transcript strata
+  with minimum witness counts, explicit-error strata, checksummed witness-specific
+  intentional divergences, backlog strata, output equality, zero expected parity discord,
+  and `skip_allowed = false`. The initial capability matrix is specified in
+  `duckvep_model_a_v2.md`.
 
 ## duckhgvs-0.4.0: quarantine as a spike
 
@@ -147,11 +165,13 @@ human GRCh37/38; promote species only after codon-table / attribute inventories 
 
 VEP / VariantValidator / Mutalyzer / biocommons-hgvs / ClinVar disagree (algorithmic
 choices, nomenclature revisions, reference providers, transcript versions). **Decision:**
-pin a dated **HGVS recommendations snapshot** as normative; VEP-116 as the operational
-compatibility target; other validators as a differential panel; **ClinVar as corpus, not
-oracle.** Every intentional VEP deviation → an ERRATA witness. Build the adjudicated corpus
-(repeats, exon boundaries, UTRs, introns, partial transcripts, frameshifts, extensions,
-duplications, reference mismatches) before M6c.
+pin **HGVS Nomenclature 21.1.4** (2026-05-11), tag commit
+[`6f85311989e76ead95d3547828f97ebaa3802e35`](https://github.com/HGVSnomenclature/hgvs-nomenclature/tree/6f85311989e76ead95d3547828f97ebaa3802e35),
+with no named extensions in the first claim. VEP-116 is the operational compatibility
+target; other validators form a differential panel; **ClinVar is corpus, not oracle.**
+Every intentional VEP deviation → an ERRATA witness. Build the adjudicated corpus (repeats,
+exon boundaries, UTRs, introns, partial transcripts, frameshifts, extensions, duplications,
+reference mismatches) before M6c.
 
 ## Identity vs HGVS coordinates
 
@@ -172,21 +192,24 @@ round-trip. Test `apply(ref, VCF) == apply(ref, parsed HGVS)`, not string round-
 
 ## M6a–M6d sequencing
 
-- **M6a — contract gate (this note):** pin VEP 116 + HGVS snapshot; design Model A v2 +
-  typed edit relations + provenance/hashes + the lossless `allele_transcript_context`.
-  **No code folding.**
-- **M6b — Model A + SO MVP:** reproducible GRCh37/38 imports proven by exact
+- **M6a — contract gate (this note + `duckvep_model_a_v2.md`):** pin exact VEP/API/HGVS
+  sources; fix Model A v2, typed edit/provenance/hash relations, lossless context, capability
+  manifest, and ownership/coordinate contracts. **No code folding.**
+- **M6b — Model A + first gated SO slice:** reproducible GRCh37/38 imports proven by exact
   spliced/CDS/peptide hashes; VEP-116 SO for a declared biallelic small-variant subset, both
-  strands, coding + noncoding. No HGVS / haplotype claim.
+  strands, coding + noncoding. Translation edits and partial-CDS facts are imported/applied
+  where required to construct the correct SO reference state. No HGVS / haplotype claim.
 - **M6c — DNA HGVS:** generation-only `g./c./n.`, independent per-reference 3′ norm,
   application-equivalence tests.
 - **M6d — protein + compound:** `p.` after the protein state machine passes independent
-  differential tests; then translation edits, partial CDS, haplotypes, `m.`, structural
-  HGVS as separately gated expansions.
+  differential tests; then variant/model-edit collision semantics, haplotypes, `m.`, and
+  structural HGVS as separately gated expansions. Translation edits and partiality are
+  already model facts in M6b; M6d adds their protein-HGVS/compound behavior.
 
-Smallest defensible MVP matrix (a single plus-strand transcript is a *smoke test*, not an
-MVP): both strands, phase, coding/noncoding, complete/partial CDS, repeats, and ≥1
-transcript-reference mismatch.
+Required first-slice matrix: both strands, phase 0/1/2, coding/noncoding,
+complete/partial CDS, repeats, separated MNV differing runs, each admitted model-edit class,
+and at least one explicit transcript-reference-mismatch policy witness. A single plus-strand
+transcript is only a smoke test and cannot support a release claim.
 
 ## Memory (open — needs measurement)
 

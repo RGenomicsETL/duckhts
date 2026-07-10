@@ -2,8 +2,9 @@
 
 Status: **future proposal / open design.** Records how to fold the stalled sibling
 extension `/root/duckvep-c` (commit `9f922c8`) into this tree as `src/duckvep/`
-before that repo is archived, what to salvage, why the stall was the *transcript
-model import* (not the engine or the tests), and the conformance/format discipline
+before that repo is archived, what to salvage, why the principal functional stall was the
+*transcript model import*, why the old ABI/glue still require M6a adaptation, and the
+conformance/format discipline
 that differentiates it from `fastVEP`. Companion to `design/roadmap.md` M6. Nothing
 here is implemented in DuckHTS yet.
 
@@ -11,8 +12,8 @@ here is implemented in DuckHTS yet.
 things here — the edit model (edits are split nucleotide-pre / peptide-post translation, not
 "all before translation") and the VEP pin (RESOLVED to 116). For those, plus the
 SO/HGVS-as-sibling-consumers reframe, the lossless `allele_transcript_context`, the two-lane
-oracle, conformance-must-gate, and the `duckhgvs-0.4.0` quarantine, **`duckvep_m6a_contract_gate.md`
-is authoritative.**
+oracle, conformance-must-gate, and the `duckhgvs-0.4.0` quarantine,
+**`duckvep_m6a_contract_gate.md` plus `duckvep_model_a_v2.md` are authoritative.**
 
 ## What duckvep-c actually is (do not under-credit it)
 
@@ -26,7 +27,7 @@ consequence evaluator**, source-grounded in `Bio/EnsEMBL/Variation`
 and SV cases. See `/root/duckvep-c/design/duckvep_effect_ctx_architecture.md` and
 `vep_consequence_state_machine.md`.
 
-## Why it stalled (the correct diagnosis)
+## Why it stalled (principal cause plus the ABI gate)
 
 Not incrementalism for its own sake, and **not a weak test story**. The stall is the
 **Model A transcript-model import**. The engine reads a `tx_flags` bitset
@@ -35,8 +36,8 @@ CDS_START_NF/END_NF, SELENOCYSTEINE, STOP_CODON_READTHROUGH, RNA_EDIT,
 AMINO_ACID_SUB, MANE_SELECT, MANE_PLUS_CLINICAL, GENCODE_*, CCDS,
 READTHROUGH_TRANSCRIPT, UPSTREAM_ATG`) plus a *prepared, edit-applied* `cds_seq` —
 never a biotype string or Ensembl object (`/root/duckvep-c/design/duckvep_annotate_input_contract.md`,
-`src/include/duckvep_model_reader.h`). That is the *right* cut: Ensembl specifics
-live in an import step, the kernel stays uniform.
+`src/include/duckvep_model_reader.h`). Keeping Ensembl-specific ingestion outside the
+kernel is the right cut; the old `cds_seq + tx_flags` data shape is not.
 
 But `model_a_from_gff()` **does not synthesize `cds_seq` yet** (structural-only), and
 the evaluator does **not yet emit** `NMD_transcript_variant` / `mature_miRNA_variant`
@@ -45,7 +46,8 @@ classes that depend on MySQL-dump-only data — selenoproteins (`UGA`→Sec, not
 `stop_gained`), RNA-edited/readthrough transcripts, mature miRNA, MANE-picked
 variants — **cannot be represented in the model**, therefore **cannot be traversed
 by the fuzzer**, therefore conformance stays a subset statistic no matter how good
-the state machine is. **Model A import is the single pivot.**
+the state machine is. Model A v2 is the data pivot. The second M6a gate is the lossless
+per-allele/transcript context: the old compact-result ABI cannot be the SO/HGVS boundary.
 
 ## The conformance framework is the crown jewel (the anti-slop engine)
 
@@ -58,9 +60,10 @@ Three tiers, each catching what the tier below cannot (all under
 2. **Rare-class witness fuzzer** — `generate_witnesses.R` (D2) *deliberately tiles
    the equivalence classes where consequence bugs live*: each donor / acceptor /
    5th-base / region boundary, start & stop codons, exon edges, same-codon and
-   two-codon MNVs. `fuzz_witnesses.R` (D3) runs VEP `--gff` (sole oracle) vs
+   two-codon MNVs. `fuzz_witnesses.R` (D3) runs VEP `--gff` (the geometry lane) vs
    `duckvep_annotate` on the SAME Model A + optional prepared CDS, exact
-   SO-term-**set** comparison. **This already found a real VEP-state-machine bug**
+   SO-term-**set** comparison. Curated edit states additionally require the pinned cache/DB
+   lane. **The geometry fuzzer already found a real VEP-state-machine bug**
    (`intron_variant` at essential splice sites → the `PRE_WITHIN_INTRON` fix).
 3. **Real-data statistical audit** — `stratified_conformance.R` (D4) samples real
    VCF (GIAB default, ClinVar via `--corpus`), runs VEP vs duckvep, reports SO-set
@@ -87,7 +90,8 @@ bounds*, not raw speed.
 fastVEP reinvents formats: `fastSA` is an echtvar-inspired bespoke binary (Var32 /
 delta / chunked-ZIP; `crates/fastvep-sa/src/lib.rs` "echtvar-inspired"), and the
 cache is a serde port of VEP's Sereal structure. **DuckVEP-in-DuckHTS must not
-reinvent formats:** Model A is a **DuckDB relation / Parquet**; supplementary
+reinvent formats:** Model A is a **DuckDB relation pack / Parquet** with a derived fused
+execution view; supplementary
 annotations (ClinVar/gnomAD/dbSNP/COSMIC) are **joins** to Parquet / DuckLake; the
 Ensembl MySQL dump is read by DuckDB's `mysql` scanner. Storage is solved by the
 engine; the consequence logic is the only risk we take on. This aligns with
@@ -95,21 +99,25 @@ engine; the consequence logic is the only risk we take on. This aligns with
 
 ## Salvage inventory (before archiving `/root/duckvep-c`)
 
-Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
+Salvage into `src/duckvep/` only after applying the dispositions below. Priority = unique
+algorithms, generators, source-grounded tests, and provenance—not old ABI surface area.
 
 **Verified file-by-file (2026-07, Sonnet 5 audit against the trees): see
 `duckvep_salvage_inventory_audit.md` for the corrected, evidence-backed inventory table
 (existence, line counts, per-file dedupe diffs, and gaps).** Key corrections folded below.
 
-**Tier A — irreplaceable:**
-- `conformance/` in full — the three tiers above, `generate_effect_rules.pl`,
-  `extract_so_spec.pl`, `generate_so_metadata.pl`, `so_dump.c`,
-  `model_a_from_gff.sql`, `model_a_with_cds.R`, `data/`.
-- `kernel/` — the pure, DuckDB-free consequence engine:
+**Tier A — irreplaceable algorithms, generators, and tracked seed fixtures:**
+- From commit `9f922c8`, salvage the 28 tracked `conformance/` programs, binding tables, and
+  seed fixtures. Do **not** copy the dirty directory "in full": the 39-file filesystem count
+  includes modified, untracked, and ignored result artifacts. Freeze generated oracle data
+  only when an authoritative manifest names its checksum.
+- From `kernel/`, salvage the pure consequence algorithms and generated-rule machinery:
   `duckvep_classify.c`, `duckvep_effect.c`, `duckvep_sweep.c`, `duckvep_sv.c`,
   `duckvep_delta.c`, `duckvep_codon.c`, `duckvep_coding.c`,
   `duckvep_haplotype.c` (the haplosaurus lane, slice 5 open), `duckvep_projection.c`,
-  `duckvep_kernel.c`, `duckvep_so.c` + `include/{duckvep_kernel,duckvep_so}.h`.
+  `duckvep_kernel.c`, and `duckvep_so.c`. The old `duckvep_kernel.h` is retained as rewrite
+  evidence, **not lifted as the v2 ABI**: its compact scalar result and HGVS handoff are the
+  architecture M6a replaces.
 - The design docs: `duckvep_effect_ctx_architecture.md`,
   `vep_consequence_state_machine.md`, `duckvep_annotate_input_contract.md`,
   `duckvep_span_sv_cnv_consolidation_2026-06-23.md`,
@@ -121,10 +129,14 @@ Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
   `kernel/src/*.h`, the 2 generated `kernel/src/*.inc` (`duckvep_effect_rules.inc`,
   `duckvep_so_metadata.inc`), and `kernel/CMakeLists.txt`.
 
-**Tier B — engine glue to lift + rename:**
-- `src/consequence_udf.c`, `src/annotate_table.c`, `src/duckvep_variant_tile.c`,
-  `src/duckvep_model_reader.c`, `src/duckvep_relation_cursor.c`,
-  `src/duckvep_chunk_reader.c`, `src/chrom_interner.c` + their `include/` headers.
+**Tier B — engine glue, split by disposition:**
+- Reuse/adapt the narrow transport helpers where their contracts survive:
+  `src/consequence_udf.c`, `src/duckvep_variant_tile.c`,
+  `src/duckvep_relation_cursor.c`, `src/duckvep_chunk_reader.c`, `src/chrom_interner.c` and
+  matching headers.
+- Rewrite `src/duckvep_model_reader.c`/header for the normalized Model A v2 relation pack,
+  five sequence states, typed edit slices, and immutable reference bundles. Adapt or rewrite
+  `src/annotate_table.c` around the new context/result lifetime. Neither is a prefix rename.
 - **Note (audit):** `src/duckvep.c` (the `dv_`-prefixed extension entry point) is NOT
   lifted verbatim — it is superseded by the new `duckhts_csq` registration (fuse step 5).
 
@@ -145,56 +157,45 @@ Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
 
 ## Fuse mechanics
 
-1. Create `src/duckvep/` (self-contained) + `src/duckvep/kernel/`.
-2. Deduplicate Tier C; delete duckvep's copies; repoint includes to DuckHTS
-   (keep DuckHTS's `bcf_reader.c` — it is ahead of duckvep-c's fork).
-3. Discard duckvep-c's `src/simd/` — DuckHTS's SIMD tree is strictly ahead; nothing to merge.
-4. Wire the build: `CMakeLists.txt`, `r/Rduckhts/R/bootstrap.R`,
-   `r/Rduckhts/configure`, `r/Rduckhts/configure.win` (per `AGENTS.md` — a new
-   public function is incomplete until wired on Unix + Windows + R package).
-5. Public surface: one `duckhts_csq(...)` / annotate table function reusing DuckHTS
-   `read_gtf` / `fasta_nuc` / cgranges / VariantKey.
-6. Land the **Model A import** (the pivot) as a first-class DuckHTS surface —
-   schema pinned from `github.com/Ensembl/ensembl` (see "Model A data provenance"
-   below), assembly-parameterized (GRCh38 + GRCh37), species-agnostic. Ensembl
-   MySQL-dump/scanner → DuckDB SQL (`transcript_attrib ⋈ attrib_type`,
-   `translation_attrib ⋈ translation`) → flat Model A relation + `tx_flags`
-   (MANE flags may come from GENCODE GTF tags instead). **CORRECTION (2026-07, see
-   `duckvep_m6a_contract_gate.md`): edits are NOT all "before translation."** Ensembl
-   splits them by scope — nucleotide-scope `_rna_edit` changes the *spliced nucleotide*
-   sequence pre-translation, but peptide-scope `_selenocysteine` (UGA→Sec, not
-   `stop_gained`), `amino_acid_sub`, `initial_met`, `_stop_codon_rt` modify the *peptide
-   after translation*. Model A v2 carries **typed edit relations** `(scope, tx/translation
-   id, code, start, end, alt_seq)`, not flat flags, and stores/derives both the edited
-   spliced transcript sequence and the final edited reference peptide; emit side relations
-   (`mature_mirna`, regulatory). Only then does the fuzzer reach the rare clinical classes.
+1. Freeze the `9f922c8` tracked-source inventory and selected, checksummed conformance seeds;
+   do not move dirty run outputs.
+2. Land the **Model A v2 import first**: the normalized relation pack, separate logical-model
+   and build identities, artifact/selection manifests, five sequence-state exporter/hashes,
+   validation, and derived execution view specified by `duckvep_model_a_v2.md`. The schema
+   is species-neutral; first supported packs are human GRCh38 and GRCh37.
+3. Create `src/duckvep/` and port the unique classifier/delta/sweep/rule algorithms behind
+   the new context and result boundary. Rewrite the old model reader; adapt annotation glue.
+4. Deduplicate Tier C against DuckHTS (keep DuckHTS's newer `bcf_reader.c`) and discard
+   duckvep-c's `src/simd/` entirely.
+5. Wire CMake plus R package Unix/Windows bootstrap/configure paths and both SQL/R test
+   levels before exposing a public surface.
+6. Add the narrow capability-manifest-bound annotation surface only after the five-state
+   hash gate and zero-discord frozen fixtures pass. Reuse DuckHTS readers, cgranges,
+   VariantKey, and sequence providers; do not create a private cache format.
 
 ## Model A data provenance, schema source, species, and assemblies
 
 The Model A import is a data-engineering problem; get its *inputs* right.
 
-- **Schema from the Ensembl API repo, not a live MySQL instance.** The authoritative
-  DDL is versioned in `github.com/Ensembl/ensembl` (`sql/table.sql`, core: transcript
-  / translation / exon / exon_transcript / *_attrib / attrib_type / seq_region) and
-  `github.com/Ensembl/ensembl-variation` (`sql/table.sql`, variation; local copy at
-  `/root/ensembl-variation/sql/table.sql`). Pin the schema to a release tag and build
-  the Model A SQL against *that* file — reverse-engineering a live DB is fragile and
-  version-ambiguous. The DuckDB `mysql` scanner (or a server-free dump) supplies the
-  *rows*; the repo supplies the *shape*.
-- **All Ensembl species, by construction.** The kernel already reads `tx_flags`, never
-  a species biotype string (`duckvep_annotate_input_contract.md`), so a species is
-  just another Model A relation. Keep it that way: no per-species branches in the
-  engine, only per-species import runs.
+- **Schema from the pinned Ensembl API source, not a live-instance guess.** Model A's core
+  DDL is [`sql/table.sql`](https://github.com/Ensembl/ensembl/blob/c0cf13daa961d80584bad797b2eb0ff3a7500ef3/sql/table.sql)
+  at commit `c0cf13daa961d80584bad797b2eb0ff3a7500ef3`. Variation DDL is not needed to
+  define the transcript pack; pin it separately when importing variation/supplementary
+  data. The scanner or server-free dump supplies rows; the repository supplies shape.
+- **Species-neutral shape, human-first claim.** Keep species-specific vocabulary in the
+  importer and named attributes, not engine branches. Do not claim all-species parity until
+  codon-table, attribute, and source-selection inventories pass; M6b supports human
+  GRCh37/38 first.
 - **GRCh38 AND GRCh37 — GRCh37 is clinically load-bearing.** Clinical genomics still
   runs on GRCh37/hg19. Ensembl serves GRCh37 from a separate archive DB
   (grch37.ensembl.org); VEP has `--grch37`. Model A import must be assembly-parameterized
   and both assemblies are first-class, not GRCh38-only. Reference FASTA for GRCh37 is
   `human_g1k_v37.fasta` (see `/root/GRCh37/`).
-- **MANE tx_flags from GENCODE, not only Ensembl attribs.** GENCODE ships MANE-tagged
+- **MANE values from GENCODE, not only Ensembl attribs.** GENCODE ships MANE-tagged
   GTF (`tag "MANE_Select"` / `"MANE_Plus_Clinical"`); `v46lift37` carries MANE onto
-  GRCh37 (MANE ENST/NM share identical CDS by construction, so it is robust across an
-  Ensembl-release gap). This is a simpler, version-stable source for `MANE_SELECT` /
-  `MANE_PLUS_CLINICAL` than the core `transcript_attrib` join, and it works on GRCh37.
+  GRCh37. Preserve the accession value and source receipt; then hash-verify ENST/NM sequence
+  identity before promoting the crosswalk. The runtime MANE bits are derived selection
+  metadata, not identity proof.
   Reference: `/root/bioconnect-sprint-py/docs/data_versions.md` (GENCODE v46lift37,
   `--mane_select --pick`).
 
@@ -235,9 +236,10 @@ divergences are categorical/clinical, the oracle is versioned and forks
 (release, **cache vs DB**), and three oracles (VEP / haplosaurus / bcftools csq)
 disagree with each other.
 
-- **(1) Pinned conformance manifest** — *which* oracle: VEP release + cache-vs-DB,
-  GENCODE-vs-RefSeq, assembly, bcftools/haplosaurus versions. Separates version
-  skew from real divergence.
+- **(1) Pinned conformance manifest** — *which* model build, engine/rule binary, oracle
+  container/modules/command, cache-vs-DB lane, annotation source, assembly, numeric allele
+  bounds, and required rare-state witness counts. This separates version skew and empty
+  strata from real divergence; emitted-pair equality is checked before SO-set equality.
 - **(2) `ERRATA.md`** — three reason-classes, each entry naming *which oracle* it
   diverges from and *backed by a regression witness*: (a) intentional design
   divergence (cite the Ensembl/VEP source mechanism, riker-style); (b) VEP/haplosaurus
@@ -266,7 +268,7 @@ frontier. **Decision: pin VEP 116** (the salvaged kernel is 116-shaped). If GRCh
 needs 115, it is a *named* compatibility target with consciously back-ported predicates,
 never a 115 wrapper on 116 assumptions. Record loaded-module hashes, not `vep --version`.
 Full detail + the sibling-consumer / Model-A-v2 / oracle-lane / conformance-gating decisions
-live in `duckvep_m6a_contract_gate.md`.
+live in the two M6a contract notes.
 
 ## duckhgvs-0.4.0 — quarantine (not the head start it looks like)
 
@@ -274,7 +276,9 @@ live in `duckvep_m6a_contract_gate.md`.
 handoff (`/root/duckvep-c/docs/HANDOFF.md:33`) calling it "already exists." It hard-codes
 `DUCKHGVS_SEQ_MAX 4096` / `DUCKHGVS_TRANSCRIPT_EXON_MAX 512`, only projects alleles wholly
 inside one exon, and its README's "not yet" list covers accession resolution, intronic
-`c./n.`, protein normalization, SV, and full grammar; the 4096 buffer already excludes 9,742
-real transcripts. Salvage ideas + test vectors; **do not fold its ABI.** Its
+`c./n.`, protein normalization, SV, and full grammar. On its bundled GRCh37 RefSeq model,
+28,901/108,760 transcripts (26.6%) exceed 4096 nt spliced length; the older 9,742 figure was
+a CDS count from a different VEP-116/GRCh38 dataset. Salvage the apply-then-diff test pattern
+and seed vectors; **do not fold its ABI.** Its
 render-HGVS-from-`duckvep_consequence_t` architecture is exactly the design error M6a
 corrects (see `duckvep_m6a_contract_gate.md`).

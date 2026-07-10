@@ -26,17 +26,18 @@ Two guardrails, both from `AGENTS.md` discipline:
 | RSeQC/Qualimap/featureCounts/dupRadar (Rust) | `.sync/RustQC` | `fee1fce` |
 | mosdepth | `.sync/mosdepth` | `52813e0` (v0.3.13) |
 | bcftools (BCSQ contract) | system / `.sync/pysam/bcftools` | 1.23 |
-| Ensembl VEP | `/root/ensembl-vep` (`release/115`), `/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0`, `/root/ensembl-variation` (`release/115`) | **116 (RESOLVED).** `Constants.pm` is byte-identical 115↔116, so the pin is not a rule-table choice; `VariationEffect.pm` differs by 155 lines on the stop/inframe/partial-codon predicates. Pin 116; 115 only as a named compat target. See `duckvep_m6a_contract_gate.md`. |
-| fastVEP (contrast, NOT a source) | `/root/fastVEP`, github.com/Huang-lab/fastVEP | `785922e` (v0.2.0) |
+| Ensembl VEP | `/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0`; local 115 comparison trees at `/root/ensembl-vep`, `/root/ensembl-variation` | **116:** VEP commit `57ea5c5`; embedded core `c0cf13d`, variation `2fb834b`. `Constants.pm` is byte-identical 115↔116, while consequence predicates differ. 115 is only a named compatibility target. See the M6a contract notes. |
+| HGVS Nomenclature | [HGVSnomenclature/hgvs-nomenclature](https://github.com/HGVSnomenclature/hgvs-nomenclature) | **21.1.4**, commit `6f85311`, no named extensions in the first claim |
+| fastVEP (contrast, NOT a source) | `/root/fastVEP`, [Huang-lab/fastVEP](https://github.com/Huang-lab/fastVEP) | `785922e` (v0.2.0) |
 | duckvep-c (consequence engine to fold in) | `/root/duckvep-c` | `9f922c8` |
-| Ensembl schema (Model A shape) | github.com/Ensembl/ensembl `sql/table.sql` (core); `/root/ensembl-variation/sql/table.sql` (variation) | pin to a release tag |
+| Ensembl core schema (Model A shape) | [Ensembl/ensembl `sql/table.sql`](https://github.com/Ensembl/ensembl/blob/c0cf13daa961d80584bad797b2eb0ff3a7500ef3/sql/table.sql) | `c0cf13daa961d80584bad797b2eb0ff3a7500ef3` |
 | GENCODE (MANE tags, GRCh37 via lift) | v46lift37 (basic, MANE-tagged); see `/root/bioconnect-sprint-py/docs/data_versions.md` | pin per import |
 | ACMG SQL engine (M8 reference) | `/root/bioconnect-acmg/manifests/*.sql` | — |
 
 **Assemblies & species (M6/M8):** GRCh38 **and** GRCh37 are first-class — GRCh37/hg19
 is clinically load-bearing (Ensembl archive DB / VEP `--grch37` / GENCODE lift37,
-FASTA `/root/GRCh37/human_g1k_v37.fasta`). Model A import is assembly-parameterized and
-species-agnostic (the kernel reads `tx_flags`, never a species biotype string).
+FASTA `/root/GRCh37/human_g1k_v37.fasta`). Model A's shape is assembly-parameterized and
+species-neutral; the first supported engine/model claim is human GRCh37/38 only.
 
 ## Primitive verdicts (reconciled)
 
@@ -130,28 +131,32 @@ HGVS *from* the compact `duckvep_consequence_t`, which discards the ranges/seque
 HGVS needs. SO and HGVS must be **sibling consumers of a lossless `allele_transcript_context`**.
 Do not fold the duckvep-c ABI before M6a lands.
 
-- **M6a — contract gate (docs/design, no code fold):** pin **VEP 116** (resolved — see
-  oracle table); design **Model A v2** with *typed edit relations* (nucleotide `_rna_edit`
+- **M6a — contract gate (docs/design, no code fold):** pin exact **VEP 116**, embedded API
+  commits, and **HGVS 21.1.4**; design **Model A v2** with *typed edit relations* (nucleotide `_rna_edit`
   pre-translation vs peptide `_selenocysteine`/`amino_acid_sub`/`_stop_codon_rt`
   post-translation — the reconciliation doc's "apply all before translation" was wrong),
-  identity/provenance/sequence-hashes, and the lossless `allele_transcript_context`; decide
-  the HGVS normative snapshot + adjudicated-panel oracle policy; quarantine
-  `/root/duckhgvs-0.4.0` as a spike (fixed 4096-base/512-exon buffers).
-- **M6b — Model A + SO MVP:** reproducible GRCh37/38 imports proven by exact
+  separate logical-model/build identities, source selection/provenance, five sequence
+  states, the lossless piecewise `allele_transcript_context`, and a capability-bound
+  conformance manifest; quarantine
+  `/root/duckhgvs-0.4.0` as a spike. Binding schema: `duckvep_model_a_v2.md`.
+- **M6b — Model A + first gated SO slice:** reproducible GRCh37/38 imports proven by exact
   spliced/CDS/peptide **hashes**; VEP-116 SO for a declared biallelic small-variant subset,
-  both strands, coding+noncoding. No HGVS/haplotype claim. Two oracle lanes (`--gff` geometry
-  + pinned `--cache`/DB for curated edits). **Conformance must gate** (fail on discord/skip).
+  both strands, coding+noncoding. Import/apply model translation edits and partiality where
+  they define the SO reference state. No HGVS/haplotype claim. Two oracle lanes (`--gff`
+  geometry + pinned `--cache`/DB for curated edits). **Conformance must gate** (fail on
+  discord/skip).
 - **M6c — DNA HGVS (duckhgvs):** generation-only `g./c./n.`, independent per-reference 3′
   normalization (keep VariantKey left-aligned identity separate), application-equivalence
   tests — not string round-trips (HGVS↔VCF is not a bijection).
 - **M6d — protein + compound:** `p.` only after the protein state machine passes independent
-  differential tests; then translation edits, partial CDS, haplotypes, `m.`, structural HGVS
-  as separately gated expansions.
+  differential tests; then model-edit collision semantics, haplotypes, `m.`, and structural
+  HGVS as separately gated expansions. Translation edits/partiality are already Model A
+  facts used by M6b; this stage adds their protein-HGVS/compound behavior.
 
 Scope the first claim to **human GRCh37/38** (kernel supports only codon tables 1/2).
 Risk: Model A v2 + lossless-intermediate schema (the real pivot), not the state machine.
-Oracle: **VEP 116** (SO/HGVS) as compatibility target + dated HGVS-recommendations snapshot
-as normative + VariantValidator/Mutalyzer/hgvs as a differential panel; **ClinVar `CLNHGVS`
+Oracle: **VEP 116** as compatibility target + **HGVS Nomenclature 21.1.4** as normative +
+VariantValidator/Mutalyzer/hgvs as a differential panel; **ClinVar `CLNHGVS`
 as corpus, not oracle**; bcftools 1.23 as a separate BCSQ adapter/oracle; brute-force
 genetic-code property tests for the kernel.
 
@@ -187,7 +192,7 @@ Oracle: bwa / minimap2 SAM + brute-force SW property tests.
 M1 contracts ┼─ per-cycle SIMD aggs (M2) ─→ QC-DNA metrics (M4)
 + oracles    ├─ mosdepth streaming (M3) ──→ duckhts_riker fused pass (M4)
              ├─ Model A import (M6 pivot) → duckvep fuzzer can reach rare classes
-             │        (schema-from-repo · GRCh38+GRCh37 · all species · MANE-from-GENCODE)
+             │        (pinned schema · human GRCh38+GRCh37 · value-preserving MANE inputs)
              │                              └─→ consequence (M6) ─┐
              │   supplementary-anno Parquet (gnomAD/REVEL/SpliceAI)┼─→ ACMG SQL layer (M8)
              └─ minibwa ksw2 spike (M1) ──→ [gated] seq_align (M7)

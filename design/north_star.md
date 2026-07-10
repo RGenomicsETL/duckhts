@@ -70,9 +70,10 @@ Projection-aware, header-faithful readers and fused analytics, all ordinary tabl
 
 ### L3 — Annotation and consequence engine (DuckVEP) — the flagship proof
 
-A DuckDB-native VEP / `bcftools csq` layer built entirely from L0–L2 (relations, Parquet, VariantKey/RegionKey, cgranges, `read_gff`, `fasta_nuc`, typed CSQ parsing). **No private cache format** (`.fastSA`/Sereal are explicitly not adopted). Storage is solved; the consequence engine is the entire risk. Target `bcftools csq` first (bounded, validatable against an executable), Ensembl VEP `release/115` as semantic comparator, HGVS as a later layer.
+A DuckDB-native VEP / `bcftools csq` layer built entirely from L0–L2 (relations, Parquet, VariantKey/RegionKey, cgranges, `read_gff`, `fasta_nuc`, typed CSQ parsing). **No private cache format** (`.fastSA`/Sereal are explicitly not adopted). The hard boundary is the reproducible transcript/edit model plus lossless per-allele/transcript context; the consequence predicates are only one consumer. Target Ensembl VEP 116 for the first gated SO slice, keep bcftools 1.23 as a separately named BCSQ contract, and add HGVS in independently gated DNA/protein stages.
 
-Pillars: `duckvep_bcftools_csq_port_plan_2026-06-09.md`, `duckvep_layer_keys.md`.
+Pillars: `duckvep_m6a_contract_gate.md`, `duckvep_model_a_v2.md`,
+`duckvep_bcftools_csq_port_plan_2026-06-09.md`, and `duckvep_layer_keys.md`.
 
 ### L4 — Lakehouse / VariantLake
 

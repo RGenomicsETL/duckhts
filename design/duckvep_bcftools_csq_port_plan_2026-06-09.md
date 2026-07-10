@@ -1,15 +1,19 @@
 # DuckVEP / bcftools csq port plan (2026-06-09)
 
-Status: open design and implementation backlog. This is planning guidance for a DuckDB-native VEP/csq layer; it is not yet a compatibility claim.
+Status: **open historical backlog, partly superseded.** This remains guidance for the
+separately named bcftools-csq lane. `duckvep_m6a_contract_gate.md` and
+`duckvep_model_a_v2.md` supersede it on VEP pinning, milestone sequence, model/context
+shape, HGVS architecture, and conformance gating. It is not a compatibility claim.
 
 ## Purpose
 
 This note turns the current DuckVEP objective into concrete phases:
 
 - start from existing CSQ/ANN/BCSQ parsing in `read_bcf()`;
-- port the smallest useful slice of `bcftools csq` consequence production;
+- port an explicitly bounded first slice of `bcftools csq` consequence production;
 - use DuckDB relations, Parquet, indexes, and interval primitives instead of inventing a new cache/archive format;
-- keep Ensembl VEP and fastVEP as semantic references without inheriting their storage/runtime constraints;
+- use pinned Ensembl VEP as the semantic source; keep fastVEP only as a negative control for
+  private formats, scalar context, and shared-pair-only validation;
 - build a testing framework that can compare DuckHTS output to upstream VEP/bcftools on tiny fixtures first, then GIAB-scale data;
 - keep TigerStyle/crash-safety cleanup in the path, especially top-level `src/` code.
 
@@ -19,8 +23,8 @@ These are local checkouts, not final compatibility pins:
 
 | Source | Local path | Observed ref | What to study/use |
 | --- | --- | --- | --- |
-| Ensembl VEP | `/root/ensembl-vep` | `release/115`, commit `2beada0` | consequence output semantics, cache/database/GFF annotation sources, HGVS generation, transcript/haplotype code paths |
-| fastVEP | `/root/fastVEP` | `master`, commit `c40ae9a` | modular Rust architecture, GFF3/fasta loading, supplementary annotation design, HGVS crates, performance/test approach |
+| Ensembl VEP | `/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0` | `release/116.0`, commit `57ea5c5` | pinned consequence semantics and cache/database/GFF/HGVS call paths; local release-115 trees are delta references only |
+| fastVEP | `/root/fastVEP` | observed local checkout | negative control for private-format and scalar-context decisions and for shared-pair-only validation; do not use as a semantic source |
 | bcftools csq source via pysam mirror | `/root/duckhts/.sync/pysam/bcftools/csq.c` | pysam mirror `v0.23.3-43-g79293854` | BCSQ INFO/FORMAT contract, consequence flags, GFF/fasta inputs, haplotype-aware coding consequence strategy |
 
 Before claiming exact `bcftools csq` compatibility, establish and record an official bcftools tag/commit and validate against the executable for the declared scope.
@@ -123,7 +127,7 @@ Explicitly defer:
 
 ### Phase 3: VEP-compatible output comparison
 
-Use Ensembl VEP `release/115` as the semantic comparator for tiny fixtures:
+Use pinned Ensembl VEP `release/116.0` as the semantic comparator for controlled fixtures:
 
 - variant/transcript candidate selection;
 - consequence terms and severity ranks;
