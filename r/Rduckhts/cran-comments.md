@@ -1,23 +1,29 @@
+## Submission
+
+This submission updates the bundled 'duckhts' DuckDB extension in Rduckhts
+(1.3.0 -> 1.4.0). Minor release adding new reader/converter functions,
+sequence-UDF overloads, and some bug fixes. Full list in `NEWS.md`. No
+user-facing API breakage.
+
 ## Test environments
 
-- Ubuntu 24.04.3 LTS (x86_64), R 4.6.0
+- Ubuntu 24.04 (x86_64), R 4.6.0 — local `R CMD check --as-cran` (tarball): Status OK
+- win-builder — R-release (R 4.6.1) Status OK; R-devel submitted
+- Fedora R-devel (rhub `ghcr.io/r-hub/containers/gcc16`, mirrors CRAN
+  `r-devel-linux-x86_64-fedora-gcc`): 0 errors, 0 warnings; the only note is a
+  local-container artifact ('pandoc' not installed) that does not occur on CRAN
+- macOS builder — R-release submitted
 
 ## R CMD check results
 
-0 errors | 0 warnings | 0 notes
+0 errors | 0 warnings | 0 notes on the completed environments above.
 
-Checked with:
-
-```sh
-THREADS=2 make check
-```
-
-The check reported an installed-size INFO:
-
-- installed size: 26.3 Mb
-- largest directories: `duckhts_extension` (22.6 Mb) and `extdata` (3.1 Mb)
-
-This size is expected. The package bundles the `duckhts` DuckDB extension sources, vendored `htslib` 1.23.1, and small HTS fixtures so installation and tests can run without network access.
+Installed size is reported as INFO (~28 Mb). The size is intentional: the
+package bundles the 'duckhts' DuckDB extension C sources and vendored 'htslib'
+1.23.1 so it builds and tests without network access; no compiled objects or
+large binaries are shipped in the sources. Largest directories are
+`duckhts_extension` and `extdata` (small HTS fixtures). If CRAN's incoming
+check reports installed size as a NOTE, it is expected and by design.
 
 ## Reverse dependencies
 
