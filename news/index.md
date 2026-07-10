@@ -1,6 +1,6 @@
 # Changelog
 
-## Rduckhts 1.3.0.9000-0.1.0 (2026-05-30)
+## Rduckhts 1.4.0-0.1.0 (2026-07-10)
 
 - bundled `cigar_*` helpers (`cigar_has_soft_clip`,
   `cigar_has_hard_clip`, `cigar_left_soft_clip`,
@@ -149,8 +149,6 @@
   `read_hts_header(..., mode := 'raw')`, so Parquet metadata written
   from VCF/BCF inputs has the complete header needed for future VCF/BCF
   regeneration
-- start the post-1.3.0 development cycle for the bundled duckhts
-  extension
 
 ## Rduckhts 1.3.0-0.1.0 (2026-05-29)
 
