@@ -59,6 +59,18 @@ The roadmap left this open (115 for ClinVar CLNHGVS vs 116 kernel grounding). Ve
   `_ins_del_stop_altered` → `_ins_del_stop_altered_cil`, and final-stop-length logic — i.e.
   exactly the stop / inframe / partial-codon predicates at our coding frontier.
 
+**Full per-hunk catalog: `vep_115_to_116_predicate_delta.md`** (17 meaningful hunks, 13 on the
+coding frontier). The "155 lines" headline is directionally right but *undercounts* — a
+116-targeted engine must also implement: `inframe_insertion`/`inframe_deletion` guards that
+exclude already-stop reference codons; `stop_gained` now deferring to `stop_lost` (mutual
+exclusion by call order); a `frameshift` post-stop guard; an `X` (incomplete/ambiguous peptide)
+routing change shared by `stop_lost`/`stop_retained`; plus one real behavioral hunk each in
+`Sequence.pm` (the `get_3prime_seq_offset` 3′-shift cap — 115 under-shifts indels before long
+repeats) and `TranscriptVariationAllele.pm` (`_var2transcript_slice_coords` now *clamps*
+boundary-crossing variants instead of returning `undef`, so 116 emits `c./n.` where 115 emitted
+none, for **all** transcripts). Two hunks (the dead-looking `$consider_ins_len` param; whether
+the 3′-shift cap change touches `c./n.` or only `g.`) are escalated to gpt-5.6-sol.
+
 **Decision:** **pin VEP 116.** The salvaged kernel, conformance data, and controlled GFF are
 116-shaped. If GRCh37/clinical requires 115, make it an explicitly *named* compatibility
 target with consciously back-ported predicate behavior — never a 115 wrapper on 116
@@ -95,13 +107,31 @@ stratified file rather than one manifest-bound run.
 ## duckhgvs-0.4.0: quarantine as a spike
 
 `/root/duckhgvs-0.4.0` (v0.4.0) is a design spike, **not** a validated engine, despite the
-handoff calling it "already exists." `include/duckhgvs.h` hard-codes `DUCKHGVS_SEQ_MAX 4096`
-and `DUCKHGVS_TRANSCRIPT_EXON_MAX 512`; it only projects alleles wholly contained in one
-exon; its README "not yet" list = no accession resolution, no intronic `c./n.`, no protein
-normalization, no SV, no full grammar. The 4096 buffer already excludes **9,742** real
-transcripts (max CDS 107,976). Salvage ideas + test vectors; **do not fold its ABI.** Run a
-file-by-file provenance / NOTICE audit (it bundles a RefSeq GFF and lacks tracked upstream
-attribution).
+handoff calling it "already exists." Full verified audit: `duckhgvs_0_4_0_audit.md`. Key facts:
+`include/duckhgvs.h` hard-codes `DUCKHGVS_SEQ_MAX 4096`; genomic→transcript projection is
+verified to accept only alleles wholly inside one exon (`src/duckhgvs.c:1734-1742` — both
+intronic and exon-boundary cases → `ENOSUP`); the README "not yet" list = no accession
+resolution, no intronic `c./n.`, no protein normalization, no SV, no full grammar.
+
+- **Buffer break (spliced length is the honest metric — apply/`n.`/equivalence all route
+  through the 4096 buffer):** ~26.6% of transcripts exceed 4096 nt spliced length on the
+  bundled GRCh37 RefSeq GFF (28,901/108,760; max 109,224); 5.8% exceed it on CDS length
+  (4,316/74,880; max CDS 107,976 — the figure that corroborates the data source). The "9,742"
+  figure came from codex's VEP-116 (GRCh38) CDS scan — a *different dataset*; both agree the
+  exclusion is double-digit-percent, not an edge case. `DUCKHGVS_TRANSCRIPT_EXON_MAX 512` does
+  NOT break on GRCh37 (max 363, *TTN*) — a latent risk, not a demonstrated one.
+- **Its "conformance" is mostly not real:** only the ClinVar `CLNHGVS` lane is an external-
+  oracle comparison, and it is restricted to pure SNVs (the trivial `g.` case). The VEP-CSQ
+  "oracle" is a parse→format string round-trip on VEP's own output text (never touches
+  REF/ALT/transcript); `vcfcheck` has no expected value at all; the TSV corpora are hand-typed
+  expectations on 9–14 nt toy sequences. "Tests pass" ≠ HGVS correctness.
+- **Salvage (M6c):** lift the **apply-then-diff** equivalence *pattern* + its ~20 `APPLY`/`EQUIV`
+  seed vectors (`duckhgvs_apply_to_sequence` / `_equivalent_on_sequence`) — exactly the
+  application-equivalence test shape M6c needs. **Discard** `duckhgvs_projected_allele_t` as a
+  data model (single scalar tx position, no ranges/provenance, hard-fails on intronic/boundary
+  cases): it is a *negative example* for the lossless `allele_transcript_context`. Do NOT fold
+  the ABI. The bundled 48 MB RefSeq GFF is orphaned (unreferenced, no NOTICE, dir not even a git
+  repo) — discard; re-vendor deliberately with checksum + NOTICE if M6c needs it.
 
 ## Scope the first claim: human GRCh37/38 only
 
