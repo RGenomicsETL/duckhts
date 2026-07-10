@@ -66,6 +66,13 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "wasm_http_hfile.c"
   )
   file.copy(file.path(src_dir, c_files), dest)
+  duckvep_files <- c(
+    "duckvep_allele.c",
+    "duckvep_allele.h"
+  )
+  duckvep_dest <- file.path(dest, "duckvep")
+  dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
+  file.copy(file.path(src_dir, "duckvep", duckvep_files), duckvep_dest)
   simd_files <- c(
     "duckhts_simd_dispatch.c",
     "duckhts_simd_scalar.c",
@@ -77,7 +84,11 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   simd_dest <- file.path(dest, "simd")
   dir.create(simd_dest, recursive = TRUE, showWarnings = FALSE)
   file.copy(file.path(src_dir, "simd", simd_files), simd_dest)
-  message("  Copied ", length(c_files) + length(simd_files), " C source files")
+  message(
+    "  Copied ",
+    length(c_files) + length(simd_files) + 1L,
+    " C source files and 1 private DuckVEP header"
+  )
 
   # Headers
   inc_dest <- file.path(dest, "include")
@@ -282,6 +293,7 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "bcftools_shim.c",
       "score_udf.c",
       "vep_parser.c",
+      file.path("duckvep", "duckvep_allele.c"),
       "wasm_http_hfile.c"
     )
   )

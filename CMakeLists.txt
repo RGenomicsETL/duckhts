@@ -90,6 +90,7 @@ set(EXTENSION_SOURCES
         src/kmer_udf.c
         src/tabix_reader.c
         src/vep_parser.c
+        src/duckvep/duckvep_allele.c
         src/hts_meta_reader.c
         src/quality_encoding.c
         src/quality_encoding_reader.c
