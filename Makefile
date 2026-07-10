@@ -1,4 +1,5 @@
-.PHONY: clean clean_all clean_local function_catalog
+.PHONY: clean clean_all clean_local function_catalog \
+	test-duckvep-allele test-duckvep-model
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -66,8 +67,8 @@ link_wasm_release:
 endif
 
 test: test_debug
-test_debug: test_extension_debug
-test_release: test_extension_release
+test_debug: test-duckvep-allele test_extension_debug
+test_release: test-duckvep-allele test_extension_release
 
 # Override header fetch to use the actual DuckDB release version, not the C API version
 update_duckdb_headers_custom:
@@ -137,6 +138,22 @@ bench-simd-bam-gc:
 bench-simd-kernels:
 	cc -O2 -I src/include -o build/bench_simd_kernels test/scripts/bench_simd_kernels.c
 	./build/bench_simd_kernels $(BENCH_ARGS)
+
+# Private scalar contract test for semantic edit trimming and the exact
+# VEP-116 differing-region compatibility view.  This deliberately has no
+# DuckDB dependency so sanitizers and alternate C compilers can exercise it.
+test-duckvep-allele:
+	mkdir -p build
+	$(CC) -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror \
+		-Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes \
+		-I src/duckvep \
+		src/duckvep/duckvep_allele.c \
+		test/duckvep/test_duckvep_allele.c \
+		-o build/test_duckvep_allele
+	./build/test_duckvep_allele
+
+test-duckvep-model:
+	Rscript test/duckvep_model.R
 
 # Build the duckdb-wasm extension (Docker) and run the headless Playwright smoke
 # test that loads it in a real browser and asserts the SIMD kernels resolve on

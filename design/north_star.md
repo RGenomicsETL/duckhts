@@ -63,16 +63,16 @@ Projection-aware, header-faithful readers and fused analytics, all ordinary tabl
 - genotype matrix (new): variant-major, 2-bit packed `read_bcf_gt`-style surface for matrix ops (AF, missingness, GRM, PCA, LD). Decodes to a contiguous numeric matrix on demand; sample axis is metadata, not columns. On-ramp to L4 SVCR.
 - coverage/interval: `read_pileup`, `bam_bin_counts`, `duckhts_bam_bed_coverage`, `duckhts_mosdepth`, `duckhts_samtools_idxstats`, cgranges overlap. One counting model per surface (`coverage_memory_footprint.md`, `duckhts_mosdepth.md`).
 - new readers (planned): bigWig / bigBed / bedGraph / PAF. BED-compatible output is the interoperability contract.
-- keys: VariantKey (exact allele identity), RegionKey + cgranges (span/overlap) (`duckvep_layer_keys.md`).
+- keys: VariantKey for exact allele identity; RegionKey plus cgranges for span/overlap.
 - fused bcftools ops: `bcftools_norm_row`, `bcftools_score`, `bcftools_munge_row`, the `bcftools_filter` expression engine. We rewrite operations that fuse; full bcftools CLI fidelity is RBCFTools' job, not ours.
 - scan planning: `scan_mode := 'sequential'`, indexed full scans, multi-file via `hts_union_query` (`better_scans.md`, `multireading.md`).
 - alignment kernels (future): banded SW / edit-distance / PAF-oriented primitives as SIMD kernels — heavier, gated behind a real consumer.
 
 ### L3 — Annotation and consequence engine (DuckVEP) — the flagship proof
 
-A DuckDB-native VEP / `bcftools csq` layer built entirely from L0–L2 (relations, Parquet, VariantKey/RegionKey, cgranges, `read_gff`, `fasta_nuc`, typed CSQ parsing). **No private cache format** (`.fastSA`/Sereal are explicitly not adopted). Storage is solved; the consequence engine is the entire risk. Target `bcftools csq` first (bounded, validatable against an executable), Ensembl VEP `release/115` as semantic comparator, HGVS as a later layer.
+A DuckDB-native VEP / `bcftools csq` layer built entirely from L0–L2 (relations, Parquet, VariantKey/RegionKey, cgranges, `read_gff`, `fasta_nuc`, typed CSQ parsing). **No private cache format** (`.fastSA`/Sereal are explicitly not adopted). The hard boundary is the reproducible transcript/edit model plus lossless per-allele/transcript context; the consequence predicates are only one consumer. Target Ensembl VEP 116 for the first gated SO slice, keep bcftools 1.23 as a separately named BCSQ contract, and add HGVS in independently gated DNA/protein stages.
 
-Pillars: `duckvep_bcftools_csq_port_plan_2026-06-09.md`, `duckvep_layer_keys.md`.
+Pillar: `duckvep_model.md`.
 
 ### L4 — Lakehouse / VariantLake
 
