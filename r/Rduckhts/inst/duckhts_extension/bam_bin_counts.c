@@ -1283,7 +1283,13 @@ static void bam_bin_counts_bind(duckdb_bind_info info) {
     bind->mapq = 0;
     bind->require_flags = 0;
     bind->exclude_flags = 0;
+#if defined(__EMSCRIPTEN__)
+    /* Browser wasm has no htslib pthread pool.  The no-index path remains a
+     * single synchronous scan through the XHR-backed hFILE transport. */
+    bind->decompression_threads = 0;
+#else
     bind->decompression_threads = DUCKHTS_DEFAULT_BINCOUNT_DECOMPRESSION_THREADS;
+#endif
     bind->rmdup = BAM_BIN_RMDUP_NONE;
     duckdb_destroy_value(&path_val);
     duckdb_destroy_value(&bw_val);

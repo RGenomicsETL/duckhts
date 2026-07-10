@@ -74,7 +74,7 @@
 <body>
   <main>
     <h1>duckdb-wasm Local DuckHTS Test</h1>
-    <p>This harness loads the local DuckHTS wasm extension in duckdb-wasm, asserts the SIMD dispatch kernels resolve correctly on wasm (scalar fallback), and runs same-origin HTTP smoke tests.</p>
+    <p>This harness loads the local DuckHTS wasm extension in duckdb-wasm, requires native SIMD128 dispatch for every registered sequence kernel, and runs same-origin HTTP smoke tests.</p>
 
     <div class="controls">
       <button id="run">Run Setup + Smoke Test</button>
@@ -175,26 +175,83 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
       log("Cleared Module.duckhtsWasmHttpConfig");
     }
 
-    // Validate that this build's SIMD optimization landed on wasm.  The AVX2
-    // bam_nt16_counts kernel is x86-gated, so on wasm the logical kernel must
-    // still be registered and resolve to the scalar fallback, and the dispatch
-    // path must compute correct results.  Throws on mismatch -> status "Failed".
+    // Validate both build plumbing and execution.  Throws on any mismatch, so
+    // the Playwright harness reports a failed terminal state.
     async function assertSimd() {
-      log("Asserting DuckHTS SIMD kernel on wasm...");
+      log("Asserting DuckHTS SIMD128 kernels on wasm...");
+      const bt = await conn.query(
+        "SELECT compiled, cpu_supported, available FROM duckhts_simd_info() " +
+        "WHERE backend = 'wasm_simd128'");
+      const brows = bt.toArray();
+      if (brows.length !== 1) throw new Error(`expected one wasm_simd128 backend row, got ${brows.length}`);
+      const brow = brows[0];
+      if (!brow.compiled || !brow.cpu_supported || !brow.available) {
+        throw new Error(`wasm_simd128 unavailable: ${JSON.stringify(brow)}`);
+      }
+
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('wasm_simd128')");
       const kt = await conn.query(
-        "SELECT count(*)::INT AS n, max(selected_backend) AS backend " +
-        "FROM duckhts_simd_kernel_info() WHERE kernel = 'bam_nt16_counts'");
-      const krow = kt.toArray()[0];
-      const n = Number(krow.n);
-      const backend = String(krow.backend);
-      log(`  bam_nt16_counts rows=${n} backend=${backend}`);
-      if (n !== 1) throw new Error(`expected 1 bam_nt16_counts kernel row, got ${n}`);
-      if (backend !== "scalar") throw new Error(`expected scalar backend on wasm, got ${backend}`);
+        "SELECT kernel, selected_backend, selected_capability, scalar_fallback " +
+        "FROM duckhts_simd_kernel_info() ORDER BY kernel");
+      const krows = kt.toArray();
+      const expected = ["bam_nt16_counts", "nt16_gc_counts", "seq_base_counts"];
+      if (krows.length !== expected.length) {
+        throw new Error(`expected ${expected.length} SIMD kernel rows, got ${krows.length}`);
+      }
+      for (let i = 0; i < expected.length; i++) {
+        const row = krows[i];
+        log(`  ${row.kernel} backend=${row.selected_backend} fallback=${row.scalar_fallback}`);
+        if (String(row.kernel) !== expected[i] ||
+            String(row.selected_backend) !== "wasm_simd128" ||
+            String(row.selected_capability) !== "wasm_simd128" ||
+            Boolean(row.scalar_fallback)) {
+          throw new Error(`unexpected SIMD kernel dispatch: ${JSON.stringify(row)}`);
+        }
+      }
 
       const gt = await conn.query("SELECT printf('%.3f', seq_gc_content('acgtnn')) AS gc");
       const gc = String(gt.toArray()[0].gc);
       log(`  seq_gc_content('acgtnn') = ${gc}`);
       if (gc !== "0.500") throw new Error(`expected seq_gc_content 0.500, got ${gc}`);
+
+      const validNt16 =
+        "list_transform(range(4096), i -> CASE i % 5 " +
+        "WHEN 0 THEN 1 WHEN 1 THEN 2 WHEN 2 THEN 4 WHEN 3 THEN 8 ELSE 15 END)::UTINYINT[]";
+      const invalidNt16 =
+        "list_transform(range(4096), i -> CASE WHEN i = 4093 THEN 3 ELSE " +
+        "CASE i % 5 WHEN 0 THEN 1 WHEN 1 THEN 2 WHEN 2 THEN 4 WHEN 3 THEN 8 ELSE 15 END END)::UTINYINT[]";
+
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('scalar')");
+      const scalar = await conn.query(
+        `SELECT printf('%.12f', seq_gc_content(${validNt16})) AS valid_gc, ` +
+        `seq_gc_content(${invalidNt16}) IS NULL AS invalid_is_null`);
+      const scalarRow = scalar.toArray()[0];
+
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('wasm_simd128')");
+      const simd = await conn.query(
+        `SELECT printf('%.12f', seq_gc_content(${validNt16})) AS valid_gc, ` +
+        `seq_gc_content(${invalidNt16}) IS NULL AS invalid_is_null`);
+      const simdRow = simd.toArray()[0];
+      log(`  long nt16 scalar=${scalarRow.valid_gc} wasm=${simdRow.valid_gc}`);
+      if (String(simdRow.valid_gc) !== String(scalarRow.valid_gc) ||
+          !scalarRow.invalid_is_null || !simdRow.invalid_is_null) {
+        throw new Error(
+          `long nt16 mismatch: scalar=${JSON.stringify(scalarRow)} wasm=${JSON.stringify(simdRow)}`);
+      }
+
+      const bamUrl = defaultOriginUrl("/extdata/fixture_mixed.bam");
+      const bamDigestSql =
+        "SELECT concat_ws('|', sum(gc_bases_pre)::VARCHAR, sum(bases_pre)::VARCHAR, " +
+        "sum(gc_bases_post)::VARCHAR, sum(bases_post)::VARCHAR) AS digest " +
+        `FROM bam_bin_counts('${bamUrl}', 5000, stats := 'gc')`;
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('scalar')");
+      const scalarBam = String((await conn.query(bamDigestSql)).toArray()[0].digest);
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('wasm_simd128')");
+      const simdBam = String((await conn.query(bamDigestSql)).toArray()[0].digest);
+      log(`  packed BAM scalar=${scalarBam} wasm=${simdBam}`);
+      if (scalarBam !== simdBam) {
+        throw new Error(`packed BAM mismatch: scalar=${scalarBam} wasm=${simdBam}`);
+      }
       log("  SIMD assertions passed");
     }
 
@@ -215,9 +272,13 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
 
         const extPath = "/duckdb-wasm/duckhts.duckdb_extension.wasm";
         const extUrl = defaultOriginUrl(extPath);
+        log("Registering extension file:", extUrl);
         await db.registerFileURL(extPath, extUrl, duckdb.DuckDBDataProtocol.HTTP, false);
+        log("Registered extension file");
 
+        log("Reading DuckDB platform");
         await conn.query("PRAGMA platform");
+        log("Loading DuckHTS extension");
         await conn.query("LOAD '/duckdb-wasm/duckhts.duckdb_extension.wasm'");
         log("Loaded extension:", extUrl);
 

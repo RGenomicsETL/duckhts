@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 
 // Drives the existing manual harness (scripts/duckdb-wasm-local-test.html)
 // headlessly: instantiate duckdb-wasm, LOAD the DuckHTS wasm extension, assert
-// the SIMD dispatch kernels resolve on wasm (scalar fallback), and run the
+// all SIMD dispatch kernels resolve to wasm_simd128 without fallback, and run the
 // same-origin HTTP smoke queries.  The harness sets #status to Passed/Failed.
-test("DuckHTS wasm extension loads and SIMD kernels resolve (scalar fallback)", async ({ page }) => {
+test("DuckHTS wasm extension loads and selects SIMD128 for every kernel", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
 

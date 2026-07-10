@@ -108,6 +108,11 @@ set(EXTENSION_SOURCES
 )
 
 if (DUCKDB_WASM_EXTENSION)
+	# Keep SIMD128 specific to the DuckDB-Wasm runtime.  webR and native builds
+	# compile this translation unit as a stub unless their own build contract
+	# explicitly opts in; a global -msimd128 would silently change those ABIs.
+	set_property(SOURCE src/simd/duckhts_simd_wasm_simd128.c APPEND PROPERTY
+		COMPILE_OPTIONS -msimd128)
 	add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 	# C files must use the same setjmp/longjmp mechanism as the DuckDB WASM
 	# runtime (__wasm_longjmp / __wasm_setjmp).  Without -fwasm-exceptions the

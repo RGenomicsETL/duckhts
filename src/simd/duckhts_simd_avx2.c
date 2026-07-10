@@ -32,7 +32,7 @@ static void duckhts_base_counts_avx2(const char *seq, size_t len,
     out->called = 0;
     out->invalid = 0;
 
-    for (; i + 32 <= len; i += 32) {
+    for (; len - i >= 32; i += 32) {
         __m256i bytes = _mm256_loadu_si256((const __m256i *)(const void *)(seq + i));
         __m256i up = _mm256_and_si256(bytes, case_mask);
         uint32_t a_mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(up, v_a));
@@ -96,13 +96,15 @@ static void duckhts_bam_nt16_counts_avx2(const uint8_t *packed_seq,
     const __m256i v_t = _mm256_set1_epi8(8);
     const __m256i v_n = _mm256_set1_epi8(15);
     uint64_t a = 0, c = 0, g = 0, t = 0, n = 0;
-    int32_t i = 0;
+    size_t n_total;
+    size_t i = 0;
 
     out->a = out->c = out->g = out->t = 0;
     out->n = out->iupac = out->gc = out->called = 0;
     if (!packed_seq || n_bases <= 0) return;
+    n_total = (size_t)n_bases;
 
-    for (; i + 64 <= n_bases; i += 64) {
+    for (; n_total - i >= 64; i += 64) {
         __m256i bytes = _mm256_loadu_si256((const __m256i *)(const void *)(packed_seq + (i >> 1)));
         __m256i hi = _mm256_and_si256(_mm256_srli_epi16(bytes, 4), lo_mask);
         __m256i lo = _mm256_and_si256(bytes, lo_mask);
@@ -121,9 +123,10 @@ static void duckhts_bam_nt16_counts_avx2(const uint8_t *packed_seq,
     /* IUPAC/`=` for the vectorized region is the processed remainder. */
     out->iupac = (uint64_t)i - (a + c + g + t + n);
 
-    for (; i < n_bases; i++) {
+    for (; i < n_total; i++) {
         uint8_t byte = packed_seq[i >> 1];
-        unsigned code = (i & 1) ? (byte & 0x0Fu) : (unsigned)(byte >> 4);
+        unsigned code = (i & 1u) ? (unsigned)(byte & 0x0Fu)
+                                 : (unsigned)(byte >> 4);
         switch (code) {
         case 1: a++; break;
         case 2: c++; break;
@@ -169,7 +172,7 @@ static void duckhts_nt16_gc_counts_avx2(const uint8_t *codes, size_t n,
     out->invalid = 0;
     if (!codes) return;
 
-    for (; i + 32 <= n; i += 32) {
+    for (; n - i >= 32; i += 32) {
         __m256i x = _mm256_loadu_si256((const __m256i *)(const void *)(codes + i));
         uint32_t ma = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(x, v_a));
         uint32_t mc = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(x, v_c));

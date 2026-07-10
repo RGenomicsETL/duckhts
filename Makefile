@@ -1,5 +1,5 @@
 .PHONY: clean clean_all clean_local function_catalog \
-	test-duckvep-allele test-duckvep-model
+	test-duckvep-allele test-duckvep-model test-simd-kernels bench-simd-kernels
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -67,8 +67,8 @@ link_wasm_release:
 endif
 
 test: test_debug
-test_debug: test-duckvep-allele test_extension_debug
-test_release: test-duckvep-allele test_extension_release
+test_debug: test-duckvep-allele test-simd-kernels test_extension_debug
+test_release: test-duckvep-allele test-simd-kernels test_extension_release
 
 # Override header fetch to use the actual DuckDB release version, not the C API version
 update_duckdb_headers_custom:
@@ -129,15 +129,35 @@ bench-simd-seq-gc:
 bench-simd-bam-gc:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_bam_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
-# Standalone C microbenchmark for the byte-oriented SIMD kernels: isolates each
-# kernel from DuckDB/R, gates correctness against the scalar oracle, and reports
-# scalar-relative throughput.  Built at -O2 to match the CRAN R package's
-# optimization level (the extension itself ships -O3; the SIMD win holds at
-# both).  The per-backend kernels carry their own ISA target attributes, so the
-# baseline -O2 here does not gate the AVX2 path.  Optional: BENCH_ARGS="bases iters".
+# Standalone SIMD contracts link the backend translation units normally and
+# obtain private functions only through their registrar callbacks.  The normal
+# test is deterministic and quick.  The benchmark repeats that gate before
+# timing both nt16 kernels.  Optional: BENCH_ARGS="bases iterations".
+SIMD_KERNEL_TEST_SOURCES = \
+	test/scripts/bench_simd_kernels.c \
+	src/simd/duckhts_simd_scalar.c \
+	src/simd/duckhts_simd_avx2.c \
+	src/simd/duckhts_simd_neon.c \
+	src/simd/duckhts_simd_wasm_simd128.c
+SIMD_KERNEL_TEST_CFLAGS = -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror \
+	-Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes
+
+test-simd-kernels:
+	@set -e; \
+	tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/duckhts-simd-kernels.XXXXXX"); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	$(CC) $(SIMD_KERNEL_TEST_CFLAGS) -I src/include \
+		$(SIMD_KERNEL_TEST_SOURCES) -o "$$tmp/simd_kernels"; \
+	"$$tmp/simd_kernels" --check
+
 bench-simd-kernels:
-	cc -O2 -I src/include -o build/bench_simd_kernels test/scripts/bench_simd_kernels.c
-	./build/bench_simd_kernels $(BENCH_ARGS)
+	@set -e; \
+	tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/duckhts-simd-kernels.XXXXXX"); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	$(CC) $(SIMD_KERNEL_TEST_CFLAGS) -I src/include \
+		$(SIMD_KERNEL_TEST_SOURCES) -o "$$tmp/simd_kernels"; \
+	"$$tmp/simd_kernels" --check; \
+	"$$tmp/simd_kernels" --bench $(BENCH_ARGS)
 
 # Private scalar contract test for semantic edit trimming and the exact
 # VEP-116 differing-region compatibility view.  This deliberately has no
