@@ -27,24 +27,23 @@ platform).
 | kernel            | scalar | avx2 | avx512 | neon | wasm_simd128 |
 |-------------------|:------:|:----:|:------:|:----:|:------------:|
 | `seq_base_counts` |   ✅   |  ✅  |   ✅   |  ✅  |      ✅      |
-| `bam_nt16_counts` |   ✅   |  ✅  |   —    |  —   |      —       |
-| `nt16_gc_counts`  |   ✅   |  ✅  |   —    |  —   |      —       |
+| `bam_nt16_counts` |   ✅   |  ✅  |   —    |  ✅  |      ✅      |
+| `nt16_gc_counts`  |   ✅   |  ✅  |   —    |  ✅  |      ✅      |
 
-**Known coverage gaps (perf, not correctness), tracked as a roadmap follow-up:**
+**Known coverage gaps:**
 
-- `bam_nt16_counts` and `nt16_gc_counts` are implemented only for `scalar` and
-  `avx2`. On **arm64 (NEON)** and **wasm** they fall back to `scalar`, so Apple
-  Silicon macOS and wasm builds do not get the nt16 SIMD speedups (the "~7x"
-  `nt16_gc_counts` figure is AVX2-only). On x86 this is not user-visible because
-  `avx2` covers all three kernels even when `avx512` only covers `base_counts`.
+- AVX-512 implements `seq_base_counts` only. Concrete `avx512` requests use the
+  scalar nt16 slots, while `auto` selects AVX2 for both nt16 kernels on capable
+  x86 hosts.
+- The DuckDB-Wasm CMake target compiles its backend translation unit with
+  `-msimd128`, and browser conformance requires all three slots to select
+  `wasm_simd128`. webR is a distinct build: it remains scalar unless its package
+  toolchain explicitly opts into SIMD128.
 - Verified on the CRAN-path build (R package `configure` → installed 1.4.0
   tarball): on x86_64, `duckhts_simd_info()` selects `avx2` and all three kernels
   resolve to `avx2`; the abort-on-compile-failure `configure` loop plus
   function-level `__attribute__((target("avx2,popcnt")))` guarantee the SIMD TUs
   are in every successful install, with runtime `cpuid` dispatch per running CPU.
-- Follow-up: add NEON (and later wasm/AVX-512) implementations of
-  `bam_nt16_counts` and `nt16_gc_counts`, registered in their backend TUs, gated
-  by the existing backend-agnostic `scalar == auto` conformance tests.
 
 ## Conformance test plan
 
@@ -52,13 +51,30 @@ Conformance is backend-agnostic:
 
 - SQL tests assert backend inventory invariants: scalar is always available, `available == compiled && cpu_supported`, `auto` is not a concrete backend row, and known placeholder capabilities such as `sse2` are recognized but not selectable.
 - SQL tests assert kernel-dispatch invariants through `duckhts_simd_kernel_info()`: every logical kernel has exactly one selected backend in the current immutable table, the `seq_base_counts` row exists, capability names match backend names for current kernels, and the dispatch mode is `capability-mask-dispatch-table`.
+- `make test-simd-kernels` links backend translation units normally, captures
+  their private functions through registrar callbacks, and checks both nt16
+  kernels against independent slow oracles over deterministic boundary, tail,
+  alignment, invalid-code, odd-padding, and randomized cases. Every runnable
+  backend represented by the runner must provide both nt16 slots when it is
+  compiled and CPU-supported on that host.
 - SQL tests force `scalar`, compute `seq_gc_content(...)` over long deterministic sequences, then force `auto` and require bit-identical decimal results.
-- R tinytests repeat the SQL diagnostics through thin DBI wrappers, check R-side scalar/non-missing argument validation, and verify `rduckhts_simd_kernel_info()` exposes the same kernel-level diagnostics.
-- Platform-specific assertions must never assume AVX2, AVX512, NEON, wasm SIMD128, or future RVV availability. They may only assert implications from `duckhts_simd_info()` and `duckhts_simd_kernel_info()`.
+- R tinytests repeat the SQL diagnostics through thin DBI wrappers, check R-side scalar/non-missing argument validation, and require each available complete backend (`avx2`, `neon`, or `wasm_simd128`) to own all three slots without scalar fallback while matching scalar nt16 results.
+- The real-browser wasm test requires the backend to be compiled and available,
+  forces `wasm_simd128`, checks every slot, and executes long valid and invalid
+  nt16 inputs plus a no-index BAM GC scan under both scalar and SIMD128. The
+  retained Docker build invalidates htslib's ExternalProject configure state so
+  an ignored host `config.status` cannot silently re-enable libcurl in the side
+  module.
+- Portable SQL/R tests assert implications from `duckhts_simd_info()` and
+  `duckhts_simd_kernel_info()`. Target-specific CI does the opposite: it forces
+  the backend promised by that build and fails if compilation, CPU support, or
+  a kernel registration is absent.
 
 ## Benchmark setup
 
-The benchmark path remains `make bench-simd-seq-gc`:
+The standalone kernel benchmark is `make bench-simd-kernels`; it runs the
+contract gate before timing packed and unpacked nt16 classification. The
+end-to-end text-sequence benchmark remains `make bench-simd-seq-gc`:
 
 - `scripts/benchmark_simd_seq_gc.py` launches a fresh process for each backend request.
 - The script records both the dispatch label (`duckhts_simd_backend()`) and the concrete `seq_base_counts` kernel backend from `duckhts_simd_kernel_info()`.

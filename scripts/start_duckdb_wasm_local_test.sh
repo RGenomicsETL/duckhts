@@ -51,6 +51,7 @@ find third_party/htslib -type f \( \
   -name "*.o" -o -name "*.a" -o -name "*.pico" -o -name "*.lo" -o -name "*.la" -o \
   -name "*.so" -o -name "*.dylib" -o -name "*.dll" -o \
   -name "config.h" -o -name "config.mk" -o -name "config_vars.h" -o \
+  -name "config.status" -o -name "config.log" -o -name "config.cache" -o \
   -name "htslib.pc.tmp" -o -name "a.wasm" \
 \) -delete || true
 # Always build the venv fresh inside the container: a host configure/venv (its
@@ -59,7 +60,15 @@ find third_party/htslib -type f \( \
 # prior run could shadow recreation.  Removing it lets `make configure` build a
 # working venv with the container python.
 rm -rf configure/venv
-make DUCKDB_PLATFORM=wasm_eh configure release move_wasm_extension
+make DUCKDB_PLATFORM=wasm_eh configure
+# cmake_build is retained for fast local rebuilds.  Invalidate the htslib
+# ExternalProject completion stamps explicitly: otherwise a host-side
+# config.status copied by rsync can regenerate a curl-enabled wasm htslib after
+# the configure step is skipped.  duckdb-wasm exports no libcurl functions, so
+# that stale mix produces a side module which compiles but fails during LOAD.
+rm -f cmake_build/release/htslib_build-prefix/src/htslib_build-stamp/htslib_build-configure
+rm -f cmake_build/release/htslib_build-prefix/src/htslib_build-stamp/htslib_build-build
+make DUCKDB_PLATFORM=wasm_eh release move_wasm_extension
 '
 
 mkdir -p "${WASM_BUILD_DIR}"
@@ -89,6 +98,7 @@ cp -f "${WASM_EXT}" "${SITE_ROOT}/duckdb-wasm/duckhts.duckdb_extension.wasm"
 cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/r1.fq" "${SITE_ROOT}/extdata/"
 cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/header_tabix.tsv.gz" "${SITE_ROOT}/extdata/"
 cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/header_tabix.tsv.gz.tbi" "${SITE_ROOT}/extdata/"
+cp -f "${ROOT_DIR}/r/Rduckhts/inst/extdata/fixture_mixed.bam" "${SITE_ROOT}/extdata/"
 
 cat <<EOF
 Built:
@@ -109,6 +119,7 @@ Served files:
   /extdata/r1.fq
   /extdata/header_tabix.tsv.gz
   /extdata/header_tabix.tsv.gz.tbi
+  /extdata/fixture_mixed.bam
 EOF
 
 if [ "${SERVE}" = "0" ]; then
