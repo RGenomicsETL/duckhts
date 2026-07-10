@@ -15,7 +15,36 @@ DuckHTS resolves logical kernels independently from concrete CPU/runtime capabil
 5. Initialization builds immutable dispatch tables for `auto`, `scalar`, and concrete selectable backend policies. Runtime selection swaps an atomic pointer to one immutable table.
 6. `auto` uses every currently available selectable capability and chooses the best implementation per logical kernel by priority. Concrete backend requests use that backend where implemented and scalar fallback for missing kernel slots.
 
-The initial manifest contains only `seq_base_counts`, used by `seq_gc_content(...)`, but the shape is intended for future quality scans, delimiter scans, BAM packed-sequence counts, depth reductions, and allele normalization helpers. Unknown architectures, musl-based systems, and RISC-V currently remain scalar-only unless a backend is explicitly added with compiler and runtime probes; this avoids adding libc-specific detection paths before DuckHTS has a tested RVV kernel.
+The manifest now holds three logical kernels — `seq_base_counts` (feeds `seq_gc_content(text)`), `bam_nt16_counts` (feeds `bam_bin_counts`), and `nt16_gc_counts` (feeds the nt16 `seq_gc_content(UTINYINT[])` overload, added in 1.4.0) — and the shape is intended for future quality scans, delimiter scans, depth reductions, and allele normalization helpers. Unknown architectures, musl-based systems, and RISC-V currently remain scalar-only unless a backend is explicitly added with compiler and runtime probes; this avoids adding libc-specific detection paths before DuckHTS has a tested RVV kernel.
+
+## Backend × kernel coverage ledger
+
+Which concrete backend implements which logical kernel. A missing cell falls
+back to `scalar` under `auto` (correctness-neutral — the scalar reference is the
+per-kernel oracle, so results are bit-identical — but no acceleration on that
+platform).
+
+| kernel            | scalar | avx2 | avx512 | neon | wasm_simd128 |
+|-------------------|:------:|:----:|:------:|:----:|:------------:|
+| `seq_base_counts` |   ✅   |  ✅  |   ✅   |  ✅  |      ✅      |
+| `bam_nt16_counts` |   ✅   |  ✅  |   —    |  —   |      —       |
+| `nt16_gc_counts`  |   ✅   |  ✅  |   —    |  —   |      —       |
+
+**Known coverage gaps (perf, not correctness), tracked as a roadmap follow-up:**
+
+- `bam_nt16_counts` and `nt16_gc_counts` are implemented only for `scalar` and
+  `avx2`. On **arm64 (NEON)** and **wasm** they fall back to `scalar`, so Apple
+  Silicon macOS and wasm builds do not get the nt16 SIMD speedups (the "~7x"
+  `nt16_gc_counts` figure is AVX2-only). On x86 this is not user-visible because
+  `avx2` covers all three kernels even when `avx512` only covers `base_counts`.
+- Verified on the CRAN-path build (R package `configure` → installed 1.4.0
+  tarball): on x86_64, `duckhts_simd_info()` selects `avx2` and all three kernels
+  resolve to `avx2`; the abort-on-compile-failure `configure` loop plus
+  function-level `__attribute__((target("avx2,popcnt")))` guarantee the SIMD TUs
+  are in every successful install, with runtime `cpuid` dispatch per running CPU.
+- Follow-up: add NEON (and later wasm/AVX-512) implementations of
+  `bam_nt16_counts` and `nt16_gc_counts`, registered in their backend TUs, gated
+  by the existing backend-agnostic `scalar == auto` conformance tests.
 
 ## Conformance test plan
 
