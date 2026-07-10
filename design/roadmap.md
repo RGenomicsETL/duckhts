@@ -26,7 +26,7 @@ Two guardrails, both from `AGENTS.md` discipline:
 | RSeQC/Qualimap/featureCounts/dupRadar (Rust) | `.sync/RustQC` | `fee1fce` |
 | mosdepth | `.sync/mosdepth` | `52813e0` (v0.3.13) |
 | bcftools (BCSQ contract) | system / `.sync/pysam/bcftools` | 1.23 |
-| Ensembl VEP | `/root/ensembl-vep` | `release/115` (SO + HGVS oracle); duckvep-c kernel grounded in 116 — see reconciliation doc for the pin decision |
+| Ensembl VEP | `/root/ensembl-vep` (`release/115`), `/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0`, `/root/ensembl-variation` (`release/115`) | **116 (RESOLVED).** `Constants.pm` is byte-identical 115↔116, so the pin is not a rule-table choice; `VariationEffect.pm` differs by 155 lines on the stop/inframe/partial-codon predicates. Pin 116; 115 only as a named compat target. See `duckvep_m6a_contract_gate.md`. |
 | fastVEP (contrast, NOT a source) | `/root/fastVEP`, github.com/Huang-lab/fastVEP | `785922e` (v0.2.0) |
 | duckvep-c (consequence engine to fold in) | `/root/duckvep-c` | `9f922c8` |
 | Ensembl schema (Model A shape) | github.com/Ensembl/ensembl `sql/table.sql` (core); `/root/ensembl-variation/sql/table.sql` (variation) | pin to a release tag |
@@ -121,14 +121,39 @@ See `.sync/riker/src/commands/rna.rs`, `.sync/RustQC/src/rna/`. Keep plotting/re
 rendering out of native kernels.
 Oracle: RustQC `fee1fce` + the actual upstream tools (`.sync/RustQC/src/citations.rs`).
 
-### M6 — Fuse duckvep-c consequence/HGVS engine
-See `design/duckvep_reconciliation.md` (the detailed salvage + Model A import +
-three-tier conformance + format-as-relations plan). Lift into `src/duckvep/`; the
-three-tier conformance framework is the deliverable's core (the anti-slop
-differentiator vs fastVEP). HGVS g→c→p after SO agreement.
-Risk: transcript-model preparation (Model A import) — the pivot.
-Oracle: VEP `release/115` (SO/HGVS) + ClinVar `CLNHGVS`; bcftools 1.23 (BCSQ subset);
-brute-force genetic-code property tests for the kernel.
+### M6 — DuckVEP consequence + duckhgvs, in four gated sub-milestones
+**Reframed 2026-07 after an adversarial gpt-5.6-sol (max) review — see
+`design/duckvep_m6a_contract_gate.md` for the verified findings and decisions.**
+duckvep (SO consequence) and duckhgvs (HGVS `g.→c./n.→p.`) share a model but are **not one
+acceptance gate**. The blocker is not folding code: it is that the stalled handoff renders
+HGVS *from* the compact `duckvep_consequence_t`, which discards the ranges/sequence-context
+HGVS needs. SO and HGVS must be **sibling consumers of a lossless `allele_transcript_context`**.
+Do not fold the duckvep-c ABI before M6a lands.
+
+- **M6a — contract gate (docs/design, no code fold):** pin **VEP 116** (resolved — see
+  oracle table); design **Model A v2** with *typed edit relations* (nucleotide `_rna_edit`
+  pre-translation vs peptide `_selenocysteine`/`amino_acid_sub`/`_stop_codon_rt`
+  post-translation — the reconciliation doc's "apply all before translation" was wrong),
+  identity/provenance/sequence-hashes, and the lossless `allele_transcript_context`; decide
+  the HGVS normative snapshot + adjudicated-panel oracle policy; quarantine
+  `/root/duckhgvs-0.4.0` as a spike (fixed 4096-base/512-exon buffers).
+- **M6b — Model A + SO MVP:** reproducible GRCh37/38 imports proven by exact
+  spliced/CDS/peptide **hashes**; VEP-116 SO for a declared biallelic small-variant subset,
+  both strands, coding+noncoding. No HGVS/haplotype claim. Two oracle lanes (`--gff` geometry
+  + pinned `--cache`/DB for curated edits). **Conformance must gate** (fail on discord/skip).
+- **M6c — DNA HGVS (duckhgvs):** generation-only `g./c./n.`, independent per-reference 3′
+  normalization (keep VariantKey left-aligned identity separate), application-equivalence
+  tests — not string round-trips (HGVS↔VCF is not a bijection).
+- **M6d — protein + compound:** `p.` only after the protein state machine passes independent
+  differential tests; then translation edits, partial CDS, haplotypes, `m.`, structural HGVS
+  as separately gated expansions.
+
+Scope the first claim to **human GRCh37/38** (kernel supports only codon tables 1/2).
+Risk: Model A v2 + lossless-intermediate schema (the real pivot), not the state machine.
+Oracle: **VEP 116** (SO/HGVS) as compatibility target + dated HGVS-recommendations snapshot
+as normative + VariantValidator/Mutalyzer/hgvs as a differential panel; **ClinVar `CLNHGVS`
+as corpus, not oracle**; bcftools 1.23 as a separate BCSQ adapter/oracle; brute-force
+genetic-code property tests for the kernel.
 
 ### M8 — Clinical SQL layer: configurable ACMG/AMP engine
 Sits on M6 (consequence) + supplementary-annotation Parquet/DuckLake joins

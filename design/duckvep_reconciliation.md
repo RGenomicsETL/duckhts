@@ -7,6 +7,13 @@ model import* (not the engine or the tests), and the conformance/format discipli
 that differentiates it from `fastVEP`. Companion to `design/roadmap.md` M6. Nothing
 here is implemented in DuckHTS yet.
 
+**Superseded in part (2026-07):** an adversarial gpt-5.6-sol (max) review corrected two
+things here — the edit model (edits are split nucleotide-pre / peptide-post translation, not
+"all before translation") and the VEP pin (RESOLVED to 116). For those, plus the
+SO/HGVS-as-sibling-consumers reframe, the lossless `allele_transcript_context`, the two-lane
+oracle, conformance-must-gate, and the `duckhgvs-0.4.0` quarantine, **`duckvep_m6a_contract_gate.md`
+is authoritative.**
+
 ## What duckvep-c actually is (do not under-credit it)
 
 Not a "bcftools csq engine" — a **table-driven port of Ensembl VEP 116's actual
@@ -134,10 +141,15 @@ Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
    below), assembly-parameterized (GRCh38 + GRCh37), species-agnostic. Ensembl
    MySQL-dump/scanner → DuckDB SQL (`transcript_attrib ⋈ attrib_type`,
    `translation_attrib ⋈ translation`) → flat Model A relation + `tx_flags`
-   (MANE flags may come from GENCODE GTF tags instead); extract spliced CDS from
-   FASTA and **apply seq-edits / selenocysteine / RNA-edit / readthrough BEFORE
-   translation** → `cds_seq`; emit side relations (`mature_mirna`, regulatory).
-   Only then does the fuzzer reach the rare clinical classes.
+   (MANE flags may come from GENCODE GTF tags instead). **CORRECTION (2026-07, see
+   `duckvep_m6a_contract_gate.md`): edits are NOT all "before translation."** Ensembl
+   splits them by scope — nucleotide-scope `_rna_edit` changes the *spliced nucleotide*
+   sequence pre-translation, but peptide-scope `_selenocysteine` (UGA→Sec, not
+   `stop_gained`), `amino_acid_sub`, `initial_met`, `_stop_codon_rt` modify the *peptide
+   after translation*. Model A v2 carries **typed edit relations** `(scope, tx/translation
+   id, code, start, end, alt_seq)`, not flat flags, and stores/derives both the edited
+   spliced transcript sequence and the final edited reference peptide; emit side relations
+   (`mature_mirna`, regulatory). Only then does the fuzzer reach the rare clinical classes.
 
 ## Model A data provenance, schema source, species, and assemblies
 
@@ -222,10 +234,29 @@ they must not enter `ERRATA.md` as class-(a). The manifest + import must precede
 trustworthy errata. The accepted-mismatch ledger (roadmap M1) **is** the class-(c)
 coverage boundary — shrinking it is the breakthrough metric.
 
-## Version-pin decision left open
+## Version-pin decision — RESOLVED to VEP 116 (2026-07)
 
-duckvep-c's kernel is grounded in **VEP 116**; the roadmap oracle pin is **VEP 115**
-(gpt-5.6-sol, for ClinVar `CLNHGVS` HGVS-corpus alignment). Reconcile before M6:
-pin one release, record it in the manifest, and regenerate the rule table
-(`generate_effect_rules.pl`) against that exact `Constants.pm`. Do not silently mix
-116 expectations with a 115 oracle.
+Verified against the working trees: `Bio/EnsEMBL/Variation/Utils/Constants.pm` is
+**byte-identical** between 115 (`/root/ensembl-variation` @ `release/115`) and 116
+(`ensembl-vep-116.0-0`), so regenerating the rule table (`generate_effect_rules.pl`)
+would produce the *same* SO vocabulary/rank/tier either way — the pin is **not** a
+rule-table decision. The real 115→116 difference is **155 changed lines in
+`VariationEffect.pm`**, concentrated on `stop_lost`, `partial_codon`, `stop_retained`,
+`_overlaps_stop_codon`→`_overlaps_stop_codon_cil`, `_ins_del_stop_altered`→`…_cil`, and
+final-stop-length logic — the stop/inframe/partial-codon predicates at our coding
+frontier. **Decision: pin VEP 116** (the salvaged kernel is 116-shaped). If GRCh37/clinical
+needs 115, it is a *named* compatibility target with consciously back-ported predicates,
+never a 115 wrapper on 116 assumptions. Record loaded-module hashes, not `vep --version`.
+Full detail + the sibling-consumer / Model-A-v2 / oracle-lane / conformance-gating decisions
+live in `duckvep_m6a_contract_gate.md`.
+
+## duckhgvs-0.4.0 — quarantine (not the head start it looks like)
+
+`/root/duckhgvs-0.4.0` (v0.4.0) is a design spike, NOT a validated engine, despite the
+handoff (`/root/duckvep-c/docs/HANDOFF.md:33`) calling it "already exists." It hard-codes
+`DUCKHGVS_SEQ_MAX 4096` / `DUCKHGVS_TRANSCRIPT_EXON_MAX 512`, only projects alleles wholly
+inside one exon, and its README's "not yet" list covers accession resolution, intronic
+`c./n.`, protein normalization, SV, and full grammar; the 4096 buffer already excludes 9,742
+real transcripts. Salvage ideas + test vectors; **do not fold its ABI.** Its
+render-HGVS-from-`duckvep_consequence_t` architecture is exactly the design error M6a
+corrects (see `duckvep_m6a_contract_gate.md`).
