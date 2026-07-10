@@ -2,6 +2,8 @@
 
 ## Rduckhts 1.4.0-0.1.0 (2026-07-10)
 
+CRAN release: 2026-07-10
+
 - bundled `cigar_*` helpers (`cigar_has_soft_clip`,
   `cigar_has_hard_clip`, `cigar_left_soft_clip`,
   `cigar_right_soft_clip`, `cigar_query_length`,
