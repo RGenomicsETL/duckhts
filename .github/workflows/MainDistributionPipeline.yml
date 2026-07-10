@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Check NEON kernels against scalar oracles
         run: make test-simd-kernels
 
