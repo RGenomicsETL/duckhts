@@ -97,6 +97,10 @@ engine; the consequence logic is the only risk we take on. This aligns with
 
 Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
 
+**Verified file-by-file (2026-07, Sonnet 5 audit against the trees): see
+`duckvep_salvage_inventory_audit.md` for the corrected, evidence-backed inventory table
+(existence, line counts, per-file dedupe diffs, and gaps).** Key corrections folded below.
+
 **Tier A — irreplaceable:**
 - `conformance/` in full — the three tiers above, `generate_effect_rules.pl`,
   `extract_so_spec.pl`, `generate_so_metadata.pl`, `so_dump.c`,
@@ -109,28 +113,42 @@ Lift into `src/duckvep/`. Priority = uniqueness (can't be rebuilt cheaply).
 - The design docs: `duckvep_effect_ctx_architecture.md`,
   `vep_consequence_state_machine.md`, `duckvep_annotate_input_contract.md`,
   `duckvep_span_sv_cnv_consolidation_2026-06-23.md`,
-  `duckvep_current_design_state_machines.md`,
-  `duckvep_bcftools_csq_port_plan_2026-06-09.md`, `duckvep_layer_keys.md`.
+  `duckvep_current_design_state_machines.md` (+ its `.qmd` source).
+  **Already lifted (do not re-copy — reconcile if drifted):**
+  `duckvep_bcftools_csq_port_plan_2026-06-09.md`, `duckvep_layer_keys.md` are already
+  present under `/root/duckhts/design/`.
+- **Also required for Tier A to compile (audit gap):** the 11 private kernel headers in
+  `kernel/src/*.h`, the 2 generated `kernel/src/*.inc` (`duckvep_effect_rules.inc`,
+  `duckvep_so_metadata.inc`), and `kernel/CMakeLists.txt`.
 
 **Tier B — engine glue to lift + rename:**
 - `src/consequence_udf.c`, `src/annotate_table.c`, `src/duckvep_variant_tile.c`,
   `src/duckvep_model_reader.c`, `src/duckvep_relation_cursor.c`,
   `src/duckvep_chunk_reader.c`, `src/chrom_interner.c` + their `include/` headers.
+- **Note (audit):** `src/duckvep.c` (the `dv_`-prefixed extension entry point) is NOT
+  lifted verbatim — it is superseded by the new `duckhts_csq` registration (fuse step 5).
 
 **Tier C — DEDUPLICATE against DuckHTS (do not copy; use the DuckHTS copy):**
-- `bcf_reader.c`, `cgranges_api.c`, `variantkey_udf.c`, `vep_parser.c`,
+- `cgranges_api.c`, `variantkey_udf.c`, `vep_parser.c`,
   `bgzip.c`, `tabix_reader.c`, `seq_reader.c`, `quality_encoding.c`,
   `bcftools_norm_udf.c`, `bcftools_shim.c`, `wasm_http_hfile.c`,
-  `include/seq_encoding.h`, `include/wasm_socket_compat.h`. These are near-duplicates
-  of files already in DuckHTS; unify to one copy.
-- **Merge the SIMD dispatchers:** `src/simd/duckvep_simd_*` → the DuckHTS
-  `src/simd/duckhts_simd_*` framework. One extension, one dispatch table.
+  **`hts_index_builder.c`, `hts_meta_reader.c`, `interval_udf.c`** (audit-added; also
+  near-dups), `include/seq_encoding.h`, `include/wasm_socket_compat.h` + the 9 paired
+  headers the audit enumerates. These are near-duplicates (prefix-only diffs) of files
+  already in DuckHTS; unify to one copy.
+- **`bcf_reader.c` is NOT a same-generation near-dup — keep DuckHTS's, discard
+  duckvep-c's.** DuckHTS's copy (5028 vs 4551 lines) carries the `decode_error_policy`
+  (`null`/`warn`/`error`) + GT-preflight feature that duckvep-c's fork predates.
+- **SIMD: discard `src/simd/duckvep_simd_*` entirely — do NOT merge.** DuckHTS's
+  `src/simd/duckhts_simd_*` is strictly ahead (it added `BAM_NT16_COUNTS` +
+  `NT16_GC_COUNTS`); duckvep-c's SIMD tree contributes zero unique content.
 
 ## Fuse mechanics
 
 1. Create `src/duckvep/` (self-contained) + `src/duckvep/kernel/`.
-2. Deduplicate Tier C; delete duckvep's copies; repoint includes to DuckHTS.
-3. Merge SIMD dispatch (Tier C).
+2. Deduplicate Tier C; delete duckvep's copies; repoint includes to DuckHTS
+   (keep DuckHTS's `bcf_reader.c` — it is ahead of duckvep-c's fork).
+3. Discard duckvep-c's `src/simd/` — DuckHTS's SIMD tree is strictly ahead; nothing to merge.
 4. Wire the build: `CMakeLists.txt`, `r/Rduckhts/R/bootstrap.R`,
    `r/Rduckhts/configure`, `r/Rduckhts/configure.win` (per `AGENTS.md` — a new
    public function is incomplete until wired on Unix + Windows + R package).
