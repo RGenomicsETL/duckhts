@@ -1,0 +1,35 @@
+diff --git a/src/theft_call_internal.h b/src/theft_call_internal.h
+index 21058d3..c2d1093 100644
+--- a/src/theft_call_internal.h
++++ b/src/theft_call_internal.h
+@@ -7,0 +8 @@
++#if !defined(_WIN32)
+@@ -12,0 +14 @@
++#endif
+@@ -16,0 +19 @@
++#if !defined(_WIN32)
+@@ -29,0 +33 @@
++#endif
+diff --git a/src/theft_call.c b/src/theft_call.c
+index 4bfdb96..1369605 100644
+--- a/src/theft_call.c
++++ b/src/theft_call.c
+@@ -3,0 +4 @@
++#if !defined(_WIN32)
+@@ -10,0 +12 @@
++#endif
+@@ -16,0 +19,4 @@
++#if defined(_WIN32)
++    if (t->fork.enable) { return THEFT_TRIAL_ERROR; }
++    return theft_call_inner(t, args);
++#else
+@@ -88,0 +95 @@
++#endif
+@@ -90,0 +98 @@
++#if !defined(_WIN32)
+@@ -261,0 +270 @@
++#endif
+@@ -326,0 +336 @@
++#if !defined(_WIN32)
+@@ -342,0 +353 @@
++#endif
