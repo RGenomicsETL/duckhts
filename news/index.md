@@ -1,5 +1,15 @@
 # Changelog
 
+## Rduckhts 1.4.0.9000-0.1.0 (development)
+
+- bundle the DuckVEP SQL surface: `duckvep_model_load(...)` loads and
+  validates one of several named resident transcript models from
+  committed DuckDB relations, `duckvep_annotate(...)` returns explicit
+  per-transcript consequence rows for biallelic small variants, and
+  `duckvep_model_drop(...)` releases a model. Add an end-to-end DBI
+  tinytest using the bundled extension and a sequence-backed coding
+  transcript
+
 ## Rduckhts 1.4.0-0.1.0 (2026-07-10)
 
 CRAN release: 2026-07-10
