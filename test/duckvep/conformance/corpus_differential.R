@@ -18,7 +18,9 @@ root <- tryCatch(
 )
 results_dir <- file.path(root, "test", "duckvep", "conformance", "results")
 ncores <- parallel::detectCores()
-if (is.na(ncores)) ncores <- 1L
+if (is.na(ncores)) {
+  ncores <- 1L
+}
 
 op <- OptionParser(
   usage = "%prog [options]  (defaults run the in-tree witness differential)"
@@ -40,10 +42,21 @@ op <- add_option(
   op,
   "--model-sql",
   dest = "model_sql",
-  default = file.path(root, "test", "duckvep", "conformance", "minimal_model.sql"),
+  default = file.path(
+    root,
+    "test",
+    "duckvep",
+    "conformance",
+    "minimal_model.sql"
+  ),
   help = "optional SQL that creates the four duckvep_* model relations [%default]"
 )
-op <- add_option(op, "--model-name", dest = "model_name", default = "differential")
+op <- add_option(
+  op,
+  "--model-name",
+  dest = "model_name",
+  default = "differential"
+)
 op <- add_option(
   op,
   "--sample-per-shape",
@@ -108,8 +121,12 @@ missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
 }
-if (opt$sample_per_shape < 0L) die("--sample-per-shape must be non-negative")
-if (opt$distance < 0L) die("--distance must be non-negative")
+if (opt$sample_per_shape < 0L) {
+  die("--sample-per-shape must be non-negative")
+}
+if (opt$distance < 0L) {
+  die("--distance must be non-negative")
+}
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 if (!nzchar(opt$annotations_out)) {
   opt$annotations_out <- file.path(
@@ -132,11 +149,15 @@ sql_q <- function(x) as.character(dbQuoteString(con, x))
 invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 invisible(tryCatch(
   dbExecute(con, "LOAD json"),
-  error = function(e) die("DuckDB JSON support is required: {conditionMessage(e)}")
+  error = function(e) {
+    die("DuckDB JSON support is required: {conditionMessage(e)}")
+  }
 ))
 
 if (nzchar(opt$model_sql)) {
-  if (!file.exists(opt$model_sql)) die("model SQL does not exist: {opt$model_sql}")
+  if (!file.exists(opt$model_sql)) {
+    die("model SQL does not exist: {opt$model_sql}")
+  }
   invisible(dbExecute(
     con,
     paste(readLines(opt$model_sql, warn = FALSE), collapse = "\n")
@@ -155,7 +176,9 @@ present_relations <- dbGetQuery(
 )$table_name
 missing_relations <- setdiff(needed_relations, present_relations)
 if (length(missing_relations) != 0L) {
-  die("model database is missing relation(s): {paste(missing_relations, collapse = ', ')}")
+  die(
+    "model database is missing relation(s): {paste(missing_relations, collapse = ', ')}"
+  )
 }
 
 load_queries <- c(
@@ -179,7 +202,9 @@ loaded <- dbGetQuery(
        {sql_q(load_queries[2])}, {sql_q(load_queries[3])})"
   )
 )$loaded
-if (length(loaded) != 1L || !isTRUE(loaded[[1L]])) die("DuckVEP model load failed")
+if (length(loaded) != 1L || !isTRUE(loaded[[1L]])) {
+  die("DuckVEP model load failed")
+}
 
 source_vcf <- opt$vcf
 if (!nzchar(source_vcf)) {
@@ -189,16 +214,23 @@ if (!nzchar(source_vcf)) {
     "Rscript",
     c(
       file.path(root, "test", "duckvep", "conformance", "generate_witnesses.R"),
-      "--gff", opt$gff,
-      "--fasta", opt$fasta,
-      "--tx", "DUCK1-201",
-      "--out", source_vcf,
-      "--ext", opt$extension
+      "--gff",
+      opt$gff,
+      "--fasta",
+      opt$fasta,
+      "--tx",
+      "DUCK1-201",
+      "--out",
+      source_vcf,
+      "--ext",
+      opt$extension
     )
   )
   if (rc != 0L || !file.exists(source_vcf)) die("witness generation failed")
 }
-if (!file.exists(source_vcf)) die("VCF does not exist: {source_vcf}")
+if (!file.exists(source_vcf)) {
+  die("VCF does not exist: {source_vcf}")
+}
 
 chrom_filter <- ""
 chroms <- trimws(strsplit(opt$chrom, ",", fixed = TRUE)[[1L]])
@@ -274,17 +306,26 @@ invisible(dbExecute(
      ORDER BY r.seq_region, position, reference, alternate"
   )
 ))
-sample_count <- dbGetQuery(con, "SELECT count(*) AS n FROM duckvep_sample")$n[[1L]]
-if (sample_count == 0) die("the sampler found no biallelic A/C/G/T variants in model regions")
+sample_count <- dbGetQuery(con, "SELECT count(*) AS n FROM duckvep_sample")$n[[
+  1L
+]]
+if (sample_count == 0) {
+  die("the sampler found no biallelic A/C/G/T variants in model regions")
+}
 
 sample_vcf <- opt$sample_vcf
 if (!nzchar(sample_vcf)) {
   sample_vcf <- tempfile(fileext = ".vcf")
-  if (!isTRUE(opt$keep_sample_vcf)) temporary_files <- c(temporary_files, sample_vcf)
+  if (!isTRUE(opt$keep_sample_vcf)) {
+    temporary_files <- c(temporary_files, sample_vcf)
+  }
 }
 dir.create(dirname(sample_vcf), recursive = TRUE, showWarnings = FALSE)
 vc <- file(sample_vcf, open = "wt")
-writeLines(c("##fileformat=VCFv4.2", "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"), vc)
+writeLines(
+  c("##fileformat=VCFv4.2", "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"),
+  vc
+)
 res <- dbSendQuery(
   con,
   paste(
@@ -294,7 +335,9 @@ res <- dbSendQuery(
 )
 repeat {
   chunk <- dbFetch(res, n = 100000L)
-  if (nrow(chunk) == 0L) break
+  if (nrow(chunk) == 0L) {
+    break
+  }
   writeLines(
     paste(
       chunk$chrom,
@@ -314,7 +357,9 @@ dbClearResult(res)
 close(vc)
 
 stage_gff <- function(path) {
-  if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) return(path)
+  if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) {
+    return(path)
+  }
   header <- tempfile(fileext = ".header")
   body <- tempfile(fileext = ".body")
   sorted_body <- tempfile(fileext = ".sorted-body")
@@ -334,7 +379,9 @@ stage_gff <- function(path) {
   body_con <- file(body, "wt")
   repeat {
     lines <- readLines(input, n = 100000L, warn = FALSE)
-    if (length(lines) == 0L) break
+    if (length(lines) == 0L) {
+      break
+    }
     is_header <- startsWith(lines, "#")
     writeLines(lines[is_header], header_con)
     writeLines(lines[!is_header], body_con)
@@ -348,13 +395,17 @@ stage_gff <- function(path) {
     stdout = sorted_body,
     env = "LC_ALL=C"
   )
-  if (rc != 0L) die("sorting GFF failed")
+  if (rc != 0L) {
+    die("sorting GFF failed")
+  }
   out_con <- file(sorted_gff, "wt")
   for (part in c(header, sorted_body)) {
     in_con <- file(part, "rt")
     repeat {
       lines <- readLines(in_con, n = 100000L, warn = FALSE)
-      if (length(lines) == 0L) break
+      if (length(lines) == 0L) {
+        break
+      }
       writeLines(lines, out_con)
     }
     close(in_con)
@@ -367,7 +418,9 @@ stage_gff <- function(path) {
        keep := TRUE, overwrite := TRUE)"
     )
   )$success
-  if (length(bgzip) != 1L || !isTRUE(bgzip[[1L]])) die("bgzip of GFF failed")
+  if (length(bgzip) != 1L || !isTRUE(bgzip[[1L]])) {
+    die("bgzip of GFF failed")
+  }
   indexed <- dbGetQuery(
     con,
     glue(
@@ -375,7 +428,9 @@ stage_gff <- function(path) {
        index_path := {sql_q(paste0(output, '.tbi'))}, threads := 1)"
     )
   )$success
-  if (length(indexed) != 1L || !isTRUE(indexed[[1L]])) die("tabix indexing of GFF failed")
+  if (length(indexed) != 1L || !isTRUE(indexed[[1L]])) {
+    die("tabix indexing of GFF failed")
+  }
   output
 }
 gff_for_vep <- stage_gff(opt$gff)
@@ -419,28 +474,78 @@ micromamba <- if (file.exists(opt$micromamba)) {
 } else {
   unname(Sys.which(opt$micromamba))
 }
-if (!nzchar(micromamba)) die("micromamba is unavailable: {opt$micromamba}")
+if (!nzchar(micromamba)) {
+  die("micromamba is unavailable: {opt$micromamba}")
+}
 if (!dir.exists(opt$vep_prefix)) {
   die("VEP environment prefix does not exist: {opt$vep_prefix}")
 }
 vep_prefix <- normalizePath(opt$vep_prefix)
+vep_command <- function(...) {
+  blit::conda(
+    "run",
+    "-p",
+    vep_prefix,
+    "vep",
+    ...,
+    conda = micromamba
+  )
+}
+
+vep_info <- tempfile(fileext = ".txt")
+temporary_files <- c(temporary_files, vep_info)
+info_rc <- vep_command("--help") |>
+  blit::cmd_run(
+    stdout = vep_info,
+    stderr = "2>&1",
+    stdin = NULL,
+    verbose = FALSE
+  )
+if (info_rc != 0L || !file.exists(vep_info)) {
+  die("cannot identify VEP in {vep_prefix}")
+}
+vep_info_lines <- readLines(vep_info, warn = FALSE)
+component_version <- function(component) {
+  line <- grep(
+    glue("^\\s*{component}\\s*:"),
+    vep_info_lines,
+    value = TRUE
+  )
+  if (length(line) != 1L) {
+    die("VEP did not report {component} exactly once")
+  }
+  trimws(sub("^[^:]+:", "", line))
+}
+oracle_version <- component_version("ensembl-vep")
+if (!identical(oracle_version, "116.0")) {
+  die("expected Ensembl VEP 116.0, found {oracle_version}")
+}
+oracle_build <- paste(
+  glue("core={component_version('ensembl')}"),
+  glue("variation={component_version('ensembl-variation')}"),
+  glue("vep={oracle_version}"),
+  sep = ";"
+)
+
 vep_json <- tempfile(fileext = ".json")
 temporary_files <- c(temporary_files, vep_json)
 vep_time <- system.time({
-  rc <- blit::conda(
-    "run",
-    "-p", vep_prefix,
-    "vep",
-    "-i", sample_vcf,
-    "--gff", gff_for_vep,
-    "--fasta", opt$fasta,
-    "--distance", as.character(opt$distance),
+  rc <- vep_command(
+    "-i",
+    sample_vcf,
+    "--gff",
+    gff_for_vep,
+    "--fasta",
+    opt$fasta,
+    "--distance",
+    as.character(opt$distance),
     "--json",
-    "-o", vep_json,
-    "--fork", opt$fork,
+    "-o",
+    vep_json,
+    "--fork",
+    opt$fork,
     "--force_overwrite",
-    "--no_stats",
-    conda = micromamba
+    "--no_stats"
   ) |>
     blit::cmd_run(stdout = "", stderr = "", stdin = NULL, verbose = FALSE)
 })
@@ -475,6 +580,9 @@ invisible(dbExecute(
      SELECT
        {sql_q(run_date)} AS run_date,
        {sql_q(opt$corpus)} AS corpus,
+       {sql_q(opt$model_name)} AS model,
+       {sql_q(oracle_version)} AS oracle_version,
+       {sql_q(oracle_build)} AS oracle_build,
        'vep'::VARCHAR AS source,
        a.variant_id,
        v.chrom,
@@ -491,7 +599,8 @@ invisible(dbExecute(
      FROM vep_annotation a JOIN duckvep_sample v USING (variant_id)
      UNION ALL
      SELECT
-       {sql_q(run_date)}, {sql_q(opt$corpus)}, 'duckvep',
+       {sql_q(run_date)}, {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
+       {sql_q(oracle_version)}, {sql_q(oracle_build)}, 'duckvep',
        a.variant_id, v.chrom, v.position, v.reference, v.alternate,
        v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason
      FROM duckvep_annotation a JOIN duckvep_sample v USING (variant_id)"
@@ -511,7 +620,10 @@ counts <- dbGetQuery(
   "SELECT source, count(*) AS transcript_rows
    FROM duckvep_annotation_dump GROUP BY source ORDER BY source"
 )
-invisible(dbGetQuery(con, glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")))
+invisible(dbGetQuery(
+  con,
+  glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
+))
 
 cat(glue("sampled variants: {sample_count}"), "\n", sep = "")
 for (i in seq_len(nrow(counts))) {
@@ -533,6 +645,14 @@ cat(
 )
 cat(glue("annotations: {opt$annotations_out}"), "\n", sep = "")
 
-report <- file.path(root, "test", "duckvep", "conformance", "statistical_conformance.R")
+report <- file.path(
+  root,
+  "test",
+  "duckvep",
+  "conformance",
+  "statistical_conformance.R"
+)
 rc <- system2("Rscript", c(report, "--annotations", opt$annotations_out))
-if (rc != 0L) die("statistical report failed with exit status {rc}")
+if (rc != 0L) {
+  die("statistical report failed with exit status {rc}")
+}

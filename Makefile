@@ -5,6 +5,9 @@
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
 	duckvep-corpus-differential duckvep-statistical-report \
+	duckvep-record-conformance duckvep-record-properties \
+	bench-duckvep-throughput \
+	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -290,6 +293,27 @@ duckvep-corpus-differential: release
 duckvep-statistical-report:
 	Rscript test/duckvep/conformance/statistical_conformance.R \
 		$(DUCKVEP_STATISTICAL_ARGS)
+
+# Regenerate the real VEP witness output, then replace this revision's rows in
+# the append-only audit ledger. No counts are entered by hand.
+duckvep-record-conformance: test-duckvep-differential
+	Rscript test/duckvep/conformance/statistical_conformance.R \
+		--annotations test/duckvep/conformance/results/witnesses_annotations.parquet \
+		--history test/duckvep/conformance/data/conformance_history.csv
+
+duckvep-record-properties:
+	Rscript test/duckvep/conformance/property_history.R \
+		$(DUCKVEP_PROPERTY_HISTORY_ARGS)
+
+# `configure` refreshes extension metadata from description.yml before timing.
+bench-duckvep-throughput: configure release
+	Rscript benchmarks/duckvep_throughput.R $(DUCKVEP_THROUGHPUT_ARGS)
+
+duckvep-render-reports:
+	DUCKHTS_REPO_ROOT=$(PROJ_DIR) Rscript -e \
+		"rmarkdown::render('benchmarks/duckvep_conformance.Rmd', quiet = TRUE)"
+	DUCKHTS_REPO_ROOT=$(PROJ_DIR) Rscript -e \
+		"rmarkdown::render('benchmarks/duckvep_throughput.Rmd', quiet = TRUE)"
 
 # Build the duckdb-wasm extension (Docker) and run the headless Playwright smoke
 # test that loads it in a real browser and asserts the SIMD kernels resolve on

@@ -1,0 +1,46 @@
+---
+title: "DuckVEP sorted-stream throughput"
+output: github_document
+---
+
+<!-- duckvep_throughput.md is generated from duckvep_throughput.Rmd. -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
+history <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_throughput.csv"),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+history$revision <- substr(history$source_revision, 1, 8)
+```
+
+This benchmark drives `duckvep_annotate` through DuckDB's stable extension API
+with nondecreasing sequence-region and position keys. It records vector adapter,
+sweep reuse, coding classification, list materialization, `unnest`, and final
+aggregation together.
+
+The current checked-in workload has one transcript and two exons. It is a
+repeatable hot-transcript floor, not a whole-genome throughput claim. Production
+qualification also requires an imported Ensembl model and a sorted gnomAD-scale
+variant stream spanning realistic transcript density.
+
+## Recorded runs
+
+```{r runs}
+table <- history[, c(
+  "run_date", "revision", "workload", "threads", "variants", "passes",
+  "min_seconds", "median_seconds", "max_seconds", "variants_per_second",
+  "ns_per_variant", "cpu"
+)]
+table$variants <- format(table$variants, big.mark = ",", scientific = FALSE)
+table$variants_per_second <- round(table$variants_per_second)
+table$ns_per_variant <- round(table$ns_per_variant, 1)
+knitr::kable(table, row.names = FALSE)
+```
+
+Each pass consumes every generated input and checks output cardinality and a
+consequence-string checksum. Rows with different workload, thread count, host,
+or variant count are separate measurements and should not be compared as if
+only the engine changed.

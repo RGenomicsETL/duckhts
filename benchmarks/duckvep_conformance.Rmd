@@ -1,0 +1,205 @@
+---
+title: "DuckVEP conformance against Ensembl VEP 116"
+output: github_document
+---
+
+<!-- duckvep_conformance.md is generated from duckvep_conformance.Rmd. -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
+history_path <- file.path(
+  root, "test", "duckvep", "conformance", "data", "conformance_history.csv"
+)
+history <- read.csv(
+  history_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(oracle_version = "character")
+)
+property_history <- read.csv(
+  file.path(
+    root, "test", "duckvep", "conformance", "data", "property_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character", seed = "character")
+)
+overall <- history[history$stratum_kind == "all", , drop = FALSE]
+latest <- overall[nrow(overall), , drop = FALSE]
+same_run <- function(x) {
+  x$source_revision == latest$source_revision &
+    x$engine == latest$engine &
+    x$corpus == latest$corpus &
+    x$model == latest$model
+}
+upper95 <- function(k, n) {
+  if (n == 0) NA_real_ else binom.test(k, n, conf.level = 0.95)$conf.int[[2L]]
+}
+percent <- function(x) {
+  ifelse(is.na(x), "not estimable", sprintf("%.2f%%", 100 * x))
+}
+short_revision <- function(x) substr(x, 1, 8)
+```
+
+This report records exact transcript-level consequence agreement with the real
+Ensembl VEP 116 `--gff` output. Unresolved DuckVEP rows remain in the denominator;
+they are not discarded as unsupported cases. The CSV is append-only by source
+revision, corpus, and resident model.
+
+## Latest run
+
+```{r latest}
+latest_table <- data.frame(
+  revision = short_revision(latest$source_revision),
+  corpus = latest$corpus,
+  model = latest$model,
+  oracle = paste0("VEP ", latest$oracle_version),
+  pairs = latest$n,
+  exact = paste0(latest$exact_agree, "/", latest$n),
+  unresolved = latest$unresolved,
+  resolved_disagreements = latest$resolved_discordant,
+  resolved_error_upper_95 = percent(latest$upper95),
+  stringsAsFactors = FALSE
+)
+knitr::kable(latest_table, row.names = FALSE)
+```
+
+## History
+
+```{r history}
+timeline <- overall[, c(
+  "run_date", "source_revision", "corpus", "model", "n", "exact_agree",
+  "unresolved", "resolved_n", "resolved_discordant", "upper95"
+)]
+timeline$source_revision <- short_revision(timeline$source_revision)
+timeline$exact_rate <- percent(timeline$exact_agree / timeline$n)
+timeline$resolved_error_upper_95 <- percent(timeline$upper95)
+timeline$upper95 <- NULL
+knitr::kable(timeline, row.names = FALSE)
+```
+
+## Randomized pure-C properties
+
+The property ledger is separate from the VEP differential. It records successful
+runs of each randomized oracle, including the exact seed and duplicate count. A
+failed suite does not append rows.
+
+```{r property-history}
+property_runs <- aggregate(
+  cbind(trials, passed, failed, skipped, duplicates) ~
+    run_date + source_revision + configured_trials + seed + suite_tests +
+      suite_assertions + suite_elapsed_seconds + compiler,
+  data = property_history,
+  FUN = sum
+)
+target_counts <- aggregate(
+  target ~ run_date + source_revision + configured_trials + seed,
+  data = property_history,
+  FUN = length
+)
+names(target_counts)[names(target_counts) == "target"] <- "randomized_targets"
+property_runs <- merge(
+  property_runs,
+  target_counts,
+  by = c("run_date", "source_revision", "configured_trials", "seed")
+)
+property_runs$source_revision <- short_revision(property_runs$source_revision)
+property_runs <- property_runs[, c(
+  "run_date", "source_revision", "seed", "randomized_targets", "trials",
+  "passed", "failed", "duplicates", "suite_tests", "suite_assertions",
+  "suite_elapsed_seconds", "compiler"
+)]
+for (column in c("trials", "passed", "suite_assertions")) {
+  property_runs[[column]] <- format(
+    property_runs[[column]],
+    big.mark = ",",
+    scientific = FALSE
+  )
+}
+knitr::kable(property_runs, row.names = FALSE)
+```
+
+```{r property-targets}
+last_property <- property_history[nrow(property_history), , drop = FALSE]
+latest_properties <- property_history[
+  property_history$source_revision == last_property$source_revision &
+    property_history$seed == last_property$seed &
+    property_history$configured_trials == last_property$configured_trials,
+  c("target", "trials", "passed", "failed", "skipped", "duplicates"),
+  drop = FALSE
+]
+for (column in c("trials", "passed", "failed", "skipped", "duplicates")) {
+  latest_properties[[column]] <- format(
+    latest_properties[[column]],
+    big.mark = ",",
+    scientific = FALSE
+  )
+}
+knitr::kable(latest_properties, row.names = FALSE)
+```
+
+## Individual Sequence Ontology terms
+
+For each transcript pair, this compares the union of terms emitted by either
+engine. A missing or extra term is therefore visible under its own SO name.
+Rows must not be summed across terms because one pair can carry several terms.
+
+```{r so-terms}
+term_rows <- history[
+  history$stratum_kind == "so_term" & same_run(history),
+  ,
+  drop = FALSE
+]
+term_counts <- aggregate(
+  cbind(
+    n, exact_agree, unresolved, resolved_n, resolved_agree,
+    resolved_discordant, term_mismatch, engine_extra, engine_missing
+  ) ~ consequence_class + impact,
+  data = term_rows,
+  FUN = sum
+)
+term_counts$upper95 <- mapply(
+  upper95,
+  term_counts$resolved_discordant,
+  term_counts$resolved_n
+)
+term_counts <- term_counts[order(
+  -term_counts$resolved_discordant,
+  -term_counts$unresolved,
+  -term_counts$n,
+  term_counts$consequence_class
+), ]
+term_counts$resolved_error_upper_95 <- percent(term_counts$upper95)
+term_counts$upper95 <- NULL
+knitr::kable(term_counts, row.names = FALSE)
+```
+
+## VEP impact classes
+
+This table uses full consequence sets, so each transcript pair is counted once.
+
+```{r impact}
+set_rows <- history[
+  history$stratum_kind == "consequence_set" & same_run(history),
+  ,
+  drop = FALSE
+]
+impact_counts <- aggregate(
+  cbind(n, exact_agree, unresolved, resolved_n, resolved_discordant) ~ impact,
+  data = set_rows,
+  FUN = sum
+)
+impact_counts$upper95 <- mapply(
+  upper95,
+  impact_counts$resolved_discordant,
+  impact_counts$resolved_n
+)
+impact_counts$exact_rate <- percent(impact_counts$exact_agree / impact_counts$n)
+impact_counts$resolved_error_upper_95 <- percent(impact_counts$upper95)
+impact_counts$upper95 <- NULL
+knitr::kable(impact_counts, row.names = FALSE)
+```
+
+The source artifact hash and exact Ensembl core/variation build remain in
+`test/duckvep/conformance/data/conformance_history.csv` for audit and reruns.

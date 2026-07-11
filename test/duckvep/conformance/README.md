@@ -48,6 +48,16 @@ before the C engine runs. The output is a Parquet row set from both engines, a p
 Parquet difference, and CSV summaries with exact matches, unresolved engine rows, resolved
 discordances, emission misses/extras, and exact binomial 95% upper bounds.
 
+`make duckvep-record-conformance` reruns the real VEP witnesses and records the current
+source revision in `data/conformance_history.csv`. Rows include the complete consequence
+set, individual SO terms, VEP impact, allele shape, unresolved reason, exact Ensembl
+build, and annotation-artifact hash. `make bench-duckvep-throughput` records the sorted
+stable-API path in `benchmarks/data/duckvep_throughput.csv`; its checked-in fixture has
+one transcript and is not a whole-genome performance claim. Render both views with
+`make duckvep-render-reports`. `make duckvep-record-properties` runs the pure-C
+randomized suite and records every reported target, seed, trial count, and duplicate
+count in `data/property_history.csv`; a failed suite writes no history row.
+
 The corpus runner currently compares independent alleles. The pure C tests cover phased
 edit grouping, same-codon interactions, open frameshifts, and restored frameshifts; a VEP
 Haplosaurus differential belongs with the public phased input surface rather than being
