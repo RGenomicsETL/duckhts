@@ -13,9 +13,9 @@ SELECT
   list_extract(VEP_strand, 1),
   list_extract(VEP_dna_change, 1)
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/duckvep/minimal_bcsq.vcf')
-WHERE POS = 125;
+WHERE POS = 124;
 ----
-missense_variant	DUCK1	DUCK1-201	+	125A>C
+missense_variant	DUCK1	DUCK1-201	+	124T>C
 
 # --- BCSQ fields keep the same typed list surface used for CSQ/ANN parsing ---
 query TT
@@ -31,7 +31,7 @@ WITH variants AS (
   SELECT CHROM, POS, REF, list_extract(ALT, 1) AS ALT, ID
   FROM read_bcf('__WORKING_DIRECTORY__/test/data/duckvep/minimal_bcsq.vcf')
 ), exact_annotations(chrom, pos, ref, alt, label) AS (
-  VALUES ('chrDuck', 125::BIGINT, 'A', 'C', 'pinned_exact_missense')
+  VALUES ('chrDuck', 124::BIGINT, 'T', 'C', 'pinned_exact_missense')
 )
 SELECT v.ID, a.label
 FROM variants v
@@ -53,7 +53,7 @@ WITH variants AS (
   FROM read_gff('__WORKING_DIRECTORY__/test/data/duckvep/minimal.gff3', attributes_map := true)
   WHERE feature = 'gene'
 )
-SELECT string_agg(v.ID || ':' || coalesce(g.gene_id, 'NA'), ',' ORDER BY v.POS)
+SELECT string_agg(v.ID || ':' || coalesce(g.gene_id, 'NA'), ',' ORDER BY v.CHROM, v.POS)
 FROM variants v
 LEFT JOIN genes g
   ON v.CHROM = g.seqname

@@ -67,12 +67,58 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   )
   file.copy(file.path(src_dir, c_files), dest)
   duckvep_files <- c(
-    "duckvep_allele.c",
-    "duckvep_allele.h"
+    "duckvep_model.c",
+    "duckvep_model.h",
+    "duckvep_variant_tile.c",
+    "duckvep_variant_tile.h",
+    "duckvep_annotate.c"
   )
   duckvep_dest <- file.path(dest, "duckvep")
   dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
   file.copy(file.path(src_dir, "duckvep", duckvep_files), duckvep_dest)
+  duckvep_kernel_headers <- c("duckvep_kernel.h", "duckvep_so.h")
+  duckvep_kernel_sources <- c(
+    "duckvep_kernel.c",
+    "duckvep_so.c",
+    "duckvep_sweep.c",
+    "duckvep_classify.c",
+    "duckvep_effect.c",
+    "duckvep_sv.c",
+    "duckvep_delta.c",
+    "duckvep_projection.c",
+    "duckvep_codon.c",
+    "duckvep_coding.c",
+    "duckvep_haplotype.c"
+  )
+  duckvep_kernel_private_headers <- list.files(
+    file.path(src_dir, "duckvep", "kernel", "src"),
+    pattern = "[.](h|inc)$"
+  )
+  duckvep_kernel_dest <- file.path(duckvep_dest, "kernel")
+  dir.create(
+    file.path(duckvep_kernel_dest, "include"),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  dir.create(
+    file.path(duckvep_kernel_dest, "src"),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  file.copy(
+    file.path(src_dir, "duckvep", "kernel", "include", duckvep_kernel_headers),
+    file.path(duckvep_kernel_dest, "include")
+  )
+  file.copy(
+    file.path(
+      src_dir,
+      "duckvep",
+      "kernel",
+      "src",
+      c(duckvep_kernel_sources, duckvep_kernel_private_headers)
+    ),
+    file.path(duckvep_kernel_dest, "src")
+  )
   simd_files <- c(
     "duckhts_simd_dispatch.c",
     "duckhts_simd_scalar.c",
@@ -86,8 +132,12 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   file.copy(file.path(src_dir, "simd", simd_files), simd_dest)
   message(
     "  Copied ",
-    length(c_files) + length(simd_files) + 1L,
-    " C source files and 1 private DuckVEP header"
+    length(c_files) + length(simd_files) +
+      sum(endsWith(duckvep_files, ".c")) + length(duckvep_kernel_sources),
+    " C source files and ",
+    sum(endsWith(duckvep_files, ".h")) + length(duckvep_kernel_headers) +
+      length(duckvep_kernel_private_headers),
+    " private DuckVEP headers"
   )
 
   # Headers
@@ -293,7 +343,10 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "bcftools_shim.c",
       "score_udf.c",
       "vep_parser.c",
-      file.path("duckvep", "duckvep_allele.c"),
+      file.path("duckvep", "kernel", "src", duckvep_kernel_sources),
+      file.path("duckvep", "duckvep_variant_tile.c"),
+      file.path("duckvep", "duckvep_model.c"),
+      file.path("duckvep", "duckvep_annotate.c"),
       "wasm_http_hfile.c"
     )
   )
@@ -301,7 +354,9 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
   includes <- paste(
     paste0("-I", file.path(ext_dir, "include")),
     paste0("-I", file.path(ext_dir, "duckdb_capi")),
-    paste0("-I", htslib_dir)
+    paste0("-I", htslib_dir),
+    paste0("-I", file.path(ext_dir, "duckvep", "kernel", "include")),
+    paste0("-I", file.path(ext_dir, "duckvep", "kernel", "src"))
   )
 
   for (i in seq_along(c_files)) {

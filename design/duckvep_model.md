@@ -1,189 +1,162 @@
-# DuckVEP annotation model and context contract
+# DuckVEP model and execution contract
 
-Status: **current implementation contract (2026-07-10).** The executable schema is
-`scripts/duckvep_model_schema.sql`; `scripts/duckvep_model.R` initializes and validates
-relation packs. Private C components live under `src/duckvep/`.
+Status: current implementation guidance. This describes the model DuckDB prepares and the
+borrowed arrays consumed by the private C kernel under `src/duckvep/`.
 
-## Compatibility pins
+## Compatibility target
 
-- Ensembl VEP `release/116.0`, commit
-  `57ea5c52340acc1f156267f810ad162e26597082`.
-- Ensembl core `c0cf13daa961d80584bad797b2eb0ff3a7500ef3`; pinned `sql/table.sql`
-  SHA-256 `ec7bb8dd2fcd6a7012bfd67aff8065b912915d541450fa4f3f05334a92944e8c`.
-- Ensembl variation `2fb834b987ede3824e200197a838ce11e91aeb4b`.
-- HGVS Nomenclature 21.1.4, commit
-  `6f85311989e76ead95d3547828f97ebaa3802e35`.
-- Initial public scope: human GRCh37 and GRCh38, codon tables 1 and 2.
+- Ensembl VEP 116, commit `57ea5c52340acc1f156267f810ad162e26597082`.
+- Ensembl core commit `c0cf13daa961d80584bad797b2eb0ff3a7500ef3`.
+- Ensembl variation commit `2fb834b987ede3824e200197a838ce11e91aeb4b`.
+- Human GRCh37 and GRCh38; codon tables 1 and 2.
 
-Compatibility release, annotation release, assembly, source database, and nomenclature
-version are independent fields. A VEP version string is not a source receipt; manifests
-record commits and SHA-256 hashes.
+An assembly, an Ensembl annotation release, and a VEP behavior target are separate
+identities. Imported data records the source URI, source commit or release, file checksum,
+assembly, and FASTA checksum.
 
-## Architecture boundary
+## Where transcript models come from
 
-- The annotation model is a normalized DuckDB/Parquet relation pack, not a private cache
-  format. Nested transcript rows are disposable execution views.
-- SO consequence evaluation and HGVS rendering consume the same immutable
-  `allele_transcript_context` as siblings. HGVS is never rendered from a compact consequence
-  row.
-- The old `/root/duckvep-c` model reader, annotation glue, compact kernel ABI, and scalar
-  projector are rewrite evidence, not production components. There is one piecewise
-  projector and an independent scalar/base-walk test oracle.
-- Allele, transcript, exon, and sequence lengths are wide and checked. Limits from the old
-  `uint16_t` ABI or the duckhgvs 4096-byte buffers are not biological limits.
-- `tx_flags` is a derived execution cache. It is not persistent model truth and never stores
-  edit payload.
+The production importer reads the pinned Ensembl core schema and matching genomic FASTA.
+It selects ordinary relations; DuckHTS does not invent a cache file format or mirror the
+whole Ensembl database.
 
-Before translating or bundling Ensembl/VEP source text, add the pinned Apache-2.0 license
-and attribution under `third_party/licenses/` and `r/Rduckhts/inst/COPYRIGHT`. The current
-differing-region primitive is an independent behavioral rewrite and copies no upstream text.
+The indispensable Ensembl relations are:
 
-## Relation pack
+- `coord_system`, `seq_region`, and `dna` for assembly identity and reference sequence;
+- `gene`, `transcript`, `exon`, and `exon_transcript` for stable identities, genomic spans,
+  strand, exon membership, rank, and transcript order;
+- `translation` for the selected coding start and end within its boundary exons;
+- `attrib_type` and the gene/transcript/translation attribute relations for incomplete CDS,
+  RNA edits, selenocysteine, amino-acid substitutions, stop-codon readthrough, MANE, and
+  related facts used by VEP predicates; and
+- stable-ID/xref relations only for requested output identifiers.
 
-The pack contains exactly these 26 normalized relations:
+Those relations add facts a generic GFF normally loses: exact translation boundaries,
+source exon ranks, multiple translations, incomplete-CDS state, typed sequence edits, and
+release-specific selection metadata. GFF plus FASTA remains useful for small tests and
+portable reduced models, but it cannot silently claim the same behavior when those facts
+are absent.
 
-| Group | Relations |
-| --- | --- |
-| Manifest and receipts | `model_manifest`, `model_source`, `model_selection_audit`, `model_build`, `model_artifact` |
-| Geometry and identity | `model_seq_region`, `model_gene`, `model_transcript`, `model_exon`, `model_transcript_exon`, `model_translation` |
-| Raw attributes and typed edits | `model_attribute_type`, `model_seq_region_attribute`, `model_gene_attribute`, `model_transcript_attribute`, `model_translation_attribute`, `model_transcript_edit`, `model_translation_edit`, `model_mature_mirna` |
-| External identifiers | `model_external_db`, `model_xref`, `model_object_xref`, `model_seq_region_synonym`, `model_xref_identity` |
-| Sequence states | `model_sequence_blob`, `model_sequence_state` |
+## DuckDB preparation
 
-`format_version = 2` is data in `model_manifest`; filenames and SQL namespaces are not
-versioned. Schema evolution changes the manifest version and migration rules rather than
-creating parallel implementations.
+DuckDB performs import, filtering, joins, receipt checks, and sequence construction.
+Prepared transcript rows are sorted by sequence region and genomic start. Exon membership
+is sorted in genomic order with precomputed transcript-oriented cDNA spans.
 
-## Identity and physical rules
+For each selected translation, preparation builds the transcript-oriented coding sequence
+once:
 
-- A pack has exactly one `model_manifest` row and at least one `model_source` and
-  `model_build` row.
-- Source objects use `(model_id, source_namespace, source_internal_id)` as identity. Stable
-  ID and version are nullable metadata, never keys.
-- Pack-local `*_key` values are positive `UBIGINT`s with a checked bijection to source
-  identity. Dense runtime indices never escape as biological identifiers.
-- Source coordinates are 1-based inclusive `BIGINT`. Internal C coordinates are 0-based
-  half-open. Conversion occurs only at adapters/renderers.
-- Absence is `NULL`, never zero, empty text, or an all-zero key. Empty sequence remains
-  distinct from absent sequence.
-- Text is exact UTF-8 `VARCHAR`; sequence and edit payloads are `BLOB`; hashes are lowercase
-  64-character hexadecimal SHA-256.
-- `external_db`, `xref`, `object_xref`, and `seq_region_synonym` source IDs remain distinct.
-  Sequence-region synonyms may have no external database.
-- Display-xref pointers on genes and transcripts resolve through the normalized xref chain
-  and agree with `model_object_xref.is_display_xref`.
-- `model_xref_identity.verified_sequence_sha256` is the external accession sequence hash.
-  `exact` means it equals the named present model sequence state; `mismatch` means it does
-  not. Gene xrefs cannot claim sequence identity.
-- `model_sequence_blob` has no `model_id`. Its primary key is
-  `(sequence_sha256, alphabet)` because the same bytes may be valid DNA and peptide.
+1. join ranked exons to the matching FASTA sequence;
+2. reverse-complement minus-strand transcripts;
+3. apply declared transcript-level edits in their recorded order;
+4. cut the translation boundaries and preserve start-phase padding; and
+5. hash the resulting bytes and the inputs that produced them.
 
-`model_id` and `model_build_id` are intended to be canonical SHA-256 identities. Canonical
-row serialization and golden vectors are not yet specified, so current tooling must report
-identity authentication as unavailable. Structural or model-candidate validation is not
-proof that either identifier was recomputed.
+The C kernel receives the prepared coding sequence as a borrowed pointer and length. It
+does not query FASTA, allocate a transcript string, or rebuild a CDS for each variant.
 
-## Geometry and edit invariants
+## Resident model
 
-- Transcript/exon membership is N:M. Its source-faithful identity includes transcript,
-  exon, and rank. Rank is contiguous from 1 for an admitted transcript; rare repeated
-  memberships remain representable until selection policy accepts or quarantines them.
-- Exons in one transcript share strand and sequence region and are ordered 5′ to 3′.
-- A transcript owns zero or more translations. Canonical transcript/translation pointers
-  are nullable or resolve within the same source namespace; every source translation is
-  preserved.
-- Translation offsets are exon-relative in transcript orientation. Start-phase padding is
-  explicit and limited to 0, 1, or 2; accepted codon tables are 1 and 2.
-- Attribute tables preserve exact duplicates through `duplicate_ordinal`. Attribute type
-  description and source display fields retain source nullability.
-- Transcript `_rna_edit` rows address raw spliced nucleotide sequence and apply before CDS
-  extraction.
-- Translation `initial_met`, `_selenocysteine`, `amino_acid_sub`, and `_stop_codon_rt` rows
-  address the unedited peptide and apply after translation.
-- Applied edits have a non-null replay ordinal. Equal-start edits without receipt-backed
-  order are quarantined. `basis_ref_seq` is the unedited coordinate-basis slice;
-  `preapply_ref_seq` is replay-derived and may have a different length after overlapping,
-  length-changing edits.
-- Mature-miRNA spans remain many-valued rows, not transcript flags.
+`duckvep_model_load` takes a name and three SQL queries. They are execution projections,
+not a second annotation database:
 
-## Sequence states
+- sequence regions: one sorted, unique `seq_region UINTEGER` column;
+- transcripts: `transcript_index`, sequence region, genomic start/end, strand, gene
+  ordinal, flags, optional CDS start/end, optional prepared CDS bytes, and codon table; and
+- exons: transcript ordinal, genomic start/end, transcript-oriented cDNA start/end, phase,
+  and end phase.
 
-Each coding model preserves five independently hashed states:
+The loader reads the three committed relations in one snapshot on a private connection, so
+temporary and uncommitted relations are intentionally out of scope. It checks names, exact
+SQL types, ordering, spans, phases, CDS null coupling, and sequence bounds before publishing
+the model. Wide DuckDB coordinates are narrowed once to the kernel's human-genome storage:
+16-bit sequence-region and exon-count fields, 32-bit one-based inclusive genomic/cDNA
+coordinates, 32-bit transcript/gene ordinals, and a shared CDS byte pool. Stable biological
+identifiers remain in ordinary DuckDB lookup relations.
 
-1. transcript `raw_spliced`;
-2. transcript `edited_spliced`;
-3. translation `translatable_cds`, including start-phase `N` padding;
-4. translation `peptide_unedited`, before translation SeqEdits; and
-5. translation `peptide_final`.
+Several named models may coexist in one database instance. Model arrays and their cgranges
+indexes are immutable after loading. `duckvep_model_drop` refuses to remove a model while a
+worker is using it.
 
-`model_sequence_state` uses tagged non-null ownership: `(owner_kind, owner_key)`, where
-`owner_kind` is `transcript` or `translation`. This avoids mutually exclusive nullable keys
-and makes the role/owner/alphabet matrix explicit. Present states reference
-`(sequence_sha256, alphabet)` and their byte count must equal both the blob length and the
-role receipt.
+## Variant execution
 
-Export states from fresh pinned-API objects or explicitly invalidate caches. Toggling edit
-state on a cached object can return the wrong peptide. A noncoding transcript has no
-translation state; it does not have an empty peptide.
+`duckvep_annotate` is a stable-ABI vector function. DuckDB supplies variant columns directly;
+the adapter does not execute a nested variant query or materialize the variant relation. For
+each DuckDB vector it:
 
-## Allele/transcript context
+1. validates and copies REF/ALT bytes into one compact pool;
+2. splits rows only when model, sequence region, distance, or sort order changes;
+3. asks cgranges once for transcripts already crossing the start of each sorted run; and
+4. continues with a forward sweep in which transcripts enter once and exon cursors only
+   advance.
 
-The implemented private primitives are:
+There is no transcript binary search per variant and no all-exon scan per candidate pair.
+Adapter arrays are recycled across vectors, and each model keeps a pool of already-sized
+kernel workspaces for concurrent DuckDB workers. Results use bounded, resumable caller-owned
+arrays before becoming DuckDB list rows.
 
-- checked 0-based half-open spans;
-- immutable borrowed byte and edit views;
-- maximal prefix-then-suffix semantic trimming; and
-- a separately tagged compatibility differing-region view.
+The SQL caller should put `unnest(duckvep_annotate(...))` in the `SELECT` list and expand
+the returned struct in an outer query. Writing it as a lateral table-function join creates
+a more expensive dependent plan and defeats much of the point of the vector adapter.
 
-The generic private builder takes a `duckvep_diff_algorithm_t`. The current algorithm tag is
-`DUCKVEP_DIFF_VEP_116_BYTE_XOR`; release identity is data, not part of the function name.
-Its exact unequal-length Perl byte-XOR behavior and empty insertion sentinel are frozen by
-deterministic tests. The semantic edit remains canonical; compatibility runs are derived and
-never replace it.
+The stable community-extension ABI does not provide expression-local scalar state across
+successive DuckDB vectors. Consequently, the current adapter seeds once per sorted vector,
+not once per whole chromosome. DuckDB's prepared-result streaming creation calls are exposed
+only by the unstable extension ABI, so DuckHTS does not use them. Carrying the sweep frontier
+across vectors must come from a future stable table-in/table-out API or a kernel interface
+that accepts an explicit carry state; it is not a reason to make the extension version-locked.
 
-The complete context adds:
+## Supplementary annotations (planned execution rule)
 
-- original VCF allele and immutable normalization views;
-- piecewise exon/intron/outside projection ordered in transcript orientation;
-- explicit validity for transcript coordinates and feature indices;
-- endpoint anchor sets that preserve both equidistant intronic candidates and selection
-  status;
-- raw, edited-transcript, phase-padded CDS, and peptide axes;
-- given, used, and transcript-oriented alleles with validation status;
-- applied model-edit IDs and conflict status; and
-- model, assembly, source, accession/version, and sequence-hash provenance.
+Large exact-match sources such as dbSNP, ClinVar, and gnomAD will remain sorted streams.
+One current key per source will participate in a small merge heap. Keys and projected
+payload blocks will be discarded behind the variant cursor; the source will never be
+resident in full.
 
-For insertions, the semantic reference span is `[p,p)` and projection uses the two genomic
-flanks. A partial overlap preserves the unclipped span; VEP-compatible clamping is a derived
-view. Missing coordinates use validity flags, never zero sentinels.
+Region sources will use the same event sweep. Intervals will enter one global active set
+containing their end, source ordinal, and row ordinal, and leave after their end. Memory
+will therefore be one projected input block per selected source plus the intervals
+overlapping the current position. cgranges may seed a tile or serve a sparse random query,
+but dozens of full resident interval trees are not the whole-genome path.
 
-Builders own mutable per-worker arenas; published contexts are const borrowed views.
-References point into immutable pooled model storage. A context expires when its worker
-workspace resets, and public result rows contain no context pointers.
+The transcript model will remain shared by all workers. Variant blocks, live transcript
+state, supplementary input blocks, and result blocks will be per-worker. Workers will
+claim neighboring tiles so their source cursors and decoded blocks are reused instead of
+reopened per tile.
 
-## Validation profiles
+## Consequences and phased edits
 
-`scripts/duckvep_model.R validate` exposes three explicit profiles:
+Alleles are represented as checked immutable byte views and a semantic edit obtained by
+maximal common-prefix and common-suffix trimming. The lossless allele/transcript context
+owns the projected cDNA/CDS/protein facts, oriented alleles, reference validation, codon
+change, and provenance needed by both consequence and future HGVS consumers.
 
-- `structural`: relation shape and local constraints; an empty initialized schema may pass;
-- `model_candidate`: nonempty normalized biology, receipts, geometry/cardinality, edit
-  replay, five sequence states, and exact sequence hashes; identity authentication remains
-  unavailable; and
-- `conformance_gate` (default): all model-candidate checks plus canonical identity
-  authentication. It fails closed until canonical serialization and golden vectors land.
+The public vector accepts biallelic A/C/G/T/N substitutions and indels. The ported VEP-116
+predicates cover intergenic, upstream/downstream, intronic, noncoding-exon, UTR, splice,
+synonymous, missense, start/stop, frameshift, in-frame, and protein-altering cases. When a
+coding span exists but its prepared sequence facts cannot settle a predicate, the row says
+`status = 'unresolved'` and gives a reason; it is not counted as supported by the statistical
+report. A coding REF mismatch is an error. The kernel also contains the single-interval
+SV/CNV classifier, but the current SQL vector has no typed structural-event argument yet.
 
-Diagnostics are deterministic machine-readable JSON. Parquet validation repeats every
-constraint explicitly because Parquet views do not enforce DuckDB table constraints.
-Missing relations, invalid enum/null coupling, orphaned references, empty required strata,
-missing oracle rows, or any declared-slice discord are failures rather than skips.
+The pure C haplotype path applies all edits to one prepared CDS and translates once. Its
+partitioner expects edits already grouped by model, transcript, sample, phase set, and
+haplotype; it keeps a block open while the reading frame is displaced or the next edit still
+touches the same alternate codon. This covers combined same-codon substitutions and a later
+indel that restores a frame. The SQL surface still annotates independent alleles: genotype
+decoding, phase grouping, and tile-boundary finalization must be added together rather than
+pretending independent calls are haplotype consequences.
 
-## Implementation order
+## Validation
 
-1. Land and validate the normalized relation schema and five-state exporter.
-2. Complete the lossless context builder and independent scalar projection oracle.
-3. Port the VEP-116 consequence rules behind the new context and gate the declared
-   biallelic small-variant slice on zero discord.
-4. Add DNA HGVS generation with separate `g.` and `c./n.` 3′-shift routines and
-   application-equivalence tests.
-5. Add protein, compound, mitochondrial, haplotype, and structural HGVS as separately gated
-   capabilities.
+- `make test-duckvep-kernel` checks sweep sets against brute force, projection against a base
+  walk, codons against the genetic code, edits against rebuilt sequences, and fused output
+  against the independently checked parts. Sanitizer targets run the same properties.
+- `make test-duckvep-kernel-statistical` raises every randomized property to 100,000 trials;
+  the seed and trial count are explicit and reproducible.
+- `make test-duckvep-differential` runs formal boundary/codon/allele witnesses through VEP
+  116 and DuckVEP on the same GFF, FASTA, and transcript, then retains every exact match,
+  disagreement, missing/extra emission, and unresolved row.
+- `make duckvep-corpus-differential` applies the same union-denominator comparison to a
+  deterministic sample from a real VCF and reports exact binomial 95% upper bounds per
+  consequence, allele type, and length bin.

@@ -1,0 +1,85 @@
+/*
+ * duckvep_classify.h — span-aware transcript topology facts (INTERNAL).
+ *
+ * One event may overlap several structural regions. The classifier therefore
+ * returns an explicit fact record rather than forcing point-event mutual
+ * exclusivity. `region_mask` remains the compact public diagnostic summary.
+ */
+#ifndef DUCKVEP_CLASSIFY_H
+#define DUCKVEP_CLASSIFY_H
+
+#include "duckvep_kernel.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct duckvep_region_state {
+    uint32_t region_mask;
+    uint8_t  within_feature;
+    uint8_t  complete_overlap_feature; /* event contains the transcript span */
+    uint8_t  complete_within_feature;  /* event is contained by transcript span */
+    uint8_t  partial_overlap_feature;  /* crosses exactly one transcript boundary */
+    uint8_t  within_cdna;              /* overlaps at least one exon */
+    uint8_t  overlaps_exon;
+    uint8_t  overlaps_intron;
+    uint8_t  overlaps_cds;
+    uint8_t  overlaps_utr5;
+    uint8_t  overlaps_utr3;
+} duckvep_region_state_t;
+
+/* Classify one 1-based inclusive event span against one transcript. The coarse
+ * splice reaches are retained only for the diagnostic region mask; consequence
+ * emission uses duckvep_splice_classify_span below. */
+duckvep_region_state_t duckvep_region_classify_span(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          start1,
+    uint32_t                          end1,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic);
+
+/* Point compatibility wrapper. */
+uint32_t duckvep_region_mask(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic);
+
+/* VEP-source-grounded per-intron splice predicate facts. A span can overlap more
+ * than one window and therefore legitimately set several facts. Outer transcript
+ * ends are excluded because only gaps between consecutive exons are inspected. */
+typedef struct duckvep_splice_state {
+    uint8_t splice_donor;
+    uint8_t splice_acceptor;
+    uint8_t splice_donor_5th;
+    uint8_t splice_donor_region;
+    uint8_t splice_polypyrimidine;
+    uint8_t splice_region;
+    uint8_t intronic;
+    uint8_t any;
+} duckvep_splice_state_t;
+
+/* `interbase` marks a pure insertion: it lands BETWEEN two reference bases rather
+ * than replacing any. VEP models it as vf->start = end1+1, vf->end = end1 (start >
+ * end) so a zone [lo,hi] is only touched when BOTH flanking bases fall inside it
+ * (P in [lo, hi-1]); it also fires several exact-edge special cases at the intron
+ * rim. For a substitution/deletion pass interbase = 0 and the plain span applies. */
+duckvep_splice_state_t duckvep_splice_classify_span(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          start1,
+    uint32_t                          end1,
+    uint8_t                           interbase);
+
+/* Point compatibility wrapper. */
+duckvep_splice_state_t duckvep_splice_classify(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          pos);
+
+#endif /* DUCKVEP_CLASSIFY_H */
