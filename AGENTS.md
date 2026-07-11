@@ -117,6 +117,14 @@ Additional R package rules:
 - All R changes must maintain CRAN compatibility.
 - A new public function is incomplete until its C source is wired through both the extension build and the R package build on Unix and Windows.
 
+### Version Bump Workflow
+- The authoritative extension version is `version:` in the root `description.yml`.
+- The authoritative R package version is `Version:` in `r/Rduckhts/DESCRIPTION`; keep the DuckHTS version before the hyphen and the R packaging revision after it.
+- After releasing `X.Y.Z` to both CRAN and the DuckDB community extension repository, start the next development cycle by changing only those two declarations: `X.Y.Z` -> `X.Y.Z.9000` and `X.Y.Z-A` -> `X.Y.Z.9000-A`.
+- For a release, perform the inverse transformation while retaining the current R packaging revision `A`.
+- Do not hand-edit `configure/extension_version.txt`, rendered README/catalog files, or the local `community-extensions/` descriptor for a version-only bump. Normal configure, bootstrap, and catalog rendering carry the authoritative versions forward.
+- A version-only development-cycle bump does not add empty `NEWS.md` sections; changelog entries belong to actual user-visible changes and release finalization.
+
 ## Testing and Fixtures
 Every public feature needs two levels of testing unless the change is docs-only:
 1. SQL conformance in `test/sql/` — schema, semantics, region/index behavior.
