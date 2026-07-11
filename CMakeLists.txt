@@ -90,7 +90,20 @@ set(EXTENSION_SOURCES
         src/kmer_udf.c
         src/tabix_reader.c
         src/vep_parser.c
-        src/duckvep/duckvep_allele.c
+        src/duckvep/kernel/src/duckvep_kernel.c
+        src/duckvep/kernel/src/duckvep_so.c
+        src/duckvep/kernel/src/duckvep_sweep.c
+        src/duckvep/kernel/src/duckvep_classify.c
+        src/duckvep/kernel/src/duckvep_effect.c
+        src/duckvep/kernel/src/duckvep_sv.c
+        src/duckvep/kernel/src/duckvep_delta.c
+        src/duckvep/kernel/src/duckvep_projection.c
+        src/duckvep/kernel/src/duckvep_codon.c
+        src/duckvep/kernel/src/duckvep_coding.c
+        src/duckvep/kernel/src/duckvep_haplotype.c
+        src/duckvep/duckvep_variant_tile.c
+        src/duckvep/duckvep_model.c
+        src/duckvep/duckvep_annotate.c
         src/hts_meta_reader.c
         src/quality_encoding.c
         src/quality_encoding_reader.c
@@ -142,6 +155,8 @@ endif()
 
 # Include own headers
 target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
+target_include_directories(${EXTENSION_NAME} PRIVATE src/duckvep/kernel/include)
+target_include_directories(${EXTENSION_NAME} PRIVATE src/duckvep/kernel/src)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/cgranges)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/variantkey/include)
 

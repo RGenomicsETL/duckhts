@@ -1,0 +1,525 @@
+#!/usr/bin/env Rscript
+# Exact statistical audit over a DuckVEP annotation dump.
+#
+# Reads a *_annotations.parquet dump emitted by corpus_differential.R and
+# computes the VEP --gff statistical table: for each comparator
+# engine and VEP consequence stratum, use the UNION of (variant, transcript) pairs
+# that either VEP or the engine emitted, count exact SO-term-set discordance and
+# emission misses/extras, and attach a Clopper-Pearson 95% upper bound via
+# binom.test. This is a report, not a pass/fail gate. VEP remains the sole oracle.
+
+suppressMessages({
+  library(optparse)
+  library(duckdb)
+  library(DBI)
+  library(glue)
+})
+options(rlang_backtrace_on_error = "none")
+
+root <- tryCatch(
+  system2(
+    "git",
+    c("rev-parse", "--show-toplevel"),
+    stdout = TRUE,
+    stderr = FALSE
+  ),
+  error = function(e) "."
+)
+
+op <- OptionParser(
+  usage = "%prog [options]  (default: newest test/duckvep/conformance/results/*_annotations.parquet)"
+)
+op <- add_option(op, "--annotations", default = "")
+op <- add_option(op, "--out", default = "")
+op <- add_option(op, "--audit-out", dest = "audit_out", default = "")
+op <- add_option(op, "--pairs-out", dest = "pairs_out", default = "")
+op <- add_option(
+  op,
+  "--history",
+  default = "",
+  help = "append or replace this revision/corpus/model in an audit history CSV"
+)
+op <- add_option(
+  op,
+  "--source-revision",
+  dest = "source_revision",
+  default = "",
+  help = "source revision recorded with --history [current Git HEAD]"
+)
+opt <- parse_args(op)
+
+data_dir <- file.path(root, "test", "duckvep", "conformance", "results")
+if (!nzchar(opt$annotations)) {
+  candidates <- list.files(
+    data_dir,
+    pattern = "_annotations[.]parquet$",
+    recursive = TRUE,
+    full.names = TRUE
+  )
+  if (length(candidates) == 0L) {
+    stop(
+      "no *_annotations.parquet dump found; run corpus_differential.R first"
+    )
+  }
+  info <- file.info(candidates)
+  opt$annotations <- candidates[order(info$mtime, decreasing = TRUE)[1L]]
+}
+opt$annotations <- normalizePath(opt$annotations, mustWork = TRUE)
+stem <- sub("_annotations[.]parquet$", "", basename(opt$annotations))
+out_dir <- dirname(opt$annotations)
+if (!nzchar(opt$out)) {
+  opt$out <- file.path(out_dir, glue("{stem}_statistical_conformance.csv"))
+}
+if (!nzchar(opt$audit_out)) {
+  opt$audit_out <- file.path(out_dir, glue("{stem}_methodology_audit.csv"))
+}
+if (!nzchar(opt$pairs_out)) {
+  opt$pairs_out <- file.path(out_dir, glue("{stem}_pairs.parquet"))
+}
+
+upper95 <- function(k, n) {
+  if (is.na(n) || n <= 0L) {
+    return(NA_real_)
+  }
+  stats::binom.test(k, n, conf.level = 0.95)$conf.int[[2L]]
+}
+
+con <- dbConnect(duckdb())
+on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+sql_q <- function(x) as.character(dbQuoteString(con, x))
+
+so_spec_path <- file.path(
+  root,
+  "test",
+  "duckvep",
+  "conformance",
+  "data",
+  "so_consequences.tsv"
+)
+if (!file.exists(so_spec_path)) {
+  stop("missing generated VEP SO table: ", so_spec_path)
+}
+so_spec <- utils::read.delim(
+  so_spec_path,
+  stringsAsFactors = FALSE,
+  na.strings = "\\N"
+)
+invisible(dbWriteTable(con, "so_spec", so_spec, overwrite = TRUE))
+
+invisible(dbExecute(
+  con,
+  glue(
+    "CREATE TABLE ann AS SELECT * FROM read_parquet({sql_q(opt$annotations)})"
+  )
+))
+ann_columns <- dbListFields(con, "ann")
+if (!("status" %in% ann_columns)) {
+  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN status VARCHAR"))
+}
+if (!("reason" %in% ann_columns)) {
+  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN reason VARCHAR"))
+}
+if (!("model" %in% ann_columns)) {
+  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN model VARCHAR"))
+}
+if (!("oracle_version" %in% ann_columns)) {
+  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN oracle_version VARCHAR"))
+}
+if (!("oracle_build" %in% ann_columns)) {
+  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN oracle_build VARCHAR"))
+}
+invisible(dbExecute(
+  con,
+  "CREATE TABLE ann_pairs AS
+   SELECT
+     source,
+     any_value(corpus) AS corpus,
+     any_value(coalesce(model, '')) AS model,
+     any_value(coalesce(oracle_version, '')) AS oracle_version,
+     any_value(coalesce(oracle_build, '')) AS oracle_build,
+     variant_id,
+     coalesce(tx, '') AS tx,
+     any_value(chrom) AS chrom,
+     any_value(pos) AS pos,
+     any_value(ref) AS ref,
+     any_value(alt) AS alt,
+     any_value(var_type) AS var_type,
+     any_value(length_bin) AS length_bin,
+     coalesce(string_agg(DISTINCT nullif(term, ''), '&' ORDER BY nullif(term, '')), '') AS consequence,
+     any_value(impact) AS impact,
+     CASE
+       WHEN source = 'vep' THEN 'oracle'
+       WHEN count(*) FILTER (WHERE status = 'unresolved') > 0 THEN 'unresolved'
+       ELSE coalesce(any_value(status), 'unknown')
+     END AS engine_status,
+     string_agg(DISTINCT reason, ';' ORDER BY reason) AS engine_reason
+   FROM ann
+   LEFT JOIN LATERAL unnest(string_split(coalesce(consequence, ''), '&')) u(term) ON true
+   GROUP BY source, variant_id, coalesce(tx, '')"
+))
+engines <- dbGetQuery(
+  con,
+  "SELECT DISTINCT source FROM ann_pairs WHERE source <> 'vep' ORDER BY source"
+)$source
+if (length(engines) == 0L) {
+  stop("annotation dump has no comparator source rows")
+}
+
+pair_queries <- vapply(
+  engines,
+  function(engine) {
+    glue(
+      "WITH
+       v AS (SELECT * FROM ann_pairs WHERE source = 'vep'),
+       e AS (SELECT * FROM ann_pairs WHERE source = {sql_q(engine)}),
+       u AS (
+         SELECT variant_id, tx FROM v
+         UNION
+         SELECT variant_id, tx FROM e
+       )
+       SELECT
+         {sql_q(engine)} AS engine,
+         coalesce(v.corpus, e.corpus, '') AS corpus,
+         coalesce(v.model, e.model, '') AS model,
+         coalesce(v.oracle_version, e.oracle_version, '') AS oracle_version,
+         coalesce(v.oracle_build, e.oracle_build, '') AS oracle_build,
+         u.variant_id,
+         u.tx,
+         coalesce(v.chrom, e.chrom, '') AS chrom,
+         coalesce(v.pos, e.pos) AS pos,
+         coalesce(v.ref, e.ref, '') AS ref,
+         coalesce(v.alt, e.alt, '') AS alt,
+         coalesce(v.var_type, e.var_type, '') AS var_type,
+         coalesce(v.length_bin, e.length_bin, '') AS length_bin,
+         v.consequence AS vep_consequence,
+         e.consequence AS engine_consequence,
+         v.impact AS vep_impact,
+         e.impact AS engine_impact,
+         coalesce(e.engine_status, 'missing') AS engine_status,
+         e.engine_reason,
+         CASE
+           WHEN v.variant_id IS NULL THEN 'engine_extra'
+           WHEN e.variant_id IS NULL THEN 'engine_missing'
+           WHEN v.consequence = e.consequence THEN 'match'
+           ELSE 'term_mismatch'
+         END AS comparison
+       FROM u
+       LEFT JOIN v USING (variant_id, tx)
+       LEFT JOIN e USING (variant_id, tx)"
+    )
+  },
+  character(1)
+)
+invisible(dbExecute(
+  con,
+  glue("CREATE TABLE pairs AS {paste(pair_queries, collapse = ' UNION ALL ')}")
+))
+dir.create(dirname(opt$pairs_out), showWarnings = FALSE, recursive = TRUE)
+invisible(dbExecute(
+  con,
+  glue(
+    "COPY pairs TO {sql_q(opt$pairs_out)} (FORMAT parquet, COMPRESSION zstd)"
+  )
+))
+
+stats <- dbGetQuery(
+  con,
+  "WITH pair_terms AS (
+     SELECT
+       p.* EXCLUDE (comparison),
+       CASE
+         WHEN list_contains(
+                string_split(coalesce(p.vep_consequence, ''), '&'),
+                u.so_term
+              )
+          AND list_contains(
+                string_split(coalesce(p.engine_consequence, ''), '&'),
+                u.so_term
+              ) THEN 'term_match'
+         WHEN list_contains(
+                string_split(coalesce(p.vep_consequence, ''), '&'),
+                u.so_term
+              ) THEN 'term_missing'
+         ELSE 'term_extra'
+       END AS comparison,
+       u.so_term
+     FROM pairs p
+     CROSS JOIN UNNEST(list_distinct(list_concat(
+       string_split(coalesce(p.vep_consequence, ''), '&'),
+       string_split(coalesce(p.engine_consequence, ''), '&')
+     ))) u(so_term)
+     WHERE u.so_term <> ''
+   ), strata AS (
+     SELECT
+       p.*,
+       'consequence_set'::VARCHAR AS stratum_kind,
+       CASE
+         WHEN vep_consequence IS NULL THEN '(no_vep_emission)'
+         WHEN vep_consequence = '' THEN '(empty_vep_terms)'
+         ELSE vep_consequence
+       END AS consequence_class,
+       coalesce(nullif(vep_impact, ''), '(no_vep_emission)') AS stratum_impact
+     FROM pairs p
+     UNION ALL
+     SELECT
+       p.* EXCLUDE (so_term),
+       'so_term'::VARCHAR AS stratum_kind,
+       p.so_term AS consequence_class,
+       coalesce(
+         nullif(s.impact, ''),
+         nullif(p.vep_impact, ''),
+         nullif(p.engine_impact, ''),
+         '(unknown)'
+       ) AS stratum_impact
+     FROM pair_terms p
+     LEFT JOIN so_spec s ON s.SO_term = p.so_term
+   )
+   SELECT
+     engine,
+     corpus,
+     model,
+     oracle_version,
+     oracle_build,
+     stratum_kind,
+     consequence_class,
+     stratum_impact AS impact,
+     var_type,
+     length_bin,
+     engine_status,
+     coalesce(engine_reason, '') AS engine_reason,
+     count(*) AS n,
+     count(*) FILTER (WHERE comparison IN ('match', 'term_match')) AS exact_agree,
+     count(*) FILTER (WHERE comparison NOT IN ('match', 'term_match')) AS exact_discordant,
+     count(*) FILTER (WHERE engine_status = 'unresolved') AS unresolved,
+     count(*) FILTER (WHERE engine_status <> 'unresolved') AS resolved_n,
+     count(*) FILTER (
+       WHERE engine_status <> 'unresolved'
+         AND comparison IN ('match', 'term_match')
+     ) AS resolved_agree,
+     count(*) FILTER (
+       WHERE engine_status <> 'unresolved'
+         AND comparison NOT IN ('match', 'term_match')
+     ) AS resolved_discordant,
+     count(*) FILTER (
+       WHERE comparison IN ('term_mismatch', 'term_extra', 'term_missing')
+     ) AS term_mismatch,
+     count(*) FILTER (WHERE comparison IN ('engine_extra', 'term_extra')) AS engine_extra,
+     count(*) FILTER (WHERE comparison IN ('engine_missing', 'term_missing')) AS engine_missing
+   FROM strata
+   GROUP BY ALL
+   ORDER BY engine, stratum_kind, resolved_discordant DESC, unresolved DESC,
+            n DESC, consequence_class, var_type, length_bin"
+)
+stats$upper95 <- mapply(upper95, stats$resolved_discordant, stats$resolved_n)
+stats <- stats[
+  order(
+    stats$engine,
+    stats$stratum_kind,
+    -stats$resolved_discordant,
+    -stats$unresolved,
+    -stats$n,
+    stats$consequence_class,
+    stats$var_type,
+    stats$length_bin
+  ),
+]
+
+audit <- dbGetQuery(
+  con,
+  "SELECT
+     engine,
+     corpus,
+     model,
+     any_value(oracle_version) AS oracle_version,
+     any_value(oracle_build) AS oracle_build,
+     count(*) AS n,
+     count(*) FILTER (WHERE comparison = 'match') AS exact_agree,
+     count(*) FILTER (WHERE comparison <> 'match') AS exact_discordant,
+     count(*) FILTER (WHERE engine_status = 'unresolved') AS unresolved,
+     count(*) FILTER (WHERE engine_status <> 'unresolved') AS resolved_n,
+     count(*) FILTER (
+       WHERE engine_status <> 'unresolved' AND comparison = 'match'
+     ) AS resolved_agree,
+     count(*) FILTER (
+       WHERE engine_status <> 'unresolved' AND comparison <> 'match'
+     ) AS resolved_discordant,
+     count(*) FILTER (WHERE comparison = 'term_mismatch') AS term_mismatch,
+     count(*) FILTER (WHERE comparison = 'engine_extra') AS engine_extra,
+     count(*) FILTER (WHERE comparison = 'engine_missing') AS engine_missing
+   FROM pairs
+   GROUP BY engine, corpus, model
+   ORDER BY engine, corpus, model"
+)
+audit$run_date <- as.character(Sys.Date())
+audit$upper95 <- mapply(upper95, audit$resolved_discordant, audit$resolved_n)
+audit$annotations <- opt$annotations
+
+dir.create(dirname(opt$out), showWarnings = FALSE, recursive = TRUE)
+dir.create(dirname(opt$audit_out), showWarnings = FALSE, recursive = TRUE)
+dir.create(dirname(opt$pairs_out), showWarnings = FALSE, recursive = TRUE)
+utils::write.csv(stats, opt$out, row.names = FALSE)
+utils::write.csv(audit, opt$audit_out, row.names = FALSE)
+
+if (nzchar(opt$history)) {
+  if (!nzchar(opt$source_revision)) {
+    revision <- suppressWarnings(system2(
+      "git",
+      c("-C", root, "rev-parse", "HEAD"),
+      stdout = TRUE,
+      stderr = FALSE
+    ))
+    revision_status <- attr(revision, "status")
+    if (!is.null(revision_status) && revision_status != 0L) {
+      stop("cannot determine source revision")
+    }
+    opt$source_revision <- trimws(revision[[1L]])
+  }
+  if (!nzchar(opt$source_revision)) {
+    stop("empty source revision")
+  }
+
+  run_date <- as.character(Sys.Date())
+  artifact_md5 <- unname(tools::md5sum(opt$annotations))
+  history_columns <- c(
+    "run_date",
+    "source_revision",
+    "artifact_md5",
+    "engine",
+    "corpus",
+    "model",
+    "oracle_version",
+    "oracle_build",
+    "stratum_kind",
+    "consequence_class",
+    "impact",
+    "var_type",
+    "length_bin",
+    "engine_status",
+    "engine_reason",
+    "n",
+    "exact_agree",
+    "exact_discordant",
+    "unresolved",
+    "resolved_n",
+    "resolved_agree",
+    "resolved_discordant",
+    "term_mismatch",
+    "engine_extra",
+    "engine_missing",
+    "upper95"
+  )
+  history_stats <- data.frame(
+    run_date = rep(run_date, nrow(stats)),
+    source_revision = rep(opt$source_revision, nrow(stats)),
+    artifact_md5 = rep(artifact_md5, nrow(stats)),
+    stats,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )[, history_columns]
+  history_all <- data.frame(
+    run_date = rep(run_date, nrow(audit)),
+    source_revision = rep(opt$source_revision, nrow(audit)),
+    artifact_md5 = rep(artifact_md5, nrow(audit)),
+    engine = audit$engine,
+    corpus = audit$corpus,
+    model = audit$model,
+    oracle_version = audit$oracle_version,
+    oracle_build = audit$oracle_build,
+    stratum_kind = "all",
+    consequence_class = "(all)",
+    impact = "(all)",
+    var_type = "(all)",
+    length_bin = "(all)",
+    engine_status = "(all)",
+    engine_reason = "",
+    n = audit$n,
+    exact_agree = audit$exact_agree,
+    exact_discordant = audit$exact_discordant,
+    unresolved = audit$unresolved,
+    resolved_n = audit$resolved_n,
+    resolved_agree = audit$resolved_agree,
+    resolved_discordant = audit$resolved_discordant,
+    term_mismatch = audit$term_mismatch,
+    engine_extra = audit$engine_extra,
+    engine_missing = audit$engine_missing,
+    upper95 = audit$upper95,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )[, history_columns]
+  history_rows <- rbind(history_all, history_stats)
+
+  dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
+  if (file.exists(opt$history)) {
+    old <- utils::read.csv(
+      opt$history,
+      stringsAsFactors = FALSE,
+      check.names = FALSE,
+      colClasses = c(oracle_version = "character")
+    )
+    if (!identical(names(old), history_columns)) {
+      stop("history schema does not match: ", opt$history)
+    }
+    new_keys <- unique(paste(
+      history_rows$source_revision,
+      history_rows$engine,
+      history_rows$corpus,
+      history_rows$model,
+      sep = "\034"
+    ))
+    old_keys <- paste(
+      old$source_revision,
+      old$engine,
+      old$corpus,
+      old$model,
+      sep = "\034"
+    )
+    old <- old[!(old_keys %in% new_keys), , drop = FALSE]
+    history_rows <- rbind(old, history_rows)
+  }
+  history_rows <- history_rows[
+    order(
+      history_rows$run_date,
+      history_rows$source_revision,
+      history_rows$corpus,
+      history_rows$model,
+      history_rows$engine,
+      history_rows$stratum_kind,
+      history_rows$consequence_class,
+      history_rows$impact,
+      history_rows$var_type,
+      history_rows$length_bin,
+      history_rows$engine_status,
+      history_rows$engine_reason
+    ),
+    ,
+    drop = FALSE
+  ]
+  history_tmp <- tempfile(
+    pattern = "duckvep-conformance-",
+    tmpdir = dirname(opt$history),
+    fileext = ".csv"
+  )
+  utils::write.csv(history_rows, history_tmp, row.names = FALSE)
+  if (!file.rename(history_tmp, opt$history)) {
+    unlink(history_tmp)
+    stop("cannot replace history: ", opt$history)
+  }
+}
+
+cat("Statistical VEP --gff audit\n")
+cat(glue("  annotations -> {opt$annotations}"), "\n", sep = "")
+for (i in seq_len(nrow(audit))) {
+  cat(
+    glue(
+      "  {audit$engine[i]}: exact {audit$exact_agree[i]}/{audit$n[i]}; resolved {audit$resolved_agree[i]}/{audit$resolved_n[i]}, discord {audit$resolved_discordant[i]} (<= {sprintf('%.2e', audit$upper95[i])} @95%); unresolved {audit$unresolved[i]}, extra {audit$engine_extra[i]}, missing {audit$engine_missing[i]}"
+    ),
+    "\n",
+    sep = ""
+  )
+}
+cat(glue("  strata -> {opt$out}"), "\n", sep = "")
+cat(glue("  audit  -> {opt$audit_out}"), "\n", sep = "")
+cat(glue("  pairs  -> {opt$pairs_out}"), "\n", sep = "")
+if (nzchar(opt$history)) {
+  cat(glue("  history -> {opt$history}"), "\n", sep = "")
+}

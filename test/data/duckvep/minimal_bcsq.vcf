@@ -1,7 +1,8 @@
 ##fileformat=VCFv4.2
 ##contig=<ID=chrDuck,length=256>
+##contig=<ID=chrEmpty,length=1>
 ##INFO=<ID=BCSQ,Number=.,Type=String,Description="Local consequence annotation from BCFtools/csq fixture. Format: Consequence|gene|transcript|biotype|strand|amino_acid_change|dna_change">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
-chrDuck	125	duck_missense	A	C	.	PASS	BCSQ=missense_variant|DUCK1|DUCK1-201|protein_coding|+|M1T|125A>C
-chrDuck	160	duck_intron	C	T	.	PASS	BCSQ=intron_variant|DUCK1|DUCK1-201|protein_coding|+||160C>T
-chrDuck	350	duck_intergenic	G	A	.	PASS	BCSQ=intergenic_variant||||||350G>A
+chrDuck	124	duck_missense	T	C	.	PASS	BCSQ=missense_variant|DUCK1|DUCK1-201|protein_coding|+|V2A|124T>C
+chrDuck	160	duck_intron	T	C	.	PASS	BCSQ=intron_variant|DUCK1|DUCK1-201|protein_coding|+||160T>C
+chrEmpty	1	duck_intergenic	A	C	.	PASS	BCSQ=intergenic_variant||||||1A>C

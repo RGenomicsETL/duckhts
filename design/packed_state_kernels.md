@@ -1,6 +1,6 @@
 # Packed-state classification and reduction kernels
 
-Status: open design / implementation contract. This is the L0/L1 pillar under [`north_star.md`](north_star.md). It is the review-before-code gate for extending the SIMD manifest (`src/include/duckhts_simd_kernels.def`). Nothing here is implemented until it lands in the manifest, the backends, `functions.yaml` where public, and tests. The current manifest has exactly one kernel (`seq_base_counts`); this note governs how the next several land coherently instead of as ad-hoc additions.
+Status: open design / implementation contract. This is the review-before-code gate for extending the SIMD manifest (`src/include/duckhts_simd_kernels.def`). Nothing here is implemented until it lands in the manifest, the backends, `functions.yaml` where public, and tests. The current manifest has exactly one kernel (`seq_base_counts`); this note governs how the next several land coherently instead of as ad-hoc additions.
 
 ## The unifying abstraction
 

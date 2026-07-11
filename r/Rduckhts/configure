@@ -405,8 +405,8 @@ echo "---------- Building DuckHTS extension ----------"
 
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c simd/duckhts_simd_dispatch.c simd/duckhts_simd_scalar.c simd/duckhts_simd_avx2.c simd/duckhts_simd_avx512.c simd/duckhts_simd_neon.c simd/duckhts_simd_wasm_simd128.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c variantkey_udf.c cgranges.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c duckvep/duckvep_allele.c kmer_udf.c wasm_http_hfile.c"
-INCLUDES="-I./include -I./duckdb_capi -I./htslib"
+C_SOURCES="duckhts.c simd/duckhts_simd_dispatch.c simd/duckhts_simd_scalar.c simd/duckhts_simd_avx2.c simd/duckhts_simd_avx512.c simd/duckhts_simd_neon.c simd/duckhts_simd_wasm_simd128.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c variantkey_udf.c cgranges.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c duckvep/kernel/src/duckvep_kernel.c duckvep/kernel/src/duckvep_so.c duckvep/kernel/src/duckvep_sweep.c duckvep/kernel/src/duckvep_classify.c duckvep/kernel/src/duckvep_effect.c duckvep/kernel/src/duckvep_sv.c duckvep/kernel/src/duckvep_delta.c duckvep/kernel/src/duckvep_projection.c duckvep/kernel/src/duckvep_codon.c duckvep/kernel/src/duckvep_coding.c duckvep/kernel/src/duckvep_haplotype.c duckvep/duckvep_variant_tile.c duckvep/duckvep_model.c duckvep/duckvep_annotate.c kmer_udf.c wasm_http_hfile.c"
+INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./duckvep/kernel/include -I./duckvep/kernel/src"
 
 echo "Compiling extension sources..."
 OBJECT_FILES=""

@@ -68,6 +68,8 @@ extern void register_duckhts_samtools_idxstats_function(duckdb_connection connec
 extern void register_duckhts_bam_bed_coverage_function(duckdb_connection connection);
 /* cgranges_api.c */
 extern void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
+/* duckvep resident model and annotation adapter */
+extern void register_duckvep_functions(duckdb_connection connection, duckdb_database database);
 /* variantkey_udf.c */
 extern void register_variantkey_functions(duckdb_connection connection);
 /* simd/duckhts_simd_dispatch.c */
@@ -159,6 +161,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_duckhts_bam_bed_coverage_function(connection);
     register_variantkey_functions(connection);
     register_duckhts_cgranges_functions(connection, *access->get_database(info));
+    register_duckvep_functions(connection, *access->get_database(info));
     if (!run_sql_or_fail(connection,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {

@@ -18,6 +18,14 @@ This section is generated from `functions.yaml`.
 | `duckhts_duckdb_supports_variant` | scalar_macro | BOOLEAN |  | Return whether the currently open DuckDB runtime advertises the VARIANT logical type. Use this to gate optional SQL that depends on DuckDB VARIANT support. |
 | `duckhts_duckdb_supports_geometry` | scalar_macro | BOOLEAN |  | Return whether the currently open DuckDB runtime advertises the GEOMETRY logical type. Use this to gate optional SQL that depends on DuckDB GEOMETRY support. |
 
+### Variant Annotation
+
+| Function | Kind | Returns | R helper | Description |
+| --- | --- | --- | --- | --- |
+| `duckvep_model_load` | table | table(loaded BOOLEAN) |  | Load one immutable transcript model into the current DuckDB database instance under a caller-chosen name. The three query strings read committed, non-temporary DuckDB relations: sorted UINTEGER sequence-region ordinals; dense transcript rows with genomic span, strand, gene ordinal, flags, optional CDS span/sequence/codon table; and transcript-ordered exon rows with genomic and cDNA spans plus phase. Loading validates and narrows the model once, builds its transcript interval index, and returns one TRUE row. Several named models may coexist. |
+| `duckvep_model_drop` | scalar | BOOLEAN |  | Remove a named resident DuckVEP transcript model and release its interval index, sequences, and cached worker state. Returns FALSE when the name is absent or the model is in use by an annotation vector. |
+| `duckvep_annotate` | scalar | LIST<STRUCT(transcript_index UINTEGER, gene_index UINTEGER, consequence VARCHAR, impact VARCHAR, region VARCHAR, status VARCHAR, reason VARCHAR, cdna_position UBIGINT, cds_position UBIGINT, protein_position UBIGINT, reference_amino_acid VARCHAR, alternate_amino_acid VARCHAR)> |  | Annotate a biallelic A/C/G/T/N variant against a named resident transcript model. position is one-based, seq_region is the model's compact ordinal, and distance defaults to 5000 bases. Apply UNNEST in the SELECT list over sorted variant columns, then expand the returned struct in an outer query; this retains DuckDB's vector execution instead of creating a per-row lateral table-function plan. Each input vector is copied into compact arrays once, each sorted run is seeded once through cgranges, then swept forward without a transcript binary search per variant. Adapter buffers and per-model kernel workspaces are reused. A no-overlap input returns one intergenic row with NULL transcript and gene ordinals; missing sequence facts are returned with status = 'unresolved' instead of being hidden. |
+
 ### Readers
 
 | Function | Kind | Returns | R helper | Description |

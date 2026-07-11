@@ -1,0 +1,11 @@
+diff --git a/src/theft_random.c b/src/theft_random.c
+index d2ba9a0..62368eb 100644
+--- a/src/theft_random.c
++++ b/src/theft_random.c
+@@ -79 +79,5 @@ void theft_random_bits_bulk(struct theft *t, uint32_t bit_count, uint64_t *buf) {
+-        t->prng.buf >>= take;
++        if (take == 64) {
++            t->prng.buf = 0;
++        } else {
++            t->prng.buf >>= take;
++        }
