@@ -1,604 +1,85 @@
-# `duckhts_mosdepth` Rewrite Plan
+# `duckhts_mosdepth` compatibility contract
 
-Status: compatibility contract plus backlog for the implemented native `duckhts_mosdepth(...)` table function. Sections that describe files to add or a proposed API are historical implementation-plan context; use `functions.yaml`, `src/mosdepth_table.c`, SQL tests, and R tinytests as the current implementation source of truth.
+Status: current compatibility contract plus open memory and conformance work for the
+implemented `duckhts_mosdepth(...)` table function. `functions.yaml`, source, and executable
+tests are authoritative for the public signature and implemented options.
 
-The goal is not "a coverage function inspired by mosdepth". The goal is a
-rewrite that follows the principles in [`.sync/rewrite.bio.txt`](/root/duckhts/.sync/rewrite.bio.txt):
+## Compatibility target
 
-- credit the original authors
-- emulate exactly
-- be explicit about validation scope
-- build small, validate continuously
+DuckHTS targets the supported subset of mosdepth 0.3.13, tag `v0.3.13`, commit
+`52813e08fe575c39a76556d1fc5c5399a6141e02`. The repository last recorded a local validation
+against that target on 2026-04-15.
 
-This note is intentionally code-oriented. It names the files, structs,
-functions, and validation steps that would be needed for an implementation.
+This pin limits the claim. Do not describe the function as compatible with arbitrary mosdepth
+versions, and re-run differential tests after changing coverage, filtering, formatting, or
+output code.
 
-## 1. Compatibility target
+## Output and semantic contract
 
-### Pinned target for v1
+The function is a side-effecting compatibility surface, distinct from SQL-native coverage
+relations. For requested outputs, it preserves mosdepth file naming, header order, formatting,
+and interval conventions. Plain-text outputs must compare byte-for-byte; BGZF outputs compare
+as decompressed text, and their indexes must be query-equivalent rather than compressed-byte
+identical.
 
-Target exact compatibility with:
+The supported contract includes these invariants:
 
-- upstream tool: `mosdepth`
-- validated runtime version: `0.3.13`
-- pinned upstream tag: `v0.3.13`
-- pinned upstream commit: `52813e08fe575c39a76556d1fc5c5399a6141e02`
-- validation date in this repo: `2026-04-15`
+- the default excluded SAM flag mask is `1796`;
+- default mode is CIGAR-aware and performs mosdepth-style mate-overlap correction;
+- fast and fragment modes retain their upstream counting meanings;
+- window and BED regions share the same mean, median, threshold, and distribution intervals;
+- summaries and distributions retain upstream ordering and decimal formatting; and
+- htslib owns BAM/CRAM transport, index loading, CRAM reference handling, and BGZF/CSI I/O.
 
-Local verification commands run on `2026-04-15`:
+`threads` controls htslib decompression workers, matching upstream's thread concept.
+`processing_threads` is a separate DuckHTS extension that processes contigs concurrently. It
+must not change bytes or row order in the final files and must not be described as an upstream
+mosdepth option.
+
+Do not fold this surface into a generic coverage function. A compatibility command may share
+private readers and kernels, but its filenames, side effects, and differential oracle remain a
+separate public contract.
+
+## Ownership and execution
+
+One invocation owns the complete output set. Configuration is fixed before coverage begins;
+each processing worker owns its BAM handle, iterator, coverage scratch, and overlap state.
+Shared writers are serialized in header order.
+
+Coverage filtering, CIGAR expansion, overlap correction, and fragment geometry are one
+semantic pipeline. Refactors may split helpers but must not create a second implementation of
+those rules for a particular output type. Summary, distribution, per-base, quantized, and
+threshold writers consume the same finalized coverage facts.
+
+Output creation must remain internal to htslib and first-party code. Do not shell out to
+`mosdepth`, `bgzip`, or `tabix` from the extension.
+
+## Validation
+
+Automated SQL and R tests cover the shipped API. Upstream comparison is driven by:
 
 ```bash
-mosdepth --version
-git -C .sync/mosdepth rev-parse HEAD
-python3 scripts/mosdepth_conformance.py \
-  HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
+python3 scripts/mosdepth_conformance.py input.bam \
   --extension build/release/duckhts.duckdb_extension
-python3 scripts/mosdepth_benchmark.py \
-  HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
-  --chrom 11 \
-  --mode fast \
-  --extension build/release/duckhts.duckdb_extension \
-  --runs 1 \
-  --verify
-python3 scripts/mosdepth_benchmark.py \
-  HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
-  --chrom 11 \
+
+python3 scripts/mosdepth_benchmark.py input.bam \
   --mode default \
   --extension build/release/duckhts.duckdb_extension \
-  --runs 1 \
-  --verify
-python3 scripts/mosdepth_benchmark.py \
-  HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam \
-  --chrom 11 \
-  --mode fragment \
-  --extension build/release/duckhts.duckdb_extension \
-  --runs 1 \
   --verify
 ```
 
-Observed local results on that date:
-
-- the original SQL reconstruction was useful as an early oracle, but it is no
-  longer the validation target
-- `scripts/mosdepth_conformance.py` and `scripts/mosdepth_benchmark.py` should
-  now exercise only the native `duckhts_mosdepth(...)` table function
-- any remaining SQL-first coverage logic belongs to generic interval/depth
-  primitives, not to the mosdepth rewrite workflow
-- the local `mosdepth` binary used by the validation scripts is now `0.3.13`
-  from the pinned tag above, installed at `/usr/local/bin/mosdepth`
-
-### Important versioning warning
-
-The `.sync/mosdepth` checkout is now pinned to the exact upstream `v0.3.13`
-tag commit listed above. Do not claim exact compatibility to "mosdepth" in
-general or to arbitrary later upstream commits without re-running conformance
-and updating this pin.
-
-## 2. What must match exactly
-
-For v1, `duckhts_mosdepth(...)` should match mosdepth's behavior and output
-contract for the supported feature subset.
-
-### Output files
-
-Given `prefix`, the rewrite should produce the same file names as mosdepth:
-
-- `{prefix}.mosdepth.global.dist.txt`
-- `{prefix}.mosdepth.summary.txt`
-- `{prefix}.per-base.bed.gz` unless `no_per_base := TRUE`
-- `{prefix}.regions.bed.gz` if `by := ...`
-- `{prefix}.mosdepth.region.dist.txt` if `by := ...`
-- `{prefix}.quantized.bed.gz` if `quantize := ...`
-- `{prefix}.thresholds.bed.gz` if `thresholds := ...`
-
-For the supported modes, "same" means:
-
-- text files: byte-for-byte identical
-- gzipped BED outputs: decompressed text must be byte-for-byte identical
-- accompanying `.csi` indexes: query-equivalent with tabix; compressed bytes do
-  not have to be identical
-
-### Semantics that count
-
-The rewrite must preserve:
-
-- default excluded flags: `1796`
-- `threads` meaning: htslib BAM/CRAM decompression threads only
-- `fast_mode` semantics
-- default-mode CIGAR-aware coverage semantics
-- default-mode mate-overlap correction semantics
-- `by := <window>` and `by := <bed>` output shape
-- summary and distribution formatting
-- file naming and header ordering
-
-The rewrite must not silently "improve" outputs.
-
-## 3. Current public API
-
-Implemented as a DuckDB table function with side effects, similar in spirit to
-existing `bgzip(...)` and `bam_index(...)`. `functions.yaml` is authoritative;
-keep this sketch aligned with it.
-
-### Current SQL signature
-
-```sql
-duckhts_mosdepth(
-  prefix,
-  path,
-  chrom := NULL,
-  by := NULL,
-  fasta := NULL,
-  read_groups := NULL,
-  no_per_base := FALSE,
-  threads := 2,
-  processing_threads := 2,
-  flag := 1796,
-  include_flag := 0,
-  fast_mode := FALSE,
-  fragment_mode := FALSE,
-  use_median := FALSE,
-  mapq := 0,
-  min_frag_len := -1,
-  max_frag_len := -1,
-  precision_digits := 2,
-  quantize := NULL,
-  thresholds := NULL,
-  index_path := NULL,
-  overwrite := FALSE
-)
-```
-
-### Returned columns
-
-Returns one row with:
-
-- `success BOOLEAN`
-- `prefix VARCHAR`
-- `summary_path VARCHAR`
-- `global_dist_path VARCHAR`
-- `per_base_path VARCHAR`
-- `regions_path VARCHAR`
-- `region_dist_path VARCHAR`
-- `quantized_path VARCHAR`
-- `thresholds_path VARCHAR`
-
-Uses `NULL` for outputs that were not requested.
-
-### Why a dedicated function
-
-Do not fold this into `bam_coverage(...)` in v1.
-
-Reason:
-
-- `duckhts_mosdepth(...)` is a compatibility rewrite with file-writing side
-  effects and exact mosdepth output contracts
-- `bam_coverage(...)` should stay free to be a more SQL-native and possibly
-  more parallel coverage primitive later
-
-These are different products and should not share a public surface in v1.
-
-## 4. Current implementation files
-
-Current source of truth:
-
-- implementation: `src/mosdepth_table.c`
-- registration: `src/duckhts.c`
-- extension build wiring: `CMakeLists.txt`
-- R package build wiring: `r/Rduckhts/R/bootstrap.R`, `r/Rduckhts/configure`, `r/Rduckhts/configure.win`
-- public catalog/docs: `functions.yaml` plus generated `r/Rduckhts/inst/function_catalog/functions.*`
-- SQL tests: `test/sql/mosdepth.test`
-- R tests: `r/Rduckhts/inst/tinytest/test_mosdepth.R`
-- release notes: `NEWS.md`, `r/Rduckhts/NEWS.md`
-
-Potential future splits, only if the implementation becomes unwieldy:
-
-- `src/mosdepth_engine.c`
-- `src/include/mosdepth_engine.h`
-- `src/mosdepth_output.c`
-- `src/include/mosdepth_output.h`
-
-## 5. Core implementation design
-
-### 5.1 Bind / init / execute model
-
-Implemented as a normal DuckDB table function:
-
-- bind validates arguments and constructs immutable options;
-- the function body performs the rewrite once and emits a single result row;
-- `threads` is the htslib decompression thread count;
-- `processing_threads` is DuckHTS-owned contig-processing parallelism and is distinct from upstream mosdepth's `--threads`.
-
-One call owns the whole output set and preserves mosdepth-compatible filenames and output ordering. Do not reinterpret `threads` as DuckDB worker parallelism.
-
-### 5.2 Historical C struct sketch
-
-The sketch below is retained for design history only. `src/mosdepth_table.c` is authoritative and now includes additional fields such as `processing_threads` and `precision_digits`.
-
-```c
-typedef struct {
-    char *prefix;
-    char *path;
-    char *chrom;
-    char *by;
-    char *fasta;
-    char *index_path;
-    char *quantize;
-    char *thresholds;
-    char *read_groups;
-    int threads;
-    int mapq;
-    int min_frag_len;
-    int max_frag_len;
-    uint16_t exclude_flag;
-    uint16_t include_flag;
-    bool no_per_base;
-    bool fast_mode;
-    bool fragment_mode;
-    bool use_median;
-    bool overwrite;
-} duckhts_mosdepth_bind_t;
-```
-
-Add a result-data struct:
-
-```c
-typedef struct {
-    bool done;
-    bool success;
-    char *prefix;
-    char *summary_path;
-    char *global_dist_path;
-    char *per_base_path;
-    char *regions_path;
-    char *region_dist_path;
-    char *quantized_path;
-    char *thresholds_path;
-    char *error_message;
-} duckhts_mosdepth_result_t;
-```
-
-Add a per-contig stats struct mirroring mosdepth summary logic:
-
-```c
-typedef struct {
-    uint64_t cum_depth;
-    uint64_t cum_length;
-    uint32_t min_depth;
-    uint32_t max_depth;
-} duckhts_mosdepth_depth_stat_t;
-```
-
-Add a BED region struct:
-
-```c
-typedef struct {
-    char *chrom;
-    uint32_t start;
-    uint32_t stop;
-    char *name; /* nullable */
-} duckhts_mosdepth_region_t;
-```
-
-### 5.3 Main engine functions
-
-Suggested function boundaries:
-
-- `mosdepth_bind(...)`
-- `mosdepth_init(...)`
-- `mosdepth_function(...)`
-- `mosdepth_run(const duckhts_mosdepth_bind_t *bind, duckhts_mosdepth_result_t *out)`
-- `mosdepth_run_contig(...)`
-- `mosdepth_scan_alignment(...)`
-- `mosdepth_emit_outputs_for_contig(...)`
-- `mosdepth_write_summary_line(...)`
-- `mosdepth_write_distribution(...)`
-- `mosdepth_write_thresholds(...)`
-- `mosdepth_write_quantized(...)`
-
-## 6. Reading and coverage algorithm
-
-### 6.1 htslib APIs to use
-
-Use htslib directly, not `read_bam(...)`:
-
-- `sam_open()`
-- `sam_hdr_read()`
-- `sam_index_load3()`
-- `sam_itr_queryi()`
-- `sam_itr_next()`
-- `hts_set_threads()`
-- `hts_set_opt(fp, CRAM_OPT_REFERENCE, ...)`
-- `hts_set_opt(fp, CRAM_OPT_REQUIRED_FIELDS, ...)`
-- `hts_set_opt(fp, CRAM_OPT_DECODE_MD, 0)`
-
-For remote BAM / CRAM support:
-
-- use `sam_open()` for transport
-- load indexes with `sam_index_load3(fp, path, index_path, HTS_IDX_SAVE_REMOTE)`
-
-Do not bypass htslib transport with custom readers.
-
-### 6.2 Required-fields optimization
-
-Mirror upstream mosdepth's CRAM field minimization from
-[`.sync/mosdepth/mosdepth.nim`](/root/duckhts/.sync/mosdepth/mosdepth.nim:975).
-
-For all modes request at least:
-
-- `SAM_FLAG`
-- `SAM_RNAME`
-- `SAM_POS`
-- `SAM_MAPQ`
-- `SAM_CIGAR`
-- `SAM_TLEN`
-
-For non-fast mode also request:
-
-- `SAM_QNAME`
-- `SAM_RNEXT`
-- `SAM_PNEXT`
-
-If `read_groups` filtering is requested, also request:
-
-- `SAM_RGAUX`
-
-This is important for CRAM performance and for fidelity to upstream behavior.
-
-### 6.3 Per-contig processing model
-
-For exact mosdepth-style output, process contigs sequentially in header order.
-
-For each contig:
-
-1. construct a whole-contig iterator with `sam_itr_queryi(idx, tid, 0, HTS_POS_MAX)`
-2. allocate a dense `int32_t` delta array of length `target_length + 1`
-3. scan records for that contig
-4. apply mode-specific delta updates
-5. cumulative-sum the array to concrete depth
-6. write outputs and update summary/distribution state
-7. free or reuse the array for the next contig
-
-Do not use `read_bam(...)` contig-claiming parallelism for this compatibility
-rewrite.
-
-Reason:
-
-- mosdepth's public `threads` flag is decompression-only
-- a parallel contig-claiming engine changes memory behavior materially
-- exact output-order compatibility is simpler with sequential header-order
-  processing
-
-### 6.4 Fast-mode update rule
-
-Mirror upstream logic:
-
-```text
-arr[rec.start] += 1
-arr[rec.stop]  -= 1
-```
-
-This uses the aligned record span and ignores internal CIGAR operators.
-
-### 6.5 Default-mode update rule
-
-Mirror upstream logic:
-
-- expand reference-consuming aligned blocks from the CIGAR
-- increment block starts
-- decrement block ends
-
-Implement a helper:
-
-```c
-static void mosdepth_inc_coverage_from_cigar(const bam1_t *rec, int32_t *arr);
-```
-
-This should treat only reference-consuming query-consuming operators as depth
-contributors, analogous to mosdepth's `gen_start_ends()` / `inc_coverage()`.
-
-### 6.6 Mate-overlap correction
-
-This is the hardest exact-compatibility requirement.
-
-Mirror upstream logic from
-[`.sync/mosdepth/mosdepth.nim`](/root/duckhts/.sync/mosdepth/mosdepth.nim:291):
-
-- only in default mode
-- only for proper pairs
-- not for supplementary reads
-- only when both mates are on the same contig
-- first overlapping mate is stored in a `seen` map keyed by `QNAME`
-- when the partner arrives, subtract the overlap interval(s)
-
-Implementation detail:
-
-- for simple one-CIGAR-block pairs, use the cheap whole-overlap correction
-- otherwise merge both mates' block start/end events, track `pair_depth`, and
-  subtract intervals where pair depth reaches `2`
-
-Suggested helpers:
-
-- `mosdepth_should_track_overlap(const bam1_t *rec)`
-- `mosdepth_record_take_or_store_overlap(...)`
-- `mosdepth_apply_overlap_simple(...)`
-- `mosdepth_apply_overlap_blocks(...)`
-
-Data structure:
-
-- use a khash table or uthash keyed by QNAME storing a copied `bam1_t *` or a
-  compact overlap struct
-- free entries immediately when the mate arrives
-
-Do not approximate overlap correction. This is one of the main reasons users
-trust mosdepth default mode.
-
-### 6.7 Fragment mode
-
-Mirror upstream:
-
-- count only read1 from proper pairs
-- compute fragment start as `min(start, matepos)`
-- increment fragment start
-- decrement `fragment_start + abs(isize)`
-
-## 7. Output writers
-
-### 7.1 Summary
-
-Write exactly the same header and columns as mosdepth:
-
-- `chrom`
-- `length`
-- `bases`
-- `mean`
-- `min`
-- `max`
-
-Formatting:
-
-- use the same decimal precision policy as mosdepth
-- support `MOSDEPTH_PRECISION` if we want environment compatibility, or
-  document a fixed precision if we deliberately do not mirror that behavior
-
-For v1 compatibility, mirroring `MOSDEPTH_PRECISION` is preferred.
-
-### 7.2 Global and region distributions
-
-Mirror mosdepth's cumulative distribution:
-
-- histogram is per exact depth
-- emitted value for depth `d` is proportion of bases covered at least `d`
-- write per chromosome and `total`
-
-Use the same sparse-trailing-zero behavior as mosdepth; do not emit a denser
-distribution format just because it is easier.
-
-### 7.3 Per-base BED.gz
-
-Generate run-length encoded output from the depth array:
-
-- contiguous runs with same depth become one BED interval
-- output order must match mosdepth header-order traversal
-
-Suggested helper:
-
-```c
-static int mosdepth_write_rle_depth(BGZF *bgzf, const char *chrom,
-                                    const int32_t *depth, int64_t n);
-```
-
-### 7.4 `by := <window|bed>` regions output
-
-Implement one region writer that handles both:
-
-- integer window size
-- BED file input
-
-For each region, compute:
-
-- mean depth by default
-- median if `use_median := TRUE`
-
-For BED input:
-
-- if there is a 4th column, propagate it as the region name
-- otherwise emit `unknown`, matching mosdepth threshold behavior
-
-### 7.5 Quantized output
-
-Quantized output is not a new coverage algorithm. It is a post-processing pass
- over the per-base depth array.
-
-Implementation:
-
-- parse quantize breakpoints into sorted integer thresholds
-- map each depth to a label/bin
-- merge adjacent positions whose quantized label is the same
-
-### 7.6 Thresholds output
-
-Thresholds output is also post-processing over region intervals:
-
-- for each region in `by`
-- count bases with depth `>=` each requested threshold
-- write one extra output column per threshold
-
-This is implemented; keep threshold semantics tied to the same region intervals used for mean/median output.
-
-### 7.7 Compression and indexing
-
-For BED-like outputs:
-
-- write BGZF directly with htslib
-- build CSI indexes after close
-
-Use:
-
-- `bgzf_open()` or `hts_open()` in BGZF write mode
-- `tbx_index_build3()` or equivalent htslib index builder after the file is
-  closed
-
-Do not shell out to `bgzip` or `tabix` from the extension.
-
-## 8. Implemented scope and remaining backlog
-
-Implemented public scope includes:
-
-- indexed BAM input;
-- CRAM input when a reference FASTA is supplied as needed by htslib;
-- `chrom`, `by := <window>`, and `by := <bed>` selection;
-- `threads` for htslib decompression;
-- `processing_threads` for DuckHTS-owned contig processing;
-- `flag`, `include_flag`, `mapq`, `min_frag_len`, `max_frag_len`, `read_groups`;
-- `fast_mode`, default CIGAR-aware mode, mate-overlap correction, and `fragment_mode`;
-- `no_per_base`, `use_median`, `precision_digits`;
-- summary and global distribution outputs;
-- per-base BED.gz + CSI;
-- regions BED.gz + CSI and region distribution output;
-- quantized BED.gz + CSI;
-- thresholds BED.gz + CSI for `by` outputs.
-
-Remaining backlog:
-
-- tiled/streaming coverage scratch for `processing_threads > 1` memory control, tracked in `coverage_memory_footprint.md`;
-- broader real-data conformance/performance refreshes when changing engine internals;
-- D4 output and unsupported experimental flags only if a real downstream need appears.
-
-## 9. Validation and tests
-
-Current automated coverage lives in:
-
-- SQL tests: `test/sql/mosdepth.test`;
-- R tests: `r/Rduckhts/inst/tinytest/test_mosdepth.R`;
-- upstream comparison/benchmark scripts: `scripts/mosdepth_conformance.py` and `scripts/mosdepth_benchmark.py`.
-
-Tests should cover fast/default/fragment modes, CRAM reference behavior, `by` window/BED outputs, quantize, thresholds, median, read-group and fragment-length filters, output path creation, and bad-argument validation.
-
-When claiming upstream compatibility or performance, record:
-
-- BAM/CRAM used;
-- exact mosdepth version/commit;
-- exact commands;
-- validation date;
-- known unsupported features.
-
-## 10. Documentation and attribution
-
-Docs for `duckhts_mosdepth(...)` must continue to state:
-
-- it is a native rewrite of mosdepth behavior for the documented scope;
-- users should cite upstream mosdepth when mosdepth-compatible output semantics are used in scientific work;
-- validation scope is pinned and not a claim about arbitrary future mosdepth versions.
-
-## 11. Native implementation rationale
-
-The native path remains justified because one scan can produce summary, distribution, region, per-base, quantized, and threshold outputs while applying CIGAR handling and overlap correction without SQL materializing internal depth/mate state. Preserve that one-pass/fused-output design when refactoring.
-
-## 12. Non-goals
-
-For v1, do not:
-
-- silently deviate from mosdepth output formats
-- reinterpret `threads` as DuckDB compute threads
-- mix this compatibility rewrite into future generic coverage APIs
-- claim compatibility against an unpinned upstream version
+A compatibility or performance claim must record the input, exact upstream commit, command,
+mode, DuckHTS processing/decompression thread counts, validation date, and unsupported
+features. Benchmarking the native function against an old SQL reconstruction is not
+conformance evidence.
+
+Docs and scientific output should credit mosdepth and its authors when relying on
+mosdepth-compatible behavior.
+
+## Open work
+
+- Bound whole-contig coverage scratch when `processing_threads > 1` without changing output;
+  see [`coverage_memory_footprint.md`](coverage_memory_footprint.md).
+- Refresh differential coverage on broader real BAM and CRAM inputs after engine changes.
+- Add another upstream feature or output format only for a demonstrated downstream need, with
+  the pin, supported subset, tests, and attribution updated together.

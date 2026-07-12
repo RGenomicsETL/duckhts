@@ -2222,7 +2222,7 @@ TEST effect_rule_table_known_pre_bits(void) {
 
     /* Essential splice donor/acceptor: intron PLACEMENT but within_intron FALSE (the
      * dinucleotides are start/end_splice_site, not intronic) -> intron_variant does NOT fire,
-     * the splice term emits alone. design/vep_consequence_state_machine.md. */
+     * so the splice term emits alone. */
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR),
               duckvep_effect_eval(DUCKVEP_PRE(DUCKVEP_PRE_INTRON) |
                                   DUCKVEP_PRE(DUCKVEP_PRE_CODING) |
@@ -4382,10 +4382,9 @@ TEST annotate_region_mask_truthful_known_scene(void) {
     ASSERT_EQ((uint32_t)DUCKVEP_REGION_UTR, rows[0].region_mask);
     ASSERT_EQ(0u, rows[0].region_mask & (uint32_t)DUCKVEP_REGION_SPLICE);
 
-    /* (b) real essential donor: emitted as splice_donor ALONE (intron_variant suppressed at
-     * the essential site), though the region_mask diagnostic still flags the intronic
-     * PLACEMENT + SPLICE (the structural summary and the VEP-faithful emission legitimately
-     * differ here — see design/vep_consequence_state_machine.md). */
+    /* (b) real essential donor: emitted as splice_donor ALONE because the dinucleotide is a
+     * splice site, not within_intron. The region_mask still records intron placement plus
+     * splice proximity; it is a structural diagnostic, not the emitted consequence set. */
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR), rows[1].consequence_mask);
     ASSERT((rows[1].region_mask & (uint32_t)DUCKVEP_REGION_SPLICE) != 0u);
     ASSERT((rows[1].region_mask & (uint32_t)DUCKVEP_REGION_INTRON) != 0u);
