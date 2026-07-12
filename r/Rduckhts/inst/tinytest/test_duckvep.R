@@ -44,21 +44,25 @@ queries <- c(
     "phase, end_phase FROM duckvep_r_exons ORDER BY transcript_index, exon_cdna_start"
   )
 )
-loaded <- dbGetQuery(
-  con,
-  paste0(
-    "SELECT loaded FROM duckvep_model_load(",
-    paste(
-      vapply(
-        c("r-test", queries),
-        function(x) as.character(dbQuoteString(con, x)),
-        character(1)
+load_model <- function(name, model_queries) {
+  dbGetQuery(
+    con,
+    paste0(
+      "SELECT loaded FROM duckvep_model_load(",
+      paste(
+        vapply(
+          c(name, model_queries),
+          function(x) as.character(dbQuoteString(con, x)),
+          character(1)
+        ),
+        collapse = ", "
       ),
-      collapse = ", "
-    ),
-    ")"
+      ")"
+    )
   )
-)
+}
+
+loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
 
 annotation <- dbGetQuery(
@@ -75,6 +79,36 @@ expect_identical(annotation$impact, "MODERATE")
 expect_identical(annotation$status, "supported")
 expect_equal(annotation$cds_position, 5)
 expect_equal(annotation$protein_position, 2)
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_transcripts_nmd AS",
+    "SELECT * REPLACE (7::UBIGINT AS transcript_flags)",
+    "FROM duckvep_r_transcripts"
+  )
+)
+nmd_queries <- queries
+nmd_queries[2] <- sub(
+  "duckvep_r_transcripts",
+  "duckvep_r_transcripts_nmd",
+  nmd_queries[2],
+  fixed = TRUE
+)
+expect_true(load_model("r-nmd", nmd_queries)$loaded)
+nmd <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence FROM unnest(duckvep_annotate(",
+    "'r-nmd', 1::UINTEGER, 160::UBIGINT, 'T', 'C', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_identical(
+  nmd$consequence,
+  "intron_variant&NMD_transcript_variant"
+)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
+expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd') AS dropped")$dropped)
 
 dbDisconnect(con, shutdown = TRUE)

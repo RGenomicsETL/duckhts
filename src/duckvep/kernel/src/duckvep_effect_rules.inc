@@ -28,6 +28,7 @@ static const duckvep_consequence_rule_t k_rules[] = {
     { DUCKVEP_PRE(DUCKVEP_PRE_UTR3), 0u, DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR), 3u, 26u, DUCKVEP_IMPACT_MODIFIER }, /* 3_prime_UTR_variant / within_3_prime_utr */
     { DUCKVEP_PRE(DUCKVEP_PRE_NONCODING_EXON), 0u, DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT_EXON), 3u, 27u, DUCKVEP_IMPACT_MODIFIER }, /* non_coding_transcript_exon_variant / non_coding_exon_variant */
     { DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_INTRON), 0u, DUCKVEP_SO(DUCKVEP_SO_INTRON), 3u, 28u, DUCKVEP_IMPACT_MODIFIER }, /* intron_variant / within_intron */
+    { DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT), 0u, DUCKVEP_SO(DUCKVEP_SO_NMD_TRANSCRIPT), 3u, 29u, DUCKVEP_IMPACT_MODIFIER }, /* NMD_transcript_variant / within_nmd_transcript */
     { DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NONCODING_GENE), 0u, DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT), 3u, 30u, DUCKVEP_IMPACT_MODIFIER }, /* non_coding_transcript_variant / within_non_coding_gene */
     { DUCKVEP_PRE(DUCKVEP_PRE_CODING_TRANSCRIPT), 0u, DUCKVEP_SO(DUCKVEP_SO_CODING_TRANSCRIPT), 3u, 31u, DUCKVEP_IMPACT_MODIFIER }, /* coding_transcript_variant / coding_transcript_variant */
     { DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM), 0u, DUCKVEP_SO(DUCKVEP_SO_UPSTREAM_GENE), 3u, 32u, DUCKVEP_IMPACT_MODIFIER }, /* upstream_gene_variant / upstream */

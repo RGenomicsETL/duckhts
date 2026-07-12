@@ -2088,6 +2088,63 @@ TEST effect_rule_table_known_pre_bits(void) {
     PASS();
 }
 
+/* VEP's NMD_transcript_variant means "inside a transcript whose curated
+ * biotype is nonsense_mediated_decay". It is independent of the ordinary
+ * region consequence and does not extend into the upstream/downstream halo. */
+TEST nmd_transcript_predicate_known_scene(void) {
+    static uint16_t chrom[1] = {0u};
+    static uint32_t tstart[1] = {100u};
+    static uint32_t tend[1] = {300u};
+    static int8_t strand[1] = {1};
+    static uint64_t flags[1] = {(uint64_t)DUCKVEP_TX_BIOTYPE_NMD};
+    static uint32_t exoff[1] = {0u};
+    static uint16_t excnt[1] = {2u};
+    static uint32_t cds_start[1] = {110u};
+    static uint32_t cds_end[1] = {290u};
+    static uint32_t exon_start[2] = {100u, 250u};
+    static uint32_t exon_end[2] = {150u, 300u};
+    static uint32_t cdna_start[2] = {1u, 52u};
+    static uint32_t cdna_end[2] = {51u, 102u};
+    static int8_t phase[2] = {0, 0};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_effect_ctx_t ctx;
+    uint64_t mask;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&ex, 0, sizeof ex);
+    tx.chrom_id = chrom;
+    tx.start1 = tstart;
+    tx.end1 = tend;
+    tx.strand = strand;
+    tx.flags = flags;
+    tx.exon_offset = exoff;
+    tx.exon_count = excnt;
+    tx.cds_start1 = cds_start;
+    tx.cds_end1 = cds_end;
+    tx.transcript_count = 1u;
+    ex.start1 = exon_start;
+    ex.end1 = exon_end;
+    ex.cdna_start1 = cdna_start;
+    ex.cdna_end1 = cdna_end;
+    ex.phase = phase;
+    ex.end_phase = phase;
+    ex.exon_count = 2u;
+
+    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 200u, 200u, 0u, 3u, 8u,
+                            &ctx);
+    duckvep_effect_ctx_finalize(&ctx);
+    mask = duckvep_effect_eval(ctx.pre_bits);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_INTRON) |
+              DUCKVEP_SO(DUCKVEP_SO_NMD_TRANSCRIPT), mask);
+
+    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 90u, 90u, 0u, 3u, 8u,
+                            &ctx);
+    ASSERT((ctx.pre_bits &
+            DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u);
+    PASS();
+}
+
 /* VEP's tier machine is not severity ranking: a tier-1/2 match suppresses
  * later tiers, while every matching rule in the assigned tier co-emits. */
 TEST effect_rule_tiers_suppress_only_later_tiers(void) {
@@ -13266,6 +13323,7 @@ int main(int argc, char **argv) {
     RUN_TEST(splice_classify_insertion_interbase_scene);
     RUN_TEST(splice_ppt_exon_gate_scene);
     RUN_TEST(effect_rule_table_known_pre_bits);
+    RUN_TEST(nmd_transcript_predicate_known_scene);
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
     RUN_TEST(event_length_delta_pre_bits_follow_trimmed_alleles);
     RUN_TEST(annotate_structural_known_scene);

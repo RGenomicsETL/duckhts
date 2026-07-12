@@ -50,6 +50,15 @@ void duckvep_effect_ctx_fill(
     pre |= coding ? DUCKVEP_PRE(DUCKVEP_PRE_CODING)
                   : DUCKVEP_PRE(DUCKVEP_PRE_NONCODING);
 
+    /* VariationEffect::within_nmd_transcript is exactly the conjunction of
+     * within_feature and the curated nonsense_mediated_decay biotype. It is
+     * not a prediction that this allele creates a new NMD substrate. */
+    if (out->region_state.within_feature &&
+        (transcripts->flags[tx_idx] &
+         (uint64_t)DUCKVEP_TX_BIOTYPE_NMD) != 0u) {
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT);
+    }
+
     out->splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
                                                 start1, end1, interbase);
     if (out->splice.splice_donor)
