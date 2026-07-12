@@ -1,8 +1,8 @@
 /*
  * duckvep_delta.c — sequence-delta producers. See duckvep_delta.h.
  *
- * The codon/peptide FACTS layer of the engine, lifted out of duckvep_kernel.c so the
- * kernel stays orchestration-only and slice 3+ extends the edit classifier here. No
+ * The codon/peptide FACTS layer of the engine. The annotation sweep remains
+ * orchestration-only and all coding edit classification enters here. No
  * DuckDB/htslib/Arrow; no allocation. Builds on the oracle-tested coding kernels
  * (duckvep_project_coding_base + duckvep_coding_snv_from_cds).
  */
@@ -738,8 +738,8 @@ static duckvep_context_delta_status_t delta_context_inframe_deletion(
     /* A pure in-frame deletion is inframe_deletion in VEP regardless of codon alignment: the
      * codon-allele trim (VariationEffect::inframe_deletion) always leaves an empty alt and a
      * ref whose length is the (mod-3) deleted length. So we no longer require the deletion to
-     * start on a codon boundary — only that the start codon is intact (a start-codon deletion
-     * is deferred to the boundary slice) and the CDS geometry is a clean single deletion. */
+     * start on a codon boundary — only that the start codon is intact and the CDS geometry
+     * is a clean single deletion. */
     if (ctx->single_edit_cds_start <= 3u) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
@@ -760,8 +760,8 @@ static duckvep_context_delta_status_t delta_context_inframe_deletion(
     /* Classify from the peptide diff window (already trimmed in the context). Both the ref
      * codons removed/merged and any alt junction codon must be known and NON-stop: a stop in
      * either window means the deletion removed the terminator (stop_lost) or the merged
-     * junction is a premature stop (inframe_deletion&stop_gained) — both are stop-composite
-     * slices, deferred here so we never emit a partial SO set. A codon-aligned deletion has
+     * junction is a premature stop (inframe_deletion&stop_gained). Leave those contexts
+     * unresolved rather than emit a partial SO set. A codon-aligned deletion has
      * an empty alt window (alt_first_changed_codon == 0); a mid-codon deletion carries a
      * single merged junction codon in the alt window. */
     if (ctx->ref_first_changed_codon == 0u ||
@@ -858,8 +858,8 @@ static duckvep_context_delta_status_t delta_context_inframe_insertion(
     }
     if (ctx->single_edit_cds_start == 0u) return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     before_cds = ctx->single_edit_cds_start - 1u;
-    /* Insertion after the complete start codon; a start-region insertion is a start-boundary
-     * slice. Unlike the old classifier, VEP does NOT require a codon-boundary insertion site —
+    /* Require insertion after the complete start codon. VEP does not require a
+     * codon-boundary insertion site:
      * a mid-codon insertion is still inframe_insertion when the residues flanking it are kept. */
     if (before_cds < 3u || (size_t)before_cds > ctx->ref_cds_len) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
@@ -1074,7 +1074,7 @@ static int delta_frameshift_local_stop_gained(const duckvep_coding_context_t *ct
     /* Reference codon span of the window (codon_len/3). For a pure insertion VEP sets
      * cds_end = cds_start - 1; an insertion before the first CDS base (first_cds == 1)
      * spans no reference codon, so handle it explicitly and never form last_cds == 0
-     * (whose (last_cds - 1) would underflow). This helper is also called on legacy
+     * (whose (last_cds - 1) would underflow). This helper is also called on direct
      * frameshift rows without the start-codon guard, so first_cds == 1 can reach here. */
     if (ctx->single_edit_ref_len > 0u) {
         last_cds = (uint64_t)first_cds + (uint64_t)ctx->single_edit_ref_len - 1u;
@@ -1123,10 +1123,10 @@ static int delta_frameshift_local_stop_gained(const duckvep_coding_context_t *ct
 
 /* Coarse frameshift FACT from the CodingContext: a net CDS length change not divisible
  * by three shifts the reading frame, which VEP labels frameshift_variant. This resolves
- * the boundary frameshifts (first-codon-adjacent, terminal/stop codon) that the legacy
- * body-only path rejects but VEP resolves. We emit ONLY the frameshift fact and only when
+ * boundary frameshifts (first-codon-adjacent, terminal/stop codon) that the direct
+ * body-only path rejects but VEP resolves. We emit only the frameshift fact and only when
  * the start codon is preserved: a disrupted start is frameshift_variant&start_lost in VEP,
- * deferred to the start/stop refinement slice so we never emit a partial SO set. When the
+ * left unresolved so we never emit a partial SO set. When the
  * frameshift's local recomputed codon is a premature stop, VEP composites
  * frameshift_variant&stop_gained; delta_frameshift_local_stop_gained adds that fact. The
  * region layer adds any splice/UTR composite terms. VEP `--gff`-validated. */
@@ -1146,13 +1146,13 @@ static duckvep_context_delta_status_t delta_context_frameshift(
     if (ctx->ref_cds_len == 0u || (ctx->ref_cds_len % 3u) != 0u) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    /* Single-edit only; multi-edit (haplotype) frameshift is a later slice. */
+    /* This classifier accepts one edit; grouped haplotypes enter as an edit set elsewhere. */
     if (!ctx->has_single_edit) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
     /* Start codon (CDS positions 1..3) must be untouched. An edit that overlaps or is
-     * inserted within the start codon makes VEP add start_lost (a start/stop refinement
-     * deferred to a later slice), so leave those as honest backlog. A pure insertion is
+     * inserted within the start codon makes VEP add start_lost, so leave those contexts
+     * unresolved. A pure insertion is
      * carried at the CDS position it precedes, so cds_start > 3 means it lands after the
      * complete start codon. The exception is an annotated-incomplete CDS start, where VEP
      * does not emit start_lost. */
@@ -1162,7 +1162,7 @@ static duckvep_context_delta_status_t delta_context_frameshift(
     }
     /* A pure insertion after the final CDS base lands at the CDS/3'UTR junction, where VEP
      * composites the frameshift with 3_prime_UTR_variant. The coding frameshift fact alone
-     * is an incomplete SO set there, so defer it to the UTR-boundary slice as backlog. */
+     * is an incomplete SO set there, so leave it unresolved. */
     if (ctx->single_edit_ref_len == 0u &&
         (size_t)ctx->single_edit_cds_start > ctx->ref_cds_len) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
@@ -1485,8 +1485,8 @@ static void delta_apply_codon_change(
     delta->valid = 1u;
 }
 
-/* SNV fast path: ref_len==alt_len==1, the count==1 case of the edit envelope. Kept
- * private — the only public producer is the duckvep_sequence_delta_fill chokepoint. */
+/* SNV fast path: ref_len==alt_len==1, the count==1 case of the edit set. Kept
+ * private; callers enter through duckvep_sequence_delta_fill. */
 static void sequence_delta_fill_snv(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -1927,12 +1927,8 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_with_scratch(
         break;
     case DUCKVEP_KIND_SV:
     default:
-        /* The ONE production place structural shapes plug in. Their delta will be
-         * produced by the edit-set production path (build a duckvep_edit_set_t, then
-         * mutate via duckvep_haplotype_apply_cds_edits + full CodingContext peptide
-         * translation). Leaving the delta invalid keeps the CDS bucket at
-         * coding_sequence_variant. Adapter code must not bypass this dispatcher by
-         * calling the internal CodingContext classifier directly. */
+        /* Structural coding edits are not represented by this dispatcher. Leaving
+         * the delta invalid keeps the CDS bucket at coding_sequence_variant. */
         break;
     }
 }
@@ -1968,7 +1964,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta) {
 
-    if (route != NULL) *route = DUCKVEP_DELTA_ROUTE_LEGACY;
+    if (route != NULL) *route = DUCKVEP_DELTA_ROUTE_DIRECT;
     if (delta == NULL) return;
 
     /* SNV (and any non-coding-editable kind, or a call with no edit-set scratch) takes the
@@ -1980,37 +1976,33 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
         return;
     }
 
-    /* AUTHORITATIVE CodingContext. duckvep_sequence_delta_fill_with_scratch builds the alt
+    /* duckvep_sequence_delta_fill_with_scratch builds the alternate
      * CDS + ref/alt peptides once from the variant's edit set and classifies MNV / DEL / INS
      * / INDEL from the peptide diff (duckvep_coding_context_delta_fill), including the
-     * frameshift local-stop composite. This is the SOLE coding-fact authority: no legacy
-     * shadow, no equality gate. Correctness is graded against VEP `--gff` (the oracle), never
-     * against the old per-shape code. */
+     * frameshift local-stop composite. Correctness is graded against VEP `--gff`, not
+     * against the direct per-shape fallback. */
     duckvep_sequence_delta_fill_with_scratch(kind, transcripts, exons, seq, v, variant_idx,
                                              tx_idx, pos, strand, scratch, delta);
     if (delta->valid) {
         if (route != NULL) {
-            *route = kind == DUCKVEP_KIND_MNV ? DUCKVEP_DELTA_ROUTE_MNV_CONTEXT_ACCEPTED
-                   : kind == DUCKVEP_KIND_DEL ? DUCKVEP_DELTA_ROUTE_DEL_CONTEXT_ACCEPTED
-                   : kind == DUCKVEP_KIND_INS ? DUCKVEP_DELTA_ROUTE_INS_CONTEXT_ACCEPTED
-                                              : DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT_ACCEPTED;
+            *route = kind == DUCKVEP_KIND_MNV ? DUCKVEP_DELTA_ROUTE_MNV_CONTEXT
+                   : kind == DUCKVEP_KIND_DEL ? DUCKVEP_DELTA_ROUTE_DEL_CONTEXT
+                   : kind == DUCKVEP_KIND_INS ? DUCKVEP_DELTA_ROUTE_INS_CONTEXT
+                                              : DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT;
         }
         return;
     }
 
-    /* The interpreter deferred this shape (a start/stop/UTR-boundary composite not yet in the
-     * classifier, a multi-edit haplotype, or an incomplete/ambiguous CDS) or its edit-set
-     * build ran out of scratch. Fall back to the legacy per-shape filler for robustness: it
-     * resolves the body-only frameshift / inframe cases the interpreter leaves invalid — and
-     * defers the SAME boundary shapes, so it never emits a partial SO set the interpreter was
-     * avoiding. An invalid result renders as coding_sequence_variant (VEP's coding_unknown). */
+    /* The context classifier deferred this shape or its edit-set build ran out of
+     * scratch. Use the direct shape-specific path while that classifier is incomplete.
+     * An invalid result renders as coding_sequence_variant (VEP's coding_unknown). */
     duckvep_sequence_delta_fill_with_scratch(kind, transcripts, exons, seq, v, variant_idx,
                                              tx_idx, pos, strand, NULL, delta);
     if (route != NULL) {
-        *route = kind == DUCKVEP_KIND_MNV ? DUCKVEP_DELTA_ROUTE_MNV_CONTEXT_FALLBACK_UNSUPPORTED
-               : kind == DUCKVEP_KIND_DEL ? DUCKVEP_DELTA_ROUTE_DEL_CONTEXT_FALLBACK_UNSUPPORTED
-               : kind == DUCKVEP_KIND_INS ? DUCKVEP_DELTA_ROUTE_INS_CONTEXT_FALLBACK_UNSUPPORTED
-                                          : DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT_FALLBACK_UNSUPPORTED;
+        *route = kind == DUCKVEP_KIND_MNV ? DUCKVEP_DELTA_ROUTE_MNV_DIRECT_FALLBACK
+               : kind == DUCKVEP_KIND_DEL ? DUCKVEP_DELTA_ROUTE_DEL_DIRECT_FALLBACK
+               : kind == DUCKVEP_KIND_INS ? DUCKVEP_DELTA_ROUTE_INS_DIRECT_FALLBACK
+                                          : DUCKVEP_DELTA_ROUTE_INDEL_DIRECT_FALLBACK;
     }
 }
 

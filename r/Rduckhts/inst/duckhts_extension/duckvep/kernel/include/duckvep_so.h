@@ -11,17 +11,16 @@
  *
  * Impacts mirror Ensembl VEP's HIGH/MODERATE/LOW/MODIFIER ranking (see
  * https://www.ensembl.org/info/genome/variation/prediction/predicted_data.html).
- * SET by duckvep_annotate_tile today: the structural subset
+ * Current emitted coverage includes the structural subset
  * (up/down/intron/utr/non-coding) plus the VEP-source-grounded SNV-point splice
  * subset (splice_region / splice_donor / splice_acceptor / splice_donor_5th_base /
- * splice_donor_region / splice_polypyrimidine_tract — from duckvep_splice_classify;
- * not yet measured against a VEP --gff differential) plus the codon-SNV subset
+ * splice_donor_region / splice_polypyrimidine_tract — from duckvep_splice_classify)
+ * plus the codon-SNV subset
  * (synonymous / missense / stop_gained / stop_lost / stop_retained / start_lost),
- * narrow two-codon MNV missense, and sequence-backed frameshift / in-frame-deletion
- * indel slices, full-transcript structural deletion/CNV-loss and
+ * narrow two-codon MNV missense, sequence-backed frameshift/in-frame indels,
+ * full-transcript structural deletion/CNV-loss and
  * duplication/CNV-gain terms, and curated NMD_transcript_variant placement.
- * DECLARED but NOT yet set: incomplete_terminal_codon and mature_miRNA_variant.
- * See conformance/README for the current measured scope.
+ * The conformance reports record the measured subset and known gaps.
  */
 #ifndef DUCKVEP_SO_H
 #define DUCKVEP_SO_H
@@ -78,6 +77,14 @@ typedef enum duckvep_so_bit {
     DUCKVEP_SO_PROTEIN_ALTERING           = 31,
     DUCKVEP_SO_BIT_COUNT                  = 32
 } duckvep_so_bit_t;
+
+#ifdef __cplusplus
+static_assert(DUCKVEP_SO_BIT_COUNT <= 64,
+              "duckvep consequence mask is too narrow for the SO vocabulary");
+#else
+_Static_assert(DUCKVEP_SO_BIT_COUNT <= 64,
+               "duckvep consequence mask is too narrow for the SO vocabulary");
+#endif
 
 /* The single-bit mask for a term index. */
 #define DUCKVEP_SO(bit) (UINT64_C(1) << (bit))

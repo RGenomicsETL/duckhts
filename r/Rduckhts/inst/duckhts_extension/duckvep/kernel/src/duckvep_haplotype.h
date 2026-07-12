@@ -1,16 +1,13 @@
 /*
  * duckvep_haplotype.h — multi-edit CDS haplotype mutation helpers (INTERNAL).
  *
- * This is the Haplosaurus-shaped sequence path, kept inside the standalone C99
- * kernel boundary: callers project/sample/phase variants upstream, then pass a
+ * Callers group and project phased variants, then pass a
  * transcript-oriented CDS plus per-haplotype edits. The kernel mutates a
  * caller-owned scratch sequence in reverse CDS-coordinate order, translates once,
  * and emits aggregate indel/frameshift flags. No allocation, no DuckDB/htslib.
  *
- * Scope: sequence mutation and translation semantics only. It is not yet the
- * DuckDB custom aggregate, sample/phase-set bucketing, or VEP differential
- * harness. Those adapters must preserve the source-observed Haplosaurus grouping
- * constraints documented in docs/VEP_SOURCE_AUDIT.md.
+ * This header owns sequence mutation and translation only. Stream grouping and
+ * DuckDB materialization stay outside the kernel.
  */
 #ifndef DUCKVEP_HAPLOTYPE_H
 #define DUCKVEP_HAPLOTYPE_H

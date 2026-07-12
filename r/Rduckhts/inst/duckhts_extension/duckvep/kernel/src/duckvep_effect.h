@@ -111,7 +111,7 @@ void duckvep_effect_ctx_fill_point_sorted(
 /* Apply variant-class facts from canonical event topology, not the caller's
  * broad transport kind. VEP's insertion/deletion predicates are allele-length
  * predicates after REF/ALT normalization/trimming; `kind` only chooses the broad
- * execution lane. */
+ * classification path. */
 void duckvep_effect_ctx_apply_event(duckvep_effect_ctx_t *ctx,
                                     const duckvep_event_t *event);
 

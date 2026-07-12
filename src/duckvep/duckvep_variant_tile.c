@@ -235,7 +235,7 @@ duckvep_tile_status_t duckvep_variant_tile_append_event(
             return DUCKVEP_TILE_INVALID;
         }
         if (sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
-            tile_set_error(t, "BND requires the future two-locus event lane");
+            tile_set_error(t, "BND requires paired two-locus coordinates");
             return DUCKVEP_TILE_INVALID;
         }
     } else {

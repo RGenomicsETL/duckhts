@@ -562,7 +562,7 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 	slice = duckvep_scalar_batch_slice(batch, begin, count);
 	cursor = NULL;
 	if (duckvep_annotate_cursor_open(state->entry->model.kernel, &slice,
-	    NULL, state->options, state->workspace, &cursor,
+	    state->options, state->workspace, &cursor,
 	    &kernel_error) != DUCKVEP_OK) {
 		(void)snprintf(error, error_size, "duckvep_annotate: %s",
 		    kernel_error.message);

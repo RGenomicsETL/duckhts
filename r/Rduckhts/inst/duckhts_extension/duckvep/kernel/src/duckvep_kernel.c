@@ -27,16 +27,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define DUCKVEP_STRINGIFY_INNER(value) #value
+#define DUCKVEP_STRINGIFY(value) DUCKVEP_STRINGIFY_INNER(value)
+
 const char *duckvep_kernel_version(void) {
-    /* Built once into static storage; no allocation, safe to call anytime. */
-    static char buf[16];
-    if (buf[0] == '\0') {
-        (void)snprintf(buf, sizeof buf, "%d.%d.%d",
-                       DUCKVEP_KERNEL_VERSION_MAJOR,
-                       DUCKVEP_KERNEL_VERSION_MINOR,
-                       DUCKVEP_KERNEL_VERSION_PATCH);
-    }
-    return buf;
+    return DUCKVEP_STRINGIFY(DUCKVEP_KERNEL_VERSION_MAJOR) "."
+           DUCKVEP_STRINGIFY(DUCKVEP_KERNEL_VERSION_MINOR) "."
+           DUCKVEP_STRINGIFY(DUCKVEP_KERNEL_VERSION_PATCH);
 }
 
 static duckvep_status_t fail(duckvep_error_t *error,
@@ -289,7 +286,6 @@ struct duckvep_options {
     uint32_t splice_region_exonic;
     uint32_t splice_region_intronic;
     uint32_t halo;
-    int      emit_hgvs;
 };
 
 duckvep_status_t duckvep_options_open(
@@ -313,7 +309,6 @@ duckvep_status_t duckvep_options_open(
     o->downstream_dist        = (init != NULL && init->downstream_dist != 0u)        ? init->downstream_dist        : DUCKVEP_DEFAULT_DOWNSTREAM_DIST;
     o->splice_region_exonic   = (init != NULL && init->splice_region_exonic != 0u)   ? init->splice_region_exonic   : DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC;
     o->splice_region_intronic = (init != NULL && init->splice_region_intronic != 0u) ? init->splice_region_intronic : DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC;
-    o->emit_hgvs              = (init != NULL) ? init->emit_hgvs : 0;
     {
         /* The sweep window must cover the directional reach, or upstream/downstream
          * candidates beyond `halo` are dropped before the directional filter can
@@ -634,17 +629,14 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
         if (dist > c->options->downstream_dist) return 1;
     }
 
-    /* Lazy escalation: only the CDS bucket needs the codon delta. The single delta
-     * chokepoint dispatches on the variant shape (SNV, narrow MNVs, supported
-     * INS/DEL, and narrow frameshift INDEL today; SV/broader delins route to one
-     * documented home). It takes borrowed views directly (it does not see the opaque
-     * model struct). */
+    /* Only the CDS bucket needs a sequence delta. The dispatcher takes borrowed
+     * model views directly; the annotation sweep does not classify coding effects. */
     memset(&delta, 0, sizeof delta);
     if (kind != DUCKVEP_KIND_SV &&
         (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS))) {
         const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
         cds_delta_attempted = 1;
-        duckvep_sequence_delta_route_t route = DUCKVEP_DELTA_ROUTE_LEGACY;
+        duckvep_sequence_delta_route_t route = DUCKVEP_DELTA_ROUTE_DIRECT;
         duckvep_sequence_delta_fill_for_annotation_trace(kind, tx, &c->model->exons,
                                                          seq, c->variants, variant_idx,
                                                          (size_t)tx_idx, pos,
@@ -653,28 +645,22 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
                                                          c->delta_route_stats != NULL ? &route : NULL,
                                                          &delta);
         if (c->delta_route_stats != NULL) {
-            if (route == DUCKVEP_DELTA_ROUTE_MNV_CONTEXT_ACCEPTED) {
-                c->delta_route_stats->mnv_context_accepted++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_MNV_CONTEXT_FALLBACK_MISMATCH) {
-                c->delta_route_stats->mnv_context_fallback_mismatch++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_MNV_CONTEXT_FALLBACK_UNSUPPORTED) {
-                c->delta_route_stats->mnv_context_fallback_unsupported++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_DEL_CONTEXT_ACCEPTED) {
-                c->delta_route_stats->del_context_accepted++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_DEL_CONTEXT_FALLBACK_MISMATCH) {
-                c->delta_route_stats->del_context_fallback_mismatch++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_DEL_CONTEXT_FALLBACK_UNSUPPORTED) {
-                c->delta_route_stats->del_context_fallback_unsupported++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INS_CONTEXT_ACCEPTED) {
-                c->delta_route_stats->ins_context_accepted++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INS_CONTEXT_FALLBACK_MISMATCH) {
-                c->delta_route_stats->ins_context_fallback_mismatch++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INS_CONTEXT_FALLBACK_UNSUPPORTED) {
-                c->delta_route_stats->ins_context_fallback_unsupported++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT_ACCEPTED) {
-                c->delta_route_stats->indel_context_accepted++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT_FALLBACK_UNSUPPORTED) {
-                c->delta_route_stats->indel_context_fallback_unsupported++;
+            if (route == DUCKVEP_DELTA_ROUTE_MNV_CONTEXT) {
+                c->delta_route_stats->mnv_context++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_MNV_DIRECT_FALLBACK) {
+                c->delta_route_stats->mnv_direct_fallback++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_DEL_CONTEXT) {
+                c->delta_route_stats->del_context++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_DEL_DIRECT_FALLBACK) {
+                c->delta_route_stats->del_direct_fallback++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_INS_CONTEXT) {
+                c->delta_route_stats->ins_context++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_INS_DIRECT_FALLBACK) {
+                c->delta_route_stats->ins_direct_fallback++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT) {
+                c->delta_route_stats->indel_context++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_DIRECT_FALLBACK) {
+                c->delta_route_stats->indel_direct_fallback++;
             }
         }
         duckvep_effect_ctx_apply_delta(&ectx, &delta);
@@ -811,7 +797,7 @@ static duckvep_status_t validate_variant_batch(
         if (kind == (uint8_t)DUCKVEP_KIND_SV &&
             sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
             return fail(error, DUCKVEP_ERR_UNSUPPORTED, DVW_ANN_SV_TYPE,
-                        "breakends require the two-locus event lane");
+                        "breakends require paired two-locus coordinates");
         }
         if (i > 0u &&
             (variants->chrom_id[i] < variants->chrom_id[i - 1u] ||
@@ -831,7 +817,7 @@ static duckvep_status_t validate_variant_batch(
                           variants->allele_bytes != NULL;
     validate_alleles = needs_alleles || allele_columns_seen;
 
-    /* Structural events never enter the sequence-delta lane. SNVs also have point
+    /* Structural events never enter sequence-delta classification. SNVs also have point
      * topology when the model has no sequence and no allele storage is supplied.
      * Every other small variant needs REF/ALT storage because topology uses the
      * allele-trimmed differing region. If allele storage is supplied for no-seq
@@ -951,7 +937,6 @@ static duckvep_status_t validate_result_builder_for_append(
 duckvep_status_t duckvep_annotate_cursor_open(
     const duckvep_model_t          *model,
     const duckvep_variant_batch_t  *variants,
-    const duckvep_track_set_t      *tracks,
     const duckvep_options_t        *options,
     duckvep_workspace_t            *workspace,
     duckvep_annotate_cursor_t     **out_cursor,
@@ -960,7 +945,6 @@ duckvep_status_t duckvep_annotate_cursor_open(
     duckvep_annotate_cursor_t *cursor;
     duckvep_status_t st;
 
-    (void)tracks; /* point/region track joins land with the SA-source adapter */
     if (out_cursor == NULL) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_CURSOR_NULL_OUT,
                     "out_cursor is NULL");
@@ -1092,7 +1076,6 @@ duckvep_status_t duckvep_annotate_cursor_fill(
 duckvep_status_t duckvep_annotate_tile(
     const duckvep_model_t          *model,
     const duckvep_variant_batch_t  *variants,
-    const duckvep_track_set_t      *tracks,
     const duckvep_options_t        *options,
     duckvep_workspace_t            *workspace,
     duckvep_result_builder_t       *results,
@@ -1107,8 +1090,6 @@ duckvep_status_t duckvep_annotate_tile(
     uint32_t ctx_variant_idx;
     const uint32_t *ctx_tx_indices;
     size_t ctx_tx_count;
-
-    (void)tracks; /* point/region track joins land with the SA-source adapter */
 
     /* Boundary contract checks first — fail loud, never on a partial result. */
     if (model == NULL) {
@@ -1164,7 +1145,8 @@ duckvep_status_t duckvep_annotate_tile(
     /* One cursor step per variant, then a direct per-candidate loop in this TU.
      * annotate_pair is therefore inlineable and a full result buffer stops the
      * sweep immediately instead of draining the remaining candidate relation.
-     * This is still tile-local, not the future persistent DuckDB annotation cursor. */
+     * This entry point is tile-local; the cursor API preserves state only within the
+     * supplied batch. */
     duckvep_sweep_cursor_init(&sweep, variants, &model->transcripts, options->halo,
                               workspace->active, workspace->active_cap,
                               workspace->candidates, workspace->active_cap);

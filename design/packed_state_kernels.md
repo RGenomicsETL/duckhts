@@ -1,6 +1,6 @@
 # Packed-state classification and reduction kernels
 
-Status: open design / implementation contract. This is the review-before-code gate for extending the SIMD manifest (`src/include/duckhts_simd_kernels.def`). Nothing here is implemented until it lands in the manifest, the backends, `functions.yaml` where public, and tests. The current manifest has exactly one kernel (`seq_base_counts`); this note governs how the next several land coherently instead of as ad-hoc additions.
+Status: open design / implementation contract. This is the review-before-code gate for extending the SIMD manifest (`src/include/duckhts_simd_kernels.def`). The current manifest contains `seq_base_counts`, `bam_nt16_counts`, and `nt16_gc_counts`; proposals below are implemented only when they land in the manifest, backends, tests, and `functions.yaml` where public.
 
 ## The unifying abstraction
 
