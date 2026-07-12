@@ -3,16 +3,14 @@
 
 #include "duckvep_so.h"
 
-void duckvep_effect_ctx_fill(
+static void duckvep_effect_ctx_set_topology(
     const duckvep_transcript_model_t *transcripts,
-    const duckvep_exon_model_t       *exons,
     uint32_t                          variant_idx,
     size_t                            tx_idx,
     uint32_t                          start1,
     uint32_t                          end1,
-    uint8_t                           interbase,
-    uint32_t                          splice_region_exonic,
-    uint32_t                          splice_region_intronic,
+    const duckvep_region_state_t     *region_state,
+    const duckvep_splice_state_t     *splice_state,
     duckvep_effect_ctx_t             *out) {
 
     int coding = transcripts->cds_start1[tx_idx] != 0u;
@@ -25,9 +23,7 @@ void duckvep_effect_ctx_fill(
     out->end1 = end1;
     out->strand = transcripts->strand[tx_idx];
 
-    out->region_state = duckvep_region_classify_span(
-        transcripts, exons, tx_idx, start1, end1,
-        splice_region_exonic, splice_region_intronic);
+    out->region_state = *region_state;
     region = out->region_state.region_mask;
 
     /* Span placement is not mutually exclusive: one event can overlap CDS, UTR,
@@ -59,8 +55,7 @@ void duckvep_effect_ctx_fill(
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT);
     }
 
-    out->splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
-                                                start1, end1, interbase);
+    out->splice = *splice_state;
     if (out->splice.splice_donor)
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_DONOR);
     if (out->splice.splice_acceptor)
@@ -86,6 +81,53 @@ void duckvep_effect_ctx_fill(
     if (out->splice.any) region |= (uint32_t)DUCKVEP_REGION_SPLICE;
     out->region = region;
     out->pre_bits = pre;
+}
+
+void duckvep_effect_ctx_fill(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          start1,
+    uint32_t                          end1,
+    uint8_t                           interbase,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
+    duckvep_effect_ctx_t             *out) {
+
+    duckvep_region_state_t region;
+    duckvep_splice_state_t splice;
+
+    region = duckvep_region_classify_span(transcripts, exons, tx_idx,
+                                           start1, end1,
+                                           splice_region_exonic,
+                                           splice_region_intronic);
+    splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
+                                           start1, end1, interbase);
+    duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
+                                    start1, end1, &region, &splice, out);
+}
+
+void duckvep_effect_ctx_fill_point_sorted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
+    uint16_t                         *exon_rank_io,
+    duckvep_effect_ctx_t             *out) {
+
+    duckvep_region_state_t region;
+    duckvep_splice_state_t splice;
+
+    duckvep_classify_point_sorted(transcripts, exons, tx_idx, pos,
+                                  splice_region_exonic,
+                                  splice_region_intronic, exon_rank_io,
+                                  &region, &splice);
+    duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
+                                    pos, pos, &region, &splice, out);
 }
 
 void duckvep_effect_ctx_apply_event(duckvep_effect_ctx_t *ctx,

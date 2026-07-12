@@ -94,6 +94,20 @@ void duckvep_effect_ctx_fill(
     uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out);
 
+/* Sorted SNV hot path. The cursor is per transcript and survives adjacent
+ * annotation tiles; UINT16_MAX means that this transcript has not yet been
+ * visited in the current monotone run. */
+void duckvep_effect_ctx_fill_point_sorted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
+    uint16_t                         *exon_rank_io,
+    duckvep_effect_ctx_t             *out);
+
 /* Apply variant-class facts from canonical event topology, not the caller's
  * broad transport kind. VEP's insertion/deletion predicates are allele-length
  * predicates after REF/ALT normalization/trimming; `kind` only chooses the broad

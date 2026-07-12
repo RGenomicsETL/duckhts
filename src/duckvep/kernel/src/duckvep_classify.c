@@ -41,6 +41,86 @@ static int gap_between_exons(const duckvep_exon_model_t *exons,
     return *gap_start <= *gap_end;
 }
 
+struct duckvep_splice_accum {
+    int start_ss;
+    int end_ss;
+    int fifth;
+    int fifth_rev;
+    int dreg;
+    int dreg_rev;
+    int ppt;
+    int ppt_rev;
+    int intronic;
+    int region;
+};
+
+/* Accumulate VEP's splice predicates for one intron. Span and sorted-point
+ * traversal deliberately share this code: the optimization chooses fewer gaps,
+ * never a second definition of the biology. */
+static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
+                                size_t left_idx, size_t right_idx,
+                                int64_t irs, int64_t ire,
+                                int64_t lo_s, int64_t hi_s,
+                                uint8_t interbase,
+                                struct duckvep_splice_accum *a,
+                                int64_t *reach_lo, int64_t *reach_hi) {
+    uint32_t gap_start;
+    uint32_t gap_end;
+    int64_t is;
+    int64_t ie;
+
+    if (!gap_between_exons(exons, left_idx, right_idx,
+                           &gap_start, &gap_end))
+        return 0;
+    is = (int64_t)gap_start;
+    ie = (int64_t)gap_end;
+    if (reach_lo != NULL)
+        *reach_lo = is - 3 < ie - 16 ? is - 3 : ie - 16;
+    if (reach_hi != NULL)
+        *reach_hi = is + 16 > ie + 3 ? is + 16 : ie + 3;
+
+    if (span_overlaps_i64(irs, ire, is, is + 1)) a->start_ss = 1;
+    if (span_overlaps_i64(irs, ire, ie - 1, ie)) a->end_ss = 1;
+    if (span_overlaps_i64(irs, ire, is + 4, is + 4)) a->fifth = 1;
+    if (span_overlaps_i64(irs, ire, ie - 4, ie - 4)) a->fifth_rev = 1;
+    if (span_overlaps_i64(irs, ire, is + 2, is + 5)) a->dreg = 1;
+    if (span_overlaps_i64(irs, ire, ie - 5, ie - 2)) a->dreg_rev = 1;
+    if (span_overlaps_i64(lo_s, hi_s, ie - 16, ie - 2)) a->ppt = 1;
+    if (span_overlaps_i64(lo_s, hi_s, is + 2, is + 16)) a->ppt_rev = 1;
+    if (span_overlaps_i64(irs, ire, is + 2, ie - 2) ||
+        (interbase && (irs == is + 2 || ire == ie - 2)))
+        a->intronic = 1;
+    if (span_overlaps_i64(irs, ire, is + 2, is + 7) ||
+        span_overlaps_i64(irs, ire, ie - 7, ie - 2) ||
+        span_overlaps_i64(irs, ire, is - 3, is - 1) ||
+        span_overlaps_i64(irs, ire, ie + 1, ie + 3) ||
+        (interbase && (irs == is || ire == ie ||
+                       irs == is + 2 || ire == ie - 2)))
+        a->region = 1;
+    return 1;
+}
+
+static duckvep_splice_state_t splice_accum_finish(
+    const struct duckvep_splice_accum *a, int fwd) {
+    duckvep_splice_state_t st;
+
+    memset(&st, 0, sizeof st);
+    st.splice_donor = (uint8_t)(fwd ? a->start_ss : a->end_ss);
+    st.splice_acceptor = (uint8_t)(fwd ? a->end_ss : a->start_ss);
+    st.splice_donor_5th = (uint8_t)(fwd ? a->fifth : a->fifth_rev);
+    st.splice_donor_region =
+        (uint8_t)((fwd ? a->dreg : a->dreg_rev) && !st.splice_donor_5th);
+    st.splice_polypyrimidine = (uint8_t)(fwd ? a->ppt : a->ppt_rev);
+    st.intronic = (uint8_t)a->intronic;
+    st.splice_region =
+        (uint8_t)(a->region && !st.splice_donor && !st.splice_acceptor &&
+                  !st.splice_donor_region && !st.splice_donor_5th);
+    st.any = (uint8_t)(st.splice_donor || st.splice_acceptor ||
+                       st.splice_donor_5th || st.splice_donor_region ||
+                       st.splice_polypyrimidine || st.splice_region);
+    return st;
+}
+
 static int overlaps_coarse_exon_reach(uint32_t start1, uint32_t end1,
                                       uint32_t es, uint32_t ee,
                                       uint32_t exonic,
@@ -208,16 +288,10 @@ duckvep_splice_state_t duckvep_splice_classify_span(
     uint32_t                          end1,
     uint8_t                           interbase) {
 
-    duckvep_splice_state_t st;
+    struct duckvep_splice_accum acc;
     int fwd = transcripts->strand[tx_idx] >= 0;
     size_t off = (size_t)transcripts->exon_offset[tx_idx];
     size_t cnt = (size_t)transcripts->exon_count[tx_idx];
-    int start_ss = 0, end_ss = 0;
-    int fifth = 0, fifth_rev = 0;
-    int dreg = 0, dreg_rev = 0;
-    int ppt = 0, ppt_rev = 0;
-    int intronic = 0;
-    int region = 0;
     size_t k;
     /* VEP models a pure insertion as vf->start = P+1, vf->end = P (start > end),
      * where P == end1 is the anchor base to its 5' side. Feeding (P+1, P) into the
@@ -234,59 +308,218 @@ duckvep_splice_state_t duckvep_splice_classify_span(
     int64_t lo_s = interbase ? ire : (int64_t)start1;
     int64_t hi_s = interbase ? irs : (int64_t)end1;
 
-    memset(&st, 0, sizeof st);
-    if (cnt < 2u) return st;
+    memset(&acc, 0, sizeof acc);
 
     for (k = 0u; k + 1u < cnt; k++) {
-        uint32_t gap_start;
-        uint32_t gap_end;
-        int64_t is;
-        int64_t ie;
-        if (!gap_between_exons(exons, off + k, off + k + 1u,
-                               &gap_start, &gap_end)) {
-            continue;
-        }
-        is = (int64_t)gap_start;
-        ie = (int64_t)gap_end;
+        (void)splice_accum_add_gap(exons, off + k, off + k + 1u,
+                                   irs, ire, lo_s, hi_s, interbase,
+                                   &acc, NULL, NULL);
+    }
+    return splice_accum_finish(&acc, fwd);
+}
 
-        if (span_overlaps_i64(irs, ire, is, is + 1)) start_ss = 1;
-        if (span_overlaps_i64(irs, ire, ie - 1, ie)) end_ss = 1;
-        if (span_overlaps_i64(irs, ire, is + 4, is + 4)) fifth = 1;
-        if (span_overlaps_i64(irs, ire, ie - 4, ie - 4)) fifth_rev = 1;
-        if (span_overlaps_i64(irs, ire, is + 2, is + 5)) dreg = 1;
-        if (span_overlaps_i64(irs, ire, ie - 5, ie - 2)) dreg_rev = 1;
-        if (span_overlaps_i64(lo_s, hi_s, ie - 16, ie - 2)) ppt = 1;
-        if (span_overlaps_i64(lo_s, hi_s, is + 2, is + 16)) ppt_rev = 1;
-        if (span_overlaps_i64(irs, ire, is + 2, ie - 2) ||
-            (interbase && (irs == is + 2 || ire == ie - 2))) {
-            intronic = 1;
+static size_t point_exon_index(const duckvep_transcript_model_t *transcripts,
+                               size_t tx_idx, uint32_t rank) {
+    size_t off = (size_t)transcripts->exon_offset[tx_idx];
+    uint32_t cnt = (uint32_t)transcripts->exon_count[tx_idx];
+
+    if (transcripts->strand[tx_idx] >= 0)
+        return off + (size_t)rank;
+    return off + (size_t)(cnt - rank - 1u);
+}
+
+static uint32_t point_exon_seek(const duckvep_transcript_model_t *transcripts,
+                                const duckvep_exon_model_t *exons,
+                                size_t tx_idx, uint32_t pos, uint32_t rank) {
+    uint32_t cnt = (uint32_t)transcripts->exon_count[tx_idx];
+
+    if (rank == UINT16_MAX || rank > cnt) {
+        uint32_t lo = 0u;
+        uint32_t hi = cnt;
+
+        /* This search runs once when a transcript first enters a sorted run.
+         * Later variants only advance the cursor. */
+        while (lo < hi) {
+            uint32_t mid = lo + (hi - lo) / 2u;
+            size_t ei = point_exon_index(transcripts, tx_idx, mid);
+
+            if (exons->end1[ei] < pos)
+                lo = mid + 1u;
+            else
+                hi = mid;
         }
-        /* VEP _intron_overlap: intron interior 3-8, exon rim 1-3, plus insertion
-         * exact-edge cases at the exon/intron and donor/acceptor boundaries. */
-        if (span_overlaps_i64(irs, ire, is + 2, is + 7) ||
-            span_overlaps_i64(irs, ire, ie - 7, ie - 2) ||
-            span_overlaps_i64(irs, ire, is - 3, is - 1) ||
-            span_overlaps_i64(irs, ire, ie + 1, ie + 3) ||
-            (interbase && (irs == is || ire == ie ||
-                           irs == is + 2 || ire == ie - 2))) {
-            region = 1;
+        rank = lo;
+    } else {
+        while (rank < cnt &&
+               exons->end1[point_exon_index(transcripts, tx_idx, rank)] < pos)
+            rank++;
+    }
+    return rank;
+}
+
+void duckvep_classify_point_sorted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic,
+    uint16_t                         *exon_rank_io,
+    duckvep_region_state_t           *region_out,
+    duckvep_splice_state_t           *splice_out) {
+
+    duckvep_region_state_t region;
+    duckvep_splice_state_t splice;
+    struct duckvep_splice_accum acc;
+    uint32_t ts;
+    uint32_t te;
+    uint32_t cds_s;
+    uint32_t cds_e;
+    uint32_t cnt;
+    uint32_t rank;
+    int fwd;
+    int in_exon = 0;
+
+    memset(&region, 0, sizeof region);
+    memset(&splice, 0, sizeof splice);
+    memset(&acc, 0, sizeof acc);
+    if (region_out == NULL || splice_out == NULL || exon_rank_io == NULL ||
+        transcripts == NULL || exons == NULL ||
+        tx_idx >= transcripts->transcript_count) {
+        if (region_out != NULL) *region_out = region;
+        if (splice_out != NULL) *splice_out = splice;
+        return;
+    }
+
+    ts = transcripts->start1[tx_idx];
+    te = transcripts->end1[tx_idx];
+    fwd = transcripts->strand[tx_idx] >= 0;
+    if (pos < ts) {
+        region.region_mask = fwd ? (uint32_t)DUCKVEP_REGION_UPSTREAM
+                                 : (uint32_t)DUCKVEP_REGION_DOWNSTREAM;
+        cnt = (uint32_t)transcripts->exon_count[tx_idx];
+        rank = point_exon_seek(transcripts, exons, tx_idx, pos, *exon_rank_io);
+        *exon_rank_io = (uint16_t)rank;
+        goto exact_splice;
+    }
+    if (pos > te) {
+        region.region_mask = fwd ? (uint32_t)DUCKVEP_REGION_DOWNSTREAM
+                                 : (uint32_t)DUCKVEP_REGION_UPSTREAM;
+        cnt = (uint32_t)transcripts->exon_count[tx_idx];
+        rank = point_exon_seek(transcripts, exons, tx_idx, pos, *exon_rank_io);
+        *exon_rank_io = (uint16_t)rank;
+        goto exact_splice;
+    }
+
+    region.within_feature = 1u;
+    region.complete_overlap_feature = (uint8_t)(ts == te && pos == ts);
+    region.complete_within_feature = 1u;
+    cnt = (uint32_t)transcripts->exon_count[tx_idx];
+    rank = point_exon_seek(transcripts, exons, tx_idx, pos, *exon_rank_io);
+    *exon_rank_io = (uint16_t)rank;
+
+    if (rank < cnt) {
+        size_t ei = point_exon_index(transcripts, tx_idx, rank);
+        uint32_t es = exons->start1[ei];
+
+        if (pos >= es) {
+            in_exon = 1;
+            region.within_cdna = 1u;
+            region.overlaps_exon = 1u;
+            cds_s = transcripts->cds_start1[tx_idx];
+            cds_e = transcripts->cds_end1[tx_idx];
+            if (cds_s != 0u) {
+                if (pos >= cds_s && pos <= cds_e) {
+                    region.overlaps_cds = 1u;
+                } else if (pos < cds_s) {
+                    if (fwd) region.overlaps_utr5 = 1u;
+                    else     region.overlaps_utr3 = 1u;
+                } else {
+                    if (fwd) region.overlaps_utr3 = 1u;
+                    else     region.overlaps_utr5 = 1u;
+                }
+            }
+        }
+    }
+    if (!in_exon)
+        region.overlaps_intron = 1u;
+
+    if (in_exon) {
+        size_t ei = point_exon_index(transcripts, tx_idx, rank);
+        if (overlaps_coarse_exon_reach(pos, pos,
+                                       exons->start1[ei], exons->end1[ei],
+                                       splice_exonic, splice_intronic))
+            region.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
+        if (rank > 0u) {
+            size_t pi = point_exon_index(transcripts, tx_idx, rank - 1u);
+            if (overlaps_coarse_exon_reach(pos, pos,
+                                           exons->start1[pi], exons->end1[pi],
+                                           splice_exonic, splice_intronic))
+                region.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
+        }
+        if (rank + 1u < cnt) {
+            size_t ni = point_exon_index(transcripts, tx_idx, rank + 1u);
+            if (overlaps_coarse_exon_reach(pos, pos,
+                                           exons->start1[ni], exons->end1[ni],
+                                           splice_exonic, splice_intronic))
+                region.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
+        }
+    } else {
+        if (rank < cnt) {
+            size_t ni = point_exon_index(transcripts, tx_idx, rank);
+            if (overlaps_coarse_exon_reach(pos, pos,
+                                           exons->start1[ni], exons->end1[ni],
+                                           splice_exonic, splice_intronic))
+                region.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
+        }
+        if (rank > 0u) {
+            size_t pi = point_exon_index(transcripts, tx_idx, rank - 1u);
+            if (overlaps_coarse_exon_reach(pos, pos,
+                                           exons->start1[pi], exons->end1[pi],
+                                           splice_exonic, splice_intronic))
+                region.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
         }
     }
 
-    st.splice_donor = (uint8_t)(fwd ? start_ss : end_ss);
-    st.splice_acceptor = (uint8_t)(fwd ? end_ss : start_ss);
-    st.splice_donor_5th = (uint8_t)(fwd ? fifth : fifth_rev);
-    st.splice_donor_region =
-        (uint8_t)((fwd ? dreg : dreg_rev) && !st.splice_donor_5th);
-    st.splice_polypyrimidine = (uint8_t)(fwd ? ppt : ppt_rev);
-    st.intronic = (uint8_t)intronic;
-    st.splice_region =
-        (uint8_t)(region && !st.splice_donor && !st.splice_acceptor &&
-                  !st.splice_donor_region && !st.splice_donor_5th);
-    st.any = (uint8_t)(st.splice_donor || st.splice_acceptor ||
-                       st.splice_donor_5th || st.splice_donor_region ||
-                       st.splice_polypyrimidine || st.splice_region);
-    return st;
+    if (transcripts->cds_start1[tx_idx] == 0u && in_exon)
+        region.region_mask |= (uint32_t)DUCKVEP_REGION_EXON;
+    if (region.overlaps_cds)
+        region.region_mask |= (uint32_t)DUCKVEP_REGION_CDS;
+    if (region.overlaps_utr5 || region.overlaps_utr3)
+        region.region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
+    if (region.overlaps_intron)
+        region.region_mask |= (uint32_t)DUCKVEP_REGION_INTRON;
+
+exact_splice:
+    if (cnt >= 2u) {
+        uint32_t pivot = rank == 0u ? 0u : rank - 1u;
+        uint32_t g;
+        int64_t p = (int64_t)pos;
+
+        if (pivot >= cnt - 1u) pivot = cnt - 2u;
+        g = pivot;
+        for (;;) {
+            int64_t reach_hi;
+            int found = splice_accum_add_gap(exons,
+                point_exon_index(transcripts, tx_idx, g),
+                point_exon_index(transcripts, tx_idx, g + 1u),
+                p, p, p, p, 0u, &acc, NULL, &reach_hi);
+            if ((found && p > reach_hi) || g == 0u) break;
+            g--;
+        }
+        for (g = pivot + 1u; g + 1u < cnt; g++) {
+            int64_t reach_lo;
+            int found = splice_accum_add_gap(exons,
+                point_exon_index(transcripts, tx_idx, g),
+                point_exon_index(transcripts, tx_idx, g + 1u),
+                p, p, p, p, 0u, &acc, &reach_lo, NULL);
+            if (found && p < reach_lo) break;
+        }
+    }
+    splice = splice_accum_finish(&acc, fwd);
+
+    *region_out = region;
+    *splice_out = splice;
 }
 
 duckvep_splice_state_t duckvep_splice_classify(

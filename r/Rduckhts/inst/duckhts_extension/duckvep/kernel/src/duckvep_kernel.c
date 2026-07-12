@@ -60,10 +60,38 @@ struct duckvep_model {
     duckvep_transcript_model_t transcripts;
     duckvep_exon_model_t       exons;
     duckvep_sequence_pool_t    seq;
+    uint8_t                   *point_ordered;
     size_t                     max_transcripts_per_chrom;
     size_t                     max_cds_len;
     int                        has_seq;
 };
+
+static int transcript_point_ordered(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx) {
+
+    size_t off = (size_t)transcripts->exon_offset[tx_idx];
+    size_t cnt = (size_t)transcripts->exon_count[tx_idx];
+    size_t e;
+
+    for (e = 0u; e < cnt; e++) {
+        size_t ei = off + e;
+        uint32_t es = exons->start1[ei];
+        uint32_t ee = exons->end1[ei];
+
+        if (es > ee || es < transcripts->start1[tx_idx] ||
+            ee > transcripts->end1[tx_idx])
+            return 0;
+        if (e == 0u) continue;
+        if (transcripts->strand[tx_idx] >= 0) {
+            if (exons->end1[ei - 1u] >= es) return 0;
+        } else {
+            if (ee >= exons->start1[ei - 1u]) return 0;
+        }
+    }
+    return 1;
+}
 
 /* where_codes are STABLE engine-internal failure-site ids; tests anchor on them.
  * Never renumber an existing site; append new ones. */
@@ -100,7 +128,8 @@ enum {
     DVW_CURSOR_OOM          = 61u,
     DVW_CURSOR_NULL         = 62u,
     DVW_WS_SCRATCH_RANGE    = 63u,
-    DVW_WS_SCRATCH_OOM      = 64u
+    DVW_WS_SCRATCH_OOM      = 64u,
+    DVW_WS_MODEL            = 65u
 };
 
 duckvep_status_t duckvep_model_open(
@@ -221,6 +250,18 @@ duckvep_status_t duckvep_model_open(
     }
     m->transcripts = *transcripts;
     m->exons = *exons;
+    if (transcripts->transcript_count > 0u) {
+        m->point_ordered = (uint8_t *)calloc(transcripts->transcript_count,
+                                              sizeof *m->point_ordered);
+        if (m->point_ordered == NULL) {
+            free(m);
+            return fail(error, DUCKVEP_ERR_INTERNAL, DVW_MODEL_OOM,
+                        "model point-layout alloc failed");
+        }
+        for (t = 0u; t < transcripts->transcript_count; t++)
+            m->point_ordered[t] = (uint8_t)transcript_point_ordered(
+                transcripts, exons, t);
+    }
     m->max_transcripts_per_chrom = max_chrom_run;
     m->max_cds_len = max_cds_len;
     if (seq != NULL) {
@@ -232,7 +273,10 @@ duckvep_status_t duckvep_model_open(
 }
 
 void duckvep_model_close(duckvep_model_t *model) {
-    free(model);
+    if (model != NULL) {
+        free(model->point_ordered);
+        free(model);
+    }
 }
 
 /* ----------------------------------------------------------------- options --
@@ -295,13 +339,48 @@ void duckvep_options_close(duckvep_options_t *options) {
  * lengthening insertion CodingContext builds. Broader haplotype/grouped edit-set
  * paths will widen this policy explicitly when they are wired into production. */
 struct duckvep_workspace {
+    const duckvep_model_t    *model;
     uint32_t                *active;
     uint32_t                *candidates;
-    size_t                                  active_cap;
+    uint16_t                *point_exon_rank;
+    size_t                   point_exon_count;
+    size_t                   active_cap;
+    uint16_t                 point_last_chrom;
+    uint32_t                 point_last_pos;
+    int                      point_run_active;
     duckvep_delta_scratch_t                 delta_scratch;
     duckvep_workspace_delta_route_stats_t   delta_route_stats;
     int                                     delta_route_stats_enabled;
 };
+
+static void workspace_point_cursor_reset(duckvep_workspace_t *workspace) {
+    if (workspace == NULL || workspace->point_exon_rank == NULL) return;
+    memset(workspace->point_exon_rank, 0xff,
+           workspace->point_exon_count * sizeof *workspace->point_exon_rank);
+}
+
+static void workspace_point_run_begin(
+    duckvep_workspace_t           *workspace,
+    const duckvep_variant_batch_t *variants) {
+
+    uint16_t first_chrom;
+    uint32_t first_pos;
+    size_t last;
+
+    if (workspace == NULL || variants == NULL || variants->count == 0u) return;
+    first_chrom = variants->chrom_id[0];
+    first_pos = variants->pos1[0];
+    if (workspace->point_run_active &&
+        (first_chrom < workspace->point_last_chrom ||
+         (first_chrom == workspace->point_last_chrom &&
+          first_pos < workspace->point_last_pos))) {
+        workspace_point_cursor_reset(workspace);
+    }
+    last = variants->count - 1u;
+    workspace->point_last_chrom = variants->chrom_id[last];
+    workspace->point_last_pos = variants->pos1[last];
+    workspace->point_run_active = 1;
+}
 
 static int size_add_checked(size_t a, size_t b, size_t *out) {
     if (out == NULL) return 0;
@@ -386,6 +465,7 @@ duckvep_status_t duckvep_workspace_open(
     struct duckvep_workspace *w;
     duckvep_status_t st;
     size_t cap;
+    size_t point_bytes = 0u;
 
     if (out_workspace == NULL || model == NULL) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_WS_NULL_ARG,
@@ -397,6 +477,12 @@ duckvep_status_t duckvep_workspace_open(
      * across the whole model. */
     cap = model->max_transcripts_per_chrom;
     if (cap == 0u) cap = 1u; /* always have a non-NULL active buffer */
+    if (model->transcripts.transcript_count > 0u &&
+        !size_mul_checked(model->transcripts.transcript_count,
+                          sizeof *w->point_exon_rank, &point_bytes)) {
+        return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_WS_SCRATCH_RANGE,
+                    "workspace point cursor capacity overflow");
+    }
 
     w = (struct duckvep_workspace *)calloc(1u, sizeof *w);
     if (w == NULL) {
@@ -404,9 +490,15 @@ duckvep_status_t duckvep_workspace_open(
     }
     w->active = (uint32_t *)calloc(cap, sizeof *w->active);
     w->candidates = (uint32_t *)calloc(cap, sizeof *w->candidates);
-    if (w->active == NULL || w->candidates == NULL) {
+    if (model->transcripts.transcript_count > 0u) {
+        w->point_exon_rank = (uint16_t *)malloc(point_bytes);
+    }
+    if (w->active == NULL || w->candidates == NULL ||
+        (model->transcripts.transcript_count > 0u &&
+         w->point_exon_rank == NULL)) {
         free(w->active);
         free(w->candidates);
+        free(w->point_exon_rank);
         free(w);
         return fail(error, DUCKVEP_ERR_INTERNAL, DVW_WS_OOM,
                     "workspace sweep scratch alloc failed");
@@ -415,9 +507,13 @@ duckvep_status_t duckvep_workspace_open(
     if (st != DUCKVEP_OK) {
         free(w->active);
         free(w->candidates);
+        free(w->point_exon_rank);
         free(w);
         return st;
     }
+    w->model = model;
+    w->point_exon_count = model->transcripts.transcript_count;
+    workspace_point_cursor_reset(w);
     w->active_cap = cap;
     *out_workspace = w;
     return DUCKVEP_OK;
@@ -427,6 +523,7 @@ void duckvep_workspace_close(duckvep_workspace_t *workspace) {
     if (workspace != NULL) {
         free(workspace->active);
         free(workspace->candidates);
+        free(workspace->point_exon_rank);
         workspace_delta_scratch_free(&workspace->delta_scratch);
         free(workspace);
     }
@@ -473,6 +570,7 @@ struct annotate_ctx {
     const duckvep_model_t         *model;
     const duckvep_variant_batch_t *variants;
     const duckvep_options_t       *options;
+    duckvep_workspace_t           *workspace;
     duckvep_delta_scratch_t       *delta_scratch;
     duckvep_workspace_delta_route_stats_t *delta_route_stats;
     duckvep_result_builder_t      *results;
@@ -505,10 +603,19 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
-    duckvep_effect_ctx_fill(tx, &c->model->exons, variant_idx, (size_t)tx_idx,
-                            event.start1, event.end1, event.interbase,
-                            c->options->splice_region_exonic,
-                            c->options->splice_region_intronic, &ectx);
+    if (kind == DUCKVEP_KIND_SNV && c->model->point_ordered[tx_idx]) {
+        duckvep_effect_ctx_fill_point_sorted(
+            tx, &c->model->exons, variant_idx, (size_t)tx_idx,
+            event.start1, c->options->splice_region_exonic,
+            c->options->splice_region_intronic,
+            &c->workspace->point_exon_rank[tx_idx], &ectx);
+    } else {
+        duckvep_effect_ctx_fill(tx, &c->model->exons, variant_idx,
+                                (size_t)tx_idx, event.start1, event.end1,
+                                event.interbase,
+                                c->options->splice_region_exonic,
+                                c->options->splice_region_intronic, &ectx);
+    }
     duckvep_effect_ctx_apply_event(&ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {
         duckvep_sv_effect_t sv = duckvep_sv_effect_fill(&event, &ectx.region_state);
@@ -816,6 +923,10 @@ static duckvep_status_t validate_common_annotate_args(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_WORKSPACE,
                     "workspace is NULL");
     }
+    if (workspace->model != model) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_WS_MODEL,
+                    "workspace belongs to a different model");
+    }
     return DUCKVEP_OK;
 }
 
@@ -868,6 +979,7 @@ duckvep_status_t duckvep_annotate_cursor_open(
     cursor->variants = &cursor->variants_view;
     cursor->options = options;
     cursor->workspace = workspace;
+    workspace_point_run_begin(workspace, variants);
     duckvep_sweep_cursor_init(&cursor->sweep, cursor->variants, &model->transcripts,
                               options->halo, workspace->active, workspace->active_cap,
                               workspace->candidates, workspace->active_cap);
@@ -934,6 +1046,7 @@ duckvep_status_t duckvep_annotate_cursor_fill(
     ctx.model = cursor->model;
     ctx.variants = cursor->variants;
     ctx.options = cursor->options;
+    ctx.workspace = cursor->workspace;
     ctx.delta_scratch = duckvep_workspace_delta_scratch(cursor->workspace);
     ctx.delta_route_stats = cursor->workspace->delta_route_stats_enabled
                               ? &cursor->workspace->delta_route_stats
@@ -1020,6 +1133,10 @@ duckvep_status_t duckvep_annotate_tile(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_WORKSPACE,
                     "workspace is NULL");
     }
+    if (workspace->model != model) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_WS_MODEL,
+                    "workspace belongs to a different model");
+    }
     if (results == NULL) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_RESULTS, "results is NULL");
     }
@@ -1035,12 +1152,14 @@ duckvep_status_t duckvep_annotate_tile(
     ctx.model = model;
     ctx.variants = variants;
     ctx.options = options;
+    ctx.workspace = workspace;
     ctx.delta_scratch = duckvep_workspace_delta_scratch(workspace);
     ctx.delta_route_stats = workspace->delta_route_stats_enabled
                               ? &workspace->delta_route_stats
                               : NULL;
     ctx.results = results;
     ctx.status = DUCKVEP_OK;
+    workspace_point_run_begin(workspace, variants);
 
     /* One cursor step per variant, then a direct per-candidate loop in this TU.
      * annotate_pair is therefore inlineable and a full result buffer stops the
