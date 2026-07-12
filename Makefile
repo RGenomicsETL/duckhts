@@ -56,6 +56,10 @@ configure: venv platform extension_version
 extension_version:
 	@$(VERSION_COMMAND)
 
+# Metadata packaging must observe the current root descriptor even when callers
+# invoke `make release` or `make debug` without a preceding configure step.
+build_extension_with_metadata_debug build_extension_with_metadata_release: extension_version
+
 debug: build_extension_library_debug build_extension_with_metadata_debug
 release: build_extension_library_release build_extension_with_metadata_release
 
