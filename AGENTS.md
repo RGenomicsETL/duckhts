@@ -3,14 +3,20 @@
 
 ## Prologue
 
-Always ask yourself before landing a change what other changes would have made that change easier to land and other changes to land long term.
-Sometimes as needed, you can call into the user or a PI/GPT/reviewer fellow for ideas and task to accomplish and ask them this question with current state of the project, avenues you see. Having several perspectives and long term maintenability is important ! Ambiguities should be avoided. Code sprawl and bloat too. Allignmment among actors is a must.
+Before landing a change, ask which invariant, interface, test, or shared helper would make
+this change and the next one easier to own. Avoid ambiguity, duplicate authorities, code
+sprawl, and planning artifacts that outlive their decision.
 
-write C as a BSD kernel programmer rather than a Java programmer that failed upwards
-write R as a r-lib programmer rather than a Python programmer that failed upwards
+Read `ARCHITECTURE.md` for the project thesis and `STYLE.md` for the repository-specific
+C, R, and SQL discipline.
 
 ## Project Goal
-DuckDB extension that reads HTS file formats (VCF/BCF, BAM/CRAM, FASTA/FASTQ, BED, GTF/GFF, tabix) via htslib, with coverage/interval analytics for CNV and QC workflows. The R package (`Rduckhts`) is on CRAN.
+
+DuckHTS is a library-first C extension that makes sequencing data and genomics algorithms
+composable in DuckDB. htslib supplies HTS transport and format semantics; reusable native
+kernels supply coverage, interval, sequence, normalization, and consequence mechanics;
+SQL supplies planning, joins, supplementary annotation, provenance, and explainable
+clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
 
 ## Source Layout
 - Extension sources: `src/` (C source), `src/include/` (headers), SIMD backends in `src/simd/`.
@@ -18,31 +24,23 @@ DuckDB extension that reads HTS file formats (VCF/BCF, BAM/CRAM, FASTA/FASTQ, BE
 - R package: `r/Rduckhts/`.
 - Benchmark drivers and rendered reports: `scripts/`, `benchmarks/`.
 - Design notes and planning docs: `design/`; start with `design/README.md` to identify current vs historical notes.
+- Binding architecture and style: `ARCHITECTURE.md` and `STYLE.md`.
 - Vendored sources: `third_party/`.
 - Upstream mirrors / pinned rewrite references: `.sync/` when present.
 - `CLAUDE.md` is a symlink to `AGENTS.md`; edit `AGENTS.md` only.
 
 ## Agent Working Instructions
-1. Read relevant source files before making changes.
+1. Read `ARCHITECTURE.md`, `STYLE.md`, and the relevant source files before making changes.
 2. Check existing SQL and R tests to understand expected behavior.
 3. When mirroring external tool behavior, consult `.sync/` mirrors before secondary sources.
 4. Keep changes focused. Do not create branches, commits, large generated diffs, or workflow sprawl unless explicitly requested.
 5. Preserve existing public APIs unless the task explicitly asks for an API change.
 6. When referring to public GitHub issues or PRs, use full GitHub URLs.
 
-## Current Public Surface Snapshot
-`functions.yaml` is the source of truth. As of this cleanup, DuckHTS includes:
+## Public Surface
 
-- readers: `read_bcf`, `read_bam`, `read_fasta`, `read_fastq`, `read_bed`, `read_gff`, `read_gtf`, `read_tabix`, `read_pileup`;
-- metadata/index helpers: `read_hts_header`, `read_hts_index*`, `fasta_index`, `bam_index`, `bcf_index`, `tabix_index`;
-- compression helpers: `bgzip`, `bgunzip`;
-- coverage/interval primitives: `bam_bin_counts`, `duckhts_bam_bed_coverage`, `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `fasta_nuc`, cgranges registry/overlap functions;
-- variant/key/liftover/normalization helpers: VariantKey, RegionKey, `bcftools_liftover`, `duckdb_liftover`, `bcftools_norm_row`, `duckhts_bcftools_norm`, `bcftools_score`, `bcftools_munge_row`, `duckdb_munge*`;
-- sequence/SIMD helpers: `seq_*`, `duckhts_simd_*`, SAM flag and CIGAR helpers;
-- converter helpers: `duckhts_*_convert_parquet_sql` and R wrappers for BCF/BAM/GFF/tabix Parquet export;
-- multi-file helper: `hts_union_query` for generated `UNION ALL BY NAME` reader queries.
-
-If this list disagrees with `functions.yaml`, update this section or delete detail here in favor of the catalog.
+`functions.yaml` is the only hand-maintained public SQL catalog. Do not duplicate its
+function inventory in agent instructions or design notes.
 
 ## Changelog — Mandatory
 Every user-visible change must update **both**:
@@ -64,19 +62,11 @@ R package changelog scope is strict:
 - Keep benchmark `.Rmd` / `.md` files under `benchmarks/`, not the repo root.
 - Design docs must start with a status line that says whether they are current implementation guidance, open design, future proposal, or historical review.
 
-## Design Doc Map
-Read `design/README.md` first. Important current pointers:
+## Design Notes
 
-- `design/better_scans.md`: open scan-planning work; `scan_mode := 'sequential'` is implemented, weighted contig claiming and BCF/VCF offset semantics remain open.
-- `design/coverage_memory_footprint.md`: current memory backlog for coverage readers; `duckhts_bam_bed_coverage` tiling landed, mosdepth tiling and `bam_bin_counts` streaming remain open.
-- `design/duckhts_mosdepth.md`: mosdepth compatibility contract and remaining backlog for the implemented `duckhts_mosdepth(...)` rewrite.
-- `design/duckhts_parquet_lake.md`: implemented Parquet converter-helper surface plus future DuckLake/native-writer design.
-- `design/fastq_throughput.md`: FASTQ throughput investigation; direct htslib-transport parser remains future work.
-- `design/multireading.md`: multi-file reading guidance centered on shipped `hts_union_query(...)` and generated `UNION ALL BY NAME` queries.
-- `design/simd_dispatch_matrix.md` and `design/simd_future_kernel_proposals.md`: SIMD dispatch contract and future kernel ideas.
-- `design/duckdb_c_api_deprecation_scan_2026-04-21.md`: historical deprecation scan; rerun after DuckDB header/runtime bumps.
-
-Do not cite stale or nonexistent design files as required reading.
+Read `design/README.md`. Keep a note only while it defines a live contract or a concrete
+unresolved choice. Code and tests replace completed implementation plans; git history and
+GitHub issues retain the path and backlog.
 
 ## Build and CI Rules
 - Build scripts must be deterministic and non-interactive.
@@ -202,7 +192,8 @@ Wasm support must not be treated like native Linux:
 `FILE_OFFSET UBIGINT` in `read_bam()` exposes the BGZF virtual offset after each record. Use `ORDER BY FILE_OFFSET` in window functions to reproduce exact BAM file order for streaming dedup. The SQL replication of WisecondorX larp/larp2 is in `scripts/wisecondorx_convert_conformance.py`; consult the relevant upstream/reference notes before changing these semantics.
 
 ## Style
-- Keep edits minimal and focused.
-- Prefer small C helpers and explicit ownership over object-like C sprawl.
-- Write R wrappers in the style already used in `r/Rduckhts/R/`.
-- Do not make benchmark superiority claims beyond measured, documented workloads.
+
+Follow `STYLE.md`. In particular: keep ownership explicit, return errors instead of
+aborting DuckDB, bound input-driven allocation, avoid fake object systems and future-only
+interfaces, write R as R, preserve SQL composability, and make no benchmark claim beyond a
+measured documented workload.
