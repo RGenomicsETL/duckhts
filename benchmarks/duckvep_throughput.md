@@ -19,6 +19,7 @@ density.
 | run_date   | revision | workload                      | threads | variants   | passes | min_seconds | median_seconds | max_seconds | variants_per_second | ns_per_variant | cpu                                 |
 |:-----------|:---------|:------------------------------|--------:|:-----------|-------:|------------:|---------------:|------------:|--------------------:|---------------:|:------------------------------------|
 | 2026-07-11 | 8cc22218 | fixture_one_transcript_sorted |       1 | 10,000,000 |      3 |       3.225 |          3.334 |       3.371 |             2999400 |          333.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-13 | 87f03a2a | fixture_one_transcript_sorted |       1 | 10,000,000 |      3 |       2.812 |          2.824 |       2.825 |             3541076 |          282.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
 
 Each pass consumes every generated input and checks output cardinality
 and a consequence-string checksum. Rows with different workload, thread
