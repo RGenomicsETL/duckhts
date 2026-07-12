@@ -99,6 +99,30 @@ expect_identical(annotation$status, "supported")
 expect_equal(annotation$cds_position, 5)
 expect_equal(annotation$protein_position, 2)
 
+reference_mismatch <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.status, a.reason FROM unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, 124::UBIGINT, 'A', 'C', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_identical(reference_mismatch$status, "unresolved")
+expect_identical(reference_mismatch$reason, "reference_mismatch")
+
+frameshift <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.protein_position, a.reference_amino_acid,",
+    "a.alternate_amino_acid FROM unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, 124::UBIGINT, 'T', 'TC', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_equal(frameshift$protein_position, 2)
+expect_true(is.na(frameshift$reference_amino_acid))
+expect_true(is.na(frameshift$alternate_amino_acid))
+
 prepared_events <- dbGetQuery(
   con,
   paste(

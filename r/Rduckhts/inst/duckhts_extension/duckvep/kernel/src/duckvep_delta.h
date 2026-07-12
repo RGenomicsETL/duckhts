@@ -42,6 +42,7 @@ typedef struct duckvep_sequence_delta {
     uint8_t start_lost, frameshift, inframe_deletion, inframe_insertion;
     uint8_t protein_altering;
     uint8_t valid;                          /* 1 when the delta is filled */
+    uint8_t sequence_status;                /* duckvep_sequence_status_t  */
 } duckvep_sequence_delta_t;
 
 /* One or more projected CDS edits in translation orientation. A single small

@@ -675,6 +675,30 @@ duckvep_scalar_format_region(uint32_t region, char *buffer, size_t size)
 	return length != 0;
 }
 
+static const char *
+duckvep_scalar_sequence_reason(uint8_t status)
+{
+	switch ((duckvep_sequence_status_t)status) {
+	case DUCKVEP_SEQUENCE_MISSING:
+		return "missing_sequence";
+	case DUCKVEP_SEQUENCE_AMBIGUOUS:
+		return "ambiguous_sequence";
+	case DUCKVEP_SEQUENCE_REFERENCE_MISMATCH:
+		return "reference_mismatch";
+	case DUCKVEP_SEQUENCE_NON_CONTIGUOUS_EDIT:
+		return "non_contiguous_cds_edit";
+	case DUCKVEP_SEQUENCE_INVALID_PROJECTION:
+		return "invalid_model_projection";
+	case DUCKVEP_SEQUENCE_INTERNAL_CAPACITY:
+		return "internal_capacity_error";
+	case DUCKVEP_SEQUENCE_NOT_APPLICABLE:
+	case DUCKVEP_SEQUENCE_RESOLVED:
+	case DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT:
+	default:
+		return "unsupported_compound_consequence";
+	}
+}
+
 static int
 duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
@@ -772,7 +796,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 		}
 		for (source = begin; source < end; source++, output_count++) {
 			const duckvep_consequence_t *result;
-			const char *status;
+			const char *status, *reason;
 			char consequence[512], region[128], amino_acid[2];
 
 			result = &state->results[source];
@@ -798,13 +822,15 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			    "unresolved" : "supported";
 			duckdb_vector_assign_string_element(vectors[5],
 			    (idx_t)output_count, status);
-			if (status[0] == 'u')
+			if (status[0] == 'u') {
+				reason = duckvep_scalar_sequence_reason(
+				    result->sequence_status);
 				duckdb_vector_assign_string_element(vectors[6],
-				    (idx_t)output_count,
-				    "sequence_predicate_unresolved");
-			else
+				    (idx_t)output_count, reason);
+			} else {
 				duckvep_scalar_set_null(vectors[6],
 				    (idx_t)output_count);
+			}
 			if (result->cdna_pos >= 0)
 				cdna_positions[output_count] =
 				    (uint64_t)result->cdna_pos;
@@ -817,21 +843,26 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			else
 				duckvep_scalar_set_null(vectors[8],
 				    (idx_t)output_count);
-			if (result->protein_pos >= 0) {
+			if (result->protein_pos >= 0)
 				protein_positions[output_count] =
 				    (uint64_t)result->protein_pos;
-				amino_acid[1] = '\0';
+			else
+				duckvep_scalar_set_null(vectors[9],
+				    (idx_t)output_count);
+			amino_acid[1] = '\0';
+			if (result->aa_ref != 0u) {
 				amino_acid[0] = (char)result->aa_ref;
 				duckdb_vector_assign_string_element(vectors[10],
 				    (idx_t)output_count, amino_acid);
+			} else {
+				duckvep_scalar_set_null(vectors[10],
+				    (idx_t)output_count);
+			}
+			if (result->aa_alt != 0u) {
 				amino_acid[0] = (char)result->aa_alt;
 				duckdb_vector_assign_string_element(vectors[11],
 				    (idx_t)output_count, amino_acid);
 			} else {
-				duckvep_scalar_set_null(vectors[9],
-				    (idx_t)output_count);
-				duckvep_scalar_set_null(vectors[10],
-				    (idx_t)output_count);
 				duckvep_scalar_set_null(vectors[11],
 				    (idx_t)output_count);
 			}

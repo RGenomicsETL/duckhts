@@ -912,6 +912,9 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     }
     row->region_mask = ectx.region;
     row->impact = (uint8_t)duckvep_so_impact(cmask);
+    row->sequence_status = cds_delta_attempted
+        ? delta.sequence_status
+        : (uint8_t)DUCKVEP_SEQUENCE_NOT_APPLICABLE;
     if (delta.valid) {
         row->cdna_pos = delta.cdna_pos;
         row->cds_pos = delta.cds_pos;

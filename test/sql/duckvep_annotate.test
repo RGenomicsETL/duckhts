@@ -200,13 +200,36 @@ SELECT loaded FROM duckvep_model_load(
 ----
 1
 
-query TT
-SELECT annotation.consequence, annotation.status
+query TTT
+SELECT annotation.consequence, annotation.status, annotation.reason
 FROM unnest(duckvep_annotate(
   'structural', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
-coding_sequence_variant	unresolved
+coding_sequence_variant	unresolved	missing_sequence
+
+# A REF disagreement with the prepared CDS is auditable and does not become a
+# generic unsupported-sequence result.
+query TTT
+SELECT annotation.consequence, annotation.status, annotation.reason
+FROM unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, 124::UBIGINT, 'A', 'C', 0::UBIGINT
+)) AS u(annotation);
+----
+coding_sequence_variant	unresolved	reference_mismatch
+
+# A protein coordinate is useful for a frameshift, but the compact row has no
+# scalar one-letter amino-acid pair. Absence is NULL, not an empty string.
+query TIII
+SELECT annotation.consequence,
+       (annotation.protein_position IS NOT NULL)::INTEGER,
+       (annotation.reference_amino_acid IS NULL)::INTEGER,
+       (annotation.alternate_amino_acid IS NULL)::INTEGER
+FROM unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, 124::UBIGINT, 'T', 'TC', 0::UBIGINT
+)) AS u(annotation);
+----
+frameshift_variant	1	1	1
 
 # NMD_transcript_variant is the VEP biotype predicate: it co-emits for a
 # variant inside a transcript already curated as nonsense_mediated_decay.

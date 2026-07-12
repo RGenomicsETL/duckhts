@@ -4259,9 +4259,12 @@ TEST annotate_structural_known_scene(void) {
         if (i == 2u || i == 5u) {
             ASSERT((rows[i].flags &
                     (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED) != 0u);
+            ASSERT_EQ(DUCKVEP_SEQUENCE_MISSING, rows[i].sequence_status);
         } else {
             ASSERT_EQ(0u, rows[i].flags &
                          (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED);
+            ASSERT_EQ(DUCKVEP_SEQUENCE_NOT_APPLICABLE,
+                      rows[i].sequence_status);
         }
     }
 
@@ -4752,6 +4755,7 @@ TEST annotate_codon_snv_known_scene(void) {
         ASSERT_EQ(exp_protein[i], rows[i].protein_pos);
         ASSERT_EQ((uint8_t)exp_aa_ref[i], rows[i].aa_ref);
         ASSERT_EQ((uint8_t)exp_aa_alt[i], rows[i].aa_alt);
+        ASSERT_EQ(DUCKVEP_SEQUENCE_RESOLVED, rows[i].sequence_status);
     }
 
     duckvep_workspace_close(ws);
@@ -4935,6 +4939,8 @@ TEST annotate_codon_ref_mismatch_falls_back(void) {
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE), rows[0].consequence_mask);
     ASSERT_EQ(-1, rows[0].cds_pos);      /* not refined */
     ASSERT_EQ(0, (int)rows[0].aa_ref);
+    ASSERT_EQ(DUCKVEP_SEQUENCE_REFERENCE_MISMATCH,
+              rows[0].sequence_status);
 
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
