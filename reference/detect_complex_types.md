@@ -32,7 +32,7 @@ library(duckdb)
 
 con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
 #> duckdb is keeping downloaded extensions in a temporary directory:
-#> ℹ /tmp/RtmpcfJJIJ/duckdb/extensions
+#> ℹ /tmp/RtmpYiPohX/duckdb/extensions
 #> This is removed when the R session ends, so extensions are re-downloaded each session.
 #> ℹ To keep them, point `options(duckdb.extension_directory =)` or the `DUCKDB_EXTENSION_DIRECTORY` environment variable at a permanent path.
 rduckhts_load(con)
