@@ -1,5 +1,9 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- expose specific DuckVEP unresolved reasons through the bundled extension and return NULL, rather than empty strings, when a protein-positioned frameshift or in-frame indel has no scalar one-letter amino-acid value
+- reject malformed bundled DuckVEP resident models at load time when transcript/exon/cDNA/CDS/phase/prepared-sequence coordinates disagree; the SQL loader and standalone C engine now share the same final validator
+- make bundled DuckVEP intergenic output fail closed for partial resident models. Ordinary `duckvep_model_load(...)` calls report `no_feature_in_loaded_model` as unresolved; the named `transcript_coverage_complete := TRUE` parameter requires contig lengths before returning supported `intergenic_variant`, and rejects coordinates beyond those lengths
+- fix bundled `duckvep_annotate(...)` handling of padded small variants: whole-allele padding no longer turns a one-base substitution into an MNV, and VCF position-1 insertions/deletions with a following padding base are accepted
 - speed up the bundled DuckVEP engine for coordinate-sorted SNVs by retaining compact per-transcript exon cursors across adjacent DuckDB chunks and by avoiding full Sequence Ontology scans for the common single-consequence rows; this does not change the existing MNV/indel/SV span classifiers or grouped-haplotype edit core
 - bundled DuckVEP annotation now emits VEP-116 `NMD_transcript_variant` for variants inside transcripts imported with the `nonsense_mediated_decay` biotype
 - bundle the DuckVEP SQL surface: `duckvep_model_load(...)` loads and validates one of several named resident transcript models from committed DuckDB relations, `duckvep_annotate(...)` returns explicit per-transcript consequence rows for biallelic small variants, and `duckvep_model_drop(...)` releases a model. Add an end-to-end DBI tinytest using the bundled extension and a sequence-backed coding transcript

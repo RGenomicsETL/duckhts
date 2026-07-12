@@ -12,13 +12,14 @@ is append-only by source revision, corpus, and resident model.
 
 | revision | corpus    | model        | oracle    | pairs | exact   | unresolved | resolved_disagreements | resolved_error_upper_95 |
 |:---------|:----------|:-------------|:----------|------:|:--------|-----------:|-----------------------:|:------------------------|
-| 8cc22218 | witnesses | differential | VEP 116.0 |   242 | 203/242 |         33 |                     15 | 11.56%                  |
+| 87f03a2a | witnesses | differential | VEP 116.0 |   242 | 203/242 |         33 |                     15 | 11.56%                  |
 
 ## History
 
 | run_date   | source_revision | corpus    | model        |   n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
 |:-----------|:----------------|:----------|:-------------|----:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
 | 2026-07-11 | 8cc22218        | witnesses | differential | 242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
+| 2026-07-13 | 87f03a2a        | witnesses | differential | 242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
 
 ## Randomized pure-C properties
 
@@ -28,7 +29,8 @@ duplicate count. A failed suite does not append rows.
 
 | run_date   | source_revision | seed               | randomized_targets | trials    | passed    | failed | duplicates | suite_tests | suite_assertions | suite_elapsed_seconds | compiler                                   |
 |:-----------|:----------------|:-------------------|-------------------:|:----------|:----------|-------:|-----------:|------------:|:-----------------|----------------------:|:-------------------------------------------|
-| 2026-07-11 | 8cc22218        | 0xd0c0ffee12345678 |                 39 | 3,800,500 | 3,800,500 |      0 |          0 |         133 | 189,981          |                  15.4 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-11 | 8cc22218        | 0xd0c0ffee12345678 |                 39 | 3,800,500 | 3,800,500 |      0 |          0 |         133 | 189,981          |                15.400 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-13 | 87f03a2a        | 0xd0c0ffee12345678 |                 40 | 3,900,500 | 3,900,500 |      0 |          0 |         139 | 190,024          |                18.541 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                 | trials  | passed  | failed | skipped | duplicates |
 |:-----------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
@@ -36,8 +38,8 @@ duplicate count. A failed suite does not append rows.
 | annotate cursor cross-codon MNV route == tile                          | 100,000 | 100,000 | 0      | 0       | 0          |
 | annotate cursor DEL route == tile under output splits                  | 100,000 | 100,000 | 0      | 0       | 0          |
 | annotate cursor INS route == tile under output splits                  | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor MNV route == tile under output splits                  | 100,000 | 100,000 | 0      | 0       | 0          |
 | annotate cursor output splits == one annotate_tile                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor padded SNV == tile under output splits                 | 100,000 | 100,000 | 0      | 0       | 0          |
 | annotate_tile == sweep + classify + structural-SO composition          | 100,000 | 100,000 | 0      | 0       | 0          |
 | annotate_tile codon refinement == coding-SNV kernel oracle             | 100,000 | 100,000 | 0      | 0       | 0          |
 | annotate_tile codon-aligned in-frame deletion == CDS-position oracle   | 100,000 | 100,000 | 0      | 0       | 0          |
@@ -60,11 +62,12 @@ duplicate count. A failed suite does not append rows.
 | haplotype blocks preserve every frame and same-codon interaction       | 100,000 | 100,000 | 0      | 0       | 0          |
 | multi-edit CDS haplotype apply == left-to-right rebuild oracle         | 100,000 | 100,000 | 0      | 0       | 0          |
 | region mask structural invariants                                      | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta annotation wrapper MNV == legacy                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta annotation wrapper MNV == direct shape                  | 100,000 | 100,000 | 0      | 0       | 0          |
 | sequence delta scratch INDEL == in-frame delins oracle                 | 100,000 | 100,000 | 0      | 0       | 0          |
 | sequence delta scratch MNV == single-codon oracle                      | 100,000 | 100,000 | 0      | 0       | 0          |
 | sequence delta scratch two-codon MNV window == codon-window oracle     | 100,000 | 100,000 | 0      | 0       | 0          |
 | sequence-backed SNV codon edit == codon-slice edit oracle              | 100,000 | 100,000 | 0      | 0       | 0          |
+| sorted point cursor classifier == exhaustive exon/gap scans            | 100,000 | 100,000 | 0      | 0       | 0          |
 | sweep candidate set == brute-force candidate set                       | 100,000 | 100,000 | 0      | 0       | 0          |
 | tile_controller_preserves_sorted_stream                                | 500     | 500     | 0      | 0       | 0          |
 | variant CDS edit builder == direct CDS splice oracle                   | 100,000 | 100,000 | 0      | 0       | 0          |

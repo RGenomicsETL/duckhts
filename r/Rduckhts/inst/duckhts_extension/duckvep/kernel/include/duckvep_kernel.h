@@ -30,7 +30,7 @@ extern "C" {
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
 #define DUCKVEP_KERNEL_VERSION_MINOR 5
-#define DUCKVEP_KERNEL_VERSION_PATCH 0
+#define DUCKVEP_KERNEL_VERSION_PATCH 1
 
 /* --------------------------------------------------------------- status -- */
 
@@ -216,6 +216,18 @@ typedef enum duckvep_consequence_flag {
     DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0
 } duckvep_consequence_flag_t;
 
+typedef enum duckvep_sequence_status {
+    DUCKVEP_SEQUENCE_NOT_APPLICABLE = 0,
+    DUCKVEP_SEQUENCE_RESOLVED = 1,
+    DUCKVEP_SEQUENCE_MISSING = 2,
+    DUCKVEP_SEQUENCE_AMBIGUOUS = 3,
+    DUCKVEP_SEQUENCE_REFERENCE_MISMATCH = 4,
+    DUCKVEP_SEQUENCE_NON_CONTIGUOUS_EDIT = 5,
+    DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT = 6,
+    DUCKVEP_SEQUENCE_INVALID_PROJECTION = 7,
+    DUCKVEP_SEQUENCE_INTERNAL_CAPACITY = 8
+} duckvep_sequence_status_t;
+
 typedef struct duckvep_consequence {
     uint32_t variant_idx;
     uint32_t tx_idx;
@@ -226,6 +238,7 @@ typedef struct duckvep_consequence {
     uint32_t flags;
 
     uint8_t  impact;               /* duckvep_impact_t                         */
+    uint8_t  sequence_status;      /* duckvep_sequence_status_t                */
     int32_t  cdna_pos;
     int32_t  cds_pos;
     int32_t  protein_pos;

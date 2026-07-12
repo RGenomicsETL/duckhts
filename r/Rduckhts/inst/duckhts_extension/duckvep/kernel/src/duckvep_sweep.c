@@ -155,7 +155,10 @@ int duckvep_sweep_cursor_next(
     event_start = variants->pos1[cursor->vi];
     point_hi = sat_add_u32(event_start, cursor->halo);
     span_hi = sat_add_u32(
-        duckvep_event_effective_end1_at(variants, cursor->vi), cursor->halo);
+        cursor->events != NULL
+            ? cursor->events[cursor->vi].end1
+            : duckvep_event_effective_end1_at(variants, cursor->vi),
+        cursor->halo);
 
     /* Persistent point frontier. Event starts are monotone, so each transcript is
      * admitted once and an expired transcript can never overlap a later event. */

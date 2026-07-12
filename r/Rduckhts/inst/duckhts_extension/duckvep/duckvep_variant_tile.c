@@ -5,6 +5,7 @@
  * single row always fits. Run-validation state persists across reset_rows.
  */
 #include "duckvep_variant_tile.h"
+#include "kernel/src/duckvep_event.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -45,28 +46,6 @@ struct duckvep_variant_tile {
 
     char *error; /* owned, last hard validation error */
 };
-
-static int tile_indel_shape_valid(const char *ref, size_t ref_len,
-                                  const char *alt, size_t alt_len) {
-    size_t prefix = 0u;
-    size_t suffix = 0u;
-    size_t ref_rem;
-    size_t alt_rem;
-    size_t ref_diff_len;
-    size_t alt_diff_len;
-
-    if (ref == NULL || alt == NULL || ref_len == 0u || alt_len == 0u) return 0;
-    while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) prefix++;
-    ref_rem = ref_len - prefix;
-    alt_rem = alt_len - prefix;
-    while (suffix < ref_rem && suffix < alt_rem &&
-           ref[ref_len - 1u - suffix] == alt[alt_len - 1u - suffix]) {
-        suffix++;
-    }
-    ref_diff_len = ref_len - prefix - suffix;
-    alt_diff_len = alt_len - prefix - suffix;
-    return ref_diff_len > 0u && alt_diff_len > 0u && ref_diff_len != alt_diff_len;
-}
 
 static void tile_set_error(duckvep_variant_tile_t *t, const char *msg) {
     size_t n;
@@ -167,6 +146,7 @@ duckvep_tile_status_t duckvep_variant_tile_append_event(
     uint8_t kind, uint8_t sv_type, uint8_t copy_change,
     const char *ref, size_t ref_len, const char *alt, size_t alt_len,
     const char *variant_id, size_t variant_id_len) {
+    duckvep_event_t event;
     size_t i;
 
     if (t == NULL) return DUCKVEP_TILE_INVALID;
@@ -181,47 +161,15 @@ duckvep_tile_status_t duckvep_variant_tile_append_event(
         tile_set_error(t, "REF/ALT length exceeds uint16 storage");
         return DUCKVEP_TILE_INVALID;
     }
-    if (kind == (uint8_t)DUCKVEP_KIND_SNV) {
-        if (ref_len != 1u || alt_len != 1u || end1 != pos1) {
-            tile_set_error(t, "SNV requires ref_len==1, alt_len==1, end1==pos1");
-            return DUCKVEP_TILE_INVALID;
-        }
-    } else if (kind == (uint8_t)DUCKVEP_KIND_MNV) {
-        uint32_t span;
-        if (ref_len < 2u || ref_len != alt_len) {
-            tile_set_error(t, "MNV requires equal REF/ALT lengths >=2");
-            return DUCKVEP_TILE_INVALID;
-        }
-        span = (uint32_t)ref_len - 1u;
-        if (pos1 > UINT32_MAX - span || end1 != pos1 + span) {
-            tile_set_error(t, "MNV requires end1==pos1+ref_len-1");
-            return DUCKVEP_TILE_INVALID;
-        }
-    } else if (kind == (uint8_t)DUCKVEP_KIND_INS) {
-        if (ref_len != 1u || alt_len <= ref_len || end1 != pos1) {
-            tile_set_error(t, "INS requires VCF anchor ref_len==1, alt_len>ref_len, end1==pos1");
-            return DUCKVEP_TILE_INVALID;
-        }
-    } else if (kind == (uint8_t)DUCKVEP_KIND_DEL) {
-        uint32_t span;
-        if (alt_len != 1u || ref_len <= alt_len) {
-            tile_set_error(t, "DEL requires VCF anchor alt_len==1, ref_len>alt_len");
-            return DUCKVEP_TILE_INVALID;
-        }
-        span = (uint32_t)ref_len - 1u;
-        if (pos1 > UINT32_MAX - span || end1 != pos1 + span) {
-            tile_set_error(t, "DEL requires end1==pos1+ref_len-1");
-            return DUCKVEP_TILE_INVALID;
-        }
-    } else if (kind == (uint8_t)DUCKVEP_KIND_INDEL) {
-        uint32_t span;
-        if (ref_len == 0u || alt_len == 0u || !tile_indel_shape_valid(ref, ref_len, alt, alt_len)) {
-            tile_set_error(t, "INDEL requires a non-empty unequal REF/ALT differing region");
-            return DUCKVEP_TILE_INVALID;
-        }
-        span = (uint32_t)ref_len - 1u;
-        if (pos1 > UINT32_MAX - span || end1 != pos1 + span) {
-            tile_set_error(t, "INDEL requires end1==pos1+ref_len-1");
+    if (kind <= (uint8_t)DUCKVEP_KIND_MNV) {
+        if (ref_len == 0u || alt_len == 0u ||
+            !duckvep_event_prepare_small(pos1, (const uint8_t *)ref,
+                                         (uint16_t)ref_len,
+                                         (const uint8_t *)alt,
+                                         (uint16_t)alt_len, &event) ||
+            event.raw_end1 != end1 || event.kind != kind) {
+            tile_set_error(t,
+                "small-variant kind or raw span is inconsistent with REF/ALT");
             return DUCKVEP_TILE_INVALID;
         }
     } else if (kind == (uint8_t)DUCKVEP_KIND_SV) {

@@ -3,6 +3,7 @@
 DUCKDB_EXTENSION_EXTERN
 
 #include "duckvep_model.h"
+#include "kernel/src/duckvep_event.h"
 #include "kernel/include/duckvep_kernel.h"
 #include "kernel/include/duckvep_so.h"
 
@@ -34,6 +35,7 @@ typedef struct duckvep_scalar_state {
 	uint8_t *variant_kinds;
 	uint8_t *sv_types;
 	uint8_t *copy_changes;
+	uint8_t *transcript_coverage_complete;
 	uint8_t *allele_bytes;
 	size_t variant_capacity;
 	size_t allele_capacity;
@@ -65,6 +67,7 @@ duckvep_scalar_variant_reserve(duckvep_scalar_state_t *state, size_t needed)
 	DUCKVEP_SCALAR_VARIANT_RESIZE(variant_kinds);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(sv_types);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(copy_changes);
+	DUCKVEP_SCALAR_VARIANT_RESIZE(transcript_coverage_complete);
 #undef DUCKVEP_SCALAR_VARIANT_RESIZE
 	state->variant_capacity = capacity;
 	return 1;
@@ -142,6 +145,7 @@ duckvep_scalar_state_destroy(void *pointer)
 	free(state->variant_kinds);
 	free(state->sv_types);
 	free(state->copy_changes);
+	free(state->transcript_coverage_complete);
 	free(state->allele_bytes);
 	free(state->results);
 	free(state);
@@ -256,44 +260,19 @@ duckvep_scalar_select_model(duckvep_scalar_state_t *state,
 }
 
 static int
-duckvep_scalar_simple_kind(const uint8_t *reference, uint16_t reference_length,
+duckvep_scalar_simple_kind(uint32_t position,
+	const uint8_t *reference, uint16_t reference_length,
 	const uint8_t *alternate, uint16_t alternate_length, uint8_t *kind)
 {
-	uint16_t prefix, suffix, reference_remaining, alternate_remaining;
-	uint16_t reference_difference, alternate_difference;
+	duckvep_event_t event;
 
 	if (reference == NULL || alternate == NULL || kind == NULL ||
 	    reference_length == 0 || alternate_length == 0)
 		return 0;
-	prefix = 0;
-	while (prefix < reference_length && prefix < alternate_length &&
-	    reference[prefix] == alternate[prefix])
-		prefix++;
-	reference_remaining = (uint16_t)(reference_length - prefix);
-	alternate_remaining = (uint16_t)(alternate_length - prefix);
-	suffix = 0;
-	while (suffix < reference_remaining && suffix < alternate_remaining &&
-	    reference[reference_length - suffix - 1] ==
-	    alternate[alternate_length - suffix - 1])
-		suffix++;
-	reference_difference = (uint16_t)(reference_length - prefix - suffix);
-	alternate_difference = (uint16_t)(alternate_length - prefix - suffix);
-	if (reference_difference == 0 && alternate_difference == 0)
+	if (!duckvep_event_prepare_small(position, reference, reference_length,
+	    alternate, alternate_length, &event))
 		return 0;
-	if (reference_length == alternate_length) {
-		*kind = reference_length == 1 ? DUCKVEP_KIND_SNV :
-		    DUCKVEP_KIND_MNV;
-		return 1;
-	}
-	if (prefix != 0 && reference_difference == 0) {
-		*kind = DUCKVEP_KIND_INS;
-		return 1;
-	}
-	if (prefix != 0 && alternate_difference == 0) {
-		*kind = DUCKVEP_KIND_DEL;
-		return 1;
-	}
-	*kind = DUCKVEP_KIND_INDEL;
+	*kind = event.kind;
 	return 1;
 }
 
@@ -389,7 +368,8 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 		    state->alternate_offsets[row],
 		    duckdb_string_t_data(&alternates[row]),
 		    state->alternate_lengths[row]) ||
-		    !duckvep_scalar_simple_kind(state->allele_bytes +
+		    !duckvep_scalar_simple_kind(state->positions[row],
+		    state->allele_bytes +
 		    state->reference_offsets[row], state->reference_lengths[row],
 		    state->allele_bytes + state->alternate_offsets[row],
 		    state->alternate_lengths[row], &state->variant_kinds[row])) {
@@ -418,16 +398,28 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 }
 
 static int
-duckvep_scalar_model_has_region(const duckvep_owned_model_t *model,
-	uint16_t seq_region)
+duckvep_scalar_model_region(const duckvep_owned_model_t *model,
+	uint16_t seq_region, uint32_t *sequence_length)
 {
-	size_t index;
+	size_t begin, end;
 
-	for (index = 0; index < model->known_seq_region_count; index++) {
-		if (model->known_seq_regions[index] == seq_region)
-			return 1;
+	begin = 0;
+	end = model->known_seq_region_count;
+	while (begin < end) {
+		size_t middle;
+
+		middle = begin + (end - begin) / 2;
+		if (model->known_seq_regions[middle] < seq_region)
+			begin = middle + 1;
+		else
+			end = middle;
 	}
-	return 0;
+	if (begin >= model->known_seq_region_count ||
+	    model->known_seq_regions[begin] != seq_region)
+		return 0;
+	if (sequence_length != NULL)
+		*sequence_length = model->sequence_lengths[begin];
+	return 1;
 }
 
 static int
@@ -516,6 +508,8 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 	duckvep_error_t kernel_error;
 	duckvep_status_t status;
 	uint32_t sweep_distance;
+	uint32_t sequence_length;
+	size_t variant;
 
 	if (distance > UINT32_MAX) {
 		duckvep_sql_set_error(error, error_size,
@@ -527,11 +521,20 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 	 * This keeps the cgranges seed and avoids restarting at the first transcript
 	 * for every exact-position DuckDB vector. */
 	sweep_distance = distance == 0 ? 1u : (uint32_t)distance;
-	if (!duckvep_scalar_model_has_region(&state->entry->model,
-	    batch->chrom_id[begin])) {
+	if (!duckvep_scalar_model_region(&state->entry->model,
+	    batch->chrom_id[begin], &sequence_length)) {
 		duckvep_sql_set_error(error, error_size,
 		    "duckvep_annotate: seq_region is absent from the loaded model");
 		return 0;
+	}
+	for (variant = begin; variant < begin + count; variant++) {
+		state->transcript_coverage_complete[variant] = (uint8_t)
+		    state->entry->model.transcript_coverage_complete;
+		if (sequence_length != 0 && batch->end1[variant] > sequence_length) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate: variant span exceeds sequence-region length");
+			return 0;
+		}
 	}
 	if (state->workspace == NULL) {
 		state->workspace_cache = duckvep_registry_workspace_take(
@@ -672,6 +675,30 @@ duckvep_scalar_format_region(uint32_t region, char *buffer, size_t size)
 	return length != 0;
 }
 
+static const char *
+duckvep_scalar_sequence_reason(uint8_t status)
+{
+	switch ((duckvep_sequence_status_t)status) {
+	case DUCKVEP_SEQUENCE_MISSING:
+		return "missing_sequence";
+	case DUCKVEP_SEQUENCE_AMBIGUOUS:
+		return "ambiguous_sequence";
+	case DUCKVEP_SEQUENCE_REFERENCE_MISMATCH:
+		return "reference_mismatch";
+	case DUCKVEP_SEQUENCE_NON_CONTIGUOUS_EDIT:
+		return "non_contiguous_cds_edit";
+	case DUCKVEP_SEQUENCE_INVALID_PROJECTION:
+		return "invalid_model_projection";
+	case DUCKVEP_SEQUENCE_INTERNAL_CAPACITY:
+		return "internal_capacity_error";
+	case DUCKVEP_SEQUENCE_NOT_APPLICABLE:
+	case DUCKVEP_SEQUENCE_RESOLVED:
+	case DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT:
+	default:
+		return "unsupported_compound_consequence";
+	}
+}
+
 static int
 duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
@@ -742,14 +769,25 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			duckvep_scalar_set_null(vectors[0], (idx_t)output_count);
 			duckvep_scalar_set_null(vectors[1], (idx_t)output_count);
 			duckdb_vector_assign_string_element(vectors[2],
-			    (idx_t)output_count, "intergenic_variant");
+			    (idx_t)output_count, state->transcript_coverage_complete[row]
+			    ? "intergenic_variant" : "sequence_variant");
 			duckdb_vector_assign_string_element(vectors[3],
 			    (idx_t)output_count, "MODIFIER");
-			duckdb_vector_assign_string_element(vectors[4],
-			    (idx_t)output_count, "intergenic");
+			if (state->transcript_coverage_complete[row])
+				duckdb_vector_assign_string_element(vectors[4],
+				    (idx_t)output_count, "intergenic");
+			else
+				duckvep_scalar_set_null(vectors[4],
+				    (idx_t)output_count);
 			duckdb_vector_assign_string_element(vectors[5],
-			    (idx_t)output_count, "supported");
-			duckvep_scalar_set_null(vectors[6], (idx_t)output_count);
+			    (idx_t)output_count, state->transcript_coverage_complete[row]
+			    ? "supported" : "unresolved");
+			if (state->transcript_coverage_complete[row])
+				duckvep_scalar_set_null(vectors[6],
+				    (idx_t)output_count);
+			else
+				duckdb_vector_assign_string_element(vectors[6],
+				    (idx_t)output_count, "no_feature_in_loaded_model");
 			for (column = 7; column < 12; column++)
 				duckvep_scalar_set_null(vectors[column],
 				    (idx_t)output_count);
@@ -758,7 +796,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 		}
 		for (source = begin; source < end; source++, output_count++) {
 			const duckvep_consequence_t *result;
-			const char *status;
+			const char *status, *reason;
 			char consequence[512], region[128], amino_acid[2];
 
 			result = &state->results[source];
@@ -784,13 +822,15 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			    "unresolved" : "supported";
 			duckdb_vector_assign_string_element(vectors[5],
 			    (idx_t)output_count, status);
-			if (status[0] == 'u')
+			if (status[0] == 'u') {
+				reason = duckvep_scalar_sequence_reason(
+				    result->sequence_status);
 				duckdb_vector_assign_string_element(vectors[6],
-				    (idx_t)output_count,
-				    "sequence_predicate_unresolved");
-			else
+				    (idx_t)output_count, reason);
+			} else {
 				duckvep_scalar_set_null(vectors[6],
 				    (idx_t)output_count);
+			}
 			if (result->cdna_pos >= 0)
 				cdna_positions[output_count] =
 				    (uint64_t)result->cdna_pos;
@@ -803,21 +843,26 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			else
 				duckvep_scalar_set_null(vectors[8],
 				    (idx_t)output_count);
-			if (result->protein_pos >= 0) {
+			if (result->protein_pos >= 0)
 				protein_positions[output_count] =
 				    (uint64_t)result->protein_pos;
-				amino_acid[1] = '\0';
+			else
+				duckvep_scalar_set_null(vectors[9],
+				    (idx_t)output_count);
+			amino_acid[1] = '\0';
+			if (result->aa_ref != 0u) {
 				amino_acid[0] = (char)result->aa_ref;
 				duckdb_vector_assign_string_element(vectors[10],
 				    (idx_t)output_count, amino_acid);
+			} else {
+				duckvep_scalar_set_null(vectors[10],
+				    (idx_t)output_count);
+			}
+			if (result->aa_alt != 0u) {
 				amino_acid[0] = (char)result->aa_alt;
 				duckdb_vector_assign_string_element(vectors[11],
 				    (idx_t)output_count, amino_acid);
 			} else {
-				duckvep_scalar_set_null(vectors[9],
-				    (idx_t)output_count);
-				duckvep_scalar_set_null(vectors[10],
-				    (idx_t)output_count);
 				duckvep_scalar_set_null(vectors[11],
 				    (idx_t)output_count);
 			}

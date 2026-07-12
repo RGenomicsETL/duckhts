@@ -44,19 +44,27 @@ queries <- c(
     "phase, end_phase FROM duckvep_r_exons ORDER BY transcript_index, exon_cdna_start"
   )
 )
-load_model <- function(name, model_queries) {
+load_model <- function(name, model_queries, transcript_coverage_complete = FALSE) {
+  arguments <- paste(
+    vapply(
+      c(name, model_queries),
+      function(x) as.character(dbQuoteString(con, x)),
+      character(1)
+    ),
+    collapse = ", "
+  )
+  if (transcript_coverage_complete) {
+    arguments <- paste(
+      arguments,
+      "transcript_coverage_complete := TRUE",
+      sep = ", "
+    )
+  }
   dbGetQuery(
     con,
     paste0(
       "SELECT loaded FROM duckvep_model_load(",
-      paste(
-        vapply(
-          c(name, model_queries),
-          function(x) as.character(dbQuoteString(con, x)),
-          character(1)
-        ),
-        collapse = ", "
-      ),
+      arguments,
       ")"
     )
   )
@@ -64,6 +72,17 @@ load_model <- function(name, model_queries) {
 
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
+
+invalid_queries <- queries
+invalid_queries[2] <- paste0(
+  "SELECT * REPLACE (99::UBIGINT AS transcript_start) FROM (",
+  invalid_queries[2],
+  ")"
+)
+expect_error(
+  load_model("r-invalid-envelope", invalid_queries),
+  pattern = "transcript span is not the outer exon envelope"
+)
 
 annotation <- dbGetQuery(
   con,
@@ -79,6 +98,80 @@ expect_identical(annotation$impact, "MODERATE")
 expect_identical(annotation$status, "supported")
 expect_equal(annotation$cds_position, 5)
 expect_equal(annotation$protein_position, 2)
+
+reference_mismatch <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.status, a.reason FROM unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, 124::UBIGINT, 'A', 'C', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_identical(reference_mismatch$status, "unresolved")
+expect_identical(reference_mismatch$reason, "reference_mismatch")
+
+frameshift <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.protein_position, a.reference_amino_acid,",
+    "a.alternate_amino_acid FROM unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, 124::UBIGINT, 'T', 'TC', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_equal(frameshift$protein_position, 2)
+expect_true(is.na(frameshift$reference_amino_acid))
+expect_true(is.na(frameshift$alternate_amino_acid))
+
+prepared_events <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 123::UBIGINT, 'GTA', 'GCA'),",
+    "(2, 1::UBIGINT, 'AC', 'C'),",
+    "(3, 1::UBIGINT, 'C', 'AC'))",
+    "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(prepared_events$ord, 1:3)
+expect_identical(prepared_events$consequence[1], "missense_variant")
+expect_identical(prepared_events$consequence[2:3], rep("sequence_variant", 2))
+expect_identical(prepared_events$status[2:3], rep("unresolved", 2))
+expect_identical(
+  prepared_events$reason[2:3],
+  rep("no_feature_in_loaded_model", 2)
+)
+
+complete_queries <- queries
+complete_queries[1] <- paste(
+  "SELECT seq_region, 1000::UBIGINT AS sequence_length",
+  "FROM duckvep_r_regions ORDER BY seq_region"
+)
+expect_true(load_model("r-complete", complete_queries, TRUE)$loaded)
+complete_intergenic <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "'r-complete', 1::UINTEGER, 1::UBIGINT, 'A', 'C', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_identical(complete_intergenic$consequence, "intergenic_variant")
+expect_identical(complete_intergenic$status, "supported")
+expect_error(
+  dbGetQuery(
+    con,
+    paste(
+      "SELECT duckvep_annotate(",
+      "'r-complete', 1::UINTEGER, 1001::UBIGINT, 'A', 'C', 0::UBIGINT",
+      ")"
+    )
+  ),
+  pattern = "variant span exceeds sequence-region length"
+)
 
 dbExecute(
   con,
@@ -110,5 +203,6 @@ expect_identical(
 )
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd') AS dropped")$dropped)
+expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-complete') AS dropped")$dropped)
 
 dbDisconnect(con, shutdown = TRUE)
