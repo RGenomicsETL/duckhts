@@ -180,6 +180,96 @@ TEST null_args_are_rejected(void) {
     PASS();
 }
 
+TEST model_open_rejects_projection_and_sequence_invariant_mutations(void) {
+    uint16_t chrom[1] = {0u};
+    uint32_t tx_start[1] = {100u};
+    uint32_t tx_end[1] = {111u};
+    int8_t strand[1] = {1};
+    uint64_t flags[1] = {DUCKVEP_TX_HAS_TRANSLATION |
+                         DUCKVEP_TX_BIOTYPE_PROTEIN_CODING};
+    uint32_t exon_offset[1] = {0u};
+    uint16_t exon_count[1] = {2u};
+    uint32_t cds_start[1] = {100u};
+    uint32_t cds_end[1] = {111u};
+    uint32_t exon_start[2] = {100u, 108u};
+    uint32_t exon_end[2] = {104u, 111u};
+    uint32_t cdna_start[2] = {1u, 6u};
+    uint32_t cdna_end[2] = {5u, 9u};
+    int8_t phase[2] = {0, 0};
+    int8_t end_phase[2] = {0, 0};
+    uint8_t cds_bytes[9] = {'A','T','G','A','A','A','T','A','A'};
+    uint64_t sequence_offset[1] = {0u};
+    uint32_t sequence_length[1] = {9u};
+    uint8_t codon_table[1] = {1u};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_sequence_pool_t seq;
+    duckvep_model_t *model = NULL;
+    duckvep_error_t err;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    memset(&seq, 0, sizeof seq); memset(&err, 0, sizeof err);
+    tx.chrom_id = chrom; tx.start1 = tx_start; tx.end1 = tx_end;
+    tx.strand = strand; tx.flags = flags; tx.exon_offset = exon_offset;
+    tx.exon_count = exon_count; tx.cds_start1 = cds_start;
+    tx.cds_end1 = cds_end; tx.transcript_count = 1u;
+    exons.start1 = exon_start; exons.end1 = exon_end;
+    exons.cdna_start1 = cdna_start; exons.cdna_end1 = cdna_end;
+    exons.phase = phase; exons.end_phase = end_phase; exons.exon_count = 2u;
+    seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
+    seq.cds_offset = sequence_offset; seq.cds_length = sequence_length;
+    seq.codon_table = codon_table; seq.transcript_count = 1u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    duckvep_model_close(model); model = NULL;
+
+    strand[0] = 0;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(66u, err.where_code); strand[0] = 1;
+
+    tx_start[0] = 99u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(67u, err.where_code); tx_start[0] = 100u;
+
+    cdna_start[1] = 7u; cdna_end[1] = 10u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(68u, err.where_code); cdna_start[1] = 6u; cdna_end[1] = 9u;
+
+    phase[0] = 3;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(69u, err.where_code); phase[0] = 0;
+
+    cds_start[0] = 105u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(70u, err.where_code); cds_start[0] = 100u;
+
+    sequence_length[0] = 8u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(71u, err.where_code); sequence_length[0] = 9u;
+
+    codon_table[0] = 3u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(71u, err.where_code); codon_table[0] = 1u;
+
+    cds_bytes[4] = 'X';
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(71u, err.where_code); cds_bytes[4] = 'A';
+
+    exons.phase = NULL; exons.end_phase = NULL;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(71u, err.where_code);
+    PASS();
+}
+
 TEST annotate_tile_rejects_null_model_for_any_batch(void) {
     struct theft_run_config cfg;
     memset(&cfg, 0, sizeof cfg);
@@ -4518,8 +4608,8 @@ TEST annotate_reverse_strand_known_scene(void) {
     static const uint16_t texcnt[1]  = {2u};
     static const uint32_t tcds_s[1]  = {1100u};
     static const uint32_t tcds_e[1]  = {1900u};
-    static const uint32_t estart[2]  = {1000u, 1700u};
-    static const uint32_t eend[2]    = {1300u, 2000u};
+    static const uint32_t estart[2]  = {1700u, 1000u};
+    static const uint32_t eend[2]    = {2000u, 1300u};
 
     static const uint16_t vchrom[6] = {0u, 0u, 0u, 0u, 0u, 0u};
     static const uint32_t vpos[6]   = {900u, 1050u, 1200u, 1500u, 1950u, 2100u};
@@ -11257,13 +11347,18 @@ TEST workspace_delta_scratch_caps_known(void) {
     static const uint32_t end1[3] = {100u, 208u, 313u};
     static const int8_t strand[3] = {1, 1, -1};
     static const uint64_t flags[3] = {0u, 0u, 0u};
-    static const uint32_t exon_off[3] = {0u, 0u, 0u};
-    static const uint16_t exon_cnt[3] = {0u, 0u, 0u};
+    static const uint32_t exon_off[3] = {0u, 0u, 1u};
+    static const uint16_t exon_cnt[3] = {0u, 1u, 1u};
     static const uint32_t cds_s[3] = {0u, 200u, 300u};
     static const uint32_t cds_e[3] = {0u, 208u, 313u};
     static const uint64_t cds_off[3] = {0u, 0u, 9u};
     static const uint32_t cds_len[3] = {0u, 9u, 14u};
-    static const uint8_t table[3] = {0u, 0u, 0u};
+    static const uint8_t table[3] = {0u, 1u, 1u};
+    static const uint32_t exon_start[2] = {200u, 300u};
+    static const uint32_t exon_end[2] = {208u, 313u};
+    static const uint32_t exon_cdna_start[2] = {1u, 1u};
+    static const uint32_t exon_cdna_end[2] = {9u, 14u};
+    static const int8_t exon_phase[2] = {0, 0};
     static const uint8_t cds_bytes[23] = {
         'A','T','G','G','A','A','T','A','A',
         'A','T','G','C','C','C','G','G','G','T','T','T','A','A'
@@ -11281,6 +11376,9 @@ TEST workspace_delta_scratch_caps_known(void) {
     tx.chrom_id = chrom; tx.start1 = start1; tx.end1 = end1; tx.strand = strand;
     tx.flags = flags; tx.exon_offset = exon_off; tx.exon_count = exon_cnt;
     tx.cds_start1 = cds_s; tx.cds_end1 = cds_e; tx.transcript_count = 3u;
+    ex.start1 = exon_start; ex.end1 = exon_end;
+    ex.cdna_start1 = exon_cdna_start; ex.cdna_end1 = exon_cdna_end;
+    ex.phase = exon_phase; ex.end_phase = exon_phase; ex.exon_count = 2u;
     seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
     seq.cds_offset = cds_off; seq.cds_length = cds_len; seq.codon_table = table;
     seq.transcript_count = 3u;
@@ -13656,6 +13754,7 @@ int main(int argc, char **argv) {
     GREATEST_MAIN_BEGIN();
     RUN_TEST(kernel_version_is_well_formed);
     RUN_TEST(null_args_are_rejected);
+    RUN_TEST(model_open_rejects_projection_and_sequence_invariant_mutations);
     RUN_TEST(annotate_tile_rejects_null_model_for_any_batch);
     RUN_TEST(event_load_without_variant_kind_uses_supplied_interval);
     RUN_TEST(event_load_trims_small_variant_differing_region);

@@ -90,6 +90,62 @@ static int transcript_point_ordered(
     return 1;
 }
 
+static int model_exon_for_genomic(
+    const duckvep_exon_model_t *exons,
+    size_t                      offset,
+    size_t                      count,
+    uint32_t                    genomic_pos,
+    size_t                     *exon_idx) {
+
+    size_t i;
+
+    for (i = offset; i < offset + count; i++) {
+        if (genomic_pos >= exons->start1[i] && genomic_pos <= exons->end1[i]) {
+            if (exon_idx != NULL) *exon_idx = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int model_genomic_to_cdna(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          genomic_pos,
+    uint32_t                         *cdna_pos,
+    size_t                           *exon_idx) {
+
+    size_t offset = (size_t)transcripts->exon_offset[tx_idx];
+    size_t count = (size_t)transcripts->exon_count[tx_idx];
+    size_t i;
+
+    if (cdna_pos == NULL || exons->cdna_start1 == NULL ||
+        exons->cdna_end1 == NULL) return 0;
+    for (i = offset; i < offset + count; i++) {
+        uint32_t position;
+
+        if (genomic_pos < exons->start1[i] || genomic_pos > exons->end1[i]) continue;
+        position = transcripts->strand[tx_idx] > 0
+            ? exons->cdna_start1[i] + genomic_pos - exons->start1[i]
+            : exons->cdna_start1[i] + exons->end1[i] - genomic_pos;
+        if (position < exons->cdna_start1[i] || position > exons->cdna_end1[i]) {
+            return 0;
+        }
+        *cdna_pos = position;
+        if (exon_idx != NULL) *exon_idx = i;
+        return 1;
+    }
+    return 0;
+}
+
+static int model_sequence_base_valid(uint8_t base) {
+    uint8_t upper = (uint8_t)(base & UINT8_C(0xdf));
+    return upper == (uint8_t)'A' || upper == (uint8_t)'C' ||
+           upper == (uint8_t)'G' || upper == (uint8_t)'T' ||
+           upper == (uint8_t)'N';
+}
+
 /* where_codes are STABLE engine-internal failure-site ids; tests anchor on them.
  * Never renumber an existing site; append new ones. */
 enum {
@@ -126,7 +182,13 @@ enum {
     DVW_CURSOR_NULL         = 62u,
     DVW_WS_SCRATCH_RANGE    = 63u,
     DVW_WS_SCRATCH_OOM      = 64u,
-    DVW_WS_MODEL            = 65u
+    DVW_WS_MODEL            = 65u,
+    DVW_MODEL_TX_LAYOUT      = 66u,
+    DVW_MODEL_EXON_LAYOUT    = 67u,
+    DVW_MODEL_CDNA_LAYOUT    = 68u,
+    DVW_MODEL_PHASE          = 69u,
+    DVW_MODEL_CDS_PROJECTION = 70u,
+    DVW_MODEL_SEQ_CONTRACT   = 71u
 };
 
 duckvep_status_t duckvep_model_open(
@@ -170,6 +232,11 @@ duckvep_status_t duckvep_model_open(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                     "exon view has count>0 but null start/end columns");
     }
+    if ((exons->cdna_start1 == NULL) != (exons->cdna_end1 == NULL) ||
+        (exons->phase == NULL) != (exons->end_phase == NULL)) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
+                    "paired exon cDNA or phase columns are incomplete");
+    }
 
     /* Validate every transcript once: span ordering, exon slice in range, cds
      * within span, and the (chrom_id, start1) sort order the sweep relies on. */
@@ -179,9 +246,11 @@ duckvep_status_t duckvep_model_open(
         uint32_t cds_s = transcripts->cds_start1[t];
         uint32_t cds_e = transcripts->cds_end1[t];
 
-        if (transcripts->start1[t] > transcripts->end1[t]) {
-            return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_CDS_RANGE,
-                        "transcript start1 > end1");
+        if (transcripts->start1[t] == 0u ||
+            transcripts->start1[t] > transcripts->end1[t] ||
+            (transcripts->strand[t] != 1 && transcripts->strand[t] != -1)) {
+            return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_TX_LAYOUT,
+                        "transcript has an invalid span or strand");
         }
         if (eoff > exons->exon_count || ecnt > exons->exon_count - eoff) {
             return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_EXON_RANGE,
@@ -197,6 +266,80 @@ duckvep_status_t duckvep_model_open(
             /* cds_start1 == 0 is the non-coding sentinel; a stray cds_end1 is malformed. */
             return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_CDS_RANGE,
                         "cds_start1 == 0 (non-coding) but cds_end1 != 0");
+        }
+        if (ecnt > 0u) {
+            uint32_t genomic_min = UINT32_MAX;
+            uint32_t genomic_max = 0u;
+            size_t e;
+
+            for (e = 0u; e < ecnt; e++) {
+                size_t ei = eoff + e;
+                uint32_t exon_len;
+
+                if (exons->start1[ei] == 0u ||
+                    exons->start1[ei] > exons->end1[ei] ||
+                    exons->start1[ei] < transcripts->start1[t] ||
+                    exons->end1[ei] > transcripts->end1[t]) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_EXON_LAYOUT,
+                                "exon lies outside its transcript span");
+                }
+                if (e > 0u) {
+                    size_t previous = ei - 1u;
+                    if ((transcripts->strand[t] > 0 &&
+                         exons->start1[ei] <= exons->end1[previous]) ||
+                        (transcripts->strand[t] < 0 &&
+                         exons->end1[ei] >= exons->start1[previous])) {
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_EXON_LAYOUT,
+                                    "exons overlap or are not in transcript order");
+                    }
+                }
+                if (exons->start1[ei] < genomic_min) genomic_min = exons->start1[ei];
+                if (exons->end1[ei] > genomic_max) genomic_max = exons->end1[ei];
+                exon_len = exons->end1[ei] - exons->start1[ei] + 1u;
+                if (exons->cdna_start1 != NULL) {
+                    uint32_t cdna_len;
+                    if (exons->cdna_start1[ei] == 0u ||
+                        exons->cdna_start1[ei] > exons->cdna_end1[ei]) {
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_CDNA_LAYOUT,
+                                    "exon has an invalid cDNA span");
+                    }
+                    cdna_len = exons->cdna_end1[ei] -
+                               exons->cdna_start1[ei] + 1u;
+                    if (cdna_len != exon_len ||
+                        (e == 0u && exons->cdna_start1[ei] != 1u) ||
+                        (e > 0u &&
+                         (exons->cdna_end1[ei - 1u] == UINT32_MAX ||
+                          exons->cdna_start1[ei] !=
+                          exons->cdna_end1[ei - 1u] + 1u))) {
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_CDNA_LAYOUT,
+                                    "exon cDNA spans are not contiguous and length preserving");
+                    }
+                }
+                if (exons->phase != NULL &&
+                    (exons->phase[ei] < -1 || exons->phase[ei] > 2 ||
+                     exons->end_phase[ei] < -1 || exons->end_phase[ei] > 2)) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_PHASE,
+                                "exon phase is outside -1,0,1,2");
+                }
+            }
+            if (genomic_min != transcripts->start1[t] ||
+                genomic_max != transcripts->end1[t]) {
+                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_EXON_LAYOUT,
+                            "transcript span is not the outer exon envelope");
+            }
+        }
+        if (cds_s != 0u &&
+            (!model_exon_for_genomic(exons, eoff, ecnt, cds_s, NULL) ||
+             !model_exon_for_genomic(exons, eoff, ecnt, cds_e, NULL))) {
+            return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                        DVW_MODEL_CDS_PROJECTION,
+                        "CDS boundary does not project into an exon");
         }
         if (t > 0u) {
             uint16_t pc = transcripts->chrom_id[t - 1u];
@@ -236,6 +379,67 @@ duckvep_status_t duckvep_model_open(
                 len > (uint64_t)seq->cds_bytes_len - off) {
                 return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_SEQ_RANGE,
                             "cds offset/length out of the sequence pool");
+            }
+            if (len > 0u) {
+                uint32_t coding_start_cdna;
+                uint32_t coding_end_cdna;
+                uint64_t expected_len;
+                uint32_t coding_start_genomic;
+                uint32_t coding_end_genomic;
+                size_t coding_start_exon;
+                size_t i;
+                int8_t phase;
+
+                if (transcripts->cds_start1[t] == 0u ||
+                    exons->cdna_start1 == NULL || exons->phase == NULL) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "sequence-backed transcript lacks CDS projection columns");
+                }
+                coding_start_genomic = transcripts->strand[t] > 0
+                    ? transcripts->cds_start1[t] : transcripts->cds_end1[t];
+                coding_end_genomic = transcripts->strand[t] > 0
+                    ? transcripts->cds_end1[t] : transcripts->cds_start1[t];
+                if (!model_genomic_to_cdna(transcripts, exons, t,
+                                           coding_start_genomic,
+                                           &coding_start_cdna,
+                                           &coding_start_exon) ||
+                    !model_genomic_to_cdna(transcripts, exons, t,
+                                           coding_end_genomic,
+                                           &coding_end_cdna, NULL) ||
+                    coding_end_cdna < coding_start_cdna) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_CDS_PROJECTION,
+                                "CDS does not project to a contiguous cDNA interval");
+                }
+                phase = exons->phase[coding_start_exon];
+                if (phase < 0 || phase > 2) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_PHASE,
+                                "sequence-backed CDS has no valid start phase");
+                }
+                expected_len = (uint64_t)coding_end_cdna -
+                               (uint64_t)coding_start_cdna + 1u +
+                               (uint64_t)phase;
+                if (len != expected_len ||
+                    (seq->codon_table[t] != 1u && seq->codon_table[t] != 2u)) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "prepared CDS length or codon table is inconsistent");
+                }
+                for (i = 0u; i < (size_t)len; i++) {
+                    if (!model_sequence_base_valid(seq->cds_bytes[(size_t)off + i])) {
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_SEQ_CONTRACT,
+                                    "prepared CDS contains a non-ACGTN base");
+                    }
+                }
+            } else if (transcripts->cds_start1[t] == 0u &&
+                       seq->codon_table[t] != 0u && seq->codon_table[t] != 1u &&
+                       seq->codon_table[t] != 2u) {
+                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_SEQ_CONTRACT,
+                            "non-coding transcript has an invalid codon-table value");
             }
             if ((size_t)len > max_cds_len) max_cds_len = (size_t)len;
         }

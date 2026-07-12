@@ -54,6 +54,18 @@ SELECT loaded FROM duckvep_model_load(
 ----
 1
 
+# The pure-C model validator is also the final authority for SQL-loaded models.
+# A transcript span wider than its outer exon envelope must fail at load time.
+statement error
+SELECT * FROM duckvep_model_load(
+  'invalid-envelope',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * REPLACE (99::UBIGINT AS transcript_start) FROM duckvep_test_transcripts ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start'
+);
+----
+transcript span is not the outer exon envelope
+
 # Pinned VEP-116 coding predicates plus structural rows through the public vector.
 query TTTTTTTTTT
 WITH variants(ord, id, seq_region, position, reference, alternate) AS (

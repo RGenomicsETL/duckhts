@@ -73,6 +73,17 @@ load_model <- function(name, model_queries, transcript_coverage_complete = FALSE
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
 
+invalid_queries <- queries
+invalid_queries[2] <- paste0(
+  "SELECT * REPLACE (99::UBIGINT AS transcript_start) FROM (",
+  invalid_queries[2],
+  ")"
+)
+expect_error(
+  load_model("r-invalid-envelope", invalid_queries),
+  pattern = "transcript span is not the outer exon envelope"
+)
+
 annotation <- dbGetQuery(
   con,
   paste(
