@@ -4,9 +4,8 @@
  * Not part of the stable kernel ABI. Tests and in-kernel production routing use
  * this to borrow workspace-owned scratch without exposing the
  * opaque workspace layout through kernel/include/duckvep_kernel.h. The returned
- * scratch is currently sized for single-variant equal-length MNV, shortening pure-
- * deletion, and lengthening insertion CodingContext builds under the uint16_t small-
- * variant payload model; grouped haplotypes must widen this policy deliberately.
+ * scratch is sized for one small-variant CodingContext build under the uint16_t allele
+ * payload model.
  * Route stats are opt-in internal evidence for tests and are disabled until reset.
  */
 #ifndef DUCKVEP_WORKSPACE_INTERNAL_H
@@ -16,17 +15,14 @@
 #include "duckvep_kernel.h"
 
 typedef struct duckvep_workspace_delta_route_stats {
-    uint64_t mnv_context_accepted;
-    uint64_t mnv_context_fallback_mismatch;
-    uint64_t mnv_context_fallback_unsupported;
-    uint64_t del_context_accepted;
-    uint64_t del_context_fallback_mismatch;
-    uint64_t del_context_fallback_unsupported;
-    uint64_t ins_context_accepted;
-    uint64_t ins_context_fallback_mismatch;
-    uint64_t ins_context_fallback_unsupported;
-    uint64_t indel_context_accepted;
-    uint64_t indel_context_fallback_unsupported;
+    uint64_t mnv_context;
+    uint64_t mnv_direct_fallback;
+    uint64_t del_context;
+    uint64_t del_direct_fallback;
+    uint64_t ins_context;
+    uint64_t ins_direct_fallback;
+    uint64_t indel_context;
+    uint64_t indel_direct_fallback;
 } duckvep_workspace_delta_route_stats_t;
 
 DUCKVEP_INTERNAL_API duckvep_delta_scratch_t *duckvep_workspace_delta_scratch(

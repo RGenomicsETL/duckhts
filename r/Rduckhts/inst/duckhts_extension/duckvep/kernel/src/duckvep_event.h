@@ -145,7 +145,7 @@ static inline uint32_t duckvep_event_effective_end1_at(
     duckvep_event_t event;
     /* Geometry-only white-box sweep callers may omit variant_kind and thereby
      * request the supplied interval directly. Production annotation validates
-     * variant_kind and uses full intervals only for the structural lane. */
+     * variant_kind and uses full intervals only for structural events. */
     if (batch->variant_kind == NULL ||
         batch->variant_kind[idx] == (uint8_t)DUCKVEP_KIND_SV) {
         return batch->end1[idx];

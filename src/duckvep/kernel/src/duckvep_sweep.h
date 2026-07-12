@@ -10,7 +10,7 @@
  *   T.start1 <= E.effective_end1 + halo && T.end1 + halo >= E.start1.
  *
  * For production annotation, effective_end1 is the supplied end1 for the
- * single-interval SV/CNV lane and the allele-normalized differing-region end for
+ * single-interval SV/CNV events and the allele-normalized differing-region end for
  * small variants. Raw pos1 remains the monotone sweep key; shared VCF padding never
  * becomes the topology start. Geometry-only white-box callers may omit variant_kind
  * to sweep an explicitly supplied interval.

@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- consolidate the standalone DuckVEP kernel ABI as 0.5.0: remove ignored supplementary-track and HGVS arguments, placeholder consequence bytes, and impossible route states; keep the still-used direct coding fallback explicit and measured while the shared edit/CDS/peptide interpreter is completed
 - accelerate sorted SNV annotation with one compact exon cursor per transcript and worker, retained across adjacent input chunks and reset on coordinate rewind. The point path shares the exact splice predicates with the span classifier and does not alter the existing MNV/indel/SV span classifiers or grouped-haplotype edit core. Sparse Sequence Ontology masks now avoid scanning all assigned terms during impact selection and single-term rendering
 - make release and debug builds refresh extension metadata from the authoritative root `description.yml`, preventing a previously generated version file from leaking the prior release number into a new artifact
 - emit VEP-116 `NMD_transcript_variant` alongside the ordinary regional consequence when a variant lies inside a transcript whose imported biotype is `nonsense_mediated_decay`; the upstream/downstream halo does not receive the term

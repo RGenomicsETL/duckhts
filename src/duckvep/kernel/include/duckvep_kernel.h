@@ -29,8 +29,8 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 4
-#define DUCKVEP_KERNEL_VERSION_PATCH 1
+#define DUCKVEP_KERNEL_VERSION_MINOR 5
+#define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
 
@@ -40,7 +40,7 @@ typedef enum duckvep_status {
     DUCKVEP_ERR_MODEL_INVALID,  /* offsets/counts inconsistent at model-open           */
     DUCKVEP_ERR_OUT_OF_RANGE,   /* a 64->32 narrowing or index bound check failed      */
     DUCKVEP_ERR_RESULT_FULL,    /* result builder capacity exhausted (no truncation)   */
-    DUCKVEP_ERR_UNSUPPORTED,    /* path not yet implemented (e.g. breakend / haplotype) */
+    DUCKVEP_ERR_UNSUPPORTED,    /* event cannot be represented by this entry point */
     DUCKVEP_ERR_INTERNAL
 } duckvep_status_t;
 
@@ -88,7 +88,7 @@ typedef enum duckvep_variant_kind {
     DUCKVEP_KIND_SV         /* symbolic/structural; dispatched to the SV kernel */
 } duckvep_variant_kind_t;
 
-/* Structural-event operation. `variant_kind` selects the broad execution lane;
+/* Structural-event operation. `variant_kind` selects the event family;
  * this subtype preserves the operation required by VEP's structural predicates.
  * CNV direction is deliberately separate: an undirected copy-number interval is
  * not intrinsically a gain or loss without sample/ploidy context. */
@@ -205,20 +205,15 @@ typedef struct duckvep_sequence_pool {
 } duckvep_sequence_pool_t;
 
 /* ----------------------------------------------------------- compact output
- * The default, HGVS-free result row. HGVS is a LATE, optional rendering layer:
- * the caller hands selected rows to duckhgvs for c./n./p. only when requested,
- * so formatting/normalization never contaminate the 47M-pair default path.
- * Position fields are -1 when not applicable. */
+ * The structured consequence result. Compatibility text and HGVS are separate
+ * consumers of projected facts. Position fields are -1 when not applicable. */
 
 typedef enum duckvep_consequence_flag {
-    /* The pair overlaps CDS and entered the sequence-delta chokepoint, but the
-     * current kernel slice could not resolve a VEP codon/peptide predicate. The
-     * consequence_mask may still contain coding_sequence_variant as the safe
+    /* The pair overlaps CDS, but the sequence context could not resolve a VEP
+     * codon/peptide predicate. The consequence_mask may still contain
+     * coding_sequence_variant as the safe
      * fallback; this bit makes that fallback auditable rather than silent. */
-    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0,
-    DUCKVEP_CONSEQUENCE_FLAG_HAPLOTYPE_GROUPED   = 1u << 1,
-    DUCKVEP_CONSEQUENCE_FLAG_HAPLOTYPE_FLUSHED   = 1u << 2,
-    DUCKVEP_CONSEQUENCE_FLAG_RESERVED_BACKLOG    = 1u << 3
+    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0
 } duckvep_consequence_flag_t;
 
 typedef struct duckvep_consequence {
@@ -237,8 +232,6 @@ typedef struct duckvep_consequence {
 
     uint8_t  aa_ref;
     uint8_t  aa_alt;
-    uint8_t  codon_ref;
-    uint8_t  codon_alt;
 } duckvep_consequence_t;
 
 /* ------------------------------------------------------------ opaque handles
@@ -246,8 +239,7 @@ typedef struct duckvep_consequence {
  * Their layouts are private to the implementation translation units. */
 
 typedef struct duckvep_model          duckvep_model_t;          /* immutable transcript/exon/seq model */
-typedef struct duckvep_track_set      duckvep_track_set_t;      /* selected point/region SA tracks     */
-typedef struct duckvep_options        duckvep_options_t;        /* distances, hgvs on/off, buckets...  */
+typedef struct duckvep_options        duckvep_options_t;        /* distance and splice windows          */
 typedef struct duckvep_workspace      duckvep_workspace_t;      /* per-worker scratch arena (no malloc/row) */
 typedef struct duckvep_annotate_cursor duckvep_annotate_cursor_t; /* resumable tile-local annotator */
 
@@ -284,15 +276,13 @@ typedef struct duckvep_options_init {
     uint32_t splice_region_exonic;   /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC       */
     uint32_t splice_region_intronic; /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC     */
     uint32_t halo;                   /* 0 -> max(upstream_dist, downstream_dist)        */
-    int      emit_hgvs;              /* 0 = HGVS-free default path                       */
 } duckvep_options_init_t;
 
 /* ------------------------------------------------------------- entry points
  * The entire engine surface. No file paths, SQL names, DuckDB handles, or
  * bcf1_t — adapters translate those into the views above before calling.
- * Lifecycle: open model + options + a per-worker workspace once (immutable for
- * the run), init a result builder over caller memory, then call annotate_tile
- * per tile. Codon/HGVS predicates fill in behind the same entry in later patches. */
+ * Lifecycle: open model + options + a per-worker workspace once, initialize a
+ * result builder over caller memory, then annotate each sorted batch. */
 
 /* Returns a static "major.minor.patch" string. Safe before any model open. */
 const char *duckvep_kernel_version(void);
@@ -339,7 +329,7 @@ void   duckvep_result_builder_reset(duckvep_result_builder_t *builder);
  * the same boundary contract as `duckvep_annotate_tile`, then preserves the sweep
  * and candidate position across calls to `duckvep_annotate_cursor_fill`. It copies
  * the small `variants` view struct but borrows the arrays it points at; it does not
- * own `model`, `tracks`, `options`, or `workspace`; keep all borrowed storage alive
+ * own `model`, `options`, or `workspace`; keep all borrowed storage alive
  * until close. The cursor is single-threaded and consumes the supplied workspace
  * for its lifetime.
  *
@@ -350,7 +340,6 @@ void   duckvep_result_builder_reset(duckvep_result_builder_t *builder);
 duckvep_status_t duckvep_annotate_cursor_open(
     const duckvep_model_t          *model,
     const duckvep_variant_batch_t  *variants,
-    const duckvep_track_set_t      *tracks,
     const duckvep_options_t        *options,
     duckvep_workspace_t            *workspace,
     duckvep_annotate_cursor_t     **out_cursor,
@@ -373,7 +362,7 @@ duckvep_status_t duckvep_annotate_cursor_seed(
 int  duckvep_annotate_cursor_done(const duckvep_annotate_cursor_t *cursor);
 void duckvep_annotate_cursor_close(duckvep_annotate_cursor_t *cursor);
 
-/* Annotate one tile-local variant batch against an immutable model + tracks,
+/* Annotate one tile-local variant batch against an immutable model,
  * emitting duckvep_consequence_t rows into `results`. `workspace` is this
  * worker's scratch.
  *
@@ -386,13 +375,12 @@ void duckvep_annotate_cursor_close(duckvep_annotate_cursor_t *cursor);
  * are validated sorted at duckvep_model_open.)
  *
  * Thread-safe across workers as long as each owns its own `workspace` + `results`
- * and the model/options/tracks are immutable. On failure, writes `error` (if
+ * and the model/options are immutable. On failure, writes `error` (if
  * non-NULL) and returns non-OK; on a full result builder returns
  * DUCKVEP_ERR_RESULT_FULL without truncating a partial row. */
 duckvep_status_t duckvep_annotate_tile(
     const duckvep_model_t          *model,
     const duckvep_variant_batch_t  *variants,
-    const duckvep_track_set_t      *tracks,
     const duckvep_options_t        *options,
     duckvep_workspace_t            *workspace,
     duckvep_result_builder_t       *results,
