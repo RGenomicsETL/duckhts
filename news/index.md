@@ -2,6 +2,9 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP annotation now emits VEP-116 `NMD_transcript_variant`
+  for variants inside transcripts imported with the
+  `nonsense_mediated_decay` biotype
 - bundle the DuckVEP SQL surface: `duckvep_model_load(...)` loads and
   validates one of several named resident transcript models from
   committed DuckDB relations, `duckvep_annotate(...)` returns explicit

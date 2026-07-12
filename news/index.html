@@ -34,7 +34,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.4.0.9000-0.1.0" id="rduckhts-1409000-010-development">Rduckhts 1.4.0.9000-0.1.0 (development)<a class="anchor" aria-label="anchor" href="#rduckhts-1409000-010-development"></a></h2>
-<ul><li>bundle the DuckVEP SQL surface: <code>duckvep_model_load(...)</code> loads and validates one of several named resident transcript models from committed DuckDB relations, <code>duckvep_annotate(...)</code> returns explicit per-transcript consequence rows for biallelic small variants, and <code>duckvep_model_drop(...)</code> releases a model. Add an end-to-end DBI tinytest using the bundled extension and a sequence-backed coding transcript</li>
+<ul><li>bundled DuckVEP annotation now emits VEP-116 <code>NMD_transcript_variant</code> for variants inside transcripts imported with the <code>nonsense_mediated_decay</code> biotype</li>
+<li>bundle the DuckVEP SQL surface: <code>duckvep_model_load(...)</code> loads and validates one of several named resident transcript models from committed DuckDB relations, <code>duckvep_annotate(...)</code> returns explicit per-transcript consequence rows for biallelic small variants, and <code>duckvep_model_drop(...)</code> releases a model. Add an end-to-end DBI tinytest using the bundled extension and a sequence-backed coding transcript</li>
 </ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.4.0-0.1.0" id="rduckhts-140-010-2026-07-10">Rduckhts 1.4.0-0.1.0 (2026-07-10)<a class="anchor" aria-label="anchor" href="#rduckhts-140-010-2026-07-10"></a></h2><p class="text-muted">CRAN release: 2026-07-10</p>
