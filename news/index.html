@@ -34,7 +34,10 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.4.0.9000-0.1.0" id="rduckhts-1409000-010-development">Rduckhts 1.4.0.9000-0.1.0 (development)<a class="anchor" aria-label="anchor" href="#rduckhts-1409000-010-development"></a></h2>
-<ul><li>expose specific DuckVEP unresolved reasons through the bundled extension and return NULL, rather than empty strings, when a protein-positioned frameshift or in-frame indel has no scalar one-letter amino-acid value</li>
+<ul><li>bundled DuckVEP annotation now follows VEP 116 for frame-changing edits that begin in the terminal stop, returning <code>stop_lost</code> or <code>stop_retained_variant</code> instead of a false frameshift. The resident transcript query accepts an optional twelfth <code>post_cds_bases</code> BLOB with up to three transcript-oriented bases; when a terminal deletion needs absent tail sequence, the result is explicitly unresolved as <code>missing_transcript_tail</code>
+</li>
+<li>bundled DuckVEP annotation now matches VEP 116 for insertions at exon, CDS, and transcript boundaries, including coding+splice consequences when the VCF padding base is intronic and UTR/downstream placement at right-hand boundaries</li>
+<li>expose specific DuckVEP unresolved reasons through the bundled extension and return NULL, rather than empty strings, when a protein-positioned frameshift or in-frame indel has no scalar one-letter amino-acid value</li>
 <li>reject malformed bundled DuckVEP resident models at load time when transcript/exon/cDNA/CDS/phase/prepared-sequence coordinates disagree; the SQL loader and standalone C engine now share the same final validator</li>
 <li>make bundled DuckVEP intergenic output fail closed for partial resident models. Ordinary <code>duckvep_model_load(...)</code> calls report <code>no_feature_in_loaded_model</code> as unresolved; the named <code>transcript_coverage_complete := TRUE</code> parameter requires contig lengths before returning supported <code>intergenic_variant</code>, and rejects coordinates beyond those lengths</li>
 <li>fix bundled <code>duckvep_annotate(...)</code> handling of padded small variants: whole-allele padding no longer turns a one-base substitution into an MNV, and VCF position-1 insertions/deletions with a following padding base are accepted</li>

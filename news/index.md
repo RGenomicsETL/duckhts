@@ -2,6 +2,17 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP annotation now follows VEP 116 for frame-changing
+  edits that begin in the terminal stop, returning `stop_lost` or
+  `stop_retained_variant` instead of a false frameshift. The resident
+  transcript query accepts an optional twelfth `post_cds_bases` BLOB
+  with up to three transcript-oriented bases; when a terminal deletion
+  needs absent tail sequence, the result is explicitly unresolved as
+  `missing_transcript_tail`
+- bundled DuckVEP annotation now matches VEP 116 for insertions at exon,
+  CDS, and transcript boundaries, including coding+splice consequences
+  when the VCF padding base is intronic and UTR/downstream placement at
+  right-hand boundaries
 - expose specific DuckVEP unresolved reasons through the bundled
   extension and return NULL, rather than empty strings, when a
   protein-positioned frameshift or in-frame indel has no scalar
