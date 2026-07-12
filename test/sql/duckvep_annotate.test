@@ -156,6 +156,31 @@ FROM unnest(duckvep_annotate(
 ----
 coding_sequence_variant	unresolved
 
+# NMD_transcript_variant is the VEP biotype predicate: it co-emits for a
+# variant inside a transcript already curated as nonsense_mediated_decay.
+statement ok
+CREATE TABLE duckvep_test_transcripts_nmd AS
+SELECT * REPLACE (7::UBIGINT AS transcript_flags)
+FROM duckvep_test_transcripts;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'nmd',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_test_transcripts_nmd ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_cdna_start'
+);
+----
+1
+
+query T
+SELECT annotation.consequence
+FROM unnest(duckvep_annotate(
+  'nmd', 1::UINTEGER, 160::UBIGINT, 'T', 'C', 0::UBIGINT
+)) AS u(annotation);
+----
+intron_variant&NMD_transcript_variant
+
 # Decreasing positions remain correct by starting another sweep run.
 query IT
 WITH variants(ord, position, reference, alternate) AS (
@@ -231,8 +256,8 @@ SELECT * FROM duckvep_model_load(
 ----
 duckvep_model_load: model name already exists
 
-query III
+query IIII
 SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
-       duckvep_model_drop('structural');
+       duckvep_model_drop('structural'), duckvep_model_drop('nmd');
 ----
-1	1	1
+1	1	1	1
