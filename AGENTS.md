@@ -23,7 +23,7 @@ clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
 - SQL tests: `test/sql/`.
 - R package: `r/Rduckhts/`.
 - Benchmark drivers and rendered reports: `scripts/`, `benchmarks/`.
-- Design notes and planning docs: `design/`; start with `design/README.md` to identify current vs historical notes.
+- Design notes: `design/`; start with `design/README.md` to find current contracts and open investigations.
 - Binding architecture and style: `ARCHITECTURE.md` and `STYLE.md`.
 - Vendored sources: `third_party/`.
 - Upstream mirrors / pinned rewrite references: `.sync/` when present.
