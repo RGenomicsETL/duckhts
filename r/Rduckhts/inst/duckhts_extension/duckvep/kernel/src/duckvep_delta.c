@@ -652,6 +652,7 @@ DUCKVEP_INTERNAL_API duckvep_coding_context_status_t duckvep_coding_context_buil
     tmp.ref_peptide_len = ref_pep_len;
     tmp.alt_peptide = alt_peptide_scratch;
     tmp.alt_peptide_len = alt_pep_len;
+    tmp.codon_table = (uint8_t)table;
     tmp.length_diff = apply_result.length_diff;
     tmp.flags = apply_result.flags;
     tmp.applied_edits = apply_result.applied_edits;
@@ -757,6 +758,22 @@ static uint8_t delta_sequence_status_from_context(
     }
 }
 
+static uint8_t delta_sequence_status_from_delta(
+    duckvep_context_delta_status_t status) {
+
+    switch (status) {
+    case DUCKVEP_CONTEXT_DELTA_OK:
+        return (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
+    case DUCKVEP_CONTEXT_DELTA_UNSUPPORTED:
+        return (uint8_t)DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT;
+    case DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL:
+        return (uint8_t)DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL;
+    case DUCKVEP_CONTEXT_DELTA_INVALID_ARG:
+    default:
+        return (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+    }
+}
+
 static uint8_t delta_sequence_status_from_snv(
     duckvep_coding_snv_status_t status) {
 
@@ -828,6 +845,23 @@ static duckvep_variant_coding_context_status_t duckvep_variant_coding_context_bu
     if (cst != DUCKVEP_CODING_CONTEXT_OK) {
         return delta_variant_context_from_context_status(cst);
     }
+    if (seq->post_cds_bases != NULL) {
+        size_t base;
+        uint8_t length = 0u;
+
+        if (tx_idx >
+            (SIZE_MAX - (DUCKVEP_POST_CDS_BASE_COUNT - 1u)) /
+                DUCKVEP_POST_CDS_BASE_COUNT) {
+            return DUCKVEP_VARIANT_CODING_CONTEXT_OUT_OF_RANGE;
+        }
+        base = tx_idx * DUCKVEP_POST_CDS_BASE_COUNT;
+        while (length < DUCKVEP_POST_CDS_BASE_COUNT &&
+               seq->post_cds_bases[base + length] != 0u) {
+            length++;
+        }
+        ctx->post_cds_bases = seq->post_cds_bases + base;
+        ctx->post_cds_length = length;
+    }
     return DUCKVEP_VARIANT_CODING_CONTEXT_OK;
 }
 
@@ -849,9 +883,17 @@ DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_cod
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx) {
 
+    duckvep_event_t event;
+
+    if (v == NULL || variant_idx >= v->count) {
+        if (ctx != NULL) memset(ctx, 0, sizeof *ctx);
+        return DUCKVEP_VARIANT_CODING_CONTEXT_INVALID_ARG;
+    }
+    duckvep_event_load(v, variant_idx, &event);
+
     return duckvep_variant_coding_context_build_event(
         transcripts, exons, seq, v, variant_idx, tx_idx, transcript_strand,
-        NULL, edit_scratch, edit_scratch_cap, alt_cds_scratch, alt_cds_cap,
+        &event, edit_scratch, edit_scratch_cap, alt_cds_scratch, alt_cds_cap,
         ref_peptide_scratch, ref_peptide_cap, alt_peptide_scratch,
         alt_peptide_cap, ctx);
 }
@@ -1271,6 +1313,82 @@ static int delta_frameshift_local_stop_gained(const duckvep_coding_context_t *ct
     return 1;
 }
 
+/* VEP suppresses frameshift_variant when the first affected reference peptide is
+ * the terminal stop. It rebuilds CDS + 3' UTR and tests the codon at the original
+ * translation end, yielding stop_lost or stop_retained instead. This narrow path
+ * handles a single frame-changing edit that begins inside the terminal codon.
+ * An edit beginning upstream retains the ordinary frameshift path because its
+ * first affected reference peptide is not the stop. */
+static duckvep_context_delta_status_t delta_context_terminal_stop_frameshift(
+    const duckvep_coding_context_t *ctx,
+    uint64_t                        tx_flags,
+    int                            *handled,
+    duckvep_sequence_delta_t       *delta) {
+
+    uint32_t terminal_start;
+    char codon[4];
+    size_t i;
+    char alt_aa;
+
+    if (handled != NULL) *handled = 0;
+    if (ctx == NULL || handled == NULL || delta == NULL) {
+        return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+    if (!ctx->has_single_edit || ctx->ref_cds == NULL || ctx->alt_cds == NULL ||
+        ctx->ref_peptide == NULL || ctx->ref_cds_len < 3u ||
+        (ctx->ref_cds_len % 3u) != 0u ||
+        ctx->ref_peptide_len != ctx->ref_cds_len / 3u ||
+        ctx->ref_peptide[ctx->ref_peptide_len - 1u] != (uint8_t)'*' ||
+        (tx_flags & (uint64_t)DUCKVEP_TX_CDS_END_NF) != 0u ||
+        ctx->single_edit_cds_start == 0u ||
+        ctx->ref_cds_len > (size_t)UINT32_MAX) {
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+
+    terminal_start = (uint32_t)ctx->ref_cds_len - 2u;
+    if (ctx->single_edit_cds_start < terminal_start ||
+        ctx->single_edit_cds_start > ctx->ref_cds_len) {
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+
+    *handled = 1;
+    codon[3] = '\0';
+    for (i = 0u; i < 3u; i++) {
+        size_t position = ctx->ref_cds_len - 3u + i;
+        char base;
+
+        if (position < ctx->alt_cds_len) {
+            base = delta_norm_base((char)ctx->alt_cds[position]);
+        } else {
+            size_t tail_position = position - ctx->alt_cds_len;
+            if (ctx->post_cds_bases == NULL ||
+                tail_position >= (size_t)ctx->post_cds_length) {
+                return DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL;
+            }
+            base = delta_norm_base((char)ctx->post_cds_bases[tail_position]);
+        }
+        if (base == '\0' || base == 'N') {
+            return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+        }
+        codon[i] = base;
+    }
+    if (ctx->codon_table != (uint8_t)DUCKVEP_CODON_TABLE_STANDARD &&
+        ctx->codon_table != (uint8_t)DUCKVEP_CODON_TABLE_VERT_MITO) {
+        return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+    alt_aa = duckvep_translate_codon(
+        codon, (duckvep_codon_table_t)ctx->codon_table);
+    if (alt_aa == '*') delta->stop_retained = 1u;
+    else delta->stop_lost = 1u;
+    delta->cdna_pos = -1;
+    delta->cds_pos = -1;
+    delta->protein_pos = (int32_t)ctx->ref_peptide_len;
+    delta->ref_aa = (uint8_t)'*';
+    delta->alt_aa = (uint8_t)alt_aa;
+    delta->valid = 1u;
+    return DUCKVEP_CONTEXT_DELTA_OK;
+}
+
 /* Coarse frameshift FACT from the CodingContext: a net CDS length change not divisible
  * by three shifts the reading frame, which VEP labels frameshift_variant. This resolves
  * boundary frameshifts (first-codon-adjacent, terminal/stop codon) that the direct
@@ -1359,6 +1477,14 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
         return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     }
     if (ctx->length_diff != 0 && (ctx->length_diff % 3) != 0) {
+        duckvep_context_delta_status_t terminal_status;
+        int terminal_handled;
+
+        terminal_status = delta_context_terminal_stop_frameshift(
+            ctx, tx_flags, &terminal_handled, delta);
+        if (terminal_handled || terminal_status != DUCKVEP_CONTEXT_DELTA_OK) {
+            return terminal_status;
+        }
         return delta_context_frameshift(ctx, tx_flags, delta);
     }
     if (ctx->length_diff != 0 && ctx->has_single_edit &&
@@ -2076,10 +2202,8 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
             if (context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
                 delta_status = duckvep_coding_context_delta_fill(&ctx, tx_flags, delta);
                 if (delta_status != DUCKVEP_CONTEXT_DELTA_OK) {
-                    delta->sequence_status = delta_status ==
-                        DUCKVEP_CONTEXT_DELTA_UNSUPPORTED
-                        ? (uint8_t)DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT
-                        : (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+                    delta->sequence_status =
+                        delta_sequence_status_from_delta(delta_status);
                 }
             }
         } else {
@@ -2114,10 +2238,8 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
             if (context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
                 delta_status = duckvep_coding_context_delta_fill(&ctx, tx_flags, delta);
                 if (delta_status != DUCKVEP_CONTEXT_DELTA_OK) {
-                    delta->sequence_status = delta_status ==
-                        DUCKVEP_CONTEXT_DELTA_UNSUPPORTED
-                        ? (uint8_t)DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT
-                        : (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+                    delta->sequence_status =
+                        delta_sequence_status_from_delta(delta_status);
                 }
             }
         } else {
@@ -2218,6 +2340,10 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
                    : kind == DUCKVEP_KIND_INS ? DUCKVEP_DELTA_ROUTE_INS_CONTEXT
                                               : DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT;
         }
+        return;
+    }
+    if (context_sequence_status ==
+        (uint8_t)DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL) {
         return;
     }
 

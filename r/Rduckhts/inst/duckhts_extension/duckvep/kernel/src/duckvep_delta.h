@@ -120,6 +120,9 @@ typedef struct duckvep_coding_context {
     const uint8_t *alt_cds;     size_t alt_cds_len;
     const uint8_t *ref_peptide; size_t ref_peptide_len;
     const uint8_t *alt_peptide; size_t alt_peptide_len;
+    const uint8_t *post_cds_bases;
+    uint8_t post_cds_length;
+    uint8_t codon_table;
     int64_t length_diff;
     uint32_t flags;
     size_t applied_edits;
@@ -151,7 +154,8 @@ typedef enum duckvep_variant_coding_context_status {
 typedef enum duckvep_context_delta_status {
     DUCKVEP_CONTEXT_DELTA_OK = 0,
     DUCKVEP_CONTEXT_DELTA_INVALID_ARG,
-    DUCKVEP_CONTEXT_DELTA_UNSUPPORTED
+    DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+    DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL
 } duckvep_context_delta_status_t;
 
 typedef enum duckvep_sequence_delta_route {

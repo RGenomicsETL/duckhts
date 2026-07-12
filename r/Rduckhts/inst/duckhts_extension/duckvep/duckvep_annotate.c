@@ -691,6 +691,8 @@ duckvep_scalar_sequence_reason(uint8_t status)
 		return "invalid_model_projection";
 	case DUCKVEP_SEQUENCE_INTERNAL_CAPACITY:
 		return "internal_capacity_error";
+	case DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL:
+		return "missing_transcript_tail";
 	case DUCKVEP_SEQUENCE_NOT_APPLICABLE:
 	case DUCKVEP_SEQUENCE_RESOLVED:
 	case DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT:

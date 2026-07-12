@@ -201,6 +201,7 @@ TEST model_open_rejects_projection_and_sequence_invariant_mutations(void) {
     uint64_t sequence_offset[1] = {0u};
     uint32_t sequence_length[1] = {9u};
     uint8_t codon_table[1] = {1u};
+    uint8_t invalid_tail[DUCKVEP_POST_CDS_BASE_COUNT] = {'A','X',0u};
     duckvep_transcript_model_t tx;
     duckvep_exon_model_t exons;
     duckvep_sequence_pool_t seq;
@@ -262,6 +263,11 @@ TEST model_open_rejects_projection_and_sequence_invariant_mutations(void) {
     ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
               duckvep_model_open(&tx, &exons, &seq, &model, &err));
     ASSERT_EQ(71u, err.where_code); cds_bytes[4] = 'A';
+
+    seq.post_cds_bases = invalid_tail;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(71u, err.where_code); seq.post_cds_bases = NULL;
 
     exons.phase = NULL; exons.end_phase = NULL;
     ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
@@ -5966,6 +5972,116 @@ TEST annotate_codon_indel_frameshift_known_scene(void) {
     PASS();
 }
 
+TEST annotate_terminal_stop_frame_change_uses_transcript_tail(void) {
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {1000u};
+    static const uint32_t tend[1] = {1011u};
+    static const int8_t tstrand[1] = {1};
+    static const uint32_t texoff[1] = {0u};
+    static const uint16_t texcnt[1] = {1u};
+    static const uint32_t tcds_s[1] = {1000u};
+    static const uint32_t tcds_e[1] = {1008u};
+    static const uint32_t estart[1] = {1000u};
+    static const uint32_t eend[1] = {1011u};
+    static const uint32_t ecdna_s[1] = {1u};
+    static const uint32_t ecdna_e[1] = {12u};
+    static const int8_t ephase[1] = {0};
+    static const uint8_t cds_bytes[9] = {
+        'A','T','G', 'A','A','A', 'T','A','A'
+    };
+    static const uint8_t post_cds[DUCKVEP_POST_CDS_BASE_COUNT] = {
+        'A','C','G'
+    };
+    static const uint64_t cds_off[1] = {0u};
+    static const uint32_t cds_lenv[1] = {9u};
+    static const uint8_t cds_tab[1] = {
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD
+    };
+    static const uint16_t vchrom[2] = {0u, 0u};
+    static const uint32_t vpos[2] = {1006u, 1006u};
+    static const uint32_t vend[2] = {1007u, 1006u};
+    static const uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_DEL,
+        (uint8_t)DUCKVEP_KIND_INS
+    };
+    static const uint8_t abytes[6] = {
+        'T','A', 'T',
+        'T', 'T','T'
+    };
+    static const uint32_t roff[2] = {0u, 3u};
+    static const uint32_t aoff[2] = {2u, 4u};
+    static const uint16_t rlen[2] = {2u, 1u};
+    static const uint16_t alen[2] = {1u, 2u};
+
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_sequence_pool_t seq;
+    duckvep_variant_batch_t v;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *ws = NULL;
+    duckvep_error_t err;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t rb;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&seq, 0, sizeof seq);
+    memset(&v, 0, sizeof v);
+    memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend; tx.strand = tstrand;
+    tx.flags = k_zero_flags; tx.exon_offset = texoff; tx.exon_count = texcnt;
+    tx.cds_start1 = tcds_s; tx.cds_end1 = tcds_e; tx.transcript_count = 1u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 1u;
+    seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
+    seq.cds_offset = cds_off; seq.cds_length = cds_lenv; seq.codon_table = cds_tab;
+    seq.post_cds_bases = post_cds; seq.transcript_count = 1u;
+    v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend; v.variant_kind = vkind;
+    v.allele_bytes = abytes; v.allele_bytes_len = sizeof abytes;
+    v.ref_offset = roff; v.alt_offset = aoff;
+    v.ref_length = rlen; v.alt_length = alen; v.count = 2u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_result_builder_init(&rb, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&rb));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED), rows[0].consequence_mask);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, rows[0].sequence_status);
+    ASSERT_EQ((uint8_t)'*', rows[0].aa_ref);
+    ASSERT_EQ((uint8_t)'*', rows[0].aa_alt);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_STOP_LOST), rows[1].consequence_mask);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, rows[1].sequence_status);
+
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+
+    seq.post_cds_bases = NULL;
+    model = NULL; opts = NULL; ws = NULL;
+    memset(&err, 0, sizeof err);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_result_builder_init(&rb, rows, 2u);
+    v.count = 1u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(1u, duckvep_result_builder_count(&rb));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE), rows[0].consequence_mask);
+    ASSERT((rows[0].flags &
+            (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED) != 0u);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL,
+              rows[0].sequence_status);
+
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
 TEST annotate_codon_delins_frameshift_known_scene(void) {
     static const uint16_t tchrom[2]  = {0u, 1u};
     static const uint32_t tstart[2]  = {1000u, 2000u};
@@ -7552,6 +7668,9 @@ static struct theft_type_info kprop_cross_codon_mnv_info = {
 
 static enum theft_alloc_res kprop_frameshift_indel_alloc(struct theft *t, void *env, void **instance) {
     static const char BASES[4] = {'A', 'C', 'G', 'T'};
+    static const uint8_t STOPS[3][3] = {
+        {'T','A','A'}, {'T','A','G'}, {'T','G','A'}
+    };
     struct kprop_coding *s = (struct kprop_coding *)calloc(1u, sizeof *s);
     uint32_t ncodons = (uint32_t)kprop_bounded(t, KPROP_MAX_CODONS - 2u) + 3u;
     uint32_t cds_len = 3u * ncodons;
@@ -7561,11 +7680,17 @@ static enum theft_alloc_res kprop_frameshift_indel_alloc(struct theft *t, void *
     uint32_t extra;
     uint32_t cds_pos;
     uint32_t mode;
+    int force_terminal;
     (void)env;
     if (s == NULL) return THEFT_ALLOC_ERROR;
     s->cds = (uint8_t *)malloc(cds_len);
     if (s->cds == NULL) { free(s); return THEFT_ALLOC_ERROR; }
     for (i = 0u; i < cds_len; i++) s->cds[i] = (uint8_t)BASES[kprop_bounded(t, 4u)];
+    force_terminal = kprop_bounded(t, 8u) == 0u;
+    if (force_terminal) {
+        uint32_t stop = (uint32_t)kprop_bounded(t, 3u);
+        memcpy(s->cds + cds_len - 3u, STOPS[stop], 3u);
+    }
 
     s->chrom = 0u; s->strand = kprop_bounded(t, 2u) == 0u ? 1 : -1; s->flags = 0u;
     s->tstart = base; s->tend = base + cds_len - 1u;
@@ -7578,7 +7703,11 @@ static enum theft_alloc_res kprop_frameshift_indel_alloc(struct theft *t, void *
     mode = (uint32_t)kprop_bounded(t, 3u);
     if (mode == 0u) {
         extra = (uint32_t)kprop_bounded(t, 2u) + 1u; /* net +1 or +2, both frameshift */
-        cds_pos = (uint32_t)kprop_bounded(t, cds_len - 6u) + 4u; /* exclude first/last codon */
+        if (force_terminal) {
+            cds_pos = s->strand > 0 ? cds_len - 2u : cds_len - 1u;
+        } else {
+            cds_pos = (uint32_t)kprop_bounded(t, cds_len - 6u) + 4u;
+        }
         s->vpos = kprop_genomic_pos_for_cds(s, cds_pos);
         s->vend = s->vpos; s->vkind = (uint8_t)DUCKVEP_KIND_INS;
         s->abytes[0] = (uint8_t)kprop_genomic_base_at(s, s->vpos);
@@ -12567,6 +12696,9 @@ static struct {
     uint32_t delins_minus2;
     uint32_t rev;
     uint32_t stop_gained;
+    uint32_t terminal_stop;
+    uint32_t terminal_reverse;
+    uint32_t terminal_missing_tail;
 } g_frameshift_cov;
 
 static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct theft *t, void *arg1) {
@@ -12633,6 +12765,45 @@ static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct
                            alt_cds, sizeof alt_cds, ref_pep, sizeof ref_pep,
                            alt_pep, sizeof alt_pep, &fsctx) ==
                        DUCKVEP_VARIANT_CODING_CONTEXT_OK;
+        if (have_ctx && fsctx.ref_peptide_len > 0u &&
+            fsctx.ref_peptide[fsctx.ref_peptide_len - 1u] == (uint8_t)'*' &&
+            fsctx.single_edit_cds_start >= fsctx.ref_cds_len - 2u &&
+            fsctx.single_edit_cds_start <= fsctx.ref_cds_len) {
+            if (fsctx.alt_cds_len >= fsctx.ref_cds_len) {
+                char codon[3];
+                char alt_aa;
+                uint64_t want;
+                memcpy(codon, fsctx.alt_cds + fsctx.ref_cds_len - 3u,
+                       sizeof codon);
+                alt_aa = duckvep_translate_codon(
+                    codon, DUCKVEP_CODON_TABLE_STANDARD);
+                want = alt_aa == '*'
+                    ? DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED)
+                    : DUCKVEP_SO(DUCKVEP_SO_STOP_LOST);
+                if (rows[0].consequence_mask != want ||
+                    rows[0].sequence_status !=
+                        (uint8_t)DUCKVEP_SEQUENCE_RESOLVED ||
+                    rows[0].protein_pos != (int32_t)fsctx.ref_peptide_len ||
+                    rows[0].aa_ref != (uint8_t)'*' ||
+                    rows[0].aa_alt != (uint8_t)alt_aa) {
+                    tr = THEFT_TRIAL_FAIL;
+                } else {
+                    g_frameshift_cov.terminal_stop++;
+                    if (s->strand < 0) g_frameshift_cov.terminal_reverse++;
+                }
+            } else {
+                if (rows[0].consequence_mask !=
+                        DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE) ||
+                    rows[0].sequence_status !=
+                        (uint8_t)DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL ||
+                    rows[0].protein_pos != -1) {
+                    tr = THEFT_TRIAL_FAIL;
+                } else {
+                    g_frameshift_cov.terminal_missing_tail++;
+                }
+            }
+            goto done;
+        }
         if (have_ctx && (duckvep_codon_table_t)s->ctab == DUCKVEP_CODON_TABLE_STANDARD) {
             int expected_stop = kprop_frameshift_local_stop_oracle(
                 fsctx.ref_cds, fsctx.ref_cds_len, fsctx.alt_cds, fsctx.alt_cds_len,
@@ -12687,12 +12858,17 @@ TEST annotate_frameshift_indel_matches_oracle(void) {
     ASSERT(g_frameshift_cov.delins_minus1 > 0u);
     ASSERT(g_frameshift_cov.delins_minus2 > 0u);
     ASSERT(g_frameshift_cov.rev > 0u);
+    ASSERT(g_frameshift_cov.terminal_stop > 0u);
+    ASSERT(g_frameshift_cov.terminal_reverse > 0u);
     fprintf(stderr,
-            "[frameshift coverage] ins=%u del=%u delins=%u(+1=%u +2=%u -1=%u -2=%u) reverse=%u stop_gained=%u\n",
+            "[frameshift coverage] ins=%u del=%u delins=%u(+1=%u +2=%u -1=%u -2=%u) reverse=%u stop_gained=%u terminal_stop=%u terminal_reverse=%u terminal_missing_tail=%u\n",
             g_frameshift_cov.ins, g_frameshift_cov.del, g_frameshift_cov.delins,
             g_frameshift_cov.delins_plus1, g_frameshift_cov.delins_plus2,
             g_frameshift_cov.delins_minus1, g_frameshift_cov.delins_minus2,
-            g_frameshift_cov.rev, g_frameshift_cov.stop_gained);
+            g_frameshift_cov.rev, g_frameshift_cov.stop_gained,
+            g_frameshift_cov.terminal_stop,
+            g_frameshift_cov.terminal_reverse,
+            g_frameshift_cov.terminal_missing_tail);
     PASS();
 }
 
@@ -13901,6 +14077,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_codon_mnv_reverse_strand_same_codon_known_scene);
     RUN_TEST(annotate_codon_padded_small_variant_delta_known_scene);
     RUN_TEST(annotate_codon_indel_frameshift_known_scene);
+    RUN_TEST(annotate_terminal_stop_frame_change_uses_transcript_tail);
     RUN_TEST(annotate_codon_delins_frameshift_known_scene);
     RUN_TEST(annotate_codon_inframe_insertion_known_scene);
     RUN_TEST(annotate_codon_inframe_insertion_reverse_known_scene);

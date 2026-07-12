@@ -29,8 +29,12 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 5
-#define DUCKVEP_KERNEL_VERSION_PATCH 1
+#define DUCKVEP_KERNEL_VERSION_MINOR 6
+#define DUCKVEP_KERNEL_VERSION_PATCH 0
+
+/* Transcript-oriented reference bases immediately after the CDS. VEP needs at
+ * most three for an edit confined to the terminal stop codon. */
+#define DUCKVEP_POST_CDS_BASE_COUNT 3u
 
 /* --------------------------------------------------------------- status -- */
 
@@ -202,6 +206,7 @@ typedef struct duckvep_sequence_pool {
     const uint32_t *cds_length;    /* [transcript_count] 0 = non-coding                  */
     const uint8_t  *codon_table;   /* [transcript_count] duckvep_codon_table_t per tx    */
     size_t          transcript_count;
+    const uint8_t  *post_cds_bases;/* OPTIONAL [transcript_count * 3], 0-padded          */
 } duckvep_sequence_pool_t;
 
 /* ----------------------------------------------------------- compact output
@@ -225,7 +230,8 @@ typedef enum duckvep_sequence_status {
     DUCKVEP_SEQUENCE_NON_CONTIGUOUS_EDIT = 5,
     DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT = 6,
     DUCKVEP_SEQUENCE_INVALID_PROJECTION = 7,
-    DUCKVEP_SEQUENCE_INTERNAL_CAPACITY = 8
+    DUCKVEP_SEQUENCE_INTERNAL_CAPACITY = 8,
+    DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL = 9
 } duckvep_sequence_status_t;
 
 typedef struct duckvep_consequence {

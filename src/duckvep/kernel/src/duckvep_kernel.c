@@ -373,9 +373,32 @@ duckvep_status_t duckvep_model_open(
             return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                         "sequence pool has count>0 but null columns");
         }
+        if (seq->post_cds_bases != NULL &&
+            seq->transcript_count > SIZE_MAX / DUCKVEP_POST_CDS_BASE_COUNT) {
+            return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_MODEL_SEQ_COUNT,
+                        "post-CDS sequence pool exceeds size_t");
+        }
         for (t = 0u; t < seq->transcript_count; t++) {
             uint64_t off = seq->cds_offset[t];
             uint64_t len = (uint64_t)seq->cds_length[t];
+            size_t tail_base = t * DUCKVEP_POST_CDS_BASE_COUNT;
+            size_t tail_i;
+            uint8_t tail_length = 0u;
+            int tail_ended = 0;
+
+            for (tail_i = 0u; seq->post_cds_bases != NULL &&
+                 tail_i < DUCKVEP_POST_CDS_BASE_COUNT; tail_i++) {
+                uint8_t base = seq->post_cds_bases[tail_base + tail_i];
+                if (base == 0u) {
+                    tail_ended = 1;
+                } else if (tail_ended || !model_sequence_base_valid(base)) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "post-CDS bases are invalid or not zero-padded");
+                } else {
+                    tail_length++;
+                }
+            }
             if (off > (uint64_t)seq->cds_bytes_len ||
                 len > (uint64_t)seq->cds_bytes_len - off) {
                 return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_SEQ_RANGE,
@@ -427,6 +450,15 @@ duckvep_status_t duckvep_model_open(
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
                                 "prepared CDS length or codon table is inconsistent");
+                }
+                if ((uint64_t)tail_length >
+                    (uint64_t)exons->cdna_end1[
+                        (size_t)transcripts->exon_offset[t] +
+                        (size_t)transcripts->exon_count[t] - 1u] -
+                    (uint64_t)coding_end_cdna) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "post-CDS bases exceed the transcript tail");
                 }
                 for (i = 0u; i < (size_t)len; i++) {
                     if (!model_sequence_base_valid(seq->cds_bytes[(size_t)off + i])) {
