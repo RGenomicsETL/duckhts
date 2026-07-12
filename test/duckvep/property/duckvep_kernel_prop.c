@@ -1541,6 +1541,174 @@ TEST region_mask_invariants_hold(void) {
     PASS();
 }
 
+/* The production SNV path carries one exon cursor per transcript across sorted
+ * tiles. Keep the old all-exon classifiers as an independent oracle: randomized
+ * transcript shapes are walked base-by-base, including both strands, short
+ * exons/introns, outer transcript padding, CDS/UTR boundaries, and every splice
+ * window. */
+#define KPROP_POINT_MAX_EXONS 8u
+
+struct kprop_point_scene {
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    uint16_t chrom;
+    uint32_t tstart;
+    uint32_t tend;
+    int8_t strand;
+    uint64_t flags;
+    uint32_t exoff;
+    uint16_t excnt;
+    uint32_t cds_s;
+    uint32_t cds_e;
+    uint32_t es[KPROP_POINT_MAX_EXONS];
+    uint32_t ee[KPROP_POINT_MAX_EXONS];
+    uint32_t splice_exonic;
+    uint32_t splice_intronic;
+};
+
+static enum theft_alloc_res kprop_point_scene_alloc(
+    struct theft *t, void *env, void **instance) {
+
+    struct kprop_point_scene *s;
+    uint32_t asc_s[KPROP_POINT_MAX_EXONS];
+    uint32_t asc_e[KPROP_POINT_MAX_EXONS];
+    uint32_t pos;
+    uint32_t i;
+    uint32_t cnt;
+    uint32_t left_pad;
+    uint32_t right_pad;
+    (void)env;
+
+    s = (struct kprop_point_scene *)calloc(1u, sizeof *s);
+    if (s == NULL) return THEFT_ALLOC_ERROR;
+    cnt = 1u + (uint32_t)kprop_bounded(t, KPROP_POINT_MAX_EXONS);
+    pos = 1000u + (uint32_t)kprop_bounded(t, 1000000u);
+    for (i = 0u; i < cnt; i++) {
+        uint32_t len = 1u + (uint32_t)kprop_bounded(t, 48u);
+        uint32_t gap = 1u + (uint32_t)kprop_bounded(t, 48u);
+        asc_s[i] = pos;
+        asc_e[i] = pos + len - 1u;
+        pos = asc_e[i] + gap + 1u;
+    }
+    s->strand = kprop_bounded(t, 2u) == 0u ? (int8_t)1 : (int8_t)-1;
+    for (i = 0u; i < cnt; i++) {
+        uint32_t src = s->strand >= 0 ? i : cnt - i - 1u;
+        s->es[i] = asc_s[src];
+        s->ee[i] = asc_e[src];
+    }
+    left_pad = (uint32_t)kprop_bounded(t, 20u);
+    right_pad = (uint32_t)kprop_bounded(t, 20u);
+    s->tstart = asc_s[0] - left_pad;
+    s->tend = asc_e[cnt - 1u] + right_pad;
+    if (kprop_bounded(t, 3u) != 0u) {
+        uint32_t span = s->tend - s->tstart;
+        s->cds_s = s->tstart + (uint32_t)kprop_bounded(t, span + 1u);
+        s->cds_e = s->cds_s + (uint32_t)kprop_bounded(t,
+            s->tend - s->cds_s + 1u);
+    }
+    s->splice_exonic = (uint32_t)kprop_bounded(t, 40u);
+    s->splice_intronic = (uint32_t)kprop_bounded(t, 40u);
+    s->excnt = (uint16_t)cnt;
+
+    s->tx.chrom_id = &s->chrom;
+    s->tx.start1 = &s->tstart;
+    s->tx.end1 = &s->tend;
+    s->tx.strand = &s->strand;
+    s->tx.flags = &s->flags;
+    s->tx.exon_offset = &s->exoff;
+    s->tx.exon_count = &s->excnt;
+    s->tx.cds_start1 = &s->cds_s;
+    s->tx.cds_end1 = &s->cds_e;
+    s->tx.transcript_count = 1u;
+    s->ex.start1 = s->es;
+    s->ex.end1 = s->ee;
+    s->ex.exon_count = cnt;
+    *instance = s;
+    return THEFT_ALLOC_OK;
+}
+
+static void kprop_point_scene_free(void *instance, void *env) {
+    (void)env;
+    free(instance);
+}
+
+static struct theft_type_info kprop_point_scene_info = {
+    .alloc = kprop_point_scene_alloc,
+    .free = kprop_point_scene_free,
+};
+
+static int region_states_equal(const duckvep_region_state_t *a,
+                               const duckvep_region_state_t *b) {
+    return a->region_mask == b->region_mask &&
+           a->within_feature == b->within_feature &&
+           a->complete_overlap_feature == b->complete_overlap_feature &&
+           a->complete_within_feature == b->complete_within_feature &&
+           a->partial_overlap_feature == b->partial_overlap_feature &&
+           a->within_cdna == b->within_cdna &&
+           a->overlaps_exon == b->overlaps_exon &&
+           a->overlaps_intron == b->overlaps_intron &&
+           a->overlaps_cds == b->overlaps_cds &&
+           a->overlaps_utr5 == b->overlaps_utr5 &&
+           a->overlaps_utr3 == b->overlaps_utr3;
+}
+
+static int splice_states_equal(const duckvep_splice_state_t *a,
+                               const duckvep_splice_state_t *b) {
+    return a->splice_donor == b->splice_donor &&
+           a->splice_acceptor == b->splice_acceptor &&
+           a->splice_donor_5th == b->splice_donor_5th &&
+           a->splice_donor_region == b->splice_donor_region &&
+           a->splice_polypyrimidine == b->splice_polypyrimidine &&
+           a->splice_region == b->splice_region &&
+           a->intronic == b->intronic && a->any == b->any;
+}
+
+static enum theft_trial_res prop_sorted_point_classifier_matches_exhaustive(
+    struct theft *t, void *arg1) {
+
+    const struct kprop_point_scene *s =
+        (const struct kprop_point_scene *)arg1;
+    uint16_t rank = UINT16_MAX;
+    uint32_t first = s->tstart > 24u ? s->tstart - 24u : 1u;
+    uint32_t last = s->tend + 24u;
+    uint32_t pos;
+    (void)t;
+
+    for (pos = first; pos <= last; pos++) {
+        duckvep_region_state_t slow_region;
+        duckvep_region_state_t fast_region;
+        duckvep_splice_state_t slow_splice;
+        duckvep_splice_state_t fast_splice;
+
+        slow_region = duckvep_region_classify_span(
+            &s->tx, &s->ex, 0u, pos, pos,
+            s->splice_exonic, s->splice_intronic);
+        slow_splice = duckvep_splice_classify_span(
+            &s->tx, &s->ex, 0u, pos, pos, 0u);
+        duckvep_classify_point_sorted(
+            &s->tx, &s->ex, 0u, pos,
+            s->splice_exonic, s->splice_intronic,
+            &rank, &fast_region, &fast_splice);
+        if (!region_states_equal(&slow_region, &fast_region) ||
+            !splice_states_equal(&slow_splice, &fast_splice))
+            return THEFT_TRIAL_FAIL;
+        if (pos == UINT32_MAX) break;
+    }
+    return THEFT_TRIAL_PASS;
+}
+
+TEST sorted_point_classifier_matches_exhaustive_for_any_transcript(void) {
+    struct theft_run_config cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.name = "sorted point cursor classifier == exhaustive exon/gap scans";
+    cfg.prop1 = prop_sorted_point_classifier_matches_exhaustive;
+    cfg.type_info[0] = &kprop_point_scene_info;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    PASS();
+}
+
 /* Hand-computed: coding transcript [1000,2000], exons [1000,1200] & [1500,2000],
  * CDS [1100,1900], splice_dist 8. tx0 is '+' strand, tx1 is '-' strand. */
 TEST region_mask_known_scene(void) {
@@ -3593,6 +3761,97 @@ TEST annotate_cursor_resumes_known_scene(void) {
     duckvep_annotate_cursor_close(cur);
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
+TEST sorted_point_cursor_survives_tiles_and_resets_on_rewind(void) {
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {100u};
+    static const uint32_t tend[1] = {310u};
+    static const int8_t strand[1] = {1};
+    static const uint64_t flags[1] = {0u};
+    static const uint32_t exoff[1] = {0u};
+    static const uint16_t excnt[1] = {3u};
+    static const uint32_t zero[1] = {0u};
+    static const uint32_t es[3] = {100u, 200u, 300u};
+    static const uint32_t ee[3] = {120u, 220u, 310u};
+    uint16_t vchrom[3] = {0u, 0u, 0u};
+    uint32_t vpos[3];
+    uint32_t vend[3];
+    uint8_t vkind[3] = {
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_variant_batch_t v;
+    duckvep_model_t *model = NULL;
+    duckvep_model_t *other_model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *ws = NULL;
+    duckvep_consequence_t rows[3];
+    duckvep_result_builder_t rb;
+    duckvep_error_t err;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&ex, 0, sizeof ex);
+    memset(&v, 0, sizeof v);
+    memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = strand; tx.flags = flags; tx.exon_offset = exoff;
+    tx.exon_count = excnt; tx.cds_start1 = zero; tx.cds_end1 = zero;
+    tx.transcript_count = 1u;
+    ex.start1 = es; ex.end1 = ee; ex.exon_count = 3u;
+    v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend;
+    v.variant_kind = vkind;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &ex, NULL, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_model_open(&tx, &ex, NULL, &other_model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+
+    vpos[0] = vend[0] = 105u;
+    vpos[1] = vend[1] = 150u;
+    v.count = 2u;
+    duckvep_result_builder_init(&rb, rows, 3u);
+    ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG,
+              duckvep_annotate_tile(other_model, &v, NULL, opts, ws, &rb, &err));
+    ASSERT_EQ(65u, err.where_code);
+    duckvep_result_builder_reset(&rb);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &v, NULL, opts, ws, &rb, &err));
+    ASSERT_EQ(2u, rb.count);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, rows[0].region_mask);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_INTRON, rows[1].region_mask);
+
+    vpos[0] = vend[0] = 205u;
+    vpos[1] = vend[1] = 250u;
+    vpos[2] = vend[2] = 305u;
+    v.count = 3u;
+    duckvep_result_builder_init(&rb, rows, 3u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &v, NULL, opts, ws, &rb, &err));
+    ASSERT_EQ(3u, rb.count);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, rows[0].region_mask);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_INTRON, rows[1].region_mask);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, rows[2].region_mask);
+
+    /* A new run may rewind. The workspace detects that boundary and invalidates
+     * its per-transcript ranks lazily, rather than carrying exon 3 into exon 1. */
+    vpos[0] = vend[0] = 110u;
+    v.count = 1u;
+    duckvep_result_builder_init(&rb, rows, 3u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &v, NULL, opts, ws, &rb, &err));
+    ASSERT_EQ(1u, rb.count);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, rows[0].region_mask);
+
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(other_model);
     duckvep_model_close(model);
     PASS();
 }
@@ -13414,11 +13673,13 @@ int main(int argc, char **argv) {
     RUN_TEST(model_open_rejects_invalid_models);
     RUN_TEST(annotate_matches_composition_for_any_scene);
     RUN_TEST(annotate_cursor_resumes_known_scene);
+    RUN_TEST(sorted_point_cursor_survives_tiles_and_resets_on_rewind);
     RUN_TEST(annotate_cursor_matches_tile_for_any_output_split);
     RUN_TEST(region_mask_known_scene);
     RUN_TEST(region_mask_short_exon_splice_reach_clamped);
     RUN_TEST(region_span_can_cross_cds_intron_and_splice_windows);
     RUN_TEST(region_mask_invariants_hold);
+    RUN_TEST(sorted_point_classifier_matches_exhaustive_for_any_transcript);
     RUN_TEST(projection_known_forward_reverse_and_phase);
     RUN_TEST(projection_matches_bruteforce_for_any_small_transcript);
     RUN_TEST(codon_translate_known);

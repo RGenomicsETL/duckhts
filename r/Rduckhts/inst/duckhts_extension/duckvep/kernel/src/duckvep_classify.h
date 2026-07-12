@@ -62,6 +62,24 @@ typedef struct duckvep_splice_state {
     uint8_t any;
 } duckvep_splice_state_t;
 
+/* Fused point-event classifier for the sorted hot path. `exon_rank_io` is the
+ * genomic-order rank of the first exon whose end is not before `pos`; initialize
+ * it to UINT16_MAX for a new transcript run. Successive calls for the same
+ * transcript must have non-decreasing positions. The model already limits exon
+ * counts to uint16_t. Exons remain stored in transcript order, so genomic rank
+ * runs forward on both strands while the implementation maps minus-strand ranks
+ * back to the borrowed exon slice. */
+void duckvep_classify_point_sorted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic,
+    uint16_t                         *exon_rank_io,
+    duckvep_region_state_t           *region_out,
+    duckvep_splice_state_t           *splice_out);
+
 /* `interbase` marks a pure insertion: it lands BETWEEN two reference bases rather
  * than replacing any. VEP models it as vf->start = end1+1, vf->end = end1 (start >
  * end) so a zone [lo,hi] is only touched when BOTH flanking bases fall inside it

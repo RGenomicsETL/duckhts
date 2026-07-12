@@ -18,11 +18,10 @@
  * not yet measured against a VEP --gff differential) plus the codon-SNV subset
  * (synonymous / missense / stop_gained / stop_lost / stop_retained / start_lost),
  * narrow two-codon MNV missense, and sequence-backed frameshift / in-frame-deletion
- * indel slices, plus
- * full-transcript structural deletion/CNV-loss and duplication/CNV-gain terms.
- * DECLARED but NOT yet set: incomplete_terminal_codon and the transcript-biotype
- * terms NMD_transcript_variant / mature_miRNA_variant (need the distilled tx_flags
- * facts + side relations). See conformance/README for the current measured scope.
+ * indel slices, full-transcript structural deletion/CNV-loss and
+ * duplication/CNV-gain terms, and curated NMD_transcript_variant placement.
+ * DECLARED but NOT yet set: incomplete_terminal_codon and mature_miRNA_variant.
+ * See conformance/README for the current measured scope.
  */
 #ifndef DUCKVEP_SO_H
 #define DUCKVEP_SO_H
@@ -63,9 +62,8 @@ typedef enum duckvep_so_bit {
     /* --- additional splice terms (set by the splice-state classifier) --- */
     DUCKVEP_SO_SPLICE_DONOR_REGION        = 19,
     DUCKVEP_SO_SPLICE_POLYPYRIMIDINE      = 20,
-    /* --- transcript-biotype terms (declared now; set when the import carries the
-     * distilled biotype facts — DUCKVEP_TX_BIOTYPE_NMD / _MIRNA (duckvep_kernel.h) +
-     * the mature-miRNA side relation, plus rule-table tier suppression) --- */
+    /* --- transcript-biotype terms (NMD is set from the distilled biotype flag;
+     * mature miRNA still needs its side relation) --- */
     DUCKVEP_SO_NMD_TRANSCRIPT             = 21,
     DUCKVEP_SO_MATURE_MIRNA               = 22,
     DUCKVEP_SO_FRAMESHIFT                 = 23,
