@@ -231,6 +231,30 @@ FROM unnest(duckvep_annotate(
 ----
 frameshift_variant	1	1	1
 
+# VEP 116 places an insertion on the exon/CDS side of a boundary while its
+# splice predicates retain the interbase interval. These are fixed witnesses
+# from the real VEP differential, not hand-assigned consequence examples.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 199::UBIGINT, 'G', 'GT'),
+    (2, 199::UBIGINT, 'G', 'GATG'),
+    (3, 240::UBIGINT, 'A', 'AATG'),
+    (4, 250::UBIGINT, 'C', 'CT')
+)
+SELECT ord, annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, position, reference, alternate, 1::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	frameshift_variant&splice_region_variant	supported	-
+2	protein_altering_variant&splice_region_variant	supported	-
+3	3_prime_UTR_variant	supported	-
+4	downstream_gene_variant	supported	-
+
 # NMD_transcript_variant is the VEP biotype predicate: it co-emits for a
 # variant inside a transcript already curated as nonsense_mediated_decay.
 statement ok

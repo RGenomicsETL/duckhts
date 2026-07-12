@@ -188,6 +188,7 @@ static duckvep_cds_edit_status_t duckvep_variant_cds_edit_build_event(
     duckvep_coding_projection_t proj;
     uint32_t min_cds;
     uint32_t max_cds;
+    uint32_t projected_pos;
     uint16_t j;
     uint8_t kind;
 
@@ -222,22 +223,45 @@ static duckvep_cds_edit_status_t duckvep_variant_cds_edit_build_event(
     out->alt = edit.alt_len > 0u ? v->allele_bytes + edit.alt_off : NULL;
 
     if (edit.event.interbase) {
+        uint32_t boundary;
+        uint32_t right_flank;
+
         if (edit.ref_len != 0u || edit.alt_len == 0u) return DUCKVEP_CDS_EDIT_INVALID_EVENT;
-        if (!duckvep_project_coding_base(transcripts, exons, tx_idx,
-                                         edit.event.start1, &proj)) {
-            return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+        boundary = edit.event.insertion_boundary0;
+        right_flank = duckvep_event_right_flank1(&edit.event);
+        projected_pos = edit.event.start1;
+        if (duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                        projected_pos, &proj)) {
+            /* The retained VCF padding base is usable only when it is itself in
+             * the CDS. Genomic REF validation outside the CDS belongs upstream. */
+            if (!delta_cds_ref_matches(cds_seq, cds_len, proj.cds_pos,
+                                       (char)v->allele_bytes[edit.anchor_ref_off],
+                                       transcript_strand)) {
+                return DUCKVEP_CDS_EDIT_REF_MISMATCH;
+            }
+        } else {
+            projected_pos = edit.event.anchor_side ==
+                                (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT
+                              ? right_flank
+                              : boundary;
+            if (projected_pos == 0u ||
+                !duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                             projected_pos, &proj)) {
+                return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+            }
         }
-        if (!delta_cds_ref_matches(cds_seq, cds_len, proj.cds_pos,
-                                   (char)v->allele_bytes[edit.anchor_ref_off],
-                                   transcript_strand)) {
-            return DUCKVEP_CDS_EDIT_REF_MISMATCH;
-        }
-        if (edit.event.anchor_side == (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT) {
+
+        /* cds_start is the 1-based position before which the inserted bases are
+         * written. The same genomic boundary reverses direction on a minus-strand
+         * transcript, hence the two flank-specific formulas. */
+        if (projected_pos == boundary) {
             out->cds_start = transcript_strand > 0 ? proj.cds_pos + 1u
                                                    : proj.cds_pos;
-        } else {
+        } else if (projected_pos == right_flank) {
             out->cds_start = transcript_strand > 0 ? proj.cds_pos
                                                    : proj.cds_pos + 1u;
+        } else {
+            return DUCKVEP_CDS_EDIT_INVALID_EVENT;
         }
         if (out->cds_start == 0u || (uint64_t)out->cds_start > (uint64_t)cds_len + 1u) {
             return DUCKVEP_CDS_EDIT_OUT_OF_CDS;

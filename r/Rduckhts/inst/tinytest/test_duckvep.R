@@ -123,6 +123,33 @@ expect_equal(frameshift$protein_position, 2)
 expect_true(is.na(frameshift$reference_amino_acid))
 expect_true(is.na(frameshift$alternate_amino_acid))
 
+boundary_insertions <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 199::UBIGINT, 'G', 'GT'),",
+    "(2, 199::UBIGINT, 'G', 'GATG'),",
+    "(3, 240::UBIGINT, 'A', 'AATG'),",
+    "(4, 250::UBIGINT, 'C', 'CT'))",
+    "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 1::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(boundary_insertions$ord, 1:4)
+expect_identical(
+  boundary_insertions$consequence,
+  c(
+    "frameshift_variant&splice_region_variant",
+    "protein_altering_variant&splice_region_variant",
+    "3_prime_UTR_variant",
+    "downstream_gene_variant"
+  )
+)
+expect_identical(boundary_insertions$status, rep("supported", 4))
+expect_true(all(is.na(boundary_insertions$reason)))
+
 prepared_events <- dbGetQuery(
   con,
   paste(

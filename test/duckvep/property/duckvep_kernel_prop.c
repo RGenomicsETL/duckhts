@@ -8508,6 +8508,101 @@ static uint32_t kprop_single_variant_flags_oracle(uint32_t ref_len, uint32_t alt
     return flags;
 }
 
+TEST cds_edit_builder_projects_exon_boundary_insertions_on_both_strands(void) {
+    static const uint16_t chrom[2] = {0u, 1u};
+    static const uint32_t tx_start[2] = {100u, 100u};
+    static const uint32_t tx_end[2] = {250u, 250u};
+    static const int8_t strand[2] = {1, -1};
+    static const uint32_t exon_offset[2] = {0u, 2u};
+    static const uint16_t exon_count[2] = {2u, 2u};
+    static const uint32_t cds_start[2] = {120u, 110u};
+    static const uint32_t cds_end[2] = {240u, 230u};
+    static const uint32_t exon_start[4] = {100u, 200u, 200u, 100u};
+    static const uint32_t exon_end[4] = {150u, 250u, 250u, 150u};
+    static const uint32_t cdna_start[4] = {1u, 52u, 1u, 52u};
+    static const uint32_t cdna_end[4] = {51u, 102u, 51u, 102u};
+    static const int8_t phase[4] = {0, 0, 0, 0};
+    static const uint64_t cds_offset[2] = {0u, 72u};
+    static const uint32_t cds_length[2] = {72u, 72u};
+    static const uint8_t codon_table[2] = {
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD,
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD
+    };
+    static const uint32_t pos[2] = {199u, 199u};
+    static const uint8_t kind[2] = {
+        (uint8_t)DUCKVEP_KIND_INS, (uint8_t)DUCKVEP_KIND_INS
+    };
+    static const uint8_t alleles[6] = {'G','G','T', 'G','G','T'};
+    static const uint32_t ref_offset[2] = {0u, 3u};
+    static const uint32_t alt_offset[2] = {1u, 4u};
+    static const uint16_t ref_length[2] = {1u, 1u};
+    static const uint16_t alt_length[2] = {2u, 2u};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_sequence_pool_t seq;
+    duckvep_variant_batch_t variants;
+    duckvep_haplotype_edit_t edit;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t results;
+    duckvep_error_t error;
+    uint8_t cds[144];
+    size_t i;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    memset(&seq, 0, sizeof seq); memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    memset(cds, 'A', sizeof cds);
+    cds[0] = cds[72] = 'A'; cds[1] = cds[73] = 'T'; cds[2] = cds[74] = 'G';
+    cds[69] = cds[141] = 'T'; cds[70] = cds[142] = 'A';
+    cds[71] = cds[143] = 'A';
+    tx.chrom_id = chrom; tx.start1 = tx_start; tx.end1 = tx_end; tx.strand = strand;
+    tx.flags = k_zero_flags; tx.exon_offset = exon_offset; tx.exon_count = exon_count;
+    tx.cds_start1 = cds_start; tx.cds_end1 = cds_end; tx.transcript_count = 2u;
+    exons.start1 = exon_start; exons.end1 = exon_end;
+    exons.cdna_start1 = cdna_start; exons.cdna_end1 = cdna_end;
+    exons.phase = phase; exons.end_phase = phase; exons.exon_count = 4u;
+    seq.cds_bytes = cds; seq.cds_bytes_len = sizeof cds;
+    seq.cds_offset = cds_offset; seq.cds_length = cds_length;
+    seq.codon_table = codon_table; seq.transcript_count = 2u;
+    variants.chrom_id = chrom; variants.pos1 = pos; variants.end1 = pos;
+    variants.variant_kind = kind; variants.allele_bytes = alleles;
+    variants.allele_bytes_len = sizeof alleles; variants.ref_offset = ref_offset;
+    variants.alt_offset = alt_offset; variants.ref_length = ref_length;
+    variants.alt_length = alt_length; variants.count = 2u;
+
+    for (i = 0u; i < 2u; i++) {
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_OK,
+                  duckvep_variant_cds_edit_build(&tx, &exons, &seq, &variants,
+                                                 (uint32_t)i, i, strand[i], &edit));
+        ASSERT_EQ(32u, edit.cds_start);
+        ASSERT_EQ(0u, edit.ref_len);
+        ASSERT_EQ(1u, edit.alt_len);
+    }
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &workspace, &error));
+    duckvep_result_builder_init(&results, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &variants, options, workspace,
+                                    &results, &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    for (i = 0u; i < 2u; i++) {
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT) |
+                  DUCKVEP_SO(DUCKVEP_SO_SPLICE_REGION),
+                  rows[i].consequence_mask);
+        ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, rows[i].sequence_status);
+    }
+
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    PASS();
+}
+
 TEST cds_edit_builder_known_scene(void) {
     static uint8_t plus_cds[12] = {'A','T','G','A','A','A','C','C','C','T','A','A'};
     static uint8_t minus_cds[12] = {'A','T','G','A','A','A','C','C','C','T','A','A'};
@@ -13814,6 +13909,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_codon_matches_kernel_for_any_cds_snv);
     RUN_TEST(annotate_mnv_same_codon_matches_oracle);
     RUN_TEST(annotate_cross_codon_mnv_missense_matches_oracle);
+    RUN_TEST(cds_edit_builder_projects_exon_boundary_insertions_on_both_strands);
     RUN_TEST(cds_edit_builder_known_scene);
     RUN_TEST(coding_context_known_scene);
     RUN_TEST(variant_coding_context_known_scene);

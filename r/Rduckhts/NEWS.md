@@ -1,5 +1,6 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundled DuckVEP annotation now matches VEP 116 for insertions at exon, CDS, and transcript boundaries, including coding+splice consequences when the VCF padding base is intronic and UTR/downstream placement at right-hand boundaries
 - expose specific DuckVEP unresolved reasons through the bundled extension and return NULL, rather than empty strings, when a protein-positioned frameshift or in-frame indel has no scalar one-letter amino-acid value
 - reject malformed bundled DuckVEP resident models at load time when transcript/exon/cDNA/CDS/phase/prepared-sequence coordinates disagree; the SQL loader and standalone C engine now share the same final validator
 - make bundled DuckVEP intergenic output fail closed for partial resident models. Ordinary `duckvep_model_load(...)` calls report `no_feature_in_loaded_model` as unresolved; the named `transcript_coverage_complete := TRUE` parameter requires contig lengths before returning supported `intergenic_variant`, and rejects coordinates beyond those lengths
