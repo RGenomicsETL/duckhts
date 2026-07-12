@@ -18,6 +18,7 @@
 #include "duckvep_delta.h"
 #include "duckvep_effect.h"
 #include "duckvep_event.h"
+#include "duckvep_projection.h"
 #include "duckvep_so.h"
 #include "duckvep_sweep.h"
 #include "duckvep_workspace_internal.h"
@@ -372,9 +373,32 @@ duckvep_status_t duckvep_model_open(
             return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                         "sequence pool has count>0 but null columns");
         }
+        if (seq->post_cds_bases != NULL &&
+            seq->transcript_count > SIZE_MAX / DUCKVEP_POST_CDS_BASE_COUNT) {
+            return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_MODEL_SEQ_COUNT,
+                        "post-CDS sequence pool exceeds size_t");
+        }
         for (t = 0u; t < seq->transcript_count; t++) {
             uint64_t off = seq->cds_offset[t];
             uint64_t len = (uint64_t)seq->cds_length[t];
+            size_t tail_base = t * DUCKVEP_POST_CDS_BASE_COUNT;
+            size_t tail_i;
+            uint8_t tail_length = 0u;
+            int tail_ended = 0;
+
+            for (tail_i = 0u; seq->post_cds_bases != NULL &&
+                 tail_i < DUCKVEP_POST_CDS_BASE_COUNT; tail_i++) {
+                uint8_t base = seq->post_cds_bases[tail_base + tail_i];
+                if (base == 0u) {
+                    tail_ended = 1;
+                } else if (tail_ended || !model_sequence_base_valid(base)) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "post-CDS bases are invalid or not zero-padded");
+                } else {
+                    tail_length++;
+                }
+            }
             if (off > (uint64_t)seq->cds_bytes_len ||
                 len > (uint64_t)seq->cds_bytes_len - off) {
                 return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_SEQ_RANGE,
@@ -426,6 +450,15 @@ duckvep_status_t duckvep_model_open(
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
                                 "prepared CDS length or codon table is inconsistent");
+                }
+                if ((uint64_t)tail_length >
+                    (uint64_t)exons->cdna_end1[
+                        (size_t)transcripts->exon_offset[t] +
+                        (size_t)transcripts->exon_count[t] - 1u] -
+                    (uint64_t)coding_end_cdna) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "post-CDS bases exceed the transcript tail");
                 }
                 for (i = 0u; i < (size_t)len; i++) {
                     if (!model_sequence_base_valid(seq->cds_bytes[(size_t)off + i])) {
@@ -796,6 +829,41 @@ struct annotate_ctx {
     int                            point_sorted_safe;
 };
 
+static int insertion_placement_uses_right_flank(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event) {
+
+    uint32_t boundary;
+    uint32_t right;
+    uint32_t cds_end;
+    duckvep_coding_projection_t projection;
+
+    if (event == NULL || !event->interbase ||
+        event->anchor_side != (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT) {
+        return 0;
+    }
+    boundary = event->insertion_boundary0;
+    right = duckvep_event_right_flank1(event);
+    if (boundary == transcripts->end1[tx_idx]) return 1;
+    cds_end = transcripts->cds_end1[tx_idx];
+    if (cds_end != 0u && boundary == cds_end) return 1;
+
+    /* At an internal coding-exon entrance the VCF padding base is intronic but
+     * the inserted sequence maps immediately before the right-hand CDS base.
+     * The global CDS entrance is deliberately excluded: VEP's _before_coding
+     * special case assigns that boundary to the UTR. */
+    if (transcripts->cds_start1[tx_idx] == 0u ||
+        right == transcripts->cds_start1[tx_idx] ||
+        duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                    boundary, &projection)) {
+        return 0;
+    }
+    return duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                       right, &projection);
+}
+
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
@@ -804,6 +872,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     struct annotate_ctx *c = (struct annotate_ctx *)vctx;
     const duckvep_transcript_model_t *tx;
     uint32_t pos;
+    uint32_t topology_start1;
+    uint32_t topology_end1;
     int fwd;
     uint32_t dist;
     duckvep_variant_kind_t kind;
@@ -819,6 +889,13 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     tx = &c->model->transcripts;
     event = c->events[variant_idx];
     pos = event.start1;
+    topology_start1 = event.start1;
+    topology_end1 = event.end1;
+    if (insertion_placement_uses_right_flank(
+            tx, &c->model->exons, (size_t)tx_idx, &event)) {
+        topology_start1 = duckvep_event_right_flank1(&event);
+        topology_end1 = topology_start1;
+    }
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
@@ -830,11 +907,11 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
             c->options->splice_region_intronic,
             &c->workspace->point_exon_rank[tx_idx], &ectx);
     } else {
-        duckvep_effect_ctx_fill(tx, &c->model->exons, variant_idx,
-                                (size_t)tx_idx, event.start1, event.end1,
-                                event.interbase,
-                                c->options->splice_region_exonic,
-                                c->options->splice_region_intronic, &ectx);
+        duckvep_effect_ctx_fill_geometry(
+            tx, &c->model->exons, variant_idx, (size_t)tx_idx,
+            topology_start1, topology_end1, event.start1, event.end1,
+            event.interbase, c->options->splice_region_exonic,
+            c->options->splice_region_intronic, &ectx);
     }
     duckvep_effect_ctx_apply_event(&ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {
@@ -845,12 +922,12 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     /* The symmetric sweep halo admits candidates up to max(up,down); enforce the
      * directional up/downstream window here so an asymmetric config is honored. */
     if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM)) {
-        dist = fwd ? tx->start1[tx_idx] - event.end1
-                   : event.start1 - tx->end1[tx_idx];
+        dist = fwd ? tx->start1[tx_idx] - topology_end1
+                   : topology_start1 - tx->end1[tx_idx];
         if (dist > c->options->upstream_dist) return 1;
     } else if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM)) {
-        dist = fwd ? event.start1 - tx->end1[tx_idx]
-                   : tx->start1[tx_idx] - event.end1;
+        dist = fwd ? topology_start1 - tx->end1[tx_idx]
+                   : tx->start1[tx_idx] - topology_end1;
         if (dist > c->options->downstream_dist) return 1;
     }
 

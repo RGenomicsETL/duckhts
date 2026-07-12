@@ -95,17 +95,39 @@ void duckvep_effect_ctx_fill(
     uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out) {
 
+    duckvep_effect_ctx_fill_geometry(
+        transcripts, exons, variant_idx, tx_idx,
+        start1, end1, start1, end1, interbase,
+        splice_region_exonic, splice_region_intronic, out);
+}
+
+void duckvep_effect_ctx_fill_geometry(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          region_start1,
+    uint32_t                          region_end1,
+    uint32_t                          splice_start1,
+    uint32_t                          splice_end1,
+    uint8_t                           interbase,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
+    duckvep_effect_ctx_t             *out) {
+
     duckvep_region_state_t region;
     duckvep_splice_state_t splice;
 
     region = duckvep_region_classify_span(transcripts, exons, tx_idx,
-                                           start1, end1,
+                                           region_start1, region_end1,
                                            splice_region_exonic,
                                            splice_region_intronic);
     splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
-                                           start1, end1, interbase);
+                                           splice_start1, splice_end1,
+                                           interbase);
     duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
-                                    start1, end1, &region, &splice, out);
+                                    region_start1, region_end1,
+                                    &region, &splice, out);
 }
 
 void duckvep_effect_ctx_fill_point_sorted(

@@ -19,7 +19,7 @@ dbExecute(
     "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
     "120::UBIGINT cds_start, 240::UBIGINT cds_end,",
     "'ATGGTACGTACGTACGTACGTACGTACGTACTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAA'::BLOB cds_sequence,",
-    "1::UTINYINT codon_table"
+    "1::UTINYINT codon_table, 'ACG'::BLOB post_cds_bases"
   )
 )
 dbExecute(
@@ -36,7 +36,8 @@ queries <- c(
   "SELECT seq_region FROM duckvep_r_regions ORDER BY seq_region",
   paste(
     "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
-    "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
+    "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table,",
+    "post_cds_bases",
     "FROM duckvep_r_transcripts ORDER BY seq_region, transcript_start, transcript_index"
   ),
   paste(
@@ -122,6 +123,88 @@ frameshift <- dbGetQuery(
 expect_equal(frameshift$protein_position, 2)
 expect_true(is.na(frameshift$reference_amino_acid))
 expect_true(is.na(frameshift$alternate_amino_acid))
+
+boundary_insertions <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 199::UBIGINT, 'G', 'GT'),",
+    "(2, 199::UBIGINT, 'G', 'GATG'),",
+    "(3, 240::UBIGINT, 'A', 'AATG'),",
+    "(4, 250::UBIGINT, 'C', 'CT'))",
+    "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 1::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(boundary_insertions$ord, 1:4)
+expect_identical(
+  boundary_insertions$consequence,
+  c(
+    "frameshift_variant&splice_region_variant",
+    "protein_altering_variant&splice_region_variant",
+    "3_prime_UTR_variant",
+    "downstream_gene_variant"
+  )
+)
+expect_identical(boundary_insertions$status, rep("supported", 4))
+expect_true(all(is.na(boundary_insertions$reason)))
+
+terminal_stop_edits <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 238::UBIGINT, 'T', 'AC'),",
+    "(2, 238::UBIGINT, 'TA', 'T'),",
+    "(3, 239::UBIGINT, 'AA', 'A'),",
+    "(4, 240::UBIGINT, 'A', 'CG'))",
+    "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(terminal_stop_edits$ord, 1:4)
+expect_identical(
+  terminal_stop_edits$consequence,
+  c(
+    "stop_lost",
+    "stop_retained_variant",
+    "stop_retained_variant",
+    "stop_lost"
+  )
+)
+expect_identical(terminal_stop_edits$status, rep("supported", 4))
+expect_true(all(is.na(terminal_stop_edits$reason)))
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_transcripts_no_tail AS",
+    "SELECT * EXCLUDE (post_cds_bases) FROM duckvep_r_transcripts"
+  )
+)
+no_tail_queries <- queries
+no_tail_queries[2] <- sub(
+  "duckvep_r_transcripts",
+  "duckvep_r_transcripts_no_tail",
+  no_tail_queries[2],
+  fixed = TRUE
+)
+no_tail_queries[2] <- sub(", post_cds_bases", "", no_tail_queries[2], fixed = TRUE)
+expect_true(load_model("r-no-tail", no_tail_queries)$loaded)
+missing_tail <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status, a.reason FROM unnest(duckvep_annotate(",
+    "'r-no-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_identical(missing_tail$consequence, "coding_sequence_variant")
+expect_identical(missing_tail$status, "unresolved")
+expect_identical(missing_tail$reason, "missing_transcript_tail")
 
 prepared_events <- dbGetQuery(
   con,

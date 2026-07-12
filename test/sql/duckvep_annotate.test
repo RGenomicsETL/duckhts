@@ -21,7 +21,8 @@ SELECT
   120::UBIGINT cds_start,
   240::UBIGINT cds_end,
   'ATGGTACGTACGTACGTACGTACGTACGTACTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAA'::BLOB cds_sequence,
-  1::UTINYINT codon_table;
+  1::UTINYINT codon_table,
+  'ACG'::BLOB post_cds_bases;
 
 statement ok
 CREATE TABLE duckvep_test_exons AS
@@ -230,6 +231,79 @@ FROM unnest(duckvep_annotate(
 )) AS u(annotation);
 ----
 frameshift_variant	1	1	1
+
+# VEP 116 places an insertion on the exon/CDS side of a boundary while its
+# splice predicates retain the interbase interval. These are fixed witnesses
+# from the real VEP differential, not hand-assigned consequence examples.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 199::UBIGINT, 'G', 'GT'),
+    (2, 199::UBIGINT, 'G', 'GATG'),
+    (3, 240::UBIGINT, 'A', 'AATG'),
+    (4, 250::UBIGINT, 'C', 'CT')
+)
+SELECT ord, annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, position, reference, alternate, 1::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	frameshift_variant&splice_region_variant	supported	-
+2	protein_altering_variant&splice_region_variant	supported	-
+3	3_prime_UTR_variant	supported	-
+4	downstream_gene_variant	supported	-
+
+# VEP handles a frame-changing edit that begins in the terminal stop through
+# stop_lost/stop_retained, not frameshift_variant. Deletions may need the first
+# post-CDS reference base to reconstruct the codon at the original endpoint.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 238::UBIGINT, 'T', 'AC'),
+    (2, 238::UBIGINT, 'TA', 'T'),
+    (3, 239::UBIGINT, 'AA', 'A'),
+    (4, 240::UBIGINT, 'A', 'CG')
+)
+SELECT ord, annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	stop_lost	supported	-
+2	stop_retained_variant	supported	-
+3	stop_retained_variant	supported	-
+4	stop_lost	supported	-
+
+# The twelfth transcript column is optional for old/topology-only model
+# producers. A terminal deletion that needs it fails closed rather than becoming
+# a false frameshift.
+statement ok
+CREATE TABLE duckvep_test_transcripts_no_tail AS
+SELECT * EXCLUDE (post_cds_bases) FROM duckvep_test_transcripts;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'fixture-no-tail',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_test_transcripts_no_tail ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start'
+);
+----
+1
+
+query TTT
+SELECT annotation.consequence, annotation.status, annotation.reason
+FROM unnest(duckvep_annotate(
+  'fixture-no-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT
+)) AS u(annotation);
+----
+coding_sequence_variant	unresolved	missing_transcript_tail
 
 # NMD_transcript_variant is the VEP biotype predicate: it co-emits for a
 # variant inside a transcript already curated as nonsense_mediated_decay.

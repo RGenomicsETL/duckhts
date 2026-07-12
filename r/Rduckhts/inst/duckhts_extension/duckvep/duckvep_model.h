@@ -33,6 +33,7 @@ typedef struct duckvep_owned_model {
 	uint64_t *cds_sequence_offsets;
 	uint32_t *cds_sequence_lengths;
 	uint8_t *codon_tables;
+	uint8_t *post_cds_bases;
 	uint32_t *exon_starts;
 	uint32_t *exon_ends;
 	uint32_t *exon_cdna_starts;

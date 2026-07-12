@@ -51,8 +51,8 @@ construct reduced test models, but missing Ensembl facts remain explicit.
 DuckDB prepares three dense execution projections:
 
 - sequence-region ordinals;
-- transcript spans, strand, gene ordinal, flags, CDS bounds, prepared CDS bytes, and codon
-  table; and
+- transcript spans, strand, gene ordinal, flags, CDS bounds, prepared CDS bytes, codon
+  table, and up to three transcript-oriented bases immediately after the CDS; and
 - exon membership with genomic and transcript-oriented cDNA spans plus phase.
 
 The current `duckvep_model_load` function reads those projections from three committed,
@@ -61,6 +61,10 @@ interval index, and publishes an immutable named model. Several models may coexi
 database instance. Stable IDs and provenance remain in ordinary DuckDB relations. A
 production Ensembl importer and model receipt are still required by
 https://github.com/RGenomicsETL/duckhts/issues/95.
+
+The three post-CDS bases cost three bytes per transcript and let VEP's terminal-stop rule
+reconstruct the codon at the original translation endpoint after a short deletion. They
+are not a general UTR cache: an edit needing more sequence remains unresolved.
 
 ## Ownership
 

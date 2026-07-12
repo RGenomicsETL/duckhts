@@ -46,6 +46,18 @@ static inline uint32_t duckvep_event_sat_add_u32_u16(uint32_t x, uint16_t y) {
     return x > UINT32_MAX - (uint32_t)y ? UINT32_MAX : x + (uint32_t)y;
 }
 
+/* VEP places a pure insertion between boundary P and P+1. Projection validates
+ * one retained anchor base; predicates that cross a right-hand transcript,
+ * exon, or CDS boundary also need P+1 explicitly. */
+static inline uint32_t duckvep_event_right_flank1(
+    const duckvep_event_t *event) {
+
+    if (event == NULL || !event->interbase) return event != NULL ? event->start1 : 0u;
+    return event->insertion_boundary0 == UINT32_MAX
+        ? UINT32_MAX
+        : event->insertion_boundary0 + 1u;
+}
+
 static inline int duckvep_event_allele_slices_ok(
     const duckvep_variant_batch_t *batch,
     size_t                         idx) {

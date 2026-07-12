@@ -94,6 +94,23 @@ void duckvep_effect_ctx_fill(
     uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out);
 
+/* Region placement and splice overlap are distinct for a pure insertion at an
+ * exon/CDS boundary. The mapper may place the event on the right flank while
+ * VEP's splice predicates retain the reversed interbase interval (P+1,P). */
+void duckvep_effect_ctx_fill_geometry(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          region_start1,
+    uint32_t                          region_end1,
+    uint32_t                          splice_start1,
+    uint32_t                          splice_end1,
+    uint8_t                           interbase,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
+    duckvep_effect_ctx_t             *out);
+
 /* Sorted SNV hot path. The cursor is per transcript and survives adjacent
  * annotation tiles; UINT16_MAX means that this transcript has not yet been
  * visited in the current monotone run. */
