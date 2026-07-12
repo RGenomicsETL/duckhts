@@ -18,6 +18,7 @@ typedef struct duckvep_query_result {
 typedef struct duckvep_load_bind {
 	duckvep_registry_t *registry;
 	char *arguments[4];
+	int transcript_coverage_complete;
 } duckvep_load_bind_t;
 
 typedef struct duckvep_load_state {
@@ -71,6 +72,9 @@ duckvep_model_reserve_regions(duckvep_owned_model_t *model, size_t needed)
 	    model->known_seq_region_capacity, needed);
 	if (!duckvep_sql_resize((void **)&model->known_seq_regions,
 	    sizeof(*model->known_seq_regions), capacity))
+		return 0;
+	if (!duckvep_sql_resize((void **)&model->sequence_lengths,
+	    sizeof(*model->sequence_lengths), capacity))
 		return 0;
 	model->known_seq_region_capacity = capacity;
 	return 1;
@@ -155,6 +159,7 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 	if (model->kernel != NULL)
 		duckvep_model_close(model->kernel);
 	free(model->known_seq_regions);
+	free(model->sequence_lengths);
 	free(model->seq_regions);
 	free(model->transcript_starts);
 	free(model->transcript_ends);
@@ -342,31 +347,56 @@ static int
 duckvep_load_regions(duckdb_connection connection, const char *query,
 	duckvep_owned_model_t *model, char *error, size_t error_size)
 {
-	static const char *const names[] = {"seq_region"};
-	static const duckdb_type types[] = {DUCKDB_TYPE_UINTEGER};
+	static const char *const one_name[] = {"seq_region"};
+	static const duckdb_type one_type[] = {DUCKDB_TYPE_UINTEGER};
+	static const char *const two_names[] = {"seq_region", "sequence_length"};
+	static const duckdb_type two_types[] = {
+		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT
+	};
 	duckvep_query_result_t query_result;
 	duckdb_data_chunk chunk;
+	idx_t column_count;
 	int ok;
 
 	if (!duckvep_query_result_open(connection, query, &query_result, error,
 	    error_size))
 		return 0;
 	ok = 0;
-	if (!duckvep_result_schema(&query_result.result, names, types, 1, SIZE_MAX,
-	    error, error_size))
+	column_count = duckdb_column_count(&query_result.result);
+	if (column_count != 1 && column_count != 2) {
+		duckvep_sql_set_error(error, error_size,
+		    "seq_region query must return seq_region and optional sequence_length");
+		goto done;
+	}
+	if (model->transcript_coverage_complete && column_count != 2) {
+		duckvep_sql_set_error(error, error_size,
+		    "complete transcript coverage requires sequence_length for every region");
+		goto done;
+	}
+	if (!duckvep_result_schema(&query_result.result,
+	    column_count == 1 ? one_name : two_names,
+	    column_count == 1 ? one_type : two_types,
+	    (size_t)column_count, SIZE_MAX, error, error_size))
 		goto done;
 	while ((chunk = duckdb_fetch_chunk(query_result.result)) != NULL) {
-		duckdb_vector vector;
+		duckdb_vector region_vector, length_vector;
 		uint32_t *values;
+		uint64_t *lengths;
 		idx_t row, rows;
 
 		rows = duckdb_data_chunk_get_size(chunk);
-		vector = duckdb_data_chunk_get_vector(chunk, 0);
-		values = (uint32_t *)duckdb_vector_get_data(vector);
+		region_vector = duckdb_data_chunk_get_vector(chunk, 0);
+		length_vector = column_count == 2
+		    ? duckdb_data_chunk_get_vector(chunk, 1) : NULL;
+		values = (uint32_t *)duckdb_vector_get_data(region_vector);
+		lengths = length_vector != NULL
+		    ? (uint64_t *)duckdb_vector_get_data(length_vector) : NULL;
 		for (row = 0; row < rows; row++) {
 			size_t index;
 
-			if (duckvep_row_is_null(vector, row)) {
+			if (duckvep_row_is_null(region_vector, row) ||
+			    (length_vector != NULL &&
+			    duckvep_row_is_null(length_vector, row))) {
 				duckvep_sql_set_error(error, error_size,
 				    "seq_region query contains NULL");
 				duckdb_destroy_data_chunk(&chunk);
@@ -376,6 +406,13 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 			if (values[row] > UINT16_MAX) {
 				duckvep_sql_set_error(error, error_size,
 				    "seq_region exceeds the compact uint16 model limit");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			if (lengths != NULL &&
+			    (lengths[row] == 0 || lengths[row] > UINT32_MAX)) {
+				duckvep_sql_set_error(error, error_size,
+				    "sequence_length must fit a positive uint32 coordinate");
 				duckdb_destroy_data_chunk(&chunk);
 				goto done;
 			}
@@ -393,6 +430,8 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 				goto done;
 			}
 			model->known_seq_regions[index] = (uint16_t)values[row];
+			model->sequence_lengths[index] = lengths != NULL
+			    ? (uint32_t)lengths[row] : 0;
 			model->known_seq_region_count++;
 		}
 		duckdb_destroy_data_chunk(&chunk);
@@ -751,7 +790,8 @@ duckvep_query_command(duckdb_connection connection, const char *sql,
 static int
 duckvep_model_load_queries(duckdb_connection connection,
 	const char *region_query, const char *transcript_query,
-	const char *exon_query, duckvep_owned_model_t *model,
+	const char *exon_query, int transcript_coverage_complete,
+	duckvep_owned_model_t *model,
 	char *error, size_t error_size)
 {
 	duckvep_error_t kernel_error;
@@ -764,6 +804,7 @@ duckvep_model_load_queries(duckdb_connection connection,
 		    "model-loading connection is unavailable");
 		return 0;
 	}
+	model->transcript_coverage_complete = transcript_coverage_complete;
 	if (!duckvep_query_command(connection, "BEGIN TRANSACTION", error,
 	    error_size))
 		return 0;
@@ -1034,9 +1075,17 @@ static void
 duckvep_model_load_bind(duckdb_bind_info info)
 {
 	duckvep_load_bind_t *bind;
+	duckdb_value complete_value;
 	duckdb_logical_type bool_type;
+	idx_t parameter_count;
 	size_t index;
 
+	parameter_count = duckdb_bind_get_parameter_count(info);
+	if (parameter_count != 4) {
+		duckdb_bind_set_error(info,
+		    "duckvep_model_load: expected four positional arguments");
+		return;
+	}
 	bind = calloc(1, sizeof(*bind));
 	if (bind == NULL) {
 		duckdb_bind_set_error(info, "duckvep_model_load: out of memory");
@@ -1052,6 +1101,19 @@ duckvep_model_load_bind(duckdb_bind_info info)
 			duckvep_model_load_bind_destroy(bind);
 			return;
 		}
+	}
+	complete_value = duckdb_bind_get_named_parameter(
+	    info, "transcript_coverage_complete");
+	if (complete_value != NULL) {
+		if (duckdb_is_null_value(complete_value)) {
+			duckdb_destroy_value(&complete_value);
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: transcript_coverage_complete cannot be NULL");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+		bind->transcript_coverage_complete = duckdb_get_bool(complete_value);
+		duckdb_destroy_value(&complete_value);
 	}
 	bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
 	duckdb_bind_add_result_column(info, "loaded", bool_type);
@@ -1110,7 +1172,8 @@ duckvep_model_load_init(duckdb_init_info info)
 	pthread_mutex_lock(&registry->query_mutex);
 	loaded = duckvep_model_load_queries(registry->query_connection,
 	    bind->arguments[1], bind->arguments[2], bind->arguments[3],
-	    &entry->model, error, sizeof(error));
+	    bind->transcript_coverage_complete, &entry->model, error,
+	    sizeof(error));
 	pthread_mutex_unlock(&registry->query_mutex);
 	if (!loaded) {
 		duckvep_model_entry_destroy(entry);
@@ -1235,13 +1298,14 @@ duckvep_register_model_functions(duckdb_connection connection,
 
 	varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-
 	table = duckdb_create_table_function();
 	duckdb_table_function_set_name(table, "duckvep_model_load");
 	duckdb_table_function_add_parameter(table, varchar_type);
 	duckdb_table_function_add_parameter(table, varchar_type);
 	duckdb_table_function_add_parameter(table, varchar_type);
 	duckdb_table_function_add_parameter(table, varchar_type);
+	duckdb_table_function_add_named_parameter(table,
+	    "transcript_coverage_complete", bool_type);
 	duckvep_registry_retain(registry);
 	duckdb_table_function_set_extra_info(table, registry,
 	    duckvep_registry_release);

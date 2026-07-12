@@ -35,6 +35,7 @@ typedef struct duckvep_scalar_state {
 	uint8_t *variant_kinds;
 	uint8_t *sv_types;
 	uint8_t *copy_changes;
+	uint8_t *transcript_coverage_complete;
 	uint8_t *allele_bytes;
 	size_t variant_capacity;
 	size_t allele_capacity;
@@ -66,6 +67,7 @@ duckvep_scalar_variant_reserve(duckvep_scalar_state_t *state, size_t needed)
 	DUCKVEP_SCALAR_VARIANT_RESIZE(variant_kinds);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(sv_types);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(copy_changes);
+	DUCKVEP_SCALAR_VARIANT_RESIZE(transcript_coverage_complete);
 #undef DUCKVEP_SCALAR_VARIANT_RESIZE
 	state->variant_capacity = capacity;
 	return 1;
@@ -143,6 +145,7 @@ duckvep_scalar_state_destroy(void *pointer)
 	free(state->variant_kinds);
 	free(state->sv_types);
 	free(state->copy_changes);
+	free(state->transcript_coverage_complete);
 	free(state->allele_bytes);
 	free(state->results);
 	free(state);
@@ -395,16 +398,28 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 }
 
 static int
-duckvep_scalar_model_has_region(const duckvep_owned_model_t *model,
-	uint16_t seq_region)
+duckvep_scalar_model_region(const duckvep_owned_model_t *model,
+	uint16_t seq_region, uint32_t *sequence_length)
 {
-	size_t index;
+	size_t begin, end;
 
-	for (index = 0; index < model->known_seq_region_count; index++) {
-		if (model->known_seq_regions[index] == seq_region)
-			return 1;
+	begin = 0;
+	end = model->known_seq_region_count;
+	while (begin < end) {
+		size_t middle;
+
+		middle = begin + (end - begin) / 2;
+		if (model->known_seq_regions[middle] < seq_region)
+			begin = middle + 1;
+		else
+			end = middle;
 	}
-	return 0;
+	if (begin >= model->known_seq_region_count ||
+	    model->known_seq_regions[begin] != seq_region)
+		return 0;
+	if (sequence_length != NULL)
+		*sequence_length = model->sequence_lengths[begin];
+	return 1;
 }
 
 static int
@@ -493,6 +508,8 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 	duckvep_error_t kernel_error;
 	duckvep_status_t status;
 	uint32_t sweep_distance;
+	uint32_t sequence_length;
+	size_t variant;
 
 	if (distance > UINT32_MAX) {
 		duckvep_sql_set_error(error, error_size,
@@ -504,11 +521,20 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 	 * This keeps the cgranges seed and avoids restarting at the first transcript
 	 * for every exact-position DuckDB vector. */
 	sweep_distance = distance == 0 ? 1u : (uint32_t)distance;
-	if (!duckvep_scalar_model_has_region(&state->entry->model,
-	    batch->chrom_id[begin])) {
+	if (!duckvep_scalar_model_region(&state->entry->model,
+	    batch->chrom_id[begin], &sequence_length)) {
 		duckvep_sql_set_error(error, error_size,
 		    "duckvep_annotate: seq_region is absent from the loaded model");
 		return 0;
+	}
+	for (variant = begin; variant < begin + count; variant++) {
+		state->transcript_coverage_complete[variant] = (uint8_t)
+		    state->entry->model.transcript_coverage_complete;
+		if (sequence_length != 0 && batch->end1[variant] > sequence_length) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate: variant span exceeds sequence-region length");
+			return 0;
+		}
 	}
 	if (state->workspace == NULL) {
 		state->workspace_cache = duckvep_registry_workspace_take(
@@ -719,14 +745,25 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			duckvep_scalar_set_null(vectors[0], (idx_t)output_count);
 			duckvep_scalar_set_null(vectors[1], (idx_t)output_count);
 			duckdb_vector_assign_string_element(vectors[2],
-			    (idx_t)output_count, "intergenic_variant");
+			    (idx_t)output_count, state->transcript_coverage_complete[row]
+			    ? "intergenic_variant" : "sequence_variant");
 			duckdb_vector_assign_string_element(vectors[3],
 			    (idx_t)output_count, "MODIFIER");
-			duckdb_vector_assign_string_element(vectors[4],
-			    (idx_t)output_count, "intergenic");
+			if (state->transcript_coverage_complete[row])
+				duckdb_vector_assign_string_element(vectors[4],
+				    (idx_t)output_count, "intergenic");
+			else
+				duckvep_scalar_set_null(vectors[4],
+				    (idx_t)output_count);
 			duckdb_vector_assign_string_element(vectors[5],
-			    (idx_t)output_count, "supported");
-			duckvep_scalar_set_null(vectors[6], (idx_t)output_count);
+			    (idx_t)output_count, state->transcript_coverage_complete[row]
+			    ? "supported" : "unresolved");
+			if (state->transcript_coverage_complete[row])
+				duckvep_scalar_set_null(vectors[6],
+				    (idx_t)output_count);
+			else
+				duckdb_vector_assign_string_element(vectors[6],
+				    (idx_t)output_count, "no_feature_in_loaded_model");
 			for (column = 7; column < 12; column++)
 				duckvep_scalar_set_null(vectors[column],
 				    (idx_t)output_count);

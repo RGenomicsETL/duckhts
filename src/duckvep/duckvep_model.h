@@ -18,6 +18,7 @@ typedef struct duckvep_owned_model {
 	duckvep_sequence_pool_t sequences;
 	duckvep_model_t *kernel;
 	uint16_t *known_seq_regions;
+	uint32_t *sequence_lengths;
 	size_t known_seq_region_count;
 	uint16_t *seq_regions;
 	uint32_t *transcript_starts;
@@ -42,6 +43,7 @@ typedef struct duckvep_owned_model {
 	size_t cds_sequence_length;
 	cgranges_t *interval_index;
 	int interval_index_complete;
+	int transcript_coverage_complete;
 	size_t known_seq_region_capacity;
 	size_t transcript_capacity;
 	size_t exon_capacity;

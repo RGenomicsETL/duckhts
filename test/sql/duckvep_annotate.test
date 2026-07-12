@@ -91,7 +91,47 @@ intron	0	intron_variant	MODIFIER	intron	supported	-	-	-	-
 stop_gained	0	stop_gained	HIGH	CDS	supported	-	88	68	23
 stop_lost	0	stop_lost	HIGH	CDS	supported	-	90	70	24
 stop_retained	0	stop_retained_variant	LOW	CDS	supported	-	91	71	24
-intergenic	-	intergenic_variant	MODIFIER	intergenic	supported	-	-	-	-
+intergenic	-	sequence_variant	MODIFIER	NULL	unresolved	no_feature_in_loaded_model	-	-	-
+
+# The stronger overload requires contig lengths before a caller may declare
+# complete transcript coverage and receive supported intergenic assertions.
+statement error
+SELECT * FROM duckvep_model_load(
+  'invalid-complete',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_test_transcripts ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start',
+  transcript_coverage_complete := TRUE
+);
+----
+complete transcript coverage requires sequence_length
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'fixture-complete',
+  'SELECT seq_region, 1000::UBIGINT AS sequence_length FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_test_transcripts ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start',
+  transcript_coverage_complete := TRUE
+);
+----
+1
+
+query TTTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-'), annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 0::UINTEGER, 100::UBIGINT, 'A', 'C', 0::UBIGINT
+)) AS u(annotation);
+----
+intergenic_variant	supported	-	intergenic
+
+statement error
+SELECT duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 1001::UBIGINT, 'A', 'C', 0::UBIGINT
+);
+----
+variant span exceeds sequence-region length
 
 # Several named models may coexist and may occur in the same DuckDB vector.
 statement ok
@@ -211,7 +251,7 @@ LATERAL unnest(duckvep_annotate(
 )) AS u(annotation)
 ORDER BY ord;
 ----
-1	intergenic_variant
+1	sequence_variant
 2	5_prime_UTR_variant
 
 # Essential splice positions use the VEP-116 splice predicate port.
@@ -308,9 +348,10 @@ SELECT * FROM duckvep_model_load(
 ----
 duckvep_model_load: model name already exists
 
-query IIIII
+query IIIIII
 SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
        duckvep_model_drop('structural'), duckvep_model_drop('nmd'),
-       duckvep_model_drop('position-one');
+       duckvep_model_drop('position-one'),
+       duckvep_model_drop('fixture-complete');
 ----
-1	1	1	1	1
+1	1	1	1	1	1

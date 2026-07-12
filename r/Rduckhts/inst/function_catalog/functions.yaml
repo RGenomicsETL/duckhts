@@ -192,12 +192,12 @@
       "name": "duckvep_model_load",
       "kind": "table",
       "category": "Variant Annotation",
-      "signature": "duckvep_model_load(name, sequence_region_query, transcript_query, exon_query)",
+      "signature": "duckvep_model_load(name, sequence_region_query, transcript_query, exon_query, transcript_coverage_complete := FALSE)",
       "returns": "table(loaded BOOLEAN)",
       "r_wrapper": "",
-      "description": "Load one immutable transcript model into the current DuckDB database instance under a caller-chosen name. The three query strings read committed, non-temporary DuckDB relations: sorted UINTEGER sequence-region ordinals; dense transcript rows with genomic span, strand, gene ordinal, flags, optional CDS span/sequence/codon table; and transcript-ordered exon rows with genomic and cDNA spans plus phase. Loading validates and narrows the model once, builds its transcript interval index, and returns one TRUE row. Several named models may coexist.",
+      "description": "Load one immutable transcript model into the current DuckDB database instance under a caller-chosen name. The three query strings read committed, non-temporary DuckDB relations: sorted UINTEGER sequence-region ordinals; dense transcript rows with genomic span, strand, gene ordinal, flags, optional CDS span/sequence/codon table; and transcript-ordered exon rows with genomic and cDNA spans plus phase. The default is a partial model: a variant with no loaded feature is unresolved, not intergenic. Setting the named parameter transcript_coverage_complete := TRUE requires the sequence-region query to also return sequence_length UBIGINT and permits supported intergenic results after coordinate bounds checks. Loading validates and narrows the model once, builds its transcript interval index, and returns one TRUE row. Several named models may coexist.",
       "examples": [
-        "SELECT loaded FROM duckvep_model_load('grch38', 'SELECT seq_region FROM model_regions ORDER BY seq_region', 'SELECT * FROM model_transcripts ORDER BY seq_region, transcript_start, transcript_index', 'SELECT * FROM model_exons ORDER BY transcript_index, exon_cdna_start');"
+        "SELECT loaded FROM duckvep_model_load('grch38', 'SELECT seq_region, sequence_length FROM model_regions ORDER BY seq_region', 'SELECT * FROM model_transcripts ORDER BY seq_region, transcript_start, transcript_index', 'SELECT * FROM model_exons ORDER BY transcript_index, exon_cdna_start', transcript_coverage_complete := TRUE);"
       ]
     },
     {

@@ -1,5 +1,6 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- make bundled DuckVEP intergenic output fail closed for partial resident models. Ordinary `duckvep_model_load(...)` calls report `no_feature_in_loaded_model` as unresolved; the named `transcript_coverage_complete := TRUE` parameter requires contig lengths before returning supported `intergenic_variant`, and rejects coordinates beyond those lengths
 - fix bundled `duckvep_annotate(...)` handling of padded small variants: whole-allele padding no longer turns a one-base substitution into an MNV, and VCF position-1 insertions/deletions with a following padding base are accepted
 - speed up the bundled DuckVEP engine for coordinate-sorted SNVs by retaining compact per-transcript exon cursors across adjacent DuckDB chunks and by avoiding full Sequence Ontology scans for the common single-consequence rows; this does not change the existing MNV/indel/SV span classifiers or grouped-haplotype edit core
 - bundled DuckVEP annotation now emits VEP-116 `NMD_transcript_variant` for variants inside transcripts imported with the `nonsense_mediated_decay` biotype
