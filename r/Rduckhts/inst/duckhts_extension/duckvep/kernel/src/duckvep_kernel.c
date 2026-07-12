@@ -354,27 +354,45 @@ static void workspace_point_cursor_reset(duckvep_workspace_t *workspace) {
            workspace->point_exon_count * sizeof *workspace->point_exon_rank);
 }
 
-static void workspace_point_run_begin(
+static int workspace_point_run_begin(
     duckvep_workspace_t           *workspace,
-    const duckvep_variant_batch_t *variants) {
+    const duckvep_variant_batch_t *variants,
+    const duckvep_event_t         *events) {
 
     uint16_t first_chrom;
     uint32_t first_pos;
+    int monotonic = 1;
+    size_t i;
     size_t last;
 
-    if (workspace == NULL || variants == NULL || variants->count == 0u) return;
+    if (workspace == NULL || variants == NULL || variants->count == 0u) return 1;
     first_chrom = variants->chrom_id[0];
-    first_pos = variants->pos1[0];
+    first_pos = events != NULL ? events[0].start1 : variants->pos1[0];
+    for (i = 1u; i < variants->count; i++) {
+        uint32_t previous_pos = events != NULL
+            ? events[i - 1u].start1 : variants->pos1[i - 1u];
+        uint32_t current_pos = events != NULL
+            ? events[i].start1 : variants->pos1[i];
+        if (variants->chrom_id[i] < variants->chrom_id[i - 1u] ||
+            (variants->chrom_id[i] == variants->chrom_id[i - 1u] &&
+             current_pos < previous_pos)) {
+            monotonic = 0;
+            break;
+        }
+    }
     if (workspace->point_run_active &&
         (first_chrom < workspace->point_last_chrom ||
          (first_chrom == workspace->point_last_chrom &&
           first_pos < workspace->point_last_pos))) {
         workspace_point_cursor_reset(workspace);
     }
+    if (!monotonic) workspace_point_cursor_reset(workspace);
     last = variants->count - 1u;
     workspace->point_last_chrom = variants->chrom_id[last];
-    workspace->point_last_pos = variants->pos1[last];
+    workspace->point_last_pos = events != NULL
+        ? events[last].start1 : variants->pos1[last];
     workspace->point_run_active = 1;
+    return monotonic;
 }
 
 static int size_add_checked(size_t a, size_t b, size_t *out) {
@@ -564,12 +582,14 @@ void duckvep_result_builder_reset(duckvep_result_builder_t *builder) {
 struct annotate_ctx {
     const duckvep_model_t         *model;
     const duckvep_variant_batch_t *variants;
+    const duckvep_event_t         *events;
     const duckvep_options_t       *options;
     duckvep_workspace_t           *workspace;
     duckvep_delta_scratch_t       *delta_scratch;
     duckvep_workspace_delta_route_stats_t *delta_route_stats;
     duckvep_result_builder_t      *results;
     duckvep_status_t               status; /* first non-OK halts emission */
+    int                            point_sorted_safe;
 };
 
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
@@ -593,12 +613,13 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     if (c->status != DUCKVEP_OK) return 0;
 
     tx = &c->model->transcripts;
-    duckvep_event_load(c->variants, (size_t)variant_idx, &event);
-    pos = event.raw_start1;
+    event = c->events[variant_idx];
+    pos = event.start1;
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
-    if (kind == DUCKVEP_KIND_SNV && c->model->point_ordered[tx_idx]) {
+    if (kind == DUCKVEP_KIND_SNV && c->point_sorted_safe &&
+        c->model->point_ordered[tx_idx]) {
         duckvep_effect_ctx_fill_point_sorted(
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
             event.start1, c->options->splice_region_exonic,
@@ -642,6 +663,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
                                                          (size_t)tx_idx, pos,
                                                          tx->strand[tx_idx],
                                                          c->delta_scratch,
+                                                         &event,
                                                          c->delta_route_stats != NULL ? &route : NULL,
                                                          &delta);
         if (c->delta_route_stats != NULL) {
@@ -706,58 +728,22 @@ static int allele_shape_matches_kind(uint8_t        kind,
                                      const uint8_t *ref,
                                      uint16_t       ref_len,
                                      const uint8_t *alt,
-                                     uint16_t       alt_len) {
-    uint16_t prefix = 0u;
-    uint16_t suffix = 0u;
-    uint16_t ref_rem;
-    uint16_t alt_rem;
-    uint16_t ref_diff_len;
-    uint16_t alt_diff_len;
-    uint64_t span;
+                                     uint16_t       alt_len,
+                                     duckvep_event_t *event_out) {
+    duckvep_event_t event;
 
-    if (ref_len == 0u || alt_len == 0u || ref == NULL || alt == NULL) return 0;
-    span = (uint64_t)ref_len - 1u;
-    if ((uint64_t)pos1 + span > UINT32_MAX ||
-        (uint64_t)end1 != (uint64_t)pos1 + span) {
+    if (!duckvep_event_prepare_small(pos1, ref, ref_len, alt, alt_len, &event) ||
+        event.raw_end1 != end1 || event.kind != kind) {
         return 0;
     }
-
-    while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) {
-        prefix++;
-    }
-    ref_rem = (uint16_t)(ref_len - prefix);
-    alt_rem = (uint16_t)(alt_len - prefix);
-    while (suffix < ref_rem && suffix < alt_rem &&
-           ref[(uint16_t)(ref_len - 1u - suffix)] ==
-           alt[(uint16_t)(alt_len - 1u - suffix)]) {
-        suffix++;
-    }
-    ref_diff_len = (uint16_t)(ref_len - prefix - suffix);
-    alt_diff_len = (uint16_t)(alt_len - prefix - suffix);
-
-    switch ((duckvep_variant_kind_t)kind) {
-    case DUCKVEP_KIND_SNV:
-        return ref_len == 1u && alt_len == 1u && ref_diff_len == 1u &&
-               alt_diff_len == 1u;
-    case DUCKVEP_KIND_INS:
-        return prefix > 0u && ref_diff_len == 0u && alt_diff_len > 0u;
-    case DUCKVEP_KIND_DEL:
-        return ref_diff_len > 0u && alt_diff_len == 0u;
-    case DUCKVEP_KIND_MNV:
-        return ref_len == alt_len && ref_len >= 2u && ref_diff_len > 0u &&
-               ref_diff_len == alt_diff_len;
-    case DUCKVEP_KIND_INDEL:
-        return ref_diff_len > 0u && alt_diff_len > 0u &&
-               ref_diff_len != alt_diff_len;
-    case DUCKVEP_KIND_SV:
-    default:
-        return 0;
-    }
+    if (event_out != NULL) *event_out = event;
+    return 1;
 }
 
 static duckvep_status_t validate_variant_batch(
     const duckvep_model_t         *model,
     const duckvep_variant_batch_t *variants,
+    duckvep_event_t               *events,
     duckvep_error_t               *error) {
 
     size_t i;
@@ -810,6 +796,9 @@ static duckvep_status_t validate_variant_batch(
             (model->has_seq || kind != (uint8_t)DUCKVEP_KIND_SNV)) {
             needs_alleles = 1;
         }
+        if (events != NULL && kind == (uint8_t)DUCKVEP_KIND_SV) {
+            duckvep_event_load(variants, i, &events[i]);
+        }
     }
 
     allele_columns_seen = variants->ref_offset != NULL || variants->ref_length != NULL ||
@@ -854,10 +843,30 @@ static duckvep_status_t validate_variant_batch(
                                            variants->allele_bytes + (size_t)roff,
                                            (uint16_t)rlen,
                                            variants->allele_bytes + (size_t)aoff,
-                                           (uint16_t)alen)) {
+                                           (uint16_t)alen,
+                                           events != NULL ? &events[i] : NULL)) {
                 return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_ALLELE_RANGE,
                             "variant kind inconsistent with REF/ALT span");
             }
+            if (events != NULL) {
+                events[i].chrom_id = variants->chrom_id[i];
+                events[i].sv_type = (uint8_t)DUCKVEP_SV_NONE;
+                events[i].copy_change = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+            }
+        }
+    } else if (events != NULL) {
+        /* Geometry-only SNV callers may omit allele storage when the model has
+         * no sequence. Preserve their point topology without manufacturing REF
+         * bytes that no predicate can inspect. */
+        for (i = 0u; i < variants->count; i++) {
+            if (variants->variant_kind[i] == (uint8_t)DUCKVEP_KIND_SV) continue;
+            duckvep_event_load_raw_interval(variants, i, &events[i]);
+            events[i].chrom_id = variants->chrom_id[i];
+            events[i].kind = (uint8_t)DUCKVEP_KIND_SNV;
+            events[i].ref_diff_length = 1u;
+            events[i].alt_diff_length = 1u;
+            events[i].sv_type = (uint8_t)DUCKVEP_SV_NONE;
+            events[i].copy_change = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
         }
     }
     return DUCKVEP_OK;
@@ -876,6 +885,8 @@ struct duckvep_annotate_cursor {
     size_t                         tx_pos;
     int                            have_slice;
     int                            done;
+    int                            point_sorted_safe;
+    duckvep_event_t                events[];
 };
 
 static duckvep_status_t validate_common_annotate_args(
@@ -883,6 +894,7 @@ static duckvep_status_t validate_common_annotate_args(
     const duckvep_variant_batch_t *variants,
     const duckvep_options_t       *options,
     duckvep_workspace_t           *workspace,
+    duckvep_event_t               *events,
     duckvep_error_t               *error) {
 
     duckvep_status_t validation_status;
@@ -900,7 +912,7 @@ static duckvep_status_t validate_common_annotate_args(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_COLUMNS,
                     "variant batch has count>0 but null required columns");
     }
-    validation_status = validate_variant_batch(model, variants, error);
+    validation_status = validate_variant_batch(model, variants, events, error);
     if (validation_status != DUCKVEP_OK) return validation_status;
     if (options == NULL) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_OPTIONS, "options is NULL");
@@ -944,29 +956,43 @@ duckvep_status_t duckvep_annotate_cursor_open(
 
     duckvep_annotate_cursor_t *cursor;
     duckvep_status_t st;
+    size_t event_bytes;
+    size_t cursor_bytes;
 
     if (out_cursor == NULL) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_CURSOR_NULL_OUT,
                     "out_cursor is NULL");
     }
     *out_cursor = NULL;
-    st = validate_common_annotate_args(model, variants, options, workspace, error);
-    if (st != DUCKVEP_OK) return st;
-
-    cursor = (duckvep_annotate_cursor_t *)calloc(1u, sizeof *cursor);
+    if (variants != NULL &&
+        (!size_mul_checked(variants->count, sizeof *cursor->events, &event_bytes) ||
+         !size_add_checked(sizeof *cursor, event_bytes, &cursor_bytes))) {
+        return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_CURSOR_OOM,
+                    "annotate cursor event storage overflow");
+    }
+    if (variants == NULL) cursor_bytes = sizeof *cursor;
+    cursor = (duckvep_annotate_cursor_t *)calloc(1u, cursor_bytes);
     if (cursor == NULL) {
         return fail(error, DUCKVEP_ERR_INTERNAL, DVW_CURSOR_OOM,
                     "annotate cursor allocation failed");
+    }
+    st = validate_common_annotate_args(model, variants, options, workspace,
+                                       cursor->events, error);
+    if (st != DUCKVEP_OK) {
+        free(cursor);
+        return st;
     }
     cursor->model = model;
     cursor->variants_view = *variants;
     cursor->variants = &cursor->variants_view;
     cursor->options = options;
     cursor->workspace = workspace;
-    workspace_point_run_begin(workspace, variants);
+    cursor->point_sorted_safe = workspace_point_run_begin(
+        workspace, variants, cursor->events);
     duckvep_sweep_cursor_init(&cursor->sweep, cursor->variants, &model->transcripts,
                               options->halo, workspace->active, workspace->active_cap,
                               workspace->candidates, workspace->active_cap);
+    cursor->sweep.events = cursor->events;
     if (cursor->sweep.status != DUCKVEP_OK) {
         st = fail(error, cursor->sweep.status, DVW_ANN_SWEEP,
                   "candidate sweep initialization failed");
@@ -1007,9 +1033,10 @@ duckvep_status_t duckvep_annotate_cursor_seed(
     return DUCKVEP_OK;
 }
 
-duckvep_status_t duckvep_annotate_cursor_fill(
+static duckvep_status_t annotate_cursor_fill(
     duckvep_annotate_cursor_t      *cursor,
     duckvep_result_builder_t       *results,
+    int                             pause_when_full,
     duckvep_error_t                *error) {
 
     struct annotate_ctx ctx;
@@ -1029,6 +1056,7 @@ duckvep_status_t duckvep_annotate_cursor_fill(
 
     ctx.model = cursor->model;
     ctx.variants = cursor->variants;
+    ctx.events = cursor->events;
     ctx.options = cursor->options;
     ctx.workspace = cursor->workspace;
     ctx.delta_scratch = duckvep_workspace_delta_scratch(cursor->workspace);
@@ -1037,6 +1065,7 @@ duckvep_status_t duckvep_annotate_cursor_fill(
                               : NULL;
     ctx.results = results;
     ctx.status = DUCKVEP_OK;
+    ctx.point_sorted_safe = cursor->point_sorted_safe;
 
     for (;;) {
         if (!cursor->have_slice || cursor->tx_pos >= cursor->tx_count) {
@@ -1064,13 +1093,21 @@ duckvep_status_t duckvep_annotate_cursor_fill(
                 return fail(error, ctx.status, DVW_ANN_SWEEP, "annotate cursor failed");
             }
             cursor->tx_pos++;
-            if (results->count >= results->capacity) {
+            if (pause_when_full && results->count >= results->capacity) {
                 return fail(error, DUCKVEP_ERR_RESULT_FULL, DVW_ANN_RESULT_FULL,
                             "result builder capacity exhausted; cursor paused");
             }
         }
         cursor->have_slice = 0;
     }
+}
+
+duckvep_status_t duckvep_annotate_cursor_fill(
+    duckvep_annotate_cursor_t      *cursor,
+    duckvep_result_builder_t       *results,
+    duckvep_error_t                *error) {
+
+    return annotate_cursor_fill(cursor, results, 1, error);
 }
 
 duckvep_status_t duckvep_annotate_tile(
@@ -1080,98 +1117,19 @@ duckvep_status_t duckvep_annotate_tile(
     duckvep_workspace_t            *workspace,
     duckvep_result_builder_t       *results,
     duckvep_error_t                *error) {
+    duckvep_annotate_cursor_t *cursor = NULL;
+    duckvep_status_t status;
 
-    struct annotate_ctx ctx;
-    duckvep_sweep_cursor_t sweep;
-    duckvep_status_t sweep_status = DUCKVEP_OK;
-    duckvep_status_t validation_status;
-    int sweep_rc;
-    int stopped = 0;
-    uint32_t ctx_variant_idx;
-    const uint32_t *ctx_tx_indices;
-    size_t ctx_tx_count;
-
-    /* Boundary contract checks first — fail loud, never on a partial result. */
-    if (model == NULL) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_MODEL, "model is NULL");
-    }
-    if (variants == NULL) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_VARIANTS,
-                    "variants batch is NULL");
-    }
-    if (variants->count > 0u &&
-        (variants->chrom_id == NULL || variants->pos1 == NULL ||
-         variants->end1 == NULL || variants->variant_kind == NULL)) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_COLUMNS,
-                    "variant batch has count>0 but null required columns");
-    }
-    validation_status = validate_variant_batch(model, variants, error);
-    if (validation_status != DUCKVEP_OK) return validation_status;
-    if (options == NULL) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_OPTIONS, "options is NULL");
-    }
-    if (workspace == NULL) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_WORKSPACE,
-                    "workspace is NULL");
-    }
-    if (workspace->model != model) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_WS_MODEL,
-                    "workspace belongs to a different model");
-    }
-    if (results == NULL) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_RESULTS, "results is NULL");
-    }
-    if (results->capacity > 0u && results->rows == NULL) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_RESULT_STORAGE,
-                    "result builder has capacity>0 but rows is NULL");
-    }
-    if (results->count > results->capacity) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_RESULT_COUNT,
-                    "result builder count exceeds capacity");
-    }
-
-    ctx.model = model;
-    ctx.variants = variants;
-    ctx.options = options;
-    ctx.workspace = workspace;
-    ctx.delta_scratch = duckvep_workspace_delta_scratch(workspace);
-    ctx.delta_route_stats = workspace->delta_route_stats_enabled
-                              ? &workspace->delta_route_stats
-                              : NULL;
-    ctx.results = results;
-    ctx.status = DUCKVEP_OK;
-    workspace_point_run_begin(workspace, variants);
-
-    /* One cursor step per variant, then a direct per-candidate loop in this TU.
-     * annotate_pair is therefore inlineable and a full result buffer stops the
-     * sweep immediately instead of draining the remaining candidate relation.
-     * This entry point is tile-local; the cursor API preserves state only within the
-     * supplied batch. */
-    duckvep_sweep_cursor_init(&sweep, variants, &model->transcripts, options->halo,
-                              workspace->active, workspace->active_cap,
-                              workspace->candidates, workspace->active_cap);
-    while ((sweep_rc = duckvep_sweep_cursor_next(&sweep, &ctx_variant_idx,
-                                                  &ctx_tx_indices, &ctx_tx_count)) > 0) {
-        size_t j;
-        for (j = 0u; j < ctx_tx_count; j++) {
-            if (!annotate_pair(ctx_variant_idx, ctx_tx_indices[j], &ctx)) {
-                stopped = 1;
-                break;
-            }
-        }
-        if (stopped) break;
-    }
-    sweep_status = sweep.status;
-    (void)sweep_rc;
-
-    if (ctx.status == DUCKVEP_ERR_RESULT_FULL) {
-        return fail(error, DUCKVEP_ERR_RESULT_FULL, DVW_ANN_RESULT_FULL,
-                    "result builder capacity exhausted");
-    }
-    if (sweep_status != DUCKVEP_OK) {
-        /* The only sweep failure with a non-NULL active buffer is active-set
-         * overflow, which cannot happen here (active_cap bounds the largest chromosome slice). */
-        return fail(error, sweep_status, DVW_ANN_SWEEP, "candidate sweep failed");
-    }
-    return DUCKVEP_OK;
+    status = validate_result_builder_for_append(results, error);
+    if (status != DUCKVEP_OK) return status;
+    status = duckvep_annotate_cursor_open(model, variants, options, workspace,
+                                          &cursor, error);
+    if (status != DUCKVEP_OK) return status;
+    /* The one-shot API historically returns RESULT_FULL only if another row
+     * actually needs storage. A resumable cursor instead pauses as soon as its
+     * output chunk fills. Both paths share event preparation and annotation;
+     * only their backpressure contract differs. */
+    status = annotate_cursor_fill(cursor, results, 0, error);
+    duckvep_annotate_cursor_close(cursor);
+    return status;
 }

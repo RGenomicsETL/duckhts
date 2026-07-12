@@ -18,6 +18,7 @@
 
 #include "duckvep_haplotype.h" /* duckvep_haplotype_edit_t (the CDS-edit element) */
 #include "duckvep_kernel.h"    /* SoA views, duckvep_sequence_pool_t, variant batch */
+#include "duckvep_event.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -319,6 +320,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation(
     uint32_t                          pos,
     int8_t                            strand,
     duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
     duckvep_sequence_delta_t         *delta);
 
 DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
@@ -332,6 +334,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     uint32_t                          pos,
     int8_t                            strand,
     duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta);
 

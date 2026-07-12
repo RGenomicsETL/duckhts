@@ -23,15 +23,24 @@ typedef struct duckvep_event {
     uint32_t raw_end1;
     uint32_t start1;          /* differing-region topology coordinate */
     uint32_t end1;            /* inclusive; pure insertions use a point */
+    uint32_t insertion_boundary0; /* genomic interbase boundary; 0 = before base 1 */
     uint16_t ref_diff_offset; /* offset inside REF where differing region starts */
     uint16_t alt_diff_offset; /* offset inside ALT where differing region starts */
+    uint16_t anchor_ref_offset; /* REF base used to validate a pure insertion */
     uint16_t ref_diff_length;
     uint16_t alt_diff_length;
     uint8_t  interbase;       /* pure insertion after trimming */
+    uint8_t  anchor_side;     /* duckvep_event_anchor_t */
     uint8_t  kind;
     uint8_t  sv_type;
     uint8_t  copy_change;
 } duckvep_event_t;
+
+typedef enum duckvep_event_anchor {
+    DUCKVEP_EVENT_ANCHOR_NONE = 0,
+    DUCKVEP_EVENT_ANCHOR_LEFT,
+    DUCKVEP_EVENT_ANCHOR_RIGHT
+} duckvep_event_anchor_t;
 
 static inline uint32_t duckvep_event_sat_add_u32_u16(uint32_t x, uint16_t y) {
     return x > UINT32_MAX - (uint32_t)y ? UINT32_MAX : x + (uint32_t)y;
@@ -67,22 +76,29 @@ static inline void duckvep_event_load_raw_interval(
     event->raw_end1 = batch->end1[idx];
     event->start1 = batch->pos1[idx];
     event->end1 = batch->end1[idx];
+    event->insertion_boundary0 = 0u;
     event->ref_diff_offset = 0u;
     event->alt_diff_offset = 0u;
+    event->anchor_ref_offset = 0u;
     event->ref_diff_length = 0u;
     event->alt_diff_length = 0u;
     event->interbase = 0u;
+    event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
 }
 
-static inline void duckvep_event_load_small_differing_region(
-    const duckvep_variant_batch_t *batch,
-    size_t                         idx,
-    duckvep_event_t               *event) {
+/* Decode one ordinary REF/ALT pair into its lossless effect geometry. This is
+ * representation interpretation, not left alignment or canonical rewriting.
+ * In particular, VCF permits a right padding base at contig position 1. The
+ * explicit boundary and anchor side preserve that case without inventing a
+ * genomic base zero. */
+static inline int duckvep_event_prepare_small(
+    uint32_t         pos1,
+    const uint8_t   *ref,
+    uint16_t         ref_len,
+    const uint8_t   *alt,
+    uint16_t         alt_len,
+    duckvep_event_t *event) {
 
-    const uint8_t *ref;
-    const uint8_t *alt;
-    uint16_t ref_len;
-    uint16_t alt_len;
     uint16_t prefix = 0u;
     uint16_t suffix = 0u;
     uint16_t ref_rem;
@@ -91,14 +107,24 @@ static inline void duckvep_event_load_small_differing_region(
     uint16_t alt_diff_len;
     uint32_t diff_start;
 
-    duckvep_event_load_raw_interval(batch, idx, event);
-    event->end1 = event->start1; /* small-variant fallback when alleles are absent */
-    if (!duckvep_event_allele_slices_ok(batch, idx)) return;
+    if (event == NULL || ref == NULL || alt == NULL || pos1 == 0u ||
+        ref_len == 0u || alt_len == 0u ||
+        (uint32_t)(ref_len - 1u) > UINT32_MAX - pos1) {
+        return 0;
+    }
 
-    ref_len = batch->ref_length[idx];
-    alt_len = batch->alt_length[idx];
-    ref = batch->allele_bytes + batch->ref_offset[idx];
-    alt = batch->allele_bytes + batch->alt_offset[idx];
+    event->raw_start1 = pos1;
+    event->raw_end1 = pos1 + (uint32_t)ref_len - 1u;
+    event->start1 = pos1;
+    event->end1 = pos1;
+    event->insertion_boundary0 = 0u;
+    event->ref_diff_offset = 0u;
+    event->alt_diff_offset = 0u;
+    event->anchor_ref_offset = 0u;
+    event->ref_diff_length = 0u;
+    event->alt_diff_length = 0u;
+    event->interbase = 0u;
+    event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
 
     while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) {
         prefix++;
@@ -113,31 +139,64 @@ static inline void duckvep_event_load_small_differing_region(
 
     ref_diff_len = (uint16_t)(ref_len - prefix - suffix);
     alt_diff_len = (uint16_t)(alt_len - prefix - suffix);
-    diff_start = duckvep_event_sat_add_u32_u16(batch->pos1[idx], prefix);
+    if (ref_diff_len == 0u && alt_diff_len == 0u) return 0;
 
     event->ref_diff_offset = prefix;
     event->alt_diff_offset = prefix;
     event->ref_diff_length = ref_diff_len;
     event->alt_diff_length = alt_diff_len;
-    event->interbase = (uint8_t)(ref_diff_len == 0u && alt_diff_len > 0u);
+    if (ref_diff_len == 0u) {
+        event->kind = (uint8_t)DUCKVEP_KIND_INS;
+    } else if (alt_diff_len == 0u) {
+        event->kind = (uint8_t)DUCKVEP_KIND_DEL;
+    } else if (ref_diff_len == alt_diff_len) {
+        event->kind = ref_diff_len == 1u
+            ? (uint8_t)DUCKVEP_KIND_SNV
+            : (uint8_t)DUCKVEP_KIND_MNV;
+    } else {
+        event->kind = (uint8_t)DUCKVEP_KIND_INDEL;
+    }
+
+    diff_start = duckvep_event_sat_add_u32_u16(pos1, prefix);
+    event->interbase = (uint8_t)(ref_diff_len == 0u);
     if (event->interbase) {
-        /* A pure insertion has no REF bases to classify. Keep the interbase edit facts
-         * but use VCF's anchor-side point for topology; VEP treats exon-end insertions
-         * as exonic splice-region/coding edits, not as substitutions of the first
-         * intronic donor base to the right. */
-        event->start1 = prefix > 0u
-            ? duckvep_event_sat_add_u32_u16(batch->pos1[idx], (uint16_t)(prefix - 1u))
-            : batch->pos1[idx];
+        event->insertion_boundary0 = (pos1 - 1u) + (uint32_t)prefix;
+        if (prefix > 0u) {
+            event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+            event->anchor_ref_offset = (uint16_t)(prefix - 1u);
+            event->start1 = event->insertion_boundary0;
+        } else {
+            /* With no shared prefix, the retained VCF padding is on the right.
+             * The first REF base is the validation anchor immediately after the
+             * insertion boundary. */
+            event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_RIGHT;
+            event->anchor_ref_offset = 0u;
+            event->start1 = event->insertion_boundary0 + 1u;
+        }
         event->end1 = event->start1;
     } else {
         event->start1 = diff_start;
-        if (ref_diff_len > 0u) {
-            event->end1 = duckvep_event_sat_add_u32_u16(diff_start,
-                                                        (uint16_t)(ref_diff_len - 1u));
-        } else {
-            event->end1 = diff_start;
-        }
+        event->end1 = duckvep_event_sat_add_u32_u16(
+            diff_start, (uint16_t)(ref_diff_len - 1u));
     }
+    return 1;
+}
+
+static inline void duckvep_event_load_small_differing_region(
+    const duckvep_variant_batch_t *batch,
+    size_t                         idx,
+    duckvep_event_t               *event) {
+
+    duckvep_event_load_raw_interval(batch, idx, event);
+    event->kind = batch->variant_kind != NULL
+        ? batch->variant_kind[idx]
+        : (uint8_t)DUCKVEP_KIND_SV;
+    event->end1 = event->start1; /* small-variant fallback when alleles are absent */
+    if (!duckvep_event_allele_slices_ok(batch, idx)) return;
+    (void)duckvep_event_prepare_small(
+        batch->pos1[idx], batch->allele_bytes + batch->ref_offset[idx],
+        batch->ref_length[idx], batch->allele_bytes + batch->alt_offset[idx],
+        batch->alt_length[idx], event);
 }
 
 static inline uint32_t duckvep_event_effective_end1_at(

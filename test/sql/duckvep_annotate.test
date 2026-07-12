@@ -239,6 +239,58 @@ WHERE annotation.consequence = 'missense_variant';
 ----
 5000
 
+# VCF permits the padding base to follow an indel at the first contig base.
+# Both transcript strands must see the prepared event; the adapter must not
+# reject it for lacking a common left prefix.
+statement ok
+CREATE TABLE duckvep_pos1_regions AS
+SELECT 1::UINTEGER AS seq_region;
+
+statement ok
+CREATE TABLE duckvep_pos1_transcripts AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 1::UINTEGER, 1::UBIGINT, 20::UBIGINT, 1::TINYINT,
+   0::UINTEGER, 0::UBIGINT, NULL::UBIGINT, NULL::UBIGINT, NULL::BLOB, NULL::UTINYINT),
+  (1::UINTEGER, 1::UINTEGER, 1::UBIGINT, 20::UBIGINT, -1::TINYINT,
+   1::UINTEGER, 0::UBIGINT, NULL::UBIGINT, NULL::UBIGINT, NULL::BLOB, NULL::UTINYINT)
+) t(transcript_index, seq_region, transcript_start, transcript_end, strand,
+    gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table);
+
+statement ok
+CREATE TABLE duckvep_pos1_exons AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 1::UBIGINT, 20::UBIGINT, 1::UBIGINT, 20::UBIGINT,
+   -1::TINYINT, -1::TINYINT),
+  (1::UINTEGER, 1::UBIGINT, 20::UBIGINT, 1::UBIGINT, 20::UBIGINT,
+   -1::TINYINT, -1::TINYINT)
+) t(transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,
+    phase, end_phase);
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'position-one',
+  'SELECT * FROM duckvep_pos1_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_pos1_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_pos1_exons ORDER BY transcript_index, exon_cdna_start'
+);
+----
+1
+
+query IIT
+WITH variants(ord, reference, alternate) AS (
+  VALUES (1, 'AC', 'C'), (2, 'C', 'AC')
+)
+SELECT ord, count(*), min(annotation.consequence)
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'position-one', 1::UINTEGER, 1::UBIGINT, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+GROUP BY ord
+ORDER BY ord;
+----
+1	2	non_coding_transcript_exon_variant
+2	2	non_coding_transcript_exon_variant
+
 statement error
 SELECT duckvep_annotate(
   'missing', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
@@ -256,8 +308,9 @@ SELECT * FROM duckvep_model_load(
 ----
 duckvep_model_load: model name already exists
 
-query IIII
+query IIIII
 SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
-       duckvep_model_drop('structural'), duckvep_model_drop('nmd');
+       duckvep_model_drop('structural'), duckvep_model_drop('nmd'),
+       duckvep_model_drop('position-one');
 ----
-1	1	1	1
+1	1	1	1	1

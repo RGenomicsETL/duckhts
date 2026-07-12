@@ -537,6 +537,12 @@ TEST event_load_trims_small_variant_differing_region(void) {
     static const uint16_t exp_rlen[4]  = {1u, 0u, 1u, 2u};
     static const uint16_t exp_alen[4]  = {0u, 1u, 1u, 2u};
     static const uint8_t  exp_inter[4] = {0u, 1u, 0u, 0u};
+    static const uint8_t  exp_kind[4] = {
+        (uint8_t)DUCKVEP_KIND_DEL,
+        (uint8_t)DUCKVEP_KIND_INS,
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_MNV
+    };
     duckvep_variant_batch_t v;
     duckvep_event_t e;
     size_t i;
@@ -558,8 +564,49 @@ TEST event_load_trims_small_variant_differing_region(void) {
         ASSERT_EQ(exp_rlen[i], e.ref_diff_length);
         ASSERT_EQ(exp_alen[i], e.alt_diff_length);
         ASSERT_EQ(exp_inter[i], e.interbase);
+        ASSERT_EQ(exp_kind[i], e.kind);
         ASSERT_EQ(exp_end[i], duckvep_event_effective_end1_at(&v, i));
     }
+    PASS();
+}
+
+TEST event_prepare_small_preserves_anchor_side_and_semantic_kind(void) {
+    static const uint8_t delete_first_ref[2] = {'A', 'C'};
+    static const uint8_t delete_first_alt[1] = {'C'};
+    static const uint8_t insert_first_ref[1] = {'C'};
+    static const uint8_t insert_first_alt[2] = {'A', 'C'};
+    static const uint8_t padded_snv_ref[3] = {'G', 'A', 'C'};
+    static const uint8_t padded_snv_alt[3] = {'G', 'A', 'T'};
+    duckvep_event_t event;
+
+    ASSERT(duckvep_event_prepare_small(1u, delete_first_ref, 2u,
+                                      delete_first_alt, 1u, &event));
+    ASSERT_EQ((uint8_t)DUCKVEP_KIND_DEL, event.kind);
+    ASSERT_EQ(1u, event.start1);
+    ASSERT_EQ(1u, event.end1);
+    ASSERT_EQ(0u, event.ref_diff_offset);
+    ASSERT_EQ(1u, event.ref_diff_length);
+    ASSERT_EQ(0u, event.alt_diff_length);
+
+    ASSERT(duckvep_event_prepare_small(1u, insert_first_ref, 1u,
+                                      insert_first_alt, 2u, &event));
+    ASSERT_EQ((uint8_t)DUCKVEP_KIND_INS, event.kind);
+    ASSERT_EQ(0u, event.insertion_boundary0);
+    ASSERT_EQ(1u, event.start1);
+    ASSERT_EQ((uint8_t)DUCKVEP_EVENT_ANCHOR_RIGHT, event.anchor_side);
+    ASSERT_EQ(0u, event.anchor_ref_offset);
+    ASSERT_EQ(0u, event.ref_diff_length);
+    ASSERT_EQ(1u, event.alt_diff_length);
+
+    ASSERT(duckvep_event_prepare_small(10u, padded_snv_ref, 3u,
+                                      padded_snv_alt, 3u, &event));
+    ASSERT_EQ((uint8_t)DUCKVEP_KIND_SNV, event.kind);
+    ASSERT_EQ(12u, event.start1);
+    ASSERT_EQ(12u, event.end1);
+    ASSERT_EQ(2u, event.ref_diff_offset);
+    ASSERT_EQ(2u, event.alt_diff_offset);
+    ASSERT_EQ(1u, event.ref_diff_length);
+    ASSERT_EQ(1u, event.alt_diff_length);
     PASS();
 }
 
@@ -3854,6 +3901,70 @@ TEST sorted_point_cursor_survives_tiles_and_resets_on_rewind(void) {
     PASS();
 }
 
+TEST padded_snv_rewind_uses_exhaustive_point_classification(void) {
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {100u};
+    static const uint32_t tend[1] = {220u};
+    static const int8_t strand[1] = {1};
+    static const uint64_t flags[1] = {0u};
+    static const uint32_t exoff[1] = {0u};
+    static const uint16_t excnt[1] = {2u};
+    static const uint32_t zero[1] = {0u};
+    static const uint32_t es[2] = {100u, 200u};
+    static const uint32_t ee[2] = {120u, 220u};
+    static const uint16_t vchrom[2] = {0u, 0u};
+    static const uint32_t vpos[2] = {100u, 101u};
+    static const uint32_t vend[2] = {210u, 105u};
+    static const uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV
+    };
+    static const uint32_t roff[2] = {0u, 222u};
+    static const uint32_t aoff[2] = {111u, 227u};
+    static const uint16_t rlen[2] = {111u, 5u};
+    static const uint16_t alen[2] = {111u, 5u};
+    uint8_t alleles[232];
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_variant_batch_t v;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *ws = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t rb;
+    duckvep_error_t err;
+
+    memset(alleles, 'A', sizeof alleles);
+    alleles[aoff[0] + alen[0] - 1u] = 'C'; /* effect position 210 */
+    alleles[aoff[1] + alen[1] - 1u] = 'C'; /* effect position 105 */
+    memset(&tx, 0, sizeof tx); memset(&ex, 0, sizeof ex);
+    memset(&v, 0, sizeof v); memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = strand; tx.flags = flags; tx.exon_offset = exoff;
+    tx.exon_count = excnt; tx.cds_start1 = zero; tx.cds_end1 = zero;
+    tx.transcript_count = 1u;
+    ex.start1 = es; ex.end1 = ee; ex.exon_count = 2u;
+    v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend;
+    v.variant_kind = vkind; v.ref_offset = roff; v.alt_offset = aoff;
+    v.ref_length = rlen; v.alt_length = alen;
+    v.allele_bytes = alleles; v.allele_bytes_len = sizeof alleles;
+    v.count = 2u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &ex, NULL, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_result_builder_init(&rb, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(2u, rb.count);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, rows[0].region_mask);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, rows[1].region_mask);
+
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
 /* The resumable cursor is a transport primitive: arbitrary output-buffer splits
  * must equal one full annotate_tile call over the same tile. This property uses
  * the same random zero-exon scenes as the composition oracle and varies the chunk
@@ -5601,7 +5712,7 @@ TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
     static const uint32_t vpos[3]   = {1002u, 1002u, 1005u};
     static const uint32_t vend[3]   = {1005u, 1006u, 1006u};
     static const uint8_t  vkind[3]  = {
-        (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_SNV,
         (uint8_t)DUCKVEP_KIND_DEL,
         (uint8_t)DUCKVEP_KIND_INS
     };
@@ -5620,6 +5731,8 @@ TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
         DUCKVEP_SO(DUCKVEP_SO_INFRAME_INSERTION)
     };
     static const int32_t exp_protein[3] = {2, 2, 3};
+    static const int32_t exp_cdna[3] = {5, -1, -1};
+    static const int32_t exp_cds[3] = {5, -1, -1};
 
     duckvep_transcript_model_t tx;
     duckvep_exon_model_t exons;
@@ -5658,8 +5771,8 @@ TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
     for (i = 0u; i < 3u; i++) {
         ASSERT_EQ_FMT((uint32_t)i, rows[i].variant_idx, "%u");
         ASSERT_EQ(exp_mask[i], rows[i].consequence_mask);
-        ASSERT_EQ(-1, rows[i].cdna_pos);
-        ASSERT_EQ(-1, rows[i].cds_pos);
+        ASSERT_EQ(exp_cdna[i], rows[i].cdna_pos);
+        ASSERT_EQ(exp_cds[i], rows[i].cds_pos);
         ASSERT_EQ(exp_protein[i], rows[i].protein_pos);
     }
     ASSERT_EQ((uint8_t)'K', rows[0].aa_ref);
@@ -6243,7 +6356,7 @@ TEST annotate_rejects_missing_alleles_for_nonpoint_small_variant(void) {
     PASS();
 }
 
-TEST annotate_rejects_prefix_zero_pure_insertion(void) {
+TEST annotate_accepts_right_anchored_pure_insertion(void) {
     static const uint16_t tchrom[1] = {0u};
     static const uint32_t tstart[1] = {100u};
     static const uint32_t tend[1]   = {200u};
@@ -6284,9 +6397,9 @@ TEST annotate_rejects_prefix_zero_pure_insertion(void) {
     ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
     ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
     duckvep_result_builder_init(&rb, &row, 1u);
-    ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG,
+    ASSERT_EQ(DUCKVEP_OK,
               duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
-    ASSERT_EQ(0u, duckvep_result_builder_count(&rb));
+    ASSERT_EQ(1u, duckvep_result_builder_count(&rb));
 
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
@@ -11435,7 +11548,7 @@ TEST sequence_delta_annotation_wrapper_del_insufficient_scratch_known(void) {
                                 &s.v, 0u, 0u, s.vpos, s.strand, &shape);
     duckvep_sequence_delta_fill_for_annotation_trace(DUCKVEP_KIND_DEL, &s.tx, &s.ex,
                                                      &s.seq, &s.v, 0u, 0u, s.vpos,
-                                                     s.strand, &scratch, &route,
+                                                     s.strand, &scratch, NULL, &route,
                                                      &routed);
     ASSERT(kprop_delta_is_inframe_deletion_at(&shape, 2));
     ASSERT(kprop_sequence_delta_equal(&shape, &routed));
@@ -11481,7 +11594,7 @@ TEST sequence_delta_annotation_wrapper_start_lost_mnv(void) {
                                              &scratch, &direct);
     duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_MNV, &s.tx, &s.ex,
                                                &s.seq, &s.v, 0u, 0u, s.vpos,
-                                               s.strand, &scratch, &routed);
+                                               s.strand, &scratch, NULL, &routed);
     ASSERT(shape.valid);
     ASSERT(direct.valid);
     ASSERT(routed.valid);
@@ -11496,7 +11609,7 @@ TEST sequence_delta_annotation_wrapper_start_lost_mnv(void) {
     kprop_wire_coding_scene(&s, 9u);
     duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_MNV, &s.tx, &s.ex,
                                                &s.seq, &s.v, 0u, 0u, s.vpos,
-                                               s.strand, &scratch, &routed);
+                                               s.strand, &scratch, NULL, &routed);
     ASSERT(routed.valid);
     ASSERT(!routed.start_lost);
     ASSERT(routed.missense);
@@ -11557,7 +11670,7 @@ static int kprop_cross_codon_scene_deltas(
                                 0u, 0u, s.vpos, s.strand, shape);
     duckvep_sequence_delta_fill_for_annotation_trace(DUCKVEP_KIND_MNV, &s.tx, &s.ex,
                                                      &s.seq, &s.v, 0u, 0u, s.vpos,
-                                                     s.strand, &scratch, route,
+                                                     s.strand, &scratch, NULL, route,
                                                      routed);
     return 1;
 }
@@ -11714,7 +11827,7 @@ static enum theft_trial_res prop_delta_annotation_wrapper_matches_direct_shape(s
     duckvep_sequence_delta_fill_for_annotation((duckvep_variant_kind_t)s->vkind,
                                                &s->tx, &s->ex, &s->seq, &s->v,
                                                0u, 0u, s->vpos, s->strand,
-                                               &scratch, &routed);
+                                               &scratch, NULL, &routed);
     if (!shape.valid || !routed.valid) return THEFT_TRIAL_FAIL;
     if (!kprop_sequence_delta_equal(&shape, &routed)) return THEFT_TRIAL_FAIL;
 
@@ -11766,9 +11879,11 @@ static struct {
     uint32_t full;
 } g_cursor_route_cov;
 
-static enum theft_trial_res prop_cursor_mnv_route_matches_tile(struct theft *t,
-                                                               void *arg1) {
+static enum theft_trial_res prop_cursor_padded_snv_matches_tile(struct theft *t,
+                                                                void *arg1) {
     const struct kprop_coding *s = (const struct kprop_coding *)arg1;
+    duckvep_variant_batch_t variants = s->v;
+    const uint8_t semantic_kind = (uint8_t)DUCKVEP_KIND_SNV;
     duckvep_model_t *model = NULL;
     duckvep_options_t *opts = NULL;
     duckvep_workspace_t *ws = NULL;
@@ -11790,6 +11905,9 @@ static enum theft_trial_res prop_cursor_mnv_route_matches_tile(struct theft *t,
     memset(&err, 0, sizeof err);
     memset(&tile_stats, 0, sizeof tile_stats);
     memset(&cursor_stats, 0, sizeof cursor_stats);
+    /* The corpus stores whole codons whose differing region is one base. At the
+     * public boundary these are SNVs, regardless of their padded representation. */
+    variants.variant_kind = &semantic_kind;
     if (duckvep_model_open(&s->tx, &s->ex, &s->seq, &model, &err) != DUCKVEP_OK) {
         return THEFT_TRIAL_FAIL;
     }
@@ -11798,7 +11916,7 @@ static enum theft_trial_res prop_cursor_mnv_route_matches_tile(struct theft *t,
 
     duckvep_workspace_delta_route_stats_reset(ws);
     duckvep_result_builder_init(&rb, tile_rows, 4u);
-    if (duckvep_annotate_tile(model, &s->v, opts, ws, &rb, &err) != DUCKVEP_OK) {
+    if (duckvep_annotate_tile(model, &variants, opts, ws, &rb, &err) != DUCKVEP_OK) {
         res = THEFT_TRIAL_FAIL; goto done;
     }
     tile_n = duckvep_result_builder_count(&rb);
@@ -11807,7 +11925,7 @@ static enum theft_trial_res prop_cursor_mnv_route_matches_tile(struct theft *t,
     tile_stats = *stats;
 
     duckvep_workspace_delta_route_stats_reset(ws);
-    if (duckvep_annotate_cursor_open(model, &s->v, opts, ws, &cur, &err) != DUCKVEP_OK) {
+    if (duckvep_annotate_cursor_open(model, &variants, opts, ws, &cur, &err) != DUCKVEP_OK) {
         res = THEFT_TRIAL_FAIL; goto done;
     }
     while (!duckvep_annotate_cursor_done(cur)) {
@@ -11827,7 +11945,7 @@ static enum theft_trial_res prop_cursor_mnv_route_matches_tile(struct theft *t,
     cursor_stats = *stats;
 
     if (!saw_full || tile_n != cursor_n || tile_n == 0u) { res = THEFT_TRIAL_FAIL; goto done; }
-    if (tile_stats.mnv_context == 0u ||
+    if (tile_stats.mnv_context != 0u ||
         tile_stats.mnv_direct_fallback != 0u ||
         tile_stats.mnv_context != cursor_stats.mnv_context ||
         tile_stats.mnv_direct_fallback != cursor_stats.mnv_direct_fallback) {
@@ -11860,11 +11978,11 @@ done:
     return res;
 }
 
-TEST annotate_cursor_mnv_route_matches_tile_for_any_output_split(void) {
+TEST annotate_cursor_padded_snv_matches_tile_for_any_output_split(void) {
     struct theft_run_config cfg;
     memset(&cfg, 0, sizeof cfg);
-    cfg.name = "annotate cursor MNV route == tile under output splits";
-    cfg.prop1 = prop_cursor_mnv_route_matches_tile;
+    cfg.name = "annotate cursor padded SNV == tile under output splits";
+    cfg.prop1 = prop_cursor_padded_snv_matches_tile;
     cfg.type_info[0] = &kprop_context_delta_info;
     cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
     cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
@@ -12167,7 +12285,7 @@ static enum theft_trial_res prop_delta_scratch_cross_codon_mnv_matches_oracle(
     duckvep_sequence_delta_fill_for_annotation_trace((duckvep_variant_kind_t)s->vkind,
                                                      &s->tx, &s->ex, &s->seq, &s->v,
                                                      0u, 0u, s->vpos, s->strand,
-                                                     &scratch, &route, &routed);
+                                                     &scratch, NULL, &route, &routed);
 
     /* The generator only builds two adjacent body codons, so the window oracle always
      * resolves; the authoritative interpreter emits it directly and the router echoes it. */
@@ -13422,6 +13540,8 @@ static enum theft_alloc_res tileprop_alloc(struct theft *t, void *env, void **in
      * ids (so a contig never reappears), pos RESETS only when the chrom changes and
      * is otherwise nondecreasing within the run. */
     for (i = 0; i < s->n; i++) {
+        uint8_t ref_idx;
+        uint8_t alt_step;
         if (i > 0u && run + 1u < TILEPROP_MAX_RUNS && theft_random_bits(t, 2) == 0u) {
             run = (uint16_t)(run + 1u); /* start a new contig */
             pos = 1u;
@@ -13431,8 +13551,12 @@ static enum theft_alloc_res tileprop_alloc(struct theft *t, void *env, void **in
         }
         s->chrom[i] = run;
         s->pos[i] = pos;
-        s->ref[i] = bases[theft_random_bits(t, 2)];
-        s->alt[i] = bases[theft_random_bits(t, 2)];
+        ref_idx = (uint8_t)theft_random_bits(t, 2);
+        alt_step = (uint8_t)kprop_bounded(t, 3u) + 1u;
+        s->ref[i] = bases[ref_idx];
+        /* The tile rejects REF==ALT because it is not a variant. Choose one of
+         * the other three bases while retaining a uniformly varied SNV stream. */
+        s->alt[i] = bases[(ref_idx + alt_step) & 3u];
     }
     s->nruns = (uint16_t)(run + 1u);
     *instance = s;
@@ -13535,6 +13659,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_tile_rejects_null_model_for_any_batch);
     RUN_TEST(event_load_without_variant_kind_uses_supplied_interval);
     RUN_TEST(event_load_trims_small_variant_differing_region);
+    RUN_TEST(event_prepare_small_preserves_anchor_side_and_semantic_kind);
     RUN_TEST(event_normalization_matches_trim_oracle);
     RUN_TEST(sweep_allele_normalized_candidates_match_trim_oracle);
     RUN_TEST(sweep_known_scene_exact_pairs);
@@ -13614,7 +13739,7 @@ int main(int argc, char **argv) {
     RUN_TEST(sequence_delta_with_scratch_cross_codon_reverse_known_scene);
     RUN_TEST(sequence_delta_with_scratch_cross_codon_negative_scenes);
     RUN_TEST(sequence_delta_annotation_wrapper_matches_direct_shape);
-    RUN_TEST(annotate_cursor_mnv_route_matches_tile_for_any_output_split);
+    RUN_TEST(annotate_cursor_padded_snv_matches_tile_for_any_output_split);
     RUN_TEST(annotate_cursor_cross_codon_mnv_route_matches_tile_for_any_output_split);
     RUN_TEST(sequence_delta_with_scratch_mnv_matches_oracle);
     RUN_TEST(sequence_delta_with_scratch_cross_codon_mnv_matches_oracle);
@@ -13631,7 +13756,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_start_lost_matches_oracle_for_any_start_codon_snv);
     RUN_TEST(annotate_rejects_unsorted_variant_batch);
     RUN_TEST(annotate_rejects_missing_alleles_for_nonpoint_small_variant);
-    RUN_TEST(annotate_rejects_prefix_zero_pure_insertion);
+    RUN_TEST(annotate_accepts_right_anchored_pure_insertion);
     RUN_TEST(annotate_rejects_kind_allele_shape_mismatch);
     RUN_TEST(annotate_rejects_allele_slice_outside_pool);
     RUN_TEST(annotate_result_full_is_reported);
@@ -13642,6 +13767,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_matches_composition_for_any_scene);
     RUN_TEST(annotate_cursor_resumes_known_scene);
     RUN_TEST(sorted_point_cursor_survives_tiles_and_resets_on_rewind);
+    RUN_TEST(padded_snv_rewind_uses_exhaustive_point_classification);
     RUN_TEST(annotate_cursor_matches_tile_for_any_output_split);
     RUN_TEST(region_mask_known_scene);
     RUN_TEST(region_mask_short_exon_splice_reach_clamped);

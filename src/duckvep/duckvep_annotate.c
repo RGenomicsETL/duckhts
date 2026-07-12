@@ -3,6 +3,7 @@
 DUCKDB_EXTENSION_EXTERN
 
 #include "duckvep_model.h"
+#include "kernel/src/duckvep_event.h"
 #include "kernel/include/duckvep_kernel.h"
 #include "kernel/include/duckvep_so.h"
 
@@ -256,44 +257,19 @@ duckvep_scalar_select_model(duckvep_scalar_state_t *state,
 }
 
 static int
-duckvep_scalar_simple_kind(const uint8_t *reference, uint16_t reference_length,
+duckvep_scalar_simple_kind(uint32_t position,
+	const uint8_t *reference, uint16_t reference_length,
 	const uint8_t *alternate, uint16_t alternate_length, uint8_t *kind)
 {
-	uint16_t prefix, suffix, reference_remaining, alternate_remaining;
-	uint16_t reference_difference, alternate_difference;
+	duckvep_event_t event;
 
 	if (reference == NULL || alternate == NULL || kind == NULL ||
 	    reference_length == 0 || alternate_length == 0)
 		return 0;
-	prefix = 0;
-	while (prefix < reference_length && prefix < alternate_length &&
-	    reference[prefix] == alternate[prefix])
-		prefix++;
-	reference_remaining = (uint16_t)(reference_length - prefix);
-	alternate_remaining = (uint16_t)(alternate_length - prefix);
-	suffix = 0;
-	while (suffix < reference_remaining && suffix < alternate_remaining &&
-	    reference[reference_length - suffix - 1] ==
-	    alternate[alternate_length - suffix - 1])
-		suffix++;
-	reference_difference = (uint16_t)(reference_length - prefix - suffix);
-	alternate_difference = (uint16_t)(alternate_length - prefix - suffix);
-	if (reference_difference == 0 && alternate_difference == 0)
+	if (!duckvep_event_prepare_small(position, reference, reference_length,
+	    alternate, alternate_length, &event))
 		return 0;
-	if (reference_length == alternate_length) {
-		*kind = reference_length == 1 ? DUCKVEP_KIND_SNV :
-		    DUCKVEP_KIND_MNV;
-		return 1;
-	}
-	if (prefix != 0 && reference_difference == 0) {
-		*kind = DUCKVEP_KIND_INS;
-		return 1;
-	}
-	if (prefix != 0 && alternate_difference == 0) {
-		*kind = DUCKVEP_KIND_DEL;
-		return 1;
-	}
-	*kind = DUCKVEP_KIND_INDEL;
+	*kind = event.kind;
 	return 1;
 }
 
@@ -389,7 +365,8 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 		    state->alternate_offsets[row],
 		    duckdb_string_t_data(&alternates[row]),
 		    state->alternate_lengths[row]) ||
-		    !duckvep_scalar_simple_kind(state->allele_bytes +
+		    !duckvep_scalar_simple_kind(state->positions[row],
+		    state->allele_bytes +
 		    state->reference_offsets[row], state->reference_lengths[row],
 		    state->allele_bytes + state->alternate_offsets[row],
 		    state->alternate_lengths[row], &state->variant_kinds[row])) {

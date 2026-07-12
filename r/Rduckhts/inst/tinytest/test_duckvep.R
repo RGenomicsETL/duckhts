@@ -80,6 +80,22 @@ expect_identical(annotation$status, "supported")
 expect_equal(annotation$cds_position, 5)
 expect_equal(annotation$protein_position, 2)
 
+prepared_events <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 123::UBIGINT, 'GTA', 'GCA'),",
+    "(2, 1::UBIGINT, 'AC', 'C'),",
+    "(3, 1::UBIGINT, 'C', 'AC'))",
+    "SELECT ord, a.consequence FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(prepared_events$ord, 1:3)
+expect_identical(prepared_events$consequence[1], "missense_variant")
+
 dbExecute(
   con,
   paste(

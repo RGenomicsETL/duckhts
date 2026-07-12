@@ -28,12 +28,14 @@
 #define DUCKVEP_SWEEP_H
 
 #include "duckvep_kernel.h"
+#include "duckvep_event.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
 typedef struct duckvep_sweep_cursor {
     const duckvep_variant_batch_t    *variants;
+    const duckvep_event_t            *events; /* optional once-prepared geometry */
     const duckvep_transcript_model_t *transcripts;
     uint32_t                          halo;
     uint32_t                         *active;
