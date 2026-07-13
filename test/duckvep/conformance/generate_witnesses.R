@@ -75,9 +75,38 @@ op <- add_option(
   default = FALSE,
   help = "self-test on the minimal fixture: assert expected witnesses, then exit"
 )
+op <- add_option(
+  op,
+  "--random-cases",
+  dest = "random_cases",
+  type = "integer",
+  default = 0L,
+  help = "add this many deterministic random alleles around and within the transcript [%default]"
+)
+op <- add_option(
+  op,
+  "--seed",
+  type = "integer",
+  default = 1L,
+  help = "random-case generator seed [%default]"
+)
+op <- add_option(
+  op,
+  "--max-random-length",
+  dest = "max_random_length",
+  type = "integer",
+  default = 10L,
+  help = "maximum differing REF or ALT length in a random allele [%default]"
+)
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
+if (opt$random_cases < 0L) {
+  die("--random-cases must be non-negative")
+}
+if (opt$max_random_length < 1L || opt$max_random_length > 65534L) {
+  die("--max-random-length must be between 1 and 65534 (the uint16 allele limit minus its VCF anchor)")
+}
 
 con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
 on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
@@ -167,7 +196,9 @@ if (!file.exists(glue("{opt$fasta}.fai"))) {
   ))
 }
 p0 <- min(pos)
-span <- glue("{chrom}:{p0}-{max(pos) + 4L}")
+span <- glue(
+  "{chrom}:{p0}-{max(pos) + max(4L, opt$max_random_length + 1L)}"
+)
 seqstr <- toupper(dbGetQuery(
   con,
   glue(
@@ -184,16 +215,42 @@ other_base <- function(...) {
 }
 
 # Tile allele shapes at every selected position. The differential runner decides scope.
-W <- list()
-emit <- function(p, ref, alt, class, shape) {
-  W[[length(W) + 1L]] <<- data.frame(
-    pos = p,
-    ref = ref,
-    alt = alt,
-    class = class,
-    shape = shape,
-    stringsAsFactors = FALSE
+# Keep the generator usable for million-case campaigns: one-row data frames in a loop
+# made witness generation slower than VEP itself. These typed columns grow geometrically
+# and become one data frame only after generation is complete.
+witness_capacity <- as.integer(min(
+  .Machine$integer.max,
+  max(1024, as.double(opt$random_cases) + 1024)
+))
+witness_count <- 0L
+w_pos <- integer(witness_capacity)
+w_ref <- character(witness_capacity)
+w_alt <- character(witness_capacity)
+w_class <- character(witness_capacity)
+w_shape <- character(witness_capacity)
+grow_witnesses <- function(need) {
+  if (need <= witness_capacity) return(invisible(NULL))
+  next_capacity <- min(
+    .Machine$integer.max,
+    max(as.double(need), as.double(witness_capacity) * 2)
   )
+  if (next_capacity < need) die("too many witnesses for an R vector")
+  witness_capacity <<- as.integer(next_capacity)
+  length(w_pos) <<- witness_capacity
+  length(w_ref) <<- witness_capacity
+  length(w_alt) <<- witness_capacity
+  length(w_class) <<- witness_capacity
+  length(w_shape) <<- witness_capacity
+}
+emit <- function(p, ref, alt, class, shape) {
+  next_row <- witness_count + 1L
+  grow_witnesses(next_row)
+  w_pos[next_row] <<- p
+  w_ref[next_row] <<- ref
+  w_alt[next_row] <<- alt
+  w_class[next_row] <<- class
+  w_shape[next_row] <<- shape
+  witness_count <<- next_row
 }
 for (k in seq_along(pos)) {
   p <- pos[k]
@@ -232,7 +289,143 @@ for (k in seq_along(pos)) {
   qb <- nuc(p, 4L)
   if (grepl("^[ACGT]{4}$", qb)) emit(p, qb, substr(qb, 1L, 1L), lab[k], "del3") # 3bp del (in-frame)
 }
-w <- do.call(rbind, W)
+
+# Add a reproducible state-space sample without creating a second generator or a
+# second allele authority. Three quarters of draws are near the splice/start/stop/exon
+# witnesses; one quarter is uniform across the transcript span. A Park-Miller generator
+# keeps the sequence independent of R's changing sample() implementation.
+random_added <- 0L
+if (opt$random_cases > 0L) {
+  modulus <- 2147483647
+  state <- (abs(as.double(opt$seed)) %% (modulus - 1)) + 1
+  next_index <- function(n) {
+    state <<- (state * 48271) %% modulus
+    as.integer(floor((state / modulus) * n)) + 1L
+  }
+  pick <- function(x) x[next_index(length(x))]
+  random_dna <- function(n) {
+    paste0(
+      vapply(seq_len(n), function(i) pick(c("A", "C", "G", "T")), ""),
+      collapse = ""
+    )
+  }
+  transcript_positions <- seq.int(min(exons$start), max(exons$endp))
+  boundary_positions <- sort(unique(as.integer(unlist(lapply(
+    pos,
+    function(p) p + seq.int(-6L, 6L)
+  )))))
+  boundary_positions <- boundary_positions[
+    boundary_positions >= min(transcript_positions) &
+      boundary_positions <= max(transcript_positions)
+  ]
+  seen <- new.env(hash = TRUE, parent = emptyenv())
+  fixed_rows <- seq_len(witness_count)
+  fixed_keys <- paste(
+    w_pos[fixed_rows], w_ref[fixed_rows], w_alt[fixed_rows], sep = ":"
+  )
+  for (key in fixed_keys) {
+    assign(key, TRUE, envir = seen)
+  }
+  add_random <- function(p, ref, alt, shape) {
+    key <- paste(p, ref, alt, sep = ":")
+    if (exists(key, envir = seen, inherits = FALSE)) {
+      return(FALSE)
+    }
+    assign(key, TRUE, envir = seen)
+    nearest <- which.min(abs(pos - p))
+    emit(p, ref, alt, lab[nearest], shape)
+    TRUE
+  }
+
+  attempts <- 0L
+  max_attempts <- opt$random_cases * 100L + 1000L
+  while (random_added < opt$random_cases && attempts < max_attempts) {
+    attempts <- attempts + 1L
+    p <- if (next_index(4L) <= 3L) {
+      pick(boundary_positions)
+    } else {
+      pick(transcript_positions)
+    }
+    anchor <- base_at(p)
+    if (is.na(anchor)) {
+      next
+    }
+    shape <- pick(c("snv", "mnv", "insertion", "deletion", "delins"))
+    if (shape == "snv") {
+      alt <- pick(setdiff(c("A", "C", "G", "T"), anchor))
+      added <- add_random(p, anchor, alt, "random_snv")
+    } else if (shape == "mnv") {
+      len <- if (opt$max_random_length == 1L) {
+        1L
+      } else {
+        1L + next_index(opt$max_random_length - 1L)
+      }
+      ref <- nuc(p, len)
+      if (nchar(ref) != len || !grepl("^[ACGT]+$", ref)) {
+        next
+      }
+      alt <- random_dna(len)
+      if (alt == ref) {
+        substr(alt, 1L, 1L) <- pick(setdiff(
+          c("A", "C", "G", "T"),
+          substr(ref, 1L, 1L)
+        ))
+      }
+      added <- add_random(p, ref, alt, paste0("random_mnv", len))
+    } else if (shape == "insertion") {
+      len <- next_index(opt$max_random_length)
+      inserted <- random_dna(len)
+      added <- add_random(
+        p,
+        anchor,
+        paste0(anchor, inserted),
+        paste0("random_ins", len)
+      )
+    } else if (shape == "deletion") {
+      len <- next_index(opt$max_random_length)
+      ref <- nuc(p, len + 1L)
+      if (nchar(ref) != len + 1L || !grepl("^[ACGT]+$", ref)) {
+        next
+      }
+      added <- add_random(p, ref, anchor, paste0("random_del", len))
+    } else {
+      ref_len <- next_index(opt$max_random_length)
+      alt_len <- next_index(opt$max_random_length)
+      ref <- nuc(p, ref_len + 1L)
+      if (nchar(ref) != ref_len + 1L || !grepl("^[ACGT]+$", ref)) {
+        next
+      }
+      inserted <- random_dna(alt_len)
+      if (ref_len == alt_len && substr(ref, 2L, nchar(ref)) == inserted) {
+        substr(inserted, 1L, 1L) <- pick(setdiff(
+          c("A", "C", "G", "T"),
+          substr(inserted, 1L, 1L)
+        ))
+      }
+      added <- add_random(
+        p,
+        ref,
+        paste0(anchor, inserted),
+        paste0("random_delins", ref_len, "to", alt_len)
+      )
+    }
+    if (isTRUE(added)) random_added <- random_added + 1L
+  }
+  if (random_added != opt$random_cases) {
+    die(
+      "generated {random_added}/{opt$random_cases} random cases after {attempts} attempts"
+    )
+  }
+}
+witness_rows <- seq_len(witness_count)
+w <- data.frame(
+  pos = w_pos[witness_rows],
+  ref = w_ref[witness_rows],
+  alt = w_alt[witness_rows],
+  class = w_class[witness_rows],
+  shape = w_shape[witness_rows],
+  stringsAsFactors = FALSE
+)
 w <- w[order(w$pos, w$ref, w$alt), , drop = FALSE]
 w$variant_id <- glue_data(w, "{chrom}:{pos}:{ref}:{alt}")
 
@@ -249,7 +442,7 @@ if (opt$check) {
     "SNV alt differs from ref" = all(with(w[w$shape == "snv", ], ref != alt))
   )
   cat(glue(
-    "OK: {nrow(w)} witnesses for {opt$tx} across {length(unique(w$class))} classes\n"
+    "OK: {nrow(w)} witnesses for {opt$tx} across {length(unique(w$class))} classes; random={random_added}\n"
   ))
   quit(status = 0)
 }
@@ -261,6 +454,9 @@ writeLines(
   c(
     "##fileformat=VCFv4.2",
     glue("##source=duckvep/generate_witnesses.R;tx={opt$tx}"),
+    glue(
+      "##duckvep_state_exploration=<seed={opt$seed},random_cases={random_added},max_random_length={opt$max_random_length}>"
+    ),
     "##INFO=<ID=CLASS,Number=1,Type=String,Description=\"coarse genomic-geometry class\">",
     "##INFO=<ID=TX,Number=1,Type=String,Description=\"target transcript id\">",
     "##INFO=<ID=SHAPE,Number=1,Type=String,Description=\"allele shape (snv/del1/ins1/ins3/mnv2/del2/del3/delins2to1/delins1to2)\">",
@@ -279,7 +475,7 @@ writeLines(
 close(vc)
 cat(
   glue(
-    "wrote {nrow(w)} witnesses ({length(unique(w$class))} classes, {length(unique(w$shape))} shapes) -> {opt$out}"
+    "wrote {nrow(w)} witnesses ({length(unique(w$class))} classes, {length(unique(w$shape))} shapes, random={random_added}, seed={opt$seed}) -> {opt$out}"
   ),
   "\n",
   sep = ""

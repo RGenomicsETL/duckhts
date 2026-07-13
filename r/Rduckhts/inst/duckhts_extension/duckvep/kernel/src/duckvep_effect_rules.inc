@@ -21,6 +21,7 @@ static const duckvep_consequence_rule_t k_rules[] = {
     { DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_REGION), 0u, DUCKVEP_SO(DUCKVEP_SO_SPLICE_REGION), 3u, 16u, DUCKVEP_IMPACT_LOW }, /* splice_region_variant / splice_region */
     { DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_DONOR_REGION), 0u, DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR_REGION), 3u, 17u, DUCKVEP_IMPACT_LOW }, /* splice_donor_region_variant / splice_donor_region_variant */
     { DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT), 0u, DUCKVEP_SO(DUCKVEP_SO_SPLICE_POLYPYRIMIDINE), 3u, 18u, DUCKVEP_IMPACT_LOW }, /* splice_polypyrimidine_tract_variant / splice_polypyrimidine_tract_variant */
+    { DUCKVEP_PRE(DUCKVEP_PRE_START_RETAINED), 0u, DUCKVEP_SO(DUCKVEP_SO_START_RETAINED), 3u, 20u, DUCKVEP_IMPACT_LOW }, /* start_retained_variant / start_retained_variant */
     { DUCKVEP_PRE(DUCKVEP_PRE_STOP_RETAINED), 0u, DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED), 3u, 21u, DUCKVEP_IMPACT_LOW }, /* stop_retained_variant / stop_retained */
     { DUCKVEP_PRE(DUCKVEP_PRE_SYNONYMOUS), 0u, DUCKVEP_SO(DUCKVEP_SO_SYNONYMOUS), 3u, 22u, DUCKVEP_IMPACT_LOW }, /* synonymous_variant / synonymous_variant */
     { DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN), 0u, DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE), 3u, 23u, DUCKVEP_IMPACT_MODIFIER }, /* coding_sequence_variant / coding_unknown */

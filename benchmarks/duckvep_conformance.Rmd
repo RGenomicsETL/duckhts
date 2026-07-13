@@ -34,7 +34,25 @@ release_parquet <- read.csv(
   colClasses = c(source_revision = "character", chromosome = "character")
 )
 overall <- history[history$stratum_kind == "all", , drop = FALSE]
-latest <- overall[nrow(overall), , drop = FALSE]
+tested_revisions <- unique(overall$source_revision)
+revision_ancestry <- suppressWarnings(system2(
+  "git",
+  c("-C", shQuote(root), "rev-list", "--topo-order", "HEAD"),
+  stdout = TRUE,
+  stderr = FALSE
+))
+tested_ancestry <- revision_ancestry[revision_ancestry %in% tested_revisions]
+latest_revision <- if (length(tested_ancestry)) {
+  tested_ancestry[[1L]]
+} else {
+  overall$source_revision[[nrow(overall)]]
+}
+latest_runs <- overall[
+  overall$source_revision == latest_revision,
+  ,
+  drop = FALSE
+]
+latest <- latest_runs[which.max(latest_runs$n), , drop = FALSE]
 same_run <- function(x) {
   x$source_revision == latest$source_revision &
     x$engine == latest$engine &
@@ -55,23 +73,25 @@ Ensembl VEP 116 `--gff` output. Unresolved DuckVEP rows remain in the denominato
 they are not discarded as unsupported cases. The CSV is append-only by source
 revision, corpus, and resident model.
 
-## Latest run
+## Latest tested revision
 
 ```{r latest}
 latest_table <- data.frame(
-  revision = short_revision(latest$source_revision),
-  corpus = latest$corpus,
-  model = latest$model,
-  oracle = paste0("VEP ", latest$oracle_version),
-  pairs = latest$n,
-  exact = paste0(latest$exact_agree, "/", latest$n),
-  unresolved = latest$unresolved,
-  resolved_disagreements = latest$resolved_discordant,
-  resolved_error_upper_95 = percent(latest$upper95),
+  revision = short_revision(latest_runs$source_revision),
+  corpus = latest_runs$corpus,
+  model = latest_runs$model,
+  oracle = paste0("VEP ", latest_runs$oracle_version),
+  pairs = latest_runs$n,
+  exact = paste0(latest_runs$exact_agree, "/", latest_runs$n),
+  unresolved = latest_runs$unresolved,
+  resolved_disagreements = latest_runs$resolved_discordant,
+  resolved_error_upper_95 = percent(latest_runs$upper95),
   stringsAsFactors = FALSE
 )
 knitr::kable(latest_table, row.names = FALSE)
 ```
+
+Detailed consequence tables below use the largest corpus at this tested revision.
 
 ## History
 

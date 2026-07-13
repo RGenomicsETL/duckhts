@@ -31,6 +31,20 @@ The tests have three independent jobs:
 - `make test-duckvep-differential` generates boundary, splice, codon, and allele-shape
   witnesses, runs both engines on the same GFF and FASTA, and compares the exact SO term
   set for every `(variant, transcript)` pair.
+- `make test-duckvep-state-exploration` runs every C property 100,000 times, then adds
+  20,000 deterministic alleles concentrated around transcript boundaries and distributed
+  across the transcript, and compares all of them with executable VEP 116. The generated
+  VCF records the seed; pair-level Parquet keeps every disagreement and unresolved row.
+
+The state exploration defaults are reproducible and can be widened without changing code:
+
+```sh
+DUCKVEP_STATE_CASES=100000 \
+DUCKVEP_STATE_SEED=29 \
+DUCKVEP_STATE_MAX_LENGTH=49 \
+DUCKVEP_PROP_TRIALS=1000000 \
+  make test-duckvep-state-exploration
+```
 
 For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_sequence_regions`, `duckvep_transcripts`, `duckvep_exons`, and

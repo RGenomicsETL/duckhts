@@ -93,6 +93,22 @@ duckvep_splice_state_t duckvep_splice_classify_span(
     uint32_t                          end1,
     uint8_t                           interbase);
 
+/* VEP does not feed one minimized interval to its splice predicates. For
+ * feature alleles longer than one base it XORs REF and ALT, groups contiguous
+ * non-zero bytes, and accumulates every resulting mismatch island before
+ * applying donor/acceptor/region suppression. Missing bytes in the shorter
+ * allele compare as zero, matching Perl's string XOR. `feature_start1` and the
+ * allele slices are after VEP's ordinary one-base indel-anchor removal. */
+duckvep_splice_state_t duckvep_splice_classify_differing_regions(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          feature_start1,
+    const uint8_t                    *feature_ref,
+    uint16_t                          feature_ref_length,
+    const uint8_t                    *feature_alt,
+    uint16_t                          feature_alt_length);
+
 /* Point compatibility wrapper. */
 duckvep_splice_state_t duckvep_splice_classify(
     const duckvep_transcript_model_t *transcripts,

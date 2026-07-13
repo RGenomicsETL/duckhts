@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 7
+#define DUCKVEP_KERNEL_VERSION_MINOR 8
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* Transcript-oriented reference bases immediately after the CDS. VEP needs at

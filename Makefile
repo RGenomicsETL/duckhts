@@ -4,6 +4,7 @@
 	duckvep-generated-check test-duckvep-so-conformance \
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
+	test-duckvep-state-exploration \
 	duckvep-corpus-differential duckvep-statistical-report \
 	duckvep-record-conformance duckvep-record-properties \
 	bench-duckvep-throughput bench-duckvep-release-parquet \
@@ -296,6 +297,27 @@ test-duckvep-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--extension build/release/duckhts.duckdb_extension \
 		--sample-per-shape 0
+
+# Reproducible rare-state exploration. The generated VCF, pair-level Parquet, and
+# statistical summaries remain under the ignored results directory so every failure
+# retains its seed and exact allele while large artifacts stay out of git.
+test-duckvep-state-exploration: release
+	@set -e; \
+	cases=$${DUCKVEP_STATE_CASES:-20000}; \
+	seed=$${DUCKVEP_STATE_SEED:-17}; \
+	max_len=$${DUCKVEP_STATE_MAX_LENGTH:-10}; \
+	trials=$${DUCKVEP_PROP_TRIALS:-100000}; \
+	DUCKVEP_PROP_TRIALS=$$trials DUCKVEP_PROP_SEED=$$seed \
+		$(MAKE) test-duckvep-kernel; \
+	vcf=test/duckvep/conformance/results/state_exploration_seed_$${seed}.vcf; \
+	Rscript test/duckvep/conformance/generate_witnesses.R \
+		--ext build/release/duckhts.duckdb_extension \
+		--random-cases $$cases --max-random-length $$max_len \
+		--seed $$seed --out $$vcf; \
+	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
+		--corpus state_exploration_seed_$${seed} \
+		--vcf $$vcf --extension build/release/duckhts.duckdb_extension \
+		--sample-per-shape 0 --seed $$seed
 
 duckvep-corpus-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \

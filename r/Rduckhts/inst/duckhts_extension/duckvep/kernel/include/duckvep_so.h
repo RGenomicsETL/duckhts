@@ -16,7 +16,8 @@
  * subset (splice_region / splice_donor / splice_acceptor / splice_donor_5th_base /
  * splice_donor_region / splice_polypyrimidine_tract — from duckvep_splice_classify)
  * plus the codon-SNV subset
- * (synonymous / missense / stop_gained / stop_lost / stop_retained / start_lost),
+ * (synonymous / missense / stop_gained / stop_lost / stop_retained /
+ * start_lost / start_retained_variant),
  * narrow two-codon MNV missense, sequence-backed frameshift/in-frame indels,
  * full-transcript structural deletion/CNV-loss and
  * duplication/CNV-gain terms, and curated NMD_transcript_variant placement.
@@ -35,7 +36,7 @@ extern "C" {
 #endif
 
 /* Stable SO term bit indices. NEVER reorder; append new terms only. The set fits
- * in a uint64_t consequence_mask (room for 64 terms; 32 used). */
+ * in a uint64_t consequence_mask. */
 typedef enum duckvep_so_bit {
     /* --- structural (set today by the structural fusion) --- */
     DUCKVEP_SO_UPSTREAM_GENE              = 0,
@@ -75,7 +76,8 @@ typedef enum duckvep_so_bit {
     DUCKVEP_SO_CODING_TRANSCRIPT          = 29,
     DUCKVEP_SO_INFRAME_INSERTION          = 30,
     DUCKVEP_SO_PROTEIN_ALTERING           = 31,
-    DUCKVEP_SO_BIT_COUNT                  = 32
+    DUCKVEP_SO_START_RETAINED             = 32,
+    DUCKVEP_SO_BIT_COUNT                  = 33
 } duckvep_so_bit_t;
 
 #ifdef __cplusplus

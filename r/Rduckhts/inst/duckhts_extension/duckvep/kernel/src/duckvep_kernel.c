@@ -864,6 +864,38 @@ static int insertion_placement_uses_right_flank(
                                        right, &projection);
 }
 
+static int event_feature_alleles(
+    const duckvep_variant_batch_t *variants,
+    uint32_t                       variant_idx,
+    const duckvep_event_t         *event,
+    const uint8_t                **ref,
+    uint16_t                      *ref_length,
+    const uint8_t                **alt,
+    uint16_t                      *alt_length) {
+
+    uint16_t offset;
+    uint16_t raw_ref_length;
+    uint16_t raw_alt_length;
+
+    if (variants == NULL || event == NULL || ref == NULL ||
+        ref_length == NULL || alt == NULL || alt_length == NULL ||
+        variants->allele_bytes == NULL || variants->ref_offset == NULL ||
+        variants->alt_offset == NULL || variants->ref_length == NULL ||
+        variants->alt_length == NULL) {
+        return 0;
+    }
+    offset = event->feature_allele_offset;
+    raw_ref_length = variants->ref_length[variant_idx];
+    raw_alt_length = variants->alt_length[variant_idx];
+    if (offset > raw_ref_length || offset > raw_alt_length) return 0;
+
+    *ref = variants->allele_bytes + variants->ref_offset[variant_idx] + offset;
+    *alt = variants->allele_bytes + variants->alt_offset[variant_idx] + offset;
+    *ref_length = (uint16_t)(raw_ref_length - offset);
+    *alt_length = (uint16_t)(raw_alt_length - offset);
+    return 1;
+}
+
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
@@ -874,6 +906,11 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     uint32_t pos;
     uint32_t topology_start1;
     uint32_t topology_end1;
+    const uint8_t *feature_ref = NULL;
+    const uint8_t *feature_alt = NULL;
+    uint16_t feature_ref_length = 0u;
+    uint16_t feature_alt_length = 0u;
+    int have_feature_alleles;
     int fwd;
     uint32_t dist;
     duckvep_variant_kind_t kind;
@@ -884,33 +921,63 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     uint64_t cmask;
     duckvep_consequence_t *row;
     int cds_delta_attempted = 0;
+    int feature_mapping_spans_intron;
 
     if (c->status != DUCKVEP_OK) return 0;
 
     tx = &c->model->transcripts;
     event = c->events[variant_idx];
     pos = event.start1;
-    topology_start1 = event.start1;
-    topology_end1 = event.end1;
-    if (insertion_placement_uses_right_flank(
-            tx, &c->model->exons, (size_t)tx_idx, &event)) {
-        topology_start1 = duckvep_event_right_flank1(&event);
-        topology_end1 = topology_start1;
+    topology_start1 = event.feature_start1;
+    topology_end1 = event.feature_end1;
+    have_feature_alleles = event_feature_alleles(
+        c->variants, variant_idx, &event,
+        &feature_ref, &feature_ref_length,
+        &feature_alt, &feature_alt_length);
+    if (event.interbase) {
+        /* Region placement for an insertion is transcript-relative, while its
+         * splice geometry remains VEP's reversed feature interval P+1,P. */
+        topology_start1 = event.start1;
+        topology_end1 = event.start1;
+        if (insertion_placement_uses_right_flank(
+                tx, &c->model->exons, (size_t)tx_idx, &event)) {
+            topology_start1 = duckvep_event_right_flank1(&event);
+            topology_end1 = topology_start1;
+        }
     }
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
     if (kind == DUCKVEP_KIND_SNV && c->point_sorted_safe &&
-        c->model->point_ordered[tx_idx]) {
+        c->model->point_ordered[tx_idx] &&
+        event.feature_start1 == event.feature_end1 &&
+        (!have_feature_alleles ||
+         (feature_ref_length == 1u && feature_alt_length == 1u))) {
         duckvep_effect_ctx_fill_point_sorted(
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
-            event.start1, c->options->splice_region_exonic,
+            event.feature_start1, c->options->splice_region_exonic,
             c->options->splice_region_intronic,
             &c->workspace->point_exon_rank[tx_idx], &ectx);
+    } else if (kind != DUCKVEP_KIND_SV && have_feature_alleles) {
+        duckvep_region_state_t region = duckvep_region_classify_span(
+            tx, &c->model->exons, (size_t)tx_idx,
+            topology_start1, topology_end1,
+            c->options->splice_region_exonic,
+            c->options->splice_region_intronic);
+        duckvep_splice_state_t splice =
+            duckvep_splice_classify_differing_regions(
+                tx, &c->model->exons, (size_t)tx_idx,
+                event.feature_start1,
+                feature_ref, feature_ref_length,
+                feature_alt, feature_alt_length);
+        duckvep_effect_ctx_fill_classified(
+            tx, variant_idx, (size_t)tx_idx,
+            topology_start1, topology_end1, &region, &splice, &ectx);
     } else {
         duckvep_effect_ctx_fill_geometry(
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
-            topology_start1, topology_end1, event.start1, event.end1,
+            topology_start1, topology_end1,
+            event.feature_start1, event.feature_end1,
             event.interbase, c->options->splice_region_exonic,
             c->options->splice_region_intronic, &ectx);
     }
@@ -919,6 +986,17 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
         duckvep_sv_effect_t sv = duckvep_sv_effect_fill(&event, &ectx.region_state);
         duckvep_effect_ctx_apply_sv(&ectx, &sv);
     }
+
+    /* VEP maps an equal-length VariationFeature as one uploaded span. When that
+     * span crosses an intron, TranscriptVariationAllele cannot form peptide
+     * alleles even if trimming would leave one exonic mismatch. Preserve VEP's
+     * coding_sequence_variant fallback instead of translating a different,
+     * minimized representation that VEP was not asked to evaluate. */
+    feature_mapping_spans_intron =
+        have_feature_alleles &&
+        feature_ref_length == feature_alt_length &&
+        ectx.region_state.overlaps_cds &&
+        ectx.region_state.overlaps_intron;
 
     /* The symmetric sweep halo admits candidates up to max(up,down); enforce the
      * directional up/downstream window here so an asymmetric config is honored. */
@@ -936,7 +1014,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
      * model views directly; the annotation sweep does not classify coding effects. */
     memset(&delta, 0, sizeof delta);
     if (kind != DUCKVEP_KIND_SV &&
-        (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS))) {
+        (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) &&
+        !feature_mapping_spans_intron) {
         const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
         cds_delta_attempted = 1;
         duckvep_sequence_delta_route_t route = DUCKVEP_DELTA_ROUTE_DIRECT;
