@@ -8,6 +8,11 @@ Ensembl VEP 116 is the behavioral oracle. The Rust prototype and fastVEP are not
 checked-in file is byte-identical. Behavioral rows are produced by executing VEP itself
 through the differential runner below.
 
+Variant-induced NMD uses the separate VEP Plugins release/116 `NMD.pm` policy pinned at
+`0082591268417af618e03850c5ffdc7c09998a5d`. The pure-C fixed cases reproduce its four
+escape rules and executable thresholds on both strands. `NMD_transcript_variant` remains
+the independent VEP core biotype consequence.
+
 The runner uses the current `WangLabCSU/blit` command API (tested at
 `940c2c1385ba6ad72f0c63b861e90abe8ae6e6f3`) to execute
 `micromamba run -p "$VEP_PREFIX" vep ...` without a shell. The default prefix is

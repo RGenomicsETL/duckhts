@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 6
+#define DUCKVEP_KERNEL_VERSION_MINOR 7
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* Transcript-oriented reference bases immediately after the CDS. VEP needs at
@@ -234,6 +234,29 @@ typedef enum duckvep_sequence_status {
     DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL = 9
 } duckvep_sequence_status_t;
 
+/* Variant-induced NMD prediction is deliberately separate from the
+ * NMD_transcript_variant SO consequence. The SO term describes a transcript
+ * whose imported biotype is already nonsense_mediated_decay; this enum applies
+ * the Ensembl VEP Plugins release/116 NMD.pm rules to a newly introduced
+ * stop-gained, frameshift, splice-donor, or splice-acceptor consequence. */
+typedef enum duckvep_nmd_prediction {
+    DUCKVEP_NMD_NOT_APPLICABLE = 0,
+    DUCKVEP_NMD_PREDICTED_TRIGGERING,
+    DUCKVEP_NMD_PREDICTED_ESCAPING,
+    DUCKVEP_NMD_UNRESOLVED
+} duckvep_nmd_prediction_t;
+
+/* Independent reasons why the release/116 plugin predicts NMD escape. Several
+ * bits may be true for one consequence. The source calls its coordinate checks
+ * "first 100 coding bases" and "50 bases at the penultimate exon end"; its
+ * executable thresholds are cds_end <= 101 and an inclusive 51-base offset. */
+typedef enum duckvep_nmd_escape_bit {
+    DUCKVEP_NMD_ESCAPE_INTRONLESS           = 1u << 0,
+    DUCKVEP_NMD_ESCAPE_EARLY_CDS            = 1u << 1,
+    DUCKVEP_NMD_ESCAPE_LAST_EXON            = 1u << 2,
+    DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END = 1u << 3
+} duckvep_nmd_escape_bit_t;
+
 typedef struct duckvep_consequence {
     uint32_t variant_idx;
     uint32_t tx_idx;
@@ -245,6 +268,8 @@ typedef struct duckvep_consequence {
 
     uint8_t  impact;               /* duckvep_impact_t                         */
     uint8_t  sequence_status;      /* duckvep_sequence_status_t                */
+    uint8_t  nmd_prediction;       /* duckvep_nmd_prediction_t                 */
+    uint8_t  nmd_escape_reasons;   /* duckvep_nmd_escape_bit_t                 */
     int32_t  cdna_pos;
     int32_t  cds_pos;
     int32_t  protein_pos;

@@ -145,6 +145,22 @@ void duckvep_effect_ctx_apply_sv(
  * and before evaluating the generated consequence program. */
 void duckvep_effect_ctx_finalize(duckvep_effect_ctx_t *ctx);
 
+typedef struct duckvep_nmd_result {
+    uint8_t prediction;
+    uint8_t escape_reasons;
+} duckvep_nmd_result_t;
+
+/* Apply the pinned VEP Plugins release/116 NMD.pm location rules after the SO
+ * consequence set is known. Eligible splice consequences without a contiguous
+ * coding projection are unresolved. */
+void duckvep_nmd_predict(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint64_t                          consequence_mask,
+    duckvep_nmd_result_t             *out);
+
 typedef struct duckvep_consequence_rule {
     uint64_t required;
     uint64_t forbidden;

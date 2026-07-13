@@ -284,6 +284,22 @@ comments and dead route values also describe a superseded equality gate. Issue #
 removal of that dual authority: extend the edit interpreter or emit an explicit unresolved
 result; do not silently choose a different classifier.
 
+## NMD prediction
+
+`NMD_transcript_variant` remains the VEP core consequence for a variant inside a
+transcript already imported with the `nonsense_mediated_decay` biotype. It does not say
+that the current variant creates a new NMD substrate.
+
+Variant-induced NMD is a separate compact result derived from VEP Plugins release/116
+`NMD.pm` (`0082591268417af618e03850c5ffdc7c09998a5d`). Stop-gained, frameshift,
+splice-donor, and splice-acceptor consequences are predicted to escape for an intronless
+transcript, an early-CDS event (`cds_end <= 101` in the plugin), an event in the last
+exon, or an event in the plugin's inclusive 51-base penultimate-exon-end window. An
+eligible projected event matching none of those rules is `triggering`; an eligible event
+without coding coordinates is `unresolved`. The SQL result exposes each escape reason as
+a boolean. This is the pinned VEP positional policy, not a direct molecular assay or a
+claim that every transcript follows one universal NMD rule.
+
 ## Phased edits
 
 The pure C mutation core already applies several non-overlapping CDS edits in reverse CDS

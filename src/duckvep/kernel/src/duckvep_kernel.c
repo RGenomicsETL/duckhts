@@ -880,6 +880,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     duckvep_event_t event;
     duckvep_effect_ctx_t ectx;
     duckvep_sequence_delta_t delta;
+    duckvep_nmd_result_t nmd;
     uint64_t cmask;
     duckvep_consequence_t *row;
     int cds_delta_attempted = 0;
@@ -973,6 +974,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
 
     cmask = duckvep_effect_eval(ectx.pre_bits);
     if (cmask == 0u) return 1; /* nothing to emit for this pair */
+    duckvep_nmd_predict(tx, &c->model->exons, (size_t)tx_idx, &event,
+                        cmask, &nmd);
 
     if (c->results->count >= c->results->capacity) {
         c->status = DUCKVEP_ERR_RESULT_FULL;
@@ -992,6 +995,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     row->sequence_status = cds_delta_attempted
         ? delta.sequence_status
         : (uint8_t)DUCKVEP_SEQUENCE_NOT_APPLICABLE;
+    row->nmd_prediction = nmd.prediction;
+    row->nmd_escape_reasons = nmd.escape_reasons;
     if (delta.valid) {
         row->cdna_pos = delta.cdna_pos;
         row->cds_pos = delta.cds_pos;
