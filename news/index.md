@@ -2,6 +2,14 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- retain versioned RefSeq accessions from MANE Select and MANE Plus
+  Clinical in bundled prepared transcript relations while keeping the
+  resident model compact; reject empty or conflicting MANE mappings. Fix
+  bundled `duckvep_model_receipt(...)` provenance column names and add
+  roughly 116 KiB of offline Ensembl-116 GRCh38 and GRCh37/GENCODE-19
+  fixtures to package tests, covering real MANE, ordinary coding, and
+  mitochondrial missing-sequence behavior without network access during
+  CRAN builds or checks
 - bundle `duckvep_ensembl_regions(...)`,
   `duckvep_ensembl_transcripts(...)`, and `duckvep_model_receipt(...)`,
   allowing DBI workflows to prepare a validated, provenance-hashed
