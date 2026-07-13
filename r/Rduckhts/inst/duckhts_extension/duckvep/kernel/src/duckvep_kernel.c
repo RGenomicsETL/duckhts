@@ -413,6 +413,7 @@ duckvep_status_t duckvep_model_open(
                 size_t coding_start_exon;
                 size_t i;
                 int8_t phase;
+                uint8_t phase_offset;
 
                 if (transcripts->cds_start1[t] == 0u ||
                     exons->cdna_start1 == NULL || exons->phase == NULL) {
@@ -437,14 +438,13 @@ duckvep_status_t duckvep_model_open(
                                 "CDS does not project to a contiguous cDNA interval");
                 }
                 phase = exons->phase[coding_start_exon];
-                if (phase < 0 || phase > 2) {
-                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                                DVW_MODEL_PHASE,
-                                "sequence-backed CDS has no valid start phase");
-                }
+                /* Ensembl uses -1 when translation starts inside an exon
+                 * whose genomic start is UTR. Its translateable_seq path
+                 * prepends bases only for positive phase, as does projection. */
+                phase_offset = phase > 0 ? (uint8_t)phase : 0u;
                 expected_len = (uint64_t)coding_end_cdna -
                                (uint64_t)coding_start_cdna + 1u +
-                               (uint64_t)phase;
+                               (uint64_t)phase_offset;
                 if (len != expected_len ||
                     (seq->codon_table[t] != 1u && seq->codon_table[t] != 2u)) {
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,

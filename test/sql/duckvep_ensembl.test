@@ -1,0 +1,258 @@
+# name: test/sql/duckvep_ensembl.test
+# description: Ensembl core plus tiled FASTA to validated resident DuckVEP model
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+CREATE SCHEMA duckvep_core;
+
+statement ok
+CREATE TABLE duckvep_reference_chunks(chrom VARCHAR, "start" BIGINT, "end" BIGINT, seq VARCHAR);
+
+statement ok
+INSERT INTO duckvep_reference_chunks VALUES
+  ('1', 0, 20, 'ATGAAACCCCGGGTAACCCC'),
+  ('1', 20, 40, 'CCTTTAGGGCATAAAAAAAA');
+
+statement ok
+CREATE TABLE duckvep_core.coord_system(
+  coord_system_id BIGINT, species_id BIGINT, name VARCHAR, version VARCHAR, rank BIGINT
+);
+
+statement ok
+INSERT INTO duckvep_core.coord_system VALUES
+  (1, 1, 'chromosome', 'GRCh38', 1),
+  (2, 2, 'chromosome', 'GRCh38', 1);
+
+statement ok
+CREATE TABLE duckvep_core.seq_region(
+  seq_region_id BIGINT, name VARCHAR, coord_system_id BIGINT, length BIGINT
+);
+
+statement ok
+INSERT INTO duckvep_core.seq_region VALUES
+  (10, '1', 1, 40),
+  (11, '1', 2, 40);
+
+statement ok
+CREATE TABLE duckvep_core.gene(
+  gene_id BIGINT, biotype VARCHAR, is_current BIGINT, stable_id VARCHAR, version BIGINT
+);
+
+statement ok
+INSERT INTO duckvep_core.gene VALUES
+  (20, 'protein_coding', 1, 'ENSG_TEST_1', 1),
+  (21, 'protein_coding', 1, 'ENSG_TEST_2', 1);
+
+statement ok
+CREATE TABLE duckvep_core.transcript(
+  transcript_id BIGINT, gene_id BIGINT, seq_region_id BIGINT,
+  seq_region_start BIGINT, seq_region_end BIGINT, seq_region_strand BIGINT,
+  biotype VARCHAR, is_current BIGINT, stable_id VARCHAR, version BIGINT
+);
+
+statement ok
+INSERT INTO duckvep_core.transcript VALUES
+  (30, 20, 10, 1, 18, 1, 'protein_coding', 1, 'ENST_TEST_FORWARD', 1),
+  (31, 21, 10, 21, 32, -1, 'nonsense_mediated_decay', 1, 'ENST_TEST_REVERSE', 1),
+  (32, 21, 10, 21, 32, -1, 'protein_coding', 1, 'ENST_TEST_EDITED', 1);
+
+statement ok
+CREATE TABLE duckvep_core.exon(
+  exon_id BIGINT, seq_region_id BIGINT, seq_region_start BIGINT,
+  seq_region_end BIGINT, seq_region_strand BIGINT, phase BIGINT,
+  end_phase BIGINT, is_current BIGINT, stable_id VARCHAR
+);
+
+statement ok
+INSERT INTO duckvep_core.exon VALUES
+  (40, 10, 1, 6, 1, -1, 0, 1, 'ENSE_TEST_1'),
+  (41, 10, 11, 18, 1, 0, 0, 1, 'ENSE_TEST_2'),
+  (42, 10, 21, 32, -1, 0, 0, 1, 'ENSE_TEST_3');
+
+statement ok
+CREATE TABLE duckvep_core.exon_transcript(exon_id BIGINT, transcript_id BIGINT, rank BIGINT);
+
+statement ok
+INSERT INTO duckvep_core.exon_transcript VALUES
+  (40, 30, 1), (41, 30, 2), (42, 31, 1), (42, 32, 1);
+
+statement ok
+CREATE TABLE duckvep_core.translation(
+  translation_id BIGINT, transcript_id BIGINT, seq_start BIGINT,
+  start_exon_id BIGINT, seq_end BIGINT, end_exon_id BIGINT,
+  stable_id VARCHAR, version BIGINT
+);
+
+statement ok
+INSERT INTO duckvep_core.translation VALUES
+  (50, 30, 1, 40, 6, 41, 'ENSP_TEST_FORWARD', 1),
+  (51, 31, 1, 42, 9, 42, 'ENSP_TEST_REVERSE', 1),
+  (52, 32, 1, 42, 9, 42, 'ENSP_TEST_EDITED', 1);
+
+statement ok
+CREATE TABLE duckvep_core.attrib_type(attrib_type_id BIGINT, code VARCHAR);
+
+statement ok
+INSERT INTO duckvep_core.attrib_type VALUES
+  (60, 'MANE_Select'), (61, 'gencode_basic'), (62, 'ccds_transcript'),
+  (63, 'gencode_primary'), (64, 'initial_met');
+
+statement ok
+CREATE TABLE duckvep_core.transcript_attrib(
+  transcript_id BIGINT, attrib_type_id BIGINT, value VARCHAR
+);
+
+statement ok
+INSERT INTO duckvep_core.transcript_attrib VALUES
+  (30, 60, 'NM_TEST'), (30, 61, '1'), (30, 62, 'CCDS_TEST'), (31, 63, '1');
+
+statement ok
+CREATE TABLE duckvep_core.translation_attrib(
+  translation_id BIGINT, attrib_type_id BIGINT, value VARCHAR
+);
+
+statement ok
+INSERT INTO duckvep_core.translation_attrib VALUES (52, 64, 'M');
+
+statement ok
+CREATE TABLE duckvep_prepared_regions AS
+SELECT * FROM duckvep_ensembl_regions(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+
+query ITIITI
+SELECT seq_region, seq_region_name, sequence_length, source_seq_region_id,
+       coord_system_name, coord_system_rank
+FROM duckvep_prepared_regions;
+----
+0	1	40	10	chromosome	1
+
+query I
+SELECT source_seq_region_id FROM duckvep_ensembl_regions(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38', species_id := 2
+);
+----
+11
+
+statement ok
+CREATE TABLE duckvep_prepared_transcripts AS
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+
+query IITTIITI
+SELECT transcript_index, transcript_flags, CAST(cds_sequence AS VARCHAR),
+       CAST(post_cds_bases AS VARCHAR), cds_start, cds_end,
+       sequence_withheld_reason, length(exons)
+FROM duckvep_prepared_transcripts ORDER BY transcript_index;
+----
+0	21507	ATGAAAGGGTAA	CC	1	16	NULL	2
+1	8197	ATGCCCTAA	AGG	24	32	NULL	1
+2	3	NULL	NULL	24	32	initial_methionine	1
+
+query IIII
+SELECT transcript_index, exon.rank, exon.exon_cdna_start, exon.exon_cdna_end
+FROM duckvep_prepared_transcripts,
+LATERAL unnest(exons) AS u(exon)
+ORDER BY transcript_index, exon.rank;
+----
+0	1	1	6
+0	2	7	14
+1	1	1	12
+2	1	1	12
+
+statement ok
+CREATE TABLE duckvep_prepared_receipt AS
+SELECT * FROM duckvep_model_receipt(
+  'duckvep_prepared_regions', 'duckvep_prepared_transcripts',
+  'Ensembl', '116', 'GRCh38',
+  repeat('a', 64), repeat('b', 64),
+  'all current transcripts on FASTA-covered assembly regions'
+);
+
+query IIIIIII
+SELECT region_count, transcript_count, gene_count, coding_transcript_count,
+       sequence_backed_transcript_count, sequence_withheld_transcript_count,
+       exon_membership_count
+FROM duckvep_prepared_receipt;
+----
+1	3	2	3	2	1	4
+
+query II
+SELECT length(model_sha256), cds_base_count FROM duckvep_prepared_receipt;
+----
+64	21
+
+query I
+SELECT model_sha256 != (
+  SELECT model_sha256 FROM duckvep_model_receipt(
+    'duckvep_prepared_regions', 'duckvep_prepared_transcripts',
+    'Ensembl', '116', 'GRCh38',
+    repeat('a', 64), repeat('b', 64),
+    'MANE transcripts only'
+  )
+) FROM duckvep_prepared_receipt;
+----
+1
+
+statement error
+SELECT * FROM duckvep_model_receipt(
+  'duckvep_prepared_regions', 'duckvep_prepared_transcripts',
+  'Ensembl', '116', 'GRCh38',
+  NULL, repeat('b', 64),
+  'all current transcripts on FASTA-covered assembly regions'
+);
+----
+source and reference SHA-256 values must contain 64 hexadecimal digits
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'ensembl-test',
+  'SELECT seq_region, sequence_length FROM duckvep_ensembl_regions(''duckvep_core'', ''duckvep_reference_chunks'', ''GRCh38'') ORDER BY seq_region',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM duckvep_prepared_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_prepared_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  transcript_coverage_complete := true
+);
+----
+1
+
+query TTT
+SELECT annotation.consequence, annotation.status, coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'ensembl-test', 0::UINTEGER, 4::UBIGINT, 'A', 'G', 0::UBIGINT
+)) AS u(annotation);
+----
+missense_variant&splice_region_variant	supported	-
+
+query TTT
+SELECT annotation.consequence, annotation.status, coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'ensembl-test', 0::UINTEGER, 28::UBIGINT, 'G', 'A', 0::UBIGINT
+)) AS u(annotation)
+ORDER BY annotation.transcript_index;
+----
+missense_variant&NMD_transcript_variant	supported	-
+coding_sequence_variant	unresolved	missing_sequence
+
+query I
+SELECT duckvep_model_drop('ensembl-test');
+----
+1
+
+statement ok
+CREATE TABLE duckvep_invalid_reference_chunks AS
+SELECT * REPLACE (
+  CASE WHEN "start" = 20 THEN 21::BIGINT ELSE "start" END AS "start",
+  CASE WHEN "start" = 20 THEN substring(seq, 2) ELSE seq END AS seq
+) FROM duckvep_reference_chunks;
+
+statement error
+SELECT * FROM duckvep_ensembl_regions(
+  'duckvep_core',
+  'duckvep_invalid_reference_chunks',
+  'GRCh38'
+);
+----
+reference chunks must cover each contig contiguously from zero
