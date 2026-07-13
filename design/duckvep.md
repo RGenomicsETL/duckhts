@@ -20,7 +20,7 @@ state.
 
 DuckDB owns:
 
-- importing Ensembl relations and FASTA, filtering transcripts, verifying receipts, and
+- staging Ensembl relations and FASTA, filtering transcripts, verifying receipts, and
   constructing canonical model relations;
 - sorting and partitioning variant input;
 - exact and interval supplementary annotations;
@@ -40,35 +40,139 @@ The C kernel owns:
 htslib owns VCF/BCF transport and genotype decoding. HGVS consumes the same projected edit
 facts as consequence prediction; it must not reconstruct biology from rendered SO strings.
 
-## Transcript model
+## Code map
 
-The production model originates from the pinned Ensembl core schema and matching genomic
-FASTA. `duckvep_ensembl_regions(...)` and `duckvep_ensembl_transcripts(...)` read the raw
-`coord_system`, `seq_region`, `gene`, `transcript`, `exon`, `exon_transcript`, `translation`,
-`attrib_type`, `transcript_attrib`, and `translation_attrib` relations directly. GFF plus
-FASTA may construct reduced test models, but missing Ensembl facts remain explicit.
+- `functions.yaml` is the public SQL contract.
+- `src/duckvep/duckvep_ensembl.c` registers the relation-to-model SQL described below.
+- `src/duckvep/duckvep_model.c` validates, owns, publishes, pins, and drops named models.
+- `src/duckvep/duckvep_annotate.c` and `src/duckvep/duckvep_variant_tile.c` adapt DuckDB
+  vectors to the pure C batch interface and materialize results.
+- `src/duckvep/kernel/include/duckvep_kernel.h` is the host-neutral kernel ABI; the sibling
+  kernel sources own traversal, topology, projection, coding edits, phased edits,
+  structural geometry, and fact-to-SO evaluation.
+- `test/sql/duckvep_ensembl.test` exercises model preparation and publication;
+  `test/sql/duckvep_annotate.test` exercises the SQL adapter; `test/duckvep/property/` and
+  `test/duckvep/conformance/` own pure-C properties and VEP differentials.
 
-DuckDB prepares three dense execution projections:
+## Transcript model build
 
-- sequence-region ordinals;
-- transcript spans, strand, gene ordinal, flags, CDS bounds, prepared CDS bytes, codon
-  table, and up to three transcript-oriented bases immediately after the CDS; and
-- exon membership with genomic and transcript-oriented cDNA spans plus phase.
+The model builder is a compiler over relations already staged in DuckDB. It is not a
+downloader, a MySQL client, or a parser for Ensembl dump archives. The caller first imports
+the pinned Ensembl tables and supplies matching reference sequence chunks. Building and
+loading are then separate operations:
 
-The Ensembl builder matches every supplied FASTA contig to exactly one same-length region
-on the requested assembly, imports every current transcript on those regions, splices both
-strands from tiled reference chunks, and follows Ensembl `translateable_seq` phase rules.
-Ensembl uses exon phase `-1` when translation begins after 5-prime UTR in the same exon;
-that means zero prepended bases, not an invalid model. RNA/peptide edits not yet implemented
-by the C kernel keep their flags and CDS span but deliberately withhold CDS bytes with an
-auditable reason.
+```text
+Ensembl core tables ──┐
+                      ├─> validate and prepare relations ─> receipt
+reference FASTA ──────┘                 │
+                                        ├─> region projection
+                                        ├─> transcript projection
+                                        └─> exon projection
+                                                   │
+                                                   v
+                                      immutable named C model
+                                                   │
+                                                   v
+                                      sorted consequence queries
+```
 
-`duckvep_model_receipt(...)` hashes both prepared relations, the reference/source hashes,
-and the declared transcript filter without a timestamp. The current `duckvep_model_load`
-function then reads three sorted projections from committed, non-temporary relations on a
-private connection, validates and narrows them, builds one transcript interval index, and
-publishes an immutable named model. Several models may coexist in one database instance;
-stable IDs and provenance remain ordinary DuckDB columns.
+This separation is deliberate. DuckDB performs the large joins, sequence assembly, and
+provenance work once. Annotation workers reuse compact immutable arrays and do not carry a
+Perl object graph, stable-ID strings, or source-table metadata through the hot loop.
+The three builder functions are DuckDB table macros registered through the stable C API;
+the C registration file does not iterate transcript rows or implement a second importer.
+
+### Inputs
+
+`duckvep_ensembl_regions(...)` and `duckvep_ensembl_transcripts(...)` read these Ensembl
+core relations by name from the supplied schema:
+
+- `coord_system` and `seq_region` identify the requested assembly and its regions;
+- `gene`, `transcript`, `exon`, and `exon_transcript` define transcript topology;
+- `translation` defines coding start and end within ranked exons; and
+- `attrib_type`, `transcript_attrib`, and `translation_attrib` supply consequence-relevant
+  flags and exceptional sequence edits.
+
+The reference relation has `(chrom, start, end, seq)`, where `start` is zero-based and
+`end` is half-open. It is normally persisted from tiled `fasta_nuc(..., include_seq :=
+true)` output. A reduced FASTA deliberately builds a reduced model; the builder never
+silently fills absent contigs from another source.
+
+### Region preparation
+
+`duckvep_ensembl_regions(...)`:
+
+1. verifies that every reference chunk is non-null, has valid coordinates, and contains
+   exactly `end - start` bases;
+2. verifies that chunks cover each supplied contig continuously from zero;
+3. matches each FASTA contig to exactly one same-name, same-length Ensembl region on the
+   requested assembly and species; and
+4. assigns dense model-local region ordinals from zero while retaining the Ensembl source
+   identifiers and coordinate-system fields.
+
+The model contract bounds a region coordinate at `UINT32_MAX` and the number of regions at
+65,536. A mismatch is a query error; no partial region model is published.
+
+### Transcript and sequence preparation
+
+`duckvep_ensembl_transcripts(...)` currently selects every `is_current = 1` transcript on
+the supplied regions. For each transcript it:
+
+1. joins its gene, optional translation, ranked exons, and selected attributes;
+2. assigns dense transcript and gene ordinals while retaining Ensembl numeric IDs, stable
+   IDs, versions, and biotypes in the prepared relation;
+3. calculates each exon's transcript-oriented cDNA span from its rank;
+4. projects the translation start and end from exon-relative coordinates into genomic and
+   cDNA coordinates;
+5. reconstructs exon sequence from the reference chunks, reverse-complements negative-
+   strand exons, joins exons in transcript order, and extracts the CDS;
+6. applies Ensembl start-phase preparation: phase `-1` or `0` adds no prefix, while a
+   positive phase adds one or two leading `N` bases; and
+7. retains up to three transcript-oriented bases after the CDS for VEP's terminal-stop
+   rule.
+
+The compact flag word records translation presence, protein-coding/NMD/miRNA biotype,
+incomplete CDS ends, selenocysteine, stop readthrough, RNA or peptide edits, MANE,
+GENCODE, CCDS, readthrough-transcript, and upstream-start state. An RNA edit on either the
+transcript or translation attribute path is the same exceptional state.
+
+Reference-derived CDS bytes are withheld when Ensembl records an RNA edit,
+selenocysteine, stop readthrough, amino-acid substitution, or initial-methionine edit that
+the C kernel does not yet implement. The transcript, coordinates, flags, and an explicit
+reason remain in the model. Unsupported reference alphabet has the same fail-closed shape.
+This is different from malformed topology: bad coordinates, strand, exon phase or rank,
+translation bounds, or incomplete sequence reconstruction abort the build.
+
+The three post-CDS bases cost three bytes per sequence-backed transcript. They are enough
+to reconstruct the original translation endpoint after a short terminal deletion; they
+are not a general UTR cache. An edit needing more sequence remains unresolved.
+
+### Prepared relations and publication
+
+The builder returns one row per transcript. The row contains the hot transcript fields,
+source and stable identifiers, biotypes, the optional prepared CDS, and an ordered nested
+exon list. Callers persist two canonical tables and derive the three sorted loader
+projections from them:
+
+- region ordinal, and sequence length when complete-coverage claims are requested;
+- transcript ordinal, region, span, strand, gene ordinal, flags, optional CDS fields,
+  codon table, and post-CDS bases; and
+- transcript ordinal plus each exon's genomic span, cDNA span, phase, and end phase.
+
+`duckvep_model_receipt(...)` checks dense ordinals and region/transcript agreement. It
+records the declared source, release, assembly, transcript filter, source-manifest hash,
+reference hash, model counts, and a deterministic hash over every prepared model field.
+There is no timestamp: identical declared inputs must produce the same receipt.
+
+`duckvep_model_load(...)` reads committed, non-temporary relations through a private
+connection, validates and narrows every value, builds the transcript interval index, and
+only then publishes the named immutable model. A failed load publishes nothing. Several
+models may coexist in one database instance, and their numeric ordinals are meaningful
+only within their model. Stable IDs and provenance remain DuckDB columns.
+
+The loader treats transcript coverage as partial by default. Only a model deliberately
+loaded with `transcript_coverage_complete := true` may turn “no loaded transcript here”
+into supported `intergenic_variant`; a partial model returns an unresolved result instead.
 
 ```sql
 CREATE TABLE reference_chunks AS
@@ -86,13 +190,25 @@ SELECT * FROM duckvep_ensembl_transcripts(
 );
 ```
 
-The source database and matching FASTA are staged once; annotation processes only open the
-prepared relations. Exact production-corpus conformance and throughput remain tracked at
-https://github.com/RGenomicsETL/duckhts/issues/95.
+### Current boundary
 
-The three post-CDS bases cost three bytes per transcript and let VEP's terminal-stop rule
-reconstruct the codon at the original translation endpoint after a short deletion. They
-are not a general UTR cache: an edit needing more sequence remains unresolved.
+The implemented builder does not yet:
+
+- stage Ensembl `table.sql` and dump files into DuckDB;
+- reproduce VEP 116's exact transcript selection, including stable-ID, `estgene`,
+  `artifact`, `readthrough_tra`, and `otherfeatures`/RefSeq rules;
+- apply Ensembl RNA and peptide sequence edits;
+- derive codon table from `seq_region_attrib` (mitochondrial names currently select table
+  2, all other regions table 1);
+- preserve the complete Ensembl xref, protein-feature, supporting-feature, attribute, and
+  alternate-transcript relations; or
+- import variation, phenotype, regulatory, or other supplementary annotations.
+
+Those richer facts should remain typed DuckDB relations joined by numeric source IDs. They
+do not belong in every resident C transcript record. Exact VEP-compatible selection and
+the richer Ensembl relation set can therefore be separate named products built from the
+same staged release. Production-corpus conformance and throughput remain tracked at
+https://github.com/RGenomicsETL/duckhts/issues/95.
 
 ## Ownership
 
