@@ -7,6 +7,7 @@ replaced them.
 | Design note | Status and use |
 | --- | --- |
 | [`duckvep.md`](duckvep.md) | Current DuckVEP ownership, model, execution, consequence-authority, and validation contract. |
+| [`duckvep_errata.md`](duckvep_errata.md) | Current ledger of surprising VEP-116 behaviours that DuckVEP deliberately reproduces, with source anchors and executable witnesses. |
 | [`duckhts_parquet_lake.md`](duckhts_parquet_lake.md) | Parquet write-format contract and open DuckLake/native-writer work. |
 | [`fastq_throughput.md`](fastq_throughput.md) | Open FASTQ throughput investigation. |
 | [`packed_state_kernels.md`](packed_state_kernels.md) | Open investigation for richer packed-state classifiers. |

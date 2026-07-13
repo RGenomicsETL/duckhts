@@ -290,6 +290,49 @@ for (k in seq_along(pos)) {
   if (grepl("^[ACGT]{4}$", qb)) emit(p, qb, substr(qb, 1L, 1L), lab[k], "del3") # 3bp del (in-frame)
 }
 
+# Pin terminal-stop predicate states that ordinary shape tiling does not reach.
+# These payloads are intentionally source-derived VEP witnesses, not hand-assigned
+# consequence labels: the differential still asks VEP and DuckVEP independently.
+if (!is.na(cds_lo) && strand == "+") {
+  stop_start <- cds_hi - 2L
+  if (nuc(stop_start, 3L) == "TAA") {
+    stop_anchor <- base_at(stop_start)
+    before_anchor <- base_at(stop_start - 1L)
+    if (!is.na(stop_anchor)) {
+      emit(
+        stop_start,
+        stop_anchor,
+        glue("{stop_anchor}AGC"),
+        "stop_codon",
+        "terminal_stop_insertion_retained"
+      )
+      emit(
+        stop_start,
+        stop_anchor,
+        glue("{stop_anchor}AGGT"),
+        "stop_codon",
+        "terminal_stop_insertion_unknown"
+      )
+      emit(
+        stop_start,
+        stop_anchor,
+        glue("{stop_anchor}CGATGTTATGA"),
+        "stop_codon",
+        "terminal_stop_insertion_lost"
+      )
+    }
+    if (!is.na(before_anchor)) {
+      emit(
+        stop_start - 1L,
+        before_anchor,
+        glue("{before_anchor}TAAA"),
+        "stop_codon",
+        "terminal_stop_boundary_retained"
+      )
+    }
+  }
+}
+
 # Add a reproducible state-space sample without creating a second generator or a
 # second allele authority. Three quarters of draws are near the splice/start/stop/exon
 # witnesses; one quarter is uniform across the transcript span. A Park-Miller generator

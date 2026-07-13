@@ -1546,6 +1546,180 @@ static duckvep_context_delta_status_t delta_context_frameshift_stop_facts(
     return DUCKVEP_CONTEXT_DELTA_OK;
 }
 
+typedef struct delta_vep_peptide_summary {
+    size_t  complete_length;
+    uint8_t first_aa;
+    uint8_t has_stop;
+    uint8_t has_x;
+    uint8_t starts_with_stop;
+    uint8_t exactly_stop;
+} delta_vep_peptide_summary_t;
+
+/* Summarize VEP's local peptide without materializing it. TVA::peptide translates
+ * complete codons and appends X for a trailing partial codon, except when the
+ * complete peptide is exactly "*". That exception is observable at the terminal
+ * stop and must precede the length-based frameshift test. */
+static duckvep_context_delta_status_t delta_vep_peptide_summarize(
+    const uint8_t                  *cds,
+    size_t                          cds_len,
+    uint8_t                         codon_table,
+    delta_vep_peptide_summary_t    *summary) {
+
+    size_t codons;
+    size_t i;
+
+    if (summary == NULL || (cds == NULL && cds_len != 0u)) {
+        return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+    memset(summary, 0, sizeof *summary);
+    if (codon_table != (uint8_t)DUCKVEP_CODON_TABLE_STANDARD &&
+        codon_table != (uint8_t)DUCKVEP_CODON_TABLE_VERT_MITO) {
+        return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+
+    codons = cds_len / 3u;
+    for (i = 0u; i < codons; i++) {
+        char triplet[4];
+        size_t j;
+        char aa;
+
+        for (j = 0u; j < 3u; j++) {
+            char base = delta_norm_base((char)cds[i * 3u + j]);
+            if (base != 'A' && base != 'C' && base != 'G' && base != 'T') {
+                return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+            }
+            triplet[j] = base;
+        }
+        triplet[3] = '\0';
+        aa = duckvep_translate_codon(
+            triplet, (duckvep_codon_table_t)codon_table);
+        if (i == 0u) summary->first_aa = (uint8_t)aa;
+        if (aa == '*') summary->has_stop = 1u;
+    }
+    summary->complete_length = codons;
+    summary->starts_with_stop =
+        codons > 0u && summary->first_aa == (uint8_t)'*';
+    summary->exactly_stop =
+        codons == 1u && summary->first_aa == (uint8_t)'*';
+    if ((cds_len % 3u) != 0u && !summary->exactly_stop) {
+        summary->has_x = 1u;
+    }
+    return DUCKVEP_CONTEXT_DELTA_OK;
+}
+
+/* Terminal insertions expose a VEP predicate-order state that a modulo-three
+ * classifier cannot represent. At the boundary before the stop, VEP's reference
+ * local peptide is empty. Inside the stop, it is "*", which suppresses frameshift;
+ * stop, insertion, and coding_unknown predicates then remain independently true.
+ * See design/duckvep_errata.md for the pinned source anchors and witnesses. */
+static duckvep_context_delta_status_t delta_context_terminal_stop_insertion(
+    const duckvep_coding_context_t *ctx,
+    uint64_t                        tx_flags,
+    int                            *handled,
+    duckvep_sequence_delta_t       *delta) {
+
+    uint32_t terminal_start;
+    size_t inserted_len;
+    size_t prefix_len;
+    size_t local_off;
+    size_t local_len;
+    delta_vep_peptide_summary_t local;
+    duckvep_context_delta_status_t status;
+
+    if (handled != NULL) *handled = 0;
+    if (ctx == NULL || handled == NULL || delta == NULL) {
+        return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+    if (!ctx->has_single_edit || ctx->applied_edits != 1u ||
+        ctx->single_edit_ref_len != 0u || ctx->single_edit_alt_len == 0u ||
+        ctx->length_diff <= 0 || ctx->ref_cds == NULL || ctx->alt_cds == NULL ||
+        ctx->ref_peptide == NULL || ctx->ref_cds_len < 3u ||
+        (ctx->ref_cds_len % 3u) != 0u ||
+        ctx->ref_peptide_len != ctx->ref_cds_len / 3u ||
+        ctx->ref_peptide[ctx->ref_peptide_len - 1u] != (uint8_t)'*' ||
+        (tx_flags & (uint64_t)DUCKVEP_TX_CDS_END_NF) != 0u ||
+        ctx->ref_cds_len > (size_t)UINT32_MAX) {
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+
+    terminal_start = (uint32_t)ctx->ref_cds_len - 2u;
+    if (ctx->single_edit_cds_start < terminal_start ||
+        ctx->single_edit_cds_start > ctx->ref_cds_len) {
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+    *handled = 1;
+
+    inserted_len = (size_t)ctx->single_edit_alt_len;
+    if ((uint64_t)ctx->single_edit_alt_len != (uint64_t)ctx->length_diff ||
+        inserted_len > SIZE_MAX - ctx->ref_cds_len ||
+        ctx->alt_cds_len != ctx->ref_cds_len + inserted_len) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    prefix_len = (size_t)ctx->single_edit_cds_start - 1u;
+    if (prefix_len > ctx->ref_cds_len ||
+        !delta_norm_span_equal(ctx->alt_cds, ctx->ref_cds, prefix_len) ||
+        !delta_norm_span_unambiguous(ctx->alt_cds + prefix_len, inserted_len) ||
+        !delta_norm_span_equal(ctx->alt_cds + prefix_len + inserted_len,
+                               ctx->ref_cds + prefix_len,
+                               ctx->ref_cds_len - prefix_len)) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+
+    local_off = (size_t)terminal_start - 1u;
+    local_len = ctx->single_edit_cds_start == terminal_start
+                  ? inserted_len
+                  : inserted_len + 3u;
+    if (local_off > ctx->alt_cds_len ||
+        local_len > ctx->alt_cds_len - local_off) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    status = delta_vep_peptide_summarize(
+        ctx->alt_cds + local_off, local_len, ctx->codon_table, &local);
+    if (status != DUCKVEP_CONTEXT_DELTA_OK) return status;
+
+    delta->cdna_pos = -1;
+    delta->cds_pos = -1;
+    delta->protein_pos = (int32_t)ctx->ref_peptide_len;
+    delta->ref_aa = ctx->single_edit_cds_start == terminal_start
+                      ? 0u
+                      : (uint8_t)'*';
+    delta->alt_aa = local.complete_length > 0u ? local.first_aa : 0u;
+
+    if (ctx->single_edit_cds_start == terminal_start) {
+        if (!local.has_x && local.starts_with_stop) {
+            delta->stop_retained = 1u;
+        } else if ((inserted_len % 3u) != 0u) {
+            delta->frameshift = 1u;
+        }
+        if (!delta->stop_retained && local.has_stop) {
+            delta->stop_gained = 1u;
+        }
+        if (!delta->frameshift) delta->inframe_insertion = 1u;
+    } else {
+        if (local.has_x) {
+            delta_vep_peptide_summary_t original_end;
+            status = delta_vep_peptide_summarize(
+                ctx->alt_cds + ctx->ref_cds_len - 3u, 3u,
+                ctx->codon_table, &original_end);
+            if (status != DUCKVEP_CONTEXT_DELTA_OK) return status;
+            if (!original_end.starts_with_stop) delta->stop_lost = 1u;
+        } else if (!local.has_stop) {
+            delta->stop_lost = 1u;
+        } else if (local.starts_with_stop) {
+            delta->stop_retained = 1u;
+        }
+
+        if (local.has_stop && !local.exactly_stop) {
+            delta->inframe_insertion = 1u;
+        }
+        if (local.has_x && !delta->stop_lost && !delta->stop_retained) {
+            delta->coding_unknown = 1u;
+        }
+    }
+    delta->valid = 1u;
+    return DUCKVEP_CONTEXT_DELTA_OK;
+}
+
 /* Coarse frameshift FACT from the CodingContext: a net CDS length change not divisible
  * by three shifts the reading frame, which VEP labels frameshift_variant. Start-codon
  * edits layer start_lost or start_retained_variant on that frame fact. When the
@@ -1626,6 +1800,17 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
     if (ctx == NULL || ctx->ref_cds == NULL || ctx->alt_cds == NULL ||
         ctx->ref_peptide == NULL || ctx->alt_peptide == NULL) {
         return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+    if (ctx->length_diff > 0 && ctx->has_single_edit &&
+        ctx->single_edit_ref_len == 0u) {
+        duckvep_context_delta_status_t terminal_status;
+        int handled;
+
+        terminal_status = delta_context_terminal_stop_insertion(
+            ctx, tx_flags, &handled, delta);
+        if (handled || terminal_status != DUCKVEP_CONTEXT_DELTA_OK) {
+            return terminal_status;
+        }
     }
     if (ctx->length_diff != 0 && (ctx->length_diff % 3) != 0) {
         duckvep_context_delta_status_t stop_status;

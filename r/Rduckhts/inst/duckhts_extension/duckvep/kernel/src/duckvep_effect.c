@@ -315,6 +315,8 @@ void duckvep_effect_ctx_apply_delta(
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION);
     if (delta->protein_altering)
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_PROTEIN_ALTERING);
+    if (delta->coding_unknown)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN);
 }
 
 void duckvep_effect_ctx_apply_sv(
@@ -361,8 +363,9 @@ void duckvep_effect_ctx_finalize(duckvep_effect_ctx_t *ctx) {
 
     /* VariationEffect::coding_unknown returns false for complete feature
      * overlap. In that case coding_transcript_variant is the transcript-level
-     * fallback. For the current supported slices, DELTA means a more specific
-     * sequence predicate was resolved; no DELTA retains coding_unknown. */
+     * fallback. Usually a resolved DELTA suppresses coding_unknown, but VEP can
+     * set both explicitly (for example an in-frame insertion whose local peptide
+     * ends in X); duckvep_effect_ctx_apply_delta preserves that fact above. */
     if (coding && ctx->region_state.complete_overlap_feature) {
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_TRANSCRIPT);
     } else if ((pre & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) != 0u &&
