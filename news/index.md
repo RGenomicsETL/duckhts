@@ -2,6 +2,10 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- make bundled `duckvep_annotate(...)` reproduce VEP 116 when ALT-only
+  mismatch bases extend from an exonic REF-shaped feature into an
+  intron, including VEP’s three-base interval-tree cache boundary and
+  co-emission with coding and splice terms
 - make bundled `duckvep_annotate(...)` classify length-changing coding
   edits from VEP 116’s codon-local predicate inputs rather than
   whole-protein or net-length shortcuts. This fixes stop-gained
@@ -12,7 +16,7 @@
   insertion predicate order, including non-modulo-three insertions that
   VEP reports as `inframe_insertion` together with
   `coding_sequence_variant`, `stop_lost`, or `stop_retained_variant`;
-  bundled fixed cases are exact for all 237 supported VEP witness pairs
+  bundled fixed cases are exact for all 239 supported VEP witness pairs
   while 11 unsupported contexts remain explicit
 - bundled `duckvep_annotate(...)` now keeps uploaded VCF geometry, VEP
   parser feature geometry, and the semantic sequence edit distinct,
