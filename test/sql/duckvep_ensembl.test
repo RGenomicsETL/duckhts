@@ -97,7 +97,7 @@ CREATE TABLE duckvep_core.attrib_type(attrib_type_id BIGINT, code VARCHAR);
 statement ok
 INSERT INTO duckvep_core.attrib_type VALUES
   (60, 'MANE_Select'), (61, 'gencode_basic'), (62, 'ccds_transcript'),
-  (63, 'gencode_primary'), (64, 'initial_met');
+  (63, 'gencode_primary'), (64, 'initial_met'), (65, '_rna_edit');
 
 statement ok
 CREATE TABLE duckvep_core.transcript_attrib(
@@ -106,7 +106,8 @@ CREATE TABLE duckvep_core.transcript_attrib(
 
 statement ok
 INSERT INTO duckvep_core.transcript_attrib VALUES
-  (30, 60, 'NM_TEST'), (30, 61, '1'), (30, 62, 'CCDS_TEST'), (31, 63, '1');
+  (30, 60, 'NM_TEST'), (30, 61, '1'), (30, 62, 'CCDS_TEST'), (31, 63, '1'),
+  (32, 65, '4 5 A');
 
 statement ok
 CREATE TABLE duckvep_core.translation_attrib(
@@ -150,7 +151,7 @@ FROM duckvep_prepared_transcripts ORDER BY transcript_index;
 ----
 0	21507	ATGAAAGGGTAA	CC	1	16	NULL	2
 1	8197	ATGCCCTAA	AGG	24	32	NULL	1
-2	3	NULL	NULL	24	32	initial_methionine	1
+2	259	NULL	NULL	24	32	rna_edit,initial_methionine	1
 
 query IIII
 SELECT transcript_index, exon.rank, exon.exon_cdna_start, exon.exon_cdna_end

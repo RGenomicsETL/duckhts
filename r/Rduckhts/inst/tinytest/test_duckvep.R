@@ -118,6 +118,32 @@ expect_equal(nchar(ensembl_receipt$model_sha256), 64)
 
 dbExecute(
   con,
+  "INSERT INTO duckvep_r_core.attrib_type VALUES (1, '_rna_edit')"
+)
+dbExecute(
+  con,
+  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (1, 1, '4 5 A')"
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_ensembl_rna_edit AS SELECT * FROM",
+    "duckvep_ensembl_transcripts(",
+    "'duckvep_r_core', 'duckvep_r_reference', 'GRCh38')"
+  )
+)
+ensembl_rna_edit <- dbGetQuery(
+  con,
+  paste(
+    "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
+    "sequence_withheld_reason FROM duckvep_r_ensembl_rna_edit"
+  )
+)
+expect_true(is.na(ensembl_rna_edit$cds_sequence))
+expect_identical(ensembl_rna_edit$sequence_withheld_reason, "rna_edit")
+
+dbExecute(
+  con,
   "CREATE TABLE duckvep_r_regions AS SELECT 1::UINTEGER AS seq_region"
 )
 dbExecute(
