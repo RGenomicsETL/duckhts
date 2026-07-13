@@ -208,7 +208,7 @@
       "signature": "duckvep_ensembl_transcripts(core_schema, reference_chunks_table, assembly, species_id := 1)",
       "returns": "table",
       "r_wrapper": "",
-      "description": "Build the validated DuckVEP transcript relation from Ensembl core tables and matching tiled FASTA sequence. The result contains the exact resident-loader columns, stable/source identifiers, biotypes, and a nested ranked-exon projection. CDS bytes follow Ensembl translateable_seq semantics on both strands, including positive start phase and up to three post-CDS bases. Transcripts carrying Ensembl RNA edits, selenocysteine, stop readthrough, amino-acid substitutions, or initial-methionine edits retain their flags and CDS span but withhold sequence with an explicit reason until the consequence kernel supports that edit.",
+      "description": "Build the validated DuckVEP transcript relation from Ensembl core tables and matching tiled FASTA sequence. The result contains the exact resident-loader columns, stable/source identifiers, biotypes, versioned RefSeq accessions from MANE Select and MANE Plus Clinical attributes when present, and a nested ranked-exon projection. MANE accessions remain cold DuckDB columns while only selection flags enter the resident C model. CDS bytes follow Ensembl translateable_seq semantics on both strands, including positive start phase and up to three post-CDS bases. Transcripts carrying Ensembl RNA edits, selenocysteine, stop readthrough, amino-acid substitutions, or initial-methionine edits retain their flags and CDS span but withhold sequence with an explicit reason until the consequence kernel supports that edit.",
       "examples": [
         "CREATE TABLE grch38_transcripts AS SELECT * FROM duckvep_ensembl_transcripts('ensembl_core', 'grch38_reference_chunks', 'GRCh38');"
       ]
@@ -220,7 +220,7 @@
       "signature": "duckvep_model_receipt(regions_table, transcripts_table, source_name, source_version, assembly, source_manifest_sha256, reference_sha256, transcript_filter)",
       "returns": "table",
       "r_wrapper": "",
-      "description": "Create one deterministic receipt for prepared DuckVEP region and transcript relations. The receipt validates dense ordinals and region/transcript agreement, records source and reference SHA-256 values plus the exact transcript filter, counts regions, bases, genes, transcripts, exon memberships, coding and withheld sequences, and hashes all semantic model fields in stable ordinal order. It contains no clock time, so rebuilding identical inputs yields the same model hash.",
+      "description": "Create one deterministic receipt for prepared DuckVEP region and transcript relations. The receipt validates dense ordinals and region/transcript agreement; returns the declared provenance as source_name, source_version, assembly, source_manifest_sha256, reference_sha256, and transcript_filter; counts regions, bases, genes, transcripts, exon memberships, coding and withheld sequences; and hashes all semantic model fields in stable ordinal order. It contains no clock time, so rebuilding identical inputs yields the same model hash.",
       "examples": [
         "CREATE TABLE grch38_receipt AS SELECT * FROM duckvep_model_receipt('grch38_regions', 'grch38_transcripts', 'Ensembl', '116', 'GRCh38', sha256(read_blob('homo_sapiens_core_116_38.sql.gz')), sha256(read_blob('GRCh38.primary.fa')), 'all current transcripts on FASTA-covered assembly regions');"
       ]

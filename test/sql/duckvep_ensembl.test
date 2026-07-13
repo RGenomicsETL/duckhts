@@ -153,6 +153,27 @@ FROM duckvep_prepared_transcripts ORDER BY transcript_index;
 1	8197	ATGCCCTAA	AGG	24	32	NULL	1
 2	259	NULL	NULL	24	32	rna_edit,initial_methionine	1
 
+query ITT
+SELECT transcript_index, mane_select_refseq, mane_plus_clinical_refseq
+FROM duckvep_prepared_transcripts ORDER BY transcript_index;
+----
+0	NM_TEST	NULL
+1	NULL	NULL
+2	NULL	NULL
+
+statement ok
+INSERT INTO duckvep_core.transcript_attrib VALUES (30, 60, 'NM_CONFLICT');
+
+statement error
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+----
+a MANE attribute must name exactly one RefSeq transcript
+
+statement ok
+DELETE FROM duckvep_core.transcript_attrib WHERE value = 'NM_CONFLICT';
+
 query IIII
 SELECT transcript_index, exon.rank, exon.exon_cdna_start, exon.exon_cdna_end
 FROM duckvep_prepared_transcripts,
@@ -185,6 +206,12 @@ query II
 SELECT length(model_sha256), cds_base_count FROM duckvep_prepared_receipt;
 ----
 64	21
+
+query TTTT
+SELECT source_name, source_version, assembly, transcript_filter
+FROM duckvep_prepared_receipt;
+----
+Ensembl	116	GRCh38	all current transcripts on FASTA-covered assembly regions
 
 query I
 SELECT model_sha256 != (
@@ -257,3 +284,237 @@ SELECT * FROM duckvep_ensembl_regions(
 );
 ----
 reference chunks must cover each contig contiguously from zero
+
+# Real release-116 fixtures: GRCh38 exercises a real MANE pair and GRCh37
+# exercises the archived GENCODE-19 model. Both include MT fail-closed edits.
+# Network access is confined to the explicit staging script.
+statement ok
+CREATE MACRO duckvep_fixture_file(assembly_dir, table_name) AS TABLE
+SELECT * FROM read_parquet(
+  '__WORKING_DIRECTORY__/test/data/duckvep/ensembl_core/' ||
+  assembly_dir || '/' || table_name || '.parquet'
+);
+
+statement ok
+CREATE SCHEMA duckvep_grch38_core;
+
+statement ok
+CREATE VIEW duckvep_grch38_core.attrib_type AS FROM duckvep_fixture_file('grch38', 'attrib_type');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.coord_system AS FROM duckvep_fixture_file('grch38', 'coord_system');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.exon AS FROM duckvep_fixture_file('grch38', 'exon');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.exon_transcript AS FROM duckvep_fixture_file('grch38', 'exon_transcript');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.gene AS FROM duckvep_fixture_file('grch38', 'gene');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.seq_region AS FROM duckvep_fixture_file('grch38', 'seq_region');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.transcript AS FROM duckvep_fixture_file('grch38', 'transcript');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.transcript_attrib AS FROM duckvep_fixture_file('grch38', 'transcript_attrib');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.translation AS FROM duckvep_fixture_file('grch38', 'translation');
+
+statement ok
+CREATE VIEW duckvep_grch38_core.translation_attrib AS FROM duckvep_fixture_file('grch38', 'translation_attrib');
+
+statement ok
+CREATE VIEW duckvep_grch38_reference AS FROM duckvep_fixture_file('grch38', 'reference_chunks');
+
+statement ok
+CREATE SCHEMA duckvep_grch37_core;
+
+statement ok
+CREATE VIEW duckvep_grch37_core.attrib_type AS FROM duckvep_fixture_file('grch37', 'attrib_type');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.coord_system AS FROM duckvep_fixture_file('grch37', 'coord_system');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.exon AS FROM duckvep_fixture_file('grch37', 'exon');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.exon_transcript AS FROM duckvep_fixture_file('grch37', 'exon_transcript');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.gene AS FROM duckvep_fixture_file('grch37', 'gene');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.seq_region AS FROM duckvep_fixture_file('grch37', 'seq_region');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.transcript AS FROM duckvep_fixture_file('grch37', 'transcript');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.transcript_attrib AS FROM duckvep_fixture_file('grch37', 'transcript_attrib');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.translation AS FROM duckvep_fixture_file('grch37', 'translation');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.translation_attrib AS FROM duckvep_fixture_file('grch37', 'translation_attrib');
+
+statement ok
+CREATE VIEW duckvep_grch37_reference AS FROM duckvep_fixture_file('grch37', 'reference_chunks');
+
+statement ok
+CREATE TABLE duckvep_grch38_regions AS
+SELECT * FROM duckvep_ensembl_regions(
+  'duckvep_grch38_core', 'duckvep_grch38_reference', 'GRCh38'
+);
+
+statement ok
+CREATE TABLE duckvep_grch38_transcripts AS
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_grch38_core', 'duckvep_grch38_reference', 'GRCh38'
+);
+
+statement ok
+CREATE TABLE duckvep_grch37_regions AS
+SELECT * FROM duckvep_ensembl_regions(
+  'duckvep_grch37_core', 'duckvep_grch37_reference', 'GRCh37'
+);
+
+statement ok
+CREATE TABLE duckvep_grch37_transcripts AS
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_grch37_core', 'duckvep_grch37_reference', 'GRCh37'
+);
+
+query IIIIIII
+SELECT
+  (SELECT count(*) FROM duckvep_grch38_regions),
+  (SELECT sum(sequence_length) FROM duckvep_grch38_regions),
+  count(*),
+  count(*) FILTER (WHERE cds_sequence IS NOT NULL),
+  count(*) FILTER (WHERE sequence_withheld_reason IS NOT NULL),
+  sum(length(exons)),
+  count(*) FILTER (WHERE mane_select_refseq IS NOT NULL)
+FROM duckvep_grch38_transcripts;
+----
+2	81258	39	1	13	40	1
+
+query IIIIIII
+SELECT
+  (SELECT count(*) FROM duckvep_grch37_regions),
+  (SELECT sum(sequence_length) FROM duckvep_grch37_regions),
+  count(*),
+  count(*) FILTER (WHERE cds_sequence IS NOT NULL),
+  count(*) FILTER (WHERE sequence_withheld_reason IS NOT NULL),
+  sum(length(exons)),
+  count(*) FILTER (WHERE mane_select_refseq IS NOT NULL)
+FROM duckvep_grch37_transcripts;
+----
+2	52717	39	2	13	48	0
+
+query ITT
+SELECT transcript_index, transcript_stable_id, mane_select_refseq
+FROM duckvep_grch38_transcripts
+WHERE mane_select_refseq IS NOT NULL;
+----
+38	ENST00000715685	NM_032790.4
+
+statement ok
+CREATE TABLE duckvep_grch38_receipt AS
+SELECT * FROM duckvep_model_receipt(
+  'duckvep_grch38_regions', 'duckvep_grch38_transcripts',
+  'Ensembl', '116', 'GRCh38',
+  'c5afd2ec87ad7aa402035a070e81068e7bd8f4c5bdae9f3c698f8ff5b2fd63d1',
+  '1ccef37f83c0784ebe74d89e4e0db8171e11625cd4b46ff47a9911e0ff471763',
+  'all current transcripts on MT and HG2047_PATCH'
+);
+
+statement ok
+CREATE TABLE duckvep_grch37_receipt AS
+SELECT * FROM duckvep_model_receipt(
+  'duckvep_grch37_regions', 'duckvep_grch37_transcripts',
+  'Ensembl', '116', 'GRCh37',
+  '46b8011c01b2628aa2678be753aa854528cf026c8d396afa54e99799d38ff8f0',
+  '09de6c8bdf434f9fe29e9803c7403b145452fdeefb5387292af67811f1523d80',
+  'all current transcripts on MT and GL000201.1'
+);
+
+query TTT
+SELECT assembly, model_sha256, transcript_filter
+FROM (
+  SELECT * FROM duckvep_grch38_receipt
+  UNION ALL
+  SELECT * FROM duckvep_grch37_receipt
+) ORDER BY assembly;
+----
+GRCh37	88e3e65c1055c5a38ac821205c3f7a246042a781d73c487607d0c32c845db5cf	all current transcripts on MT and GL000201.1
+GRCh38	68bdd72a53027af9bc09d1853848b2609c34dee3b533fdcfa4eec5881dd12db0	all current transcripts on MT and HG2047_PATCH
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'ensembl-grch38-fixture',
+  'SELECT seq_region, sequence_length FROM duckvep_grch38_regions ORDER BY seq_region',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM duckvep_grch38_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch38_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  transcript_coverage_complete := true
+);
+----
+1
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'ensembl-grch37-fixture',
+  'SELECT seq_region, sequence_length FROM duckvep_grch37_regions ORDER BY seq_region',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM duckvep_grch37_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch37_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  transcript_coverage_complete := true
+);
+----
+1
+
+query ITTIITT
+SELECT annotation.transcript_index, annotation.consequence,
+       annotation.status, annotation.cds_position, annotation.protein_position,
+       annotation.reference_amino_acid, annotation.alternate_amino_acid
+FROM unnest(duckvep_annotate(
+  'ensembl-grch38-fixture', 1::UINTEGER, 32522::UBIGINT,
+  'C', 'T', 0::UBIGINT
+)) AS u(annotation);
+----
+38	missense_variant	supported	4	2	H	Y
+
+query ITTIITT
+SELECT annotation.transcript_index, annotation.consequence,
+       annotation.status, annotation.cds_position, annotation.protein_position,
+       annotation.reference_amino_acid, annotation.alternate_amino_acid
+FROM unnest(duckvep_annotate(
+  'ensembl-grch37-fixture', 1::UINTEGER, 9452::UBIGINT,
+  'T', 'C', 0::UBIGINT
+)) AS u(annotation);
+----
+37	missense_variant	supported	4	2	Y	H
+
+query ITTT
+SELECT annotation.transcript_index, annotation.consequence,
+       annotation.status, annotation.reason
+FROM unnest(duckvep_annotate(
+  'ensembl-grch38-fixture', 0::UINTEGER, 3307::UBIGINT,
+  'A', 'C', 0::UBIGINT
+)) AS u(annotation);
+----
+5	coding_sequence_variant	unresolved	missing_sequence
+
+query I
+SELECT duckvep_model_drop('ensembl-grch38-fixture');
+----
+1
+
+query I
+SELECT duckvep_model_drop('ensembl-grch37-fixture');
+----
+1
