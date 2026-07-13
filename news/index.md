@@ -2,6 +2,14 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled `duckvep_annotate(...)` now predicts whether eligible
+  stop-gained, frameshift, splice-donor, and splice-acceptor
+  consequences trigger or escape nonsense-mediated decay under the
+  pinned VEP Plugins release/116 policy, with separate boolean escape
+  reasons and explicit unresolved state when coding placement is
+  unavailable. This remains distinct from `NMD_transcript_variant`,
+  which identifies an already curated nonsense-mediated-decay transcript
+  biotype
 - bundled `read_bcf()` and `read_bcf_v2()` now recognize the
   `Format=...` CSQ schema spelling in Ensembl variation release VCFs and
   expose typed `VEP_*` columns through DBI queries
