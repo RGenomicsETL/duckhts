@@ -8,20 +8,26 @@ the real Ensembl VEP 116 `--gff` output. Unresolved DuckVEP rows remain
 in the denominator; they are not discarded as unsupported cases. The CSV
 is append-only by source revision, corpus, and resident model.
 
-## Latest run
+## Latest tested revision
 
-| revision | corpus    | model        | oracle    | pairs | exact   | unresolved | resolved_disagreements | resolved_error_upper_95 |
-|:---------|:----------|:-------------|:----------|------:|:--------|-----------:|-----------------------:|:------------------------|
-| eb212de3 | witnesses | differential | VEP 116.0 |   242 | 219/242 |         32 |                      0 | 1.74%                   |
+| revision | corpus                    | model        | oracle    |  pairs | exact        | unresolved | resolved_disagreements | resolved_error_upper_95 |
+|:---------|:--------------------------|:-------------|:----------|-------:|:-------------|-----------:|-----------------------:|:------------------------|
+| 24bb1714 | state_exploration_seed_29 | differential | VEP 116.0 | 100242 | 85238/100242 |      28109 |                   1453 | 2.12%                   |
+| 24bb1714 | witnesses                 | differential | VEP 116.0 |    242 | 238/242      |         11 |                      0 | 1.58%                   |
+
+Detailed consequence tables below use the largest corpus at this tested
+revision.
 
 ## History
 
-| run_date   | source_revision | corpus    | model        |   n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
-|:-----------|:----------------|:----------|:-------------|----:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
-| 2026-07-11 | 8cc22218        | witnesses | differential | 242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
-| 2026-07-13 | 34b37ca1        | witnesses | differential | 242 |         209 |         32 |        210 |                  10 | 86.36%     | 8.58%                   |
-| 2026-07-13 | 87f03a2a        | witnesses | differential | 242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
-| 2026-07-13 | eb212de3        | witnesses | differential | 242 |         219 |         32 |        210 |                   0 | 90.50%     | 1.74%                   |
+| run_date   | source_revision | corpus                    | model        |      n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
+|:-----------|:----------------|:--------------------------|:-------------|-------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
+| 2026-07-11 | 8cc22218        | witnesses                 | differential |    242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
+| 2026-07-13 | 24bb1714        | state_exploration_seed_29 | differential | 100242 |       85238 |      28109 |      72133 |                1453 | 85.03%     | 2.12%                   |
+| 2026-07-13 | 24bb1714        | witnesses                 | differential |    242 |         238 |         11 |        231 |                   0 | 98.35%     | 1.58%                   |
+| 2026-07-13 | 34b37ca1        | witnesses                 | differential |    242 |         209 |         32 |        210 |                  10 | 86.36%     | 8.58%                   |
+| 2026-07-13 | 87f03a2a        | witnesses                 | differential |    242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
+| 2026-07-13 | eb212de3        | witnesses                 | differential |    242 |         219 |         32 |        210 |                   0 | 90.50%     | 1.74%                   |
 
 ## Official Ensembl release corpus in Parquet
 
@@ -46,12 +52,13 @@ The property ledger is separate from the VEP differential. It records
 successful runs of each randomized oracle, including the exact seed and
 duplicate count. A failed suite does not append rows.
 
-| run_date   | source_revision | seed               | randomized_targets | trials    | passed    | failed | duplicates | suite_tests | suite_assertions | suite_elapsed_seconds | compiler                                   |
-|:-----------|:----------------|:-------------------|-------------------:|:----------|:----------|-------:|-----------:|------------:|:-----------------|----------------------:|:-------------------------------------------|
-| 2026-07-11 | 8cc22218        | 0xd0c0ffee12345678 |                 39 | 3,800,500 | 3,800,500 |      0 |          0 |         133 | 189,981          |                15.400 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
-| 2026-07-13 | 34b37ca1        | 0xd0c0ffee12345678 |                 40 | 3,900,500 | 3,900,500 |      0 |          0 |         140 | 190,041          |                18.113 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
-| 2026-07-13 | 87f03a2a        | 0xd0c0ffee12345678 |                 40 | 3,900,500 | 3,900,500 |      0 |          0 |         139 | 190,024          |                18.541 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
-| 2026-07-13 | eb212de3        | 0xd0c0ffee12345678 |                 40 | 3,900,500 | 3,900,500 |      0 |          0 |         141 | 190,064          |                23.425 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| run_date   | source_revision | seed               | randomized_targets | trials     | passed     | failed | duplicates | suite_tests | suite_assertions | suite_elapsed_seconds | compiler                                   |
+|:-----------|:----------------|:-------------------|-------------------:|:-----------|:-----------|-------:|-----------:|------------:|:-----------------|----------------------:|:-------------------------------------------|
+| 2026-07-11 | 8cc22218        | 0xd0c0ffee12345678 |                 39 | 3,800,500  | 3,800,500  |      0 |          0 |         133 | 189,981          |                15.400 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-13 | 24bb1714        | 0x000000000000001d |                 40 | 39,000,500 | 39,000,500 |      0 |          0 |         142 | 1,873,864        |               187.865 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-13 | 34b37ca1        | 0xd0c0ffee12345678 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         140 | 190,041          |                18.113 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-13 | 87f03a2a        | 0xd0c0ffee12345678 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         139 | 190,024          |                18.541 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-13 | eb212de3        | 0xd0c0ffee12345678 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         141 | 190,064          |                23.425 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                 | trials  | passed  | failed | skipped | duplicates |
 |:-----------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
@@ -103,42 +110,43 @@ either engine. A missing or extra term is therefore visible under its
 own SO name. Rows must not be summed across terms because one pair can
 carry several terms.
 
-| consequence_class                   | impact   |   n | exact_agree | unresolved | resolved_n | resolved_agree | resolved_discordant | term_mismatch | engine_extra | engine_missing | resolved_error_upper_95 |
-|:------------------------------------|:---------|----:|------------:|-----------:|-----------:|---------------:|--------------------:|--------------:|-------------:|---------------:|:------------------------|
-| coding_sequence_variant             | MODIFIER |  32 |           9 |         32 |          0 |              0 |                   0 |            23 |           23 |              0 | not estimable           |
-| start_lost                          | HIGH     |  27 |          12 |         15 |         12 |             12 |                   0 |            15 |            0 |             15 | 26.46%                  |
-| frameshift_variant                  | HIGH     |  44 |          32 |         12 |         32 |             32 |                   0 |            12 |            0 |             12 | 10.89%                  |
-| 3_prime_UTR_variant                 | MODIFIER |  27 |          27 |          5 |         22 |             22 |                   0 |             0 |            0 |              0 | 15.44%                  |
-| splice_donor_variant                | HIGH     |  24 |          24 |          4 |         20 |             20 |                   0 |             0 |            0 |              0 | 16.84%                  |
-| stop_lost                           | HIGH     |  21 |          17 |          4 |         17 |             17 |                   0 |             4 |            0 |              4 | 19.51%                  |
-| splice_acceptor_variant             | HIGH     |  17 |          17 |          4 |         13 |             13 |                   0 |             0 |            0 |              0 | 24.71%                  |
-| inframe_deletion                    | MODERATE |   8 |           6 |          2 |          6 |              6 |                   0 |             2 |            0 |              2 | 45.93%                  |
-| inframe_insertion                   | MODERATE |   7 |           5 |          2 |          5 |              5 |                   0 |             2 |            0 |              2 | 52.18%                  |
-| stop_retained_variant               | LOW      |   6 |           4 |          2 |          4 |              4 |                   0 |             2 |            0 |              2 | 60.24%                  |
-| splice_region_variant               | LOW      |  55 |          55 |          1 |         54 |             54 |                   0 |             0 |            0 |              0 | 6.60%                   |
-| stop_gained                         | HIGH     |   2 |           1 |          1 |          1 |              1 |                   0 |             1 |            0 |              1 | 97.50%                  |
-| start_retained_variant              | LOW      |   1 |           0 |          1 |          0 |              0 |                   0 |             1 |            0 |              1 | not estimable           |
-| intron_variant                      | MODIFIER |  32 |          32 |          0 |         32 |             32 |                   0 |             0 |            0 |              0 | 10.89%                  |
-| 5_prime_UTR_variant                 | MODIFIER |  22 |          22 |          0 |         22 |             22 |                   0 |             0 |            0 |              0 | 15.44%                  |
-| synonymous_variant                  | LOW      |  13 |          13 |          0 |         13 |             13 |                   0 |             0 |            0 |              0 | 24.71%                  |
-| splice_donor_region_variant         | LOW      |  12 |          12 |          0 |         12 |             12 |                   0 |             0 |            0 |              0 | 26.46%                  |
-| splice_polypyrimidine_tract_variant | LOW      |  11 |          11 |          0 |         11 |             11 |                   0 |             0 |            0 |              0 | 28.49%                  |
-| missense_variant                    | MODERATE |  10 |          10 |          0 |         10 |             10 |                   0 |             0 |            0 |              0 | 30.85%                  |
-| splice_donor_5th_base_variant       | LOW      |   7 |           7 |          0 |          7 |              7 |                   0 |             0 |            0 |              0 | 40.96%                  |
-| downstream_gene_variant             | MODIFIER |   5 |           5 |          0 |          5 |              5 |                   0 |             0 |            0 |              0 | 52.18%                  |
-| protein_altering_variant            | MODERATE |   2 |           2 |          0 |          2 |              2 |                   0 |             0 |            0 |              0 | 84.19%                  |
+| consequence_class                   | impact   |     n | exact_agree | unresolved | resolved_n | resolved_agree | resolved_discordant | term_mismatch | engine_extra | engine_missing | resolved_error_upper_95 |
+|:------------------------------------|:---------|------:|------------:|-----------:|-----------:|---------------:|--------------------:|--------------:|-------------:|---------------:|:------------------------|
+| inframe_insertion                   | MODERATE |  4694 |        4124 |         65 |       4629 |           4124 |                 505 |           570 |          249 |            321 | 11.84%                  |
+| stop_retained_variant               | LOW      |  2630 |          38 |       2296 |        334 |             38 |                 296 |          2592 |          172 |           2420 | 91.82%                  |
+| coding_sequence_variant             | MODIFIER | 38860 |       25201 |      28109 |      10751 |          10514 |                 237 |         13659 |        13422 |            237 | 2.50%                   |
+| start_retained_variant              | LOW      |   343 |          91 |         89 |        254 |             91 |                 163 |           252 |            0 |            252 | 70.07%                  |
+| intron_variant                      | MODIFIER | 38610 |       38354 |      10525 |      28085 |          27940 |                 145 |           256 |           41 |            215 | 0.61%                   |
+| missense_variant                    | MODERATE |  4392 |        4252 |          0 |       4392 |           4252 |                 140 |           140 |          126 |             14 | 3.75%                   |
+| splice_region_variant               | LOW      |  8192 |        7996 |        709 |       7483 |           7344 |                 139 |           196 |           67 |            129 | 2.19%                   |
+| protein_altering_variant            | MODERATE |  2584 |         941 |       1510 |       1074 |            941 |                 133 |          1643 |            0 |           1643 | 14.50%                  |
+| splice_acceptor_variant             | HIGH     | 11687 |       11584 |       5286 |       6401 |           6303 |                  98 |           103 |          100 |              3 | 1.86%                   |
+| splice_polypyrimidine_tract_variant | LOW      | 10426 |       10247 |        104 |      10322 |          10247 |                  75 |           179 |           72 |            107 | 0.91%                   |
+| start_lost                          | HIGH     |  8244 |        1625 |       6546 |       1698 |           1625 |                  73 |          6619 |            0 |           6619 | 5.38%                   |
+| stop_gained                         | HIGH     |  8707 |        7986 |        661 |       8046 |           7986 |                  60 |           721 |           60 |            661 | 0.96%                   |
+| stop_lost                           | HIGH     |  3735 |        1016 |       2668 |       1067 |           1016 |                  51 |          2719 |           51 |           2668 | 6.24%                   |
+| splice_donor_5th_base_variant       | LOW      | 11101 |       10978 |       4927 |       6174 |           6126 |                  48 |           123 |          105 |             18 | 1.03%                   |
+| 5_prime_UTR_variant                 | MODIFIER | 15185 |       15077 |       7287 |       7898 |           7852 |                  46 |           108 |          108 |              0 | 0.78%                   |
+| 3_prime_UTR_variant                 | MODIFIER | 13992 |       13888 |       8255 |       5737 |           5692 |                  45 |           104 |          104 |              0 | 1.05%                   |
+| splice_donor_variant                | HIGH     | 12706 |       12614 |       5976 |       6730 |           6685 |                  45 |            92 |           90 |              2 | 0.89%                   |
+| inframe_deletion                    | MODERATE |   452 |         371 |         43 |        409 |            371 |                  38 |            81 |           38 |             43 | 12.53%                  |
+| splice_donor_region_variant         | LOW      |  4765 |        4655 |       1047 |       3718 |           3693 |                  25 |           110 |           54 |             56 | 0.99%                   |
+| downstream_gene_variant             | MODIFIER |   409 |         391 |          0 |        409 |            391 |                  18 |            18 |            0 |             18 | 6.87%                   |
+| frameshift_variant                  | HIGH     | 16257 |       16039 |        218 |      16039 |          16039 |                   0 |           218 |            0 |            218 | 0.02%                   |
+| intergenic_variant                  | MODIFIER |    15 |           0 |         15 |          0 |              0 |                   0 |            15 |            0 |             15 | not estimable           |
+| synonymous_variant                  | LOW      |   103 |         103 |          0 |        103 |            103 |                   0 |             0 |            0 |              0 | 3.52%                   |
 
 ## VEP impact classes
 
 This table uses full consequence sets, so each transcript pair is
 counted once.
 
-| impact   |   n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
-|:---------|----:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
-| HIGH     | 123 |         102 |         29 |         94 |                   0 | 82.93%     | 3.85%                   |
-| LOW      |  45 |          44 |          1 |         44 |                   0 | 97.78%     | 8.04%                   |
-| MODERATE |  24 |          23 |          1 |         23 |                   0 | 95.83%     | 14.82%                  |
-| MODIFIER |  50 |          50 |          1 |         49 |                   0 | 100.00%    | 7.25%                   |
+| impact   |     n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
+|:---------|------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
+| HIGH     | 54268 |       43042 |      20947 |      33321 |                 720 | 79.31%     | 2.32%                   |
+| LOW      | 14990 |       12762 |       2237 |      12753 |                 212 | 85.14%     | 1.90%                   |
+| MODERATE |  9423 |        8090 |        947 |       8476 |                 386 | 85.85%     | 5.02%                   |
+| MODIFIER | 21561 |       21344 |       3978 |      17583 |                 135 | 98.99%     | 0.91%                   |
 
 The source artifact hash and exact Ensembl core/variation build remain
 in `test/duckvep/conformance/data/conformance_history.csv` for audit and
