@@ -1,7 +1,7 @@
 # DuckVEP architecture
 
 Status: current implementation contract. Code and tests are authoritative for implemented
-behavior; GitHub issues #92–#98 track the named gaps.
+behavior; the remaining gaps are linked by full URL in the relevant sections below.
 
 ## Purpose and compatibility
 
@@ -43,10 +43,10 @@ facts as consequence prediction; it must not reconstruct biology from rendered S
 ## Transcript model
 
 The production model originates from the pinned Ensembl core schema and matching genomic
-FASTA. Essential relations provide sequence-region identity, genes, transcripts, ranked
-exon membership, translation boundaries, incomplete-CDS state, RNA/selenocysteine/readthrough
-edits, MANE/GENCODE/CCDS attributes, and requested stable identifiers. GFF plus FASTA may
-construct reduced test models, but missing Ensembl facts remain explicit.
+FASTA. `duckvep_ensembl_regions(...)` and `duckvep_ensembl_transcripts(...)` read the raw
+`coord_system`, `seq_region`, `gene`, `transcript`, `exon`, `exon_transcript`, `translation`,
+`attrib_type`, `transcript_attrib`, and `translation_attrib` relations directly. GFF plus
+FASTA may construct reduced test models, but missing Ensembl facts remain explicit.
 
 DuckDB prepares three dense execution projections:
 
@@ -55,11 +55,39 @@ DuckDB prepares three dense execution projections:
   table, and up to three transcript-oriented bases immediately after the CDS; and
 - exon membership with genomic and transcript-oriented cDNA spans plus phase.
 
-The current `duckvep_model_load` function reads those projections from three committed,
-sorted queries on a private connection, validates and narrows them, builds one transcript
-interval index, and publishes an immutable named model. Several models may coexist in one
-database instance. Stable IDs and provenance remain in ordinary DuckDB relations. A
-production Ensembl importer and model receipt are still required by
+The Ensembl builder matches every supplied FASTA contig to exactly one same-length region
+on the requested assembly, imports every current transcript on those regions, splices both
+strands from tiled reference chunks, and follows Ensembl `translateable_seq` phase rules.
+Ensembl uses exon phase `-1` when translation begins after 5-prime UTR in the same exon;
+that means zero prepended bases, not an invalid model. RNA/peptide edits not yet implemented
+by the C kernel keep their flags and CDS span but deliberately withhold CDS bytes with an
+auditable reason.
+
+`duckvep_model_receipt(...)` hashes both prepared relations, the reference/source hashes,
+and the declared transcript filter without a timestamp. The current `duckvep_model_load`
+function then reads three sorted projections from committed, non-temporary relations on a
+private connection, validates and narrows them, builds one transcript interval index, and
+publishes an immutable named model. Several models may coexist in one database instance;
+stable IDs and provenance remain ordinary DuckDB columns.
+
+```sql
+CREATE TABLE reference_chunks AS
+SELECT chrom, start, "end", seq
+FROM fasta_nuc('GRCh38.primary.fa', bin_width := 1048576, include_seq := true);
+
+CREATE TABLE model_regions AS
+SELECT * FROM duckvep_ensembl_regions(
+  'ensembl_core', 'reference_chunks', 'GRCh38'
+);
+
+CREATE TABLE model_transcripts AS
+SELECT * FROM duckvep_ensembl_transcripts(
+  'ensembl_core', 'reference_chunks', 'GRCh38'
+);
+```
+
+The source database and matching FASTA are staged once; annotation processes only open the
+prepared relations. Exact production-corpus conformance and throughput remain tracked at
 https://github.com/RGenomicsETL/duckhts/issues/95.
 
 The three post-CDS bases cost three bytes per transcript and let VEP's terminal-stop rule

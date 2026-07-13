@@ -189,6 +189,43 @@
       ]
     },
     {
+      "name": "duckvep_ensembl_regions",
+      "kind": "table_macro",
+      "category": "Variant Annotation",
+      "signature": "duckvep_ensembl_regions(core_schema, reference_chunks_table, assembly, species_id := 1)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Match a tiled reference sequence to one Ensembl core assembly and assign dense DuckVEP sequence-region ordinals. core_schema must contain the Ensembl seq_region and coord_system tables. reference_chunks_table must contain chrom, zero-based start, half-open end, and seq columns, normally materialized from fasta_nuc(..., include_seq := TRUE). Chunks must be contiguous from zero, their sequence lengths must match their intervals, and every FASTA contig must match exactly one same-length Ensembl region. Regions absent from the supplied FASTA are deliberately excluded.",
+      "examples": [
+        "CREATE TABLE grch38_reference_chunks AS SELECT chrom, start, \"end\", seq FROM fasta_nuc('GRCh38.primary.fa', bin_width := 1048576, include_seq := TRUE);",
+        "CREATE TABLE grch38_regions AS SELECT * FROM duckvep_ensembl_regions('ensembl_core', 'grch38_reference_chunks', 'GRCh38');"
+      ]
+    },
+    {
+      "name": "duckvep_ensembl_transcripts",
+      "kind": "table_macro",
+      "category": "Variant Annotation",
+      "signature": "duckvep_ensembl_transcripts(core_schema, reference_chunks_table, assembly, species_id := 1)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Build the validated DuckVEP transcript relation from Ensembl core tables and matching tiled FASTA sequence. The result contains the exact resident-loader columns, stable/source identifiers, biotypes, and a nested ranked-exon projection. CDS bytes follow Ensembl translateable_seq semantics on both strands, including positive start phase and up to three post-CDS bases. Transcripts carrying Ensembl RNA edits, selenocysteine, stop readthrough, amino-acid substitutions, or initial-methionine edits retain their flags and CDS span but withhold sequence with an explicit reason until the consequence kernel supports that edit.",
+      "examples": [
+        "CREATE TABLE grch38_transcripts AS SELECT * FROM duckvep_ensembl_transcripts('ensembl_core', 'grch38_reference_chunks', 'GRCh38');"
+      ]
+    },
+    {
+      "name": "duckvep_model_receipt",
+      "kind": "table_macro",
+      "category": "Variant Annotation",
+      "signature": "duckvep_model_receipt(regions_table, transcripts_table, source_name, source_version, assembly, source_manifest_sha256, reference_sha256, transcript_filter)",
+      "returns": "table",
+      "r_wrapper": "",
+      "description": "Create one deterministic receipt for prepared DuckVEP region and transcript relations. The receipt validates dense ordinals and region/transcript agreement, records source and reference SHA-256 values plus the exact transcript filter, counts regions, bases, genes, transcripts, exon memberships, coding and withheld sequences, and hashes all semantic model fields in stable ordinal order. It contains no clock time, so rebuilding identical inputs yields the same model hash.",
+      "examples": [
+        "CREATE TABLE grch38_receipt AS SELECT * FROM duckvep_model_receipt('grch38_regions', 'grch38_transcripts', 'Ensembl', '116', 'GRCh38', sha256(read_blob('homo_sapiens_core_116_38.sql.gz')), sha256(read_blob('GRCh38.primary.fa')), 'all current transcripts on FASTA-covered assembly regions');"
+      ]
+    },
+    {
       "name": "duckvep_model_load",
       "kind": "table",
       "category": "Variant Annotation",
@@ -197,7 +234,7 @@
       "r_wrapper": "",
       "description": "Load one immutable transcript model into the current DuckDB database instance under a caller-chosen name. The three query strings read committed, non-temporary DuckDB relations: sorted UINTEGER sequence-region ordinals; dense transcript rows with genomic span, strand, gene ordinal, flags, optional CDS span/sequence/codon table and an optional twelfth post_cds_bases BLOB column containing up to three transcript-oriented reference bases immediately after the CDS; and transcript-ordered exon rows with genomic and cDNA spans plus phase. The default is a partial model: a variant with no loaded feature is unresolved, not intergenic. Setting the named parameter transcript_coverage_complete := TRUE requires the sequence-region query to also return sequence_length UBIGINT and permits supported intergenic results after coordinate bounds checks. Loading validates and narrows the model once, builds its transcript interval index, and returns one TRUE row. Several named models may coexist.",
       "examples": [
-        "SELECT loaded FROM duckvep_model_load('grch38', 'SELECT seq_region, sequence_length FROM model_regions ORDER BY seq_region', 'SELECT * FROM model_transcripts ORDER BY seq_region, transcript_start, transcript_index', 'SELECT * FROM model_exons ORDER BY transcript_index, exon_cdna_start', transcript_coverage_complete := TRUE);"
+        "SELECT loaded FROM duckvep_model_load('grch38', 'SELECT seq_region, sequence_length FROM grch38_regions ORDER BY seq_region', 'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM grch38_transcripts ORDER BY seq_region, transcript_start, transcript_index', 'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM grch38_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start', transcript_coverage_complete := TRUE);"
       ]
     },
     {

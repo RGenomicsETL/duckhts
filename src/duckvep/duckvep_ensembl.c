@@ -1,0 +1,449 @@
+/* DuckDB-native preparation of the resident DuckVEP transcript model. */
+#include "duckdb_extension.h"
+DUCKDB_EXTENSION_EXTERN
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static bool
+duckvep_register_sql(duckdb_connection connection, const char *const *parts,
+	size_t part_count)
+{
+	duckdb_result result;
+	duckdb_state state;
+	char *sql;
+	size_t index, length, offset;
+
+	length = 0;
+	for (index = 0; index < part_count; index++) {
+		if (strlen(parts[index]) > SIZE_MAX - length)
+			return false;
+		length += strlen(parts[index]);
+	}
+	if (length == SIZE_MAX)
+		return false;
+	sql = malloc(length + 1);
+	if (sql == NULL)
+		return false;
+	offset = 0;
+	for (index = 0; index < part_count; index++) {
+		size_t part_length;
+
+		part_length = strlen(parts[index]);
+		memcpy(sql + offset, parts[index], part_length);
+		offset += part_length;
+	}
+	sql[offset] = '\0';
+	state = duckdb_query(connection, sql, &result);
+	free(sql);
+	if (state != DuckDBSuccess) {
+		const char *error;
+
+		error = duckdb_result_error(&result);
+		fprintf(stderr, "[duckhts] failed DuckVEP SQL registration: %s\n",
+		    error != NULL ? error : "unknown error");
+		duckdb_destroy_result(&result);
+		return false;
+	}
+	duckdb_destroy_result(&result);
+	return true;
+}
+
+static bool
+duckvep_register_ensembl_regions(duckdb_connection connection)
+{
+	static const char *const sql[] = {
+		"CREATE OR REPLACE MACRO duckvep_ensembl_regions(",
+		"core_schema, reference_chunks_table, assembly, species_id := 1) AS TABLE ",
+		"WITH parameters AS MATERIALIZED (",
+		"SELECT CAST(assembly AS VARCHAR) AS requested_assembly, ",
+		"CAST(species_id AS BIGINT) AS requested_species_id",
+		"), reference_rows AS MATERIALIZED (",
+		"SELECT CAST(chrom AS VARCHAR) AS chrom, CAST(\"start\" AS BIGINT) AS start0, ",
+		"CAST(\"end\" AS BIGINT) AS end0, CAST(seq AS VARCHAR) AS seq ",
+		"FROM query_table(reference_chunks_table)",
+		"), reference_ordered AS (",
+		"SELECT *, lag(end0) OVER (PARTITION BY chrom ORDER BY start0, end0) AS previous_end ",
+		"FROM reference_rows",
+		"), reference_regions AS MATERIALIZED (",
+		"SELECT chrom, min(start0) AS first_start, max(end0) AS sequence_length, ",
+		"sum(CASE WHEN chrom IS NULL OR start0 IS NULL OR end0 IS NULL OR seq IS NULL ",
+		"OR start0 < 0 OR end0 <= start0 OR length(seq) != end0 - start0 THEN 1 ELSE 0 END) AS invalid_chunks, ",
+		"sum(CASE WHEN previous_end IS NOT NULL AND previous_end != start0 THEN 1 ELSE 0 END) AS discontinuities ",
+		"FROM reference_ordered GROUP BY chrom",
+		"), source_regions AS MATERIALIZED (",
+		"SELECT sr.seq_region_id, sr.name AS seq_region_name, sr.length AS source_length, ",
+		"cs.coord_system_id, cs.name AS coord_system_name, cs.rank AS coord_system_rank ",
+		"FROM query_table(core_schema || '.seq_region') sr ",
+		"JOIN query_table(core_schema || '.coord_system') cs USING (coord_system_id) ",
+		"CROSS JOIN parameters p WHERE cs.species_id = p.requested_species_id ",
+		"AND cs.version = p.requested_assembly",
+		"), matches AS MATERIALIZED (",
+		"SELECT rr.chrom, rr.sequence_length, sr.seq_region_id, sr.source_length, ",
+		"sr.coord_system_id, sr.coord_system_name, sr.coord_system_rank ",
+		"FROM reference_regions rr LEFT JOIN source_regions sr ",
+		"ON sr.seq_region_name = rr.chrom",
+		"), validation AS MATERIALIZED (",
+		"SELECT CASE ",
+		"WHEN (SELECT count(*) FROM reference_rows) = 0 THEN ",
+		"error('duckvep_ensembl_regions: reference chunk table is empty') ",
+		"WHEN EXISTS (SELECT 1 FROM reference_regions WHERE chrom IS NULL OR invalid_chunks != 0) THEN ",
+		"error('duckvep_ensembl_regions: reference chunks contain NULL, invalid coordinates, ",
+		"or a sequence-length mismatch') ",
+		"WHEN EXISTS (SELECT 1 FROM reference_regions WHERE first_start != 0 OR discontinuities != 0) THEN ",
+		"error('duckvep_ensembl_regions: reference chunks must cover each contig contiguously from zero') ",
+		"WHEN EXISTS (SELECT 1 FROM reference_regions WHERE sequence_length <= 0 OR sequence_length > 4294967295) THEN ",
+		"error('duckvep_ensembl_regions: contig length exceeds the resident model coordinate range') ",
+		"WHEN (SELECT count(*) FROM reference_regions) > 65536 THEN ",
+		"error('duckvep_ensembl_regions: reference has more than 65536 contigs') ",
+		"WHEN EXISTS (SELECT chrom FROM matches GROUP BY chrom HAVING count(seq_region_id) != 1) THEN ",
+		"error('duckvep_ensembl_regions: each reference contig must match exactly one Ensembl assembly region') ",
+		"WHEN EXISTS (SELECT 1 FROM matches WHERE source_length != sequence_length) THEN ",
+		"error('duckvep_ensembl_regions: Ensembl and FASTA contig lengths disagree') ",
+		"ELSE true END AS valid",
+		") SELECT CAST(row_number() OVER (ORDER BY coord_system_rank, seq_region_id) - 1 AS UINTEGER) AS seq_region, ",
+		"chrom AS seq_region_name, CAST(sequence_length AS UBIGINT) AS sequence_length, ",
+		"seq_region_id AS source_seq_region_id, coord_system_id AS source_coord_system_id, ",
+		"coord_system_name, coord_system_rank ",
+		"FROM matches CROSS JOIN validation WHERE validation.valid ",
+		"ORDER BY seq_region"
+	};
+
+	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+}
+
+static bool
+duckvep_register_ensembl_transcripts(duckdb_connection connection)
+{
+	static const char *const sql[] = {
+		"CREATE OR REPLACE MACRO duckvep_ensembl_transcripts(",
+		"core_schema, reference_chunks_table, assembly, species_id := 1) AS TABLE ",
+		"WITH regions AS MATERIALIZED (",
+		"SELECT * FROM duckvep_ensembl_regions(core_schema, reference_chunks_table, assembly, species_id)",
+		"), eligible_transcripts AS MATERIALIZED (",
+		"SELECT t.transcript_id, t.gene_id, t.seq_region_id, t.seq_region_start, ",
+		"t.seq_region_end, t.seq_region_strand, t.biotype, t.stable_id, t.version ",
+		"FROM query_table(core_schema || '.transcript') t ",
+		"JOIN regions r ON r.source_seq_region_id = t.seq_region_id WHERE t.is_current = 1",
+		"), source_transcripts AS MATERIALIZED (",
+		"SELECT t.transcript_id AS source_transcript_id, t.gene_id AS source_gene_id, ",
+		"t.seq_region_id AS source_seq_region_id, t.seq_region_start AS transcript_start, ",
+		"t.seq_region_end AS transcript_end, t.seq_region_strand AS strand, ",
+		"t.biotype AS transcript_biotype, t.stable_id AS transcript_stable_id, ",
+		"t.version AS transcript_version, g.stable_id AS gene_stable_id, ",
+		"g.version AS gene_version, g.biotype AS gene_biotype, ",
+		"r.seq_region, r.seq_region_name, r.sequence_length ",
+		"FROM eligible_transcripts t JOIN query_table(core_schema || '.gene') g USING (gene_id) ",
+		"JOIN regions r ON r.source_seq_region_id = t.seq_region_id",
+		"), transcripts AS MATERIALIZED (",
+		"SELECT CAST(row_number() OVER (ORDER BY seq_region, transcript_start, transcript_end, ",
+		"source_transcript_id) - 1 AS UINTEGER) AS transcript_index, ",
+		"CAST(dense_rank() OVER (ORDER BY source_gene_id) - 1 AS UINTEGER) AS gene_index, * ",
+		"FROM source_transcripts",
+		"), translations AS MATERIALIZED (",
+		"SELECT tl.translation_id, tl.transcript_id AS source_transcript_id, tl.seq_start, ",
+		"tl.start_exon_id, tl.seq_end, tl.end_exon_id, tl.stable_id, tl.version ",
+		"FROM query_table(core_schema || '.translation') tl ",
+		"JOIN source_transcripts t ON t.source_transcript_id = tl.transcript_id",
+		"), transcript_attributes AS MATERIALIZED (",
+		"SELECT ta.transcript_id AS source_transcript_id, ",
+		"bool_or(aty.code = 'cds_start_NF') AS cds_start_nf, ",
+		"bool_or(aty.code = 'cds_end_NF') AS cds_end_nf, ",
+		"bool_or(aty.code = 'MANE_Select') AS mane_select, ",
+		"bool_or(aty.code = 'MANE_Plus_Clinical') AS mane_plus_clinical, ",
+		"bool_or(aty.code = 'gencode_basic') AS gencode_basic, ",
+		"bool_or(aty.code = 'gencode_primary') AS gencode_primary, ",
+		"bool_or(aty.code = 'ccds_transcript') AS ccds, ",
+		"bool_or(aty.code = 'readthrough_tra') AS readthrough_transcript, ",
+		"bool_or(aty.code = 'upstream_ATG') AS upstream_atg, ",
+		"bool_or(aty.code = '_rna_edit') AS rna_edit ",
+		"FROM query_table(core_schema || '.transcript_attrib') ta ",
+		"JOIN query_table(core_schema || '.attrib_type') aty USING (attrib_type_id) ",
+		"JOIN source_transcripts t ON t.source_transcript_id = ta.transcript_id ",
+		"WHERE aty.code IN ('cds_start_NF','cds_end_NF','MANE_Select','MANE_Plus_Clinical',",
+		"'gencode_basic','gencode_primary','ccds_transcript','readthrough_tra','upstream_ATG',",
+		"'_rna_edit') ",
+		"GROUP BY ta.transcript_id",
+		"), translation_attributes AS MATERIALIZED (",
+		"SELECT tl.transcript_id AS source_transcript_id, ",
+		"bool_or(aty.code = '_selenocysteine') AS selenocysteine, ",
+		"bool_or(aty.code = '_stop_codon_rt') AS stop_codon_readthrough, ",
+		"bool_or(aty.code = '_rna_edit') AS rna_edit, ",
+		"bool_or(aty.code = 'amino_acid_sub') AS amino_acid_sub, ",
+		"bool_or(aty.code = 'initial_met') AS initial_methionine ",
+		"FROM query_table(core_schema || '.translation_attrib') tla ",
+		"JOIN query_table(core_schema || '.translation') tl USING (translation_id) ",
+		"JOIN query_table(core_schema || '.attrib_type') aty USING (attrib_type_id) ",
+		"JOIN source_transcripts t ON t.source_transcript_id = tl.transcript_id ",
+		"WHERE aty.code IN ('_selenocysteine','_stop_codon_rt','_rna_edit','amino_acid_sub','initial_met') ",
+		"GROUP BY tl.transcript_id",
+		"), transcript_facts AS MATERIALIZED (",
+		"SELECT t.*, tl.translation_id AS source_translation_id, ",
+		"tl.stable_id AS translation_stable_id, tl.version AS translation_version, ",
+		"tl.start_exon_id, tl.end_exon_id, tl.seq_start, tl.seq_end, ",
+		"CAST((CASE WHEN tl.translation_id IS NOT NULL THEN 1 ELSE 0 END) + ",
+		"(CASE WHEN t.transcript_biotype = 'protein_coding' THEN 2 ELSE 0 END) + ",
+		"(CASE WHEN t.transcript_biotype = 'nonsense_mediated_decay' THEN 4 ELSE 0 END) + ",
+		"(CASE WHEN t.transcript_biotype = 'miRNA' THEN 8 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.cds_start_nf, false) THEN 16 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.cds_end_nf, false) THEN 32 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(tla.selenocysteine, false) THEN 64 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(tla.stop_codon_readthrough, false) THEN 128 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.rna_edit, false) OR coalesce(tla.rna_edit, false) ",
+		"THEN 256 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(tla.amino_acid_sub, false) THEN 512 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.mane_select, false) THEN 1024 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.mane_plus_clinical, false) THEN 2048 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.gencode_basic, false) THEN 4096 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.gencode_primary, false) THEN 8192 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.ccds, false) THEN 16384 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.readthrough_transcript, false) THEN 32768 ELSE 0 END) + ",
+		"(CASE WHEN coalesce(ta.upstream_atg, false) THEN 65536 ELSE 0 END) AS UBIGINT) AS transcript_flags, ",
+		"nullif(concat_ws(',', ",
+		"CASE WHEN coalesce(ta.rna_edit, false) OR coalesce(tla.rna_edit, false) ",
+		"THEN 'rna_edit' END, ",
+		"CASE WHEN coalesce(tla.selenocysteine, false) THEN 'selenocysteine' END, ",
+		"CASE WHEN coalesce(tla.stop_codon_readthrough, false) THEN 'stop_codon_readthrough' END, ",
+		"CASE WHEN coalesce(tla.amino_acid_sub, false) THEN 'amino_acid_substitution' END, ",
+		"CASE WHEN coalesce(tla.initial_methionine, false) THEN 'initial_methionine' END), '') AS attribute_withheld_reason ",
+		"FROM transcripts t LEFT JOIN translations tl USING (source_transcript_id) ",
+		"LEFT JOIN transcript_attributes ta USING (source_transcript_id) ",
+		"LEFT JOIN translation_attributes tla USING (source_transcript_id)",
+		"), exon_rows AS MATERIALIZED (",
+		"SELECT t.source_transcript_id, t.source_seq_region_id, ",
+		"t.transcript_start, t.transcript_end, t.strand, et.rank, e.exon_id AS source_exon_id, ",
+		"e.stable_id AS exon_stable_id, e.seq_region_id AS exon_seq_region_id, ",
+		"e.seq_region_start AS exon_start, e.seq_region_end AS exon_end, ",
+		"e.seq_region_strand AS exon_strand, e.phase, e.end_phase, ",
+		"e.seq_region_end - e.seq_region_start + 1 AS exon_length ",
+		"FROM transcripts t JOIN query_table(core_schema || '.exon_transcript') et ",
+		"ON et.transcript_id = t.source_transcript_id ",
+		"JOIN query_table(core_schema || '.exon') e USING (exon_id)",
+		"), exons AS MATERIALIZED (",
+		"SELECT source_transcript_id, rank, source_exon_id, exon_stable_id, exon_start, ",
+		"exon_end, exon_strand, phase, end_phase, exon_length, ",
+		"CAST(sum(exon_length) OVER (PARTITION BY source_transcript_id ORDER BY rank ",
+		"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS UBIGINT) AS exon_cdna_end ",
+		"FROM exon_rows",
+		"), exons_with_cdna AS MATERIALIZED (",
+		"SELECT *, CAST(exon_cdna_end - exon_length + 1 AS UBIGINT) AS exon_cdna_start FROM exons",
+		"), exon_lists AS MATERIALIZED (",
+		"SELECT source_transcript_id, list(struct_pack(",
+		"rank := CAST(rank AS UINTEGER), exon_start := CAST(exon_start AS UBIGINT), ",
+		"exon_end := CAST(exon_end AS UBIGINT), exon_cdna_start := exon_cdna_start, ",
+		"exon_cdna_end := exon_cdna_end, phase := CAST(phase AS TINYINT), ",
+		"end_phase := CAST(end_phase AS TINYINT), source_exon_id := source_exon_id, ",
+		"exon_stable_id := exon_stable_id) ORDER BY rank) AS exons ",
+		"FROM exons_with_cdna GROUP BY source_transcript_id",
+		"), translation_geometry AS MATERIALIZED (",
+		"SELECT tf.*, sm.rank AS start_exon_rank, sm.exon_start AS start_exon_start, ",
+		"sm.exon_end AS start_exon_end, sm.exon_cdna_start AS start_exon_cdna_start, ",
+		"sm.phase AS start_phase, em.rank AS end_exon_rank, em.exon_start AS end_exon_start, ",
+		"em.exon_end AS end_exon_end, em.exon_cdna_start AS end_exon_cdna_start, ",
+		"CASE WHEN tf.source_translation_id IS NULL THEN NULL ",
+		"WHEN tf.strand = 1 THEN sm.exon_start + tf.seq_start - 1 ",
+		"ELSE em.exon_end - tf.seq_end + 1 END AS cds_start_raw, ",
+		"CASE WHEN tf.source_translation_id IS NULL THEN NULL ",
+		"WHEN tf.strand = 1 THEN em.exon_start + tf.seq_end - 1 ",
+		"ELSE sm.exon_end - tf.seq_start + 1 END AS cds_end_raw, ",
+		"CASE WHEN tf.source_translation_id IS NULL THEN NULL ",
+		"ELSE sm.exon_cdna_start + tf.seq_start - 1 END AS cds_cdna_start, ",
+		"CASE WHEN tf.source_translation_id IS NULL THEN NULL ",
+		"ELSE em.exon_cdna_start + tf.seq_end - 1 END AS cds_cdna_end ",
+		"FROM transcript_facts tf LEFT JOIN exons_with_cdna sm ",
+		"ON sm.source_transcript_id = tf.source_transcript_id AND sm.source_exon_id = tf.start_exon_id ",
+		"LEFT JOIN exons_with_cdna em ",
+		"ON em.source_transcript_id = tf.source_transcript_id AND em.source_exon_id = tf.end_exon_id",
+		"), reference_rows AS MATERIALIZED (",
+		"SELECT CAST(chrom AS VARCHAR) AS chrom, CAST(\"start\" AS BIGINT) AS start0, ",
+		"CAST(\"end\" AS BIGINT) AS end0, upper(CAST(seq AS VARCHAR)) AS seq ",
+		"FROM query_table(reference_chunks_table)",
+		"), needed_exons AS MATERIALIZED (",
+		"SELECT DISTINCT e.source_exon_id, e.exon_start - 1 AS exon_start0, ",
+		"e.exon_end AS exon_end0, e.exon_strand, tf.seq_region_name ",
+		"FROM exons_with_cdna e JOIN transcript_facts tf USING (source_transcript_id) ",
+		"WHERE tf.source_translation_id IS NOT NULL AND tf.attribute_withheld_reason IS NULL",
+		"), exon_pieces AS MATERIALIZED (",
+		"SELECT ne.source_exon_id, r.start0 AS chunk_start, ",
+		"substring(r.seq, CAST(greatest(ne.exon_start0, r.start0) - r.start0 + 1 AS BIGINT), ",
+		"CAST(least(ne.exon_end0, r.end0) - greatest(ne.exon_start0, r.start0) AS BIGINT)) AS piece ",
+		"FROM needed_exons ne JOIN reference_rows r ON r.chrom = ne.seq_region_name ",
+		"AND r.start0 < ne.exon_end0 AND r.end0 > ne.exon_start0",
+		"), genomic_exon_sequences AS MATERIALIZED (",
+		"SELECT source_exon_id, string_agg(piece, '' ORDER BY chunk_start) AS genomic_sequence ",
+		"FROM exon_pieces GROUP BY source_exon_id",
+		"), exon_sequences AS MATERIALIZED (",
+		"SELECT ne.source_exon_id, ",
+		"CASE WHEN ne.exon_strand = 1 THEN ges.genomic_sequence ",
+		"ELSE seq_revcomp(ges.genomic_sequence) END AS transcript_sequence, ",
+		"ne.exon_end0 - ne.exon_start0 AS expected_length ",
+		"FROM needed_exons ne LEFT JOIN genomic_exon_sequences ges USING (source_exon_id)",
+		"), transcript_sequences AS MATERIALIZED (",
+		"SELECT e.source_transcript_id, string_agg(es.transcript_sequence, '' ORDER BY e.rank) AS cdna_sequence, ",
+		"sum(e.exon_length) AS expected_length ",
+		"FROM exons_with_cdna e JOIN transcript_facts tf USING (source_transcript_id) ",
+		"JOIN exon_sequences es USING (source_exon_id) ",
+		"WHERE tf.source_translation_id IS NOT NULL AND tf.attribute_withheld_reason IS NULL ",
+		"GROUP BY e.source_transcript_id",
+		"), prepared AS MATERIALIZED (",
+		"SELECT tg.*, el.exons, ts.cdna_sequence, ",
+		"CASE WHEN tg.source_translation_id IS NULL OR tg.attribute_withheld_reason IS NOT NULL THEN NULL ",
+		"ELSE repeat('N', greatest(tg.start_phase, 0)) || ",
+		"substring(ts.cdna_sequence, CAST(tg.cds_cdna_start AS BIGINT), ",
+		"CAST(tg.cds_cdna_end - tg.cds_cdna_start + 1 AS BIGINT)) END AS raw_cds_sequence, ",
+		"CASE WHEN tg.source_translation_id IS NULL OR tg.attribute_withheld_reason IS NOT NULL THEN NULL ",
+		"ELSE substring(ts.cdna_sequence, CAST(tg.cds_cdna_end + 1 AS BIGINT), 3) END AS raw_post_cds_bases ",
+		"FROM translation_geometry tg JOIN exon_lists el USING (source_transcript_id) ",
+		"LEFT JOIN transcript_sequences ts USING (source_transcript_id)",
+		"), validation AS MATERIALIZED (",
+		"SELECT CASE ",
+		"WHEN (SELECT count(*) FROM eligible_transcripts) = 0 THEN ",
+		"error('duckvep_ensembl_transcripts: no current transcript lies on the supplied reference') ",
+		"WHEN (SELECT count(*) FROM eligible_transcripts) != (SELECT count(*) FROM source_transcripts) THEN ",
+		"error('duckvep_ensembl_transcripts: a current transcript has no matching gene') ",
+		"WHEN EXISTS (SELECT source_transcript_id FROM translations GROUP BY source_transcript_id HAVING count(*) > 1) THEN ",
+		"error('duckvep_ensembl_transcripts: a transcript has more than one translation') ",
+		"WHEN (SELECT count(*) FROM transcripts) > 4294967295 THEN ",
+		"error('duckvep_ensembl_transcripts: transcript count exceeds the resident model index range') ",
+		"WHEN EXISTS (SELECT 1 FROM transcripts WHERE transcript_start < 1 OR transcript_end < transcript_start ",
+		"OR transcript_end > sequence_length OR strand NOT IN (-1, 1)) THEN ",
+		"error('duckvep_ensembl_transcripts: transcript coordinates or strand are invalid') ",
+		"WHEN EXISTS (SELECT 1 FROM exon_rows WHERE exon_start < transcript_start ",
+		"OR exon_end > transcript_end OR exon_start > exon_end OR exon_seq_region_id != source_seq_region_id ",
+		"OR exon_strand != strand OR phase NOT IN (-1,0,1,2) OR end_phase NOT IN (-1,0,1,2)) THEN ",
+		"error('duckvep_ensembl_transcripts: exon coordinates, strand, or phase are invalid') ",
+		"WHEN EXISTS (SELECT source_transcript_id FROM exon_rows GROUP BY source_transcript_id ",
+		"HAVING min(rank) != 1 OR max(rank) != count(*) OR count(DISTINCT rank) != count(*)) THEN ",
+		"error('duckvep_ensembl_transcripts: exon ranks must be contiguous and unique from one') ",
+		"WHEN (SELECT count(DISTINCT source_transcript_id) FROM exon_rows) != (SELECT count(*) FROM transcripts) THEN ",
+		"error('duckvep_ensembl_transcripts: every transcript must have at least one exon') ",
+		"WHEN EXISTS (SELECT 1 FROM translation_geometry WHERE source_translation_id IS NOT NULL AND ",
+		"(start_exon_rank IS NULL OR end_exon_rank IS NULL OR start_exon_rank > end_exon_rank ",
+		"OR seq_start < 1 OR seq_end < 1 OR seq_start > start_exon_end - start_exon_start + 1 ",
+		"OR seq_end > end_exon_end - end_exon_start + 1)) THEN ",
+		"error('duckvep_ensembl_transcripts: translation boundaries do not project into ranked exons') ",
+		"WHEN EXISTS (SELECT 1 FROM exon_sequences WHERE transcript_sequence IS NULL ",
+		"OR length(transcript_sequence) != expected_length) THEN ",
+		"error('duckvep_ensembl_transcripts: reference chunks do not reconstruct an exon exactly') ",
+		"WHEN EXISTS (SELECT 1 FROM transcript_sequences WHERE cdna_sequence IS NULL ",
+		"OR length(cdna_sequence) != expected_length) THEN ",
+		"error('duckvep_ensembl_transcripts: reference chunks do not reconstruct a transcript exactly') ",
+		"ELSE true END AS valid",
+		") SELECT p.transcript_index, p.seq_region, CAST(p.transcript_start AS UBIGINT) AS transcript_start, ",
+		"CAST(p.transcript_end AS UBIGINT) AS transcript_end, CAST(p.strand AS TINYINT) AS strand, ",
+		"p.gene_index, p.transcript_flags, CAST(p.cds_start_raw AS UBIGINT) AS cds_start, ",
+		"CAST(p.cds_end_raw AS UBIGINT) AS cds_end, ",
+		"CASE WHEN p.raw_cds_sequence IS NULL OR NOT regexp_full_match(p.raw_cds_sequence, '[ACGTN]+') ",
+		"THEN NULL::BLOB ELSE CAST(p.raw_cds_sequence AS BLOB) END AS cds_sequence, ",
+		"CASE WHEN p.raw_cds_sequence IS NULL OR NOT regexp_full_match(p.raw_cds_sequence, '[ACGTN]+') ",
+		"THEN NULL::UTINYINT WHEN p.seq_region_name IN ('MT','M','chrM','chrMT') ",
+		"THEN 2::UTINYINT ELSE 1::UTINYINT END AS codon_table, ",
+		"CASE WHEN p.raw_cds_sequence IS NULL OR NOT regexp_full_match(p.raw_cds_sequence, '[ACGTN]+') ",
+		"OR NOT regexp_full_match(p.raw_post_cds_bases, '[ACGTN]{0,3}') THEN NULL::BLOB ",
+		"ELSE CAST(p.raw_post_cds_bases AS BLOB) END AS post_cds_bases, ",
+		"p.seq_region_name, p.sequence_length, p.source_seq_region_id, p.source_transcript_id, ",
+		"p.transcript_stable_id, p.transcript_version, p.transcript_biotype, ",
+		"p.source_gene_id, p.gene_stable_id, p.gene_version, p.gene_biotype, ",
+		"p.source_translation_id, p.translation_stable_id, p.translation_version, ",
+		"coalesce(p.attribute_withheld_reason, CASE WHEN p.raw_cds_sequence IS NOT NULL ",
+		"AND NOT regexp_full_match(p.raw_cds_sequence, '[ACGTN]+') ",
+		"THEN 'unsupported_reference_base' END) AS sequence_withheld_reason, ",
+		"p.exons FROM prepared p CROSS JOIN validation WHERE validation.valid ORDER BY p.transcript_index"
+	};
+
+	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+}
+
+static bool
+duckvep_register_model_receipt(duckdb_connection connection)
+{
+	static const char *const sql[] = {
+		"CREATE OR REPLACE MACRO duckvep_model_receipt(regions_table, transcripts_table, source_name, source_version, ",
+		"assembly, source_manifest_sha256, reference_sha256, transcript_filter) AS TABLE ",
+		"WITH regions AS MATERIALIZED (SELECT * FROM query_table(regions_table)), ",
+		"model AS MATERIALIZED (SELECT * FROM query_table(transcripts_table)), ",
+		"validation AS MATERIALIZED (SELECT CASE ",
+		"WHEN source_name IS NULL OR source_name = '' OR source_version IS NULL OR source_version = '' ",
+		"OR assembly IS NULL OR assembly = '' OR transcript_filter IS NULL OR transcript_filter = '' THEN ",
+		"error('duckvep_model_receipt: source, version, assembly, and transcript filter are required') ",
+		"WHEN source_manifest_sha256 IS NULL OR reference_sha256 IS NULL ",
+		"OR NOT regexp_full_match(lower(source_manifest_sha256), '[0-9a-f]{64}') ",
+		"OR NOT regexp_full_match(lower(reference_sha256), '[0-9a-f]{64}') THEN ",
+		"error('duckvep_model_receipt: source and reference SHA-256 values must contain 64 hexadecimal digits') ",
+		"WHEN (SELECT count(*) FROM regions) = 0 OR (SELECT count(*) FROM model) = 0 THEN ",
+		"error('duckvep_model_receipt: region and transcript tables must be non-empty') ",
+		"WHEN (SELECT count(DISTINCT seq_region) FROM regions) != (SELECT count(*) FROM regions) ",
+		"OR (SELECT min(seq_region) FROM regions) != 0 ",
+		"OR (SELECT max(seq_region) FROM regions) != (SELECT count(*) - 1 FROM regions) THEN ",
+		"error('duckvep_model_receipt: sequence-region indexes must be dense and unique from zero') ",
+		"WHEN (SELECT count(DISTINCT transcript_index) FROM model) != (SELECT count(*) FROM model) ",
+		"OR (SELECT min(transcript_index) FROM model) != 0 ",
+		"OR (SELECT max(transcript_index) FROM model) != (SELECT count(*) - 1 FROM model) THEN ",
+		"error('duckvep_model_receipt: transcript indexes must be dense and unique from zero') ",
+		"WHEN EXISTS (SELECT 1 FROM model WHERE exons IS NULL OR length(exons) = 0) THEN ",
+		"error('duckvep_model_receipt: every transcript must retain its exon projection') ",
+		"WHEN EXISTS (SELECT 1 FROM model m LEFT JOIN regions r USING (seq_region) ",
+		"WHERE r.seq_region IS NULL OR r.sequence_length != m.sequence_length ",
+		"OR r.seq_region_name != m.seq_region_name) THEN ",
+		"error('duckvep_model_receipt: transcript and sequence-region mappings disagree') ",
+		"ELSE true END AS valid), ",
+		"region_fingerprint AS MATERIALIZED (SELECT sha256(string_agg(sha256(CAST(struct_pack(",
+		"seq_region := seq_region, seq_region_name := seq_region_name, sequence_length := sequence_length, ",
+		"source_seq_region_id := source_seq_region_id, source_coord_system_id := source_coord_system_id, ",
+		"coord_system_name := coord_system_name, coord_system_rank := coord_system_rank) AS VARCHAR)), ",
+		"'' ORDER BY seq_region)) AS region_sha256 FROM regions), ",
+		"row_hashes AS MATERIALIZED (SELECT transcript_index, sha256(CAST(struct_pack(",
+		"transcript_index := transcript_index, seq_region := seq_region, transcript_start := transcript_start, ",
+		"transcript_end := transcript_end, strand := strand, gene_index := gene_index, ",
+		"transcript_flags := transcript_flags, cds_start := cds_start, cds_end := cds_end, ",
+		"cds_sequence := cds_sequence, codon_table := codon_table, post_cds_bases := post_cds_bases, ",
+		"seq_region_name := seq_region_name, sequence_length := sequence_length, ",
+		"source_seq_region_id := source_seq_region_id, source_transcript_id := source_transcript_id, ",
+		"transcript_stable_id := transcript_stable_id, transcript_version := transcript_version, ",
+		"transcript_biotype := transcript_biotype, source_gene_id := source_gene_id, ",
+		"gene_stable_id := gene_stable_id, gene_version := gene_version, gene_biotype := gene_biotype, ",
+		"source_translation_id := source_translation_id, translation_stable_id := translation_stable_id, ",
+		"translation_version := translation_version, sequence_withheld_reason := sequence_withheld_reason, ",
+		"exons := exons) AS VARCHAR)) AS row_hash FROM model), ",
+		"hash_blocks AS MATERIALIZED (SELECT transcript_index // 4096 AS block_index, ",
+		"sha256(string_agg(row_hash, '' ORDER BY transcript_index)) AS block_hash ",
+		"FROM row_hashes GROUP BY block_index), ",
+		"transcript_fingerprint AS MATERIALIZED (SELECT sha256(string_agg(block_hash, '' ",
+		"ORDER BY block_index)) AS transcript_sha256 ",
+		"FROM hash_blocks), provenance_fingerprint AS MATERIALIZED (SELECT sha256(CAST(struct_pack(",
+		"source_name := source_name, source_version := source_version, assembly := assembly, ",
+		"source_manifest_sha256 := lower(source_manifest_sha256), ",
+		"reference_sha256 := lower(reference_sha256), transcript_filter := transcript_filter) ",
+		"AS VARCHAR)) AS provenance_sha256), ",
+		"fingerprint AS MATERIALIZED (SELECT sha256(provenance_sha256 || region_sha256 || ",
+		"transcript_sha256) AS model_sha256 FROM provenance_fingerprint ",
+		"CROSS JOIN region_fingerprint CROSS JOIN transcript_fingerprint), ",
+		"summary AS MATERIALIZED (SELECT count(*) AS transcript_count, count(DISTINCT gene_index) AS gene_count, ",
+		"count(*) FILTER (WHERE cds_start IS NOT NULL) AS coding_transcript_count, ",
+		"count(*) FILTER (WHERE cds_sequence IS NOT NULL) AS sequence_backed_transcript_count, ",
+		"count(*) FILTER (WHERE sequence_withheld_reason IS NOT NULL) AS sequence_withheld_transcript_count, ",
+		"sum(length(exons)) AS exon_membership_count, ",
+		"sum(coalesce(octet_length(cds_sequence), 0)) AS cds_base_count FROM model) ",
+		"SELECT source_name, source_version, assembly, lower(source_manifest_sha256) AS source_manifest_sha256, ",
+		"lower(reference_sha256) AS reference_sha256, transcript_filter, fingerprint.model_sha256, ",
+		"(SELECT count(*) FROM regions) AS region_count, ",
+		"(SELECT sum(sequence_length) FROM regions) AS reference_base_count, ",
+		"summary.transcript_count, summary.gene_count, ",
+		"summary.coding_transcript_count, summary.sequence_backed_transcript_count, ",
+		"summary.sequence_withheld_transcript_count, summary.exon_membership_count, summary.cds_base_count ",
+		"FROM summary CROSS JOIN fingerprint CROSS JOIN validation WHERE validation.valid"
+	};
+
+	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+}
+
+bool
+register_duckvep_ensembl_functions(duckdb_connection connection)
+{
+	return duckvep_register_ensembl_regions(connection) &&
+	    duckvep_register_ensembl_transcripts(connection) &&
+	    duckvep_register_model_receipt(connection);
+}

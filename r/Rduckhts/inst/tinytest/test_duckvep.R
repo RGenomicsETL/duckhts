@@ -6,6 +6,142 @@ con <- dbConnect(
 )
 expect_silent(rduckhts_load(con))
 
+ensembl_fixture_sql <- c(
+  "CREATE SCHEMA duckvep_r_core",
+  paste(
+    "CREATE TABLE duckvep_r_reference AS SELECT '1'::VARCHAR AS chrom,",
+    "0::BIGINT AS \"start\", 12::BIGINT AS \"end\",",
+    "'ATGAAATAACCC'::VARCHAR seq"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.coord_system AS SELECT",
+    "1::BIGINT AS coord_system_id, 1::BIGINT AS species_id,",
+    "'chromosome'::VARCHAR AS name, 'GRCh38'::VARCHAR AS version,",
+    "1::BIGINT AS rank"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.seq_region AS SELECT",
+    "1::BIGINT AS seq_region_id, '1'::VARCHAR AS name,",
+    "1::BIGINT AS coord_system_id, 12::BIGINT AS length"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.gene AS SELECT 1::BIGINT AS gene_id,",
+    "'protein_coding'::VARCHAR AS biotype, 1::BIGINT AS is_current,",
+    "'ENSG_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.transcript AS SELECT",
+    "1::BIGINT AS transcript_id, 1::BIGINT AS gene_id,",
+    "1::BIGINT AS seq_region_id, 1::BIGINT AS seq_region_start,",
+    "12::BIGINT AS seq_region_end, 1::BIGINT AS seq_region_strand,",
+    "'protein_coding'::VARCHAR AS biotype, 1::BIGINT AS is_current,",
+    "'ENST_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.exon AS SELECT 1::BIGINT AS exon_id,",
+    "1::BIGINT AS seq_region_id, 1::BIGINT AS seq_region_start,",
+    "12::BIGINT AS seq_region_end, 1::BIGINT AS seq_region_strand,",
+    "-1::BIGINT AS phase, 0::BIGINT AS end_phase,",
+    "1::BIGINT AS is_current, 'ENSE_R_TEST'::VARCHAR AS stable_id"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.exon_transcript AS SELECT",
+    "1::BIGINT AS exon_id, 1::BIGINT AS transcript_id, 1::BIGINT AS rank"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.translation AS SELECT",
+    "1::BIGINT AS translation_id, 1::BIGINT AS transcript_id,",
+    "1::BIGINT AS seq_start, 1::BIGINT AS start_exon_id,",
+    "9::BIGINT AS seq_end, 1::BIGINT AS end_exon_id,",
+    "'ENSP_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.attrib_type AS SELECT",
+    "NULL::BIGINT AS attrib_type_id, NULL::VARCHAR AS code WHERE false"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.transcript_attrib AS SELECT",
+    "NULL::BIGINT AS transcript_id, NULL::BIGINT AS attrib_type_id,",
+    "NULL::VARCHAR AS value WHERE false"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_core.translation_attrib AS SELECT",
+    "NULL::BIGINT AS translation_id, NULL::BIGINT AS attrib_type_id,",
+    "NULL::VARCHAR AS value WHERE false"
+  )
+)
+for (sql in ensembl_fixture_sql) {
+  dbExecute(con, sql)
+}
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_ensembl_regions AS SELECT * FROM",
+    "duckvep_ensembl_regions(",
+    "'duckvep_r_core', 'duckvep_r_reference', 'GRCh38')"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_ensembl_transcripts AS SELECT * FROM",
+    "duckvep_ensembl_transcripts(",
+    "'duckvep_r_core', 'duckvep_r_reference', 'GRCh38')"
+  )
+)
+ensembl_model <- dbGetQuery(
+  con,
+  paste(
+    "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
+    "CAST(post_cds_bases AS VARCHAR) post_cds_bases,",
+    "transcript_flags, exons[1].phase phase",
+    "FROM duckvep_r_ensembl_transcripts"
+  )
+)
+expect_identical(ensembl_model$cds_sequence, "ATGAAATAA")
+expect_identical(ensembl_model$post_cds_bases, "CCC")
+expect_equal(ensembl_model$transcript_flags, 3)
+expect_equal(ensembl_model$phase, -1)
+ensembl_receipt <- dbGetQuery(
+  con,
+  paste(
+    "SELECT * FROM duckvep_model_receipt(",
+    "'duckvep_r_ensembl_regions', 'duckvep_r_ensembl_transcripts',",
+    "'Ensembl', '116', 'GRCh38', repeat('a', 64), repeat('b', 64),",
+    "'all current transcripts on FASTA-covered assembly regions')"
+  )
+)
+expect_equal(ensembl_receipt$region_count, 1)
+expect_equal(ensembl_receipt$reference_base_count, 12)
+expect_equal(ensembl_receipt$transcript_count, 1)
+expect_equal(nchar(ensembl_receipt$model_sha256), 64)
+
+dbExecute(
+  con,
+  "INSERT INTO duckvep_r_core.attrib_type VALUES (1, '_rna_edit')"
+)
+dbExecute(
+  con,
+  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (1, 1, '4 5 A')"
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_ensembl_rna_edit AS SELECT * FROM",
+    "duckvep_ensembl_transcripts(",
+    "'duckvep_r_core', 'duckvep_r_reference', 'GRCh38')"
+  )
+)
+ensembl_rna_edit <- dbGetQuery(
+  con,
+  paste(
+    "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
+    "sequence_withheld_reason FROM duckvep_r_ensembl_rna_edit"
+  )
+)
+expect_true(is.na(ensembl_rna_edit$cds_sequence))
+expect_identical(ensembl_rna_edit$sequence_withheld_reason, "rna_edit")
+
 dbExecute(
   con,
   "CREATE TABLE duckvep_r_regions AS SELECT 1::UINTEGER AS seq_region"
