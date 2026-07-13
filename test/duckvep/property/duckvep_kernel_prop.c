@@ -2357,6 +2357,14 @@ TEST effect_rule_table_known_pre_bits(void) {
               duckvep_effect_eval(DUCKVEP_PRE(DUCKVEP_PRE_CDS) |
                                   DUCKVEP_PRE(DUCKVEP_PRE_DELTA) |
                                   DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION)));
+    /* VEP coding_unknown does not exclude inframe_insertion. A terminal insertion
+     * whose local peptide ends in X therefore emits both terms. */
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE) |
+              DUCKVEP_SO(DUCKVEP_SO_INFRAME_INSERTION),
+              duckvep_effect_eval(DUCKVEP_PRE(DUCKVEP_PRE_CDS) |
+                                  DUCKVEP_PRE(DUCKVEP_PRE_DELTA) |
+                                  DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN) |
+                                  DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION)));
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_PROTEIN_ALTERING),
               duckvep_effect_eval(DUCKVEP_PRE(DUCKVEP_PRE_CDS) |
                                   DUCKVEP_PRE(DUCKVEP_PRE_DELTA) |
@@ -10400,6 +10408,7 @@ static int kprop_delta_is_frameshift_at(const duckvep_sequence_delta_t *d,
            !d->synonymous && !d->missense && !d->stop_gained && !d->stop_lost &&
            !d->stop_retained && !d->start_lost && !d->start_retained &&
            !d->inframe_deletion && !d->inframe_insertion && !d->protein_altering &&
+           !d->coding_unknown &&
            d->cdna_pos == -1 && d->cds_pos == -1 && d->protein_pos == protein_pos &&
            d->ref_aa == (uint8_t)0u && d->alt_aa == (uint8_t)0u;
 }
@@ -10809,6 +10818,7 @@ static int kprop_sequence_delta_equal(const duckvep_sequence_delta_t *a,
            a->inframe_deletion == b->inframe_deletion &&
            a->inframe_insertion == b->inframe_insertion &&
            a->protein_altering == b->protein_altering &&
+           a->coding_unknown == b->coding_unknown &&
            a->valid == b->valid;
 }
 
@@ -10817,7 +10827,7 @@ static int kprop_delta_is_coarse_cross_codon_missense(const duckvep_sequence_del
            !d->stop_gained && !d->stop_lost && !d->stop_retained &&
            !d->start_lost && !d->start_retained && !d->frameshift &&
            !d->inframe_deletion &&
-           !d->inframe_insertion && !d->protein_altering &&
+           !d->inframe_insertion && !d->protein_altering && !d->coding_unknown &&
            d->cdna_pos == -1 && d->cds_pos == -1 && d->protein_pos == -1 &&
            d->ref_aa == (uint8_t)0u && d->alt_aa == (uint8_t)0u;
 }
@@ -10828,7 +10838,7 @@ static int kprop_delta_is_inframe_deletion_at(const duckvep_sequence_delta_t *d,
            !d->synonymous && !d->missense && !d->stop_gained && !d->stop_lost &&
            !d->stop_retained && !d->start_lost && !d->start_retained &&
            !d->frameshift &&
-           !d->inframe_insertion && !d->protein_altering &&
+           !d->inframe_insertion && !d->protein_altering && !d->coding_unknown &&
            d->cdna_pos == -1 && d->cds_pos == -1 && d->protein_pos == protein_pos &&
            d->ref_aa == (uint8_t)0u && d->alt_aa == (uint8_t)0u;
 }
@@ -10839,7 +10849,7 @@ static int kprop_delta_is_inframe_insertion_at(const duckvep_sequence_delta_t *d
            !d->synonymous && !d->missense && !d->stop_gained && !d->stop_lost &&
            !d->stop_retained && !d->start_lost && !d->start_retained &&
            !d->frameshift &&
-           !d->inframe_deletion && !d->protein_altering &&
+           !d->inframe_deletion && !d->protein_altering && !d->coding_unknown &&
            d->cdna_pos == -1 && d->cds_pos == -1 && d->protein_pos == protein_pos &&
            d->ref_aa == (uint8_t)0u && d->alt_aa == (uint8_t)0u;
 }
@@ -11106,6 +11116,16 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
     static const uint8_t insert_start_retained_stop[9] = {
         'G','T','C', 'A','T','C', 'C','T','A'
     };
+    static const uint8_t terminal_insert_agc[3] = { 'A','G','C' };
+    static const uint8_t terminal_insert_aggt[4] = { 'A','G','G','T' };
+    static const uint8_t terminal_insert_stop_lost[11] = {
+        'C','G','A','T','G','T','T','A','T','G','A'
+    };
+    static const uint8_t terminal_before_taaa[4] = { 'T','A','A','A' };
+    static const uint8_t terminal_before_c[1] = { 'C' };
+    static const uint8_t terminal_before_stop_gained[6] = {
+        'A','A','A','T','A','A'
+    };
     static const int8_t strands[2] = { 1, -1 };
     size_t case_idx;
 
@@ -11213,10 +11233,105 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
         ASSERT(delta.valid && delta.stop_retained && delta.inframe_insertion &&
                !delta.stop_gained && !delta.stop_lost);
 
+        /* VEP's terminal-stop insertion predicates are deliberately not reducible
+         * to length modulo three. These are executable witnesses from the pinned
+         * VEP-116 state machine; see design/duckvep_errata.md. */
+        edit.cds_start = 11u;
+        edit.alt_len = sizeof terminal_insert_agc;
+        edit.alt = terminal_insert_agc;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && delta.stop_retained &&
+               !delta.frameshift && !delta.stop_lost && !delta.coding_unknown);
+
+        edit.alt_len = sizeof terminal_insert_aggt;
+        edit.alt = terminal_insert_aggt;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && delta.coding_unknown &&
+               !delta.frameshift && !delta.stop_lost && !delta.stop_retained);
+
+        edit.alt_len = sizeof terminal_insert_stop_lost;
+        edit.alt = terminal_insert_stop_lost;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && delta.stop_lost &&
+               !delta.frameshift && !delta.stop_retained && !delta.coding_unknown);
+
+        edit.cds_start = 10u;
+        edit.alt_len = sizeof terminal_before_taaa;
+        edit.alt = terminal_before_taaa;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && delta.stop_retained &&
+               !delta.frameshift && !delta.stop_gained);
+
+        edit.alt_len = sizeof terminal_before_c;
+        edit.alt = terminal_before_c;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.frameshift && !delta.inframe_insertion &&
+               !delta.stop_retained && !delta.stop_gained);
+
+        edit.alt_len = sizeof terminal_before_stop_gained;
+        edit.alt = terminal_before_stop_gained;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && delta.stop_gained &&
+               !delta.frameshift && !delta.stop_retained);
+
+        /* The coding context is transcript-oriented; the same predicate state
+         * must be independent of genomic strand. */
+        edit.cds_start = 11u;
+        edit.alt_len = sizeof terminal_insert_aggt;
+        edit.alt = terminal_insert_aggt;
+        edit.variant_strand = -1;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      terminal_cds, sizeof terminal_cds, &edit_set, -1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && delta.coding_unknown &&
+               !delta.frameshift && !delta.stop_lost && !delta.stop_retained);
+        edit.variant_strand = 1;
+
         /* Mid-codon insertion that PRESERVES the flanking residue is inframe_insertion, not
          * protein_altering and not a bail: GCC after CDS 5 makes codon 2 AAA->AAG (still Lys)
          * and inserts Pro, so the ref window is empty. VEP calls this inframe_insertion; the old
          * codon-boundary-only classifier bailed. protein_pos = (5/3)+1 = 2. */
+        edit.alt_len = sizeof insert_gcc;
         edit.alt = insert_gcc;
         edit.cds_start = 6u;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -12778,7 +12893,7 @@ static enum theft_trial_res prop_delta_scratch_mnv_matches_codon_oracle(struct t
     }
     if (delta.start_lost || delta.start_retained || delta.frameshift ||
         delta.inframe_deletion ||
-        delta.inframe_insertion || delta.protein_altering) {
+        delta.inframe_insertion || delta.protein_altering || delta.coding_unknown) {
         return THEFT_TRIAL_FAIL;
     }
     if (s->expect_region == KPROP_CONTEXT_DELTA_SYNONYMOUS) {
@@ -12889,7 +13004,7 @@ static enum theft_trial_res prop_delta_scratch_cross_codon_mnv_matches_oracle(
         direct.stop_retained != (uint8_t)f.stop_retained ||
         direct.start_lost || direct.start_retained || direct.frameshift ||
         direct.inframe_deletion ||
-        direct.inframe_insertion || direct.protein_altering) {
+        direct.inframe_insertion || direct.protein_altering || direct.coding_unknown) {
         return THEFT_TRIAL_FAIL;
     }
     /* The direct shape-specific filler only resolved the missense cross-codon window; the
