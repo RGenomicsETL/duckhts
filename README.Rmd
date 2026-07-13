@@ -61,6 +61,8 @@ DuckHTS brings sequencing alignments, variants, reference sequences, annotations
 
 It covers the sequencing side of the stack: raw/reference data access, annotation parsing, BGZF/tabix utilities, and building blocks for coverage, CNV, QC, and downstream export workflows.
 
+The project thesis and ownership boundaries are documented in [`ARCHITECTURE.md`](ARCHITECTURE.md). Current implementation contracts are indexed in [`design/README.md`](design/README.md); the DuckVEP transcript-model build and consequence-engine dataflow are described in [`design/duckvep.md`](design/duckvep.md).
+
 > **Part of a growing genomics stack in DuckDB.**
 > DuckHTS covers sequencing and reference-oriented formats. [PlinkingDuck](https://github.com/teaguesterling/plinking_duck) extends the same idea to PLINK genotype workflows and explicitly builds on DuckHTS for the sequencing side of the stack. See also its documentation: https://plinking-duck.readthedocs.io . Together, these tools are pushing DuckDB toward a broader genomics analysis environment built around portable file readers, SQL-native analytics, and composable local workflows. After all, most of Genomics File Formats are Tables/Arrays in disguise.
 

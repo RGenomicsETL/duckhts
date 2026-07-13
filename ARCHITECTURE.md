@@ -108,6 +108,9 @@ typed SQL relations above the deterministic engine. Rules should emit inspectabl
 and provenance, not only a final opaque classification. The C engine computes genomic
 facts; SQL composes the case-specific argument.
 
+The current transcript-model build, ownership, execution, and validation map is
+[`design/duckvep.md`](design/duckvep.md).
+
 ## Interface rules
 
 - Public names describe meaning, not implementation generations. Put format versions in
