@@ -22,6 +22,14 @@ mkdir -p "$PKG_DST"
 
 echo "==> Preparing test data in $DST"
 
+# ---- Pinned Ensembl model-build acceptance fixture ----
+DUCKVEP_FIXTURE_SRC="$DST/duckvep/ensembl_core"
+DUCKVEP_FIXTURE_DST="$PKG_DST/duckvep/ensembl_core"
+rm -rf "$DUCKVEP_FIXTURE_DST"
+mkdir -p "$DUCKVEP_FIXTURE_DST"
+cp -a "$DUCKVEP_FIXTURE_SRC/." "$DUCKVEP_FIXTURE_DST/"
+echo "  DuckVEP Ensembl core fixture"
+
 # ---- BAM (copy + index) ----
 cp "$SRC/range.bam" "$DST/range.bam"
 samtools index "$DST/range.bam"

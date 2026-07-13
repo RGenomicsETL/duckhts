@@ -57,12 +57,12 @@ ensembl_fixture_sql <- c(
   ),
   paste(
     "CREATE TABLE duckvep_r_core.attrib_type AS SELECT",
-    "NULL::BIGINT AS attrib_type_id, NULL::VARCHAR AS code WHERE false"
+    "1::BIGINT AS attrib_type_id, 'MANE_Select'::VARCHAR AS code"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.transcript_attrib AS SELECT",
-    "NULL::BIGINT AS transcript_id, NULL::BIGINT AS attrib_type_id,",
-    "NULL::VARCHAR AS value WHERE false"
+    "1::BIGINT AS transcript_id, 1::BIGINT AS attrib_type_id,",
+    "'NM_R_TEST.1'::VARCHAR AS value"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.translation_attrib AS SELECT",
@@ -94,13 +94,14 @@ ensembl_model <- dbGetQuery(
   paste(
     "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
     "CAST(post_cds_bases AS VARCHAR) post_cds_bases,",
-    "transcript_flags, exons[1].phase phase",
+    "transcript_flags, mane_select_refseq, exons[1].phase phase",
     "FROM duckvep_r_ensembl_transcripts"
   )
 )
 expect_identical(ensembl_model$cds_sequence, "ATGAAATAA")
 expect_identical(ensembl_model$post_cds_bases, "CCC")
-expect_equal(ensembl_model$transcript_flags, 3)
+expect_equal(ensembl_model$transcript_flags, 1027)
+expect_identical(ensembl_model$mane_select_refseq, "NM_R_TEST.1")
 expect_equal(ensembl_model$phase, -1)
 ensembl_receipt <- dbGetQuery(
   con,
@@ -115,14 +116,32 @@ expect_equal(ensembl_receipt$region_count, 1)
 expect_equal(ensembl_receipt$reference_base_count, 12)
 expect_equal(ensembl_receipt$transcript_count, 1)
 expect_equal(nchar(ensembl_receipt$model_sha256), 64)
+expect_identical(
+  names(ensembl_receipt)[1:6],
+  c(
+    "source_name",
+    "source_version",
+    "assembly",
+    "source_manifest_sha256",
+    "reference_sha256",
+    "transcript_filter"
+  )
+)
+expect_identical(ensembl_receipt$source_name, "Ensembl")
+expect_identical(ensembl_receipt$source_version, "116")
+expect_identical(ensembl_receipt$assembly, "GRCh38")
+expect_identical(
+  ensembl_receipt$transcript_filter,
+  "all current transcripts on FASTA-covered assembly regions"
+)
 
 dbExecute(
   con,
-  "INSERT INTO duckvep_r_core.attrib_type VALUES (1, '_rna_edit')"
+  "INSERT INTO duckvep_r_core.attrib_type VALUES (2, '_rna_edit')"
 )
 dbExecute(
   con,
-  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (1, 1, '4 5 A')"
+  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (1, 2, '4 5 A')"
 )
 dbExecute(
   con,
@@ -420,8 +439,211 @@ expect_identical(
   nmd$consequence,
   "intron_variant&NMD_transcript_variant"
 )
+
+fixture_root <- system.file(
+  "extdata",
+  "duckvep",
+  "ensembl_core",
+  package = "Rduckhts"
+)
+expect_true(nzchar(fixture_root))
+fixture_tables <- c(
+  "attrib_type",
+  "coord_system",
+  "exon",
+  "exon_transcript",
+  "gene",
+  "seq_region",
+  "transcript",
+  "transcript_attrib",
+  "translation",
+  "translation_attrib"
+)
+
+prepare_ensembl_fixture <- function(directory, assembly) {
+  fixture_dir <- file.path(fixture_root, directory)
+  schema <- paste0("duckvep_r_", directory, "_core")
+  reference <- paste0("duckvep_r_", directory, "_reference")
+  regions <- paste0("duckvep_r_", directory, "_regions")
+  transcripts <- paste0("duckvep_r_", directory, "_transcripts")
+  model <- paste0("r-ensembl-", directory)
+
+  dbExecute(con, paste("CREATE SCHEMA", schema))
+  for (table in fixture_tables) {
+    path <- normalizePath(
+      file.path(fixture_dir, paste0(table, ".parquet")),
+      mustWork = TRUE
+    )
+    dbExecute(
+      con,
+      paste0(
+        "CREATE VIEW ", schema, ".",
+        as.character(dbQuoteIdentifier(con, table)),
+        " AS SELECT * FROM read_parquet(",
+        as.character(dbQuoteString(con, path)),
+        ")"
+      )
+    )
+  }
+  reference_path <- normalizePath(
+    file.path(fixture_dir, "reference_chunks.parquet"),
+    mustWork = TRUE
+  )
+  dbExecute(
+    con,
+    paste0(
+      "CREATE VIEW ", reference, " AS SELECT * FROM read_parquet(",
+      as.character(dbQuoteString(con, reference_path)),
+      ")"
+    )
+  )
+  dbExecute(
+    con,
+    paste0(
+      "CREATE TABLE ", regions,
+      " AS SELECT * FROM duckvep_ensembl_regions(",
+      as.character(dbQuoteString(con, schema)), ", ",
+      as.character(dbQuoteString(con, reference)), ", ",
+      as.character(dbQuoteString(con, assembly)), ")"
+    )
+  )
+  dbExecute(
+    con,
+    paste0(
+      "CREATE TABLE ", transcripts,
+      " AS SELECT * FROM duckvep_ensembl_transcripts(",
+      as.character(dbQuoteString(con, schema)), ", ",
+      as.character(dbQuoteString(con, reference)), ", ",
+      as.character(dbQuoteString(con, assembly)), ")"
+    )
+  )
+  summary <- dbGetQuery(
+    con,
+    paste(
+      "SELECT count(*) transcript_count,",
+      "count(*) FILTER (WHERE cds_sequence IS NOT NULL) sequence_backed,",
+      "count(*) FILTER (WHERE sequence_withheld_reason IS NOT NULL) withheld,",
+      "sum(length(exons)) exon_memberships,",
+      "count(*) FILTER (WHERE mane_select_refseq IS NOT NULL) mane_count",
+      "FROM", transcripts
+    )
+  )
+  model_queries <- c(
+    paste(
+      "SELECT seq_region, sequence_length FROM", regions,
+      "ORDER BY seq_region"
+    ),
+    paste(
+      "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
+      "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence,",
+      "codon_table, post_cds_bases FROM", transcripts,
+      "ORDER BY seq_region, transcript_start, transcript_index"
+    ),
+    paste(
+      "SELECT transcript_index, exon.exon_start, exon.exon_end,",
+      "exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase",
+      "FROM", transcripts, ", LATERAL unnest(exons) AS u(exon)",
+      "ORDER BY transcript_index, exon.exon_cdna_start"
+    )
+  )
+  expect_true(load_model(model, model_queries, TRUE)$loaded)
+  list(
+    model = model,
+    transcripts = transcripts,
+    summary = summary
+  )
+}
+
+grch38_fixture <- prepare_ensembl_fixture("grch38", "GRCh38")
+grch37_fixture <- prepare_ensembl_fixture("grch37", "GRCh37")
+expect_equal(
+  unlist(grch38_fixture$summary[1, ], use.names = FALSE),
+  c(39, 1, 13, 40, 1)
+)
+expect_equal(
+  unlist(grch37_fixture$summary[1, ], use.names = FALSE),
+  c(39, 2, 13, 48, 0)
+)
+
+grch38_mane <- dbGetQuery(
+  con,
+  paste(
+    "SELECT transcript_stable_id, mane_select_refseq FROM",
+    grch38_fixture$transcripts,
+    "WHERE mane_select_refseq IS NOT NULL"
+  )
+)
+expect_identical(grch38_mane$transcript_stable_id, "ENST00000715685")
+expect_identical(grch38_mane$mane_select_refseq, "NM_032790.4")
+
+grch38_coding <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_index, a.consequence, a.status, a.cds_position,",
+    "a.protein_position, a.reference_amino_acid, a.alternate_amino_acid",
+    "FROM unnest(duckvep_annotate(",
+    as.character(dbQuoteString(con, grch38_fixture$model)), ",",
+    "1::UINTEGER, 32522::UBIGINT, 'C', 'T', 0::UBIGINT)) u(a)"
+  )
+)
+expect_equal(grch38_coding$transcript_index, 38)
+expect_identical(grch38_coding$consequence, "missense_variant")
+expect_identical(grch38_coding$status, "supported")
+expect_equal(grch38_coding$cds_position, 4)
+expect_equal(grch38_coding$protein_position, 2)
+expect_identical(grch38_coding$reference_amino_acid, "H")
+expect_identical(grch38_coding$alternate_amino_acid, "Y")
+
+grch37_coding <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_index, a.consequence, a.status, a.cds_position,",
+    "a.protein_position, a.reference_amino_acid, a.alternate_amino_acid",
+    "FROM unnest(duckvep_annotate(",
+    as.character(dbQuoteString(con, grch37_fixture$model)), ",",
+    "1::UINTEGER, 9452::UBIGINT, 'T', 'C', 0::UBIGINT)) u(a)"
+  )
+)
+expect_equal(grch37_coding$transcript_index, 37)
+expect_identical(grch37_coding$consequence, "missense_variant")
+expect_identical(grch37_coding$status, "supported")
+expect_equal(grch37_coding$cds_position, 4)
+expect_equal(grch37_coding$protein_position, 2)
+expect_identical(grch37_coding$reference_amino_acid, "Y")
+expect_identical(grch37_coding$alternate_amino_acid, "H")
+
+fixture_mitochondrial <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_index, a.consequence, a.status, a.reason",
+    "FROM unnest(duckvep_annotate(",
+    as.character(dbQuoteString(con, grch38_fixture$model)), ",",
+    "0::UINTEGER, 3307::UBIGINT,",
+    "'A', 'C', 0::UBIGINT)) u(a)"
+  )
+)
+expect_equal(fixture_mitochondrial$transcript_index, 5)
+expect_identical(
+  fixture_mitochondrial$consequence,
+  "coding_sequence_variant"
+)
+expect_identical(fixture_mitochondrial$status, "unresolved")
+expect_identical(fixture_mitochondrial$reason, "missing_sequence")
+
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-complete') AS dropped")$dropped)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-ensembl-grch38') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-ensembl-grch37') AS dropped"
+  )$dropped
+)
 
 dbDisconnect(con, shutdown = TRUE)

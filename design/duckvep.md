@@ -98,6 +98,14 @@ The reference relation has `(chrom, start, end, seq)`, where `start` is zero-bas
 true)` output. A reduced FASTA deliberately builds a reduced model; the builder never
 silently fills absent contigs from another source.
 
+GRCh37 is a separate Ensembl source, not a coordinate option applied to the GRCh38
+genebuild. Release 116 publishes `homo_sapiens_core_116_37` on the GRCh37 archive; it uses
+the release-116 schema around the frozen release-75/GENCODE-19 annotation. It has GENCODE
+attributes but no MANE data, because MANE is defined only on GRCh38. A GRCh37 model must
+therefore use matching GRCh37 core relations and reference sequence and must not invent a
+MANE mapping. See https://grch37.ensembl.org/index.html and
+https://www.ensembl.org/info/genome/genebuild/mane.html.
+
 ### Region preparation
 
 `duckvep_ensembl_regions(...)`:
@@ -136,6 +144,12 @@ incomplete CDS ends, selenocysteine, stop readthrough, RNA or peptide edits, MAN
 GENCODE, CCDS, readthrough-transcript, and upstream-start state. An RNA edit on either the
 transcript or translation attribute path is the same exceptional state.
 
+For GRCh38 MANE attributes, the prepared DuckDB relation also retains the attribute value
+as `mane_select_refseq` or `mane_plus_clinical_refseq`. That value is the paired versioned
+RefSeq transcript accession. The builder rejects multiple or empty mappings for a MANE
+flag. Only the selection bits enter the resident C model; Ensembl/GENCODE and RefSeq
+identifiers stay in the cold relation for late SQL projection and future RefSeq HGVS.
+
 Reference-derived CDS bytes are withheld when Ensembl records an RNA edit,
 selenocysteine, stop readthrough, amino-acid substitution, or initial-methionine edit that
 the C kernel does not yet implement. The transcript, coordinates, flags, and an explicit
@@ -159,10 +173,26 @@ projections from them:
   codon table, and post-CDS bases; and
 - transcript ordinal plus each exon's genomic span, cDNA span, phase, and end phase.
 
+The `core_schema` argument names relations, not a transport. It can point at tables loaded
+from Ensembl's tab-separated MySQL dumps, or at a read-only MySQL catalog attached through
+DuckDB's `mysql` extension. Downloading, attaching, and staging stay outside the model
+builder so extension builds remain offline and the same validation runs for either source.
+The builder does not require a MySQL server once those relations and the matching reference
+chunks have been persisted.
+
 `duckvep_model_receipt(...)` checks dense ordinals and region/transcript agreement. It
 records the declared source, release, assembly, transcript filter, source-manifest hash,
 reference hash, model counts, and a deterministic hash over every prepared model field.
 There is no timestamp: identical declared inputs must produce the same receipt.
+
+The checked-in acceptance fixtures under `test/data/duckvep/ensembl_core/` are about 116
+KiB. The GRCh38 fixture contains complete release-116 MT and `HG2047_PATCH` source rows;
+it covers mitochondrial fail-closed edits, an ordinary multi-exon CDS, and the real
+`ENST00000715685` ↔ `NM_032790.4` MANE pair. The GRCh37 fixture contains MT and
+`GL000201.1`; it proves sequence-backed coding annotation from the archived GENCODE-19
+model and the absence of MANE mappings. The explicit staging script verifies both official
+dump manifests, assembled reference hashes, deterministic model receipts, and exact model
+counts before writing Parquet. Tests never contact Ensembl.
 
 `duckvep_model_load(...)` reads committed, non-temporary relations through a private
 connection, validates and narrows every value, builds the transcript interval index, and
