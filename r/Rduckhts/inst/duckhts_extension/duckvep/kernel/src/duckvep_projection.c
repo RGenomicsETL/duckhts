@@ -191,3 +191,84 @@ int duckvep_project_coding_base(
     *out = r;
     return 1;
 }
+
+int duckvep_project_event_to_cds(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                         *cds_start_out,
+    uint32_t                         *cds_end_out) {
+
+    duckvep_coding_projection_t projection;
+    uint32_t min_cds = UINT32_MAX;
+    uint32_t max_cds = 0u;
+    uint16_t i;
+
+    if (cds_start_out == NULL || cds_end_out == NULL) return 0;
+    *cds_start_out = 0u;
+    *cds_end_out = 0u;
+    if (transcripts == NULL || exons == NULL || event == NULL ||
+        tx_idx >= transcripts->transcript_count) {
+        return 0;
+    }
+    if (event->interbase) {
+        uint32_t boundary = event->insertion_boundary0;
+        uint32_t right = duckvep_event_right_flank1(event);
+        uint32_t projected_pos = event->start1;
+        uint32_t cds_boundary;
+
+        if (!duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                         projected_pos, &projection)) {
+            projected_pos = event->anchor_side ==
+                                (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT
+                              ? right
+                              : boundary;
+            if (projected_pos == 0u ||
+                !duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                             projected_pos, &projection)) {
+                return 0;
+            }
+        }
+        if (projected_pos == boundary) {
+            if (transcripts->strand[tx_idx] > 0) {
+                if (projection.cds_pos == UINT32_MAX) return 0;
+                cds_boundary = projection.cds_pos + 1u;
+            } else {
+                cds_boundary = projection.cds_pos;
+            }
+        } else if (projected_pos == right) {
+            if (transcripts->strand[tx_idx] > 0) {
+                cds_boundary = projection.cds_pos;
+            } else {
+                if (projection.cds_pos == UINT32_MAX) return 0;
+                cds_boundary = projection.cds_pos + 1u;
+            }
+        } else {
+            return 0;
+        }
+        if (cds_boundary == 0u) return 0;
+        *cds_start_out = cds_boundary;
+        *cds_end_out = cds_boundary;
+        return 1;
+    }
+
+    if (event->ref_diff_length == 0u) return 0;
+    for (i = 0u; i < event->ref_diff_length; i++) {
+        uint64_t genomic_pos = (uint64_t)event->start1 + (uint64_t)i;
+        if (genomic_pos > UINT32_MAX ||
+            !duckvep_project_coding_base(transcripts, exons, tx_idx,
+                                         (uint32_t)genomic_pos, &projection)) {
+            return 0;
+        }
+        if (projection.cds_pos < min_cds) min_cds = projection.cds_pos;
+        if (projection.cds_pos > max_cds) max_cds = projection.cds_pos;
+    }
+    if (min_cds == UINT32_MAX || max_cds < min_cds ||
+        max_cds - min_cds + 1u != (uint32_t)event->ref_diff_length) {
+        return 0;
+    }
+    *cds_start_out = min_cds;
+    *cds_end_out = max_cds;
+    return 1;
+}

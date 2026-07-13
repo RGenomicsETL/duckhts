@@ -706,9 +706,11 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
 {
 	duckdb_list_entry *lists;
-	duckdb_vector child, vectors[12];
+	duckdb_vector child, vectors[17];
 	uint32_t *transcript_indices, *gene_indices;
 	uint64_t *cdna_positions, *cds_positions, *protein_positions;
+	bool *nmd_escape_intronless, *nmd_escape_early_cds;
+	bool *nmd_escape_last_exon, *nmd_escape_penultimate_exon_end;
 	size_t output_count, source, row, column;
 
 	output_count = 0;
@@ -749,7 +751,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 		output_count += lists[row].length;
 	}
 	child = duckdb_list_vector_get_child(output);
-	for (column = 0; column < 12; column++)
+	for (column = 0; column < 17; column++)
 		vectors[column] = duckdb_struct_vector_get_child(child,
 		    (idx_t)column);
 	transcript_indices = duckdb_vector_get_data(vectors[0]);
@@ -757,6 +759,10 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	cdna_positions = duckdb_vector_get_data(vectors[7]);
 	cds_positions = duckdb_vector_get_data(vectors[8]);
 	protein_positions = duckdb_vector_get_data(vectors[9]);
+	nmd_escape_intronless = duckdb_vector_get_data(vectors[13]);
+	nmd_escape_early_cds = duckdb_vector_get_data(vectors[14]);
+	nmd_escape_last_exon = duckdb_vector_get_data(vectors[15]);
+	nmd_escape_penultimate_exon_end = duckdb_vector_get_data(vectors[16]);
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -790,7 +796,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			else
 				duckdb_vector_assign_string_element(vectors[6],
 				    (idx_t)output_count, "no_feature_in_loaded_model");
-			for (column = 7; column < 12; column++)
+			for (column = 7; column < 17; column++)
 				duckvep_scalar_set_null(vectors[column],
 				    (idx_t)output_count);
 			output_count++;
@@ -867,6 +873,48 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			} else {
 				duckvep_scalar_set_null(vectors[11],
 				    (idx_t)output_count);
+			}
+			switch ((duckvep_nmd_prediction_t)result->nmd_prediction) {
+			case DUCKVEP_NMD_PREDICTED_TRIGGERING:
+				duckdb_vector_assign_string_element(vectors[12],
+				    (idx_t)output_count, "triggering");
+				nmd_escape_intronless[output_count] = false;
+				nmd_escape_early_cds[output_count] = false;
+				nmd_escape_last_exon[output_count] = false;
+				nmd_escape_penultimate_exon_end[output_count] = false;
+				break;
+			case DUCKVEP_NMD_PREDICTED_ESCAPING:
+				duckdb_vector_assign_string_element(vectors[12],
+				    (idx_t)output_count, "escaping");
+				nmd_escape_intronless[output_count] =
+				    (result->nmd_escape_reasons &
+				    DUCKVEP_NMD_ESCAPE_INTRONLESS) != 0;
+				nmd_escape_early_cds[output_count] =
+				    (result->nmd_escape_reasons &
+				    DUCKVEP_NMD_ESCAPE_EARLY_CDS) != 0;
+				nmd_escape_last_exon[output_count] =
+				    (result->nmd_escape_reasons &
+				    DUCKVEP_NMD_ESCAPE_LAST_EXON) != 0;
+				nmd_escape_penultimate_exon_end[output_count] =
+				    (result->nmd_escape_reasons &
+				    DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END) != 0;
+				break;
+			case DUCKVEP_NMD_UNRESOLVED:
+				duckdb_vector_assign_string_element(vectors[12],
+				    (idx_t)output_count, "unresolved");
+				for (column = 13; column < 17; column++)
+					duckvep_scalar_set_null(vectors[column],
+					    (idx_t)output_count);
+				break;
+			case DUCKVEP_NMD_NOT_APPLICABLE:
+				for (column = 12; column < 17; column++)
+					duckvep_scalar_set_null(vectors[column],
+					    (idx_t)output_count);
+				break;
+			default:
+				duckvep_sql_set_error(error, error_size,
+				    "duckvep_annotate: invalid kernel NMD prediction");
+				return 0;
 			}
 		}
 	}
@@ -973,9 +1021,11 @@ duckvep_annotation_list_type(void)
 		"transcript_index", "gene_index", "consequence", "impact",
 		"region", "status", "reason", "cdna_position", "cds_position",
 		"protein_position", "reference_amino_acid",
-		"alternate_amino_acid"
+		"alternate_amino_acid", "nmd_prediction",
+		"nmd_escape_intronless", "nmd_escape_early_cds",
+		"nmd_escape_last_exon", "nmd_escape_penultimate_exon_end"
 	};
-	duckdb_logical_type types[12], structure, list;
+	duckdb_logical_type types[17], structure, list;
 	size_t index;
 
 	types[0] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
@@ -986,9 +1036,12 @@ duckvep_annotation_list_type(void)
 		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
 	types[10] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	types[11] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-	structure = duckdb_create_struct_type(types, names, 12);
+	types[12] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+	for (index = 13; index < 17; index++)
+		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+	structure = duckdb_create_struct_type(types, names, 17);
 	list = duckdb_create_list_type(structure);
-	for (index = 0; index < 12; index++)
+	for (index = 0; index < 17; index++)
 		duckdb_destroy_logical_type(&types[index]);
 	duckdb_destroy_logical_type(&structure);
 	return list;

@@ -1,6 +1,7 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- distinguish the existing VEP core `NMD_transcript_variant` biotype consequence from variant-induced nonsense-mediated-decay prediction. `duckvep_annotate(...)` now applies the pinned VEP Plugins release/116 NMD policy to stop-gained, frameshift, splice-donor, and splice-acceptor consequences, returning `triggering`, `escaping`, or explicit `unresolved` state plus independent intronless, early-CDS, last-exon, and penultimate-exon-end escape reasons. The standalone kernel ABI is 0.7.0; on the 64-bit release ABI the compact result remains 56 bytes by using former alignment padding
 - `read_bcf()` and `read_bcf_v2()` now recognize the `Format=...` CSQ schema
   spelling used by Ensembl variation release VCFs, exposing their consequence
   fields through the same typed `VEP_*` columns as ordinary VEP output

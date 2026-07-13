@@ -1,7 +1,109 @@
 /* duckvep_effect.c — VEP-shaped consequence evaluator. */
 #include "duckvep_effect.h"
 
+#include "duckvep_projection.h"
 #include "duckvep_so.h"
+
+void duckvep_nmd_predict(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint64_t                          consequence_mask,
+    duckvep_nmd_result_t             *out) {
+
+    const uint64_t eligible =
+        DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED) |
+        DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT) |
+        DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR) |
+        DUCKVEP_SO(DUCKVEP_SO_SPLICE_ACCEPTOR);
+    uint32_t exon_offset;
+    uint16_t exon_count;
+    uint32_t variant_end1;
+    uint32_t variant_cds_start;
+    uint32_t variant_cds_end;
+    uint8_t reasons = 0u;
+
+    if (out == NULL) return;
+    out->prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
+    out->escape_reasons = 0u;
+    if (transcripts == NULL || exons == NULL || event == NULL ||
+        (consequence_mask & eligible) == 0u) {
+        return;
+    }
+    if (tx_idx >= transcripts->transcript_count ||
+        transcripts->strand == NULL ||
+        transcripts->cds_start1 == NULL ||
+        transcripts->cds_end1 == NULL ||
+        transcripts->exon_offset == NULL ||
+        transcripts->exon_count == NULL ||
+        exons->start1 == NULL || exons->end1 == NULL) {
+        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+        return;
+    }
+    if (transcripts->cds_start1[tx_idx] == 0u ||
+        transcripts->cds_end1[tx_idx] == 0u) {
+        return;
+    }
+
+    /* NMD.pm returns no prediction unless TranscriptVariation has both CDS
+     * coordinates. Keep that absence explicit for splice-crossing events. */
+    if (!duckvep_project_event_to_cds(transcripts, exons, tx_idx, event,
+                                      &variant_cds_start, &variant_cds_end)) {
+        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+        return;
+    }
+    if (variant_cds_start == 0u || variant_cds_end < variant_cds_start) {
+        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+        return;
+    }
+    if (variant_cds_end <= 101u) {
+        reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_EARLY_CDS;
+    }
+
+    exon_offset = transcripts->exon_offset[tx_idx];
+    exon_count = transcripts->exon_count[tx_idx];
+    if (exon_count == 0u || exon_offset > exons->exon_count ||
+        (size_t)exon_count > exons->exon_count - exon_offset) {
+        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+        return;
+    }
+    if (exon_count == 1u) {
+        reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_INTRONLESS;
+    }
+
+    /* VEP's parser removes the ordinary VCF padding base before constructing
+     * the VariationFeature. event.end1 is the equivalent prepared endpoint. */
+    variant_end1 = event->end1;
+    {
+        size_t last = (size_t)exon_offset + (size_t)exon_count - 1u;
+        if (variant_end1 >= exons->start1[last] &&
+            variant_end1 <= exons->end1[last]) {
+            reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_LAST_EXON;
+        }
+    }
+    if (exon_count >= 2u) {
+        size_t penultimate = (size_t)exon_offset + (size_t)exon_count - 2u;
+        uint32_t lo;
+        uint32_t hi;
+
+        if (transcripts->strand[tx_idx] < 0) {
+            lo = exons->start1[penultimate];
+            hi = lo > UINT32_MAX - 51u ? UINT32_MAX : lo + 51u;
+        } else {
+            hi = exons->end1[penultimate];
+            lo = hi > 51u ? hi - 51u : 0u;
+        }
+        if (variant_end1 >= lo && variant_end1 <= hi) {
+            reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END;
+        }
+    }
+
+    out->escape_reasons = reasons;
+    out->prediction = reasons != 0u
+        ? (uint8_t)DUCKVEP_NMD_PREDICTED_ESCAPING
+        : (uint8_t)DUCKVEP_NMD_PREDICTED_TRIGGERING;
+}
 
 static void duckvep_effect_ctx_set_topology(
     const duckvep_transcript_model_t *transcripts,

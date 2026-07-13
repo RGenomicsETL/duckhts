@@ -440,6 +440,65 @@ expect_identical(
   "intron_variant&NMD_transcript_variant"
 )
 
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_nmd_prediction_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 498::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "100::UBIGINT cds_start, 498::UBIGINT cds_end,",
+    "('ATG' || repeat('CAA', 81) || 'TAA')::BLOB cds_sequence,",
+    "1::UTINYINT codon_table"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_nmd_prediction_exons AS SELECT * FROM (VALUES",
+    "(0::UINTEGER, 100::UBIGINT, 199::UBIGINT, 1::UBIGINT, 100::UBIGINT, 0::TINYINT, 1::TINYINT),",
+    "(0::UINTEGER, 300::UBIGINT, 399::UBIGINT, 101::UBIGINT, 200::UBIGINT, 1::TINYINT, 2::TINYINT),",
+    "(0::UINTEGER, 450::UBIGINT, 498::UBIGINT, 201::UBIGINT, 249::UBIGINT, 2::TINYINT, 0::TINYINT)",
+    ") t(transcript_index, exon_start, exon_end, exon_cdna_start,",
+    "exon_cdna_end, phase, end_phase)"
+  )
+)
+nmd_prediction_queries <- c(
+  queries[1],
+  paste(
+    "SELECT * FROM duckvep_r_nmd_prediction_transcripts",
+    "ORDER BY seq_region, transcript_start, transcript_index"
+  ),
+  paste(
+    "SELECT * FROM duckvep_r_nmd_prediction_exons",
+    "ORDER BY transcript_index, exon_cdna_start"
+  )
+)
+expect_true(load_model("r-nmd-prediction", nmd_prediction_queries)$loaded)
+nmd_prediction <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position) AS (VALUES",
+    "(1, 305::UBIGINT), (2, 350::UBIGINT))",
+    "SELECT ord, a.nmd_prediction, a.nmd_escape_intronless,",
+    "a.nmd_escape_early_cds, a.nmd_escape_last_exon,",
+    "a.nmd_escape_penultimate_exon_end FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-nmd-prediction', 1::UINTEGER, position, 'C', 'T', 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_identical(nmd_prediction$nmd_prediction, c("triggering", "escaping"))
+expect_identical(
+  nmd_prediction$nmd_escape_penultimate_exon_end,
+  c(FALSE, TRUE)
+)
+expect_true(
+  all(!nmd_prediction$nmd_escape_intronless) &&
+    all(!nmd_prediction$nmd_escape_early_cds) &&
+    all(!nmd_prediction$nmd_escape_last_exon)
+)
+
 fixture_root <- system.file(
   "extdata",
   "duckvep",
@@ -632,6 +691,12 @@ expect_identical(fixture_mitochondrial$reason, "missing_sequence")
 
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd') AS dropped")$dropped)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-nmd-prediction') AS dropped"
+  )$dropped
+)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-complete') AS dropped")$dropped)
 expect_true(
   dbGetQuery(

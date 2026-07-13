@@ -2456,6 +2456,118 @@ TEST nmd_transcript_predicate_known_scene(void) {
     PASS();
 }
 
+/* VEP Plugins release/116 NMD.pm is a separate prediction from the curated
+ * NMD transcript biotype. Pin its executable coordinate thresholds on both
+ * strands, including the source's inclusive 51-base penultimate-exon offset. */
+TEST variant_induced_nmd_prediction_known_scene(void) {
+    static uint16_t chrom[1] = {0u};
+    static uint32_t tstart[1] = {100u};
+    static uint32_t tend[1] = {599u};
+    static int8_t strand[1] = {1};
+    static uint64_t flags[1] = {0u};
+    static uint32_t exoff[1] = {0u};
+    static uint16_t excnt[1] = {3u};
+    static uint32_t cds_start[1] = {100u};
+    static uint32_t cds_end[1] = {599u};
+    static uint32_t exon_start[3] = {100u, 300u, 500u};
+    static uint32_t exon_end[3] = {199u, 399u, 599u};
+    static uint32_t cdna_start[3] = {1u, 101u, 201u};
+    static uint32_t cdna_end[3] = {100u, 200u, 300u};
+    static int8_t phase[3] = {0, 0, 0};
+    static uint32_t reverse_exon_start[3] = {500u, 300u, 100u};
+    static uint32_t reverse_exon_end[3] = {599u, 399u, 199u};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_event_t event;
+    duckvep_nmd_result_t nmd;
+    uint64_t stop_gained = DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED);
+
+    memset(&tx, 0, sizeof tx);
+    memset(&ex, 0, sizeof ex);
+    memset(&event, 0, sizeof event);
+    tx.chrom_id = chrom;
+    tx.start1 = tstart;
+    tx.end1 = tend;
+    tx.strand = strand;
+    tx.flags = flags;
+    tx.exon_offset = exoff;
+    tx.exon_count = excnt;
+    tx.cds_start1 = cds_start;
+    tx.cds_end1 = cds_end;
+    tx.transcript_count = 1u;
+    ex.start1 = exon_start;
+    ex.end1 = exon_end;
+    ex.cdna_start1 = cdna_start;
+    ex.cdna_end1 = cdna_end;
+    ex.phase = phase;
+    ex.end_phase = phase;
+    ex.exon_count = 3u;
+    event.ref_diff_length = 1u;
+
+    event.start1 = event.end1 = 320u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+    ASSERT_EQ(0u, nmd.escape_reasons);
+
+    event.start1 = event.end1 = 300u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_ESCAPING, nmd.prediction);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
+    event.start1 = event.end1 = 301u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+
+    event.start1 = event.end1 = 348u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
+              nmd.escape_reasons);
+    event.start1 = event.end1 = 347u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+
+    event.start1 = event.end1 = 500u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_LAST_EXON, nmd.escape_reasons);
+
+    excnt[0] = 1u;
+    exon_end[0] = 599u;
+    cdna_end[0] = 500u;
+    event.start1 = event.end1 = 300u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_INTRONLESS |
+              DUCKVEP_NMD_ESCAPE_LAST_EXON, nmd.escape_reasons);
+    excnt[0] = 3u;
+    exon_end[0] = 199u;
+    cdna_end[0] = 100u;
+
+    event.start1 = event.end1 = 320u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event,
+                        DUCKVEP_SO(DUCKVEP_SO_MISSENSE), &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_NOT_APPLICABLE, nmd.prediction);
+
+    tx.exon_offset = NULL;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
+    tx.exon_offset = exoff;
+
+    event.start1 = event.end1 = 250u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event,
+                        DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR), &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
+
+    strand[0] = -1;
+    ex.start1 = reverse_exon_start;
+    ex.end1 = reverse_exon_end;
+    event.start1 = event.end1 = 351u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
+              nmd.escape_reasons);
+    event.start1 = event.end1 = 352u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+    PASS();
+}
+
 /* VEP's tier machine is not severity ranking: a tier-1/2 match suppresses
  * later tiers, while every matching rule in the assigned tier co-emits. */
 TEST effect_rule_tiers_suppress_only_later_tiers(void) {
@@ -3840,6 +3952,9 @@ static int consequence_rows_equal(const duckvep_consequence_t *a,
            a->region_mask == b->region_mask &&
            a->flags == b->flags &&
            a->impact == b->impact &&
+           a->sequence_status == b->sequence_status &&
+           a->nmd_prediction == b->nmd_prediction &&
+           a->nmd_escape_reasons == b->nmd_escape_reasons &&
            a->cdna_pos == b->cdna_pos &&
            a->cds_pos == b->cds_pos &&
            a->protein_pos == b->protein_pos &&
@@ -9427,6 +9542,9 @@ static enum theft_trial_res prop_cds_edit_builder_matches_splice_oracle(struct t
     const struct kprop_coding *s = (const struct kprop_coding *)arg1;
     duckvep_haplotype_edit_t edit;
     duckvep_haplotype_result_t result;
+    duckvep_event_t event;
+    uint32_t projected_cds_start;
+    uint32_t projected_cds_end;
     uint8_t mutated[64];
     size_t mutated_len = 0u;
     enum theft_trial_res tr = THEFT_TRIAL_PASS;
@@ -9441,6 +9559,22 @@ static enum theft_trial_res prop_cds_edit_builder_matches_splice_oracle(struct t
                     s->vpos, s->vend, (unsigned)s->rlen, (unsigned)s->alen);
             return THEFT_TRIAL_FAIL;
         }
+    }
+    if (!duckvep_event_prepare_small(
+            s->vpos, s->v.allele_bytes + s->roff, s->rlen,
+            s->v.allele_bytes + s->aoff, s->alen, &event) ||
+        !duckvep_project_event_to_cds(&s->tx, &s->ex, 0u, &event,
+                                      &projected_cds_start,
+                                      &projected_cds_end) ||
+        projected_cds_start != edit.cds_start ||
+        projected_cds_end != edit.cds_start +
+            (edit.ref_len == 0u ? 0u : edit.ref_len - 1u)) {
+        fprintf(stderr,
+                "\n[cds-edit-builder fail] shared event projection disagrees shape=%u strand=%d edit=%u+%u projected=%u-%u\n",
+                (unsigned)s->expect_shape, (int)s->strand,
+                edit.cds_start, edit.ref_len, projected_cds_start,
+                projected_cds_end);
+        return THEFT_TRIAL_FAIL;
     }
     {
         duckvep_haplotype_status_t hst = duckvep_haplotype_apply_cds_edits(
@@ -14052,6 +14186,7 @@ int main(int argc, char **argv) {
     RUN_TEST(splice_ppt_exon_gate_scene);
     RUN_TEST(effect_rule_table_known_pre_bits);
     RUN_TEST(nmd_transcript_predicate_known_scene);
+    RUN_TEST(variant_induced_nmd_prediction_known_scene);
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
     RUN_TEST(event_length_delta_pre_bits_follow_trimmed_alleles);
     RUN_TEST(annotate_structural_known_scene);

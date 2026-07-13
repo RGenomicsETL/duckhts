@@ -221,8 +221,9 @@ coding_sequence_variant	unresolved	reference_mismatch
 
 # A protein coordinate is useful for a frameshift, but the compact row has no
 # scalar one-letter amino-acid pair. Absence is NULL, not an empty string.
-query TIII
-SELECT annotation.consequence,
+query TTIIII
+SELECT annotation.consequence, annotation.nmd_prediction,
+       annotation.nmd_escape_early_cds::INTEGER,
        (annotation.protein_position IS NOT NULL)::INTEGER,
        (annotation.reference_amino_acid IS NULL)::INTEGER,
        (annotation.alternate_amino_acid IS NULL)::INTEGER
@@ -230,7 +231,7 @@ FROM unnest(duckvep_annotate(
   'fixture', 1::UINTEGER, 124::UBIGINT, 'T', 'TC', 0::UBIGINT
 )) AS u(annotation);
 ----
-frameshift_variant	1	1	1
+frameshift_variant	escaping	1	1	1	1
 
 # VEP 116 places an insertion on the exon/CDS side of a boundary while its
 # splice predicates retain the interbase interval. These are fixed witnesses
@@ -330,6 +331,69 @@ FROM unnest(duckvep_annotate(
 ----
 intron_variant&NMD_transcript_variant
 
+# Variant-induced NMD is a separate VEP-116-plugin-compatible prediction. The
+# four booleans expose every escape rule instead of hiding the decision in text.
+statement ok
+CREATE TABLE duckvep_nmd_prediction_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  100::UBIGINT transcript_start,
+  498::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  3::UBIGINT transcript_flags,
+  100::UBIGINT cds_start,
+  498::UBIGINT cds_end,
+  ('ATG' || repeat('CAA', 81) || 'TAA')::BLOB cds_sequence,
+  1::UTINYINT codon_table;
+
+statement ok
+CREATE TABLE duckvep_nmd_prediction_exons AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 100::UBIGINT, 199::UBIGINT, 1::UBIGINT, 100::UBIGINT,
+   0::TINYINT, 1::TINYINT),
+  (0::UINTEGER, 300::UBIGINT, 399::UBIGINT, 101::UBIGINT, 200::UBIGINT,
+   1::TINYINT, 2::TINYINT),
+  (0::UINTEGER, 450::UBIGINT, 498::UBIGINT, 201::UBIGINT, 249::UBIGINT,
+   2::TINYINT, 0::TINYINT)
+) t(transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,
+    phase, end_phase);
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'nmd-prediction',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_nmd_prediction_transcripts ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_nmd_prediction_exons ORDER BY transcript_index, exon_cdna_start'
+);
+----
+1
+
+query ITTIIII
+WITH variants(ord, position) AS (
+  VALUES
+    (1, 193::UBIGINT),
+    (2, 305::UBIGINT),
+    (3, 350::UBIGINT),
+    (4, 454::UBIGINT)
+)
+SELECT ord, annotation.consequence, annotation.nmd_prediction,
+       annotation.nmd_escape_intronless::INTEGER,
+       annotation.nmd_escape_early_cds::INTEGER,
+       annotation.nmd_escape_last_exon::INTEGER,
+       annotation.nmd_escape_penultimate_exon_end::INTEGER
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'nmd-prediction', 1::UINTEGER, position, 'C', 'T', 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	stop_gained	escaping	0	1	0	0
+2	stop_gained	triggering	0	0	0	0
+3	stop_gained	escaping	0	0	0	1
+4	stop_gained	escaping	0	0	1	0
+
 # Decreasing positions remain correct by starting another sweep run.
 query IT
 WITH variants(ord, position, reference, alternate) AS (
@@ -364,14 +428,14 @@ ORDER BY ord;
 2	5_prime_UTR_variant
 
 # Essential splice positions use the VEP-116 splice predicate port.
-query TTT
+query TTTT
 SELECT annotation.consequence, annotation.status,
-       coalesce(annotation.reason, '-')
+       coalesce(annotation.reason, '-'), annotation.nmd_prediction
 FROM unnest(duckvep_annotate(
   'fixture', 1::UINTEGER, 151::UBIGINT, 'G', 'A', 0::UBIGINT
 )) AS u(annotation);
 ----
-splice_donor_variant	supported	-
+splice_donor_variant	supported	-	unresolved
 
 # More than one DuckDB vector reuses adapter and model workspace storage. The
 # exact-distance path must retain its cgranges seed instead of rescanning the
@@ -457,10 +521,11 @@ SELECT * FROM duckvep_model_load(
 ----
 duckvep_model_load: model name already exists
 
-query IIIIII
+query IIIIIII
 SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
        duckvep_model_drop('structural'), duckvep_model_drop('nmd'),
+       duckvep_model_drop('nmd-prediction'),
        duckvep_model_drop('position-one'),
        duckvep_model_drop('fixture-complete');
 ----
-1	1	1	1	1	1
+1	1	1	1	1	1	1

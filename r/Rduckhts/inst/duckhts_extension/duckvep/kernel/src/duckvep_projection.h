@@ -23,6 +23,7 @@
 #define DUCKVEP_PROJECTION_H
 
 #include "duckvep_kernel.h"
+#include "duckvep_event.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -70,6 +71,18 @@ int duckvep_project_coding_base(
     size_t                            tx_idx,
     uint32_t                          genomic_pos,
     duckvep_coding_projection_t      *out);
+
+/* Project one prepared small-variant event to its inclusive CDS-coordinate
+ * bounds. Every changed reference base must map contiguously; splice-crossing
+ * spans therefore fail instead of inventing a coding range. A pure insertion
+ * returns the CDS boundary before which its payload is inserted. */
+int duckvep_project_event_to_cds(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                         *cds_start_out,
+    uint32_t                         *cds_end_out);
 
 #ifdef __cplusplus
 }
