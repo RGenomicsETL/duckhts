@@ -2,12 +2,16 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- make the bundled `duckvep_annotate(...)` match VEP 116’s terminal-stop
+  insertion predicate order, including non-modulo-three insertions that
+  VEP reports as `inframe_insertion` together with
+  `coding_sequence_variant`, `stop_lost`, or `stop_retained_variant`;
+  bundled fixed cases are exact for all 235 supported VEP witness pairs
+  while 11 unsupported contexts remain explicit
 - bundled `duckvep_annotate(...)` now keeps uploaded VCF geometry, VEP
   parser feature geometry, and the semantic sequence edit distinct,
   fixing candidate, splice, start-codon, and terminal-stop consequences
-  for padded and multi-base alleles. The executable VEP-116 fixture
-  agrees exactly for all 231 supported transcript pairs; 11 additional
-  pairs remain explicit unresolved results
+  for padded and multi-base alleles
 - bundled `duckvep_annotate(...)` now predicts whether eligible
   stop-gained, frameshift, splice-donor, and splice-acceptor
   consequences trigger or escape nonsense-mediated decay under the
