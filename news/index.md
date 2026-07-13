@@ -2,6 +2,20 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundle `duckvep_ensembl_regions(...)`,
+  `duckvep_ensembl_transcripts(...)`, and `duckvep_model_receipt(...)`,
+  allowing DBI workflows to prepare a validated, provenance-hashed
+  resident DuckVEP model directly from Ensembl core relations and
+  matching tiled FASTA sequence. Unsupported Ensembl RNA/peptide edits
+  keep their model flags but return explicit missing-sequence state
+  instead of ordinary coding predictions, including `_rna_edit` records
+  carried by either transcript or translation attributes; bundled SQL
+  and tinytests cover both strands, nested exon projection, receipt
+  generation, and resident loading
+- accept Ensembl exon phase `-1` in bundled sequence-backed models when
+  translation begins after 5-prime UTR within that exon, matching VEP’s
+  zero-prefix interpretation while retaining exact prepared-CDS
+  validation
 - bundled DuckVEP annotation now follows VEP 116 for frame-changing
   edits that begin in the terminal stop, returning `stop_lost` or
   `stop_retained_variant` instead of a false frameshift. The resident
