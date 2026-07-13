@@ -6,7 +6,7 @@
 	test-duckvep-witnesses test-duckvep-differential \
 	duckvep-corpus-differential duckvep-statistical-report \
 	duckvep-record-conformance duckvep-record-properties \
-	bench-duckvep-throughput \
+	bench-duckvep-throughput bench-duckvep-release-parquet \
 	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels
 
@@ -322,6 +322,13 @@ duckvep-record-properties:
 # `configure` refreshes extension metadata from description.yml before timing.
 bench-duckvep-throughput: configure release
 	Rscript benchmarks/duckvep_throughput.R $(DUCKVEP_THROUGHPUT_ARGS)
+
+# Materialize an official Ensembl consequence VCF in both complete typed and
+# narrow oracle projections. The large input and Parquet files remain external.
+bench-duckvep-release-parquet: release
+	Rscript benchmarks/duckvep_release_parquet.R \
+		--extension build/release/duckhts.duckdb_extension \
+		$(DUCKVEP_RELEASE_PARQUET_ARGS)
 
 duckvep-render-reports:
 	DUCKHTS_REPO_ROOT=$(PROJ_DIR) Rscript -e \

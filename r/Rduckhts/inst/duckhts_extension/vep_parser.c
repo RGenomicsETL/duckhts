@@ -86,9 +86,24 @@ void vep_options_init(vep_options_t* opts) {
 }
 
 static const char* parse_format_string(const char* description, int* n_fields) {
-    const char* format = strstr(description, "Format: ");
-    if (!format) return NULL;
-    format += strlen("Format: ");
+    const char* format = description;
+
+    /*
+     * VEP normally writes "Format: Allele|...".  The Ensembl variation
+     * release VCFs use "Format=Allele|..." instead.  Accept either spelling
+     * here so every CSQ/ANN/BCSQ caller shares one schema authority.
+     */
+    while ((format = strstr(format, "Format")) != NULL) {
+        const char* separator = format + strlen("Format");
+        while (isspace((unsigned char)*separator)) separator++;
+        if (*separator == ':' || *separator == '=') {
+            format = separator + 1;
+            while (isspace((unsigned char)*format)) format++;
+            break;
+        }
+        format = separator;
+    }
+    if (!format || !*format) return NULL;
     const char* end = strchr(format, '"');
     if (!end) end = format + strlen(format);
     *n_fields = 1;

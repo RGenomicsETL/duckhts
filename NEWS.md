@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- `read_bcf()` and `read_bcf_v2()` now recognize the `Format=...` CSQ schema
+  spelling used by Ensembl variation release VCFs, exposing their consequence
+  fields through the same typed `VEP_*` columns as ordinary VEP output
+- add a reproducible typed-Parquet measurement for official Ensembl consequence VCFs.
+  Release-116 chr22 contains 14,920,904 records and 30,199,106 CSQ entries; Zstandard
+  Parquet is 82.7% of the already BGZF-compressed source for all 51 reader columns and
+  58.7% for the 14-column consequence projection
 - retain the versioned RefSeq accession carried by each Ensembl MANE Select or MANE Plus Clinical attribute in the prepared transcript relation while keeping only its selection bit in the resident C model; reject empty or conflicting MANE mappings. Give `duckvep_model_receipt(...)` stable provenance column names, and add paired offline Ensembl-116 acceptance fixtures for GRCh38 and the archived GRCh37/GENCODE-19 model. The roughly 116 KiB fixtures exercise real MANE, ordinary coding, and mitochondrial fail-closed paths; explicit staging verifies both dump manifests, reference hashes, and deterministic model receipts while normal tests remain network-free
 - document the current DuckVEP Ensembl-model build as a concept-to-code map: staged core relations plus FASTA, relation validation and sequence reconstruction, deterministic receipts, immutable model publication, failure behavior, ownership, and the exact boundary of work not yet implemented. Link the project architecture and DuckVEP contract from the generated README
 - add `duckvep_ensembl_regions(...)`, `duckvep_ensembl_transcripts(...)`, and `duckvep_model_receipt(...)`: DuckDB now builds the resident consequence model directly from pinned Ensembl core relations plus tiled matching FASTA sequence, preserves stable/source identifiers and transcript attributes, verifies assembly/contig/exon/translation invariants, and emits a deterministic receipt over both region coverage and transcript content. Ensembl RNA/peptide edits not yet implemented by the kernel retain their flags and CDS span while withholding CDS bytes with an explicit reason, including `_rna_edit` records carried by either transcript or translation attributes. A complete local Ensembl-116/GRCh38-primary build validated 194 regions, 646,577 current transcripts, 5,087,789 exon memberships, and 370,580 sequence-backed coding transcripts through the resident model loader

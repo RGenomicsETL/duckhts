@@ -23,6 +23,23 @@ is append-only by source revision, corpus, and resident model.
 | 2026-07-13 | 87f03a2a        | witnesses | differential | 242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
 | 2026-07-13 | eb212de3        | witnesses | differential | 242 |         219 |         32 |        210 |                   0 | 90.50%     | 1.74%                   |
 
+## Official Ensembl release corpus in Parquet
+
+The official release consequence VCF is already BGZF-compressed. This
+table measures its complete typed DuckHTS reader projection and the
+narrower `VE` plus CSQ projection used by the bulk oracle lane. It is a
+storage comparison, not a claim that the Parquet projection can
+reproduce the original VCF byte-for-byte.
+
+| revision | release | assembly | chromosome | projection  | columns | records    | ALT_alleles | CSQ_entries | source_MiB | parquet_MiB | parquet_of_source | elapsed_seconds | records_per_second |
+|:---------|--------:|:---------|:-----------|:------------|--------:|:-----------|:------------|:------------|:-----------|:------------|:------------------|:----------------|:-------------------|
+| 55c55238 |     116 | GRCh38   | 22         | full_typed  |      51 | 14,920,904 | 17,767,586  | 30,199,106  | 265.6      | 219.8       | 82.7%             | 55.2            | 270,179            |
+| 55c55238 |     116 | GRCh38   | 22         | consequence |      14 | 14,920,904 | 17,767,586  | 30,199,106  | 265.6      | 155.9       | 58.7%             | 38.1            | 391,872            |
+
+The ledger records the official source URL, SHA-256 of every input and
+output, DuckHTS and DuckDB versions, compression, row-group size, thread
+count, machine, and exact byte sizes.
+
 ## Randomized pure-C properties
 
 The property ledger is separate from the VEP differential. It records

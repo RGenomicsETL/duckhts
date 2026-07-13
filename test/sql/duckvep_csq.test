@@ -4,6 +4,48 @@
 
 require duckhts
 
+# --- Ensembl variation releases use Format= rather than VEP's usual Format: ---
+query IT
+SELECT count(*), string_agg(column_name, ',' ORDER BY column_name)
+FROM (DESCRIBE SELECT * FROM read_bcf_v2(
+  '__WORKING_DIRECTORY__/test/data/duckvep/ensembl_release_consequences.vcf',
+  include_info := false,
+  include_format := false,
+  vep_fields := 'Allele,Consequence,Feature_type,Feature,Amino_acids,SIFT'
+));
+----
+13	ALT,CHROM,FILTER,ID,POS,QUAL,REF,VEP_Allele,VEP_Amino_acids,VEP_Consequence,VEP_Feature,VEP_Feature_type,VEP_SIFT
+
+# --- official release rows retain parallel CSQ fields and indexed VE entries ---
+query II
+SELECT list_count(VEP_Consequence), list_count(INFO_VE)
+FROM read_bcf_v2(
+  '__WORKING_DIRECTORY__/test/data/duckvep/ensembl_release_consequences.vcf',
+  info_fields := 'VE',
+  include_format := false,
+  vep_fields := 'Allele,Consequence,Feature_type,Feature,Amino_acids,SIFT'
+)
+WHERE POS = 15528198;
+----
+4	6
+
+query T
+SELECT string_agg(
+  list_extract(VEP_Allele, ordinal) || ':' ||
+    list_extract(VEP_Consequence, ordinal) || ':' ||
+    list_extract(VEP_Feature, ordinal),
+  ',' ORDER BY ordinal
+)
+FROM read_bcf_v2(
+  '__WORKING_DIRECTORY__/test/data/duckvep/ensembl_release_consequences.vcf',
+  include_info := false,
+  include_format := false,
+  vep_fields := 'Allele,Consequence,Feature'
+), UNNEST(range(1, list_count(VEP_Allele) + 1)) AS u(ordinal)
+WHERE POS = 15528198;
+----
+A:missense_variant:ENST00000643195,A:intron_variant:ENST00000775238,T:intron_variant:ENST00000775238,T:missense_variant:ENST00000643195
+
 # --- bcftools csq BCSQ header schema is parsed into VEP_* list columns ---
 query TTTTT
 SELECT

@@ -25,6 +25,14 @@ property_history <- read.csv(
   check.names = FALSE,
   colClasses = c(source_revision = "character", seed = "character")
 )
+release_parquet <- read.csv(
+  file.path(
+    root, "benchmarks", "data", "duckvep_release_parquet.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character", chromosome = "character")
+)
 overall <- history[history$stratum_kind == "all", , drop = FALSE]
 latest <- overall[nrow(overall), , drop = FALSE]
 same_run <- function(x) {
@@ -78,6 +86,57 @@ timeline$resolved_error_upper_95 <- percent(timeline$upper95)
 timeline$upper95 <- NULL
 knitr::kable(timeline, row.names = FALSE)
 ```
+
+## Official Ensembl release corpus in Parquet
+
+The official release consequence VCF is already BGZF-compressed. This table measures its
+complete typed DuckHTS reader projection and the narrower `VE` plus CSQ projection used by
+the bulk oracle lane. It is a storage comparison, not a claim that the Parquet projection
+can reproduce the original VCF byte-for-byte.
+
+```{r release-parquet}
+last_storage <- release_parquet[nrow(release_parquet), , drop = FALSE]
+storage <- release_parquet[
+  release_parquet$source_revision == last_storage$source_revision &
+    release_parquet$source_sha256 == last_storage$source_sha256,
+  ,
+  drop = FALSE
+]
+storage <- storage[match(c("full_typed", "consequence"), storage$projection), ]
+storage_table <- data.frame(
+  revision = short_revision(storage$source_revision),
+  release = storage$ensembl_release,
+  assembly = storage$assembly,
+  chromosome = storage$chromosome,
+  projection = storage$projection,
+  columns = storage$columns,
+  records = format(storage$records, big.mark = ",", scientific = FALSE),
+  ALT_alleles = format(
+    storage$alternate_alleles,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  CSQ_entries = format(storage$csq_entries, big.mark = ",", scientific = FALSE),
+  source_MiB = sprintf("%.1f", storage$source_bytes / 2^20),
+  parquet_MiB = sprintf("%.1f", storage$parquet_bytes / 2^20),
+  parquet_of_source = sprintf(
+    "%.1f%%",
+    100 * storage$parquet_fraction_of_source
+  ),
+  elapsed_seconds = sprintf("%.1f", storage$elapsed_seconds),
+  records_per_second = format(
+    round(storage$records_per_second),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+knitr::kable(storage_table, row.names = FALSE)
+```
+
+The ledger records the official source URL, SHA-256 of every input and output, DuckHTS and
+DuckDB versions, compression, row-group size, thread count, machine, and exact byte sizes.
 
 ## Randomized pure-C properties
 
