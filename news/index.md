@@ -2,6 +2,9 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled `read_bcf()` and `read_bcf_v2()` now recognize the
+  `Format=...` CSQ schema spelling in Ensembl variation release VCFs and
+  expose typed `VEP_*` columns through DBI queries
 - retain versioned RefSeq accessions from MANE Select and MANE Plus
   Clinical in bundled prepared transcript relations while keeping the
   resident model compact; reject empty or conflicting MANE mappings. Fix
