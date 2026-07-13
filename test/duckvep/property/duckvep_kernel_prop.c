@@ -6292,10 +6292,10 @@ TEST annotate_codon_delins_frameshift_known_scene(void) {
     static const uint64_t exp_mask[4] = {
         DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT),
         DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT),
-        DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE),
+        DUCKVEP_SO(DUCKVEP_SO_PROTEIN_ALTERING),
         DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT)
     };
-    static const int32_t exp_protein[4] = {2, 2, -1, 2};
+    static const int32_t exp_protein[4] = {2, 2, 2, 2};
 
     duckvep_transcript_model_t tx;
     duckvep_exon_model_t exons;
@@ -7193,6 +7193,7 @@ struct kprop_coding {
     uint16_t vchrom; uint32_t vpos; uint32_t vend; uint8_t vkind;
     uint8_t abytes[16]; uint32_t roff; uint32_t aoff; uint16_t rlen; uint16_t alen;
     uint8_t expect_cds[64]; uint32_t expect_len; uint8_t expect_shape; uint8_t expect_region;
+    uint8_t expect_protein_altering;
 };
 
 static void kprop_coding_free(void *instance, void *env) {
@@ -8081,14 +8082,17 @@ static struct theft_type_info kprop_inframe_insertion_info = {
     .free  = kprop_coding_free,
 };
 
-static enum theft_alloc_res kprop_inframe_delins_alloc(struct theft *t, void *env, void **instance) {
-    static const uint8_t ALT3[3] = { 'G', 'C', 'C' };
-    static const uint8_t ALT6[6] = { 'G', 'C', 'C', 'G', 'C', 'T' };
+static enum theft_alloc_res kprop_delins_shape_alloc(struct theft *t, void *env, void **instance) {
+    static const uint8_t ALT3_PRESERVED[3] = { 'A', 'A', 'A' };
+    static const uint8_t ALT3_ALTERED[3] = { 'G', 'C', 'C' };
+    static const uint8_t ALT6_PRESERVED[6] = { 'A', 'A', 'G', 'G', 'C', 'C' };
+    static const uint8_t ALT6_ALTERED[6] = { 'G', 'C', 'C', 'G', 'C', 'T' };
     struct kprop_coding *s = (struct kprop_coding *)calloc(1u, sizeof *s);
     uint32_t ncodons = (uint32_t)kprop_bounded(t, KPROP_MAX_CODONS - 4u) + 5u;
     uint32_t cds_len = 3u * ncodons;
     uint32_t base = (uint32_t)kprop_bounded(t, 0xFFF00000u) + 1000u;
     uint32_t lengthening = (uint32_t)kprop_bounded(t, 2u) == 0u;
+    uint32_t preserved = (uint32_t)kprop_bounded(t, 2u) == 0u;
     uint32_t codon_idx;
     uint32_t cds_start;
     uint32_t ref_len;
@@ -8111,12 +8115,15 @@ static enum theft_alloc_res kprop_inframe_delins_alloc(struct theft *t, void *en
 
     ref_len = lengthening ? 3u : 6u;
     alt_len = lengthening ? 6u : 3u;
-    alt_tx = lengthening ? ALT6 : ALT3;
+    alt_tx = lengthening
+        ? (preserved ? ALT6_PRESERVED : ALT6_ALTERED)
+        : (preserved ? ALT3_PRESERVED : ALT3_ALTERED);
     codon_idx = (uint32_t)kprop_bounded(t, ncodons - 3u) + 1u;
     cds_start = codon_idx * 3u + 1u;
     s->expect_shape = lengthening ? (uint8_t)KPROP_CDS_EDIT_INS
                                   : (uint8_t)KPROP_CDS_EDIT_DEL;
     s->expect_region = (uint8_t)KPROP_CDS_EDIT_BODY;
+    s->expect_protein_altering = preserved ? 0u : 1u;
     s->vkind = (uint8_t)DUCKVEP_KIND_INDEL;
     s->vpos = s->strand > 0 ? kprop_genomic_pos_for_cds(s, cds_start)
                             : kprop_genomic_pos_for_cds(s, cds_start + ref_len - 1u);
@@ -8133,8 +8140,8 @@ static enum theft_alloc_res kprop_inframe_delins_alloc(struct theft *t, void *en
     return THEFT_ALLOC_OK;
 }
 
-static struct theft_type_info kprop_inframe_delins_info = {
-    .alloc = kprop_inframe_delins_alloc,
+static struct theft_type_info kprop_delins_shape_info = {
+    .alloc = kprop_delins_shape_alloc,
     .free  = kprop_coding_free,
 };
 
@@ -10854,6 +10861,17 @@ static int kprop_delta_is_inframe_insertion_at(const duckvep_sequence_delta_t *d
            d->ref_aa == (uint8_t)0u && d->alt_aa == (uint8_t)0u;
 }
 
+static int kprop_delta_is_protein_altering_at(const duckvep_sequence_delta_t *d,
+                                               int32_t protein_pos) {
+    return d != NULL && d->valid && d->protein_altering &&
+           !d->synonymous && !d->missense && !d->stop_gained && !d->stop_lost &&
+           !d->stop_retained && !d->start_lost && !d->start_retained &&
+           !d->frameshift && !d->inframe_deletion && !d->inframe_insertion &&
+           !d->coding_unknown &&
+           d->cdna_pos == -1 && d->cds_pos == -1 && d->protein_pos == protein_pos &&
+           d->ref_aa == (uint8_t)0u && d->alt_aa == (uint8_t)0u;
+}
+
 TEST coding_context_delta_inframe_deletion_known_scene(void) {
     static const uint8_t short_cds[9] = {
         'A','T','G',  'A','A','A',  'T','T','T'
@@ -11106,9 +11124,19 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
     static const uint8_t terminal_cds[12] = {
         'A','T','G',  'A','A','A',  'C','C','C',  'T','A','A'
     };
+    static const uint8_t internal_stop_cds[15] = {
+        'A','T','G',  'T','A','A',  'C','C','C',  'G','G','G',  'T','T','T'
+    };
+    static const uint8_t stop_window_cds[12] = {
+        'A','T','G',  'A','A','A',  'T','A','C',  'G','G','G'
+    };
     static const uint8_t insert_gcc[3] = { 'G','C','C' };
     static const uint8_t insert_gcc2[6] = { 'G','C','C', 'G','C','C' };
     static const uint8_t insert_stop[3] = { 'T','A','A' };
+    static const uint8_t insert_stop_before_ref_flank[3] = { 'A','T','A' };
+    static const uint8_t insert_ref_flank_before_stop[6] = {
+        'A','C','T', 'A','A','G'
+    };
     static const uint8_t insert_atg[3] = { 'A','T','G' };
     static const uint8_t insert_start_retained[9] = {
         'G','C','G', 'T','T','G', 'G','C','A'
@@ -11208,9 +11236,58 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
         ASSERT(delta.valid && delta.inframe_insertion && delta.stop_gained &&
                !delta.stop_lost && !delta.stop_retained);
 
+        /* The two VEP predicates deliberately see different peptide values. Inserting
+         * ATA before the last base of TAC makes the local peptide Y -> *Y. The in-frame
+         * predicate truncates the alternate to '*', while protein_altering sees raw '*Y';
+         * neither shape term applies, leaving stop_gained alone. */
+        edit.cds_start = 9u;
+        edit.alt_len = sizeof insert_stop_before_ref_flank;
+        edit.alt = insert_stop_before_ref_flank;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      stop_window_cds, sizeof stop_window_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_gained && !delta.inframe_insertion &&
+               !delta.protein_altering && !delta.frameshift);
+
+        /* Nearby positive control: inserting ACTAAG before the second base of TAC makes
+         * Y -> Y*D. The preserved Y occurs before the new stop, so VEP emits both terms. */
+        edit.cds_start = 8u;
+        edit.alt_len = sizeof insert_ref_flank_before_stop;
+        edit.alt = insert_ref_flank_before_stop;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      stop_window_cds, sizeof stop_window_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_gained && delta.inframe_insertion &&
+               !delta.protein_altering && !delta.frameshift);
+
+        /* VEP truncates *both* sides to the first stop for the exact-stop
+         * insertion guard. Inserting GCC inside an internal TAA makes the local
+         * peptide * -> *P: stop_retained applies, but inframe_insertion does not. */
+        edit.cds_start = 6u;
+        edit.alt_len = sizeof insert_gcc;
+        edit.alt = insert_gcc;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      internal_stop_cds, sizeof internal_stop_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_retained && !delta.inframe_insertion &&
+               !delta.protein_altering && !delta.stop_gained && !delta.stop_lost);
+
         /* Moving the same ATG insertion across the terminal TAA distinguishes
          * stop_lost from inframe_insertion&stop_retained_variant. */
         edit.alt = insert_atg;
+        edit.alt_len = sizeof insert_atg;
         edit.cds_start = 11u;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
                   duckvep_coding_context_build(
@@ -11405,7 +11482,7 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
     PASS();
 }
 
-TEST coding_context_delta_inframe_delins_known_scene(void) {
+TEST coding_context_delta_delins_known_scene(void) {
     static uint8_t cds[18] = {
         'A','T','G',  'A','A','A',  'C','C','C',  'G','G','G',  'T','T','T',  'G','A','A'
     };
@@ -11462,7 +11539,7 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
         ASSERT_EQ(6u, ctx.single_edit_alt_len);
         ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-        ASSERT(kprop_delta_is_inframe_insertion_at(&delta, 3));
+        ASSERT(kprop_delta_is_protein_altering_at(&delta, 3));
 
         s.vpos = s.strand > 0 ? kprop_genomic_pos_for_cds(&s, cds_start)
                               : kprop_genomic_pos_for_cds(&s, cds_start + 5u);
@@ -11483,7 +11560,7 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
         ASSERT_EQ(3u, ctx.single_edit_alt_len);
         ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-        ASSERT(kprop_delta_is_inframe_deletion_at(&delta, 3));
+        ASSERT(kprop_delta_is_protein_altering_at(&delta, 3));
     }
 
     {
@@ -11507,9 +11584,10 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
                                                alt_cds, sizeof alt_cds,
                                                ref_pep, sizeof ref_pep,
                                                alt_pep, sizeof alt_pep, &ctx));
-        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-        ASSERT(!delta.valid);
+        ASSERT(delta.valid && delta.start_lost && !delta.inframe_insertion &&
+               !delta.protein_altering);
 
         edit.cds_start = 16u; edit.ref = cds + 15u;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -11518,9 +11596,9 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
                                                alt_cds, sizeof alt_cds,
                                                ref_pep, sizeof ref_pep,
                                                alt_pep, sizeof alt_pep, &ctx));
-        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-        ASSERT(!delta.valid);
+        ASSERT(kprop_delta_is_protein_altering_at(&delta, 6));
 
         edit.cds_start = 8u; edit.ref = cds + 7u;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -11529,9 +11607,9 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
                                                alt_cds, sizeof alt_cds,
                                                ref_pep, sizeof ref_pep,
                                                alt_pep, sizeof alt_pep, &ctx));
-        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-        ASSERT(!delta.valid);
+        ASSERT(kprop_delta_is_protein_altering_at(&delta, 3));
 
         edit.cds_start = 7u; edit.ref = cds + 6u; edit.alt = stop_alt6;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -11540,9 +11618,10 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
                                                alt_cds, sizeof alt_cds,
                                                ref_pep, sizeof ref_pep,
                                                alt_pep, sizeof alt_pep, &ctx));
-        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-        ASSERT(!delta.valid);
+        ASSERT(delta.valid && delta.protein_altering && delta.stop_gained &&
+               !delta.inframe_insertion && !delta.inframe_deletion);
 
         edits[0].cds_start = 13u; edits[0].ref_len = 3u; edits[0].ref = cds + 12u;
         edits[0].alt_len = 3u; edits[0].alt = alt3; edits[0].variant_strand = 1;
@@ -11602,10 +11681,10 @@ TEST coding_context_delta_inframe_delins_known_scene(void) {
         duckvep_result_builder_init(&rb, rows, 2u);
         ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &s.v, opts, ws, &rb, &err));
         ASSERT_EQ(1u, duckvep_result_builder_count(&rb));
-        /* +3 delins (replace codon 3 with two codons) in the CDS body: the INDEL
-         * gap-fill routes it through the general CodingContext, which resolves the
-         * net-lengthening in-frame delins as an inframe_insertion. */
-        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_INFRAME_INSERTION), rows[0].consequence_mask);
+        /* Replacing P with AA increases the CDS by one codon but preserves neither
+         * peptide edge. VEP calls the local shape protein_altering_variant, not an
+         * in-frame insertion inferred from net length alone. */
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_PROTEIN_ALTERING), rows[0].consequence_mask);
         stats = duckvep_workspace_delta_route_stats(ws);
         ASSERT(stats != NULL);
         ASSERT_EQ(0u, stats->mnv_context);
@@ -11665,7 +11744,7 @@ TEST sequence_delta_with_scratch_indel_known_scene(void) {
         duckvep_sequence_delta_fill_with_scratch(DUCKVEP_KIND_INDEL, &s.tx, &s.ex,
                                                  &s.seq, &s.v, 0u, 0u, s.vpos,
                                                  s.strand, &scratch, &delta);
-        ASSERT(kprop_delta_is_inframe_insertion_at(&delta, 3));
+        ASSERT(kprop_delta_is_protein_altering_at(&delta, 3));
 
         s.vpos = s.strand > 0 ? kprop_genomic_pos_for_cds(&s, cds_start)
                               : kprop_genomic_pos_for_cds(&s, cds_start + 5u);
@@ -11676,7 +11755,7 @@ TEST sequence_delta_with_scratch_indel_known_scene(void) {
         duckvep_sequence_delta_fill_with_scratch(DUCKVEP_KIND_INDEL, &s.tx, &s.ex,
                                                  &s.seq, &s.v, 0u, 0u, s.vpos,
                                                  s.strand, &scratch, &delta);
-        ASSERT(kprop_delta_is_inframe_deletion_at(&delta, 3));
+        ASSERT(kprop_delta_is_protein_altering_at(&delta, 3));
 
         s.vpos = s.strand > 0 ? kprop_genomic_pos_for_cds(&s, cds_start)
                               : kprop_genomic_pos_for_cds(&s, cds_start);
@@ -11701,7 +11780,7 @@ TEST sequence_delta_with_scratch_indel_known_scene(void) {
     PASS();
 }
 
-TEST annotate_inframe_delins_boundary_no_route_known_scene(void) {
+TEST annotate_delins_boundary_no_route_known_scene(void) {
     static uint8_t cds[18] = {
         'A','T','G',  'A','A','A',  'C','C','C',  'G','G','G',  'T','T','T',  'G','A','A'
     };
@@ -11710,6 +11789,12 @@ TEST annotate_inframe_delins_boundary_no_route_known_scene(void) {
     static const uint32_t starts[4] = { 1u, 16u, 13u, 8u };
     static const uint32_t ref_lens[4] = { 3u, 3u, 6u, 3u };
     static const uint32_t alt_lens[4] = { 6u, 6u, 3u, 6u };
+    static const uint64_t expected_masks[4] = {
+        DUCKVEP_SO(DUCKVEP_SO_START_LOST),
+        DUCKVEP_SO(DUCKVEP_SO_PROTEIN_ALTERING),
+        DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE),
+        DUCKVEP_SO(DUCKVEP_SO_PROTEIN_ALTERING)
+    };
     static const int8_t strands[2] = { 1, -1 };
     size_t case_idx;
     size_t strand_idx;
@@ -11753,7 +11838,7 @@ TEST annotate_inframe_delins_boundary_no_route_known_scene(void) {
             duckvep_result_builder_init(&rb, rows, 2u);
             ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &s.v, opts, ws, &rb, &err));
             ASSERT_EQ(1u, duckvep_result_builder_count(&rb));
-            ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE), rows[0].consequence_mask);
+            ASSERT_EQ(expected_masks[case_idx], rows[0].consequence_mask);
             stats = duckvep_workspace_delta_route_stats(ws);
             ASSERT(stats != NULL);
             ASSERT_EQ(0u, stats->mnv_context);
@@ -13570,11 +13655,17 @@ TEST coding_context_delta_inframe_insertion_matches_oracle(void) {
     PASS();
 }
 
-static struct { uint32_t fwd; uint32_t rev; uint32_t lengthen; uint32_t shorten; }
-    g_context_inframe_delins_cov;
+static struct {
+    uint32_t fwd;
+    uint32_t rev;
+    uint32_t lengthen;
+    uint32_t shorten;
+    uint32_t inframe;
+    uint32_t protein_altering;
+} g_context_delins_shape_cov;
 
-static enum theft_trial_res prop_context_inframe_delins_matches_oracle(struct theft *t,
-                                                                      void *arg1) {
+static enum theft_trial_res prop_context_delins_shape_matches_oracle(struct theft *t,
+                                                                    void *arg1) {
     const struct kprop_coding *s = (const struct kprop_coding *)arg1;
     duckvep_haplotype_edit_t edits[4];
     uint8_t alt_cds[96];
@@ -13594,11 +13685,9 @@ static enum theft_trial_res prop_context_inframe_delins_matches_oracle(struct th
         return THEFT_TRIAL_FAIL;
     }
     if (!ctx.has_single_edit || ctx.applied_edits != 1u ||
-        ctx.single_edit_ref_len == 0u || ctx.single_edit_alt_len == 0u ||
-        (ctx.single_edit_ref_len % 3u) != 0u ||
-        (ctx.single_edit_alt_len % 3u) != 0u || ctx.length_diff == 0 ||
-        (ctx.length_diff % 3) != 0 || ctx.single_edit_cds_start <= 3u ||
-        ((ctx.single_edit_cds_start - 1u) % 3u) != 0u) {
+        (ctx.single_edit_ref_len == 0u && ctx.single_edit_alt_len == 0u) ||
+        ctx.length_diff == 0 || (ctx.length_diff % 3) != 0 ||
+        ctx.single_edit_cds_start <= 3u) {
         return THEFT_TRIAL_FAIL;
     }
     if ((uint64_t)ctx.single_edit_cds_start +
@@ -13610,36 +13699,52 @@ static enum theft_trial_res prop_context_inframe_delins_matches_oracle(struct th
     if (duckvep_coding_context_delta_fill(&ctx, 0u, &delta) != DUCKVEP_CONTEXT_DELTA_OK) {
         return THEFT_TRIAL_FAIL;
     }
-    if (ctx.length_diff > 0) {
-        if (!kprop_delta_is_inframe_insertion_at(&delta, protein_pos)) return THEFT_TRIAL_FAIL;
-        g_context_inframe_delins_cov.lengthen++;
+    if (s->expect_protein_altering) {
+        if (!kprop_delta_is_protein_altering_at(&delta, protein_pos)) {
+            return THEFT_TRIAL_FAIL;
+        }
+        g_context_delins_shape_cov.protein_altering++;
+    } else if (ctx.length_diff > 0) {
+        if (!kprop_delta_is_inframe_insertion_at(&delta, protein_pos)) {
+            return THEFT_TRIAL_FAIL;
+        }
+        g_context_delins_shape_cov.inframe++;
     } else {
-        if (!kprop_delta_is_inframe_deletion_at(&delta, protein_pos)) return THEFT_TRIAL_FAIL;
-        g_context_inframe_delins_cov.shorten++;
+        if (!kprop_delta_is_inframe_deletion_at(&delta, protein_pos)) {
+            return THEFT_TRIAL_FAIL;
+        }
+        g_context_delins_shape_cov.inframe++;
     }
-    if (s->strand > 0) g_context_inframe_delins_cov.fwd++;
-    else g_context_inframe_delins_cov.rev++;
+    if (ctx.length_diff > 0) g_context_delins_shape_cov.lengthen++;
+    else g_context_delins_shape_cov.shorten++;
+    if (s->strand > 0) g_context_delins_shape_cov.fwd++;
+    else g_context_delins_shape_cov.rev++;
     return THEFT_TRIAL_PASS;
 }
 
-TEST coding_context_delta_inframe_delins_matches_oracle(void) {
+TEST coding_context_delta_delins_shape_matches_oracle(void) {
     struct theft_run_config cfg;
     memset(&cfg, 0, sizeof cfg);
-    cfg.name = "coding context delta in-frame delins == edit-origin oracle";
-    cfg.prop1 = prop_context_inframe_delins_matches_oracle;
-    cfg.type_info[0] = &kprop_inframe_delins_info;
+    cfg.name = "coding context delins shape == local-edge oracle";
+    cfg.prop1 = prop_context_delins_shape_matches_oracle;
+    cfg.type_info[0] = &kprop_delins_shape_info;
     cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
     cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
-    memset(&g_context_inframe_delins_cov, 0, sizeof g_context_inframe_delins_cov);
+    memset(&g_context_delins_shape_cov, 0, sizeof g_context_delins_shape_cov);
     ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
-    ASSERT(g_context_inframe_delins_cov.fwd > 0u);
-    ASSERT(g_context_inframe_delins_cov.rev > 0u);
-    ASSERT(g_context_inframe_delins_cov.lengthen > 0u);
-    ASSERT(g_context_inframe_delins_cov.shorten > 0u);
+    ASSERT(g_context_delins_shape_cov.fwd > 0u);
+    ASSERT(g_context_delins_shape_cov.rev > 0u);
+    ASSERT(g_context_delins_shape_cov.lengthen > 0u);
+    ASSERT(g_context_delins_shape_cov.shorten > 0u);
+    ASSERT(g_context_delins_shape_cov.inframe > 0u);
+    ASSERT(g_context_delins_shape_cov.protein_altering > 0u);
     fprintf(stderr,
-            "[context-inframe-delins coverage] forward=%u reverse=%u lengthen=%u shorten=%u\n",
-            g_context_inframe_delins_cov.fwd, g_context_inframe_delins_cov.rev,
-            g_context_inframe_delins_cov.lengthen, g_context_inframe_delins_cov.shorten);
+            "[context-delins-shape coverage] forward=%u reverse=%u lengthen=%u "
+            "shorten=%u inframe=%u protein_altering=%u\n",
+            g_context_delins_shape_cov.fwd, g_context_delins_shape_cov.rev,
+            g_context_delins_shape_cov.lengthen, g_context_delins_shape_cov.shorten,
+            g_context_delins_shape_cov.inframe,
+            g_context_delins_shape_cov.protein_altering);
     PASS();
 }
 
@@ -13677,13 +13782,21 @@ static enum theft_trial_res prop_delta_scratch_indel_matches_oracle(struct theft
     duckvep_sequence_delta_fill_with_scratch(DUCKVEP_KIND_INDEL, &s->tx, &s->ex,
                                              &s->seq, &s->v, 0u, 0u, s->vpos,
                                              s->strand, &scratch, &delta);
-    if (ctx.length_diff > 0) {
-        if (!kprop_delta_is_inframe_insertion_at(&delta, protein_pos)) return THEFT_TRIAL_FAIL;
-        g_delta_scratch_indel_cov.lengthen++;
+    if (s->expect_protein_altering) {
+        if (!kprop_delta_is_protein_altering_at(&delta, protein_pos)) {
+            return THEFT_TRIAL_FAIL;
+        }
+    } else if (ctx.length_diff > 0) {
+        if (!kprop_delta_is_inframe_insertion_at(&delta, protein_pos)) {
+            return THEFT_TRIAL_FAIL;
+        }
     } else if (ctx.length_diff < 0) {
-        if (!kprop_delta_is_inframe_deletion_at(&delta, protein_pos)) return THEFT_TRIAL_FAIL;
-        g_delta_scratch_indel_cov.shorten++;
+        if (!kprop_delta_is_inframe_deletion_at(&delta, protein_pos)) {
+            return THEFT_TRIAL_FAIL;
+        }
     } else return THEFT_TRIAL_FAIL;
+    if (ctx.length_diff > 0) g_delta_scratch_indel_cov.lengthen++;
+    else g_delta_scratch_indel_cov.shorten++;
     if (s->strand > 0) g_delta_scratch_indel_cov.fwd++;
     else g_delta_scratch_indel_cov.rev++;
     return THEFT_TRIAL_PASS;
@@ -13692,9 +13805,9 @@ static enum theft_trial_res prop_delta_scratch_indel_matches_oracle(struct theft
 TEST sequence_delta_with_scratch_indel_matches_oracle(void) {
     struct theft_run_config cfg;
     memset(&cfg, 0, sizeof cfg);
-    cfg.name = "sequence delta scratch INDEL == in-frame delins oracle";
+    cfg.name = "sequence delta scratch INDEL == local delins-shape oracle";
     cfg.prop1 = prop_delta_scratch_indel_matches_oracle;
-    cfg.type_info[0] = &kprop_inframe_delins_info;
+    cfg.type_info[0] = &kprop_delins_shape_info;
     cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
     cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
     memset(&g_delta_scratch_indel_cov, 0, sizeof g_delta_scratch_indel_cov);
@@ -14488,11 +14601,11 @@ int main(int argc, char **argv) {
     RUN_TEST(coding_context_delta_known_scene);
     RUN_TEST(coding_context_delta_inframe_deletion_known_scene);
     RUN_TEST(coding_context_delta_inframe_insertion_known_scene);
-    RUN_TEST(coding_context_delta_inframe_delins_known_scene);
+    RUN_TEST(coding_context_delta_delins_known_scene);
     RUN_TEST(coding_context_delta_frameshift_known_scene);
     RUN_TEST(coding_context_delta_frameshift_stop_gained_scene);
     RUN_TEST(sequence_delta_with_scratch_indel_known_scene);
-    RUN_TEST(annotate_inframe_delins_boundary_no_route_known_scene);
+    RUN_TEST(annotate_delins_boundary_no_route_known_scene);
     RUN_TEST(annotate_inframe_insertion_route_known_scene);
     RUN_TEST(annotate_inframe_deletion_route_known_scene);
     RUN_TEST(cds_edit_builder_matches_direct_splice_oracle);
@@ -14521,7 +14634,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_cursor_del_route_matches_tile_for_any_output_split);
     RUN_TEST(coding_context_delta_inframe_deletion_matches_oracle);
     RUN_TEST(coding_context_delta_inframe_insertion_matches_oracle);
-    RUN_TEST(coding_context_delta_inframe_delins_matches_oracle);
+    RUN_TEST(coding_context_delta_delins_shape_matches_oracle);
     RUN_TEST(sequence_delta_with_scratch_indel_matches_oracle);
     RUN_TEST(annotate_inframe_insertion_matches_oracle);
     RUN_TEST(annotate_cursor_ins_route_matches_tile_for_any_output_split);
