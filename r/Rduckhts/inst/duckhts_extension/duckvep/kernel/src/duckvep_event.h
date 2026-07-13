@@ -4,10 +4,17 @@
  * path loads one compact event value per ALT.
  *
  * Single-interval SV/CNV rows use their supplied inclusive [pos1,end1] span.
- * Small variants carry TWO geometries: the raw VCF anchor/span, and the VEP-style
- * differing region derived by trimming shared REF/ALT prefix + suffix. The sweep
- * keeps raw pos1 as the monotone key, but topology/splice predicates consume the
- * differing region so padded VCF anchors do not create fake CDS/splice overlap.
+ * Small variants carry three geometries:
+ *
+ *   raw_*      the uploaded VCF REF span;
+ *   feature_*  VEP's VariationFeature span after its ordinary one-base indel
+ *              anchor removal (VEP does not minimize substitutions by default);
+ *   start/end  the fully trimmed semantic edit used for CDS projection.
+ *
+ * Region predicates consume feature_*. Splice predicates inspect the separate
+ * mismatch islands inside the feature alleles. Sequence projection consumes the
+ * semantic edit. Keeping these explicit prevents one convenient interval from
+ * becoming three subtly different biological authorities.
  */
 #ifndef DUCKVEP_EVENT_H
 #define DUCKVEP_EVENT_H
@@ -21,12 +28,15 @@ typedef struct duckvep_event {
     uint16_t chrom_id;
     uint32_t raw_start1;
     uint32_t raw_end1;
-    uint32_t start1;          /* differing-region topology coordinate */
+    uint32_t feature_start1;  /* VEP VariationFeature start; may exceed end */
+    uint32_t feature_end1;
+    uint32_t start1;          /* fully trimmed semantic edit coordinate */
     uint32_t end1;            /* inclusive; pure insertions use a point */
     uint32_t insertion_boundary0; /* genomic interbase boundary; 0 = before base 1 */
     uint16_t ref_diff_offset; /* offset inside REF where differing region starts */
     uint16_t alt_diff_offset; /* offset inside ALT where differing region starts */
     uint16_t anchor_ref_offset; /* REF base used to validate a pure insertion */
+    uint16_t feature_allele_offset; /* 0 or VEP's removed first indel anchor */
     uint16_t ref_diff_length;
     uint16_t alt_diff_length;
     uint8_t  interbase;       /* pure insertion after trimming */
@@ -58,6 +68,15 @@ static inline uint32_t duckvep_event_right_flank1(
         : event->insertion_boundary0 + 1u;
 }
 
+static inline uint32_t duckvep_event_feature_max1(
+    const duckvep_event_t *event) {
+
+    if (event == NULL) return 0u;
+    return event->feature_start1 > event->feature_end1
+        ? event->feature_start1
+        : event->feature_end1;
+}
+
 static inline int duckvep_event_allele_slices_ok(
     const duckvep_variant_batch_t *batch,
     size_t                         idx) {
@@ -86,12 +105,15 @@ static inline void duckvep_event_load_raw_interval(
 
     event->raw_start1 = batch->pos1[idx];
     event->raw_end1 = batch->end1[idx];
+    event->feature_start1 = batch->pos1[idx];
+    event->feature_end1 = batch->end1[idx];
     event->start1 = batch->pos1[idx];
     event->end1 = batch->end1[idx];
     event->insertion_boundary0 = 0u;
     event->ref_diff_offset = 0u;
     event->alt_diff_offset = 0u;
     event->anchor_ref_offset = 0u;
+    event->feature_allele_offset = 0u;
     event->ref_diff_length = 0u;
     event->alt_diff_length = 0u;
     event->interbase = 0u;
@@ -127,16 +149,27 @@ static inline int duckvep_event_prepare_small(
 
     event->raw_start1 = pos1;
     event->raw_end1 = pos1 + (uint32_t)ref_len - 1u;
+    event->feature_start1 = pos1;
+    event->feature_end1 = event->raw_end1;
     event->start1 = pos1;
     event->end1 = pos1;
     event->insertion_boundary0 = 0u;
     event->ref_diff_offset = 0u;
     event->alt_diff_offset = 0u;
     event->anchor_ref_offset = 0u;
+    event->feature_allele_offset = 0u;
     event->ref_diff_length = 0u;
     event->alt_diff_length = 0u;
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
+
+    /* VEP's default VCF parser removes exactly one shared leading base from a
+     * length-changing allele. It leaves equal-length substitutions untouched;
+     * --minimal is a separate parser option. */
+    if (ref_len != alt_len && ref[0] == alt[0]) {
+        event->feature_allele_offset = 1u;
+        event->feature_start1++;
+    }
 
     while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) {
         prefix++;
@@ -204,6 +237,7 @@ static inline void duckvep_event_load_small_differing_region(
         ? batch->variant_kind[idx]
         : (uint8_t)DUCKVEP_KIND_SV;
     event->end1 = event->start1; /* small-variant fallback when alleles are absent */
+    event->feature_end1 = event->feature_start1;
     if (!duckvep_event_allele_slices_ok(batch, idx)) return;
     (void)duckvep_event_prepare_small(
         batch->pos1[idx], batch->allele_bytes + batch->ref_offset[idx],
@@ -222,7 +256,7 @@ static inline uint32_t duckvep_event_effective_end1_at(
         return batch->end1[idx];
     }
     duckvep_event_load_small_differing_region(batch, idx, &event);
-    return event.end1;
+    return duckvep_event_feature_max1(&event);
 }
 
 static inline uint8_t duckvep_event_sv_type_at(

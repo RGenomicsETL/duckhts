@@ -42,6 +42,35 @@ static int delta_peptide_span_known_nonstop(const uint8_t *pep, size_t off, size
     return 1;
 }
 
+static int delta_peptide_span_known(const uint8_t *pep, size_t off, size_t len) {
+    size_t i;
+
+    if (len == 0u) return 1;
+    if (pep == NULL) return 0;
+    for (i = 0u; i < len; i++) {
+        if (pep[off + i] == (uint8_t)'\0' || pep[off + i] == (uint8_t)'X') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int delta_peptide_stop_index(
+    const uint8_t *pep, size_t off, size_t len, size_t *index) {
+
+    size_t i;
+
+    if (index != NULL) *index = 0u;
+    if (pep == NULL || index == NULL) return 0;
+    for (i = 0u; i < len; i++) {
+        if (pep[off + i] == (uint8_t)'*') {
+            *index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int delta_norm_span_equal(const uint8_t *a, const uint8_t *b, size_t len) {
     size_t i;
 
@@ -927,14 +956,8 @@ static duckvep_context_delta_status_t delta_context_inframe_deletion(
         ctx->alt_peptide_len != ctx->alt_cds_len / 3u) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    /* A pure in-frame deletion is inframe_deletion in VEP regardless of codon alignment: the
-     * codon-allele trim (VariationEffect::inframe_deletion) always leaves an empty alt and a
-     * ref whose length is the (mod-3) deleted length. So we no longer require the deletion to
-     * start on a codon boundary — only that the start codon is intact and the CDS geometry
-     * is a clean single deletion. */
-    if (ctx->single_edit_cds_start <= 3u) {
-        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
-    }
+    /* A pure in-frame deletion is inframe_deletion in VEP regardless of codon alignment.
+     * The start-codon predicate is layered by the caller after this shape is known. */
     deleted_end = (uint64_t)ctx->single_edit_cds_start + deleted_len - 1u;
     if (deleted_end > (uint64_t)ctx->ref_cds_len) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
@@ -1029,6 +1052,18 @@ static duckvep_context_delta_status_t delta_context_inframe_insertion(
     uint32_t before_cds;
     size_t prefix_len;
     size_t suffix_len;
+    size_t ref_peptide_off = 0u;
+    size_t ref_peptide_len = 0u;
+    size_t alt_peptide_off;
+    size_t alt_peptide_len;
+    size_t ref_stop_index = 0u;
+    size_t alt_stop_index = 0u;
+    size_t alt_shape_len;
+    int ref_has_stop;
+    int alt_has_stop;
+    int stop_retained = 0;
+    int ref_peptide_is_alt_suffix;
+    int inframe;
 
     if (ctx == NULL || delta == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     if (ctx->ref_cds == NULL || ctx->alt_cds == NULL || ctx->ref_peptide == NULL ||
@@ -1050,10 +1085,11 @@ static duckvep_context_delta_status_t delta_context_inframe_insertion(
     }
     if (ctx->single_edit_cds_start == 0u) return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     before_cds = ctx->single_edit_cds_start - 1u;
-    /* Require insertion after the complete start codon. VEP does not require a
-     * codon-boundary insertion site:
-     * a mid-codon insertion is still inframe_insertion when the residues flanking it are kept. */
-    if (before_cds < 3u || (size_t)before_cds > ctx->ref_cds_len) {
+    /* VEP does not require an insertion to follow the complete start codon or
+     * to land on a codon boundary. Start-overlapping insertions are classified
+     * by the same peptide predicates below, after start_lost/start_retained has
+     * been established by the caller. */
+    if ((size_t)before_cds > ctx->ref_cds_len) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
     prefix_len = (size_t)before_cds;
@@ -1065,15 +1101,19 @@ static duckvep_context_delta_status_t delta_context_inframe_insertion(
                                ctx->ref_cds + prefix_len, suffix_len)) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    /* The alt diff window (inserted residues plus any changed junction residue) must be known
-     * and non-stop; a stop there is an inserted-stop composite, deferred. The ref window is
-     * empty for a flank-preserving insertion and otherwise must be known/non-stop too. */
+    /* The peptide windows may contain stops. VEP evaluates stop_retained, stop_lost, and
+     * stop_gained before deciding whether the remaining length increase is an in-frame
+     * insertion, and trims the alternate peptide after its first stop for that shape test. */
     if (ctx->alt_first_changed_codon == 0u ||
         ctx->alt_last_changed_codon < ctx->alt_first_changed_codon ||
-        ctx->alt_last_changed_codon > ctx->alt_peptide_len ||
-        !delta_peptide_span_known_nonstop(
-            ctx->alt_peptide, (size_t)ctx->alt_first_changed_codon - 1u,
-            (size_t)(ctx->alt_last_changed_codon - ctx->alt_first_changed_codon) + 1u)) {
+        ctx->alt_last_changed_codon > ctx->alt_peptide_len) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    alt_peptide_off = (size_t)ctx->alt_first_changed_codon - 1u;
+    alt_peptide_len =
+        (size_t)(ctx->alt_last_changed_codon - ctx->alt_first_changed_codon) + 1u;
+    if (!delta_peptide_span_known(
+            ctx->alt_peptide, alt_peptide_off, alt_peptide_len)) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
     if (ctx->ref_first_changed_codon == 0u) {
@@ -1081,30 +1121,83 @@ static duckvep_context_delta_status_t delta_context_inframe_insertion(
             return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
         }
     } else if (ctx->ref_last_changed_codon < ctx->ref_first_changed_codon ||
-               ctx->ref_last_changed_codon > ctx->ref_peptide_len ||
-               !delta_peptide_span_known_nonstop(
-                   ctx->ref_peptide, (size_t)ctx->ref_first_changed_codon - 1u,
-                   (size_t)(ctx->ref_last_changed_codon - ctx->ref_first_changed_codon) + 1u)) {
+               ctx->ref_last_changed_codon > ctx->ref_peptide_len) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    } else {
+        ref_peptide_off = (size_t)ctx->ref_first_changed_codon - 1u;
+        ref_peptide_len =
+            (size_t)(ctx->ref_last_changed_codon - ctx->ref_first_changed_codon) + 1u;
+        if (!delta_peptide_span_known(
+                ctx->ref_peptide, ref_peptide_off, ref_peptide_len)) {
+            return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+        }
     }
     if ((uint64_t)(before_cds / 3u) + 1u > (uint64_t)INT32_MAX) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
 
+    ref_has_stop = delta_peptide_stop_index(
+        ctx->ref_peptide, ref_peptide_off, ref_peptide_len, &ref_stop_index);
+    alt_has_stop = delta_peptide_stop_index(
+        ctx->alt_peptide, alt_peptide_off, alt_peptide_len, &alt_stop_index);
+
+    /* VEP's ref_eq_alt_sequence has two retained-stop cases: the changed windows keep a
+     * stop at the same peptide position, or the complete reference peptide is preserved
+     * and the newly appended peptide begins with a stop. The latter is the common
+     * insertion immediately before a terminal stop. */
+    if (ref_has_stop && alt_has_stop &&
+        ref_peptide_off + ref_stop_index == alt_peptide_off + alt_stop_index) {
+        stop_retained = 1;
+    } else if (ctx->ref_peptide_len > 0u &&
+               ctx->alt_peptide_len > ctx->ref_peptide_len &&
+               memcmp(ctx->ref_peptide, ctx->alt_peptide,
+                      ctx->ref_peptide_len) == 0 &&
+               ctx->alt_peptide[ctx->ref_peptide_len] == (uint8_t)'*') {
+        stop_retained = 1;
+    }
+
     delta->cdna_pos = -1;
     delta->cds_pos = -1;
     delta->protein_pos = (int32_t)(before_cds / 3u + 1u);
+    if (ref_has_stop && !alt_has_stop) {
+        delta->stop_lost = 1u;
+        delta->valid = 1u;
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+    if (ref_has_stop && alt_has_stop && !stop_retained) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    if (stop_retained) delta->stop_retained = 1u;
+    else if (alt_has_stop && !ref_has_stop) delta->stop_gained = 1u;
+
+    alt_shape_len = alt_has_stop ? alt_stop_index + 1u : alt_peptide_len;
     /* VEP: an empty ref window, or a ref window that is a prefix/suffix of the alt window, is a
-     * flank-preserving insertion => inframe_insertion; otherwise the flanking residues also
-     * change => protein_altering_variant. */
-    if (ctx->ref_first_changed_codon == 0u ||
+     * flank-preserving insertion. It first removes everything after the alternate's first
+     * stop, which is why an inserted stop can coexist with inframe_insertion. */
+    inframe = ref_peptide_len == 0u ||
         delta_pep_window_prefix_or_suffix(
-            ctx->alt_peptide, (size_t)ctx->alt_first_changed_codon - 1u,
-            (size_t)(ctx->alt_last_changed_codon - ctx->alt_first_changed_codon) + 1u,
-            ctx->ref_peptide, (size_t)ctx->ref_first_changed_codon - 1u,
-            (size_t)(ctx->ref_last_changed_codon - ctx->ref_first_changed_codon) + 1u)) {
+            ctx->alt_peptide, alt_peptide_off, alt_shape_len,
+            ctx->ref_peptide, ref_peptide_off, ref_peptide_len);
+    if (ref_peptide_len == 1u && alt_shape_len == 1u &&
+        ctx->ref_peptide[ref_peptide_off] == (uint8_t)'*' &&
+        ctx->alt_peptide[alt_peptide_off] == (uint8_t)'*') {
+        inframe = 0;
+    }
+    ref_peptide_is_alt_suffix =
+        ctx->alt_peptide_len >= ctx->ref_peptide_len &&
+        memcmp(ctx->alt_peptide + ctx->alt_peptide_len - ctx->ref_peptide_len,
+               ctx->ref_peptide, ctx->ref_peptide_len) == 0;
+    /* VEP suppresses both insertion shape predicates when the start is lost.
+     * It also suppresses inframe_insertion when an insertion before the start
+     * retains the complete reference peptide as the alternate suffix: that is
+     * an upstream addition, not an insertion into the translated protein. */
+    if (delta->start_lost ||
+        (delta->start_retained && ref_peptide_is_alt_suffix)) {
+        inframe = 0;
+    } else if (inframe) {
         delta->inframe_insertion = 1u;
-    } else {
+    } else if (ctx->ref_peptide[ref_peptide_off] != (uint8_t)'*' &&
+               ctx->alt_peptide[alt_peptide_off] != (uint8_t)'*') {
         delta->protein_altering = 1u;
     }
     delta->valid = 1u;
@@ -1313,25 +1406,73 @@ static int delta_frameshift_local_stop_gained(const duckvep_coding_context_t *ct
     return 1;
 }
 
-/* VEP suppresses frameshift_variant when the first affected reference peptide is
- * the terminal stop. It rebuilds CDS + 3' UTR and tests the codon at the original
- * translation end, yielding stop_lost or stop_retained instead. This narrow path
- * handles a single frame-changing edit that begins inside the terminal codon.
- * An edit beginning upstream retains the ordinary frameshift path because its
- * first affected reference peptide is not the stop. */
-static duckvep_context_delta_status_t delta_context_terminal_stop_frameshift(
+/* Layer VEP's start-codon predicate on a length-changing edit. The alternate
+ * CDS has already been rebuilt, so the resulting start codon is read once here
+ * instead of being reconstructed independently by every shape classifier.
+ * cds_start is the replaced CDS base, or the base before which an insertion is
+ * written; cds_start == 4 is therefore after the complete start codon. */
+static duckvep_context_delta_status_t delta_context_start_facts(
     const duckvep_coding_context_t *ctx,
     uint64_t                        tx_flags,
-    int                            *handled,
+    int                            *overlaps_start,
+    duckvep_sequence_delta_t       *delta) {
+
+    char b0, b1, b2;
+
+    if (overlaps_start != NULL) *overlaps_start = 0;
+    if (ctx == NULL || overlaps_start == NULL || delta == NULL) {
+        return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    }
+    if ((tx_flags & (uint64_t)DUCKVEP_TX_CDS_START_NF) != 0u ||
+        !ctx->has_single_edit || ctx->length_diff == 0 ||
+        ctx->single_edit_cds_start == 0u || ctx->single_edit_cds_start > 3u) {
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+    *overlaps_start = 1;
+    if (ctx->alt_cds == NULL || ctx->alt_cds_len < 3u) {
+        delta->start_lost = 1u;
+        return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+    b0 = delta_norm_base((char)ctx->alt_cds[0]);
+    b1 = delta_norm_base((char)ctx->alt_cds[1]);
+    b2 = delta_norm_base((char)ctx->alt_cds[2]);
+    if (b0 == '\0' || b1 == '\0' || b2 == '\0' ||
+        b0 == 'N' || b1 == 'N' || b2 == 'N') {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    if (b0 == 'A' && b1 == 'T' && b2 == 'G') {
+        delta->start_retained = 1u;
+    } else {
+        delta->start_lost = 1u;
+    }
+    return DUCKVEP_CONTEXT_DELTA_OK;
+}
+
+/* Reproduce VEP's stop predicates for a frame-changing edit that overlaps the
+ * terminal codon. VEP rebuilds translateable CDS + 3' UTR, then translates the
+ * three bases at the ORIGINAL coding end. A stop retained there suppresses the
+ * frameshift term. A lost stop suppresses frameshift only when the first affected
+ * reference peptide is itself the stop; an edit beginning upstream emits both
+ * frameshift_variant and stop_lost.
+ *
+ * A pure insertion immediately BEFORE the terminal codon has reversed CDS
+ * coordinates [terminal_start, terminal_start-1] and does not overlap it. An
+ * insertion after its first or second base does. This distinction is why an
+ * insertion at the CDS/stop boundary remains an ordinary frameshift. */
+static duckvep_context_delta_status_t delta_context_frameshift_stop_facts(
+    const duckvep_coding_context_t *ctx,
+    uint64_t                        tx_flags,
+    int                            *suppress_frameshift,
     duckvep_sequence_delta_t       *delta) {
 
     uint32_t terminal_start;
+    uint64_t edit_end;
     char codon[4];
     size_t i;
     char alt_aa;
 
-    if (handled != NULL) *handled = 0;
-    if (ctx == NULL || handled == NULL || delta == NULL) {
+    if (suppress_frameshift != NULL) *suppress_frameshift = 0;
+    if (ctx == NULL || suppress_frameshift == NULL || delta == NULL) {
         return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     }
     if (!ctx->has_single_edit || ctx->ref_cds == NULL || ctx->alt_cds == NULL ||
@@ -1346,12 +1487,20 @@ static duckvep_context_delta_status_t delta_context_terminal_stop_frameshift(
     }
 
     terminal_start = (uint32_t)ctx->ref_cds_len - 2u;
-    if (ctx->single_edit_cds_start < terminal_start ||
-        ctx->single_edit_cds_start > ctx->ref_cds_len) {
-        return DUCKVEP_CONTEXT_DELTA_OK;
+    if (ctx->single_edit_ref_len == 0u) {
+        if (ctx->single_edit_cds_start <= terminal_start ||
+            ctx->single_edit_cds_start > ctx->ref_cds_len) {
+            return DUCKVEP_CONTEXT_DELTA_OK;
+        }
+    } else {
+        edit_end = (uint64_t)ctx->single_edit_cds_start +
+                   (uint64_t)ctx->single_edit_ref_len - 1u;
+        if (ctx->single_edit_cds_start > ctx->ref_cds_len ||
+            edit_end < (uint64_t)terminal_start) {
+            return DUCKVEP_CONTEXT_DELTA_OK;
+        }
     }
 
-    *handled = 1;
     codon[3] = '\0';
     for (i = 0u; i < 3u; i++) {
         size_t position = ctx->ref_cds_len - 3u + i;
@@ -1378,23 +1527,28 @@ static duckvep_context_delta_status_t delta_context_terminal_stop_frameshift(
     }
     alt_aa = duckvep_translate_codon(
         codon, (duckvep_codon_table_t)ctx->codon_table);
-    if (alt_aa == '*') delta->stop_retained = 1u;
-    else delta->stop_lost = 1u;
-    delta->cdna_pos = -1;
-    delta->cds_pos = -1;
-    delta->protein_pos = (int32_t)ctx->ref_peptide_len;
-    delta->ref_aa = (uint8_t)'*';
-    delta->alt_aa = (uint8_t)alt_aa;
-    delta->valid = 1u;
+    if (alt_aa == '*') {
+        delta->stop_retained = 1u;
+        *suppress_frameshift = 1;
+    } else {
+        delta->stop_lost = 1u;
+        *suppress_frameshift =
+            ctx->single_edit_cds_start >= terminal_start;
+    }
+    if (*suppress_frameshift) {
+        delta->cdna_pos = -1;
+        delta->cds_pos = -1;
+        delta->protein_pos = (int32_t)ctx->ref_peptide_len;
+        delta->ref_aa = (uint8_t)'*';
+        delta->alt_aa = (uint8_t)alt_aa;
+        delta->valid = 1u;
+    }
     return DUCKVEP_CONTEXT_DELTA_OK;
 }
 
 /* Coarse frameshift FACT from the CodingContext: a net CDS length change not divisible
- * by three shifts the reading frame, which VEP labels frameshift_variant. This resolves
- * boundary frameshifts (first-codon-adjacent, terminal/stop codon) that the direct
- * body-only path rejects but VEP resolves. We emit only the frameshift fact and only when
- * the start codon is preserved: a disrupted start is frameshift_variant&start_lost in VEP,
- * left unresolved so we never emit a partial SO set. When the
+ * by three shifts the reading frame, which VEP labels frameshift_variant. Start-codon
+ * edits layer start_lost or start_retained_variant on that frame fact. When the
  * frameshift's local recomputed codon is a premature stop, VEP composites
  * frameshift_variant&stop_gained; delta_frameshift_local_stop_gained adds that fact. The
  * region layer adds any splice/UTR composite terms. VEP `--gff`-validated. */
@@ -1418,16 +1572,6 @@ static duckvep_context_delta_status_t delta_context_frameshift(
     if (!ctx->has_single_edit) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    /* Start codon (CDS positions 1..3) must be untouched. An edit that overlaps or is
-     * inserted within the start codon makes VEP add start_lost, so leave those contexts
-     * unresolved. A pure insertion is
-     * carried at the CDS position it precedes, so cds_start > 3 means it lands after the
-     * complete start codon. The exception is an annotated-incomplete CDS start, where VEP
-     * does not emit start_lost. */
-    if ((tx_flags & (uint64_t)DUCKVEP_TX_CDS_START_NF) == 0u &&
-        ctx->single_edit_cds_start <= 3u) {
-        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
-    }
     /* A pure insertion after the final CDS base lands at the CDS/3'UTR junction, where VEP
      * composites the frameshift with 3_prime_UTR_variant. The coding frameshift fact alone
      * is an incomplete SO set there, so leave it unresolved. */
@@ -1444,8 +1588,15 @@ static duckvep_context_delta_status_t delta_context_frameshift(
                            : -1;
     delta->ref_aa = 0u;
     delta->alt_aa = 0u;
-    if (delta_frameshift_local_stop_gained(ctx)) {
+    if (!delta->stop_lost && !delta->stop_retained &&
+        delta_frameshift_local_stop_gained(ctx)) {
         delta->stop_gained = 1u;
+    }
+    {
+        int overlaps_start;
+        duckvep_context_delta_status_t status =
+            delta_context_start_facts(ctx, tx_flags, &overlaps_start, delta);
+        if (status != DUCKVEP_CONTEXT_DELTA_OK) return status;
     }
     delta->valid = 1u;
     return DUCKVEP_CONTEXT_DELTA_OK;
@@ -1477,13 +1628,13 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
         return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     }
     if (ctx->length_diff != 0 && (ctx->length_diff % 3) != 0) {
-        duckvep_context_delta_status_t terminal_status;
-        int terminal_handled;
+        duckvep_context_delta_status_t stop_status;
+        int suppress_frameshift;
 
-        terminal_status = delta_context_terminal_stop_frameshift(
-            ctx, tx_flags, &terminal_handled, delta);
-        if (terminal_handled || terminal_status != DUCKVEP_CONTEXT_DELTA_OK) {
-            return terminal_status;
+        stop_status = delta_context_frameshift_stop_facts(
+            ctx, tx_flags, &suppress_frameshift, delta);
+        if (suppress_frameshift || stop_status != DUCKVEP_CONTEXT_DELTA_OK) {
+            return stop_status;
         }
         return delta_context_frameshift(ctx, tx_flags, delta);
     }
@@ -1492,9 +1643,20 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
         return delta_context_inframe_delins(ctx, delta);
     }
     if (ctx->length_diff < 0) {
-        return delta_context_inframe_deletion(ctx, delta);
+        duckvep_context_delta_status_t status =
+            delta_context_inframe_deletion(ctx, delta);
+        if (status == DUCKVEP_CONTEXT_DELTA_OK && delta->valid) {
+            int overlaps_start;
+            status = delta_context_start_facts(
+                ctx, tx_flags, &overlaps_start, delta);
+        }
+        return status;
     }
     if (ctx->length_diff > 0) {
+        int overlaps_start;
+        duckvep_context_delta_status_t status =
+            delta_context_start_facts(ctx, tx_flags, &overlaps_start, delta);
+        if (status != DUCKVEP_CONTEXT_DELTA_OK) return status;
         return delta_context_inframe_insertion(ctx, delta);
     }
     if (ctx->ref_cds_len == 0u || ctx->ref_cds_len != ctx->alt_cds_len ||

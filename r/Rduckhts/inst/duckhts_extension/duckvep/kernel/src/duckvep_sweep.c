@@ -156,7 +156,7 @@ int duckvep_sweep_cursor_next(
     point_hi = sat_add_u32(event_start, cursor->halo);
     span_hi = sat_add_u32(
         cursor->events != NULL
-            ? cursor->events[cursor->vi].end1
+            ? duckvep_event_feature_max1(&cursor->events[cursor->vi])
             : duckvep_event_effective_end1_at(variants, cursor->vi),
         cursor->halo);
 

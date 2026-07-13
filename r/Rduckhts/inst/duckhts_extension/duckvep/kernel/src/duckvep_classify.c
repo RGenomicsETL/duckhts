@@ -54,6 +54,23 @@ struct duckvep_splice_accum {
     int region;
 };
 
+static int splice_region_overlaps_gap(int64_t start1, int64_t end1,
+                                      int64_t intron_start,
+                                      int64_t intron_end,
+                                      uint8_t interbase) {
+    return span_overlaps_i64(start1, end1,
+                             intron_start + 2, intron_start + 7) ||
+           span_overlaps_i64(start1, end1,
+                             intron_end - 7, intron_end - 2) ||
+           span_overlaps_i64(start1, end1,
+                             intron_start - 3, intron_start - 1) ||
+           span_overlaps_i64(start1, end1,
+                             intron_end + 1, intron_end + 3) ||
+           (interbase && (start1 == intron_start || end1 == intron_end ||
+                          start1 == intron_start + 2 ||
+                          end1 == intron_end - 2));
+}
+
 /* Accumulate VEP's splice predicates for one intron. Span and sorted-point
  * traversal deliberately share this code: the optimization chooses fewer gaps,
  * never a second definition of the biology. */
@@ -62,6 +79,8 @@ static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
                                 int64_t irs, int64_t ire,
                                 int64_t lo_s, int64_t hi_s,
                                 uint8_t interbase,
+                                int intron_cached,
+                                int boundary_cached,
                                 struct duckvep_splice_accum *a,
                                 int64_t *reach_lo, int64_t *reach_hi) {
     uint32_t gap_start;
@@ -79,24 +98,25 @@ static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
     if (reach_hi != NULL)
         *reach_hi = is + 16 > ie + 3 ? is + 16 : ie + 3;
 
-    if (span_overlaps_i64(irs, ire, is, is + 1)) a->start_ss = 1;
-    if (span_overlaps_i64(irs, ire, ie - 1, ie)) a->end_ss = 1;
-    if (span_overlaps_i64(irs, ire, is + 4, is + 4)) a->fifth = 1;
-    if (span_overlaps_i64(irs, ire, ie - 4, ie - 4)) a->fifth_rev = 1;
-    if (span_overlaps_i64(irs, ire, is + 2, is + 5)) a->dreg = 1;
-    if (span_overlaps_i64(irs, ire, ie - 5, ie - 2)) a->dreg_rev = 1;
-    if (span_overlaps_i64(lo_s, hi_s, ie - 16, ie - 2)) a->ppt = 1;
-    if (span_overlaps_i64(lo_s, hi_s, is + 2, is + 16)) a->ppt_rev = 1;
-    if (span_overlaps_i64(irs, ire, is + 2, ie - 2) ||
-        (interbase && (irs == is + 2 || ire == ie - 2)))
+    if (boundary_cached) {
+        if (span_overlaps_i64(irs, ire, is, is + 1)) a->start_ss = 1;
+        if (span_overlaps_i64(irs, ire, ie - 1, ie)) a->end_ss = 1;
+        if (span_overlaps_i64(irs, ire, is + 4, is + 4)) a->fifth = 1;
+        if (span_overlaps_i64(irs, ire, ie - 4, ie - 4)) a->fifth_rev = 1;
+        if (span_overlaps_i64(irs, ire, is + 2, is + 5)) a->dreg = 1;
+        if (span_overlaps_i64(irs, ire, ie - 5, ie - 2)) a->dreg_rev = 1;
+        if (splice_region_overlaps_gap(irs, ire, is, ie, interbase))
+            a->region = 1;
+    }
+    if (intron_cached || boundary_cached) {
+        if (span_overlaps_i64(lo_s, hi_s, ie - 16, ie - 2)) a->ppt = 1;
+        if (span_overlaps_i64(lo_s, hi_s, is + 2, is + 16)) a->ppt_rev = 1;
+    }
+    if (intron_cached &&
+        (span_overlaps_i64(irs, ire, is + 2, ie - 2) ||
+         (interbase && (irs == is + 2 || ire == ie - 2)))) {
         a->intronic = 1;
-    if (span_overlaps_i64(irs, ire, is + 2, is + 7) ||
-        span_overlaps_i64(irs, ire, ie - 7, ie - 2) ||
-        span_overlaps_i64(irs, ire, is - 3, is - 1) ||
-        span_overlaps_i64(irs, ire, ie + 1, ie + 3) ||
-        (interbase && (irs == is || ire == ie ||
-                       irs == is + 2 || ire == ie - 2)))
-        a->region = 1;
+    }
     return 1;
 }
 
@@ -119,6 +139,57 @@ static duckvep_splice_state_t splice_accum_finish(
                        st.splice_donor_5th || st.splice_donor_region ||
                        st.splice_polypyrimidine || st.splice_region);
     return st;
+}
+
+static void splice_accum_add_region(
+    const duckvep_exon_model_t *exons,
+    size_t                      exon_offset,
+    size_t                      exon_count,
+    int64_t                     region_start1,
+    int64_t                     region_end1,
+    int64_t                     feature_min1,
+    int64_t                     feature_max1,
+    struct duckvep_splice_accum *acc) {
+
+    uint8_t interbase = (uint8_t)(region_start1 == region_end1 + 1);
+    int64_t lo = region_start1 < region_end1 ? region_start1 : region_end1;
+    int64_t hi = region_start1 > region_end1 ? region_start1 : region_end1;
+    size_t k;
+
+    for (k = 0u; k + 1u < exon_count; k++) {
+        uint32_t gap_start;
+        uint32_t gap_end;
+        int intron_cached;
+        int boundary_cached;
+
+        if (!gap_between_exons(exons, exon_offset + k, exon_offset + k + 1u,
+                               &gap_start, &gap_end)) {
+            continue;
+        }
+        boundary_cached =
+            span_overlaps_i64(feature_min1, feature_max1,
+                              (int64_t)gap_start - 3,
+                              (int64_t)gap_start + 7) ||
+            span_overlaps_i64(feature_min1, feature_max1,
+                              (int64_t)gap_end - 7,
+                              (int64_t)gap_end + 3);
+        intron_cached = span_overlaps_i64(
+            feature_min1, feature_max1,
+            (int64_t)gap_start, (int64_t)gap_end);
+        (void)splice_accum_add_gap(
+            exons, exon_offset + k, exon_offset + k + 1u,
+            region_start1, region_end1, lo, hi, interbase,
+            intron_cached, boundary_cached,
+            acc, NULL, NULL);
+        if (boundary_cached) {
+            /* VEP 116 assigns, rather than ORs, splice_region for each
+             * differing island/intron pair. Later islands can therefore clear
+             * an earlier hit; the other splice facts remain accumulators. */
+            acc->region = splice_region_overlaps_gap(
+                region_start1, region_end1,
+                (int64_t)gap_start, (int64_t)gap_end, interbase);
+        }
+    }
 }
 
 static int overlaps_coarse_exon_reach(uint32_t start1, uint32_t end1,
@@ -292,7 +363,6 @@ duckvep_splice_state_t duckvep_splice_classify_span(
     int fwd = transcripts->strand[tx_idx] >= 0;
     size_t off = (size_t)transcripts->exon_offset[tx_idx];
     size_t cnt = (size_t)transcripts->exon_count[tx_idx];
-    size_t k;
     /* VEP models a pure insertion as vf->start = P+1, vf->end = P (start > end),
      * where P == end1 is the anchor base to its 5' side. Feeding (P+1, P) into the
      * same overlap predicate reproduces VEP's "both flanking bases inside the zone"
@@ -310,10 +380,93 @@ duckvep_splice_state_t duckvep_splice_classify_span(
 
     memset(&acc, 0, sizeof acc);
 
-    for (k = 0u; k + 1u < cnt; k++) {
+    for (size_t k = 0u; k + 1u < cnt; k++) {
         (void)splice_accum_add_gap(exons, off + k, off + k + 1u,
                                    irs, ire, lo_s, hi_s, interbase,
+                                   1, 1,
                                    &acc, NULL, NULL);
+    }
+    return splice_accum_finish(&acc, fwd);
+}
+
+duckvep_splice_state_t duckvep_splice_classify_differing_regions(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          feature_start1,
+    const uint8_t                    *feature_ref,
+    uint16_t                          feature_ref_length,
+    const uint8_t                    *feature_alt,
+    uint16_t                          feature_alt_length) {
+
+    struct duckvep_splice_accum acc;
+    size_t off;
+    size_t cnt;
+    int fwd;
+    int64_t feature_end1;
+    int64_t feature_min1;
+    int64_t feature_max1;
+
+    memset(&acc, 0, sizeof acc);
+    if (transcripts == NULL || exons == NULL ||
+        tx_idx >= transcripts->transcript_count ||
+        (feature_ref_length > 0u && feature_ref == NULL) ||
+        (feature_alt_length > 0u && feature_alt == NULL)) {
+        return splice_accum_finish(&acc, 1);
+    }
+
+    off = (size_t)transcripts->exon_offset[tx_idx];
+    cnt = (size_t)transcripts->exon_count[tx_idx];
+    fwd = transcripts->strand[tx_idx] >= 0;
+    feature_end1 = (int64_t)feature_start1 +
+                   (int64_t)feature_ref_length - 1;
+    feature_min1 = feature_end1 < (int64_t)feature_start1
+        ? feature_end1 : (int64_t)feature_start1;
+    feature_max1 = feature_end1 > (int64_t)feature_start1
+        ? feature_end1 : (int64_t)feature_start1;
+
+    if (feature_ref_length > 1u && feature_alt_length > 1u) {
+        uint16_t length = feature_ref_length > feature_alt_length
+            ? feature_ref_length : feature_alt_length;
+        uint16_t i = 0u;
+
+        /* Perl's string XOR pads the shorter operand with zero bytes. DNA
+         * alleles cannot contain zero, so every overhanging byte is a mismatch. */
+        while (i < length) {
+            uint8_t ref_base = i < feature_ref_length ? feature_ref[i] : 0u;
+            uint8_t alt_base = i < feature_alt_length ? feature_alt[i] : 0u;
+            uint16_t first;
+            uint16_t last;
+
+            if (ref_base == alt_base) {
+                i++;
+                continue;
+            }
+            first = i;
+            last = i;
+            i++;
+            while (i < length) {
+                ref_base = i < feature_ref_length ? feature_ref[i] : 0u;
+                alt_base = i < feature_alt_length ? feature_alt[i] : 0u;
+                if (ref_base == alt_base) break;
+                last = i;
+                i++;
+            }
+            splice_accum_add_region(
+                exons, off, cnt,
+                (int64_t)feature_start1 + (int64_t)first,
+                (int64_t)feature_start1 + (int64_t)last,
+                feature_min1, feature_max1,
+                &acc);
+        }
+    } else {
+        /* This is VEP's fallback {s => 0, e => ref_length - 1}. A zero-length
+         * reference therefore becomes the reversed insertion interval P+1,P. */
+        splice_accum_add_region(
+            exons, off, cnt, (int64_t)feature_start1,
+            (int64_t)feature_start1 + (int64_t)feature_ref_length - 1,
+            feature_min1, feature_max1,
+            &acc);
     }
     return splice_accum_finish(&acc, fwd);
 }
@@ -503,7 +656,7 @@ exact_splice:
             int found = splice_accum_add_gap(exons,
                 point_exon_index(transcripts, tx_idx, g),
                 point_exon_index(transcripts, tx_idx, g + 1u),
-                p, p, p, p, 0u, &acc, NULL, &reach_hi);
+                p, p, p, p, 0u, 1, 1, &acc, NULL, &reach_hi);
             if ((found && p > reach_hi) || g == 0u) break;
             g--;
         }
@@ -512,7 +665,7 @@ exact_splice:
             int found = splice_accum_add_gap(exons,
                 point_exon_index(transcripts, tx_idx, g),
                 point_exon_index(transcripts, tx_idx, g + 1u),
-                p, p, p, p, 0u, &acc, &reach_lo, NULL);
+                p, p, p, p, 0u, 1, 1, &acc, &reach_lo, NULL);
             if (found && p < reach_lo) break;
         }
     }

@@ -185,6 +185,21 @@ static void duckvep_effect_ctx_set_topology(
     out->pre_bits = pre;
 }
 
+void duckvep_effect_ctx_fill_classified(
+    const duckvep_transcript_model_t *transcripts,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          region_start1,
+    uint32_t                          region_end1,
+    const duckvep_region_state_t     *region_state,
+    const duckvep_splice_state_t     *splice_state,
+    duckvep_effect_ctx_t             *out) {
+
+    duckvep_effect_ctx_set_topology(
+        transcripts, variant_idx, tx_idx, region_start1, region_end1,
+        region_state, splice_state, out);
+}
+
 void duckvep_effect_ctx_fill(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -227,9 +242,9 @@ void duckvep_effect_ctx_fill_geometry(
     splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
                                            splice_start1, splice_end1,
                                            interbase);
-    duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
-                                    region_start1, region_end1,
-                                    &region, &splice, out);
+    duckvep_effect_ctx_fill_classified(
+        transcripts, variant_idx, tx_idx, region_start1, region_end1,
+        &region, &splice, out);
 }
 
 void duckvep_effect_ctx_fill_point_sorted(
@@ -292,6 +307,7 @@ void duckvep_effect_ctx_apply_delta(
     if (delta->stop_lost) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_LOST);
     if (delta->stop_retained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_RETAINED);
     if (delta->start_lost) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_LOST);
+    if (delta->start_retained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_RETAINED);
     if (delta->frameshift) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
     if (delta->inframe_deletion)
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);

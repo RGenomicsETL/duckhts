@@ -39,7 +39,7 @@ typedef struct duckvep_sequence_delta {
     int32_t cdna_pos, cds_pos, protein_pos; /* 1-based; -1 when absent */
     uint8_t ref_aa, alt_aa;                 /* 1-letter AA; '*' = stop  */
     uint8_t synonymous, missense, stop_gained, stop_lost, stop_retained;
-    uint8_t start_lost, frameshift, inframe_deletion, inframe_insertion;
+    uint8_t start_lost, start_retained, frameshift, inframe_deletion, inframe_insertion;
     uint8_t protein_altering;
     uint8_t valid;                          /* 1 when the delta is filled */
     uint8_t sequence_status;                /* duckvep_sequence_status_t  */

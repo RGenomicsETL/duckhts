@@ -62,7 +62,8 @@ typedef enum duckvep_pre_bit {
     DUCKVEP_PRE_INFRAME_INSERTION      = 36,
     DUCKVEP_PRE_PROTEIN_ALTERING       = 37,
     DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT  = 38,
-    DUCKVEP_PRE_BIT_COUNT              = 39
+    DUCKVEP_PRE_START_RETAINED          = 39,
+    DUCKVEP_PRE_BIT_COUNT               = 40
 } duckvep_pre_bit_t;
 
 #define DUCKVEP_PRE(b) (UINT64_C(1) << (b))
@@ -109,6 +110,19 @@ void duckvep_effect_ctx_fill_geometry(
     uint8_t                           interbase,
     uint32_t                          splice_region_exonic,
     uint32_t                          splice_region_intronic,
+    duckvep_effect_ctx_t             *out);
+
+/* Convert already-classified region and splice facts into the one predicate
+ * bitset consumed by the generated consequence program. This is the join point
+ * for VEP's feature-span region geometry and its multi-island splice geometry. */
+void duckvep_effect_ctx_fill_classified(
+    const duckvep_transcript_model_t *transcripts,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          region_start1,
+    uint32_t                          region_end1,
+    const duckvep_region_state_t     *region_state,
+    const duckvep_splice_state_t     *splice_state,
     duckvep_effect_ctx_t             *out);
 
 /* Sorted SNV hot path. The cursor is per transcript and survives adjacent
