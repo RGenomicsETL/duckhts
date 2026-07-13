@@ -1,5 +1,6 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundled DuckVEP annotation now matches VEP 116 when an equal-length uploaded feature crosses from CDS into the transcript-oriented 3-prime UTR: it preserves VEP's unavailable peptide-mapping state and returns `coding_sequence_variant` rather than a stop or missense consequence derived from a smaller trimmed edit
 - make bundled `duckvep_annotate(...)` reproduce VEP 116 when ALT-only mismatch bases extend from an exonic REF-shaped feature into an intron, including VEP's three-base interval-tree cache boundary and co-emission with coding and splice terms
 - make bundled `duckvep_annotate(...)` classify length-changing coding edits from VEP 116's codon-local predicate inputs rather than whole-protein or net-length shortcuts. This fixes stop-gained insertions whose preserved peptide flank lies after the new stop, and delins that change length by a complete codon but are `protein_altering_variant` rather than in-frame insertion/deletion
 - make the bundled `duckvep_annotate(...)` match VEP 116's terminal-stop insertion predicate order, including non-modulo-three insertions that VEP reports as `inframe_insertion` together with `coding_sequence_variant`, `stop_lost`, or `stop_retained_variant`; bundled fixed cases are exact for all 239 supported VEP witness pairs while 11 unsupported contexts remain explicit

@@ -313,24 +313,28 @@ terminal_stop_edits <- dbGetQuery(
     "(1, 238::UBIGINT, 'T', 'AC'),",
     "(2, 238::UBIGINT, 'TA', 'T'),",
     "(3, 239::UBIGINT, 'AA', 'A'),",
-    "(4, 240::UBIGINT, 'A', 'CG'))",
+    "(4, 240::UBIGINT, 'A', 'CG'),",
+    "(5, 239::UBIGINT, 'AA', 'CA'),",
+    "(6, 240::UBIGINT, 'AA', 'TA'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
     "LATERAL unnest(duckvep_annotate(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
 )
-expect_equal(terminal_stop_edits$ord, 1:4)
+expect_equal(terminal_stop_edits$ord, 1:6)
 expect_identical(
   terminal_stop_edits$consequence,
   c(
     "stop_lost",
     "stop_retained_variant",
     "stop_retained_variant",
-    "stop_lost"
+    "stop_lost",
+    "stop_lost",
+    "coding_sequence_variant&3_prime_UTR_variant"
   )
 )
-expect_identical(terminal_stop_edits$status, rep("supported", 4))
+expect_identical(terminal_stop_edits$status, rep("supported", 6))
 expect_true(all(is.na(terminal_stop_edits$reason)))
 
 dbExecute(

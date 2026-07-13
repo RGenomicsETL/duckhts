@@ -8,6 +8,34 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## An uploaded span can suppress a simpler coding edit
+
+VEP 116 maps an equal-length uploaded `VariationFeature` to CDS as one span; it does not
+default-minimize the substitution. If that complete feature starts in CDS and ends in
+the transcript-oriented 3-prime UTR, one endpoint returned by
+`BaseTranscriptVariation::cds_coords` is a `Bio::EnsEMBL::Mapper::Gap`. Consequently,
+`TranscriptVariationAllele::codon` and `::peptide` are unavailable and
+`VariationEffect::coding_unknown` emits `coding_sequence_variant` instead of a more
+specific missense or stop consequence.
+
+This is representation-dependent VEP behaviour. Semantic prefix/suffix trimming may
+leave a single changed CDS base, but evaluating only that smaller edit produces a result
+for a feature VEP was not asked to annotate. DuckVEP therefore retains both geometries:
+the uploaded feature decides whether VEP can map peptide state, while the minimized edit
+is used only after that mapping state permits sequence evaluation.
+
+The paired VEP-116 witnesses isolate the distinction in the terminal `TAA` codon:
+
+| Uploaded feature | Mapping state | Exact VEP terms |
+| --- | --- | --- |
+| `chrDuck:239 AA>CA` | both endpoints in CDS | `stop_lost` |
+| `chrDuck:240 AA>TA` | final endpoint in 3-prime UTR | `3_prime_UTR_variant&coding_sequence_variant` |
+
+Do not generalize this suppression to a feature crossing the 5-prime UTR boundary.
+VEP has separate start-codon predicates that may still emit `start_lost` or
+`start_retained_variant` without the ordinary peptide path. The executable witnesses and
+held-out differentials are the authority for the precise boundary.
+
 ## ALT-only mismatch islands inherit an expanded intron cache
 
 VEP 116 can emit `intron_variant` for a lengthening replacement whose REF-shaped

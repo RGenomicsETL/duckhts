@@ -266,7 +266,9 @@ WITH variants(ord, position, reference, alternate) AS (
     (1, 238::UBIGINT, 'T', 'AC'),
     (2, 238::UBIGINT, 'TA', 'T'),
     (3, 239::UBIGINT, 'AA', 'A'),
-    (4, 240::UBIGINT, 'A', 'CG')
+    (4, 240::UBIGINT, 'A', 'CG'),
+    (5, 239::UBIGINT, 'AA', 'CA'),
+    (6, 240::UBIGINT, 'AA', 'TA')
 )
 SELECT ord, annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
@@ -280,6 +282,8 @@ ORDER BY ord;
 2	stop_retained_variant	supported	-
 3	stop_retained_variant	supported	-
 4	stop_lost	supported	-
+5	stop_lost	supported	-
+6	coding_sequence_variant&3_prime_UTR_variant	supported	-
 
 # The twelfth transcript column is optional for old/topology-only model
 # producers. A terminal deletion that needs it fails closed rather than becoming
