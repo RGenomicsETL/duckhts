@@ -333,6 +333,31 @@ if (!is.na(cds_lo) && strand == "+") {
   }
 }
 
+# Pin the VEP-116 peptide-view asymmetry recorded in design/duckvep_errata.md.
+# These coordinates belong to the minimal conformance transcript. Keep both sides:
+# the stop-only witness prevents whole-protein diffing, while the positive control
+# prevents a blanket suppression of in-frame insertion whenever a stop is gained.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  if (base_at(233L) == "A") {
+    emit(
+      233L,
+      "A",
+      "AACAATGTTA",
+      "exon_mid",
+      "predicate_window_stop_gained_only"
+    )
+  }
+  if (base_at(128L) == "T") {
+    emit(
+      128L,
+      "T",
+      "TTAG",
+      "exon_mid",
+      "predicate_window_inframe_stop_gained"
+    )
+  }
+}
+
 # Add a reproducible state-space sample without creating a second generator or a
 # second allele authority. Three quarters of draws are near the splice/start/stop/exon
 # witnesses; one quarter is uniform across the transcript span. A Park-Miller generator
@@ -484,6 +509,14 @@ if (opt$check) {
     ),
     "SNV alt differs from ref" = all(with(w[w$shape == "snv", ], ref != alt))
   )
+  if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+    stopifnot(
+      "missing stop-gained-only predicate witness" =
+        any(w$shape == "predicate_window_stop_gained_only"),
+      "missing in-frame-and-stop predicate witness" =
+        any(w$shape == "predicate_window_inframe_stop_gained")
+    )
+  }
   cat(glue(
     "OK: {nrow(w)} witnesses for {opt$tx} across {length(unique(w$class))} classes; random={random_added}\n"
   ))
