@@ -361,7 +361,18 @@ chrDuck	125	duck_missense	A	C	.	PASS	BCSQ=missense_variant|DUCK1|DUCK1-201|prote
 chrDuck	160	duck_intron	C	T	.	PASS	BCSQ=intron_variant|DUCK1|DUCK1-201|protein_coding|+||160C>T
 chrDuck	350	duck_intergenic	G	A	.	PASS	BCSQ=intergenic_variant||||||350G>A
 EOF
-echo "  DuckVEP/csq minimal FASTA/GFF3/BCSQ fixtures"
+cat > "$DST/duckvep/ensembl_release_consequences.vcf" <<'EOF'
+##fileformat=VCFv4.2
+##source=ensembl;version=116;url=https://e116.ensembl.org/homo_sapiens
+##INFO=<ID=VE,Number=.,Type=String,Description="Variant effect of a variant overlapping a sequence feature as computed by the ensembl variant effect pipeline. Format=Consequence|Index|Feature_type|Feature_id. Index indentifies for which variant sequence the effect is described for.">
+##INFO=<ID=CSQ,Number=.,Type=String,Description="Consequence annotations from Ensembl's Variant Effect Pipeline. Format=Allele|Consequence|Feature_type|Feature|Amino_acids|SIFT">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+22	15528196	rs1312204123	A	G	.	.	VE=missense_variant|0|mRNA|ENST00000643195,non_coding_transcript_variant|0|ncRNA|ENST00000775238,intron_variant|0|primary_transcript|ENST00000775238;CSQ=G|intron_variant|primary_transcript|ENST00000775238||,G|missense_variant|mRNA|ENST00000643195|N/S|deleterious_-_low_confidence(0.05)
+22	15528198	rs1985999326	G	A,T	.	.	VE=missense_variant|0|mRNA|ENST00000643195,missense_variant|1|mRNA|ENST00000643195,non_coding_transcript_variant|0|ncRNA|ENST00000775238,intron_variant|0|primary_transcript|ENST00000775238,non_coding_transcript_variant|1|ncRNA|ENST00000775238,intron_variant|1|primary_transcript|ENST00000775238;CSQ=A|missense_variant|mRNA|ENST00000643195|V/I|tolerated_-_low_confidence(1),A|intron_variant|primary_transcript|ENST00000775238||,T|intron_variant|primary_transcript|ENST00000775238||,T|missense_variant|mRNA|ENST00000643195|V/F|tolerated_-_low_confidence(0.16)
+EOF
+cp "$DST/duckvep/ensembl_release_consequences.vcf" \
+  "$PKG_DST/ensembl_release_consequences.vcf"
+echo "  DuckVEP/csq minimal and Ensembl release consequence fixtures"
 
 # ---- Parallel empty-contig VCF regression fixture (bgzip + tabix) ----
 for out_dir in "$DST" "$PKG_DST"; do

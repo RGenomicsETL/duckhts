@@ -489,6 +489,29 @@ test_bcf_v2_sql <- function() {
   )
   expect_equal(vep_schema$cols[1], "ALT,CHROM,FILTER,ID,POS,QUAL,REF,VEP_Consequence,VEP_DISTANCE")
 
+  ensembl_path <- system.file(
+    "extdata",
+    "ensembl_release_consequences.vcf",
+    package = "Rduckhts"
+  )
+  expect_true(file.exists(ensembl_path))
+  ensembl_counts <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT count(*) AS records, ",
+        "sum(list_count(VEP_Consequence)) AS csq_entries, ",
+        "sum(list_count(INFO_VE)) AS ve_entries ",
+        "FROM read_bcf_v2(%s, info_fields := 'VE', include_format := false, ",
+        "vep_fields := 'Allele,Consequence,Feature_type,Feature,Amino_acids,SIFT')"
+      ),
+      DBI::dbQuoteString(con, ensembl_path)
+    )
+  )
+  expect_equal(ensembl_counts$records[1], 2)
+  expect_equal(ensembl_counts$csq_entries[1], 6)
+  expect_equal(ensembl_counts$ve_entries[1], 9)
+
   expect_error(
     DBI::dbGetQuery(
       con,

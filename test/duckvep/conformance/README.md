@@ -48,6 +48,22 @@ before the C engine runs. The output is a Parquet row set from both engines, a p
 Parquet difference, and CSV summaries with exact matches, unresolved engine rows, resolved
 discordances, emission misses/extras, and exact binomial 95% upper bounds.
 
+Ensembl also publishes release VCFs whose `VE` and `CSQ` fields contain every consequence
+computed by its variation pipeline. DuckHTS reads their `Format=...` CSQ header directly;
+the full typed record and the narrower consequence-oracle projection can be measured with:
+
+```sh
+make bench-duckvep-release-parquet DUCKVEP_RELEASE_PARQUET_ARGS="\
+  --input /data/homo_sapiens_incl_consequences-chr22.vcf.gz \
+  --source-url https://ftp.ensembl.org/pub/release-116/variation/vcf/homo_sapiens/homo_sapiens_incl_consequences-chr22.vcf.gz \
+  --output-dir /data/duckvep-release-parquet \
+  --release 116 --assembly GRCh38 --chromosome 22 --overwrite"
+```
+
+The VCF and generated Parquet files remain outside git. The benchmark ledger retains both
+SHA-256 checksums, record/allele/CSQ cardinalities, exact byte sizes, compression settings,
+thread count, and source revision.
+
 `make duckvep-record-conformance` reruns the real VEP witnesses and records the current
 source revision in `data/conformance_history.csv`. Rows include the complete consequence
 set, individual SO terms, VEP impact, allele shape, unresolved reason, exact Ensembl

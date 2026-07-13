@@ -330,6 +330,9 @@ belong as ignored arguments in the consequence-kernel API.
 - `make test-duckvep-differential` compares generated witnesses to pinned VEP 116.
 - `make duckvep-corpus-differential` records the union of emitted `(variant, transcript)`
   pairs, including mismatches, misses, extras, and unresolved rows.
+- `make bench-duckvep-release-parquet` reads the official Ensembl variation consequence
+  VCF through typed CSQ columns and records complete versus consequence-only Parquet size,
+  checksum, cardinality, and elapsed time without committing the large artifacts.
 - Throughput reports must state input variants, variant-transcript pairs, output rows and
   bytes, threads, model, and machine. Site-level rate and cohort haplotype-update rate are
   different measurements.
