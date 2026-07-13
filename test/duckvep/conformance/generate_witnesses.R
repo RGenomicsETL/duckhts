@@ -358,6 +358,32 @@ if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
   }
 }
 
+# Pin VEP 116's interval-tree intron prefilter. Both alleles have ALT-only
+# mismatch bases that extend across the first donor. The REF-shaped feature for
+# the first ends at 148, inside VEP's three-base intron-cache flank, while the
+# second ends at 147, one base outside it. The former gains intron/splice terms;
+# the latter does not.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  if (identical(nuc(146L, 3L), "CGT")) {
+    emit(
+      146L,
+      "CGT",
+      "CACTGAGGGC",
+      "donor",
+      "intron_cache_alt_overhang"
+    )
+  }
+  if (identical(nuc(145L, 3L), "ACG")) {
+    emit(
+      145L,
+      "ACG",
+      "ACCTTCTGTGTA",
+      "donor",
+      "intron_cache_outside_flank"
+    )
+  }
+}
+
 # Add a reproducible state-space sample without creating a second generator or a
 # second allele authority. Three quarters of draws are near the splice/start/stop/exon
 # witnesses; one quarter is uniform across the transcript span. A Park-Miller generator
@@ -514,7 +540,11 @@ if (opt$check) {
       "missing stop-gained-only predicate witness" =
         any(w$shape == "predicate_window_stop_gained_only"),
       "missing in-frame-and-stop predicate witness" =
-        any(w$shape == "predicate_window_inframe_stop_gained")
+        any(w$shape == "predicate_window_inframe_stop_gained"),
+      "missing intron-cache ALT-overhang witness" =
+        any(w$shape == "intron_cache_alt_overhang"),
+      "missing intron-cache flank boundary witness" =
+        any(w$shape == "intron_cache_outside_flank")
     )
   }
   cat(glue(

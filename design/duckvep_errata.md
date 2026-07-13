@@ -8,6 +8,31 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## ALT-only mismatch islands inherit an expanded intron cache
+
+VEP 116 can emit `intron_variant` for a lengthening replacement whose REF-shaped
+`VariationFeature` remains entirely exonic. The result comes from two stages that are
+easy to miss when reading one predicate in isolation:
+
+- the VCF parser removes one shared indel anchor but leaves the feature end based on REF;
+- with `Set::IntervalTree`, `_overlapped_introns` preselects and caches introns over a
+  three-base flank on both exon sides;
+- `_intron_effects` later compares REF and ALT bytewise, and an ALT-only mismatch island
+  may extend beyond the cached feature span into the intronic interior.
+
+The intronic predicate still excludes the essential first and last two intron bases.
+Consequently, an island can produce `intron_variant` together with coding, donor, and
+donor-fifth-base terms. Moving the REF-shaped feature one base beyond the three-base
+cache flank suppresses all intron-derived terms even when the ALT-only island reaches the
+same bases. This is cache-dependent VEP behaviour, not a general interval-overlap rule.
+
+The pinned VEP environment uses `Set::IntervalTree` 0.12. Its source expands the cached
+intron interval in `BaseTranscriptVariation.pm::_create_intron_trees`, then consumes the
+cached list in `BaseTranscriptVariationAllele.pm::_intron_effects`. Fixed witnesses at
+`chrDuck:146 CGT>CACTGAGGGC` and `chrDuck:145 ACG>ACCTTCTGTGTA` pin the two sides of the
+cache boundary. Large held-out differentials remain necessary because transcript 3-prime
+shifting can move the predicate geometry before this cache is consulted.
+
 ## Terminal-stop insertions are predicate states, not modulo-three classes
 
 VEP 116 can classify an insertion whose length is not divisible by three as

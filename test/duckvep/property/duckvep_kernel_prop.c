@@ -2075,6 +2075,26 @@ TEST splice_classify_known_scene(void) {
         ASSERT(s.splice_donor_5th && !s.splice_donor_region && s.intronic);
     }
 
+    /* VEP's interval-tree path caches an intron when the REF-shaped feature is
+     * within three exonic bases of it. A longer ALT mismatch island may then
+     * extend through the essential donor into the intronic interior. Moving
+     * that same REF feature one base beyond the cache flank suppresses every
+     * intron-derived predicate, even though the ALT island reaches the gap. */
+    {
+        static const uint8_t ref[3] = {'A', 'A', 'A'};
+        static const uint8_t alt[11] = {
+            'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C'
+        };
+
+        s = duckvep_splice_classify_differing_regions(
+            &tx, &ex, 0u, 1198u, ref, 3u, alt, 11u);
+        ASSERT(s.splice_donor && s.splice_donor_5th && s.intronic);
+
+        s = duckvep_splice_classify_differing_regions(
+            &tx, &ex, 0u, 1195u, ref, 3u, alt, 11u);
+        ASSERT(!s.any && !s.intronic);
+    }
+
     /* --- second intron1 = [1601,1800] is classified too (not just intron0) --- */
     s = duckvep_splice_classify(&tx, &ex, 0, 1601u); /* donor of intron1            */
     ASSERT(s.splice_donor && !s.splice_acceptor);
