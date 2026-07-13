@@ -173,9 +173,16 @@ static void splice_accum_add_region(
             span_overlaps_i64(feature_min1, feature_max1,
                               (int64_t)gap_end - 7,
                               (int64_t)gap_end + 3);
+        /* With Set::IntervalTree enabled, VEP 116 preselects introns over a
+         * three-base flank on either side of the actual intron. The selected
+         * list is then cached before _intron_effects visits mismatch islands.
+         * A lengthening allele whose REF feature stops just inside the exon can
+         * therefore expose an ALT-only island in the intron. Preserve that
+         * prefilter here; the later predicate still requires the island itself
+         * to overlap the intronic interior [is+2,ie-2]. */
         intron_cached = span_overlaps_i64(
             feature_min1, feature_max1,
-            (int64_t)gap_start, (int64_t)gap_end);
+            (int64_t)gap_start - 3, (int64_t)gap_end + 3);
         (void)splice_accum_add_gap(
             exons, exon_offset + k, exon_offset + k + 1u,
             region_start1, region_end1, lo, hi, interbase,
