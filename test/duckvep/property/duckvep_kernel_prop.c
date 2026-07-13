@@ -11124,6 +11124,9 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
     static const uint8_t terminal_cds[12] = {
         'A','T','G',  'A','A','A',  'C','C','C',  'T','A','A'
     };
+    static const uint8_t internal_stop_cds[15] = {
+        'A','T','G',  'T','A','A',  'C','C','C',  'G','G','G',  'T','T','T'
+    };
     static const uint8_t stop_window_cds[12] = {
         'A','T','G',  'A','A','A',  'T','A','C',  'G','G','G'
     };
@@ -11264,6 +11267,22 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
         ASSERT(delta.valid && delta.stop_gained && delta.inframe_insertion &&
                !delta.protein_altering && !delta.frameshift);
+
+        /* VEP truncates *both* sides to the first stop for the exact-stop
+         * insertion guard. Inserting GCC inside an internal TAA makes the local
+         * peptide * -> *P: stop_retained applies, but inframe_insertion does not. */
+        edit.cds_start = 6u;
+        edit.alt_len = sizeof insert_gcc;
+        edit.alt = insert_gcc;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      internal_stop_cds, sizeof internal_stop_cds, &edit_set, 1,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_retained && !delta.inframe_insertion &&
+               !delta.protein_altering && !delta.stop_gained && !delta.stop_lost);
 
         /* Moving the same ATG insertion across the terminal TAA distinguishes
          * stop_lost from inframe_insertion&stop_retained_variant. */

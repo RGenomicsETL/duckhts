@@ -1270,7 +1270,7 @@ static duckvep_context_delta_status_t delta_context_lengthening_predicates(
         delta_pep_window_prefix_or_suffix(
             ctx->alt_peptide, local.alt_off, alt_shape_len,
             ctx->ref_peptide, local.ref_off, local.ref_len);
-    if (local.ref_len == 1u && local.alt_len == 1u &&
+    if (local.ref_len == 1u && alt_shape_len == 1u &&
         ctx->ref_peptide[local.ref_off] == (uint8_t)'*' &&
         ctx->alt_peptide[local.alt_off] == (uint8_t)'*') {
         inframe = 0;
