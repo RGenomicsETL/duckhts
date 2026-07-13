@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP annotation now matches VEP 116 when an equal-length
+  uploaded feature crosses from CDS into the transcript-oriented 3-prime
+  UTR: it preserves VEP’s unavailable peptide-mapping state and returns
+  `coding_sequence_variant` rather than a stop or missense consequence
+  derived from a smaller trimmed edit
 - make bundled `duckvep_annotate(...)` reproduce VEP 116 when ALT-only
   mismatch bases extend from an exonic REF-shaped feature into an
   intron, including VEP’s three-base interval-tree cache boundary and
