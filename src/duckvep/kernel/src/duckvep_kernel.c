@@ -921,7 +921,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     uint64_t cmask;
     duckvep_consequence_t *row;
     int cds_delta_attempted = 0;
-    int feature_mapping_spans_intron;
+    int feature_mapping_blocks_peptide;
 
     if (c->status != DUCKVEP_OK) return 0;
 
@@ -988,15 +988,15 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     }
 
     /* VEP maps an equal-length VariationFeature as one uploaded span. When that
-     * span crosses an intron, TranscriptVariationAllele cannot form peptide
-     * alleles even if trimming would leave one exonic mismatch. Preserve VEP's
-     * coding_sequence_variant fallback instead of translating a different,
-     * minimized representation that VEP was not asked to evaluate. */
-    feature_mapping_spans_intron =
+     * span crosses an intron or the CDS-to-3'-UTR boundary, one endpoint of
+     * BaseTranscriptVariation::cds_coords is a Mapper::Gap. The peptide path is
+     * therefore unavailable even if semantic trimming leaves a CDS-only mismatch.
+     * Preserve coding_unknown instead of translating that different edit. */
+    feature_mapping_blocks_peptide =
         have_feature_alleles &&
         feature_ref_length == feature_alt_length &&
         ectx.region_state.overlaps_cds &&
-        ectx.region_state.overlaps_intron;
+        (ectx.region_state.overlaps_intron || ectx.region_state.overlaps_utr3);
 
     /* The symmetric sweep halo admits candidates up to max(up,down); enforce the
      * directional up/downstream window here so an asymmetric config is honored. */
@@ -1015,7 +1015,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     memset(&delta, 0, sizeof delta);
     if (kind != DUCKVEP_KIND_SV &&
         (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) &&
-        !feature_mapping_spans_intron) {
+        !feature_mapping_blocks_peptide) {
         const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
         cds_delta_attempted = 1;
         duckvep_sequence_delta_route_t route = DUCKVEP_DELTA_ROUTE_DIRECT;

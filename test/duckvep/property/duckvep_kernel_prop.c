@@ -5969,6 +5969,114 @@ TEST annotate_codon_mnv_reverse_strand_same_codon_known_scene(void) {
     PASS();
 }
 
+/* VEP keeps an equal-length uploaded feature intact for CDS mapping even when
+ * semantic trimming leaves one changed coding base. If the uploaded span also
+ * reaches the transcript's 3' UTR, one CDS endpoint is a mapper gap and VEP
+ * cannot form peptide alleles: coding_unknown wins. The adjacent CDS-only
+ * controls prove this is a mapping boundary, not blanket stop-loss suppression. */
+TEST annotate_equal_length_cds_to_utr3_mapping_gap_known_scene(void) {
+    static const uint16_t tchrom[2] = {0u, 1u};
+    static const uint32_t tstart[2] = {1000u, 2000u};
+    static const uint32_t tend[2] = {1011u, 2011u};
+    static const int8_t tstrand[2] = {1, -1};
+    static const uint64_t tflags[2] = {0u, 0u};
+    static const uint32_t texoff[2] = {0u, 1u};
+    static const uint16_t texcnt[2] = {1u, 1u};
+    static const uint32_t tcds_s[2] = {1000u, 2003u};
+    static const uint32_t tcds_e[2] = {1008u, 2011u};
+    static const uint32_t estart[2] = {1000u, 2000u};
+    static const uint32_t eend[2] = {1011u, 2011u};
+    static const uint32_t ecdna_s[2] = {1u, 1u};
+    static const uint32_t ecdna_e[2] = {12u, 12u};
+    static const int8_t ephase[2] = {0, 0};
+    static const uint8_t cds_bytes[18] = {
+        'A','T','G', 'A','A','A', 'T','A','A',
+        'A','T','G', 'A','A','A', 'T','A','A'
+    };
+    static const uint64_t cds_off[2] = {0u, 9u};
+    static const uint32_t cds_len[2] = {9u, 9u};
+    static const uint8_t cds_tab[2] = {
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD,
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD
+    };
+    static const uint8_t post_cds[6] = {'A','A','A', 'A','A','A'};
+
+    static const uint16_t vchrom[4] = {0u, 0u, 1u, 1u};
+    static const uint32_t vpos[4] = {1007u, 1008u, 2002u, 2003u};
+    static const uint32_t vend[4] = {1008u, 1009u, 2003u, 2004u};
+    static const uint8_t vkind[4] = {
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV
+    };
+    static const uint8_t abytes[16] = {
+        'A','A', 'C','A', /* + CDS-only: TAA -> TCA, stop_lost */
+        'A','A', 'T','A', /* + CDS/3'UTR feature: coding_unknown */
+        'T','T', 'T','G', /* - 3'UTR/CDS feature: coding_unknown */
+        'T','T', 'G','T'  /* - CDS-only: TAA -> TAC, stop_lost */
+    };
+    static const uint32_t roff[4] = {0u, 4u, 8u, 12u};
+    static const uint32_t aoff[4] = {2u, 6u, 10u, 14u};
+    static const uint16_t rlen[4] = {2u, 2u, 2u, 2u};
+    static const uint16_t alen[4] = {2u, 2u, 2u, 2u};
+    static const uint64_t expected[4] = {
+        DUCKVEP_SO(DUCKVEP_SO_STOP_LOST),
+        DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE) |
+            DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR),
+        DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE) |
+            DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR),
+        DUCKVEP_SO(DUCKVEP_SO_STOP_LOST)
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_sequence_pool_t seq;
+    duckvep_variant_batch_t v;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *ws = NULL;
+    duckvep_error_t err;
+    duckvep_consequence_t rows[4];
+    duckvep_result_builder_t rb;
+    size_t i;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    memset(&seq, 0, sizeof seq); memset(&v, 0, sizeof v); memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend; tx.strand = tstrand;
+    tx.flags = tflags; tx.exon_offset = texoff; tx.exon_count = texcnt;
+    tx.cds_start1 = tcds_s; tx.cds_end1 = tcds_e; tx.transcript_count = 2u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 2u;
+    seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
+    seq.cds_offset = cds_off; seq.cds_length = cds_len; seq.codon_table = cds_tab;
+    seq.post_cds_bases = post_cds; seq.transcript_count = 2u;
+    v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend; v.variant_kind = vkind;
+    v.allele_bytes = abytes; v.allele_bytes_len = sizeof abytes;
+    v.ref_offset = roff; v.alt_offset = aoff;
+    v.ref_length = rlen; v.alt_length = alen; v.count = 4u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_result_builder_init(&rb, rows, 4u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(4u, duckvep_result_builder_count(&rb));
+    for (i = 0u; i < 4u; i++) {
+        ASSERT_EQ_FMT((uint32_t)i, rows[i].variant_idx, "%u");
+        ASSERT_EQ(expected[i], rows[i].consequence_mask);
+        if (i == 1u || i == 2u) {
+            ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_NOT_APPLICABLE,
+                      rows[i].sequence_status);
+            ASSERT_EQ(0u, rows[i].flags &
+                          (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED);
+        }
+    }
+
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
 TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
     static const uint16_t tchrom[1]  = {0u};
     static const uint32_t tstart[1]  = {1000u};
@@ -14603,6 +14711,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_codon_mnv_len3_and_cross_codon_known_scene);
     RUN_TEST(annotate_codon_mnv_cross_codon_missense_known_scene);
     RUN_TEST(annotate_codon_mnv_reverse_strand_same_codon_known_scene);
+    RUN_TEST(annotate_equal_length_cds_to_utr3_mapping_gap_known_scene);
     RUN_TEST(annotate_codon_padded_small_variant_delta_known_scene);
     RUN_TEST(annotate_codon_indel_frameshift_known_scene);
     RUN_TEST(annotate_terminal_stop_frame_change_uses_transcript_tail);

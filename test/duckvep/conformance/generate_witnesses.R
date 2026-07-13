@@ -358,6 +358,31 @@ if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
   }
 }
 
+# Pin VEP's use of the complete uploaded feature for CDS mapping. These two
+# substitutions leave a one-base semantic mismatch in the terminal stop codon.
+# The first feature remains within CDS; the second extends one base into 3' UTR,
+# making one cds_coords endpoint a mapper gap and suppressing peptide predicates.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  if (identical(nuc(239L, 2L), "AA")) {
+    emit(
+      239L,
+      "AA",
+      "CA",
+      "stop_codon",
+      "terminal_cds_mapping_control"
+    )
+  }
+  if (identical(nuc(240L, 2L), "AA")) {
+    emit(
+      240L,
+      "AA",
+      "TA",
+      "stop_codon",
+      "terminal_cds_mapping_gap"
+    )
+  }
+}
+
 # Pin VEP 116's interval-tree intron prefilter. Both alleles have ALT-only
 # mismatch bases that extend across the first donor. The REF-shaped feature for
 # the first ends at 148, inside VEP's three-base intron-cache flank, while the
@@ -544,7 +569,11 @@ if (opt$check) {
       "missing intron-cache ALT-overhang witness" =
         any(w$shape == "intron_cache_alt_overhang"),
       "missing intron-cache flank boundary witness" =
-        any(w$shape == "intron_cache_outside_flank")
+        any(w$shape == "intron_cache_outside_flank"),
+      "missing terminal-CDS mapping control" =
+        any(w$shape == "terminal_cds_mapping_control"),
+      "missing terminal-CDS mapper-gap witness" =
+        any(w$shape == "terminal_cds_mapping_gap")
     )
   }
   cat(glue(
