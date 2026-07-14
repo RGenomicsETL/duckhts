@@ -46,6 +46,14 @@ splits an interval at exon boundaries, and packs the resulting genomic segments 
 per-transcript side relation. The hot kernel checks that numeric slice; it does not parse
 attributes or rebuild cDNA mappings per variant.
 
+The cross-assembly GRCh37 cache run exposed an insertion-only boundary detail. VEP tests
+the minimized `VariationFeature` coordinates, not the transcript mapper's chosen placement
+point. A pure insertion after genomic base `P` has the reversed interval `(P+1,P)`;
+therefore an insertion after the last mature-miRNA base does not overlap the mature range,
+even though its retained VCF anchor does. Using the placement point produced 3,667 false
+`mature_miRNA_variant` calls in the targeted GRCh37 corpus. The frozen boundary regression
+keeps this distinction explicit for both transcript strands.
+
 Source anchors: Ensembl Variation 116 `VariationEffect.pm::within_mature_miRNA`, the
 `miRNA` `attrib_type`, and the transcript mapper. Keep the rule-tier regression as well as
 the importer-to-resident-model test: emitting both mature and generic exon terms would

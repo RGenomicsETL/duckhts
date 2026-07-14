@@ -1199,7 +1199,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
             c->options->splice_region_exonic,
             c->options->splice_region_intronic, &ectx);
     }
-    duckvep_effect_ctx_apply_event(&ectx, &event);
+    duckvep_effect_ctx_apply_event(tx, &ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {
         duckvep_sv_effect_t sv = duckvep_sv_effect_fill(&event, &ectx.region_state);
         duckvep_effect_ctx_apply_sv(&ectx, &sv);

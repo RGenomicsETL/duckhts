@@ -144,8 +144,10 @@ void duckvep_effect_ctx_fill_point_sorted(
  * broad transport kind. VEP's insertion/deletion predicates are allele-length
  * predicates after REF/ALT normalization/trimming; `kind` only chooses the broad
  * classification path. */
-void duckvep_effect_ctx_apply_event(duckvep_effect_ctx_t *ctx,
-                                    const duckvep_event_t *event);
+void duckvep_effect_ctx_apply_event(
+    const duckvep_transcript_model_t *transcripts,
+    duckvep_effect_ctx_t             *ctx,
+    const duckvep_event_t            *event);
 
 void duckvep_effect_ctx_apply_delta(
     duckvep_effect_ctx_t           *ctx,

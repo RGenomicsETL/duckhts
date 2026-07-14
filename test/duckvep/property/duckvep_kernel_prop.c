@@ -2700,6 +2700,9 @@ TEST mature_mirna_predicate_known_scene(void) {
     duckvep_effect_ctx_t ctx;
     duckvep_model_t *model = NULL;
     duckvep_error_t error;
+    duckvep_event_t event;
+    static const uint8_t insertion_ref[1] = {'A'};
+    static const uint8_t insertion_alt[2] = {'A', 'C'};
     size_t orientation;
 
     memset(&tx, 0, sizeof tx);
@@ -2739,6 +2742,21 @@ TEST mature_mirna_predicate_known_scene(void) {
             &tx, &exons, 0u, 0u, 102u, 102u, 0u,
             DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
             DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
+        duckvep_effect_ctx_finalize(&ctx);
+        mask = duckvep_effect_eval(ctx.pre_bits);
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT_EXON),
+                  mask);
+
+        /* VEP represents an insertion after P as the reversed feature span
+         * (P+1,P). At the mature segment's final base, it therefore remains a
+         * generic non-coding exon event rather than a mature-miRNA event. */
+        ASSERT(duckvep_event_prepare_small(
+            mature_end[0], insertion_ref, 1u, insertion_alt, 2u, &event));
+        duckvep_effect_ctx_fill(
+            &tx, &exons, 0u, 0u, mature_end[0], mature_end[0], 1u,
+            DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+            DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
+        duckvep_effect_ctx_apply_event(&tx, &ctx, &event);
         duckvep_effect_ctx_finalize(&ctx);
         mask = duckvep_effect_eval(ctx.pre_bits);
         ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT_EXON),
@@ -4632,7 +4650,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
     event.ref_diff_length = 1u;
     event.alt_diff_length = 4u;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u);
@@ -4642,7 +4660,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
     event.ref_diff_length = 4u;
     event.alt_diff_length = 1u;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u);
@@ -4652,7 +4670,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     event.kind = (uint8_t)DUCKVEP_KIND_MNV;
     event.ref_diff_length = 2u;
     event.alt_diff_length = 2u;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u);
@@ -4660,7 +4678,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     memset(&ctx, 0, sizeof ctx);
     memset(&event, 0, sizeof event);
     event.kind = (uint8_t)DUCKVEP_KIND_SV;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) == 0u);
