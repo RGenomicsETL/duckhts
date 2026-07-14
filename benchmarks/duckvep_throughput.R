@@ -175,7 +175,9 @@ annotation_query <- function(n) {
   input <- if (production) {
     glue(
       "SELECT seq_region, \"position\", \"reference\", \"alternate\"
-       FROM duckvep_throughput_variants LIMIT {n}"
+       FROM duckvep_throughput_variants
+       ORDER BY seq_region, \"position\", \"reference\", \"alternate\"
+       LIMIT {n}"
     )
   } else {
     glue(
