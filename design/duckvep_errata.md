@@ -8,6 +8,16 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## Translation edits redefine the reference stop state
+
+VEP applies supported Ensembl Translation SeqEdits when constructing the reference
+peptide inspected by its consequence predicates. Terminal-stop completeness must
+therefore be read from that edited peptide, not inferred again from the CDS translation.
+If a SeqEdit replaces the final translated `*`, a length-changing edit at that endpoint
+does not overlap an ordinary terminal stop and must not acquire `stop_lost` or
+`stop_retained_variant` from the unedited peptide. DuckVEP uses one edited-reference
+accessor for the local peptide, full-peptide comparison, and terminal-completeness test.
+
 ## An empty annotated UTR can overlap a spanning deletion
 
 VEP 116 constructs its transcript-oriented before- and after-coding intervals as

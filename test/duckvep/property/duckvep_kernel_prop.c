@@ -12129,6 +12129,8 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
     uint8_t alt_pep[80];
     duckvep_coding_context_t ctx;
     duckvep_sequence_delta_t delta;
+    uint32_t terminal_edit_position1 = 24u;
+    uint8_t terminal_edit_alt = (uint8_t)'X';
     size_t cds_len = sizeof cds - 1u;
 
     ASSERT_EQ(72u, cds_len);
@@ -12192,6 +12194,17 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
     ASSERT(delta.valid && delta.inframe_insertion && delta.stop_lost &&
            !delta.frameshift && !delta.stop_retained &&
            !delta.protein_altering);
+
+    /* Translation SeqEdits define VEP's reference peptide. If an edit
+     * redefines the final translated stop, the same terminal indel no longer
+     * overlaps an ordinary terminal stop and cannot be stop_lost/retained.
+     * Keep terminal completeness on the shared edited-reference accessor. */
+    ctx.ref_peptide_edit_position1 = &terminal_edit_position1;
+    ctx.ref_peptide_edit_alt = &terminal_edit_alt;
+    ctx.ref_peptide_edit_count = 1u;
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+              duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+    ASSERT(delta.valid && !delta.stop_lost && !delta.stop_retained);
 
     /* chrDuck:239 AA>A... Both local peptides start with the stop at index
      * zero. The longer alternate retains it and remains insertion-shaped. */

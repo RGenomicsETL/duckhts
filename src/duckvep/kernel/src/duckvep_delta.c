@@ -2348,7 +2348,8 @@ static duckvep_context_delta_status_t delta_context_length_change_predicates(
     terminal_start = ctx->ref_cds_len - 2u;
     terminal_complete =
         (tx_flags & (uint64_t)DUCKVEP_TX_CDS_END_NF) == 0u &&
-        ctx->ref_peptide[ctx->ref_peptide_len - 1u] == (uint8_t)'*';
+        delta_context_reference_peptide_base(
+            ctx, ctx->ref_peptide_len - 1u) == (uint8_t)'*';
     if (ctx->single_edit_ref_len == 0u) {
         if ((uint64_t)ctx->single_edit_cds_start >
                 (uint64_t)ctx->ref_cds_len) {
