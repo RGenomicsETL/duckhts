@@ -2,6 +2,14 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled `duckvep_annotate(...)` now matches VEP 116 when unchanged
+  bases retained in an equal-length uploaded feature widen the
+  peptide-predicate window beyond the trimmed sequence edit, including
+  representation-dependent `start_lost&start_retained_variant`,
+  `stop_retained_variant`, `missense_variant`, and `stop_gained` results
+  pinned by paired DBI regressions; retained REF mismatches and
+  ambiguous widened windows now return explicit unresolved reasons
+  instead of retrying the smaller edit
 - bundled DuckVEP annotation now matches VEP 116 when an equal-length
   uploaded feature crosses from CDS into the transcript-oriented 3-prime
   UTR: it preserves VEP’s unavailable peptide-mapping state and returns
