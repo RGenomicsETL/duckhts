@@ -192,7 +192,17 @@ static void splice_accum_add_region(
     uint8_t interbase = (uint8_t)(region_start1 == region_end1 + 1);
     int64_t lo = region_start1 < region_end1 ? region_start1 : region_end1;
     int64_t hi = region_start1 > region_end1 ? region_start1 : region_end1;
+    int64_t cache_exonic = splice_exonic > 3u
+        ? (int64_t)splice_exonic : 3;
+    int64_t cache_intronic = splice_intronic > 1u
+        ? (int64_t)splice_intronic - 1 : 0;
     size_t k;
+
+    /* This is only a superset cache gate. Keep every fixed VEP predicate
+     * reachable (the old -3/+7 window), and widen it when the caller asks the
+     * generic splice-region predicate to see farther. Predicate coordinates
+     * themselves remain exact in splice_accum_add_gap(). */
+    if (cache_intronic < 7) cache_intronic = 7;
 
     for (k = 0u; k + 1u < exon_count; k++) {
         uint32_t gap_start;
@@ -206,11 +216,11 @@ static void splice_accum_add_region(
         }
         boundary_cached =
             span_overlaps_i64(feature_min1, feature_max1,
-                              (int64_t)gap_start - 3,
-                              (int64_t)gap_start + 7) ||
+                              (int64_t)gap_start - cache_exonic,
+                              (int64_t)gap_start + cache_intronic) ||
             span_overlaps_i64(feature_min1, feature_max1,
-                              (int64_t)gap_end - 7,
-                              (int64_t)gap_end + 3);
+                              (int64_t)gap_end - cache_intronic,
+                              (int64_t)gap_end + cache_exonic);
         /* With Set::IntervalTree enabled, VEP 116 preselects introns over a
          * three-base flank on either side of the actual intron. The selected
          * list is then cached before _intron_effects visits mismatch islands.

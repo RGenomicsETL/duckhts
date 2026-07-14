@@ -7986,6 +7986,55 @@ TEST annotate_honors_splice_region_options(void) {
     PASS();
 }
 
+TEST differing_regions_honor_wider_splice_windows(void) {
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {100u};
+    static const uint32_t tend[1] = {300u};
+    static const int8_t tstrand[1] = {1};
+    static const uint32_t zero32[1] = {0u};
+    static const uint16_t two16[1] = {2u};
+    static const uint32_t estart[2] = {100u, 250u};
+    static const uint32_t eend[2] = {150u, 300u};
+    static const uint8_t ref[2] = {'A', 'A'};
+    static const uint8_t alt[2] = {'C', 'A'};
+    static const uint8_t alt_short[1] = {'C'};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_splice_state_t splice;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = tstrand; tx.flags = k_zero_flags;
+    tx.exon_offset = zero32; tx.exon_count = two16;
+    tx.cds_start1 = zero32; tx.cds_end1 = zero32;
+    tx.transcript_count = 1u;
+    exons.start1 = estart; exons.end1 = eend; exons.exon_count = 2u;
+
+    /* Exon base five and intron base twelve are outside the default cache
+     * gate but inside the requested generic splice-region windows. */
+    splice = duckvep_splice_classify_differing_regions_with_windows(
+        &tx, &exons, 0u, 146u, ref, 2u, alt, 2u, 5u, 12u);
+    ASSERT(splice.splice_region);
+    splice = duckvep_splice_classify_differing_regions_with_windows(
+        &tx, &exons, 0u, 162u, ref, 2u, alt, 2u, 5u, 12u);
+    ASSERT(splice.splice_region);
+
+    splice = duckvep_splice_classify_differing_regions(
+        &tx, &exons, 0u, 146u, ref, 2u, alt, 2u);
+    ASSERT(!splice.splice_region);
+    splice = duckvep_splice_classify_differing_regions(
+        &tx, &exons, 0u, 162u, ref, 2u, alt, 2u);
+    ASSERT(!splice.splice_region);
+
+    splice = duckvep_splice_classify_differing_regions_with_windows(
+        &tx, &exons, 0u, 146u, ref, 2u, alt_short, 1u, 5u, 12u);
+    ASSERT(splice.splice_region);
+    splice = duckvep_splice_classify_differing_regions(
+        &tx, &exons, 0u, 146u, ref, 2u, alt_short, 1u);
+    ASSERT(!splice.splice_region);
+    PASS();
+}
+
 /* model_open validates once and rejects malformed models with STABLE where_codes
  * (golden anchors: 13 exon-range, 14 cds-range, 15 unsorted — see duckvep_kernel.c). */
 TEST model_open_rejects_invalid_models(void) {
@@ -15887,6 +15936,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_directional_distance_uses_u32);
     RUN_TEST(annotate_directional_distance_filter);
     RUN_TEST(annotate_honors_splice_region_options);
+    RUN_TEST(differing_regions_honor_wider_splice_windows);
     RUN_TEST(model_open_rejects_invalid_models);
     RUN_TEST(annotate_matches_composition_for_any_scene);
     RUN_TEST(annotate_cursor_resumes_known_scene);
