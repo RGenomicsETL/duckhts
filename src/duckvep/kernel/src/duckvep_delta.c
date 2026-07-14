@@ -2099,9 +2099,9 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
 }
 
 /* Try the VEP uploaded-feature peptide window for an equal-length multi-base
- * substitution. Return 1 only when that complete feature is wholly and contiguously
- * projected to CDS and the predicate result is authoritative; return 0 to leave the
- * existing semantic-edit route unchanged. */
+ * substitution. Once the complete feature is proven wholly and contiguously in CDS,
+ * this path is authoritative: return 1 for either a resolved predicate or a preserved
+ * failure status so the caller cannot silently retry the smaller semantic edit. */
 static int delta_feature_substitution_fill(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -2119,7 +2119,12 @@ static int delta_feature_substitution_fill(
     duckvep_context_delta_status_t delta_status;
     duckvep_coding_projection_t start_projection;
     duckvep_coding_projection_t end_projection;
+    const uint8_t *cds_seq;
+    size_t cds_len;
+    size_t ref_off;
+    size_t alt_off;
     uint16_t feature_len;
+    uint16_t i;
     uint32_t first_cds = UINT32_MAX;
     uint32_t last_cds = 0u;
     uint64_t feature_span;
@@ -2157,18 +2162,63 @@ static int delta_feature_substitution_fill(
         return 0;
     }
 
+    memset(delta, 0, sizeof *delta);
+    if (!delta_allele_slice_ok(v, variant_idx) ||
+        !delta_cds_slice(seq, tx_idx, &cds_seq, &cds_len)) {
+        delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+        return 1;
+    }
+    ref_off = (size_t)v->ref_offset[variant_idx];
+    alt_off = (size_t)v->alt_offset[variant_idx];
+    for (i = 0u; i < feature_len; i++) {
+        uint32_t cds_pos = strand > 0
+            ? start_projection.cds_pos + (uint32_t)i
+            : start_projection.cds_pos - (uint32_t)i;
+        char ref_base = delta_norm_base(
+            (char)v->allele_bytes[ref_off + (size_t)i]);
+        char alt_base = delta_norm_base(
+            (char)v->allele_bytes[alt_off + (size_t)i]);
+        char cds_base;
+        char transcript_ref;
+
+        if (cds_pos == 0u || (size_t)cds_pos > cds_len) {
+            delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+            return 1;
+        }
+        cds_base = delta_norm_base((char)cds_seq[(size_t)cds_pos - 1u]);
+        if (ref_base == '\0' || ref_base == 'N' ||
+            alt_base == '\0' || alt_base == 'N' ||
+            cds_base == '\0' || cds_base == 'N') {
+            delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_AMBIGUOUS;
+            return 1;
+        }
+        transcript_ref = delta_orient_genomic_base(ref_base, strand);
+        if (transcript_ref == '\0' || transcript_ref != cds_base) {
+            delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH;
+            return 1;
+        }
+    }
+
     context_status = duckvep_variant_coding_context_build_event(
         transcripts, exons, seq, v, variant_idx, tx_idx, strand, event,
         scratch->edits, scratch->edits_cap,
         scratch->alt_cds, scratch->alt_cds_cap,
         scratch->ref_peptide, scratch->ref_peptide_cap,
         scratch->alt_peptide, scratch->alt_peptide_cap, &ctx);
-    if (context_status != DUCKVEP_VARIANT_CODING_CONTEXT_OK) return 0;
+    if (context_status != DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
+        memset(delta, 0, sizeof *delta);
+        delta->sequence_status = delta_sequence_status_from_context(context_status);
+        return 1;
+    }
     if (transcripts->flags != NULL) tx_flags = transcripts->flags[tx_idx];
     delta_status = delta_context_substitution_window(
         &ctx, ((size_t)first_cds - 1u) / 3u,
         ((size_t)last_cds - 1u) / 3u, tx_flags, 1, delta);
-    if (delta_status != DUCKVEP_CONTEXT_DELTA_OK || !delta->valid) return 0;
+    if (delta_status != DUCKVEP_CONTEXT_DELTA_OK || !delta->valid) {
+        memset(delta, 0, sizeof *delta);
+        delta->sequence_status = delta_sequence_status_from_delta(delta_status);
+        return 1;
+    }
     delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
     return 1;
 }

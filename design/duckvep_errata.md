@@ -64,6 +64,12 @@ feature selects that window; the trimmed edit supplies the replacement bases. Do
 normalize the uploaded identity inside the consequence kernel or implement separate
 start/stop rule copies for MNV-shaped input.
 
+The complete feature is also the validation boundary. Every retained REF base must agree
+with the transcript CDS, and an ambiguous or incomplete codon anywhere in the selected
+window suppresses the specific peptide predicate. Once that window is authoritative,
+DuckVEP must preserve `reference_mismatch`, ambiguous-sequence, or `coding_sequence_variant`
+state; retrying the smaller trimmed edit would annotate a different input representation.
+
 Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
 `::start_retained`, `::stop_lost`, `::stop_retained`, `::stop_gained`, and
 `::missense`. Fixed witnesses must remain paired with large held-out differentials so a

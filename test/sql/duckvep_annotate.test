@@ -117,7 +117,9 @@ WITH variants(ord, position, reference, alternate) AS (
     (3, 237::UBIGINT, 'GT', 'TT'),
     (4, 237::UBIGINT, 'G', 'T'),
     (5, 237::UBIGINT, 'GT', 'AT'),
-    (6, 237::UBIGINT, 'G', 'A')
+    (6, 237::UBIGINT, 'G', 'A'),
+    (7, 122::UBIGINT, 'AG', 'AA'),
+    (8, 122::UBIGINT, 'NG', 'NA')
 )
 SELECT ord, annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
@@ -133,6 +135,8 @@ ORDER BY ord;
 4	missense_variant	supported	-
 5	missense_variant	supported	-
 6	stop_gained	supported	-
+7	coding_sequence_variant	unresolved	reference_mismatch
+8	coding_sequence_variant	unresolved	ambiguous_sequence
 
 # The stronger overload requires contig lengths before a caller may declare
 # complete transcript coverage and receive supported intergenic assertions.

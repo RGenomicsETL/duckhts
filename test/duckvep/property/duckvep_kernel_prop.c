@@ -12878,6 +12878,92 @@ TEST sequence_delta_with_scratch_cross_codon_negative_scenes(void) {
     PASS();
 }
 
+TEST feature_substitution_window_fails_closed_known_scene(void) {
+    static uint8_t cds[15] = {
+        'A','T','G',  'N','A','A',  'C','C','C',  'T','G','G',  'T','A','A'
+    };
+    struct kprop_coding s;
+    duckvep_haplotype_edit_t edits[4];
+    uint8_t alt_cds[64];
+    uint8_t ref_pep[32];
+    uint8_t alt_pep[32];
+    duckvep_delta_scratch_t scratch;
+    duckvep_event_t event;
+    duckvep_sequence_delta_t delta;
+    duckvep_sequence_delta_route_t route;
+
+    memset(&s, 0, sizeof s);
+    s.cds = cds; s.chrom = 0u; s.strand = 1; s.flags = 0u;
+    s.tstart = 1000u; s.tend = 1014u; s.cds_s = 1000u; s.cds_e = 1014u;
+    s.es = 1000u; s.ee = 1014u; s.ecds = 1u; s.ecde = 15u;
+    s.eph = 0; s.eeph = 0; s.exoff = 0u; s.excnt = 1u; s.vchrom = 0u;
+    s.vkind = (uint8_t)DUCKVEP_KIND_SNV;
+    s.roff = 0u; s.aoff = 2u; s.rlen = 2u; s.alen = 2u;
+    kprop_wire_coding_scene(&s, sizeof cds);
+
+    scratch.edits = edits; scratch.edits_cap = 4u;
+    scratch.alt_cds = alt_cds; scratch.alt_cds_cap = sizeof alt_cds;
+    scratch.ref_peptide = ref_pep; scratch.ref_peptide_cap = sizeof ref_pep;
+    scratch.alt_peptide = alt_pep; scratch.alt_peptide_cap = sizeof alt_pep;
+
+    /* The semantic edit is G>A at CDS position 3. The complete uploaded feature
+     * also retains an N in the next codon, so VEP cannot use the widened peptide
+     * window. Do not retry the apparently valid one-base edit. */
+    s.vpos = 1002u; s.vend = 1003u;
+    s.abytes[0] = 'G'; s.abytes[1] = 'N';
+    s.abytes[2] = 'A'; s.abytes[3] = 'N';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_AMBIGUOUS, delta.sequence_status);
+
+    /* The retained A is not the transcript's G at CDS position 12. The changed
+     * T>C base itself is valid, so validating only the trimmed edit would miss
+     * this reference mismatch and emit a supported terminal-stop consequence. */
+    s.vpos = 1011u; s.vend = 1012u;
+    s.abytes[0] = 'A'; s.abytes[1] = 'T';
+    s.abytes[2] = 'A'; s.abytes[3] = 'C';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH,
+              delta.sequence_status);
+
+    /* On the reverse strand genomic 1002-1003 maps to CDS positions 13-12.
+     * The same checks must follow genomic byte order while comparing against
+     * the reverse-complemented transcript bases. */
+    s.strand = -1;
+    kprop_wire_coding_scene(&s, sizeof cds);
+    s.vpos = 1002u; s.vend = 1003u;
+    s.abytes[0] = 'G'; s.abytes[1] = 'C';
+    s.abytes[2] = 'G'; s.abytes[3] = 'T';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH,
+              delta.sequence_status);
+
+    s.abytes[0] = 'N'; s.abytes[1] = 'C';
+    s.abytes[2] = 'N'; s.abytes[3] = 'T';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_AMBIGUOUS, delta.sequence_status);
+    PASS();
+}
+
 static struct {
     uint32_t syn;
     uint32_t mis;
@@ -14929,6 +15015,7 @@ int main(int argc, char **argv) {
     RUN_TEST(sequence_delta_with_scratch_cross_codon_known_scene);
     RUN_TEST(sequence_delta_with_scratch_cross_codon_reverse_known_scene);
     RUN_TEST(sequence_delta_with_scratch_cross_codon_negative_scenes);
+    RUN_TEST(feature_substitution_window_fails_closed_known_scene);
     RUN_TEST(sequence_delta_annotation_wrapper_matches_direct_shape);
     RUN_TEST(annotate_cursor_padded_snv_matches_tile_for_any_output_split);
     RUN_TEST(annotate_cursor_cross_codon_mnv_route_matches_tile_for_any_output_split);

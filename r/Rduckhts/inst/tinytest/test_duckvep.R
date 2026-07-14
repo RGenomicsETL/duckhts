@@ -346,14 +346,16 @@ feature_window_substitutions <- dbGetQuery(
     "(3, 237::UBIGINT, 'GT', 'TT'),",
     "(4, 237::UBIGINT, 'G', 'T'),",
     "(5, 237::UBIGINT, 'GT', 'AT'),",
-    "(6, 237::UBIGINT, 'G', 'A'))",
+    "(6, 237::UBIGINT, 'G', 'A'),",
+    "(7, 122::UBIGINT, 'AG', 'AA'),",
+    "(8, 122::UBIGINT, 'NG', 'NA'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
     "LATERAL unnest(duckvep_annotate(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
 )
-expect_equal(feature_window_substitutions$ord, 1:6)
+expect_equal(feature_window_substitutions$ord, 1:8)
 expect_identical(
   feature_window_substitutions$consequence,
   c(
@@ -362,11 +364,19 @@ expect_identical(
     "stop_retained_variant",
     "missense_variant",
     "missense_variant",
-    "stop_gained"
+    "stop_gained",
+    "coding_sequence_variant",
+    "coding_sequence_variant"
   )
 )
-expect_identical(feature_window_substitutions$status, rep("supported", 6))
-expect_true(all(is.na(feature_window_substitutions$reason)))
+expect_identical(
+  feature_window_substitutions$status,
+  c(rep("supported", 6), "unresolved", "unresolved")
+)
+expect_identical(
+  feature_window_substitutions$reason[7:8],
+  c("reference_mismatch", "ambiguous_sequence")
+)
 
 dbExecute(
   con,
