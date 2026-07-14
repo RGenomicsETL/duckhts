@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled `duckvep_annotate(...)` now matches VEP 116 for equal-length
+  features crossing from 5-prime UTR into the start codon: changing the
+  start returns `start_lost` without a co-occurring stop term, while
+  preserving `ATG` returns `start_retained_variant` even when later
+  coding bases in the same uploaded feature change; DBI regressions pin
+  each state
 - bundled `duckvep_annotate(...)` now matches VEP 116 when unchanged
   bases retained in an equal-length uploaded feature widen the
   peptide-predicate window beyond the trimmed sequence edit, including
