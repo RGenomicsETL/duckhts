@@ -28,6 +28,11 @@ production-density workload uses a pre-staged DuckDB database containing
 recorded Ensembl-116 GRCh38 model contains 644,292 chromosome transcripts and
 5,078,384 exon memberships; the input is a deterministic 1-in-40 hash sample of
 100,957 sorted GIAB sites. The external staging database is not committed.
+The production query restates `ORDER BY` in the timed input CTE, so its result
+includes the cost of enforcing the kernel's nondecreasing-input contract even
+though the staging table was already written in that order. The `79cfaaf2`
+rows predate that review correction and relied on the single-thread physical
+scan preserving insertion order; they remain only as historical measurements.
 
 ## Recorded runs
 
