@@ -1914,10 +1914,10 @@ static enum theft_trial_res prop_sorted_point_classifier_matches_exhaustive(
         duckvep_splice_state_t fast_splice;
 
         slow_region = duckvep_region_classify_span(
-            &s->tx, &s->ex, 0u, pos, pos,
+            &s->tx, &s->ex, 0u, pos, pos, 0u, 0u);
+        slow_splice = duckvep_splice_classify_span_with_windows(
+            &s->tx, &s->ex, 0u, pos, pos, 0u,
             s->splice_exonic, s->splice_intronic);
-        slow_splice = duckvep_splice_classify_span(
-            &s->tx, &s->ex, 0u, pos, pos, 0u);
         duckvep_classify_point_sorted(
             &s->tx, &s->ex, 0u, pos,
             s->splice_exonic, s->splice_intronic,
@@ -2393,13 +2393,19 @@ TEST splice_ppt_exon_gate_scene(void) {
     ex.start1 = es; ex.end1 = ee; ex.exon_count = 2u;
 
     /* deletion inside the tract, wholly intronic: PPT fires, no exon overlap */
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 285u, 290u, 0u, &ctx);
+    duckvep_effect_ctx_fill(
+        &tx, &ex, 0u, 0u, 285u, 290u, 0u,
+        DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+        DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
     ASSERT(!ctx.region_state.overlaps_exon);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT)) != 0u);
 
     /* deletion from the tract across the acceptor into the exon: exon overlap
      * suppresses PPT, but the essential acceptor site still fires */
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 285u, 305u, 0u, &ctx);
+    duckvep_effect_ctx_fill(
+        &tx, &ex, 0u, 0u, 285u, 305u, 0u,
+        DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+        DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
     ASSERT(ctx.region_state.overlaps_exon);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_ACCEPTOR)) != 0u);
@@ -2582,13 +2588,19 @@ TEST nmd_transcript_predicate_known_scene(void) {
     ex.end_phase = phase;
     ex.exon_count = 2u;
 
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 200u, 200u, 0u, &ctx);
+    duckvep_effect_ctx_fill(
+        &tx, &ex, 0u, 0u, 200u, 200u, 0u,
+        DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+        DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
     duckvep_effect_ctx_finalize(&ctx);
     mask = duckvep_effect_eval(ctx.pre_bits);
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_INTRON) |
               DUCKVEP_SO(DUCKVEP_SO_NMD_TRANSCRIPT), mask);
 
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 90u, 90u, 0u, &ctx);
+    duckvep_effect_ctx_fill(
+        &tx, &ex, 0u, 0u, 90u, 90u, 0u,
+        DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+        DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
     ASSERT((ctx.pre_bits &
             DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u);
     PASS();
@@ -7898,6 +7910,78 @@ TEST annotate_directional_distance_filter(void) {
 
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
+TEST annotate_honors_splice_region_options(void) {
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {100u};
+    static const uint32_t tend[1] = {300u};
+    static const int8_t tstrand[1] = {1};
+    static const uint32_t zero32[1] = {0u};
+    static const uint16_t two16[1] = {2u};
+    static const uint32_t estart[2] = {100u, 250u};
+    static const uint32_t eend[2] = {150u, 300u};
+    static const uint16_t vchrom[2] = {0u, 0u};
+    static const uint32_t vpos[2] = {146u, 159u};
+    static const uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_variant_batch_t variants;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_options_init_t init;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t results;
+    duckvep_error_t error;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    memset(&variants, 0, sizeof variants); memset(&init, 0, sizeof init);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = tstrand; tx.flags = k_zero_flags;
+    tx.exon_offset = zero32; tx.exon_count = two16;
+    tx.cds_start1 = zero32; tx.cds_end1 = zero32;
+    tx.transcript_count = 1u;
+    exons.start1 = estart; exons.end1 = eend; exons.exon_count = 2u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vpos;
+    variants.variant_kind = vkind; variants.count = 2u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, NULL, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &workspace, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &options, &error));
+    duckvep_result_builder_init(&results, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &variants, options, workspace,
+                                    &results, &error));
+    ASSERT_EQ(2u, results.count);
+    ASSERT_EQ(0u, rows[0].consequence_mask &
+                  DUCKVEP_SO(DUCKVEP_SO_SPLICE_REGION));
+    ASSERT_EQ(0u, rows[1].consequence_mask &
+                  DUCKVEP_SO(DUCKVEP_SO_SPLICE_REGION));
+    duckvep_options_close(options); options = NULL;
+
+    init.splice_region_exonic = 5u;
+    init.splice_region_intronic = 12u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &options, &error));
+    duckvep_result_builder_init(&results, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &variants, options, workspace,
+                                    &results, &error));
+    ASSERT_EQ(2u, results.count);
+    ASSERT(rows[0].consequence_mask & DUCKVEP_SO(DUCKVEP_SO_SPLICE_REGION));
+    ASSERT(rows[1].consequence_mask & DUCKVEP_SO(DUCKVEP_SO_SPLICE_REGION));
+    ASSERT_EQ((uint32_t)(DUCKVEP_REGION_EXON | DUCKVEP_REGION_SPLICE),
+              rows[0].region_mask);
+    ASSERT_EQ((uint32_t)(DUCKVEP_REGION_INTRON | DUCKVEP_REGION_SPLICE),
+              rows[1].region_mask);
+
+    duckvep_options_close(options);
+    duckvep_workspace_close(workspace);
     duckvep_model_close(model);
     PASS();
 }
@@ -15802,6 +15886,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_rejects_result_count_past_capacity);
     RUN_TEST(annotate_directional_distance_uses_u32);
     RUN_TEST(annotate_directional_distance_filter);
+    RUN_TEST(annotate_honors_splice_region_options);
     RUN_TEST(model_open_rejects_invalid_models);
     RUN_TEST(annotate_matches_composition_for_any_scene);
     RUN_TEST(annotate_cursor_resumes_known_scene);

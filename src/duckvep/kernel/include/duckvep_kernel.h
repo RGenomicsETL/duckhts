@@ -315,8 +315,8 @@ typedef struct duckvep_result_builder {
  * engine hardcodes them. Override per-call via duckvep_options_init_t. */
 #define DUCKVEP_DEFAULT_UPSTREAM_DIST          5000u /* up-/downstream gene window      */
 #define DUCKVEP_DEFAULT_DOWNSTREAM_DIST        5000u
-#define DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC   3u    /* bases INTO the exon (1-3)        */
-#define DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC 8u    /* bases INTO the intron (1-8)      */
+#define DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC   3u    /* generic term: bases 1-3 in exon  */
+#define DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC 8u    /* generic term: bases 3-8 in intron */
 
 /* ----------------------------------------------------------- options init
  * Plain-old-data init descriptor; the opaque duckvep_options_t is prepared from
@@ -325,6 +325,9 @@ typedef struct duckvep_result_builder {
 typedef struct duckvep_options_init {
     uint32_t upstream_dist;          /* 0 -> DUCKVEP_DEFAULT_UPSTREAM_DIST              */
     uint32_t downstream_dist;        /* 0 -> DUCKVEP_DEFAULT_DOWNSTREAM_DIST            */
+    /* Configure only the generic splice_region_variant reach. Essential
+     * donor/acceptor, donor-fifth, donor-region, and polypyrimidine predicates
+     * retain their VEP-116 coordinates. */
     uint32_t splice_region_exonic;   /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC       */
     uint32_t splice_region_intronic; /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC     */
     uint32_t halo;                   /* 0 -> max(upstream_dist, downstream_dist)        */

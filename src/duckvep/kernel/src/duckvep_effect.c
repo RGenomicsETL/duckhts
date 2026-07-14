@@ -208,11 +208,14 @@ void duckvep_effect_ctx_fill(
     uint32_t                          start1,
     uint32_t                          end1,
     uint8_t                           interbase,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out) {
 
     duckvep_effect_ctx_fill_geometry(
         transcripts, exons, variant_idx, tx_idx,
-        start1, end1, start1, end1, interbase, out);
+        start1, end1, start1, end1, interbase,
+        splice_region_exonic, splice_region_intronic, out);
 }
 
 void duckvep_effect_ctx_fill_geometry(
@@ -225,6 +228,8 @@ void duckvep_effect_ctx_fill_geometry(
     uint32_t                          splice_start1,
     uint32_t                          splice_end1,
     uint8_t                           interbase,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out) {
 
     duckvep_region_state_t region;
@@ -232,9 +237,9 @@ void duckvep_effect_ctx_fill_geometry(
 
     region = duckvep_region_classify_span(transcripts, exons, tx_idx,
                                            region_start1, region_end1, 0u, 0u);
-    splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
-                                           splice_start1, splice_end1,
-                                           interbase);
+    splice = duckvep_splice_classify_span_with_windows(
+        transcripts, exons, tx_idx, splice_start1, splice_end1, interbase,
+        splice_region_exonic, splice_region_intronic);
     duckvep_effect_ctx_fill_classified(
         transcripts, variant_idx, tx_idx, region_start1, region_end1,
         &region, &splice, out);
@@ -246,16 +251,20 @@ void duckvep_effect_ctx_fill_point_sorted(
     uint32_t                          variant_idx,
     size_t                            tx_idx,
     uint32_t                          pos,
+    uint32_t                          splice_region_exonic,
+    uint32_t                          splice_region_intronic,
     uint16_t                         *exon_rank_io,
     duckvep_effect_ctx_t             *out) {
 
     duckvep_region_state_t region;
     duckvep_splice_state_t splice;
 
-    /* The effect state replaces the configurable coarse splice-region bit
-     * with the exact VEP predicates below. Skip coarse-region work here. */
+    /* The exact VEP predicate consumes the configured generic-region reaches;
+     * the coarse diagnostic pass is still unnecessary. */
     duckvep_classify_point_sorted(transcripts, exons, tx_idx, pos,
-                                  0u, 0u, exon_rank_io, &region, &splice);
+                                  splice_region_exonic,
+                                  splice_region_intronic,
+                                  exon_rank_io, &region, &splice);
     duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
                                     pos, pos, &region, &splice, out);
 }
