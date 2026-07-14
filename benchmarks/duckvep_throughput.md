@@ -20,10 +20,12 @@ external staging database is not committed.
 
 ## Recorded runs
 
-| run_date   | revision | workload                      | output_mode | threads | variants   | transcripts | exons | annotated_rows | passes | min_seconds | median_seconds | max_seconds | variants_per_second | ns_per_variant | cpu                                 |
-|:-----------|:---------|:------------------------------|:------------|--------:|:-----------|:------------|:------|:---------------|-------:|------------:|---------------:|------------:|--------------------:|---------------:|:------------------------------------|
-| 2026-07-11 | 8cc22218 | fixture_one_transcript_sorted | rich        |       1 | 10,000,000 | 1           | 2     | 10,000,000     |      3 |       3.225 |          3.334 |       3.371 |             2999400 |          333.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-13 | 87f03a2a | fixture_one_transcript_sorted | rich        |       1 | 10,000,000 | 1           | 2     | 10,000,000     |      3 |       2.812 |          2.824 |       2.825 |             3541076 |          282.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| run_date   | revision | workload                            | output_mode | threads | variants   | transcripts | exons     | annotated_rows | passes | min_seconds | median_seconds | max_seconds | variants_per_second | ns_per_variant | cpu                                 |
+|:-----------|:---------|:------------------------------------|:------------|--------:|:-----------|:------------|:----------|:---------------|-------:|------------:|---------------:|------------:|--------------------:|---------------:|:------------------------------------|
+| 2026-07-11 | 8cc22218 | fixture_one_transcript_sorted       | rich        |       1 | 10,000,000 | 1           | 2         | 10,000,000     |      3 |       3.225 |          3.334 |       3.371 |             2999400 |          333.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-13 | 87f03a2a | fixture_one_transcript_sorted       | rich        |       1 | 10,000,000 | 1           | 2         | 10,000,000     |      3 |       2.812 |          2.824 |       2.825 |             3541076 |          282.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 79cfaaf2 | ensembl116_grch38_giab_sites_hash40 | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.107 |          0.108 |       0.110 |              934787 |         1069.8 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 79cfaaf2 | ensembl116_grch38_giab_sites_hash40 | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.225 |          0.228 |       0.232 |              442794 |         2258.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
