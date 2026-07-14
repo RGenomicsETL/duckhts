@@ -360,7 +360,8 @@ duckvep_haplotype_status_t duckvep_haplotype_translate_cds(
 
     haplo_result_init(result);
     if (protein_len_out != NULL) *protein_len_out = 0u;
-    if (cds == NULL || protein_out == NULL || protein_len_out == NULL || protein_cap == 0u) {
+    if (cds == NULL || protein_out == NULL || protein_len_out == NULL ||
+        protein_cap == 0u || !duckvep_codon_table_supported(table)) {
         return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     }
     codon_count = cds_len / 3u;

@@ -1,4 +1,5 @@
 #include "duckvep_model.h"
+#include "kernel/src/duckvep_codon.h"
 
 DUCKDB_EXTENSION_EXTERN
 
@@ -19,6 +20,7 @@ typedef struct duckvep_load_bind {
 	duckvep_registry_t *registry;
 	char *arguments[4];
 	char *mature_mirna_query;
+	char *peptide_edit_query;
 	int transcript_coverage_complete;
 } duckvep_load_bind_t;
 
@@ -176,6 +178,25 @@ duckvep_model_reserve_mature_mirna(duckvep_owned_model_t *model,
 }
 
 static int
+duckvep_model_reserve_peptide_edits(duckvep_owned_model_t *model,
+	size_t needed)
+{
+	size_t capacity;
+
+	if (needed <= model->peptide_edit_capacity)
+		return 1;
+	capacity = duckvep_sql_next_capacity(model->peptide_edit_capacity,
+	    needed);
+	if (!duckvep_sql_resize((void **)&model->peptide_edit_positions,
+	    sizeof(*model->peptide_edit_positions), capacity) ||
+	    !duckvep_sql_resize((void **)&model->peptide_edit_alts,
+	    sizeof(*model->peptide_edit_alts), capacity))
+		return 0;
+	model->peptide_edit_capacity = capacity;
+	return 1;
+}
+
+static int
 duckvep_model_reserve_flanks(duckvep_owned_model_t *model, size_t needed)
 {
 	size_t capacity;
@@ -226,6 +247,9 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 	free(model->mature_mirna_offsets);
 	free(model->mature_mirna_starts);
 	free(model->mature_mirna_ends);
+	free(model->peptide_edit_offsets);
+	free(model->peptide_edit_positions);
+	free(model->peptide_edit_alts);
 	free(model->cds_sequence_bytes);
 	free(model->flank_sequence_bytes);
 	if (model->interval_index != NULL) {
@@ -265,6 +289,10 @@ duckvep_owned_model_publish(duckvep_owned_model_t *model)
 	model->sequences.cds_length = model->cds_sequence_lengths;
 	model->sequences.codon_table = model->codon_tables;
 	model->sequences.transcript_count = model->transcripts.transcript_count;
+	model->sequences.peptide_edit_offset = model->peptide_edit_offsets;
+	model->sequences.peptide_edit_position1 = model->peptide_edit_positions;
+	model->sequences.peptide_edit_alt = model->peptide_edit_alts;
+	model->sequences.peptide_edit_count = model->peptide_edit_count;
 	model->sequences.flank_bytes = model->flank_sequence_bytes;
 	model->sequences.flank_bytes_len = model->flank_sequence_length;
 	model->sequences.pre_cds_offset = model->pre_cds_sequence_offsets;
@@ -685,7 +713,8 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 				sequence_length = (size_t)duckdb_string_t_length(
 				    sequences[row]);
 				if (sequence_length == 0 || sequence_length > UINT32_MAX ||
-				    (tables[row] != 1 && tables[row] != 2)) {
+				    !duckvep_codon_table_supported(
+				    (duckvep_codon_table_t)tables[row])) {
 					duckvep_sql_set_error(error, error_size,
 					    "coding transcript has an invalid CDS sequence or codon table");
 					duckdb_destroy_data_chunk(&chunk);
@@ -1075,6 +1104,138 @@ done:
 }
 
 static int
+duckvep_peptide_edit_alt_valid(uint8_t amino_acid)
+{
+	return amino_acid == (uint8_t)'*' ||
+	    (amino_acid >= (uint8_t)'A' && amino_acid <= (uint8_t)'Z');
+}
+
+static int
+duckvep_load_peptide_edits(duckdb_connection connection, const char *query,
+	duckvep_owned_model_t *model, char *error, size_t error_size)
+{
+	static const char *const names[] = {
+		"transcript_index", "protein_position", "alternate_amino_acid"
+	};
+	static const duckdb_type types[] = {
+		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_VARCHAR
+	};
+	duckvep_query_result_t query_result;
+	duckdb_data_chunk chunk;
+	uint32_t previous_transcript, previous_position;
+	int have_previous, ok;
+	size_t transcript;
+
+	if (model->transcripts.transcript_count >
+	    SIZE_MAX / sizeof(*model->peptide_edit_offsets) - 1u) {
+		duckvep_sql_set_error(error, error_size,
+		    "peptide-edit row-offset array exceeds addressable memory");
+		return 0;
+	}
+	model->peptide_edit_offsets = calloc(
+	    model->transcripts.transcript_count + 1u,
+	    sizeof(*model->peptide_edit_offsets));
+	if (model->peptide_edit_offsets == NULL) {
+		duckvep_sql_set_error(error, error_size,
+		    "out of memory loading peptide-edit row offsets");
+		return 0;
+	}
+	if (!duckvep_query_result_open(connection, query, &query_result, error,
+	    error_size))
+		return 0;
+	have_previous = 0;
+	previous_transcript = 0;
+	previous_position = 0;
+	ok = 0;
+	if (!duckvep_result_schema(&query_result.result, names, types, 3,
+	    SIZE_MAX, error, error_size))
+		goto done;
+	while ((chunk = duckdb_fetch_chunk(query_result.result)) != NULL) {
+		duckdb_vector vectors[3];
+		uint32_t *transcript_indices, *positions;
+		duckdb_string_t *alternates;
+		idx_t row, rows;
+		size_t column;
+
+		rows = duckdb_data_chunk_get_size(chunk);
+		for (column = 0; column < 3; column++)
+			vectors[column] = duckdb_data_chunk_get_vector(chunk,
+			    (idx_t)column);
+		transcript_indices = duckdb_vector_get_data(vectors[0]);
+		positions = duckdb_vector_get_data(vectors[1]);
+		alternates = duckdb_vector_get_data(vectors[2]);
+		for (row = 0; row < rows; row++) {
+			const char *alternate;
+			uint32_t transcript_index, position;
+			uint32_t alternate_length;
+			size_t edit_index;
+			uint8_t amino_acid;
+
+			for (column = 0; column < 3; column++) {
+				if (duckvep_row_is_null(vectors[column], row)) {
+					(void)snprintf(error, error_size,
+					    "peptide-edit query contains NULL in %s",
+					    names[column]);
+					duckdb_destroy_data_chunk(&chunk);
+					goto done;
+				}
+			}
+			transcript_index = transcript_indices[row];
+			position = positions[row];
+			if (transcript_index >= model->transcripts.transcript_count ||
+			    (have_previous &&
+			    (transcript_index < previous_transcript ||
+			    (transcript_index == previous_transcript &&
+			    position <= previous_position)))) {
+				duckvep_sql_set_error(error, error_size,
+				    "peptide-edit query must be ordered and unique by transcript_index and protein_position");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			alternate_length = duckdb_string_t_length(alternates[row]);
+			alternate = duckdb_string_t_data(&alternates[row]);
+			amino_acid = alternate_length == 1u
+			    ? (uint8_t)alternate[0] : 0u;
+			if (position == 0 ||
+			    position > model->cds_sequence_lengths[transcript_index] / 3u ||
+			    alternate_length != 1u ||
+			    !duckvep_peptide_edit_alt_valid(amino_acid)) {
+				duckvep_sql_set_error(error, error_size,
+				    "peptide edit must replace one in-range protein position with one uppercase amino-acid code");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			edit_index = model->peptide_edit_count;
+			if (edit_index == (size_t)UINT32_MAX ||
+			    !duckvep_model_reserve_peptide_edits(model,
+			    edit_index + 1u)) {
+				duckvep_sql_set_error(error, error_size,
+				    "peptide-edit side relation exceeds the uint32 model limit");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			model->peptide_edit_positions[edit_index] = position;
+			model->peptide_edit_alts[edit_index] = amino_acid;
+			model->peptide_edit_offsets[transcript_index + 1u]++;
+			model->peptide_edit_count++;
+			previous_transcript = transcript_index;
+			previous_position = position;
+			have_previous = 1;
+		}
+		duckdb_destroy_data_chunk(&chunk);
+	}
+	for (transcript = 1u;
+	    transcript <= model->transcripts.transcript_count; transcript++) {
+		model->peptide_edit_offsets[transcript] +=
+		    model->peptide_edit_offsets[transcript - 1u];
+	}
+	ok = 1;
+done:
+	duckvep_query_result_close(&query_result);
+	return ok;
+}
+
+static int
 duckvep_query_command(duckdb_connection connection, const char *sql,
 	char *error, size_t error_size)
 {
@@ -1094,6 +1255,7 @@ static int
 duckvep_model_load_queries(duckdb_connection connection,
 	const char *region_query, const char *transcript_query,
 	const char *exon_query, const char *mature_mirna_query,
+	const char *peptide_edit_query,
 	int transcript_coverage_complete,
 	duckvep_owned_model_t *model,
 	char *error, size_t error_size)
@@ -1119,6 +1281,9 @@ duckvep_model_load_queries(duckdb_connection connection,
 	    duckvep_load_exons(connection, exon_query, model, error, error_size) &&
 	    (mature_mirna_query == NULL ||
 	    duckvep_load_mature_mirna(connection, mature_mirna_query, model,
+	    error, error_size)) &&
+	    (peptide_edit_query == NULL ||
+	    duckvep_load_peptide_edits(connection, peptide_edit_query, model,
 	    error, error_size));
 	if (ok)
 		ok = duckvep_query_command(connection, "COMMIT", error, error_size);
@@ -1377,6 +1542,8 @@ duckvep_model_load_bind_destroy(void *pointer)
 	}
 	if (bind->mature_mirna_query != NULL)
 		duckdb_free(bind->mature_mirna_query);
+	if (bind->peptide_edit_query != NULL)
+		duckdb_free(bind->peptide_edit_query);
 	free(bind);
 }
 
@@ -1386,6 +1553,7 @@ duckvep_model_load_bind(duckdb_bind_info info)
 	duckvep_load_bind_t *bind;
 	duckdb_value complete_value;
 	duckdb_value mature_mirna_value;
+	duckdb_value peptide_edit_value;
 	duckdb_logical_type bool_type;
 	idx_t parameter_count;
 	size_t index;
@@ -1429,6 +1597,27 @@ duckvep_model_load_bind(duckdb_bind_info info)
 		    bind->mature_mirna_query[0] == '\0') {
 			duckdb_bind_set_error(info,
 			    "duckvep_model_load: mature_mirna_query must be a non-empty string");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+	}
+	peptide_edit_value = duckdb_bind_get_named_parameter(
+	    info, "peptide_edit_query");
+	if (peptide_edit_value != NULL) {
+		if (duckdb_is_null_value(peptide_edit_value)) {
+			duckdb_destroy_value(&peptide_edit_value);
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: peptide_edit_query cannot be NULL");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+		bind->peptide_edit_query = duckdb_get_varchar(
+		    peptide_edit_value);
+		duckdb_destroy_value(&peptide_edit_value);
+		if (bind->peptide_edit_query == NULL ||
+		    bind->peptide_edit_query[0] == '\0') {
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: peptide_edit_query must be a non-empty string");
 			duckvep_model_load_bind_destroy(bind);
 			return;
 		}
@@ -1504,6 +1693,7 @@ duckvep_model_load_init(duckdb_init_info info)
 	loaded = duckvep_model_load_queries(registry->query_connection,
 	    bind->arguments[1], bind->arguments[2], bind->arguments[3],
 	    bind->mature_mirna_query,
+	    bind->peptide_edit_query,
 	    bind->transcript_coverage_complete, &entry->model, error,
 	    sizeof(error));
 	pthread_mutex_unlock(&registry->query_mutex);
@@ -1638,6 +1828,8 @@ duckvep_register_model_functions(duckdb_connection connection,
 	duckdb_table_function_add_parameter(table, varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "mature_mirna_query", varchar_type);
+	duckdb_table_function_add_named_parameter(table,
+	    "peptide_edit_query", varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "transcript_coverage_complete", bool_type);
 	duckvep_registry_retain(registry);

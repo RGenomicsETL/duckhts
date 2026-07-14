@@ -8,8 +8,12 @@ behavior; the remaining gaps are linked by full URL in the relevant sections bel
 DuckVEP is the deterministic variant-consequence kernel inside DuckHTS. It targets Ensembl
 VEP 116 (`57ea5c52340acc1f156267f810ad162e26597082`) with Ensembl core
 `c0cf13daa961d80584bad797b2eb0ff3a7500ef3` and variation
-`2fb834b987ede3824e200197a838ce11e91aeb4b`, initially for human GRCh37/38 and codon
-tables 1 and 2.
+`2fb834b987ede3824e200197a838ce11e91aeb4b`. The behavioral target is not
+human-only: the kernel accepts every NCBI codon table supported by VEP 116's BioPerl
+translator. Full-model acceptance currently covers human GRCh37 and GRCh38; non-human
+acceptance covers *Plasmodium falciparum* from Ensembl Genomes 63 paired with VEP 116,
+including its codon tables 1, 4, and 11. Evidence for one species or assembly is never
+treated as evidence for another.
 
 The kernel emits structured transcript consequences. VEP-compatible CSQ text and HGVS are
 edge projections, not the internal representation. VEP 116 is the behavioral authority;
@@ -90,8 +94,13 @@ core relations by name from the supplied schema:
 - `coord_system` and `seq_region` identify the requested assembly and its regions;
 - `gene`, `transcript`, `exon`, and `exon_transcript` define transcript topology;
 - `translation` defines coding start and end within ranked exons; and
-- `attrib_type`, `transcript_attrib`, and `translation_attrib` supply consequence-relevant
-  flags and exceptional sequence edits.
+- `attrib_type`, `seq_region_attrib`, `transcript_attrib`, and `translation_attrib` supply
+  codon tables, consequence-relevant flags, and exceptional sequence edits.
+
+Attribute values are cast to their semantic text form at this boundary. This matters for
+official dumps where a generic CSV/Parquet staging pass may infer a numeric-only `value`
+column as an integer; the model compiler does not require callers to rewrite an otherwise
+valid staged schema solely to satisfy string predicates.
 
 The reference relation has `(chrom, start, end, seq)`, where `start` is zero-based and
 `end` is half-open. It is normally persisted from tiled `fasta_nuc(..., include_seq :=
@@ -139,17 +148,21 @@ cache instead of merely the same coordinate source. For each selected transcript
    strand exons, joins exons in transcript order, and extracts the CDS;
 6. applies Ensembl start-phase preparation: phase `-1` or `0` adds no prefix, while a
    positive phase adds one or two leading `N` bases; and
-7. extracts the complete transcript-oriented spliced sequence before and after the CDS;
-   and
-8. parses each mature-miRNA cDNA range from the Ensembl `miRNA` transcript attribute and
-   projects it through the ranked exons into one or more genomic segments.
+7. reads the sequence region's `codon_table` attribute, defaulting to table 1 exactly as
+   VEP does, and rejects conflicting, malformed, or unsupported table IDs;
+8. extracts the complete transcript-oriented spliced sequence before and after the CDS;
+9. parses supported `initial_met`, `_selenocysteine`, `amino_acid_sub`, and
+   `_stop_codon_rt` Translation SeqEdits into a sparse reference-peptide relation; and
+10. parses each mature-miRNA cDNA range from the Ensembl `miRNA` transcript attribute and
+    projects it through the ranked exons into one or more genomic segments.
 
 The compact flag word records translation presence, protein-coding/NMD/miRNA biotype,
-incomplete CDS ends, selenocysteine, stop readthrough, RNA or peptide edits, MANE,
-GENCODE, CCDS, and upstream-start state. An RNA edit on either the transcript or
-translation attribute path is the same exceptional state. The standalone model ABI still
-defines a readthrough-transcript flag for explicitly prepared alternate models, but the
-VEP-compatible core importer filters those transcripts before publication.
+incomplete CDS ends, selenocysteine, stop readthrough, transcript RNA edits, peptide
+edits, MANE, GENCODE, CCDS, and upstream-start state. Translation `_rna_edit` is not one
+of `Translation::get_all_SeqEdits()` in VEP 116 and is therefore not treated as a peptide
+edit. The standalone model ABI still defines a readthrough-transcript flag for explicitly
+prepared alternate models, but the VEP-compatible core importer filters those transcripts
+before publication.
 
 For GRCh38 MANE attributes, the prepared DuckDB relation also retains the attribute value
 as `mane_select_refseq` or `mane_plus_clinical_refseq`. That value is the paired versioned
@@ -157,12 +170,13 @@ RefSeq transcript accession. The builder rejects multiple or empty mappings for 
 flag. Only the selection bits enter the resident C model; Ensembl/GENCODE and RefSeq
 identifiers stay in the cold relation for late SQL projection and future RefSeq HGVS.
 
-Reference-derived CDS bytes are withheld when Ensembl records an RNA edit,
-selenocysteine, stop readthrough, amino-acid substitution, or initial-methionine edit that
-the C kernel does not yet implement. The transcript, coordinates, flags, and an explicit
-reason remain in the model. Unsupported reference alphabet has the same fail-closed shape.
-This is different from malformed topology: bad coordinates, strand, exon phase or rank,
-translation bounds, or incomplete sequence reconstruction abort the build.
+Single-position, single-amino-acid Translation SeqEdits are kept with the reference-derived
+CDS and applied only to VEP's reference peptide; the alternate peptide remains the raw
+codon translation. Transcript RNA edits and other Translation SeqEdit shapes withhold
+sequence with an explicit reason. The transcript, coordinates, and flags remain in the
+model. Unsupported reference alphabet has the same fail-closed shape. This is different
+from malformed topology: bad coordinates, strand, exon phase or rank, translation bounds,
+or incomplete sequence reconstruction abort the build.
 
 The resident model stores CDS bytes and both non-coding transcript flanks in two packed
 byte pools with offsets and lengths per transcript. The flank pool has no per-transcript
@@ -171,27 +185,31 @@ predicate rebuilds the 5-prime-UTR-plus-CDS or CDS-plus-3-prime-UTR string. The 
 relation retains the old three-base `post_cds_bases` projection for compatibility, but
 production models load the complete flanks.
 
-Mature miRNA ranges are also prepared once, not remapped for every variant. Ensembl stores
-them as transcript cDNA intervals, possibly more than one per transcript. The builder
-splits a range when it crosses an exon boundary and returns the resulting inclusive
-genomic segments in `mature_mirna_regions`. The resident model packs all segment starts
-and ends into flat arrays with one offset per transcript. A non-miRNA transcript pays only
-the transcript-flag test; a miRNA candidate scans its usually tiny owned slice.
+Peptide edits and mature miRNA ranges are prepared once, not remapped for every variant.
+Peptide edits are packed by transcript and protein position and consulted only for an
+overlapping reference-peptide window. Ensembl stores mature-miRNA ranges as transcript
+cDNA intervals, possibly more than one per transcript. The builder splits a range when it
+crosses an exon boundary and returns the resulting inclusive genomic segments in
+`mature_mirna_regions`. The resident model packs all segment starts and ends into flat
+arrays with one offset per transcript. A non-miRNA transcript pays only the transcript-flag
+test; a miRNA candidate scans its usually tiny owned slice.
 
 ### Prepared relations and publication
 
 The builder returns one row per transcript. The row contains the hot transcript fields,
 source and stable identifiers, biotypes, the optional prepared CDS, an ordered nested
 exon list, and the nested mature-miRNA genomic segments. Callers persist two canonical
-tables and derive three required sorted loader projections plus one optional side
-projection from them:
+tables and derive three required sorted loader projections plus optional side projections
+from them:
 
 - region ordinal, and sequence length when complete-coverage claims are requested;
 - transcript ordinal, region, span, strand, gene ordinal, flags, optional CDS fields,
-  codon table, and complete pre-CDS and post-CDS sequence; and
-- transcript ordinal plus each exon's genomic span, cDNA span, phase, and end phase.
+  codon table, and complete pre-CDS and post-CDS sequence;
+- transcript ordinal plus each exon's genomic span, cDNA span, phase, and end phase;
 - for transcripts with mature-miRNA attributes, transcript ordinal plus each projected
-  genomic segment start and end.
+  genomic segment start and end; and
+- for supported Translation SeqEdits, transcript ordinal, one-based protein position, and
+  replacement amino acid.
 
 The `core_schema` argument names relations, not a transport. It can point at tables loaded
 from Ensembl's tab-separated MySQL dumps, or at a read-only MySQL catalog attached through
@@ -202,13 +220,16 @@ chunks have been persisted.
 
 `duckvep_model_receipt(...)` checks dense ordinals and region/transcript agreement. It
 records the declared source, release, assembly, transcript filter, source-manifest hash,
-reference hash, model counts including CDS and transcript-flank bases, and a deterministic
-hash over every prepared model field, including mature-miRNA ranges. There is no
+reference hash, model counts including CDS, transcript-flank bases, mature-miRNA
+transcripts and projected segments, and peptide edits, and a deterministic hash over every
+prepared model field, including mature-miRNA ranges and
+reference-peptide edits. There is no
 timestamp: identical declared inputs must produce the same receipt.
 
 The checked-in acceptance fixtures under `test/data/duckvep/ensembl_core/` are about 116
 KiB. The GRCh38 fixture contains complete release-116 MT and `HG2047_PATCH` source rows;
-it covers mitochondrial fail-closed edits, an ordinary multi-exon CDS, and the real
+it covers mitochondrial codon-table and peptide-edit behavior, an ordinary multi-exon CDS,
+and the real
 `ENST00000715685` ↔ `NM_032790.4` MANE pair. The GRCh37 fixture contains MT and
 `GL000201.1`; it proves sequence-backed coding annotation from the archived GENCODE-19
 model and the absence of MANE mappings. The explicit staging script verifies both official
@@ -232,6 +253,11 @@ start, and inclusive genomic end. Rows must be ordered by transcript and start. 
 proves that each range belongs to a miRNA transcript, stays inside one of its exons, and is
 ordered before publishing the model. Omitting the query preserves compatibility for
 models that do not carry these Ensembl attributes; it does not invent mature regions.
+
+The optional `peptide_edit_query` has transcript ordinal, one-based protein position, and
+one uppercase replacement amino acid. Rows must be unique and ordered by transcript and
+position. The loader packs them into the immutable sequence model and proves that every
+position lies within its prepared peptide before publication.
 
 The loader treats transcript coverage as partial by default. Only a model deliberately
 loaded with `transcript_coverage_complete := true` may turn “no loaded transcript here”
@@ -260,9 +286,9 @@ The implemented builder does not yet:
 - stage Ensembl `table.sql` and dump files into DuckDB;
 - reproduce the remaining non-core VEP 116 transcript sources and selection rules,
   including `estgene` and `otherfeatures`/RefSeq;
-- apply Ensembl RNA and peptide sequence edits;
-- derive codon table from `seq_region_attrib` (mitochondrial names currently select table
-  2, all other regions table 1);
+- apply transcript RNA edits or arbitrary length-changing/range Translation SeqEdits;
+- extend full-model receipts and indexed-cache differentials beyond human GRCh37/38 and
+  *P. falciparum* to more Ensembl species, assemblies, and codon-table combinations;
 - preserve the complete Ensembl xref, protein-feature, supporting-feature, attribute, and
   alternate-transcript relations; or
 - import variation, phenotype, regulatory, or other supplementary annotations.

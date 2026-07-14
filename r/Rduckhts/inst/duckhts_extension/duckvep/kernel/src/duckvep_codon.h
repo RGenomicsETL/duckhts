@@ -6,13 +6,10 @@
  * already strand-oriented and frame-aligned by the coding projection) are
  * translated and classified.
  *
- * CODON TABLE is a parameter, not a constant: nuclear transcripts use the
- * standard genetic code (NCBI transl_table=1); mitochondrial transcripts use the
- * vertebrate mitochondrial code (transl_table=2), where TGA->Trp, ATA->Met, and
- * AGA/AGG->Stop. The kernel is string-free — it never sees a chromosome name.
- * Choosing the table per transcript (i.e. detecting the mitochondrion across the
- * chrM / chrMT / MT / NC_012920 naming zoo) is the ADAPTER's job at model-prepare
- * time; it passes the resolved duckvep_codon_table_t in. [[chr-prefix normalization]]
+ * CODON TABLE is a parameter, not a constant. The model compiler reads the
+ * Ensembl sequence-region `codon_table` attribute and passes its NCBI table id;
+ * the kernel never guesses from a chromosome name. The supported set mirrors
+ * BioPerl 1.7.8, which is the translator used by VEP 116.
  *
  * Translation uses base order T=0,C=1,A=2,G=3 with codon index b1*16+b2*4+b3,
  * indexing a canonical amino-acid string per table — so the table itself is the
@@ -28,11 +25,14 @@
 extern "C" {
 #endif
 
-/* NCBI translation table ids (the two duckvep needs today). */
+/* NCBI translation-table id. Named constants cover the common human cases;
+ * duckvep_codon_table_supported() is authoritative for the complete set. */
 typedef enum duckvep_codon_table {
     DUCKVEP_CODON_TABLE_STANDARD  = 1, /* nuclear, transl_table=1 */
     DUCKVEP_CODON_TABLE_VERT_MITO = 2  /* vertebrate mitochondrial, transl_table=2 */
 } duckvep_codon_table_t;
+
+int duckvep_codon_table_supported(duckvep_codon_table_t table);
 
 /* Coding-change classification bits. */
 enum {
@@ -50,8 +50,8 @@ typedef struct duckvep_codon_result {
 } duckvep_codon_result_t;
 
 /* Translate a 3-base ASCII codon to a 1-letter amino acid under `table`. Returns
- * 'X' if any base is not A/C/G/T/U (case-insensitive). An unknown table falls
- * back to the standard code. */
+ * 'X' if any base is not A/C/G/T/U (case-insensitive), or if the table id is
+ * not supported. */
 char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table);
 
 /* Classify a reference->alt codon change under `table`. start-codon context

@@ -25,6 +25,11 @@ ensembl_fixture_sql <- c(
     "1::BIGINT AS coord_system_id, 12::BIGINT AS length"
   ),
   paste(
+    "CREATE TABLE duckvep_r_core.seq_region_attrib AS SELECT",
+    "NULL::BIGINT AS seq_region_id, NULL::BIGINT AS attrib_type_id,",
+    "NULL::VARCHAR AS value WHERE false"
+  ),
+  paste(
     "CREATE TABLE duckvep_r_core.gene AS SELECT 1::BIGINT AS gene_id,",
     "'protein_coding'::VARCHAR AS biotype, 1::BIGINT AS is_current,",
     "'ENSG_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version",
@@ -141,6 +146,8 @@ ensembl_receipt <- dbGetQuery(
 expect_equal(ensembl_receipt$region_count, 1)
 expect_equal(ensembl_receipt$reference_base_count, 12)
 expect_equal(ensembl_receipt$transcript_count, 2)
+expect_equal(ensembl_receipt$mature_mirna_transcript_count, 1)
+expect_equal(ensembl_receipt$mature_mirna_segment_count, 1)
 expect_equal(ensembl_receipt$transcript_flank_base_count, 3)
 expect_equal(nchar(ensembl_receipt$model_sha256), 64)
 expect_identical(
@@ -264,7 +271,8 @@ load_model <- function(
   name,
   model_queries,
   transcript_coverage_complete = FALSE,
-  mature_mirna_query = NULL
+  mature_mirna_query = NULL,
+  peptide_edit_query = NULL
 ) {
   arguments <- paste(
     vapply(
@@ -280,6 +288,16 @@ load_model <- function(
       paste0(
         "mature_mirna_query := ",
         as.character(dbQuoteString(con, mature_mirna_query))
+      ),
+      sep = ", "
+    )
+  }
+  if (!is.null(peptide_edit_query)) {
+    arguments <- paste(
+      arguments,
+      paste0(
+        "peptide_edit_query := ",
+        as.character(dbQuoteString(con, peptide_edit_query))
       ),
       sep = ", "
     )
@@ -891,6 +909,7 @@ fixture_tables <- c(
   "exon_transcript",
   "gene",
   "seq_region",
+  "seq_region_attrib",
   "transcript",
   "transcript_attrib",
   "translation",
@@ -983,7 +1002,20 @@ prepare_ensembl_fixture <- function(directory, assembly) {
       "ORDER BY transcript_index, exon.exon_cdna_start"
     )
   )
-  expect_true(load_model(model, model_queries, TRUE)$loaded)
+  peptide_edit_query <- paste(
+    "SELECT transcript_index, edit.protein_position,",
+    "edit.alternate_amino_acid FROM", transcripts, ",",
+    "LATERAL unnest(peptide_edits) AS u(edit)",
+    "ORDER BY transcript_index, edit.protein_position"
+  )
+  expect_true(
+    load_model(
+      model,
+      model_queries,
+      transcript_coverage_complete = TRUE,
+      peptide_edit_query = peptide_edit_query
+    )$loaded
+  )
   list(
     model = model,
     transcripts = transcripts,
@@ -995,11 +1027,11 @@ grch38_fixture <- prepare_ensembl_fixture("grch38", "GRCh38")
 grch37_fixture <- prepare_ensembl_fixture("grch37", "GRCh37")
 expect_equal(
   unlist(grch38_fixture$summary[1, ], use.names = FALSE),
-  c(39, 1, 13, 40, 1)
+  c(39, 14, 0, 40, 1)
 )
 expect_equal(
   unlist(grch37_fixture$summary[1, ], use.names = FALSE),
-  c(39, 2, 13, 48, 0)
+  c(39, 15, 0, 48, 0)
 )
 
 grch38_mane <- dbGetQuery(
@@ -1062,10 +1094,10 @@ fixture_mitochondrial <- dbGetQuery(
 expect_equal(fixture_mitochondrial$transcript_index, 5)
 expect_identical(
   fixture_mitochondrial$consequence,
-  "coding_sequence_variant"
+  "start_lost"
 )
-expect_identical(fixture_mitochondrial$status, "unresolved")
-expect_identical(fixture_mitochondrial$reason, "missing_sequence")
+expect_identical(fixture_mitochondrial$status, "supported")
+expect_true(is.na(fixture_mitochondrial$reason))
 
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-no-tail') AS dropped")$dropped)
