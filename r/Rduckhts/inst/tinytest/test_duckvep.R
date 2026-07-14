@@ -236,6 +236,54 @@ load_model <- function(name, model_queries, transcript_coverage_complete = FALSE
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
 
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_partial_cds_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 113::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "35::UBIGINT transcript_flags, 100::UBIGINT cds_start,",
+    "113::UBIGINT cds_end, 'ATGAAACCCGGGTT'::BLOB cds_sequence,",
+    "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence,",
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_partial_cds_exons AS SELECT",
+    "0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+    "113::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "14::UBIGINT exon_cdna_end, 0::TINYINT phase,",
+    "2::TINYINT end_phase"
+  )
+)
+partial_cds_queries <- c(
+  "SELECT seq_region FROM duckvep_r_regions ORDER BY seq_region",
+  paste(
+    "SELECT * FROM duckvep_r_partial_cds_transcripts",
+    "ORDER BY seq_region, transcript_start, transcript_index"
+  ),
+  paste(
+    "SELECT * FROM duckvep_r_partial_cds_exons",
+    "ORDER BY transcript_index, exon_cdna_start"
+  )
+)
+expect_true(load_model("r-partial-cds-end", partial_cds_queries)$loaded)
+partial_cds_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status, a.reason",
+    "FROM unnest(duckvep_annotate(",
+    "'r-partial-cds-end', 1::UINTEGER, 106::UBIGINT,",
+    "'C', 'CA', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(partial_cds_annotation$consequence, "frameshift_variant")
+expect_identical(partial_cds_annotation$status, "supported")
+expect_true(is.na(partial_cds_annotation$reason))
+
 invalid_queries <- queries
 invalid_queries[2] <- paste0(
   "SELECT * REPLACE (99::UBIGINT AS transcript_start) FROM (",
@@ -875,6 +923,12 @@ expect_true(
   )$dropped
 )
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-complete') AS dropped")$dropped)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-partial-cds-end') AS dropped"
+  )$dropped
+)
 expect_true(
   dbGetQuery(
     con,

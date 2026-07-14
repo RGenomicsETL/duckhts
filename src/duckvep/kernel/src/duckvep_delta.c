@@ -2190,12 +2190,14 @@ static duckvep_context_delta_status_t delta_context_length_change_predicates(
     if (ctx == NULL || handled == NULL || delta == NULL) {
         return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     }
+    /* The stored peptide contains only complete codons. CDS_END_NF may leave
+     * one or two CDS bases beyond it; the local peptide view below represents
+     * that legitimate VEP state with a synthetic trailing X. */
     if (!ctx->has_single_edit || ctx->applied_edits != 1u ||
         ctx->length_diff == 0 ||
         ctx->length_diff == INT64_MIN || ctx->ref_cds == NULL ||
         ctx->alt_cds == NULL || ctx->ref_peptide == NULL ||
         ctx->alt_peptide == NULL || ctx->ref_cds_len < 3u ||
-        (ctx->ref_cds_len % 3u) != 0u ||
         ctx->ref_peptide_len != ctx->ref_cds_len / 3u ||
         ctx->single_edit_cds_start == 0u) {
         return DUCKVEP_CONTEXT_DELTA_OK;

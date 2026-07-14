@@ -34,6 +34,18 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--cache-dir",
+  dest = "cache_dir",
+  default = "",
+  help = paste(
+    "VEP cache root; when set, use --cache --offline instead of --gff",
+    "[default: use --gff]"
+  )
+)
+op <- add_option(op, "--assembly", default = "GRCh38")
+op <- add_option(op, "--species", default = "homo_sapiens")
+op <- add_option(
+  op,
   "--fasta",
   default = file.path(root, "test", "data", "duckvep", "minimal.fa")
 )
@@ -116,7 +128,13 @@ if (
     "(blit >= 0.2.0.9000)"
   )
 }
-required_files <- c(opt$gff, opt$fasta, opt$extension)
+oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
+required_files <- c(opt$fasta, opt$extension)
+if (identical(oracle_mode, "gff")) {
+  required_files <- c(opt$gff, required_files)
+} else if (!dir.exists(opt$cache_dir)) {
+  die("VEP cache root does not exist: {opt$cache_dir}")
+}
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
@@ -181,8 +199,18 @@ if (length(missing_relations) != 0L) {
   )
 }
 
+region_columns <- dbGetQuery(
+  con,
+  "SELECT column_name FROM duckdb_columns()
+   WHERE table_name = 'duckvep_sequence_regions'"
+)$column_name
+complete_coverage <- "sequence_length" %in% region_columns
 load_queries <- c(
-  "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region",
+  paste(
+    "SELECT seq_region",
+    if (complete_coverage) ", sequence_length" else "",
+    "FROM duckvep_sequence_regions ORDER BY seq_region"
+  ),
   paste(
     "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
     "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table,",
@@ -200,7 +228,8 @@ loaded <- dbGetQuery(
   glue(
     "SELECT loaded FROM duckvep_model_load(
        {sql_q(opt$model_name)}, {sql_q(load_queries[1])},
-       {sql_q(load_queries[2])}, {sql_q(load_queries[3])})"
+       {sql_q(load_queries[2])}, {sql_q(load_queries[3])}
+       {if (complete_coverage) ', transcript_coverage_complete := TRUE' else ''})"
   )
 )$loaded
 if (length(loaded) != 1L || !isTRUE(loaded[[1L]])) {
@@ -250,7 +279,7 @@ sample_filter <- if (opt$sample_per_shape == 0L) {
 invisible(dbExecute(
   con,
   glue(
-    "CREATE OR REPLACE TABLE duckvep_sample AS
+    "CREATE OR REPLACE TEMP TABLE duckvep_sample AS
      WITH alleles AS (
        SELECT DISTINCT
          CHROM AS chrom,
@@ -434,13 +463,17 @@ stage_gff <- function(path) {
   }
   output
 }
-gff_for_vep <- stage_gff(opt$gff)
+gff_for_vep <- if (identical(oracle_mode, "gff")) {
+  stage_gff(opt$gff)
+} else {
+  ""
+}
 
 engine_time <- system.time({
   dbExecute(
     con,
     glue(
-      "CREATE OR REPLACE TABLE duckvep_annotation AS
+      "CREATE OR REPLACE TEMP TABLE duckvep_annotation AS
        WITH annotated AS (
          SELECT
            v.variant_id,
@@ -521,33 +554,57 @@ oracle_version <- component_version("ensembl-vep")
 if (!identical(oracle_version, "116.0")) {
   die("expected Ensembl VEP 116.0, found {oracle_version}")
 }
+oracle_details <- if (identical(oracle_mode, "cache")) {
+  c(
+    "oracle=cache",
+    glue("assembly={opt$assembly}"),
+    glue("species={opt$species}")
+  )
+} else {
+  "oracle=gff"
+}
 oracle_build <- paste(
   glue("core={component_version('ensembl')}"),
   glue("variation={component_version('ensembl-variation')}"),
   glue("vep={oracle_version}"),
+  oracle_details,
   sep = ";"
 )
 
 vep_json <- tempfile(fileext = ".json")
 temporary_files <- c(temporary_files, vep_json)
+vep_args <- c(
+  "-i",
+  sample_vcf,
+  "--fasta",
+  opt$fasta,
+  "--distance",
+  as.character(opt$distance),
+  "--json",
+  "-o",
+  vep_json,
+  "--fork",
+  opt$fork,
+  "--force_overwrite",
+  "--no_stats"
+)
+if (identical(oracle_mode, "cache")) {
+  vep_args <- c(
+    vep_args,
+    "--cache",
+    "--offline",
+    "--dir_cache",
+    normalizePath(opt$cache_dir),
+    "--assembly",
+    opt$assembly,
+    "--species",
+    opt$species
+  )
+} else {
+  vep_args <- c(vep_args, "--gff", gff_for_vep)
+}
 vep_time <- system.time({
-  rc <- vep_command(
-    "-i",
-    sample_vcf,
-    "--gff",
-    gff_for_vep,
-    "--fasta",
-    opt$fasta,
-    "--distance",
-    as.character(opt$distance),
-    "--json",
-    "-o",
-    vep_json,
-    "--fork",
-    opt$fork,
-    "--force_overwrite",
-    "--no_stats"
-  ) |>
+  rc <- do.call(vep_command, as.list(vep_args)) |>
     blit::cmd_run(stdout = "", stderr = "", stdin = NULL, verbose = FALSE)
 })
 if (rc != 0L || !file.exists(vep_json) || file.info(vep_json)$size == 0) {
@@ -557,7 +614,7 @@ if (rc != 0L || !file.exists(vep_json) || file.info(vep_json)$size == 0) {
 invisible(dbExecute(
   con,
   glue(
-    "CREATE OR REPLACE TABLE vep_annotation AS
+    "CREATE OR REPLACE TEMP TABLE vep_annotation AS
      SELECT
        j.id AS variant_id,
        tc.transcript_id AS tx,
@@ -577,7 +634,7 @@ run_date <- as.character(Sys.Date())
 invisible(dbExecute(
   con,
   glue(
-    "CREATE OR REPLACE TABLE duckvep_annotation_dump AS
+    "CREATE OR REPLACE TEMP TABLE duckvep_annotation_dump AS
      SELECT
        {sql_q(run_date)} AS run_date,
        {sql_q(opt$corpus)} AS corpus,
@@ -640,7 +697,10 @@ cat(
   sep = ""
 )
 cat(
-  glue("VEP annotation: {sprintf('%.3f', vep_time[['elapsed']])} s"),
+  glue(
+    "VEP {oracle_mode} annotation: ",
+    "{sprintf('%.3f', vep_time[['elapsed']])} s"
+  ),
   "\n",
   sep = ""
 )

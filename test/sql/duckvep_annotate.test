@@ -56,6 +56,56 @@ SELECT loaded FROM duckvep_model_load(
 ----
 1
 
+# CDS_END_NF may leave one or two CDS bases beyond the last complete codon.
+# VEP evaluates ordinary length changes against its synthetic trailing X;
+# the incomplete tail does not make a body edit a compound event.
+statement ok
+CREATE TABLE duckvep_partial_cds_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  100::UBIGINT transcript_start,
+  113::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  35::UBIGINT transcript_flags,
+  100::UBIGINT cds_start,
+  113::UBIGINT cds_end,
+  'ATGAAACCCGGGTT'::BLOB cds_sequence,
+  1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence,
+  ''::BLOB post_cds_sequence;
+
+statement ok
+CREATE TABLE duckvep_partial_cds_exons AS
+SELECT
+  0::UINTEGER transcript_index,
+  100::UBIGINT exon_start,
+  113::UBIGINT exon_end,
+  1::UBIGINT exon_cdna_start,
+  14::UBIGINT exon_cdna_end,
+  0::TINYINT phase,
+  2::TINYINT end_phase;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'partial-cds-end',
+  'SELECT seq_region FROM duckvep_test_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_partial_cds_transcripts',
+  'SELECT * FROM duckvep_partial_cds_exons'
+);
+----
+1
+
+query TTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'partial-cds-end', 1::UINTEGER, 106::UBIGINT, 'C', 'CA', 0::UBIGINT
+)) AS u(annotation);
+----
+frameshift_variant	supported	-
+
 # The pure-C model validator is also the final authority for SQL-loaded models.
 # A transcript span wider than its outer exon envelope must fail at load time.
 statement error
@@ -688,12 +738,13 @@ SELECT * FROM duckvep_model_load(
 ----
 duckvep_model_load: model name already exists
 
-query IIIIIIII
+query IIIIIIIII
 SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
        duckvep_model_drop('structural'), duckvep_model_drop('nmd'),
        duckvep_model_drop('nmd-prediction'),
        duckvep_model_drop('position-one'),
        duckvep_model_drop('fixture-complete'),
-       duckvep_model_drop('fixture-legacy-tail');
+       duckvep_model_drop('fixture-legacy-tail'),
+       duckvep_model_drop('partial-cds-end');
 ----
-1	1	1	1	1	1	1	1
+1	1	1	1	1	1	1	1	1

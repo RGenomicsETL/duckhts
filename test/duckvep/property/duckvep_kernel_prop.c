@@ -11745,6 +11745,102 @@ TEST coding_context_delta_frameshift_known_scene(void) {
     PASS();
 }
 
+/* Ensembl CDS_END_NF transcripts legitimately end with one or two untranslated
+ * CDS bases. VEP still evaluates ordinary length-changing edits against the
+ * complete-codon peptide plus its synthetic trailing X; the incomplete tail is
+ * not a reason to collapse an otherwise simple edit into an unresolved result. */
+TEST coding_context_delta_cds_end_nf_known_scene(void) {
+    static uint8_t cds_mod1[13] = {
+        'A','T','G',  'A','A','A',  'C','C','C',  'G','G','G',  'T'
+    };
+    static uint8_t cds_mod2[14] = {
+        'A','T','G',  'A','A','A',  'C','C','C',  'G','G','G',  'T','T'
+    };
+    static const uint8_t replace_c_ca[2] = { 'C','A' };
+    static const uint8_t insert_gcc[3] = { 'G','C','C' };
+    duckvep_haplotype_edit_t edit;
+    duckvep_edit_set_t edit_set;
+    uint8_t alt_cds[32];
+    uint8_t ref_pep[16];
+    uint8_t alt_pep[16];
+    duckvep_coding_context_t ctx;
+    duckvep_sequence_delta_t delta;
+    size_t strand_idx;
+    static const int8_t strands[2] = { 1, -1 };
+
+    memset(&edit, 0, sizeof edit);
+    edit_set.edits = &edit;
+    edit_set.count = 1u;
+
+    for (strand_idx = 0u; strand_idx < 2u; strand_idx++) {
+        int8_t strand = strands[strand_idx];
+
+        /* A +1 body edit remains a frameshift for both possible incomplete-tail
+         * lengths and on both genomic strands. */
+        edit.cds_start = 7u;
+        edit.ref = cds_mod1 + 6u;
+        edit.ref_len = 1u;
+        edit.alt = replace_c_ca;
+        edit.alt_len = sizeof replace_c_ca;
+        edit.variant_strand = strand;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod1, sizeof cds_mod1, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.frameshift && !delta.inframe_insertion &&
+               !delta.inframe_deletion);
+
+        edit.ref = cds_mod2 + 6u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.frameshift && !delta.inframe_insertion &&
+               !delta.inframe_deletion);
+
+        /* Complete-codon insertion/deletion facts are likewise independent of
+         * the trailing partial codon. */
+        edit.cds_start = 7u;
+        edit.ref = NULL;
+        edit.ref_len = 0u;
+        edit.alt = insert_gcc;
+        edit.alt_len = sizeof insert_gcc;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod1, sizeof cds_mod1, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && !delta.frameshift);
+
+        edit.ref = cds_mod2 + 6u;
+        edit.ref_len = 3u;
+        edit.alt = NULL;
+        edit.alt_len = 0u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.inframe_deletion && !delta.frameshift);
+    }
+
+    PASS();
+}
+
 /* VEP-116 states discovered independently by the statistical differentials.
  * They share one cause: stop, frame, insertion, and protein-shape predicates
  * inspect the same local peptide but remain independently true. */
@@ -15887,6 +15983,7 @@ int main(int argc, char **argv) {
     RUN_TEST(coding_context_delta_inframe_insertion_known_scene);
     RUN_TEST(coding_context_delta_delins_known_scene);
     RUN_TEST(coding_context_delta_frameshift_known_scene);
+    RUN_TEST(coding_context_delta_cds_end_nf_known_scene);
     RUN_TEST(coding_context_delta_terminal_combinations_known_scene);
     RUN_TEST(coding_context_delta_frameshift_stop_gained_scene);
     RUN_TEST(sequence_delta_with_scratch_indel_known_scene);
