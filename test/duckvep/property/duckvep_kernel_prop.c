@@ -12129,8 +12129,6 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
     uint8_t alt_pep[80];
     duckvep_coding_context_t ctx;
     duckvep_sequence_delta_t delta;
-    uint32_t terminal_edit_position1 = 24u;
-    uint8_t terminal_edit_alt = (uint8_t)'X';
     size_t cds_len = sizeof cds - 1u;
 
     ASSERT_EQ(72u, cds_len);
@@ -12195,17 +12193,6 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
            !delta.frameshift && !delta.stop_retained &&
            !delta.protein_altering);
 
-    /* Translation SeqEdits define VEP's reference peptide. If an edit
-     * redefines the final translated stop, the same terminal indel no longer
-     * overlaps an ordinary terminal stop and cannot be stop_lost/retained.
-     * Keep terminal completeness on the shared edited-reference accessor. */
-    ctx.ref_peptide_edit_position1 = &terminal_edit_position1;
-    ctx.ref_peptide_edit_alt = &terminal_edit_alt;
-    ctx.ref_peptide_edit_count = 1u;
-    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
-              duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-    ASSERT(delta.valid && !delta.stop_lost && !delta.stop_retained);
-
     /* chrDuck:239 AA>A... Both local peptides start with the stop at index
      * zero. The longer alternate retains it and remains insertion-shaped. */
     edit.cds_start = 72u;
@@ -12258,6 +12245,39 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
               duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
     ASSERT(delta.valid && delta.inframe_insertion && delta.stop_retained &&
            !delta.stop_gained && !delta.stop_lost && !delta.frameshift);
+
+    {
+        static const uint8_t short_terminal_cds[] = {
+            'A','T','G', 'T','A','A'
+        };
+        uint32_t terminal_edit_position1 = 2u;
+        uint8_t terminal_edit_alt = (uint8_t)'X';
+
+        /* VEP's direct reference-peptide predicates see Translation SeqEdits,
+         * but its X/undefined length-change fallback does not: the CIL pair
+         * checks genomic terminal coordinates, edits raw translateable DNA,
+         * and translates that raw endpoint. Deleting one base from TAA is
+         * therefore stop_lost even when a SeqEdit renders the local reference
+         * residue X. Do not collapse these two upstream authorities. */
+        edit.cds_start = 6u;
+        edit.ref = short_terminal_cds + 5u;
+        edit.ref_len = 1u;
+        edit.alt = NULL;
+        edit.alt_len = 0u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      short_terminal_cds, sizeof short_terminal_cds,
+                      &edit_set, 1, DUCKVEP_CODON_TABLE_STANDARD,
+                      alt_cds, sizeof alt_cds, ref_pep, sizeof ref_pep,
+                      alt_pep, sizeof alt_pep, &ctx));
+        ctx.ref_peptide_edit_position1 = &terminal_edit_position1;
+        ctx.ref_peptide_edit_alt = &terminal_edit_alt;
+        ctx.ref_peptide_edit_count = 1u;
+        ctx.post_cds_complete = 1u;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_lost && !delta.stop_retained);
+    }
 
     PASS();
 }

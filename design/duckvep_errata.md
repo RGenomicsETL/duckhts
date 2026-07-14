@@ -8,15 +8,22 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
-## Translation edits redefine the reference stop state
+## Terminal-stop fallbacks bypass Translation SeqEdits
 
-VEP applies supported Ensembl Translation SeqEdits when constructing the reference
-peptide inspected by its consequence predicates. Terminal-stop completeness must
-therefore be read from that edited peptide, not inferred again from the CDS translation.
-If a SeqEdit replaces the final translated `*`, a length-changing edit at that endpoint
-does not overlap an ordinary terminal stop and must not acquire `stop_lost` or
-`stop_retained_variant` from the unedited peptide. DuckVEP uses one edited-reference
-accessor for the local peptide, full-peptide comparison, and terminal-completeness test.
+VEP applies supported Ensembl Translation SeqEdits to the reference peptide returned by
+`TranscriptVariationAllele::peptide`, so its ordinary stop predicates inspect edited
+local peptide text. The length-changing `X` or unavailable-peptide fallback is a separate
+authority: `_overlaps_stop_codon_cil` tests the genomic coding endpoint, and
+`_ins_del_stop_altered_cil` edits raw translateable DNA and translates the raw terminal
+codon. It does not reapply Translation SeqEdits. A terminal deletion can consequently be
+`stop_lost` through the CIL fallback even when a SeqEdit renders the corresponding local
+reference residue `X`.
+
+DuckVEP intentionally keeps the raw CDS terminal-stop gate for that fallback while using
+the sparse edit overlay in direct peptide comparisons. Replacing both with one cleaner
+peptide authority would change VEP 116 behavior. The focused C regression combines a
+terminal `TAA`, an `X` reference-peptide edit, and a one-base terminal deletion to pin the
+distinction.
 
 ## An empty annotated UTR can overlap a spanning deletion
 
