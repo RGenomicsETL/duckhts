@@ -48,7 +48,10 @@ DUCKVEP_PROP_TRIALS=1000000 \
 
 For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_sequence_regions`, `duckvep_transcripts`, `duckvep_exons`, and
-`duckvep_transcript_names`, then run for example:
+`duckvep_transcript_names`. When the model carries Ensembl mature-miRNA
+attributes, also provide `duckvep_mature_mirna` with transcript index and
+inclusive genomic start/end columns. The runner loads that packed side relation
+automatically. Then run, for example:
 
 ```sh
 make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
@@ -60,6 +63,24 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --model-sql '' \
   --sample-per-shape 50000"
 ```
+
+Use the matching indexed VEP cache for a release-level comparison with the
+core-dump model:
+
+```sh
+make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
+  --corpus clinvar \
+  --vcf /data/clinvar.vcf.gz \
+  --cache-dir /data/vep-cache \
+  --fasta /data/GRCh38.fa \
+  --database /data/duckvep-model.duckdb \
+  --model-sql '' \
+  --sample-per-shape 50000"
+```
+
+`--gff` remains useful for small fixed fixtures and for auditing VEP's GFF
+importer. It is not interchangeable with the indexed cache: VEP may skip GFF
+feature types or parents that are present in the Ensembl core dump.
 
 Sampling is deterministic within allele type and length-change bin. Set
 `--sample-per-shape 0` to retain every eligible biallelic record. Variants are sorted once

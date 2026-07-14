@@ -2,7 +2,7 @@
 # Exact statistical audit over a DuckVEP annotation dump.
 #
 # Reads a *_annotations.parquet dump emitted by corpus_differential.R and
-# computes the VEP --gff statistical table: for each comparator
+# computes the VEP executable-oracle statistical table: for each comparator
 # engine and VEP consequence stratum, use the UNION of (variant, transcript) pairs
 # that either VEP or the engine emitted, count exact SO-term-set discordance and
 # emission misses/extras, and attach a Clopper-Pearson 95% upper bound via
@@ -506,7 +506,7 @@ if (nzchar(opt$history)) {
   }
 }
 
-cat("Statistical VEP --gff audit\n")
+cat("Statistical VEP executable audit\n")
 cat(glue("  annotations -> {opt$annotations}"), "\n", sep = "")
 for (i in seq_len(nrow(audit))) {
   cat(

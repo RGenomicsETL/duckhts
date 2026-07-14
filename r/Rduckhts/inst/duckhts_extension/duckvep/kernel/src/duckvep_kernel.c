@@ -189,7 +189,8 @@ enum {
     DVW_MODEL_CDNA_LAYOUT    = 68u,
     DVW_MODEL_PHASE          = 69u,
     DVW_MODEL_CDS_PROJECTION = 70u,
-    DVW_MODEL_SEQ_CONTRACT   = 71u
+    DVW_MODEL_SEQ_CONTRACT   = 71u,
+    DVW_MODEL_MIRNA_LAYOUT   = 72u
 };
 
 duckvep_status_t duckvep_model_open(
@@ -237,6 +238,32 @@ duckvep_status_t duckvep_model_open(
         (exons->phase == NULL) != (exons->end_phase == NULL)) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                     "paired exon cDNA or phase columns are incomplete");
+    }
+    {
+        int any_mature_column = transcripts->mature_mirna_offset != NULL ||
+                                transcripts->mature_mirna_start1 != NULL ||
+                                transcripts->mature_mirna_end1 != NULL ||
+                                transcripts->mature_mirna_count != 0u;
+
+        if ((transcripts->mature_mirna_start1 == NULL) !=
+            (transcripts->mature_mirna_end1 == NULL) ||
+            (any_mature_column && transcripts->mature_mirna_offset == NULL) ||
+            (transcripts->mature_mirna_count != 0u &&
+             transcripts->mature_mirna_start1 == NULL) ||
+            transcripts->mature_mirna_count > (size_t)UINT32_MAX) {
+            return fail(error, DUCKVEP_ERR_INVALID_ARG,
+                        DVW_MODEL_MIRNA_LAYOUT,
+                        "mature-miRNA side relation has incomplete columns");
+        }
+        if (transcripts->mature_mirna_offset != NULL &&
+            (transcripts->mature_mirna_offset[0] != 0u ||
+             transcripts->mature_mirna_offset[
+                 transcripts->transcript_count] !=
+                 (uint32_t)transcripts->mature_mirna_count)) {
+            return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                        DVW_MODEL_MIRNA_LAYOUT,
+                        "mature-miRNA row offsets do not cover the side relation");
+        }
     }
 
     /* Validate every transcript once: span ordering, exon slice in range, cds
@@ -333,6 +360,45 @@ duckvep_status_t duckvep_model_open(
                 return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                             DVW_MODEL_EXON_LAYOUT,
                             "transcript span is not the outer exon envelope");
+            }
+        }
+        if (transcripts->mature_mirna_offset != NULL) {
+            size_t begin = transcripts->mature_mirna_offset[t];
+            size_t finish = transcripts->mature_mirna_offset[t + 1u];
+            size_t segment;
+
+            if (finish < begin || finish > transcripts->mature_mirna_count) {
+                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_MIRNA_LAYOUT,
+                            "mature-miRNA row offsets are not monotone");
+            }
+            if (finish != begin &&
+                (transcripts->flags[t] &
+                 (uint64_t)DUCKVEP_TX_BIOTYPE_MIRNA) == 0u) {
+                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_MIRNA_LAYOUT,
+                            "mature-miRNA segment belongs to a non-miRNA transcript");
+            }
+            for (segment = begin; segment < finish; segment++) {
+                uint32_t start1 = transcripts->mature_mirna_start1[segment];
+                uint32_t end1 = transcripts->mature_mirna_end1[segment];
+                size_t start_exon;
+                size_t end_exon;
+
+                if (start1 == 0u || start1 > end1 ||
+                    start1 < transcripts->start1[t] ||
+                    end1 > transcripts->end1[t] ||
+                    (segment != begin &&
+                     start1 < transcripts->mature_mirna_start1[segment - 1u]) ||
+                    !model_exon_for_genomic(exons, eoff, ecnt, start1,
+                                            &start_exon) ||
+                    !model_exon_for_genomic(exons, eoff, ecnt, end1,
+                                            &end_exon) ||
+                    start_exon != end_exon) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_MIRNA_LAYOUT,
+                                "mature-miRNA segment is not an ordered exonic interval");
+                }
             }
         }
         if (cds_s != 0u &&
@@ -910,6 +976,82 @@ static int insertion_placement_uses_right_flank(
                                        right, &projection);
 }
 
+static int insertion_flanks_share_exon(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          left1,
+    uint32_t                          right1) {
+
+    size_t off = (size_t)transcripts->exon_offset[tx_idx];
+    size_t cnt = (size_t)transcripts->exon_count[tx_idx];
+    size_t e;
+
+    for (e = 0u; e < cnt; e++) {
+        size_t ei = off + e;
+        if (left1 >= exons->start1[ei] && right1 <= exons->end1[ei]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* VEP keeps three insertion questions distinct. Its generic exon overlap uses
+ * the reversed feature interval P+1,P, so both flanks must lie in one exon.
+ * UTR predicates instead use the transcript mapper and may accept either
+ * exonic flank at an internal boundary. Splice predicates retain the reversed
+ * interval and are computed elsewhere. A single point placement cannot express
+ * all three, so correct only the region facts after the cheap point classifier. */
+static void insertion_apply_region_boundaries(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    duckvep_region_state_t           *region) {
+
+    uint32_t left1;
+    uint32_t right1;
+    uint32_t cds_start;
+
+    if (transcripts == NULL || exons == NULL || event == NULL || region == NULL ||
+        !event->interbase ||
+        event->anchor_side != (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT) {
+        return;
+    }
+    left1 = event->insertion_boundary0;
+    right1 = duckvep_event_right_flank1(event);
+    cds_start = transcripts->cds_start1[tx_idx];
+
+    if (cds_start == 0u && region->overlaps_exon &&
+        !insertion_flanks_share_exon(
+            transcripts, exons, tx_idx, left1, right1)) {
+        region->overlaps_exon = 0u;
+        region->region_mask &= ~(uint32_t)DUCKVEP_REGION_EXON;
+    }
+
+    /* An insertion at an outer transcript edge is upstream/downstream, not UTR.
+     * Internal exon boundaries may map through either flank after VEP 116's
+     * transcript-coordinate clamping. Only import UTR facts from those flanks;
+     * CDS placement remains governed by the established coding projection. */
+    if (cds_start != 0u && left1 >= transcripts->start1[tx_idx] &&
+        right1 <= transcripts->end1[tx_idx]) {
+        duckvep_region_state_t left = duckvep_region_classify_span(
+            transcripts, exons, tx_idx, left1, left1, 0u, 0u);
+        duckvep_region_state_t right = duckvep_region_classify_span(
+            transcripts, exons, tx_idx, right1, right1, 0u, 0u);
+
+        if (left.within_cdna || right.within_cdna) region->within_cdna = 1u;
+        if (left.overlaps_utr5 || right.overlaps_utr5) {
+            region->overlaps_utr5 = 1u;
+            region->region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
+        }
+        if (left.overlaps_utr3 || right.overlaps_utr3) {
+            region->overlaps_utr3 = 1u;
+            region->region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
+        }
+    }
+}
+
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
@@ -977,6 +1119,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
         duckvep_region_state_t region = duckvep_region_classify_span(
             tx, &c->model->exons, (size_t)tx_idx,
             topology_start1, topology_end1, 0u, 0u);
+        insertion_apply_region_boundaries(
+            tx, &c->model->exons, (size_t)tx_idx, &event, &region);
         duckvep_splice_state_t splice =
             duckvep_splice_classify_differing_regions_with_windows(
                 tx, &c->model->exons, (size_t)tx_idx,

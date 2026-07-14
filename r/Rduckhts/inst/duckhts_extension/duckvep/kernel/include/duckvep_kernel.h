@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 9
+#define DUCKVEP_KERNEL_VERSION_MINOR 10
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -176,6 +176,15 @@ typedef struct duckvep_transcript_model {
     const uint32_t *cds_start1;    /* [transcript_count] 0 = non-coding        */
     const uint32_t *cds_end1;      /* [transcript_count]                       */
     size_t          transcript_count;
+    /* Mature-miRNA attributes are projected to exonic genomic segments by the
+     * model builder. `mature_mirna_offset` is a packed row-offset array of
+     * length transcript_count + 1; transcript t owns segments in
+     * [offset[t], offset[t + 1]). All four fields may be zero/NULL when the
+     * prepared model has no mature-miRNA side relation. */
+    const uint32_t *mature_mirna_offset;
+    const uint32_t *mature_mirna_start1;
+    const uint32_t *mature_mirna_end1;
+    size_t          mature_mirna_count;
 } duckvep_transcript_model_t;
 
 typedef struct duckvep_exon_model {

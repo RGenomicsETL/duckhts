@@ -380,6 +380,29 @@ duckvep_region_state_t duckvep_region_classify_span(
         st.overlaps_intron = 1u;
     }
 
+    /* VEP's UTR predicates do not ask whether an annotated UTR base exists.
+     * They call overlap() on [transcript_start, cds_start - 1] or
+     * [cds_end + 1, transcript_end], then separately require a cDNA mapping.
+     * When transcript and CDS share an endpoint that UTR interval is empty, but
+     * VEP's four-comparison overlap still returns true for an event spanning the
+     * inverted interval. Preserve that observable state: a deletion crossing a
+     * CDS endpoint may carry both coding_sequence_variant and a UTR term even
+     * when the transcript has no UTR bases on that side. */
+    if (cds_s != 0u && st.within_cdna && !st.complete_overlap_feature) {
+        int before_coding = cds_s > 0u &&
+            end1 >= ts && start1 <= cds_s - 1u;
+        int after_coding = cds_e < UINT32_MAX &&
+            end1 >= cds_e + 1u && start1 <= te;
+
+        if (fwd) {
+            if (before_coding) st.overlaps_utr5 = 1u;
+            if (after_coding)  st.overlaps_utr3 = 1u;
+        } else {
+            if (before_coding) st.overlaps_utr3 = 1u;
+            if (after_coding)  st.overlaps_utr5 = 1u;
+        }
+    }
+
     if (cds_s == 0u && st.overlaps_exon) {
         st.region_mask |= (uint32_t)DUCKVEP_REGION_EXON;
     }

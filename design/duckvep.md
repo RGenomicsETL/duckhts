@@ -123,8 +123,11 @@ The model contract bounds a region coordinate at `UINT32_MAX` and the number of 
 
 ### Transcript and sequence preparation
 
-`duckvep_ensembl_transcripts(...)` currently selects every `is_current = 1` transcript on
-the supplied regions. For each transcript it:
+`duckvep_ensembl_transcripts(...)` applies the VEP-116 core-source filter before assigning
+model ordinals: a transcript must be current and have a non-empty stable ID, and neither
+the `artifact` biotype nor a `readthrough_tra` attribute is admitted. This is why a model
+built from the full core dump has the same candidate transcript population as VEP's core
+cache instead of merely the same coordinate source. For each selected transcript it:
 
 1. joins its gene, optional translation, ranked exons, and selected attributes;
 2. assigns dense transcript and gene ordinals while retaining Ensembl numeric IDs, stable
@@ -136,12 +139,17 @@ the supplied regions. For each transcript it:
    strand exons, joins exons in transcript order, and extracts the CDS;
 6. applies Ensembl start-phase preparation: phase `-1` or `0` adds no prefix, while a
    positive phase adds one or two leading `N` bases; and
-7. extracts the complete transcript-oriented spliced sequence before and after the CDS.
+7. extracts the complete transcript-oriented spliced sequence before and after the CDS;
+   and
+8. parses each mature-miRNA cDNA range from the Ensembl `miRNA` transcript attribute and
+   projects it through the ranked exons into one or more genomic segments.
 
 The compact flag word records translation presence, protein-coding/NMD/miRNA biotype,
 incomplete CDS ends, selenocysteine, stop readthrough, RNA or peptide edits, MANE,
-GENCODE, CCDS, readthrough-transcript, and upstream-start state. An RNA edit on either the
-transcript or translation attribute path is the same exceptional state.
+GENCODE, CCDS, and upstream-start state. An RNA edit on either the transcript or
+translation attribute path is the same exceptional state. The standalone model ABI still
+defines a readthrough-transcript flag for explicitly prepared alternate models, but the
+VEP-compatible core importer filters those transcripts before publication.
 
 For GRCh38 MANE attributes, the prepared DuckDB relation also retains the attribute value
 as `mane_select_refseq` or `mane_plus_clinical_refseq`. That value is the paired versioned
@@ -163,17 +171,27 @@ predicate rebuilds the 5-prime-UTR-plus-CDS or CDS-plus-3-prime-UTR string. The 
 relation retains the old three-base `post_cds_bases` projection for compatibility, but
 production models load the complete flanks.
 
+Mature miRNA ranges are also prepared once, not remapped for every variant. Ensembl stores
+them as transcript cDNA intervals, possibly more than one per transcript. The builder
+splits a range when it crosses an exon boundary and returns the resulting inclusive
+genomic segments in `mature_mirna_regions`. The resident model packs all segment starts
+and ends into flat arrays with one offset per transcript. A non-miRNA transcript pays only
+the transcript-flag test; a miRNA candidate scans its usually tiny owned slice.
+
 ### Prepared relations and publication
 
 The builder returns one row per transcript. The row contains the hot transcript fields,
-source and stable identifiers, biotypes, the optional prepared CDS, and an ordered nested
-exon list. Callers persist two canonical tables and derive the three sorted loader
-projections from them:
+source and stable identifiers, biotypes, the optional prepared CDS, an ordered nested
+exon list, and the nested mature-miRNA genomic segments. Callers persist two canonical
+tables and derive three required sorted loader projections plus one optional side
+projection from them:
 
 - region ordinal, and sequence length when complete-coverage claims are requested;
 - transcript ordinal, region, span, strand, gene ordinal, flags, optional CDS fields,
   codon table, and complete pre-CDS and post-CDS sequence; and
 - transcript ordinal plus each exon's genomic span, cDNA span, phase, and end phase.
+- for transcripts with mature-miRNA attributes, transcript ordinal plus each projected
+  genomic segment start and end.
 
 The `core_schema` argument names relations, not a transport. It can point at tables loaded
 from Ensembl's tab-separated MySQL dumps, or at a read-only MySQL catalog attached through
@@ -185,8 +203,8 @@ chunks have been persisted.
 `duckvep_model_receipt(...)` checks dense ordinals and region/transcript agreement. It
 records the declared source, release, assembly, transcript filter, source-manifest hash,
 reference hash, model counts including CDS and transcript-flank bases, and a deterministic
-hash over every prepared model field. There is no timestamp: identical declared inputs
-must produce the same receipt.
+hash over every prepared model field, including mature-miRNA ranges. There is no
+timestamp: identical declared inputs must produce the same receipt.
 
 The checked-in acceptance fixtures under `test/data/duckvep/ensembl_core/` are about 116
 KiB. The GRCh38 fixture contains complete release-116 MT and `HG2047_PATCH` source rows;
@@ -208,6 +226,12 @@ three `post_cds_bases`, or the complete 13-column form ending in `pre_cds_sequen
 `post_cds_sequence`. Only the complete form may resolve length-changing edits crossing a
 CDS boundary. Older models remain loadable and return `missing_transcript_flank` rather
 than guessing when such a predicate is reached.
+
+The optional `mature_mirna_query` has three columns: transcript ordinal, inclusive genomic
+start, and inclusive genomic end. Rows must be ordered by transcript and start. The loader
+proves that each range belongs to a miRNA transcript, stays inside one of its exons, and is
+ordered before publishing the model. Omitting the query preserves compatibility for
+models that do not carry these Ensembl attributes; it does not invent mature regions.
 
 The loader treats transcript coverage as partial by default. Only a model deliberately
 loaded with `transcript_coverage_complete := true` may turn “no loaded transcript here”
@@ -234,8 +258,8 @@ SELECT * FROM duckvep_ensembl_transcripts(
 The implemented builder does not yet:
 
 - stage Ensembl `table.sql` and dump files into DuckDB;
-- reproduce VEP 116's exact transcript selection, including stable-ID, `estgene`,
-  `artifact`, `readthrough_tra`, and `otherfeatures`/RefSeq rules;
+- reproduce the remaining non-core VEP 116 transcript sources and selection rules,
+  including `estgene` and `otherfeatures`/RefSeq;
 - apply Ensembl RNA and peptide sequence edits;
 - derive codon table from `seq_region_attrib` (mitochondrial names currently select table
   2, all other regions table 1);

@@ -157,6 +157,27 @@ static void duckvep_effect_ctx_set_topology(
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT);
     }
 
+    /* VariationEffect::within_mature_miRNA maps each curated cDNA range to
+     * genomic exon segments, then applies the same inclusive overlap predicate
+     * to the uploaded feature. The prepared model stores those mapped segments,
+     * so the common non-miRNA lane pays one flag test and no projection cost. */
+    if (out->region_state.within_feature &&
+        (transcripts->flags[tx_idx] &
+         (uint64_t)DUCKVEP_TX_BIOTYPE_MIRNA) != 0u &&
+        transcripts->mature_mirna_offset != NULL) {
+        size_t segment;
+        size_t begin = transcripts->mature_mirna_offset[tx_idx];
+        size_t finish = transcripts->mature_mirna_offset[tx_idx + 1u];
+
+        for (segment = begin; segment < finish; segment++) {
+            if (end1 >= transcripts->mature_mirna_start1[segment] &&
+                start1 <= transcripts->mature_mirna_end1[segment]) {
+                pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_MATURE_MIRNA);
+                break;
+            }
+        }
+    }
+
     out->splice = *splice_state;
     if (out->splice.splice_donor)
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_DONOR);

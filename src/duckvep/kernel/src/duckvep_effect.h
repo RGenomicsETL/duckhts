@@ -63,7 +63,8 @@ typedef enum duckvep_pre_bit {
     DUCKVEP_PRE_PROTEIN_ALTERING       = 37,
     DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT  = 38,
     DUCKVEP_PRE_START_RETAINED          = 39,
-    DUCKVEP_PRE_BIT_COUNT               = 40
+    DUCKVEP_PRE_WITHIN_MATURE_MIRNA     = 40,
+    DUCKVEP_PRE_BIT_COUNT               = 41
 } duckvep_pre_bit_t;
 
 #define DUCKVEP_PRE(b) (UINT64_C(1) << (b))

@@ -27,7 +27,8 @@ ensembl_fixture_sql <- c(
   paste(
     "CREATE TABLE duckvep_r_core.gene AS SELECT 1::BIGINT AS gene_id,",
     "'protein_coding'::VARCHAR AS biotype, 1::BIGINT AS is_current,",
-    "'ENSG_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version"
+    "'ENSG_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version",
+    "UNION ALL SELECT 2, 'miRNA', 1, 'ENSG_R_MIRNA', 1"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.transcript AS SELECT",
@@ -35,18 +36,22 @@ ensembl_fixture_sql <- c(
     "1::BIGINT AS seq_region_id, 1::BIGINT AS seq_region_start,",
     "12::BIGINT AS seq_region_end, 1::BIGINT AS seq_region_strand,",
     "'protein_coding'::VARCHAR AS biotype, 1::BIGINT AS is_current,",
-    "'ENST_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version"
+    "'ENST_R_TEST'::VARCHAR AS stable_id, 1::BIGINT AS version",
+    "UNION ALL SELECT 2, 2, 1, 1, 12, 1, 'miRNA', 1,",
+    "'ENST_R_MIRNA', 1"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.exon AS SELECT 1::BIGINT AS exon_id,",
     "1::BIGINT AS seq_region_id, 1::BIGINT AS seq_region_start,",
     "12::BIGINT AS seq_region_end, 1::BIGINT AS seq_region_strand,",
     "-1::BIGINT AS phase, 0::BIGINT AS end_phase,",
-    "1::BIGINT AS is_current, 'ENSE_R_TEST'::VARCHAR AS stable_id"
+    "1::BIGINT AS is_current, 'ENSE_R_TEST'::VARCHAR AS stable_id",
+    "UNION ALL SELECT 2, 1, 1, 12, 1, -1, -1, 1, 'ENSE_R_MIRNA'"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.exon_transcript AS SELECT",
-    "1::BIGINT AS exon_id, 1::BIGINT AS transcript_id, 1::BIGINT AS rank"
+    "1::BIGINT AS exon_id, 1::BIGINT AS transcript_id, 1::BIGINT AS rank",
+    "UNION ALL SELECT 2, 2, 1"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.translation AS SELECT",
@@ -57,12 +62,14 @@ ensembl_fixture_sql <- c(
   ),
   paste(
     "CREATE TABLE duckvep_r_core.attrib_type AS SELECT",
-    "1::BIGINT AS attrib_type_id, 'MANE_Select'::VARCHAR AS code"
+    "1::BIGINT AS attrib_type_id, 'MANE_Select'::VARCHAR AS code",
+    "UNION ALL SELECT 2, 'miRNA'"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.transcript_attrib AS SELECT",
     "1::BIGINT AS transcript_id, 1::BIGINT AS attrib_type_id,",
-    "'NM_R_TEST.1'::VARCHAR AS value"
+    "'NM_R_TEST.1'::VARCHAR AS value",
+    "UNION ALL SELECT 2, 2, '2-5'"
   ),
   paste(
     "CREATE TABLE duckvep_r_core.translation_attrib AS SELECT",
@@ -97,7 +104,8 @@ ensembl_model <- dbGetQuery(
     "CAST(pre_cds_sequence AS VARCHAR) pre_cds_sequence,",
     "CAST(post_cds_sequence AS VARCHAR) post_cds_sequence,",
     "transcript_flags, mane_select_refseq, exons[1].phase phase",
-    "FROM duckvep_r_ensembl_transcripts"
+    "FROM duckvep_r_ensembl_transcripts",
+    "WHERE transcript_stable_id = 'ENST_R_TEST'"
   )
 )
 expect_identical(ensembl_model$cds_sequence, "ATGAAATAA")
@@ -107,6 +115,20 @@ expect_identical(ensembl_model$post_cds_sequence, "CCC")
 expect_equal(ensembl_model$transcript_flags, 1027)
 expect_identical(ensembl_model$mane_select_refseq, "NM_R_TEST.1")
 expect_equal(ensembl_model$phase, -1)
+mature_mirna_region <- dbGetQuery(
+  con,
+  paste(
+    "SELECT transcript_index, region.cdna_start, region.cdna_end,",
+    "region.mature_mirna_start, region.mature_mirna_end",
+    "FROM duckvep_r_ensembl_transcripts,",
+    "LATERAL unnest(mature_mirna_regions) AS u(region)"
+  )
+)
+expect_equal(mature_mirna_region$transcript_index, 1)
+expect_equal(
+  unlist(mature_mirna_region[1, -1], use.names = FALSE),
+  c(2, 5, 2, 5)
+)
 ensembl_receipt <- dbGetQuery(
   con,
   paste(
@@ -118,7 +140,7 @@ ensembl_receipt <- dbGetQuery(
 )
 expect_equal(ensembl_receipt$region_count, 1)
 expect_equal(ensembl_receipt$reference_base_count, 12)
-expect_equal(ensembl_receipt$transcript_count, 1)
+expect_equal(ensembl_receipt$transcript_count, 2)
 expect_equal(ensembl_receipt$transcript_flank_base_count, 3)
 expect_equal(nchar(ensembl_receipt$model_sha256), 64)
 expect_identical(
@@ -142,11 +164,41 @@ expect_identical(
 
 dbExecute(
   con,
-  "INSERT INTO duckvep_r_core.attrib_type VALUES (2, '_rna_edit')"
+  paste(
+    "INSERT INTO duckvep_r_core.transcript VALUES",
+    "(3, 1, 1, 1, 12, 1, 'protein_coding', 1, NULL, 1),",
+    "(4, 1, 1, 1, 12, 1, 'artifact', 1, 'ENST_R_ARTIFACT', 1),",
+    "(5, 1, 1, 1, 12, 1, 'protein_coding', 1, 'ENST_R_READTHROUGH', 1)"
+  )
 )
 dbExecute(
   con,
-  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (1, 2, '4 5 A')"
+  "INSERT INTO duckvep_r_core.attrib_type VALUES (3, 'readthrough_tra')"
+)
+dbExecute(
+  con,
+  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (5, 3, '1')"
+)
+eligible_transcripts <- dbGetQuery(
+  con,
+  paste(
+    "SELECT transcript_stable_id FROM duckvep_ensembl_transcripts(",
+    "'duckvep_r_core', 'duckvep_r_reference', 'GRCh38')",
+    "ORDER BY transcript_index"
+  )
+)
+expect_identical(
+  eligible_transcripts$transcript_stable_id,
+  c("ENST_R_TEST", "ENST_R_MIRNA")
+)
+
+dbExecute(
+  con,
+  "INSERT INTO duckvep_r_core.attrib_type VALUES (4, '_rna_edit')"
+)
+dbExecute(
+  con,
+  "INSERT INTO duckvep_r_core.transcript_attrib VALUES (1, 4, '4 5 A')"
 )
 dbExecute(
   con,
@@ -160,7 +212,8 @@ ensembl_rna_edit <- dbGetQuery(
   con,
   paste(
     "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
-    "sequence_withheld_reason FROM duckvep_r_ensembl_rna_edit"
+    "sequence_withheld_reason FROM duckvep_r_ensembl_rna_edit",
+    "WHERE transcript_stable_id = 'ENST_R_TEST'"
   )
 )
 expect_true(is.na(ensembl_rna_edit$cds_sequence))
@@ -207,7 +260,12 @@ queries <- c(
     "phase, end_phase FROM duckvep_r_exons ORDER BY transcript_index, exon_cdna_start"
   )
 )
-load_model <- function(name, model_queries, transcript_coverage_complete = FALSE) {
+load_model <- function(
+  name,
+  model_queries,
+  transcript_coverage_complete = FALSE,
+  mature_mirna_query = NULL
+) {
   arguments <- paste(
     vapply(
       c(name, model_queries),
@@ -216,6 +274,16 @@ load_model <- function(name, model_queries, transcript_coverage_complete = FALSE
     ),
     collapse = ", "
   )
+  if (!is.null(mature_mirna_query)) {
+    arguments <- paste(
+      arguments,
+      paste0(
+        "mature_mirna_query := ",
+        as.character(dbQuoteString(con, mature_mirna_query))
+      ),
+      sep = ", "
+    )
+  }
   if (transcript_coverage_complete) {
     arguments <- paste(
       arguments,
@@ -233,8 +301,143 @@ load_model <- function(name, model_queries, transcript_coverage_complete = FALSE
   )
 }
 
+ensembl_mirna_queries <- c(
+  paste(
+    "SELECT seq_region, sequence_length",
+    "FROM duckvep_r_ensembl_regions ORDER BY seq_region"
+  ),
+  paste(
+    "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
+    "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence,",
+    "codon_table, pre_cds_sequence, post_cds_sequence",
+    "FROM duckvep_r_ensembl_transcripts",
+    "ORDER BY seq_region, transcript_start, transcript_index"
+  ),
+  paste(
+    "SELECT transcript_index, exon.exon_start, exon.exon_end,",
+    "exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase",
+    "FROM duckvep_r_ensembl_transcripts,",
+    "LATERAL unnest(exons) AS u(exon)",
+    "ORDER BY transcript_index, exon.exon_cdna_start"
+  )
+)
+ensembl_mirna_query <- paste(
+  "SELECT transcript_index, region.mature_mirna_start,",
+  "region.mature_mirna_end FROM duckvep_r_ensembl_transcripts,",
+  "LATERAL unnest(mature_mirna_regions) AS u(region)",
+  "ORDER BY transcript_index, region.mature_mirna_start"
+)
+expect_true(
+  load_model(
+    "r-ensembl-mirna",
+    ensembl_mirna_queries,
+    transcript_coverage_complete = TRUE,
+    mature_mirna_query = ensembl_mirna_query
+  )$loaded
+)
+ensembl_mirna_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "'r-ensembl-mirna', 0::UINTEGER, 2::UBIGINT,",
+    "'T', 'C', 0::UBIGINT)) u(a) WHERE a.transcript_index = 1"
+  )
+)
+expect_identical(
+  ensembl_mirna_annotation$consequence,
+  "mature_miRNA_variant"
+)
+expect_identical(ensembl_mirna_annotation$status, "supported")
+
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_partial_cds_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 113::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "35::UBIGINT transcript_flags, 100::UBIGINT cds_start,",
+    "113::UBIGINT cds_end, 'ATGAAACCCGGGTT'::BLOB cds_sequence,",
+    "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence,",
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_partial_cds_exons AS SELECT",
+    "0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+    "113::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "14::UBIGINT exon_cdna_end, 0::TINYINT phase,",
+    "2::TINYINT end_phase"
+  )
+)
+partial_cds_queries <- c(
+  "SELECT seq_region FROM duckvep_r_regions ORDER BY seq_region",
+  paste(
+    "SELECT * FROM duckvep_r_partial_cds_transcripts",
+    "ORDER BY seq_region, transcript_start, transcript_index"
+  ),
+  paste(
+    "SELECT * FROM duckvep_r_partial_cds_exons",
+    "ORDER BY transcript_index, exon_cdna_start"
+  )
+)
+expect_true(load_model("r-partial-cds-end", partial_cds_queries)$loaded)
+partial_cds_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status, a.reason",
+    "FROM unnest(duckvep_annotate(",
+    "'r-partial-cds-end', 1::UINTEGER, 106::UBIGINT,",
+    "'C', 'CA', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(partial_cds_annotation$consequence, "frameshift_variant")
+expect_identical(partial_cds_annotation$status, "supported")
+expect_true(is.na(partial_cds_annotation$reason))
+
+partial_tail_deletion <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status, a.reason",
+    "FROM unnest(duckvep_annotate(",
+    "'r-partial-cds-end', 1::UINTEGER, 109::UBIGINT,",
+    "'GGGT', 'G', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(partial_tail_deletion$consequence, "inframe_deletion")
+expect_identical(partial_tail_deletion$status, "supported")
+expect_true(is.na(partial_tail_deletion$reason))
+
+noncoding_boundary_queries <- queries
+noncoding_boundary_queries[2] <- paste(
+  "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
+  "strand, gene_index, 0::UBIGINT transcript_flags,",
+  "NULL::UBIGINT cds_start, NULL::UBIGINT cds_end,",
+  "NULL::BLOB cds_sequence, NULL::UTINYINT codon_table,",
+  "NULL::BLOB pre_cds_sequence, NULL::BLOB post_cds_sequence",
+  "FROM duckvep_r_transcripts ORDER BY seq_region, transcript_start, transcript_index"
+)
+expect_true(
+  load_model("r-noncoding-boundary", noncoding_boundary_queries)$loaded
+)
+noncoding_boundary <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "'r-noncoding-boundary', 1::UINTEGER, 150::UBIGINT,",
+    "'A', 'AT', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(
+  sort(strsplit(noncoding_boundary$consequence, "&", fixed = TRUE)[[1]]),
+  c("non_coding_transcript_variant", "splice_region_variant")
+)
+expect_identical(noncoding_boundary$status, "supported")
 
 invalid_queries <- queries
 invalid_queries[2] <- paste0(
@@ -875,6 +1078,24 @@ expect_true(
   )$dropped
 )
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-complete') AS dropped")$dropped)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-partial-cds-end') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-noncoding-boundary') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-ensembl-mirna') AS dropped"
+  )$dropped
+)
 expect_true(
   dbGetQuery(
     con,

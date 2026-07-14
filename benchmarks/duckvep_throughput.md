@@ -11,31 +11,37 @@ materialization, `unnest`, and final aggregation together. Model loading
 and input staging are outside the timed pass.
 
 The checked-in one-transcript workload is a repeatable adapter floor.
-The production-density workload uses a pre-staged DuckDB database
+The production-density workloads use a pre-staged DuckDB database
 containing `bench_regions`, `bench_transcripts`, `bench_exons`, and
-`bench_variants`. Its recorded Ensembl-116 GRCh38 model contains 644,292
-chromosome transcripts and 5,078,384 exon memberships; the input is a
-deterministic 1-in-40 hash sample of 100,957 sorted GIAB sites. The
-external staging database is not committed. The production query
-restates `ORDER BY` in the timed input CTE, so its result includes the
-cost of enforcing the kernel’s nondecreasing-input contract even though
-the staging table was already written in that order. The `79cfaaf2` rows
-predate that review correction and relied on the single-thread physical
-scan preserving insertion order; they remain only as historical
-measurements.
+`bench_variants`. The earlier chromosome-only staging model contains 25
+sequence regions, 644,292 transcripts, and 5,078,384 exon memberships.
+The complete-primary-assembly model contains 194 sequence regions,
+646,577 transcripts, and 5,087,789 exon memberships; 370,580 coding
+transcripts have prepared CDS sequence. Both use the same deterministic
+1-in-40 hash sample of 100,957 sorted GIAB sites. These are distinct
+model workloads and their consequence checksums are not expected to
+match. The external staging databases are not committed. The production
+query restates `ORDER BY` in the timed input CTE, so its result includes
+the cost of enforcing the kernel’s nondecreasing-input contract even
+though the staging table was already written in that order. The
+`79cfaaf2` rows predate that review correction and relied on the
+single-thread physical scan preserving insertion order; they remain only
+as historical measurements.
 
 ## Recorded runs
 
-| run_date   | revision | workload                            | output_mode | threads | variants   | transcripts | exons     | annotated_rows | passes | min_seconds | median_seconds | max_seconds | variants_per_second | ns_per_variant | cpu                                 |
-|:-----------|:---------|:------------------------------------|:------------|--------:|:-----------|:------------|:----------|:---------------|-------:|------------:|---------------:|------------:|--------------------:|---------------:|:------------------------------------|
-| 2026-07-11 | 8cc22218 | fixture_one_transcript_sorted       | rich        |       1 | 10,000,000 | 1           | 2         | 10,000,000     |      3 |       3.225 |          3.334 |       3.371 |             2999400 |          333.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-13 | 87f03a2a | fixture_one_transcript_sorted       | rich        |       1 | 10,000,000 | 1           | 2         | 10,000,000     |      3 |       2.812 |          2.824 |       2.825 |             3541076 |          282.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-14 | 751d3c74 | ensembl116_grch38_giab_sites_hash40 | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.104 |          0.107 |       0.114 |              943523 |         1059.9 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-14 | 751d3c74 | ensembl116_grch38_giab_sites_hash40 | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.222 |          0.224 |       0.231 |              450701 |         2218.8 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-14 | 79cfaaf2 | ensembl116_grch38_giab_sites_hash40 | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.107 |          0.108 |       0.110 |              934787 |         1069.8 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-14 | 79cfaaf2 | ensembl116_grch38_giab_sites_hash40 | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.225 |          0.228 |       0.232 |              442794 |         2258.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40 | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.106 |          0.107 |       0.109 |              943523 |         1059.9 | 13th Gen Intel(R) Core(TM) i5-13500 |
-| 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40 | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.221 |          0.225 |       0.231 |              448698 |         2228.7 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| run_date   | revision | workload                                    | output_mode | threads | variants   | transcripts | exons     | annotated_rows | passes | min_seconds | median_seconds | max_seconds | variants_per_second | ns_per_variant | cpu                                 |
+|:-----------|:---------|:--------------------------------------------|:------------|--------:|:-----------|:------------|:----------|:---------------|-------:|------------:|---------------:|------------:|--------------------:|---------------:|:------------------------------------|
+| 2026-07-11 | 8cc22218 | fixture_one_transcript_sorted               | rich        |       1 | 10,000,000 | 1           | 2         | 10,000,000     |      3 |       3.225 |          3.334 |       3.371 |             2999400 |          333.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-13 | 87f03a2a | fixture_one_transcript_sorted               | rich        |       1 | 10,000,000 | 1           | 2         | 10,000,000     |      3 |       2.812 |          2.824 |       2.825 |             3541076 |          282.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 751d3c74 | ensembl116_grch38_giab_sites_hash40         | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.104 |          0.107 |       0.114 |              943523 |         1059.9 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 751d3c74 | ensembl116_grch38_giab_sites_hash40         | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.222 |          0.224 |       0.231 |              450701 |         2218.8 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 79cfaaf2 | ensembl116_grch38_giab_sites_hash40         | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.107 |          0.108 |       0.110 |              934787 |         1069.8 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 79cfaaf2 | ensembl116_grch38_giab_sites_hash40         | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.225 |          0.228 |       0.232 |              442794 |         2258.4 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 81b9e2a7 | ensembl116_grch38_primary_giab_sites_hash40 | compact     |       1 | 100,957    | 646,577     | 5,087,789 | 1,179,465      |      9 |       0.112 |          0.115 |       0.125 |              877887 |         1139.1 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | 81b9e2a7 | ensembl116_grch38_primary_giab_sites_hash40 | rich        |       1 | 100,957    | 646,577     | 5,087,789 | 1,179,465      |      9 |       0.233 |          0.236 |       0.242 |              427784 |         2337.6 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40         | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.106 |          0.107 |       0.109 |              943523 |         1059.9 | 13th Gen Intel(R) Core(TM) i5-13500 |
+| 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40         | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.221 |          0.225 |       0.231 |              448698 |         2228.7 | 13th Gen Intel(R) Core(TM) i5-13500 |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric

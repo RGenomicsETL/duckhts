@@ -2076,6 +2076,52 @@ TEST region_span_can_cross_cds_intron_and_splice_windows(void) {
     PASS();
 }
 
+/* VEP 116 calls overlap() on the nominal UTR interval before checking that the
+ * event has a cDNA mapping. If CDS and transcript share an endpoint, that UTR
+ * interval is inverted by one base; a deletion spanning the endpoint still
+ * satisfies VEP's comparison and emits both CDS and the strand-correct UTR. */
+TEST region_span_crossing_empty_utr_keeps_vep_predicate(void) {
+    static const uint16_t chrom[2] = {0u, 0u};
+    static const uint32_t tstart[2] = {100u, 100u};
+    static const uint32_t tend[2] = {200u, 200u};
+    static const int8_t strand[2] = {1, -1};
+    static const uint64_t flags[2] = {0u, 0u};
+    static const uint32_t exoff[2] = {0u, 0u};
+    static const uint16_t excnt[2] = {1u, 1u};
+    static const uint32_t cds_s[2] = {100u, 100u};
+    static const uint32_t cds_e[2] = {200u, 200u};
+    static const uint32_t es[1] = {100u};
+    static const uint32_t ee[1] = {200u};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_region_state_t low_plus;
+    duckvep_region_state_t high_plus;
+    duckvep_region_state_t low_minus;
+    duckvep_region_state_t high_minus;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&ex, 0, sizeof ex);
+    tx.chrom_id = chrom; tx.start1 = tstart; tx.end1 = tend; tx.strand = strand;
+    tx.flags = flags; tx.exon_offset = exoff; tx.exon_count = excnt;
+    tx.cds_start1 = cds_s; tx.cds_end1 = cds_e; tx.transcript_count = 2u;
+    ex.start1 = es; ex.end1 = ee; ex.exon_count = 1u;
+
+    low_plus = duckvep_region_classify_span(&tx, &ex, 0u, 98u, 102u, 0u, 0u);
+    high_plus = duckvep_region_classify_span(&tx, &ex, 0u, 198u, 202u, 0u, 0u);
+    low_minus = duckvep_region_classify_span(&tx, &ex, 1u, 98u, 102u, 0u, 0u);
+    high_minus = duckvep_region_classify_span(&tx, &ex, 1u, 198u, 202u, 0u, 0u);
+
+    ASSERT(low_plus.overlaps_cds && low_plus.overlaps_utr5 &&
+           !low_plus.overlaps_utr3);
+    ASSERT(high_plus.overlaps_cds && high_plus.overlaps_utr3 &&
+           !high_plus.overlaps_utr5);
+    ASSERT(low_minus.overlaps_cds && low_minus.overlaps_utr3 &&
+           !low_minus.overlaps_utr5);
+    ASSERT(high_minus.overlaps_cds && high_minus.overlaps_utr5 &&
+           !high_minus.overlaps_utr3);
+    PASS();
+}
+
 /* ===================================================================== *
  * VEP-source-grounded splice-SITE classification (effect-ctx slice 1).
  *
@@ -2603,6 +2649,87 @@ TEST nmd_transcript_predicate_known_scene(void) {
         DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
     ASSERT((ctx.pre_bits &
             DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u);
+    PASS();
+}
+
+/* Ensembl's repeated miRNA attributes are projected once into small genomic
+ * exon segments. The tier-2 mature term must replace, not accompany, the
+ * generic noncoding-exon consequence on either transcript strand. */
+TEST mature_mirna_predicate_known_scene(void) {
+    uint16_t chrom[1] = {0u};
+    uint32_t transcript_start[1] = {100u};
+    uint32_t transcript_end[1] = {120u};
+    int8_t strand[1] = {1};
+    uint64_t flags[1] = {(uint64_t)DUCKVEP_TX_BIOTYPE_MIRNA};
+    uint32_t exon_offset[1] = {0u};
+    uint16_t exon_count[1] = {1u};
+    uint32_t cds_start[1] = {0u};
+    uint32_t cds_end[1] = {0u};
+    uint32_t exon_start[1] = {100u};
+    uint32_t exon_end[1] = {120u};
+    uint32_t cdna_start[1] = {1u};
+    uint32_t cdna_end[1] = {21u};
+    int8_t phase[1] = {-1};
+    uint32_t mature_offset[2] = {0u, 1u};
+    uint32_t mature_start[1] = {105u};
+    uint32_t mature_end[1] = {110u};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_effect_ctx_t ctx;
+    duckvep_model_t *model = NULL;
+    duckvep_error_t error;
+    size_t orientation;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = chrom; tx.start1 = transcript_start;
+    tx.end1 = transcript_end; tx.strand = strand; tx.flags = flags;
+    tx.exon_offset = exon_offset; tx.exon_count = exon_count;
+    tx.cds_start1 = cds_start; tx.cds_end1 = cds_end;
+    tx.transcript_count = 1u;
+    tx.mature_mirna_offset = mature_offset;
+    tx.mature_mirna_start1 = mature_start;
+    tx.mature_mirna_end1 = mature_end;
+    tx.mature_mirna_count = 1u;
+    exons.start1 = exon_start; exons.end1 = exon_end;
+    exons.cdna_start1 = cdna_start; exons.cdna_end1 = cdna_end;
+    exons.phase = phase; exons.end_phase = phase; exons.exon_count = 1u;
+
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_model_open(&tx, &exons, NULL, &model, &error));
+    duckvep_model_close(model);
+    model = NULL;
+
+    for (orientation = 0u; orientation < 2u; orientation++) {
+        uint64_t mask;
+
+        strand[0] = orientation == 0u ? 1 : -1;
+        duckvep_effect_ctx_fill(
+            &tx, &exons, 0u, 0u, 106u, 106u, 0u,
+            DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+            DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
+        duckvep_effect_ctx_finalize(&ctx);
+        mask = duckvep_effect_eval(ctx.pre_bits);
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_MATURE_MIRNA), mask);
+
+        duckvep_effect_ctx_fill(
+            &tx, &exons, 0u, 0u, 102u, 102u, 0u,
+            DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+            DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
+        duckvep_effect_ctx_finalize(&ctx);
+        mask = duckvep_effect_eval(ctx.pre_bits);
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT_EXON),
+                  mask);
+    }
+
+    mature_start[0] = 99u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, NULL, &model, &error));
+    mature_start[0] = 105u;
+    mature_offset[1] = 2u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, NULL, &model, &error));
     PASS();
 }
 
@@ -11745,6 +11872,118 @@ TEST coding_context_delta_frameshift_known_scene(void) {
     PASS();
 }
 
+/* Ensembl CDS_END_NF transcripts legitimately end with one or two untranslated
+ * CDS bases. VEP still evaluates ordinary length-changing edits against the
+ * complete-codon peptide plus its synthetic trailing X; the incomplete tail is
+ * not a reason to collapse an otherwise simple edit into an unresolved result. */
+TEST coding_context_delta_cds_end_nf_known_scene(void) {
+    static uint8_t cds_mod1[13] = {
+        'A','T','G',  'A','A','A',  'C','C','C',  'G','G','G',  'T'
+    };
+    static uint8_t cds_mod2[14] = {
+        'A','T','G',  'A','A','A',  'C','C','C',  'G','G','G',  'T','T'
+    };
+    static const uint8_t replace_c_ca[2] = { 'C','A' };
+    static const uint8_t insert_gcc[3] = { 'G','C','C' };
+    duckvep_haplotype_edit_t edit;
+    duckvep_edit_set_t edit_set;
+    uint8_t alt_cds[32];
+    uint8_t ref_pep[16];
+    uint8_t alt_pep[16];
+    duckvep_coding_context_t ctx;
+    duckvep_sequence_delta_t delta;
+    size_t strand_idx;
+    static const int8_t strands[2] = { 1, -1 };
+
+    memset(&edit, 0, sizeof edit);
+    edit_set.edits = &edit;
+    edit_set.count = 1u;
+
+    for (strand_idx = 0u; strand_idx < 2u; strand_idx++) {
+        int8_t strand = strands[strand_idx];
+
+        /* A +1 body edit remains a frameshift for both possible incomplete-tail
+         * lengths and on both genomic strands. */
+        edit.cds_start = 7u;
+        edit.ref = cds_mod1 + 6u;
+        edit.ref_len = 1u;
+        edit.alt = replace_c_ca;
+        edit.alt_len = sizeof replace_c_ca;
+        edit.variant_strand = strand;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod1, sizeof cds_mod1, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.frameshift && !delta.inframe_insertion &&
+               !delta.inframe_deletion);
+
+        edit.ref = cds_mod2 + 6u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.frameshift && !delta.inframe_insertion &&
+               !delta.inframe_deletion);
+
+        /* Complete-codon insertion/deletion facts are likewise independent of
+         * the trailing partial codon. */
+        edit.cds_start = 7u;
+        edit.ref = NULL;
+        edit.ref_len = 0u;
+        edit.alt = insert_gcc;
+        edit.alt_len = sizeof insert_gcc;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod1, sizeof cds_mod1, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.inframe_insertion && !delta.frameshift);
+
+        edit.ref = cds_mod2 + 6u;
+        edit.ref_len = 3u;
+        edit.alt = NULL;
+        edit.alt_len = 0u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.inframe_deletion && !delta.frameshift);
+
+        /* The affected rounded codon itself reaches the partial tail. VEP's
+         * local reference peptide is one complete residue plus synthetic X;
+         * deleting the three interior bases remains an in-frame deletion. */
+        edit.cds_start = 11u;
+        edit.ref = cds_mod2 + 10u;
+        edit.ref_len = 3u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.inframe_deletion && !delta.frameshift);
+    }
+
+    PASS();
+}
+
 /* VEP-116 states discovered independently by the statistical differentials.
  * They share one cause: stop, frame, insertion, and protein-shape predicates
  * inspect the same local peptide but remain independently true. */
@@ -15837,6 +16076,7 @@ int main(int argc, char **argv) {
     RUN_TEST(splice_ppt_exon_gate_scene);
     RUN_TEST(effect_rule_table_known_pre_bits);
     RUN_TEST(nmd_transcript_predicate_known_scene);
+    RUN_TEST(mature_mirna_predicate_known_scene);
     RUN_TEST(variant_induced_nmd_prediction_known_scene);
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
     RUN_TEST(generated_effect_lookup_matches_rule_interpreter);
@@ -15887,6 +16127,7 @@ int main(int argc, char **argv) {
     RUN_TEST(coding_context_delta_inframe_insertion_known_scene);
     RUN_TEST(coding_context_delta_delins_known_scene);
     RUN_TEST(coding_context_delta_frameshift_known_scene);
+    RUN_TEST(coding_context_delta_cds_end_nf_known_scene);
     RUN_TEST(coding_context_delta_terminal_combinations_known_scene);
     RUN_TEST(coding_context_delta_frameshift_stop_gained_scene);
     RUN_TEST(sequence_delta_with_scratch_indel_known_scene);

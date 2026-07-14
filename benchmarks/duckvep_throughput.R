@@ -3,6 +3,8 @@
 # Record the stable DuckDB C-API path over a sorted variant stream. With no
 # database this uses the checked-in one-transcript fixture. --database expects
 # pre-staged bench_regions, bench_transcripts, bench_exons, and bench_variants.
+# Complete production models expose sequence_length plus full transcript flanks;
+# older topology-only staging databases remain accepted as partial models.
 
 suppressMessages({
   library(DBI)
@@ -117,11 +119,28 @@ if (production) {
   } else {
     "ensembl116_grch38_giab_sites_hash40"
   }
+  region_columns <- dbGetQuery(
+    con,
+    "SELECT column_name FROM duckdb_columns() WHERE table_name = 'bench_regions'"
+  )$column_name
+  transcript_columns <- dbGetQuery(
+    con,
+    "SELECT column_name FROM duckdb_columns() WHERE table_name = 'bench_transcripts'"
+  )$column_name
+  complete_coverage <- "sequence_length" %in% region_columns
+  complete_flanks <- all(
+    c("pre_cds_sequence", "post_cds_sequence") %in% transcript_columns
+  )
   load_queries <- c(
-    "SELECT seq_region FROM bench_regions ORDER BY seq_region",
+    paste(
+      "SELECT seq_region",
+      if (complete_coverage) ", sequence_length" else "",
+      "FROM bench_regions ORDER BY seq_region"
+    ),
     paste(
       "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
       "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
+      if (complete_flanks) ", pre_cds_sequence, post_cds_sequence" else "",
       "FROM bench_transcripts ORDER BY transcript_index"
     ),
     paste(
@@ -129,6 +148,21 @@ if (production) {
       "phase, end_phase FROM bench_exons ORDER BY transcript_index, exon_cdna_start"
     )
   )
+  present_relations <- dbGetQuery(
+    con,
+    paste(
+      "SELECT table_name FROM information_schema.tables",
+      "WHERE table_catalog = current_database() AND table_schema = 'main'"
+    )
+  )$table_name
+  mature_mirna_query <- if ("bench_mature_mirna" %in% present_relations) {
+    paste(
+      "SELECT transcript_index, mature_mirna_start, mature_mirna_end",
+      "FROM bench_mature_mirna ORDER BY transcript_index, mature_mirna_start"
+    )
+  } else {
+    NULL
+  }
   region_count <- counts[[1L]]
   transcript_count <- counts[[2L]]
   exon_count <- counts[[3L]]
@@ -142,6 +176,8 @@ if (production) {
   region_count <- 1
   transcript_count <- 1
   exon_count <- 2
+  complete_coverage <- FALSE
+  complete_flanks <- TRUE
   load_queries <- c(
     "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region",
     paste(
@@ -155,18 +191,30 @@ if (production) {
       "ORDER BY transcript_index, exon_cdna_start"
     )
   )
+  mature_mirna_query <- NULL
 }
 if (variant_count < 1) {
   die("benchmark input contains no variants")
 }
-loaded <- dbGetQuery(
-  con,
-  glue(
-    "SELECT loaded FROM duckvep_model_load(
-       {sql_q(model_name)}, {sql_q(load_queries[1])},
-       {sql_q(load_queries[2])}, {sql_q(load_queries[3])})"
+load_options <- character()
+if (!is.null(mature_mirna_query)) {
+  load_options <- c(
+    load_options,
+    glue("mature_mirna_query := {sql_q(mature_mirna_query)}")
   )
-)$loaded
+}
+if (complete_coverage) {
+  load_options <- c(load_options, "transcript_coverage_complete := TRUE")
+}
+model_load_sql <- glue(
+  "SELECT loaded FROM duckvep_model_load(
+     {sql_q(model_name)}, {sql_q(load_queries[1])},
+     {sql_q(load_queries[2])}, {sql_q(load_queries[3])}
+     {if (length(load_options)) paste0(', ', paste(load_options, collapse = ', ')) else ''})"
+)
+model_load_timing <- system.time({
+  loaded <- dbGetQuery(con, model_load_sql)$loaded
+})
 if (!identical(loaded, TRUE)) {
   die("model load failed")
 }
@@ -352,6 +400,15 @@ cat(
     "{format(variant_count, big.mark = ',', scientific = FALSE)} sorted variants; median ",
     "{sprintf('%.3f', median_seconds)} s; ",
     "{sprintf('%.1f', row$ns_per_variant)} ns/variant"
+  ),
+  "\n",
+  sep = ""
+)
+cat(
+  glue(
+    "model load: {sprintf('%.3f', unname(model_load_timing[['elapsed']]))} s; ",
+    "complete coverage: {tolower(as.character(complete_coverage))}; ",
+    "complete transcript flanks: {tolower(as.character(complete_flanks))}"
   ),
   "\n",
   sep = ""

@@ -23,11 +23,15 @@ consequence classification, list materialization, `unnest`, and final aggregatio
 together. Model loading and input staging are outside the timed pass.
 
 The checked-in one-transcript workload is a repeatable adapter floor. The
-production-density workload uses a pre-staged DuckDB database containing
-`bench_regions`, `bench_transcripts`, `bench_exons`, and `bench_variants`. Its
-recorded Ensembl-116 GRCh38 model contains 644,292 chromosome transcripts and
-5,078,384 exon memberships; the input is a deterministic 1-in-40 hash sample of
-100,957 sorted GIAB sites. The external staging database is not committed.
+production-density workloads use a pre-staged DuckDB database containing
+`bench_regions`, `bench_transcripts`, `bench_exons`, and `bench_variants`. The
+earlier chromosome-only staging model contains 25 sequence regions, 644,292
+transcripts, and 5,078,384 exon memberships. The complete-primary-assembly
+model contains 194 sequence regions, 646,577 transcripts, and 5,087,789 exon
+memberships; 370,580 coding transcripts have prepared CDS sequence. Both use
+the same deterministic 1-in-40 hash sample of 100,957 sorted GIAB sites. These
+are distinct model workloads and their consequence checksums are not expected
+to match. The external staging databases are not committed.
 The production query restates `ORDER BY` in the timed input CTE, so its result
 includes the cost of enforcing the kernel's nondecreasing-input contract even
 though the staging table was already written in that order. The `79cfaaf2`
