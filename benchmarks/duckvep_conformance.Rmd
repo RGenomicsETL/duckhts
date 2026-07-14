@@ -33,6 +33,12 @@ release_parquet <- read.csv(
   check.names = FALSE,
   colClasses = c(source_revision = "character", chromosome = "character")
 )
+model_receipts <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_model_receipts.csv"),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character", source_version = "character")
+)
 overall <- history[history$stratum_kind == "all", , drop = FALSE]
 tested_revisions <- unique(overall$source_revision)
 revision_ancestry <- suppressWarnings(system2(
@@ -66,12 +72,23 @@ percent <- function(x) {
   ifelse(is.na(x), "not estimable", sprintf("%.2f%%", 100 * x))
 }
 short_revision <- function(x) substr(x, 1, 8)
+oracle_field <- function(x, field) {
+  pattern <- paste0("(^|;)", field, "=([^;]+)")
+  found <- regexec(pattern, x)
+  values <- regmatches(x, found)
+  vapply(values, function(value) {
+    if (length(value) >= 3L) value[[3L]] else ""
+  }, character(1L))
+}
 ```
 
 This report records exact transcript-level consequence agreement with the real
-Ensembl VEP 116 `--gff` output. Unresolved DuckVEP rows remain in the denominator;
-they are not discarded as unsupported cases. The CSV is append-only by source
-revision, corpus, and resident model.
+Ensembl VEP 116 executable, using either its declared indexed cache or a staged
+GFF oracle. Unresolved DuckVEP rows remain in the denominator; they are not
+discarded as unsupported cases. The CSV is append-only by source revision,
+corpus, and resident model. Independent frozen distributions and seeds are kept
+separate so a fix cannot improve its own hand-picked witnesses and hide a
+regression elsewhere.
 
 ## Latest tested revision
 
@@ -80,6 +97,9 @@ latest_table <- data.frame(
   revision = short_revision(latest_runs$source_revision),
   corpus = latest_runs$corpus,
   model = latest_runs$model,
+  assembly = oracle_field(latest_runs$oracle_build, "assembly"),
+  species = oracle_field(latest_runs$oracle_build, "species"),
+  oracle_source = oracle_field(latest_runs$oracle_build, "oracle"),
   oracle = paste0("VEP ", latest_runs$oracle_version),
   pairs = latest_runs$n,
   exact = paste0(latest_runs$exact_agree, "/", latest_runs$n),
@@ -92,6 +112,41 @@ knitr::kable(latest_table, row.names = FALSE)
 ```
 
 Detailed consequence tables below use the largest corpus at this tested revision.
+
+## Prepared model receipts
+
+```{r model-receipts}
+receipt_table <- data.frame(
+  revision = short_revision(model_receipts$source_revision),
+  species = model_receipts$species,
+  release = model_receipts$source_version,
+  assembly = model_receipts$assembly,
+  regions = format(model_receipts$region_count, big.mark = ","),
+  transcripts = format(model_receipts$transcript_count, big.mark = ","),
+  coding_backed = format(
+    model_receipts$sequence_backed_transcript_count,
+    big.mark = ","
+  ),
+  exons = format(model_receipts$exon_membership_count, big.mark = ","),
+  mature_miRNA_segments = format(
+    model_receipts$mature_mirna_segment_count,
+    big.mark = ","
+  ),
+  peptide_edits = format(model_receipts$peptide_edit_count, big.mark = ","),
+  codon_tables = model_receipts$codon_table_counts,
+  model_sha256 = substr(model_receipts$model_sha256, 1, 12),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+knitr::kable(receipt_table, row.names = FALSE)
+```
+
+These are complete model-build receipts, not counts inferred from a differential.
+The ledger retains the full source-manifest, reference, and model SHA-256 values,
+the exact VEP transcript filter, every count above, CDS/flank base totals, and the
+external artifact name. The Plasmodium row is an Ensembl Genomes release-63 cache
+paired with the VEP/core-116 executable libraries, which is why both release
+numbers are recorded.
 
 ## History
 
