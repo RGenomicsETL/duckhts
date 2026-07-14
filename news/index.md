@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundle `duckvep_annotate_compact(...)`, returning the same DuckVEP
+  transcript consequences as numeric SO/region masks and stable status,
+  reason, amino-acid, and NMD codes so DBI workflows can filter and join
+  before rendering strings. The bundled rich annotation path also caches
+  DuckDB vector validity and string lengths per chunk; SQL and tinytests
+  check numeric-code semantics and parity with `duckvep_annotate(...)`
 - bundled DuckVEP now uses one edit/CDS/peptide context for
   length-changing small variants instead of retrying failed contexts
   through a shape-specific classifier. Complete transcript-oriented
