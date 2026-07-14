@@ -969,15 +969,12 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
          (feature_ref_length == 1u && feature_alt_length == 1u))) {
         duckvep_effect_ctx_fill_point_sorted(
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
-            event.feature_start1, c->options->splice_region_exonic,
-            c->options->splice_region_intronic,
+            event.feature_start1,
             &c->workspace->point_exon_rank[tx_idx], &ectx);
     } else if (kind != DUCKVEP_KIND_SV && have_feature_alleles) {
         duckvep_region_state_t region = duckvep_region_classify_span(
             tx, &c->model->exons, (size_t)tx_idx,
-            topology_start1, topology_end1,
-            c->options->splice_region_exonic,
-            c->options->splice_region_intronic);
+            topology_start1, topology_end1, 0u, 0u);
         duckvep_splice_state_t splice =
             duckvep_splice_classify_differing_regions(
                 tx, &c->model->exons, (size_t)tx_idx,
@@ -992,8 +989,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
             topology_start1, topology_end1,
             event.feature_start1, event.feature_end1,
-            event.interbase, c->options->splice_region_exonic,
-            c->options->splice_region_intronic, &ectx);
+            event.interbase, &ectx);
     }
     duckvep_effect_ctx_apply_event(&ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {

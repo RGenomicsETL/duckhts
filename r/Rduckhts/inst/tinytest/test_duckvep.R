@@ -262,6 +262,29 @@ expect_identical(annotation$status, "supported")
 expect_equal(annotation$cds_position, 5)
 expect_equal(annotation$protein_position, 2)
 
+compact_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.* FROM unnest(duckvep_annotate_compact(",
+    "'r-test', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_equal(compact_annotation$transcript_index, 0)
+expect_equal(compact_annotation$gene_index, 0)
+expect_equal(compact_annotation$consequence_mask, 8192)
+expect_equal(compact_annotation$region_mask, 16)
+expect_equal(compact_annotation$impact_code, 2)
+expect_equal(compact_annotation$status_code, 0)
+expect_equal(compact_annotation$reason_code, 0)
+expect_equal(compact_annotation$cdna_position, 25)
+expect_equal(compact_annotation$cds_position, 5)
+expect_equal(compact_annotation$protein_position, 2)
+expect_equal(compact_annotation$reference_amino_acid_code, utf8ToInt("V"))
+expect_equal(compact_annotation$alternate_amino_acid_code, utf8ToInt("A"))
+expect_equal(compact_annotation$nmd_prediction_code, 0)
+expect_equal(compact_annotation$nmd_escape_reasons, 0)
+
 reference_mismatch <- dbGetQuery(
   con,
   paste(

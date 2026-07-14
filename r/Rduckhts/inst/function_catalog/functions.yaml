@@ -262,6 +262,18 @@
       ]
     },
     {
+      "name": "duckvep_annotate_compact",
+      "kind": "scalar",
+      "category": "Variant Annotation",
+      "signature": "duckvep_annotate_compact(model_name, seq_region, position, reference, alternate [, distance])",
+      "returns": "LIST<STRUCT(transcript_index UINTEGER, gene_index UINTEGER, consequence_mask UBIGINT, region_mask UINTEGER, impact_code UTINYINT, status_code UTINYINT, reason_code UTINYINT, cdna_position UINTEGER, cds_position UINTEGER, protein_position UINTEGER, reference_amino_acid_code UTINYINT, alternate_amino_acid_code UTINYINT, nmd_prediction_code UTINYINT, nmd_escape_reasons UTINYINT)>",
+      "r_wrapper": "",
+      "description": "Run the same sorted DuckVEP consequence engine as duckvep_annotate(...) but keep the result numeric so filtering, aggregation, and joins happen before text rendering. consequence_mask uses the stable bit assignments in src/duckvep/kernel/include/duckvep_so.h. region_mask uses 1 upstream, 2 downstream, 4 intron, 8 exon, 16 CDS, 32 UTR, and 64 splice. impact_code is 0 modifier, 1 low, 2 moderate, or 3 high; status_code is 0 supported or 1 unresolved. reason_code is 0 none, 1 no feature in a partial model, 2 missing sequence, 3 ambiguous sequence, 4 reference mismatch, 5 non-contiguous CDS edit, 6 unsupported compound consequence, 7 invalid model projection, 8 internal capacity, 9 missing transcript tail, or 10 missing transcript flank. Amino-acid codes are ASCII bytes and remain NULL when no scalar amino acid exists. nmd_prediction_code is 0 not applicable, 1 triggering, 2 escaping, or 3 unresolved; nmd_escape_reasons is a bit mask with 1 intronless, 2 early CDS, 4 last exon, and 8 penultimate-exon end. Coordinate fields are NULL when unavailable. The numeric codes are stable SQL output contracts, not model ordinals.",
+      "examples": [
+        "SELECT count(*) AS transcript_rows, sum(annotation.consequence_mask) AS mask_checksum FROM (SELECT unnest(duckvep_annotate_compact('grch38', seq_region, position, reference, alternate)) AS annotation FROM sorted_variants);"
+      ]
+    },
+    {
       "name": "read_bcf",
       "kind": "table",
       "category": "Readers",

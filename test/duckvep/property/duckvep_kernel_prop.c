@@ -2393,13 +2393,13 @@ TEST splice_ppt_exon_gate_scene(void) {
     ex.start1 = es; ex.end1 = ee; ex.exon_count = 2u;
 
     /* deletion inside the tract, wholly intronic: PPT fires, no exon overlap */
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 285u, 290u, 0u, 3u, 8u, &ctx);
+    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 285u, 290u, 0u, &ctx);
     ASSERT(!ctx.region_state.overlaps_exon);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT)) != 0u);
 
     /* deletion from the tract across the acceptor into the exon: exon overlap
      * suppresses PPT, but the essential acceptor site still fires */
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 285u, 305u, 0u, 3u, 8u, &ctx);
+    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 285u, 305u, 0u, &ctx);
     ASSERT(ctx.region_state.overlaps_exon);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_ACCEPTOR)) != 0u);
@@ -2582,15 +2582,13 @@ TEST nmd_transcript_predicate_known_scene(void) {
     ex.end_phase = phase;
     ex.exon_count = 2u;
 
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 200u, 200u, 0u, 3u, 8u,
-                            &ctx);
+    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 200u, 200u, 0u, &ctx);
     duckvep_effect_ctx_finalize(&ctx);
     mask = duckvep_effect_eval(ctx.pre_bits);
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_INTRON) |
               DUCKVEP_SO(DUCKVEP_SO_NMD_TRANSCRIPT), mask);
 
-    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 90u, 90u, 0u, 3u, 8u,
-                            &ctx);
+    duckvep_effect_ctx_fill(&tx, &ex, 0u, 0u, 90u, 90u, 0u, &ctx);
     ASSERT((ctx.pre_bits &
             DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u);
     PASS();
@@ -2737,6 +2735,28 @@ TEST effect_rule_tiers_suppress_only_later_tiers(void) {
     pre = DUCKVEP_PRE(DUCKVEP_PRE_UTR5) | DUCKVEP_PRE(DUCKVEP_PRE_UTR3);
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) | DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR),
               duckvep_effect_eval_rules(pre, rules, sizeof rules / sizeof rules[0]));
+    PASS();
+}
+
+TEST generated_effect_lookup_matches_rule_interpreter(void) {
+    unsigned a;
+    unsigned b;
+    uint64_t all = 0u;
+
+    ASSERT_EQ(duckvep_effect_eval_reference(0u), duckvep_effect_eval(0u));
+    for (a = 0u; a < (unsigned)DUCKVEP_PRE_BIT_COUNT; a++) {
+        uint64_t one = DUCKVEP_PRE(a);
+        all |= one;
+        ASSERT_EQ(duckvep_effect_eval_reference(one),
+                  duckvep_effect_eval(one));
+        for (b = 0u; b < (unsigned)DUCKVEP_PRE_BIT_COUNT; b++) {
+            uint64_t pair = one | DUCKVEP_PRE(b);
+            ASSERT_EQ(duckvep_effect_eval_reference(pair),
+                      duckvep_effect_eval(pair));
+        }
+    }
+    ASSERT_EQ(duckvep_effect_eval_reference(all),
+              duckvep_effect_eval(all));
     PASS();
 }
 
@@ -15686,6 +15706,7 @@ int main(int argc, char **argv) {
     RUN_TEST(nmd_transcript_predicate_known_scene);
     RUN_TEST(variant_induced_nmd_prediction_known_scene);
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
+    RUN_TEST(generated_effect_lookup_matches_rule_interpreter);
     RUN_TEST(event_length_delta_pre_bits_follow_trimmed_alleles);
     RUN_TEST(annotate_structural_known_scene);
     RUN_TEST(annotate_padded_small_variants_use_differing_region_topology);

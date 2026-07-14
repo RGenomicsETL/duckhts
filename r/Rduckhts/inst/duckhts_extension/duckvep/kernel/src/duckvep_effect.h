@@ -91,8 +91,6 @@ void duckvep_effect_ctx_fill(
     uint32_t                          start1,
     uint32_t                          end1,
     uint8_t                           interbase,
-    uint32_t                          splice_region_exonic,
-    uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out);
 
 /* Region placement and splice overlap are distinct for a pure insertion at an
@@ -108,8 +106,6 @@ void duckvep_effect_ctx_fill_geometry(
     uint32_t                          splice_start1,
     uint32_t                          splice_end1,
     uint8_t                           interbase,
-    uint32_t                          splice_region_exonic,
-    uint32_t                          splice_region_intronic,
     duckvep_effect_ctx_t             *out);
 
 /* Convert already-classified region and splice facts into the one predicate
@@ -134,8 +130,6 @@ void duckvep_effect_ctx_fill_point_sorted(
     uint32_t                          variant_idx,
     size_t                            tx_idx,
     uint32_t                          pos,
-    uint32_t                          splice_region_exonic,
-    uint32_t                          splice_region_intronic,
     uint16_t                         *exon_rank_io,
     duckvep_effect_ctx_t             *out);
 
@@ -188,6 +182,10 @@ uint64_t duckvep_effect_eval_rules(
     uint64_t                          pre_bits,
     const duckvep_consequence_rule_t *rules,
     size_t                            rule_count);
+
+/* Reference interpreter over the generated VEP rule program. Tests compare
+ * the compact production lookup against this independent execution path. */
+uint64_t duckvep_effect_eval_reference(uint64_t pre_bits);
 
 uint64_t duckvep_effect_eval(uint64_t pre_bits);
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 
-# Record the stable DuckDB C-API path over a large, sorted variant stream.
-# The checked-in fixture has one transcript: this measures vector/adapter and
-# hot-transcript kernel cost, not whole-genome model throughput.
+# Record the stable DuckDB C-API path over a sorted variant stream. With no
+# database this uses the checked-in one-transcript fixture. --database expects
+# pre-staged bench_regions, bench_transcripts, bench_exons, and bench_variants.
 
 suppressMessages({
   library(DBI)
@@ -35,6 +35,9 @@ op <- add_option(
     "minimal_model.sql"
   )
 )
+op <- add_option(op, "--database", default = "")
+op <- add_option(op, "--output", default = "rich")
+op <- add_option(op, "--workload-name", dest = "workload_name", default = "")
 op <- add_option(op, "--variants", type = "double", default = 10000000)
 op <- add_option(op, "--passes", type = "integer", default = 3L)
 op <- add_option(op, "--warmup", type = "double", default = 100000)
@@ -60,45 +63,102 @@ whole_count <- function(x, name) {
   format(x, scientific = FALSE, trim = TRUE)
 }
 variant_sql <- whole_count(opt$variants, "--variants")
-warmup_sql <- whole_count(min(opt$warmup, opt$variants), "--warmup")
 if (opt$passes < 1L) {
   die("--passes must be positive")
 }
 if (opt$threads < 1L) {
   die("--threads must be positive")
 }
-missing <- c(opt$extension, opt$model_sql)[
-  !file.exists(c(opt$extension, opt$model_sql))
-]
+if (!opt$output %in% c("rich", "compact")) {
+  die("--output must be rich or compact")
+}
+production <- nzchar(opt$database)
+inputs <- c(opt$extension, if (production) opt$database else opt$model_sql)
+missing <- inputs[!file.exists(inputs)]
 if (length(missing) != 0L) {
   die("missing input(s):\n{paste(missing, collapse = '\n')}")
 }
 
 drv <- duckdb(config = list(allow_unsigned_extensions = "true"))
-con <- dbConnect(drv)
+con <- if (production) {
+  dbConnect(drv, dbdir = normalizePath(opt$database))
+} else {
+  dbConnect(drv)
+}
 on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
 invisible(dbExecute(con, glue("SET threads = {opt$threads}")))
 invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
-invisible(dbExecute(
-  con,
-  paste(readLines(opt$model_sql, warn = FALSE), collapse = "\n")
-))
 
 model_name <- "throughput"
-load_queries <- c(
-  "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region",
-  paste(
-    "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
-    "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
-    "FROM duckvep_transcripts ORDER BY seq_region, transcript_start, transcript_index"
-  ),
-  paste(
-    "SELECT transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,",
-    "phase, end_phase FROM duckvep_exons",
-    "ORDER BY transcript_index, exon_cdna_start"
+if (production) {
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP TABLE duckvep_throughput_variants AS
+       SELECT seq_region, \"position\", \"reference\", \"alternate\"
+       FROM bench_variants
+       ORDER BY seq_region, \"position\", \"reference\", \"alternate\"
+       LIMIT {variant_sql}"
+    )
+  ))
+  model_tables <- c("bench_regions", "bench_transcripts", "bench_exons")
+  counts <- vapply(
+    model_tables,
+    function(table) dbGetQuery(con, glue("SELECT count(*) n FROM {table}"))$n[[1L]],
+    numeric(1)
   )
-)
+  variant_count <- dbGetQuery(
+    con,
+    "SELECT count(*) n FROM duckvep_throughput_variants"
+  )$n[[1L]]
+  workload <- if (nzchar(opt$workload_name)) {
+    opt$workload_name
+  } else {
+    "ensembl116_grch38_giab_sites_hash40"
+  }
+  load_queries <- c(
+    "SELECT seq_region FROM bench_regions ORDER BY seq_region",
+    paste(
+      "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
+      "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
+      "FROM bench_transcripts ORDER BY transcript_index"
+    ),
+    paste(
+      "SELECT transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,",
+      "phase, end_phase FROM bench_exons ORDER BY transcript_index, exon_cdna_start"
+    )
+  )
+  region_count <- counts[[1L]]
+  transcript_count <- counts[[2L]]
+  exon_count <- counts[[3L]]
+} else {
+  invisible(dbExecute(
+    con,
+    paste(readLines(opt$model_sql, warn = FALSE), collapse = "\n")
+  ))
+  variant_count <- opt$variants
+  workload <- "fixture_one_transcript_sorted"
+  region_count <- 1
+  transcript_count <- 1
+  exon_count <- 2
+  load_queries <- c(
+    "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region",
+    paste(
+      "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
+      "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
+      "FROM duckvep_transcripts ORDER BY seq_region, transcript_start, transcript_index"
+    ),
+    paste(
+      "SELECT transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,",
+      "phase, end_phase FROM duckvep_exons",
+      "ORDER BY transcript_index, exon_cdna_start"
+    )
+  )
+}
+if (variant_count < 1) {
+  die("benchmark input contains no variants")
+}
 loaded <- dbGetQuery(
   con,
   glue(
@@ -112,22 +172,45 @@ if (!identical(loaded, TRUE)) {
 }
 
 annotation_query <- function(n) {
+  input <- if (production) {
+    glue(
+      "SELECT seq_region, \"position\", \"reference\", \"alternate\"
+       FROM duckvep_throughput_variants LIMIT {n}"
+    )
+  } else {
+    glue(
+      "SELECT 1::UINTEGER AS seq_region, 124::UBIGINT AS \"position\",
+              'T' AS \"reference\",
+              CASE WHEN i % 2 = 0 THEN 'C' ELSE 'G' END AS \"alternate\"
+       FROM range({n}) r(i)"
+    )
+  }
+  function_name <- if (opt$output == "compact") {
+    "duckvep_annotate_compact"
+  } else {
+    "duckvep_annotate"
+  }
+  checksum <- if (opt$output == "compact") {
+    "CAST(sum(annotation.consequence_mask) AS VARCHAR)"
+  } else {
+    "CAST(sum(length(annotation.consequence)) AS VARCHAR)"
+  }
   glue(
-    "WITH annotated AS (
-       SELECT unnest(duckvep_annotate(
-         {sql_q(model_name)}, 1::UINTEGER, 124::UBIGINT, 'T',
-         CASE WHEN i % 2 = 0 THEN 'C' ELSE 'G' END,
-         0::UBIGINT
+    "WITH variants AS ({input}), annotated AS (
+       SELECT unnest({function_name}(
+         {sql_q(model_name)}, seq_region, \"position\", \"reference\", \"alternate\",
+         5000::UBIGINT
        )) AS annotation
-       FROM range({n}) r(i)
+       FROM variants
      )
-     SELECT
-       count(*)::DOUBLE AS annotated_rows,
-       sum(length(annotation.consequence))::DOUBLE AS term_bytes
+     SELECT count(*)::DOUBLE AS annotated_rows, {checksum} AS checksum
      FROM annotated"
   )
 }
 
+warmup_count <- min(opt$warmup, variant_count)
+warmup_sql <- whole_count(warmup_count, "--warmup")
+variant_sql <- whole_count(variant_count, "--variants")
 invisible(dbGetQuery(con, annotation_query(warmup_sql)))
 elapsed <- numeric(opt$passes)
 checks <- vector("list", opt$passes)
@@ -138,10 +221,10 @@ for (i in seq_len(opt$passes)) {
   elapsed[[i]] <- unname(timing[["elapsed"]])
 }
 check <- do.call(rbind, checks)
-if (any(check$annotated_rows != opt$variants)) {
+if (length(unique(check$annotated_rows)) != 1L || check$annotated_rows[[1L]] < 1) {
   die("annotation cardinality changed across benchmark passes")
 }
-if (length(unique(check$term_bytes)) != 1L) {
+if (length(unique(check$checksum)) != 1L) {
   die("annotation checksum changed across benchmark passes")
 }
 
@@ -200,21 +283,28 @@ row <- data.frame(
   duckdb_version = duckdb_version,
   host = unname(Sys.info()[["nodename"]]),
   cpu = cpu,
-  workload = "fixture_one_transcript_sorted",
+  workload = workload,
+  output_mode = opt$output,
   input_order = "nondecreasing_seq_region_position",
   threads = opt$threads,
-  variants = as.integer(opt$variants),
-  transcripts = 1,
-  exons = 2,
+  variants = as.integer(variant_count),
+  regions = as.integer(region_count),
+  transcripts = as.integer(transcript_count),
+  exons = as.integer(exon_count),
   passes = opt$passes,
-  warmup_variants = as.integer(min(opt$warmup, opt$variants)),
+  warmup_variants = as.integer(warmup_count),
   min_seconds = min(elapsed),
   median_seconds = median_seconds,
   max_seconds = max(elapsed),
-  variants_per_second = opt$variants / median_seconds,
-  ns_per_variant = median_seconds * 1e9 / opt$variants,
+  variants_per_second = variant_count / median_seconds,
+  ns_per_variant = median_seconds * 1e9 / variant_count,
   annotated_rows = as.integer(check$annotated_rows[[1L]]),
-  term_bytes = as.integer(check$term_bytes[[1L]]),
+  checksum_kind = if (opt$output == "compact") {
+    "consequence_mask_sum"
+  } else {
+    "consequence_text_bytes"
+  },
+  checksum_value = check$checksum[[1L]],
   stringsAsFactors = FALSE
 )
 
@@ -231,7 +321,9 @@ if (nzchar(opt$history)) {
       die("history schema does not match: {opt$history}")
     }
     same <- old$source_revision == row$source_revision &
+      old$host == row$host &
       old$workload == row$workload &
+      old$output_mode == row$output_mode &
       old$threads == row$threads &
       old$variants == row$variants
     rows <- rbind(old[!same, , drop = FALSE], row)
@@ -255,7 +347,7 @@ invisible(dbGetQuery(
 ))
 cat(
   glue(
-    "{format(opt$variants, big.mark = ',', scientific = FALSE)} sorted variants; median ",
+    "{format(variant_count, big.mark = ',', scientific = FALSE)} sorted variants; median ",
     "{sprintf('%.3f', median_seconds)} s; ",
     "{sprintf('%.1f', row$ns_per_variant)} ns/variant"
   ),

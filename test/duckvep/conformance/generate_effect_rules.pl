@@ -53,6 +53,7 @@ for my $r (@$spec) {
 
 my @rules;
 my %seen;
+my %fast_by_pre;
 for my $b (@$bindings) {
     my $term = $b->{SO_term};
     die "duplicate binding: $term\n" if $seen{$term}++;
@@ -62,7 +63,16 @@ for my $b (@$bindings) {
     die "invalid rank for $term\n" unless $s->{rank} =~ /^\d+$/ && $s->{rank} <= 255;
     die "invalid impact for $term: $s->{impact}\n" unless exists $impact_c{$s->{impact}};
     die "empty C binding for $term\n" unless $b->{required} ne '' && $b->{forbidden} ne '';
-    push @rules, { %$b, %$s };
+    my %rule = (%$b, %$s);
+    die "optimized rule requires one PRE bit for $term: $b->{required}\n"
+        unless $b->{required} =~ /^DUCKVEP_PRE\((DUCKVEP_PRE_[A-Z0-9_]+)\)$/;
+    $rule{pre_enum} = $1;
+    die "optimized rule requires an empty forbidden mask for $term\n"
+        unless $b->{forbidden} eq '0u';
+    die "multiple consequences bound to $rule{pre_enum}\n"
+        if exists $fast_by_pre{$rule{pre_enum}};
+    $fast_by_pre{$rule{pre_enum}} = \%rule;
+    push @rules, \%rule;
 }
 @rules = sort { $a->{tier} <=> $b->{tier} || $a->{rank} <=> $b->{rank} } @rules;
 
@@ -78,6 +88,29 @@ for my $r (@rules) {
         $impact_c{$r->{impact}}, $r->{SO_term}, $r->{predicate});
 }
 $text .= "};\n";
+
+# The production evaluator iterates only facts that can emit a consequence.
+# Keep the general rule interpreter as the test oracle; generation fails if a
+# future rule needs compound required/forbidden predicates, so the optimized
+# representation can never silently change the VEP tier machine.
+$text .= "static const uint64_t k_rule_so_by_pre_bit[DUCKVEP_PRE_BIT_COUNT] = {\n";
+for my $r (@rules) {
+    $text .= sprintf(
+        "    [%s] = DUCKVEP_SO(%s),\n",
+        $r->{pre_enum}, $r->{so_enum});
+}
+$text .= "};\n";
+
+for my $group (1, 2, 3) {
+    my @members = grep {
+        $group == 3 ? $_->{tier} >= 3 : $_->{tier} == $group
+    } @rules;
+    my $name = $group == 3 ? 'fallback' : "tier$group";
+    my $expr = @members
+        ? join(" |\n        ", map { $_->{required} } @members)
+        : 'UINT64_C(0)';
+    $text .= "static const uint64_t k_rule_${name}_pre_mask =\n        $expr;\n";
+}
 
 if ($check) {
     die "--check requires target path\n" unless defined $target;
