@@ -12,10 +12,10 @@ is append-only by source revision, corpus, and resident model.
 
 | revision | corpus                     | model        | oracle    |  pairs | exact        | unresolved | resolved_disagreements | resolved_error_upper_95 |
 |:---------|:---------------------------|:-------------|:----------|-------:|:-------------|-----------:|-----------------------:|:------------------------|
-| 2ab08e2f | state_exploration_seed_197 | differential | VEP 116.0 | 100248 | 88021/100248 |      22598 |                    550 | 0.77%                   |
-| 2ab08e2f | state_exploration_seed_211 | differential | VEP 116.0 | 100250 | 87815/100250 |      22801 |                    578 | 0.81%                   |
-| 2ab08e2f | state_exploration_seed_71  | differential | VEP 116.0 | 100242 | 87916/100242 |      22502 |                    546 | 0.76%                   |
-| 2ab08e2f | witnesses                  | differential | VEP 116.0 |    258 | 254/258      |         10 |                      0 | 1.48%                   |
+| 8b2a2dbc | state_exploration_seed_197 | differential | VEP 116.0 | 100248 | 88021/100248 |      22598 |                    550 | 0.77%                   |
+| 8b2a2dbc | state_exploration_seed_211 | differential | VEP 116.0 | 100250 | 87815/100250 |      22801 |                    578 | 0.81%                   |
+| 8b2a2dbc | state_exploration_seed_71  | differential | VEP 116.0 | 100242 | 87916/100242 |      22502 |                    546 | 0.76%                   |
+| 8b2a2dbc | witnesses                  | differential | VEP 116.0 |    258 | 254/258      |         10 |                      0 | 1.48%                   |
 
 Detailed consequence tables below use the largest corpus at this tested
 revision.
@@ -37,6 +37,10 @@ revision.
 | 2026-07-14 | 2ab08e2f        | state_exploration_seed_211 | differential | 100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
 | 2026-07-14 | 2ab08e2f        | state_exploration_seed_71  | differential | 100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
 | 2026-07-14 | 2ab08e2f        | witnesses                  | differential |    258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
+| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_197 | differential | 100248 |       88021 |      22598 |      77650 |                 550 | 87.80%     | 0.77%                   |
+| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_211 | differential | 100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
+| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_71  | differential | 100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
+| 2026-07-14 | 8b2a2dbc        | witnesses                  | differential |    258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
 
 ## Official Ensembl release corpus in Parquet
 
@@ -70,6 +74,7 @@ duplicate count. A failed suite does not append rows.
 | 2026-07-13 | defc9a1c        | 0x0000000000000071 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         142 | 189,962          |                18.793 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-13 | eb212de3        | 0xd0c0ffee12345678 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         141 | 190,064          |                23.425 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-14 | 2ab08e2f        | 0x0000000000000139 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         144 | 201,583          |                18.940 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-14 | 8b2a2dbc        | 0x0000000000000139 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         145 | 201,595          |                21.217 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                 | trials  | passed  | failed | skipped | duplicates |
 |:-----------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
