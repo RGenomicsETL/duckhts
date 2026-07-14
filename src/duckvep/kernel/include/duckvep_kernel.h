@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 10
+#define DUCKVEP_KERNEL_VERSION_MINOR 11
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -211,6 +211,16 @@ typedef struct duckvep_sequence_pool {
     const uint32_t *cds_length;    /* [transcript_count] 0 = non-coding                  */
     const uint8_t  *codon_table;   /* [transcript_count] duckvep_codon_table_t per tx    */
     size_t          transcript_count;
+    /* VEP translation SeqEdits that replace one reference amino acid. The
+     * Ensembl compiler accepts the release-116 single-residue forms used for
+     * initial methionine, selenocysteine, curated substitutions, and stop
+     * readthrough. Each transcript owns [offset[t], offset[t + 1]); positions
+     * are one-based and strictly increasing. They alter the reference peptide
+     * only when the uploaded allele's translation window overlaps the edit. */
+    const uint32_t *peptide_edit_offset;    /* [transcript_count + 1] */
+    const uint32_t *peptide_edit_position1; /* [peptide_edit_count]   */
+    const uint8_t  *peptide_edit_alt;       /* [peptide_edit_count]   */
+    size_t          peptide_edit_count;
     /* Cold transcript-oriented sequence outside the CDS. Pre- and post-CDS
      * slices share one byte pool; offsets and lengths are per transcript. A
      * complete pool contains the entire spliced transcript flank on both sides.

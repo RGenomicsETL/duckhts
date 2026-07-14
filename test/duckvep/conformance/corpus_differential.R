@@ -46,6 +46,16 @@ op <- add_option(op, "--assembly", default = "GRCh38")
 op <- add_option(op, "--species", default = "homo_sapiens")
 op <- add_option(
   op,
+  "--cache-version",
+  dest = "cache_version",
+  default = "",
+  help = paste(
+    "VEP cache release when it differs from the VEP executable release,",
+    "for example 63 for Ensembl Genomes paired with VEP 116 [%default]"
+  )
+)
+op <- add_option(
+  op,
   "--fasta",
   default = file.path(root, "test", "data", "duckvep", "minimal.fa")
 )
@@ -236,6 +246,17 @@ if ("duckvep_mature_mirna" %in% present_relations) {
   load_options <- c(
     load_options,
     glue("mature_mirna_query := {sql_q(mature_mirna_query)}")
+  )
+}
+if ("duckvep_peptide_edits" %in% present_relations) {
+  peptide_edit_query <- paste(
+    "SELECT transcript_index, protein_position, alternate_amino_acid",
+    "FROM duckvep_peptide_edits",
+    "ORDER BY transcript_index, protein_position"
+  )
+  load_options <- c(
+    load_options,
+    glue("peptide_edit_query := {sql_q(peptide_edit_query)}")
   )
 }
 if (complete_coverage) {
@@ -573,11 +594,15 @@ if (!identical(oracle_version, "116.0")) {
   die("expected Ensembl VEP 116.0, found {oracle_version}")
 }
 oracle_details <- if (identical(oracle_mode, "cache")) {
-  c(
+  details <- c(
     "oracle=cache",
     glue("assembly={opt$assembly}"),
     glue("species={opt$species}")
   )
+  if (nzchar(opt$cache_version)) {
+    details <- c(details, glue("cache_version={opt$cache_version}"))
+  }
+  details
 } else {
   "oracle=gff"
 }
@@ -620,6 +645,9 @@ if (identical(oracle_mode, "cache")) {
     "--species",
     opt$species
   )
+  if (nzchar(opt$cache_version)) {
+    vep_args <- c(vep_args, "--cache_version", opt$cache_version)
+  }
 } else {
   vep_args <- c(vep_args, "--gff", gff_for_vep)
 }

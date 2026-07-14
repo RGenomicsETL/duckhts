@@ -202,6 +202,9 @@ TEST model_open_rejects_projection_and_sequence_invariant_mutations(void) {
     uint64_t sequence_offset[1] = {0u};
     uint32_t sequence_length[1] = {9u};
     uint8_t codon_table[1] = {1u};
+    uint32_t peptide_edit_offset[2] = {0u, 1u};
+    uint32_t peptide_edit_position1[1] = {2u};
+    uint8_t peptide_edit_alt[1] = {(uint8_t)'U'};
     uint8_t invalid_tail[2] = {'A','X'};
     uint64_t pre_cds_offset[1] = {0u};
     uint32_t pre_cds_length[1] = {0u};
@@ -228,6 +231,25 @@ TEST model_open_rejects_projection_and_sequence_invariant_mutations(void) {
 
     ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
     duckvep_model_close(model); model = NULL;
+
+    seq.peptide_edit_offset = peptide_edit_offset;
+    seq.peptide_edit_position1 = peptide_edit_position1;
+    seq.peptide_edit_alt = peptide_edit_alt;
+    seq.peptide_edit_count = 1u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    duckvep_model_close(model); model = NULL;
+
+    peptide_edit_position1[0] = 4u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(73u, err.where_code);
+    peptide_edit_position1[0] = 2u;
+
+    peptide_edit_alt[0] = (uint8_t)'?';
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(73u, err.where_code);
+    peptide_edit_alt[0] = (uint8_t)'U';
 
     strand[0] = 0;
     ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
@@ -259,7 +281,7 @@ TEST model_open_rejects_projection_and_sequence_invariant_mutations(void) {
               duckvep_model_open(&tx, &exons, &seq, &model, &err));
     ASSERT_EQ(71u, err.where_code); sequence_length[0] = 9u;
 
-    codon_table[0] = 3u;
+    codon_table[0] = 8u;
     ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
               duckvep_model_open(&tx, &exons, &seq, &model, &err));
     ASSERT_EQ(71u, err.where_code); codon_table[0] = 1u;
@@ -2678,6 +2700,9 @@ TEST mature_mirna_predicate_known_scene(void) {
     duckvep_effect_ctx_t ctx;
     duckvep_model_t *model = NULL;
     duckvep_error_t error;
+    duckvep_event_t event;
+    static const uint8_t insertion_ref[1] = {'A'};
+    static const uint8_t insertion_alt[2] = {'A', 'C'};
     size_t orientation;
 
     memset(&tx, 0, sizeof tx);
@@ -2717,6 +2742,21 @@ TEST mature_mirna_predicate_known_scene(void) {
             &tx, &exons, 0u, 0u, 102u, 102u, 0u,
             DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
             DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
+        duckvep_effect_ctx_finalize(&ctx);
+        mask = duckvep_effect_eval(ctx.pre_bits);
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT_EXON),
+                  mask);
+
+        /* VEP represents an insertion after P as the reversed feature span
+         * (P+1,P). At the mature segment's final base, it therefore remains a
+         * generic non-coding exon event rather than a mature-miRNA event. */
+        ASSERT(duckvep_event_prepare_small(
+            mature_end[0], insertion_ref, 1u, insertion_alt, 2u, &event));
+        duckvep_effect_ctx_fill(
+            &tx, &exons, 0u, 0u, mature_end[0], mature_end[0], 1u,
+            DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+            DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC, &ctx);
+        duckvep_effect_ctx_apply_event(&tx, &ctx, &event);
         duckvep_effect_ctx_finalize(&ctx);
         mask = duckvep_effect_eval(ctx.pre_bits);
         ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_NON_CODING_TRANSCRIPT_EXON),
@@ -3385,6 +3425,47 @@ TEST codon_translate_known(void) {
     ASSERT_EQ('*', duckvep_translate_codon("AGA", MITO));
     ASSERT_EQ('*', duckvep_translate_codon("AGG", MITO));
     ASSERT_EQ('M', duckvep_translate_codon("ATG", MITO)); /* start unchanged */
+    /* One discriminating codon for every additional BioPerl/VEP table. */
+    ASSERT_EQ('T', duckvep_translate_codon("CTA", (duckvep_codon_table_t)3));
+    ASSERT_EQ('W', duckvep_translate_codon("TGA", (duckvep_codon_table_t)4));
+    ASSERT_EQ('S', duckvep_translate_codon("AGA", (duckvep_codon_table_t)5));
+    ASSERT_EQ('Q', duckvep_translate_codon("TAA", (duckvep_codon_table_t)6));
+    ASSERT_EQ('N', duckvep_translate_codon("AAA", (duckvep_codon_table_t)9));
+    ASSERT_EQ('C', duckvep_translate_codon("TGA", (duckvep_codon_table_t)10));
+    ASSERT_EQ('*', duckvep_translate_codon("TGA", (duckvep_codon_table_t)11));
+    ASSERT_EQ('S', duckvep_translate_codon("CTG", (duckvep_codon_table_t)12));
+    ASSERT_EQ('G', duckvep_translate_codon("AGA", (duckvep_codon_table_t)13));
+    ASSERT_EQ('Y', duckvep_translate_codon("TAA", (duckvep_codon_table_t)14));
+    ASSERT_EQ('L', duckvep_translate_codon("TAG", (duckvep_codon_table_t)16));
+    ASSERT_EQ('N', duckvep_translate_codon("AAA", (duckvep_codon_table_t)21));
+    ASSERT_EQ('*', duckvep_translate_codon("TCA", (duckvep_codon_table_t)22));
+    ASSERT_EQ('*', duckvep_translate_codon("TTA", (duckvep_codon_table_t)23));
+    ASSERT_EQ('K', duckvep_translate_codon("AGG", (duckvep_codon_table_t)24));
+    ASSERT_EQ('G', duckvep_translate_codon("TGA", (duckvep_codon_table_t)25));
+    ASSERT_EQ('A', duckvep_translate_codon("CTG", (duckvep_codon_table_t)26));
+    ASSERT_EQ('Q', duckvep_translate_codon("TAG", (duckvep_codon_table_t)27));
+    ASSERT_EQ('Q', duckvep_translate_codon("TAA", (duckvep_codon_table_t)28));
+    ASSERT_EQ('Y', duckvep_translate_codon("TAG", (duckvep_codon_table_t)29));
+    ASSERT_EQ('E', duckvep_translate_codon("TAA", (duckvep_codon_table_t)30));
+    ASSERT_EQ('W', duckvep_translate_codon("TGA", (duckvep_codon_table_t)31));
+    ASSERT_EQ('X', duckvep_translate_codon("ATG", (duckvep_codon_table_t)8));
+    PASS();
+}
+
+TEST codon_supported_set_matches_vep116_bioperl(void) {
+    static const uint8_t supported[32] = {
+        [1] = 1u, [2] = 1u, [3] = 1u, [4] = 1u, [5] = 1u, [6] = 1u,
+        [9] = 1u, [10] = 1u, [11] = 1u, [12] = 1u, [13] = 1u,
+        [14] = 1u, [16] = 1u, [21] = 1u, [22] = 1u, [23] = 1u,
+        [24] = 1u, [25] = 1u, [26] = 1u, [27] = 1u, [28] = 1u,
+        [29] = 1u, [30] = 1u, [31] = 1u
+    };
+    size_t id;
+    for (id = 0u; id < sizeof supported; id++) {
+        ASSERT_EQ(supported[id] != 0u,
+                  duckvep_codon_table_supported((duckvep_codon_table_t)id));
+    }
+    ASSERT_EQ(0, duckvep_codon_table_supported((duckvep_codon_table_t)32));
     PASS();
 }
 
@@ -4569,7 +4650,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
     event.ref_diff_length = 1u;
     event.alt_diff_length = 4u;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u);
@@ -4579,7 +4660,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
     event.ref_diff_length = 4u;
     event.alt_diff_length = 1u;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u);
@@ -4589,7 +4670,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     event.kind = (uint8_t)DUCKVEP_KIND_MNV;
     event.ref_diff_length = 2u;
     event.alt_diff_length = 2u;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u);
@@ -4597,7 +4678,7 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     memset(&ctx, 0, sizeof ctx);
     memset(&event, 0, sizeof event);
     event.kind = (uint8_t)DUCKVEP_KIND_SV;
-    duckvep_effect_ctx_apply_event(&ctx, &event);
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SV)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) == 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) == 0u);
@@ -5468,6 +5549,9 @@ TEST annotate_codon_start_lost_known_scene(void) {
     static const uint64_t cds_off[1]  = {0u};
     static const uint32_t cds_lenv[1] = {9u};
     static const uint8_t  cds_tab[1]  = {(uint8_t)DUCKVEP_CODON_TABLE_STANDARD};
+    static const uint32_t peptide_edit_offset[2] = {0u, 1u};
+    static const uint32_t peptide_edit_position1[1] = {1u};
+    static const uint8_t  peptide_edit_alt[1] = {(uint8_t)'M'};
     static const uint64_t nf_flags[1] = {(uint64_t)DUCKVEP_TX_CDS_START_NF};
 
     static const uint16_t vchrom[3] = {0u, 0u, 0u};
@@ -5526,6 +5610,33 @@ TEST annotate_codon_start_lost_known_scene(void) {
         ASSERT_EQ((uint8_t)exp_alt[i], rows[i].aa_alt);
     }
 
+    duckvep_workspace_close(ws); ws = NULL;
+    duckvep_options_close(opts); opts = NULL;
+    duckvep_model_close(model); model = NULL;
+
+    /* Ensembl initial_met changes the reference peptide used by TVA::peptide,
+     * without rewriting the CDS. The raw TAC->TAT change is no longer
+     * synonymous Y->Y: the annotated reference residue is M, so VEP reports
+     * start_lost and suppresses the ordinary missense label. */
+    seq.peptide_edit_offset = peptide_edit_offset;
+    seq.peptide_edit_position1 = peptide_edit_position1;
+    seq.peptide_edit_alt = peptide_edit_alt;
+    seq.peptide_edit_count = 1u;
+    duckvep_result_builder_init(&rb, rows, 4u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(3u, duckvep_result_builder_count(&rb));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_START_LOST), rows[0].consequence_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_START_LOST) |
+              DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED),
+              rows[1].consequence_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_START_LOST), rows[2].consequence_mask);
+    for (i = 0u; i < 3u; i++) {
+        ASSERT_EQ((uint8_t)'M', rows[i].aa_ref);
+        ASSERT_EQ((uint8_t)exp_alt[i], rows[i].aa_alt);
+    }
     duckvep_workspace_close(ws); ws = NULL;
     duckvep_options_close(opts); opts = NULL;
     duckvep_model_close(model); model = NULL;
@@ -9327,16 +9438,19 @@ static uint64_t codon_change_to_so(uint32_t change, char aa_ref) {
     return 0u;
 }
 
-static uint64_t start_codon_snv_to_so(uint32_t change, char aa_ref, char aa_alt) {
+static uint64_t start_codon_snv_to_so(
+    uint32_t change, char aa_ref, char aa_alt, const char alt_codon[4]) {
+
     uint64_t mask;
-    if (aa_alt == 'M') return codon_change_to_so(change, aa_ref);
-    mask = DUCKVEP_SO(DUCKVEP_SO_START_LOST);
-    if (change & DUCKVEP_CODON_STOP_GAINED) mask |= DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED);
-    else if (change & DUCKVEP_CODON_STOP_LOST) mask |= DUCKVEP_SO(DUCKVEP_SO_STOP_LOST);
-    else if (change & DUCKVEP_CODON_SYNONYMOUS) {
-        mask |= (aa_ref == '*') ? DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED)
-                                : DUCKVEP_SO(DUCKVEP_SO_SYNONYMOUS);
+    int retained = alt_codon != NULL && alt_codon[0] == 'A' &&
+        alt_codon[1] == 'T' && alt_codon[2] == 'G';
+
+    mask = codon_change_to_so(change, aa_ref);
+    if (aa_alt != 'M') {
+        mask &= ~DUCKVEP_SO(DUCKVEP_SO_MISSENSE);
+        mask |= DUCKVEP_SO(DUCKVEP_SO_START_LOST);
     }
+    if (retained) mask |= DUCKVEP_SO(DUCKVEP_SO_START_RETAINED);
     return mask;
 }
 
@@ -9423,7 +9537,12 @@ done:
     return tr;
 }
 
-static struct { uint32_t sl; uint32_t sl_sg; uint32_t sl_syn; uint32_t alt_m; } g_start_cov;
+static struct {
+    uint32_t sl;
+    uint32_t sl_sg;
+    uint32_t sl_syn;
+    uint32_t retained;
+} g_start_cov;
 
 static enum theft_trial_res prop_annotate_start_lost_matches_oracle(struct theft *t, void *arg1) {
     const struct kprop_coding *s = (const struct kprop_coding *)arg1;
@@ -9454,8 +9573,11 @@ static enum theft_trial_res prop_annotate_start_lost_matches_oracle(struct theft
                                     DUCKVEP_CODON_TABLE_STANDARD, &res) != DUCKVEP_CODING_SNV_OK) {
         tr = THEFT_TRIAL_FAIL; goto done;
     }
-    want = start_codon_snv_to_so(res.change, res.aa_ref, res.aa_alt);
-    if (res.aa_alt == 'M') g_start_cov.alt_m++;
+    want = start_codon_snv_to_so(
+        res.change, res.aa_ref, res.aa_alt, res.alt_codon);
+    if (want & DUCKVEP_SO(DUCKVEP_SO_START_RETAINED)) {
+        g_start_cov.retained++;
+    }
     if (want & DUCKVEP_SO(DUCKVEP_SO_START_LOST)) {
         g_start_cov.sl++;
         if (want & DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED)) g_start_cov.sl_sg++;
@@ -12123,6 +12245,39 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
               duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
     ASSERT(delta.valid && delta.inframe_insertion && delta.stop_retained &&
            !delta.stop_gained && !delta.stop_lost && !delta.frameshift);
+
+    {
+        static const uint8_t short_terminal_cds[] = {
+            'A','T','G', 'T','A','A'
+        };
+        uint32_t terminal_edit_position1 = 2u;
+        uint8_t terminal_edit_alt = (uint8_t)'X';
+
+        /* VEP's direct reference-peptide predicates see Translation SeqEdits,
+         * but its X/undefined length-change fallback does not: the CIL pair
+         * checks genomic terminal coordinates, edits raw translateable DNA,
+         * and translates that raw endpoint. Deleting one base from TAA is
+         * therefore stop_lost even when a SeqEdit renders the local reference
+         * residue X. Do not collapse these two upstream authorities. */
+        edit.cds_start = 6u;
+        edit.ref = short_terminal_cds + 5u;
+        edit.ref_len = 1u;
+        edit.alt = NULL;
+        edit.alt_len = 0u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      short_terminal_cds, sizeof short_terminal_cds,
+                      &edit_set, 1, DUCKVEP_CODON_TABLE_STANDARD,
+                      alt_cds, sizeof alt_cds, ref_pep, sizeof ref_pep,
+                      alt_pep, sizeof alt_pep, &ctx));
+        ctx.ref_peptide_edit_position1 = &terminal_edit_position1;
+        ctx.ref_peptide_edit_alt = &terminal_edit_alt;
+        ctx.ref_peptide_edit_count = 1u;
+        ctx.post_cds_complete = 1u;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_lost && !delta.stop_retained);
+    }
 
     PASS();
 }
@@ -15649,9 +15804,10 @@ TEST annotate_start_lost_matches_oracle_for_any_start_codon_snv(void) {
     ASSERT(g_start_cov.sl > 0u);
     ASSERT(g_start_cov.sl_sg > 0u);
     ASSERT(g_start_cov.sl_syn > 0u);
-    ASSERT(g_start_cov.alt_m > 0u);
-    fprintf(stderr, "[start_lost coverage] start_lost=%u co_stop_gained=%u co_syn=%u alt_m_no_start=%u\n",
-            g_start_cov.sl, g_start_cov.sl_sg, g_start_cov.sl_syn, g_start_cov.alt_m);
+    ASSERT(g_start_cov.retained > 0u);
+    fprintf(stderr, "[start-codon coverage] start_lost=%u co_stop_gained=%u co_syn=%u start_retained=%u\n",
+            g_start_cov.sl, g_start_cov.sl_sg, g_start_cov.sl_syn,
+            g_start_cov.retained);
     PASS();
 }
 

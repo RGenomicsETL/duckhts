@@ -38,6 +38,13 @@ op <- add_option(
   )
 )
 op <- add_option(op, "--database", default = "")
+op <- add_option(
+  op,
+  "--variants-table",
+  dest = "variants_table",
+  default = "bench_variants",
+  help = "prepared variant relation in --database [%default]"
+)
 op <- add_option(op, "--output", default = "rich")
 op <- add_option(op, "--workload-name", dest = "workload_name", default = "")
 op <- add_option(op, "--variants", type = "double", default = 10000000)
@@ -89,17 +96,19 @@ con <- if (production) {
 }
 on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
+identifier_q <- function(x) as.character(dbQuoteIdentifier(con, x))
 invisible(dbExecute(con, glue("SET threads = {opt$threads}")))
 invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 
 model_name <- "throughput"
 if (production) {
+  variants_table <- identifier_q(opt$variants_table)
   invisible(dbExecute(
     con,
     glue(
       "CREATE OR REPLACE TEMP TABLE duckvep_throughput_variants AS
        SELECT seq_region, \"position\", \"reference\", \"alternate\"
-       FROM bench_variants
+       FROM {variants_table}
        ORDER BY seq_region, \"position\", \"reference\", \"alternate\"
        LIMIT {variant_sql}"
     )
@@ -163,6 +172,14 @@ if (production) {
   } else {
     NULL
   }
+  peptide_edit_query <- if ("bench_peptide_edits" %in% present_relations) {
+    paste(
+      "SELECT transcript_index, protein_position, alternate_amino_acid",
+      "FROM bench_peptide_edits ORDER BY transcript_index, protein_position"
+    )
+  } else {
+    NULL
+  }
   region_count <- counts[[1L]]
   transcript_count <- counts[[2L]]
   exon_count <- counts[[3L]]
@@ -192,6 +209,7 @@ if (production) {
     )
   )
   mature_mirna_query <- NULL
+  peptide_edit_query <- NULL
 }
 if (variant_count < 1) {
   die("benchmark input contains no variants")
@@ -201,6 +219,12 @@ if (!is.null(mature_mirna_query)) {
   load_options <- c(
     load_options,
     glue("mature_mirna_query := {sql_q(mature_mirna_query)}")
+  )
+}
+if (!is.null(peptide_edit_query)) {
+  load_options <- c(
+    load_options,
+    glue("peptide_edit_query := {sql_q(peptide_edit_query)}")
   )
 }
 if (complete_coverage) {

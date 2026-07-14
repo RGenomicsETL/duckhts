@@ -14,6 +14,12 @@ history <- read.csv(
   check.names = FALSE
 )
 history$revision <- substr(history$source_revision, 1, 8)
+resources <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_model_resources.csv"),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+resources$revision <- substr(resources$source_revision, 1, 8)
 ```
 
 This benchmark drives either the rich `duckvep_annotate` result or the numeric
@@ -22,16 +28,21 @@ nondecreasing sequence-region and position keys. It records candidate sweep,
 consequence classification, list materialization, `unnest`, and final aggregation
 together. Model loading and input staging are outside the timed pass.
 
-The checked-in one-transcript workload is a repeatable adapter floor. The
-production-density workloads use a pre-staged DuckDB database containing
-`bench_regions`, `bench_transcripts`, `bench_exons`, and `bench_variants`. The
-earlier chromosome-only staging model contains 25 sequence regions, 644,292
-transcripts, and 5,078,384 exon memberships. The complete-primary-assembly
-model contains 194 sequence regions, 646,577 transcripts, and 5,087,789 exon
-memberships; 370,580 coding transcripts have prepared CDS sequence. Both use
-the same deterministic 1-in-40 hash sample of 100,957 sorted GIAB sites. These
-are distinct model workloads and their consequence checksums are not expected
-to match. The external staging databases are not committed.
+The checked-in one-transcript workload is a repeatable adapter floor. The final
+production-density workload uses the receipt-hashed Ensembl 116 GRCh38 model:
+194 sequence regions, 644,427 transcripts, 5,068,416 exon memberships, and
+369,631 sequence-backed coding transcripts. Its ordinary topology workload is
+a deterministic 1-in-40 hash sample of 100,957 sorted GIAB sites. The coding
+workloads deliberately repeat a frozen set to stabilize one-core kernel timing:
+200,000 SNVs repeat 1,000 distinct alleles; the 36,000 non-SNV workload repeats
+1,000 MNVs and 8,000 length-changing alleles four times; the 200,000 mixed
+workload is 10% SNV, 10% MNV, 40% lengthening, and 40% shortening. Repetition
+favours warm model and sequence caches, so these rows measure the resident
+execution lanes, not file ingestion or an end-to-end genome run.
+
+Earlier chromosome-only and complete-primary staging rows remain in the ledger
+as historical measurements. They have different transcript inventories and
+checksums and must not be treated as revisions of the final receipt.
 The production query restates `ORDER BY` in the timed input CTE, so its result
 includes the cost of enforcing the kernel's nondecreasing-input contract even
 though the staging table was already written in that order. The `79cfaaf2`
@@ -47,6 +58,9 @@ table <- history[, c(
   "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant",
   "cpu"
 )]
+table$output_rows_per_second <- round(
+  table$annotated_rows / table$median_seconds
+)
 table$variants <- format(table$variants, big.mark = ",", scientific = FALSE)
 table$transcripts <- format(table$transcripts, big.mark = ",", scientific = FALSE)
 table$exons <- format(table$exons, big.mark = ",", scientific = FALSE)
@@ -57,6 +71,11 @@ table$annotated_rows <- format(
 )
 table$variants_per_second <- round(table$variants_per_second)
 table$ns_per_variant <- round(table$ns_per_variant, 1)
+table$output_rows_per_second <- format(
+  table$output_rows_per_second,
+  big.mark = ",",
+  scientific = FALSE
+)
 knitr::kable(table, row.names = FALSE)
 ```
 
@@ -65,11 +84,55 @@ the rendered consequence-byte total or the numeric consequence-mask sum. Rows
 with different workload, output mode, thread count, host, or variant count are
 separate measurements and should not be compared as if only the engine changed.
 
+## Final GRCh38 model resources
+
+```{r resources}
+last_resource <- resources[nrow(resources), , drop = FALSE]
+resource_table <- data.frame(
+  measure = c(
+    "revision", "model artifact", "model load", "process RSS before load",
+    "process RSS after load", "peak process RSS", "process RSS after drop",
+    "DuckDB base-table cache", "planned scratch per worker",
+    "observed RSS change on first workspace", "largest transcript run",
+    "largest prepared CDS"
+  ),
+  value = c(
+    last_resource$revision,
+    sprintf("%.3f GiB", last_resource$model_artifact_bytes / 1024^3),
+    sprintf("%.3f s", last_resource$model_load_seconds),
+    sprintf("%.3f GiB", last_resource$rss_baseline_kib / 1024^2),
+    sprintf("%.3f GiB", last_resource$rss_model_loaded_kib / 1024^2),
+    sprintf("%.3f GiB", last_resource$rss_peak_kib / 1024^2),
+    sprintf("%.3f GiB", last_resource$rss_after_drop_kib / 1024^2),
+    sprintf("%.3f GiB", last_resource$duckdb_base_table_cache_bytes / 1024^3),
+    sprintf("%.3f MiB", last_resource$workspace_planned_buffer_bytes / 1024^2),
+    sprintf("%.3f MiB", last_resource$workspace_rss_delta_kib / 1024),
+    format(last_resource$max_transcripts_per_region, big.mark = ","),
+    sprintf("%s bases", format(last_resource$max_cds_bytes, big.mark = ","))
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(resource_table, row.names = FALSE)
+```
+
+The artifact size is a compact DuckDB containing only `model_regions`,
+`model_transcripts`, and `model_receipt`; benchmark inputs are excluded. RSS is
+for one R/DuckDB process, not a C-heap estimate. The load peak includes both the
+DuckDB scan/cache and construction of the second immutable C representation.
+Dropping the model releases the C representation, but DuckDB retains its table
+cache in the process. The planned per-worker number is the exact sum of the C
+buffer capacities (active and candidate transcript indices, one exon cursor per
+transcript, and worst-case edit/CDS/peptide scratch); allocator metadata is not
+included. The much smaller first-workspace RSS change reflects lazy or reused
+pages, not a smaller capacity.
+
 The production form is run with:
 
 ```sh
 Rscript benchmarks/duckvep_throughput.R \
   --database /path/to/staged.duckdb \
+  --variants-table bench_variants \
+  --workload-name ensembl116_grch38_final_giab_sites_hash40 \
   --variants 100957 --passes 9 --warmup 10000 --threads 1 \
   --output compact
 ```

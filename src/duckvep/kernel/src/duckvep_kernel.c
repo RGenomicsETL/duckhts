@@ -15,6 +15,7 @@
 #include "duckvep_kernel.h"
 
 #include "duckvep_classify.h"
+#include "duckvep_codon.h"
 #include "duckvep_delta.h"
 #include "duckvep_effect.h"
 #include "duckvep_event.h"
@@ -147,6 +148,11 @@ static int model_sequence_base_valid(uint8_t base) {
            upper == (uint8_t)'N';
 }
 
+static int model_peptide_edit_alt_valid(uint8_t amino_acid) {
+    return amino_acid == (uint8_t)'*' ||
+           (amino_acid >= (uint8_t)'A' && amino_acid <= (uint8_t)'Z');
+}
+
 /* where_codes are STABLE engine-internal failure-site ids; tests anchor on them.
  * Never renumber an existing site; append new ones. */
 enum {
@@ -190,7 +196,8 @@ enum {
     DVW_MODEL_PHASE          = 69u,
     DVW_MODEL_CDS_PROJECTION = 70u,
     DVW_MODEL_SEQ_CONTRACT   = 71u,
-    DVW_MODEL_MIRNA_LAYOUT   = 72u
+    DVW_MODEL_MIRNA_LAYOUT   = 72u,
+    DVW_MODEL_PEPTIDE_EDIT_LAYOUT = 73u
 };
 
 duckvep_status_t duckvep_model_open(
@@ -431,6 +438,7 @@ duckvep_status_t duckvep_model_open(
     if (seq != NULL) {
         int have_flank_columns;
         int any_flank_column;
+        int any_peptide_edit_column;
 
         if (seq->transcript_count != transcripts->transcript_count) {
             return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_SEQ_COUNT,
@@ -441,6 +449,28 @@ duckvep_status_t duckvep_model_open(
              seq->codon_table == NULL || (seq->cds_bytes_len > 0u && seq->cds_bytes == NULL))) {
             return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                         "sequence pool has count>0 but null columns");
+        }
+        any_peptide_edit_column = seq->peptide_edit_offset != NULL ||
+                                  seq->peptide_edit_position1 != NULL ||
+                                  seq->peptide_edit_alt != NULL ||
+                                  seq->peptide_edit_count != 0u;
+        if ((seq->peptide_edit_position1 == NULL) !=
+                (seq->peptide_edit_alt == NULL) ||
+            (any_peptide_edit_column && seq->peptide_edit_offset == NULL) ||
+            (seq->peptide_edit_count != 0u &&
+             seq->peptide_edit_position1 == NULL) ||
+            seq->peptide_edit_count > (size_t)UINT32_MAX) {
+            return fail(error, DUCKVEP_ERR_INVALID_ARG,
+                        DVW_MODEL_PEPTIDE_EDIT_LAYOUT,
+                        "peptide-edit side relation has incomplete columns");
+        }
+        if (seq->peptide_edit_offset != NULL &&
+            (seq->peptide_edit_offset[0] != 0u ||
+             seq->peptide_edit_offset[seq->transcript_count] !=
+                 (uint32_t)seq->peptide_edit_count)) {
+            return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                        DVW_MODEL_PEPTIDE_EDIT_LAYOUT,
+                        "peptide-edit row offsets do not cover the side relation");
         }
         any_flank_column = seq->pre_cds_offset != NULL ||
                            seq->pre_cds_length != NULL ||
@@ -470,6 +500,32 @@ duckvep_status_t duckvep_model_open(
             uint64_t post_len = have_flank_columns
                 ? (uint64_t)seq->post_cds_length[t] : 0u;
             size_t flank_i;
+
+            if (seq->peptide_edit_offset != NULL) {
+                size_t begin = seq->peptide_edit_offset[t];
+                size_t finish = seq->peptide_edit_offset[t + 1u];
+                size_t edit;
+                uint32_t previous_position = 0u;
+
+                if (finish < begin || finish > seq->peptide_edit_count) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_PEPTIDE_EDIT_LAYOUT,
+                                "peptide-edit row offsets are not monotone");
+                }
+                for (edit = begin; edit < finish; edit++) {
+                    uint32_t position = seq->peptide_edit_position1[edit];
+
+                    if (position == 0u || position <= previous_position ||
+                        position > seq->cds_length[t] / 3u ||
+                        !model_peptide_edit_alt_valid(
+                            seq->peptide_edit_alt[edit])) {
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_PEPTIDE_EDIT_LAYOUT,
+                                    "peptide edits are not ordered, unique, and in range");
+                    }
+                    previous_position = position;
+                }
+            }
 
             if (pre_off > (uint64_t)seq->flank_bytes_len ||
                 pre_len > (uint64_t)seq->flank_bytes_len - pre_off ||
@@ -544,7 +600,8 @@ duckvep_status_t duckvep_model_open(
                                (uint64_t)coding_start_cdna + 1u +
                                (uint64_t)phase_offset;
                 if (len != expected_len ||
-                    (seq->codon_table[t] != 1u && seq->codon_table[t] != 2u)) {
+                    !duckvep_codon_table_supported(
+                        (duckvep_codon_table_t)seq->codon_table[t])) {
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
                                 "prepared CDS length or codon table is inconsistent");
@@ -579,8 +636,9 @@ duckvep_status_t duckvep_model_open(
                                 "transcript without prepared CDS has sequence flanks");
                 }
                 if (transcripts->cds_start1[t] == 0u &&
-                    seq->codon_table[t] != 0u && seq->codon_table[t] != 1u &&
-                    seq->codon_table[t] != 2u) {
+                    seq->codon_table[t] != 0u &&
+                    !duckvep_codon_table_supported(
+                        (duckvep_codon_table_t)seq->codon_table[t])) {
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
                                 "non-coding transcript has an invalid codon-table value");
@@ -1141,7 +1199,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
             c->options->splice_region_exonic,
             c->options->splice_region_intronic, &ectx);
     }
-    duckvep_effect_ctx_apply_event(&ectx, &event);
+    duckvep_effect_ctx_apply_event(tx, &ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {
         duckvep_sv_effect_t sv = duckvep_sv_effect_fill(&event, &ectx.region_state);
         duckvep_effect_ctx_apply_sv(&ectx, &sv);

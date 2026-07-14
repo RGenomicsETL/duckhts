@@ -36,6 +36,11 @@ INSERT INTO duckvep_core.seq_region VALUES
   (11, '1', 2, 40);
 
 statement ok
+CREATE TABLE duckvep_core.seq_region_attrib(
+  seq_region_id BIGINT, attrib_type_id BIGINT, value BIGINT
+);
+
+statement ok
 CREATE TABLE duckvep_core.gene(
   gene_id BIGINT, biotype VARCHAR, is_current BIGINT, stable_id VARCHAR, version BIGINT
 );
@@ -97,7 +102,11 @@ CREATE TABLE duckvep_core.attrib_type(attrib_type_id BIGINT, code VARCHAR);
 statement ok
 INSERT INTO duckvep_core.attrib_type VALUES
   (60, 'MANE_Select'), (61, 'gencode_basic'), (62, 'ccds_transcript'),
-  (63, 'gencode_primary'), (64, 'initial_met'), (65, '_rna_edit');
+  (63, 'gencode_primary'), (64, 'initial_met'), (65, '_rna_edit'),
+  (66, 'codon_table'), (68, 'amino_acid_sub');
+
+statement ok
+INSERT INTO duckvep_core.seq_region_attrib VALUES (10, 66, 2);
 
 statement ok
 CREATE TABLE duckvep_core.transcript_attrib(
@@ -115,7 +124,10 @@ CREATE TABLE duckvep_core.translation_attrib(
 );
 
 statement ok
-INSERT INTO duckvep_core.translation_attrib VALUES (52, 64, 'M');
+INSERT INTO duckvep_core.translation_attrib VALUES
+  (50, 68, '2 2 U'),
+  (51, 65, '1 2'),
+  (52, 64, '1 1 M');
 
 statement ok
 CREATE TABLE duckvep_prepared_regions AS
@@ -151,9 +163,120 @@ SELECT transcript_index, transcript_flags, CAST(cds_sequence AS VARCHAR),
        sequence_withheld_reason, length(exons)
 FROM duckvep_prepared_transcripts ORDER BY transcript_index;
 ----
-0	21507	ATGAAAGGGTAA	CC	0	CC	1	16	NULL	2
+0	22019	ATGAAAGGGTAA	CC	0	CC	1	16	NULL	2
 1	8197	ATGCCCTAA	AGG	0	AGG	24	32	NULL	1
-2	259	NULL	NULL	NULL	NULL	24	32	rna_edit,initial_methionine	1
+2	259	NULL	NULL	NULL	NULL	24	32	rna_edit	1
+
+query II
+SELECT transcript_index, codon_table
+FROM duckvep_prepared_transcripts
+WHERE cds_sequence IS NOT NULL ORDER BY transcript_index;
+----
+0	2
+1	2
+
+# Official Ensembl dump staging may infer numeric-only attribute columns as
+# integers. The importer casts values at its boundary instead of requiring a
+# staging-only VARCHAR schema.
+statement ok
+BEGIN TRANSACTION;
+
+statement ok
+CREATE TABLE duckvep_core.transcript_attrib_numeric AS
+SELECT transcript_id, attrib_type_id, try_cast(value AS BIGINT) AS value
+FROM duckvep_core.transcript_attrib
+WHERE try_cast(value AS BIGINT) IS NOT NULL;
+
+statement ok
+CREATE TABLE duckvep_core.translation_attrib_numeric AS
+SELECT translation_id, attrib_type_id, try_cast(value AS BIGINT) AS value
+FROM duckvep_core.translation_attrib
+WHERE false;
+
+statement ok
+ALTER TABLE duckvep_core.transcript_attrib RENAME TO transcript_attrib_text;
+
+statement ok
+ALTER TABLE duckvep_core.transcript_attrib_numeric RENAME TO transcript_attrib;
+
+statement ok
+ALTER TABLE duckvep_core.translation_attrib RENAME TO translation_attrib_text;
+
+statement ok
+ALTER TABLE duckvep_core.translation_attrib_numeric RENAME TO translation_attrib;
+
+query I
+SELECT count(*) FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+----
+3
+
+statement ok
+ROLLBACK;
+
+# Codon tables are sourced from seq_region_attrib, never guessed from a
+# chromosome name. Missing attributes use VEP's table-1 default; conflicting
+# or BioPerl-unsupported source values reject the import.
+statement ok
+DELETE FROM duckvep_core.seq_region_attrib WHERE seq_region_id = 10;
+
+query I
+SELECT DISTINCT codon_table FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+) WHERE cds_sequence IS NOT NULL;
+----
+1
+
+statement ok
+INSERT INTO duckvep_core.seq_region_attrib VALUES (10, 66, 2), (10, 66, 1);
+
+statement error
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+----
+sequence-region codon table is invalid or unsupported
+
+statement ok
+DELETE FROM duckvep_core.seq_region_attrib WHERE value = 1;
+
+statement ok
+UPDATE duckvep_core.seq_region_attrib SET value = 8 WHERE seq_region_id = 10;
+
+statement error
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+----
+sequence-region codon table is invalid or unsupported
+
+statement ok
+UPDATE duckvep_core.seq_region_attrib SET value = 2 WHERE seq_region_id = 10;
+
+query ITT
+SELECT transcript_index, edit.alternate_amino_acid, edit.edit_code
+FROM duckvep_prepared_transcripts,
+LATERAL unnest(peptide_edits) AS u(edit)
+ORDER BY transcript_index, edit.protein_position;
+----
+0	U	amino_acid_sub
+
+statement ok
+UPDATE duckvep_core.translation_attrib
+SET value = '2 3 UU' WHERE translation_id = 50 AND attrib_type_id = 68;
+
+query IT
+SELECT transcript_index, sequence_withheld_reason
+FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+) WHERE transcript_index = 0;
+----
+0	unsupported_translation_edit
+
+statement ok
+UPDATE duckvep_core.translation_attrib
+SET value = '2 2 U' WHERE translation_id = 50 AND attrib_type_id = 68;
 
 query ITT
 SELECT transcript_index, mane_select_refseq, mane_plus_clinical_refseq
@@ -204,11 +327,13 @@ FROM duckvep_prepared_receipt;
 ----
 1	3	2	3	2	1	4
 
-query III
-SELECT length(model_sha256), cds_base_count, transcript_flank_base_count
+query IIIIII
+SELECT length(model_sha256), cds_base_count, mature_mirna_transcript_count,
+       mature_mirna_segment_count, peptide_edit_count,
+       transcript_flank_base_count
 FROM duckvep_prepared_receipt;
 ----
-64	21	5
+64	21	0	0	1	5
 
 query TTTT
 SELECT source_name, source_version, assembly, transcript_filter
@@ -244,6 +369,7 @@ SELECT loaded FROM duckvep_model_load(
   'SELECT seq_region, sequence_length FROM duckvep_ensembl_regions(''duckvep_core'', ''duckvep_reference_chunks'', ''GRCh38'') ORDER BY seq_region',
   'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_prepared_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_prepared_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  peptide_edit_query := 'SELECT transcript_index, edit.protein_position, edit.alternate_amino_acid FROM duckvep_prepared_transcripts, LATERAL unnest(peptide_edits) AS u(edit) ORDER BY transcript_index, edit.protein_position',
   transcript_coverage_complete := true
 );
 ----
@@ -256,6 +382,14 @@ FROM unnest(duckvep_annotate(
 )) AS u(annotation);
 ----
 missense_variant&splice_region_variant	supported	-
+
+query TT
+SELECT annotation.reference_amino_acid, annotation.alternate_amino_acid
+FROM unnest(duckvep_annotate(
+  'ensembl-test', 0::UINTEGER, 4::UBIGINT, 'A', 'G', 0::UBIGINT
+)) AS u(annotation);
+----
+U	E
 
 query TTT
 SELECT annotation.consequence, annotation.status, coalesce(annotation.reason, '-')
@@ -271,6 +405,17 @@ query I
 SELECT duckvep_model_drop('ensembl-test');
 ----
 1
+
+statement error
+SELECT loaded FROM duckvep_model_load(
+  'ensembl-bad-peptide-edit',
+  'SELECT seq_region, sequence_length FROM duckvep_prepared_regions ORDER BY seq_region',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_prepared_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_prepared_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  peptide_edit_query := 'SELECT * FROM (VALUES (0::UINTEGER, 2::UINTEGER, ''U''::VARCHAR), (0::UINTEGER, 2::UINTEGER, ''U''::VARCHAR)) edits(transcript_index, protein_position, alternate_amino_acid)'
+);
+----
+peptide-edit query must be ordered and unique
 
 # Ensembl stores mature-miRNA cDNA ranges as repeated transcript attributes.
 # The importer projects them through ranked exons into a packed side relation;
@@ -301,6 +446,16 @@ CREATE TABLE duckvep_prepared_mirna AS
 SELECT * FROM duckvep_ensembl_transcripts(
   'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
 );
+
+query II
+SELECT mature_mirna_transcript_count, mature_mirna_segment_count
+FROM duckvep_model_receipt(
+  'duckvep_prepared_regions', 'duckvep_prepared_mirna',
+  'Ensembl', '116', 'GRCh38', repeat('a', 64), repeat('b', 64),
+  'VEP 116 core selection on FASTA-covered assembly regions'
+);
+----
+1	1
 
 query IIIII
 SELECT transcript_index, region.cdna_start, region.cdna_end,
@@ -443,6 +598,9 @@ statement ok
 CREATE VIEW duckvep_grch38_core.seq_region AS FROM duckvep_fixture_file('grch38', 'seq_region');
 
 statement ok
+CREATE VIEW duckvep_grch38_core.seq_region_attrib AS FROM duckvep_fixture_file('grch38', 'seq_region_attrib');
+
+statement ok
 CREATE VIEW duckvep_grch38_core.transcript AS FROM duckvep_fixture_file('grch38', 'transcript');
 
 statement ok
@@ -477,6 +635,9 @@ CREATE VIEW duckvep_grch37_core.gene AS FROM duckvep_fixture_file('grch37', 'gen
 
 statement ok
 CREATE VIEW duckvep_grch37_core.seq_region AS FROM duckvep_fixture_file('grch37', 'seq_region');
+
+statement ok
+CREATE VIEW duckvep_grch37_core.seq_region_attrib AS FROM duckvep_fixture_file('grch37', 'seq_region_attrib');
 
 statement ok
 CREATE VIEW duckvep_grch37_core.transcript AS FROM duckvep_fixture_file('grch37', 'transcript');
@@ -528,7 +689,7 @@ SELECT
   count(*) FILTER (WHERE mane_select_refseq IS NOT NULL)
 FROM duckvep_grch38_transcripts;
 ----
-2	81258	39	1	13	40	1
+2	81258	39	14	0	40	1
 
 query IIIIIII
 SELECT
@@ -541,7 +702,7 @@ SELECT
   count(*) FILTER (WHERE mane_select_refseq IS NOT NULL)
 FROM duckvep_grch37_transcripts;
 ----
-2	52717	39	2	13	48	0
+2	52717	39	15	0	48	0
 
 query ITT
 SELECT transcript_index, transcript_stable_id, mane_select_refseq
@@ -578,8 +739,8 @@ FROM (
   SELECT * FROM duckvep_grch37_receipt
 ) ORDER BY assembly;
 ----
-GRCh37	36bf220cce11d94defe73c372afdc47148727704ab0fc4346ac28a855ee4edc9	all current transcripts on MT and GL000201.1
-GRCh38	9dd6f524bb87f3775b6cef1fe1499811cfbf56c087bfeb86cf293ee75167964c	all current transcripts on MT and HG2047_PATCH
+GRCh37	1d7f9a8013d99626c1798cec4f20a212fae5a5c007944bc8bad8f0faa0929ff8	all current transcripts on MT and GL000201.1
+GRCh38	d1cb9e98fa6cdf8129536eec6d7254a7e2cb831500264a5570aa1f2946d52411	all current transcripts on MT and HG2047_PATCH
 
 query I
 SELECT loaded FROM duckvep_model_load(
@@ -587,6 +748,7 @@ SELECT loaded FROM duckvep_model_load(
   'SELECT seq_region, sequence_length FROM duckvep_grch38_regions ORDER BY seq_region',
   'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_grch38_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch38_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  peptide_edit_query := 'SELECT transcript_index, edit.protein_position, edit.alternate_amino_acid FROM duckvep_grch38_transcripts, LATERAL unnest(peptide_edits) AS u(edit) ORDER BY transcript_index, edit.protein_position',
   transcript_coverage_complete := true
 );
 ----
@@ -598,6 +760,7 @@ SELECT loaded FROM duckvep_model_load(
   'SELECT seq_region, sequence_length FROM duckvep_grch37_regions ORDER BY seq_region',
   'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_grch37_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch37_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  peptide_edit_query := 'SELECT transcript_index, edit.protein_position, edit.alternate_amino_acid FROM duckvep_grch37_transcripts, LATERAL unnest(peptide_edits) AS u(edit) ORDER BY transcript_index, edit.protein_position',
   transcript_coverage_complete := true
 );
 ----
@@ -633,7 +796,7 @@ FROM unnest(duckvep_annotate(
   'A', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
-5	coding_sequence_variant	unresolved	missing_sequence
+5	start_lost	supported	NULL
 
 query I
 SELECT duckvep_model_drop('ensembl-grch38-fixture');

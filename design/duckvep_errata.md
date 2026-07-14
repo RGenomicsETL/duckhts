@@ -8,6 +8,23 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## Terminal-stop fallbacks bypass Translation SeqEdits
+
+VEP applies supported Ensembl Translation SeqEdits to the reference peptide returned by
+`TranscriptVariationAllele::peptide`, so its ordinary stop predicates inspect edited
+local peptide text. The length-changing `X` or unavailable-peptide fallback is a separate
+authority: `_overlaps_stop_codon_cil` tests the genomic coding endpoint, and
+`_ins_del_stop_altered_cil` edits raw translateable DNA and translates the raw terminal
+codon. It does not reapply Translation SeqEdits. A terminal deletion can consequently be
+`stop_lost` through the CIL fallback even when a SeqEdit renders the corresponding local
+reference residue `X`.
+
+DuckVEP intentionally keeps the raw CDS terminal-stop gate for that fallback while using
+the sparse edit overlay in direct peptide comparisons. Replacing both with one cleaner
+peptide authority would change VEP 116 behavior. The focused C regression combines a
+terminal `TAA`, an `X` reference-peptide edit, and a one-base terminal deletion to pin the
+distinction.
+
 ## An empty annotated UTR can overlap a spanning deletion
 
 VEP 116 constructs its transcript-oriented before- and after-coding intervals as
@@ -45,6 +62,14 @@ The deterministic ClinVar chromosome-21 cache sample exposed the final two diffe
 splits an interval at exon boundaries, and packs the resulting genomic segments as a
 per-transcript side relation. The hot kernel checks that numeric slice; it does not parse
 attributes or rebuild cDNA mappings per variant.
+
+The cross-assembly GRCh37 cache run exposed an insertion-only boundary detail. VEP tests
+the minimized `VariationFeature` coordinates, not the transcript mapper's chosen placement
+point. A pure insertion after genomic base `P` has the reversed interval `(P+1,P)`;
+therefore an insertion after the last mature-miRNA base does not overlap the mature range,
+even though its retained VCF anchor does. Using the placement point produced 3,667 false
+`mature_miRNA_variant` calls in the targeted GRCh37 corpus. The frozen boundary regression
+keeps this distinction explicit for both transcript strands.
 
 Source anchors: Ensembl Variation 116 `VariationEffect.pm::within_mature_miRNA`, the
 `miRNA` `attrib_type`, and the transcript mapper. Keep the rule-tier regression as well as

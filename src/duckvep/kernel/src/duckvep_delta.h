@@ -120,6 +120,12 @@ typedef struct duckvep_coding_context {
     const uint8_t *alt_cds;     size_t alt_cds_len;
     const uint8_t *ref_peptide; size_t ref_peptide_len;
     const uint8_t *alt_peptide; size_t alt_peptide_len;
+    /* Sparse Ensembl Translation SeqEdits. Positions are one-based and sorted.
+     * They are an overlay on the reference peptide only: VEP deliberately
+     * leaves the alternate peptide as the raw codon translation. */
+    const uint32_t *ref_peptide_edit_position1;
+    const uint8_t *ref_peptide_edit_alt;
+    size_t ref_peptide_edit_count;
     /* Borrowed complete transcript-oriented 5-prime sequence. A zero length
      * with pre_cds_complete set means the CDS begins at cDNA base one. */
     const uint8_t *pre_cds_bases;

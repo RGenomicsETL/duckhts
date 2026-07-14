@@ -38,6 +38,17 @@ FROM mysql_query(source_catalog,
   'AND sr.seq_region_id IN (' || region_ids_sql || ')'
 );
 
+CREATE OR REPLACE MACRO fixture_seq_region_attributes(
+  source_catalog, assembly_name, region_ids_sql
+) AS TABLE
+FROM mysql_query(source_catalog,
+  'SELECT sra.* FROM seq_region_attrib sra '
+  'JOIN seq_region sr USING (seq_region_id) '
+  'JOIN coord_system cs USING (coord_system_id) '
+  'WHERE cs.species_id = 1 AND cs.version = ''' || assembly_name || ''' '
+  'AND sr.seq_region_id IN (' || region_ids_sql || ')'
+);
+
 CREATE OR REPLACE MACRO fixture_coord_systems(
   source_catalog, assembly_name, region_ids_sql
 ) AS TABLE
@@ -209,6 +220,10 @@ CREATE TABLE duckvep_grch38_core.seq_region AS
 FROM fixture_seq_regions(
   'ensembl_grch38', 'GRCh38', '132907,2006446537'
 );
+CREATE TABLE duckvep_grch38_core.seq_region_attrib AS
+FROM fixture_seq_region_attributes(
+  'ensembl_grch38', 'GRCh38', '132907,2006446537'
+);
 CREATE TABLE duckvep_grch38_core.transcript AS
 FROM fixture_transcripts(
   'ensembl_grch38', 'GRCh38', '132907,2006446537'
@@ -253,6 +268,10 @@ FROM fixture_coord_systems(
 );
 CREATE TABLE duckvep_grch37_core.seq_region AS
 FROM fixture_seq_regions(
+  'ensembl_grch37', 'GRCh37', '100965601,27742'
+);
+CREATE TABLE duckvep_grch37_core.seq_region_attrib AS
+FROM fixture_seq_region_attributes(
   'ensembl_grch37', 'GRCh37', '100965601,27742'
 );
 CREATE TABLE duckvep_grch37_core.transcript AS
@@ -383,25 +402,33 @@ CREATE TEMP TABLE fixture_acceptance AS
 SELECT CASE
   WHEN count(*) != 2
     OR max(model_sha256) FILTER (WHERE assembly = 'GRCh38') !=
-       '68bdd72a53027af9bc09d1853848b2609c34dee3b533fdcfa4eec5881dd12db0'
+       'd1cb9e98fa6cdf8129536eec6d7254a7e2cb831500264a5570aa1f2946d52411'
     OR max(model_sha256) FILTER (WHERE assembly = 'GRCh37') !=
-       '88e3e65c1055c5a38ac821205c3f7a246042a781d73c487607d0c32c845db5cf'
+       '1d7f9a8013d99626c1798cec4f20a212fae5a5c007944bc8bad8f0faa0929ff8'
     OR max(reference_base_count) FILTER (WHERE assembly = 'GRCh38') != 81258
     OR max(transcript_count) FILTER (WHERE assembly = 'GRCh38') != 39
     OR max(gene_count) FILTER (WHERE assembly = 'GRCh38') != 39
     OR max(coding_transcript_count) FILTER (WHERE assembly = 'GRCh38') != 14
-    OR max(sequence_backed_transcript_count) FILTER (WHERE assembly = 'GRCh38') != 1
-    OR max(sequence_withheld_transcript_count) FILTER (WHERE assembly = 'GRCh38') != 13
+    OR max(sequence_backed_transcript_count) FILTER (WHERE assembly = 'GRCh38') != 14
+    OR max(sequence_withheld_transcript_count) FILTER (WHERE assembly = 'GRCh38') != 0
     OR max(exon_membership_count) FILTER (WHERE assembly = 'GRCh38') != 40
-    OR max(cds_base_count) FILTER (WHERE assembly = 'GRCh38') != 906
+    OR max(mature_mirna_transcript_count) FILTER (WHERE assembly = 'GRCh38') != 0
+    OR max(mature_mirna_segment_count) FILTER (WHERE assembly = 'GRCh38') != 0
+    OR max(cds_base_count) FILTER (WHERE assembly = 'GRCh38') != 12301
+    OR max(peptide_edit_count) FILTER (WHERE assembly = 'GRCh38') != 13
+    OR max(transcript_flank_base_count) FILTER (WHERE assembly = 'GRCh38') != 1679
     OR max(reference_base_count) FILTER (WHERE assembly = 'GRCh37') != 52717
     OR max(transcript_count) FILTER (WHERE assembly = 'GRCh37') != 39
     OR max(gene_count) FILTER (WHERE assembly = 'GRCh37') != 39
     OR max(coding_transcript_count) FILTER (WHERE assembly = 'GRCh37') != 15
-    OR max(sequence_backed_transcript_count) FILTER (WHERE assembly = 'GRCh37') != 2
-    OR max(sequence_withheld_transcript_count) FILTER (WHERE assembly = 'GRCh37') != 13
+    OR max(sequence_backed_transcript_count) FILTER (WHERE assembly = 'GRCh37') != 15
+    OR max(sequence_withheld_transcript_count) FILTER (WHERE assembly = 'GRCh37') != 0
     OR max(exon_membership_count) FILTER (WHERE assembly = 'GRCh37') != 48
-    OR max(cds_base_count) FILTER (WHERE assembly = 'GRCh37') != 1665
+    OR max(mature_mirna_transcript_count) FILTER (WHERE assembly = 'GRCh37') != 0
+    OR max(mature_mirna_segment_count) FILTER (WHERE assembly = 'GRCh37') != 0
+    OR max(cds_base_count) FILTER (WHERE assembly = 'GRCh37') != 13060
+    OR max(peptide_edit_count) FILTER (WHERE assembly = 'GRCh37') != 13
+    OR max(transcript_flank_base_count) FILTER (WHERE assembly = 'GRCh37') != 541
     OR min(region_count) != 2 OR max(region_count) != 2 THEN
     error('DuckVEP fixture: prepared models do not match the declared assemblies')
   ELSE true
@@ -433,6 +460,10 @@ SELECT
   r.sequence_withheld_transcript_count,
   r.exon_membership_count,
   r.cds_base_count,
+  r.mature_mirna_transcript_count,
+  r.mature_mirna_segment_count,
+  r.peptide_edit_count,
+  r.transcript_flank_base_count,
   r.transcript_filter
 FROM fixture_receipts r
 CROSS JOIN reference_validation
@@ -462,6 +493,9 @@ COPY duckvep_grch38_reference TO
   (FORMAT PARQUET, COMPRESSION ZSTD);
 COPY duckvep_grch38_core.seq_region TO
   'test/data/duckvep/ensembl_core/grch38/seq_region.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD);
+COPY duckvep_grch38_core.seq_region_attrib TO
+  'test/data/duckvep/ensembl_core/grch38/seq_region_attrib.parquet'
   (FORMAT PARQUET, COMPRESSION ZSTD);
 COPY duckvep_grch38_core.transcript TO
   'test/data/duckvep/ensembl_core/grch38/transcript.parquet'
@@ -499,6 +533,9 @@ COPY duckvep_grch37_reference TO
   (FORMAT PARQUET, COMPRESSION ZSTD);
 COPY duckvep_grch37_core.seq_region TO
   'test/data/duckvep/ensembl_core/grch37/seq_region.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD);
+COPY duckvep_grch37_core.seq_region_attrib TO
+  'test/data/duckvep/ensembl_core/grch37/seq_region_attrib.parquet'
   (FORMAT PARQUET, COMPRESSION ZSTD);
 COPY duckvep_grch37_core.transcript TO
   'test/data/duckvep/ensembl_core/grch37/transcript.parquet'

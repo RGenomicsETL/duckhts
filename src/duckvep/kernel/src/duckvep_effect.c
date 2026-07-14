@@ -290,10 +290,42 @@ void duckvep_effect_ctx_fill_point_sorted(
                                     pos, pos, &region, &splice, out);
 }
 
-void duckvep_effect_ctx_apply_event(duckvep_effect_ctx_t *ctx,
-                                    const duckvep_event_t *event) {
+void duckvep_effect_ctx_apply_event(
+    const duckvep_transcript_model_t *transcripts,
+    duckvep_effect_ctx_t             *ctx,
+    const duckvep_event_t            *event) {
+
+    size_t segment;
 
     if (ctx == NULL || event == NULL) return;
+
+    /* Most topology predicates consume the transcript-relative placement point
+     * selected by the mapper. within_mature_miRNA is different: VEP compares
+     * the raw VariationFeature coordinates with each projected miRNA segment.
+     * A minimized insertion has the reversed interval (P+1,P), so an insertion
+     * after the final mature base must not inherit that base's mature term. */
+    if (transcripts != NULL &&
+        ctx->tx_idx < transcripts->transcript_count &&
+        (transcripts->flags[ctx->tx_idx] &
+         (uint64_t)DUCKVEP_TX_BIOTYPE_MIRNA) != 0u &&
+        transcripts->mature_mirna_offset != NULL) {
+        size_t begin = transcripts->mature_mirna_offset[ctx->tx_idx];
+        size_t finish = transcripts->mature_mirna_offset[ctx->tx_idx + 1u];
+
+        ctx->pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_MATURE_MIRNA);
+        if (ctx->region_state.within_feature) {
+            for (segment = begin; segment < finish; segment++) {
+                if (event->feature_end1 >=
+                        transcripts->mature_mirna_start1[segment] &&
+                    event->feature_start1 <=
+                        transcripts->mature_mirna_end1[segment]) {
+                    ctx->pre_bits |=
+                        DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_MATURE_MIRNA);
+                    break;
+                }
+            }
+        }
+    }
     if (event->kind == (uint8_t)DUCKVEP_KIND_SV) {
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_SV);
         return;
