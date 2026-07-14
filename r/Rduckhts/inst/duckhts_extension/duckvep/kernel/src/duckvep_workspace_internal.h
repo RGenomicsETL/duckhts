@@ -16,13 +16,10 @@
 
 typedef struct duckvep_workspace_delta_route_stats {
     uint64_t substitution_context;
-    uint64_t mnv_direct_fallback;
     uint64_t del_context;
-    uint64_t del_direct_fallback;
     uint64_t ins_context;
-    uint64_t ins_direct_fallback;
     uint64_t indel_context;
-    uint64_t indel_direct_fallback;
+    uint64_t boundary_context;
 } duckvep_workspace_delta_route_stats_t;
 
 DUCKVEP_INTERNAL_API duckvep_delta_scratch_t *duckvep_workspace_delta_scratch(

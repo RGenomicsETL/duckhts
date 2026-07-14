@@ -186,7 +186,7 @@ load_queries <- c(
   paste(
     "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
     "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table,",
-    "post_cds_bases",
+    "pre_cds_sequence, post_cds_sequence",
     "FROM duckvep_transcripts ORDER BY seq_region, transcript_start, transcript_index"
   ),
   paste(

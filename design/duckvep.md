@@ -136,8 +136,7 @@ the supplied regions. For each transcript it:
    strand exons, joins exons in transcript order, and extracts the CDS;
 6. applies Ensembl start-phase preparation: phase `-1` or `0` adds no prefix, while a
    positive phase adds one or two leading `N` bases; and
-7. retains up to three transcript-oriented bases after the CDS for VEP's terminal-stop
-   rule.
+7. extracts the complete transcript-oriented spliced sequence before and after the CDS.
 
 The compact flag word records translation presence, protein-coding/NMD/miRNA biotype,
 incomplete CDS ends, selenocysteine, stop readthrough, RNA or peptide edits, MANE,
@@ -157,9 +156,12 @@ reason remain in the model. Unsupported reference alphabet has the same fail-clo
 This is different from malformed topology: bad coordinates, strand, exon phase or rank,
 translation bounds, or incomplete sequence reconstruction abort the build.
 
-The three post-CDS bases cost three bytes per sequence-backed transcript. They are enough
-to reconstruct the original translation endpoint after a short terminal deletion; they
-are not a general UTR cache. An edit needing more sequence remains unresolved.
+The resident model stores CDS bytes and both non-coding transcript flanks in two packed
+byte pools with offsets and lengths per transcript. The flank pool has no per-transcript
+allocation or padding and is cold on ordinary coding rows. It is read only when a VEP
+predicate rebuilds the 5-prime-UTR-plus-CDS or CDS-plus-3-prime-UTR string. The prepared
+relation retains the old three-base `post_cds_bases` projection for compatibility, but
+production models load the complete flanks.
 
 ### Prepared relations and publication
 
@@ -170,7 +172,7 @@ projections from them:
 
 - region ordinal, and sequence length when complete-coverage claims are requested;
 - transcript ordinal, region, span, strand, gene ordinal, flags, optional CDS fields,
-  codon table, and post-CDS bases; and
+  codon table, and complete pre-CDS and post-CDS sequence; and
 - transcript ordinal plus each exon's genomic span, cDNA span, phase, and end phase.
 
 The `core_schema` argument names relations, not a transport. It can point at tables loaded
@@ -182,8 +184,9 @@ chunks have been persisted.
 
 `duckvep_model_receipt(...)` checks dense ordinals and region/transcript agreement. It
 records the declared source, release, assembly, transcript filter, source-manifest hash,
-reference hash, model counts, and a deterministic hash over every prepared model field.
-There is no timestamp: identical declared inputs must produce the same receipt.
+reference hash, model counts including CDS and transcript-flank bases, and a deterministic
+hash over every prepared model field. There is no timestamp: identical declared inputs
+must produce the same receipt.
 
 The checked-in acceptance fixtures under `test/data/duckvep/ensembl_core/` are about 116
 KiB. The GRCh38 fixture contains complete release-116 MT and `HG2047_PATCH` source rows;
@@ -199,6 +202,12 @@ connection, validates and narrows every value, builds the transcript interval in
 only then publishes the named immutable model. A failed load publishes nothing. Several
 models may coexist in one database instance, and their numeric ordinals are meaningful
 only within their model. Stable IDs and provenance remain DuckDB columns.
+
+The transcript query accepts the original 11 columns, the legacy 12-column form ending in
+three `post_cds_bases`, or the complete 13-column form ending in `pre_cds_sequence` and
+`post_cds_sequence`. Only the complete form may resolve length-changing edits crossing a
+CDS boundary. Older models remain loadable and return `missing_transcript_flank` rather
+than guessing when such a predicate is reached.
 
 The loader treats transcript coverage as partial by default. Only a model deliberately
 loaded with `transcript_coverage_complete := true` may turn “no loaded transcript here”
@@ -278,11 +287,12 @@ The intended decision chain is:
 Specialized traversal or SNV codon code is acceptable only when an exhaustive/property
 oracle proves identical results. It is not a second biological authority.
 
-The current coding path has debt: MNVs and indels first use the generalized edit/CDS/peptide
-context and then call older shape-specific code when that context is unresolved. Header
-comments and dead route values also describe a superseded equality gate. Issue #93 owns the
-removal of that dual authority: extend the edit interpreter or emit an explicit unresolved
-result; do not silently choose a different classifier.
+Production MNVs and indels use the generalized edit/CDS/peptide context exactly once. A
+projection, sequence, capacity, or unsupported-state failure remains explicit and is never
+retried through a smaller shape-specific classifier. Narrow direct classifiers remain only
+as independent pure-C test references; the annotation path cannot select them after a
+context failure. Issue #93 owns continued real-VEP differential closure, not a second
+consequence implementation.
 
 ## NMD prediction
 

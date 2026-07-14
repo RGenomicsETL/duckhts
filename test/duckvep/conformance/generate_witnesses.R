@@ -383,6 +383,35 @@ if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
   }
 }
 
+# Pin the length-changing endpoint-Gap behavior exposed by held-out seed 71.
+# The expected terms are never stored here: executable VEP 116 supplies them.
+# The first deletion maps UTR/CDS bases followed by an intronic Gap, making the
+# peptide unavailable and leaving coding_sequence_variant. The second maps CDS,
+# stop, and 3' UTR followed by an out-of-transcript Gap; VEP's independent CIL
+# stop predicate calls that missing edit result stop_retained_variant.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  mapper_gap_ref <- nuc(102L, 50L)
+  if (!is.na(mapper_gap_ref) && nchar(mapper_gap_ref) == 50L) {
+    emit(
+      102L,
+      mapper_gap_ref,
+      substr(mapper_gap_ref, 1L, 1L),
+      "exon_edge",
+      "length_change_mapper_gap_coding_unknown"
+    )
+  }
+  stop_gap_ref <- nuc(202L, 50L)
+  if (!is.na(stop_gap_ref) && nchar(stop_gap_ref) == 50L) {
+    emit(
+      202L,
+      stop_gap_ref,
+      substr(stop_gap_ref, 1L, 1L),
+      "stop_codon",
+      "length_change_mapper_gap_stop_retained"
+    )
+  }
+}
+
 # Pin VEP's use of the complete equal-length feature to select the peptide
 # predicate window. The paired one-base controls have the same semantic edit but
 # do not pull an unchanged start or stop codon into that window.
@@ -474,6 +503,48 @@ if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
       "GTAA",
       "start_codon",
       "utr5_start_boundary_stop_is_start_only"
+    )
+  }
+}
+
+# Pin four independent predicates that VEP can combine for one length-changing
+# feature. These alleles were selected from held-out seed 71 only after the
+# shared evaluator matched the complete distribution; VEP remains the oracle.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  if (base_at(120L) == "A") {
+    emit(
+      120L,
+      "A",
+      "AAGTAAAATG",
+      "start_codon",
+      "length_change_start_and_stop"
+    )
+  }
+  if (identical(nuc(129L, 15L), "ACGTACGTACGTACG")) {
+    emit(
+      129L,
+      "ACGTACGTACGTACG",
+      "ACATAG",
+      "exon_mid",
+      "length_change_protein_and_stop"
+    )
+  }
+  if (identical(nuc(202L, 38L), "CGTACGTACGTACGTACGTACGTACGTACGTACTGGTA")) {
+    emit(
+      202L,
+      "CGTACGTACGTACGTACGTACGTACGTACGTACTGGTA",
+      "C",
+      "stop_codon",
+      "length_change_frameshift_and_stop_lost"
+    )
+  }
+  if (identical(nuc(221L, 4L), "ACGT")) {
+    emit(
+      221L,
+      "ACGT",
+      "A",
+      "exon_mid",
+      "length_change_inframe_deletion_and_stop"
     )
   }
 }
@@ -669,6 +740,10 @@ if (opt$check) {
         any(w$shape == "terminal_cds_mapping_control"),
       "missing terminal-CDS mapper-gap witness" =
         any(w$shape == "terminal_cds_mapping_gap"),
+      "missing length-changing coding mapper-gap witness" =
+        any(w$shape == "length_change_mapper_gap_coding_unknown"),
+      "missing length-changing stop mapper-gap witness" =
+        any(w$shape == "length_change_mapper_gap_stop_retained"),
       "missing complete-feature start witness" =
         any(w$shape == "feature_window_start_retained"),
       "missing minimized start control" =
@@ -680,7 +755,15 @@ if (opt$check) {
       "missing minimized terminal missense control" =
         any(w$pos == 237L & w$ref == "G" & w$alt == "T"),
       "missing minimized terminal stop-gained control" =
-        any(w$pos == 237L & w$ref == "G" & w$alt == "A")
+        any(w$pos == 237L & w$ref == "G" & w$alt == "A"),
+      "missing length-changing start/stop witness" =
+        any(w$shape == "length_change_start_and_stop"),
+      "missing shortening protein/stop witness" =
+        any(w$shape == "length_change_protein_and_stop"),
+      "missing terminal shortfall witness" =
+        any(w$shape == "length_change_frameshift_and_stop_lost"),
+      "missing deletion/stop witness" =
+        any(w$shape == "length_change_inframe_deletion_and_stop")
     )
   }
   cat(glue(

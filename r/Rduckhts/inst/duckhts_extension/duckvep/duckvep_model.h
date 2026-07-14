@@ -33,7 +33,10 @@ typedef struct duckvep_owned_model {
 	uint64_t *cds_sequence_offsets;
 	uint32_t *cds_sequence_lengths;
 	uint8_t *codon_tables;
-	uint8_t *post_cds_bases;
+	uint64_t *pre_cds_sequence_offsets;
+	uint32_t *pre_cds_sequence_lengths;
+	uint64_t *post_cds_sequence_offsets;
+	uint32_t *post_cds_sequence_lengths;
 	uint32_t *exon_starts;
 	uint32_t *exon_ends;
 	uint32_t *exon_cdna_starts;
@@ -42,13 +45,17 @@ typedef struct duckvep_owned_model {
 	int8_t *exon_end_phases;
 	uint8_t *cds_sequence_bytes;
 	size_t cds_sequence_length;
+	uint8_t *flank_sequence_bytes;
+	size_t flank_sequence_length;
 	cgranges_t *interval_index;
 	int interval_index_complete;
 	int transcript_coverage_complete;
+	int transcript_flanks_complete;
 	size_t known_seq_region_capacity;
 	size_t transcript_capacity;
 	size_t exon_capacity;
 	size_t cds_sequence_capacity;
+	size_t flank_sequence_capacity;
 } duckvep_owned_model_t;
 
 typedef struct duckvep_workspace_cache {

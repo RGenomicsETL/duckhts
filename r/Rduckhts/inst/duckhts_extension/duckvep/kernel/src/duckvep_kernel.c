@@ -363,6 +363,9 @@ duckvep_status_t duckvep_model_open(
     if (chrom_run > max_chrom_run) max_chrom_run = chrom_run;
 
     if (seq != NULL) {
+        int have_flank_columns;
+        int any_flank_column;
+
         if (seq->transcript_count != transcripts->transcript_count) {
             return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_SEQ_COUNT,
                         "sequence pool transcript_count mismatch");
@@ -373,30 +376,57 @@ duckvep_status_t duckvep_model_open(
             return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                         "sequence pool has count>0 but null columns");
         }
-        if (seq->post_cds_bases != NULL &&
-            seq->transcript_count > SIZE_MAX / DUCKVEP_POST_CDS_BASE_COUNT) {
-            return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_MODEL_SEQ_COUNT,
-                        "post-CDS sequence pool exceeds size_t");
+        any_flank_column = seq->pre_cds_offset != NULL ||
+                           seq->pre_cds_length != NULL ||
+                           seq->post_cds_offset != NULL ||
+                           seq->post_cds_length != NULL;
+        have_flank_columns = seq->pre_cds_offset != NULL &&
+                             seq->pre_cds_length != NULL &&
+                             seq->post_cds_offset != NULL &&
+                             seq->post_cds_length != NULL;
+        if ((any_flank_column && !have_flank_columns) ||
+            ((seq->flanks_complete != 0u || seq->flank_bytes_len != 0u ||
+              seq->flank_bytes != NULL) && !have_flank_columns) ||
+            (seq->flank_bytes_len != 0u && seq->flank_bytes == NULL) ||
+            seq->flanks_complete > 1u) {
+            return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
+                        "transcript flank pool has incomplete columns or storage");
         }
         for (t = 0u; t < seq->transcript_count; t++) {
             uint64_t off = seq->cds_offset[t];
             uint64_t len = (uint64_t)seq->cds_length[t];
-            size_t tail_base = t * DUCKVEP_POST_CDS_BASE_COUNT;
-            size_t tail_i;
-            uint8_t tail_length = 0u;
-            int tail_ended = 0;
+            uint64_t pre_off = have_flank_columns
+                ? seq->pre_cds_offset[t] : 0u;
+            uint64_t pre_len = have_flank_columns
+                ? (uint64_t)seq->pre_cds_length[t] : 0u;
+            uint64_t post_off = have_flank_columns
+                ? seq->post_cds_offset[t] : 0u;
+            uint64_t post_len = have_flank_columns
+                ? (uint64_t)seq->post_cds_length[t] : 0u;
+            size_t flank_i;
 
-            for (tail_i = 0u; seq->post_cds_bases != NULL &&
-                 tail_i < DUCKVEP_POST_CDS_BASE_COUNT; tail_i++) {
-                uint8_t base = seq->post_cds_bases[tail_base + tail_i];
-                if (base == 0u) {
-                    tail_ended = 1;
-                } else if (tail_ended || !model_sequence_base_valid(base)) {
+            if (pre_off > (uint64_t)seq->flank_bytes_len ||
+                pre_len > (uint64_t)seq->flank_bytes_len - pre_off ||
+                post_off > (uint64_t)seq->flank_bytes_len ||
+                post_len > (uint64_t)seq->flank_bytes_len - post_off) {
+                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_SEQ_RANGE,
+                            "transcript flank offset/length is out of range");
+            }
+            for (flank_i = 0u; flank_i < (size_t)pre_len; flank_i++) {
+                if (!model_sequence_base_valid(
+                    seq->flank_bytes[(size_t)pre_off + flank_i])) {
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
-                                "post-CDS bases are invalid or not zero-padded");
-                } else {
-                    tail_length++;
+                                "pre-CDS sequence contains a non-ACGTN base");
+                }
+            }
+            for (flank_i = 0u; flank_i < (size_t)post_len; flank_i++) {
+                if (!model_sequence_base_valid(
+                    seq->flank_bytes[(size_t)post_off + flank_i])) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "post-CDS sequence contains a non-ACGTN base");
                 }
             }
             if (off > (uint64_t)seq->cds_bytes_len ||
@@ -408,6 +438,8 @@ duckvep_status_t duckvep_model_open(
                 uint32_t coding_start_cdna;
                 uint32_t coding_end_cdna;
                 uint64_t expected_len;
+                uint64_t expected_post_len;
+                uint64_t expected_pre_len;
                 uint32_t coding_start_genomic;
                 uint32_t coding_end_genomic;
                 size_t coding_start_exon;
@@ -451,14 +483,21 @@ duckvep_status_t duckvep_model_open(
                                 DVW_MODEL_SEQ_CONTRACT,
                                 "prepared CDS length or codon table is inconsistent");
                 }
-                if ((uint64_t)tail_length >
+                expected_pre_len = (uint64_t)coding_start_cdna - 1u;
+                expected_post_len =
                     (uint64_t)exons->cdna_end1[
                         (size_t)transcripts->exon_offset[t] +
                         (size_t)transcripts->exon_count[t] - 1u] -
-                    (uint64_t)coding_end_cdna) {
+                    (uint64_t)coding_end_cdna;
+                if ((seq->flanks_complete != 0u &&
+                     (pre_len != expected_pre_len ||
+                      post_len != expected_post_len)) ||
+                    (seq->flanks_complete == 0u &&
+                     (pre_len > expected_pre_len ||
+                      post_len > expected_post_len))) {
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
-                                "post-CDS bases exceed the transcript tail");
+                                "transcript flank lengths are inconsistent with cDNA projection");
                 }
                 for (i = 0u; i < (size_t)len; i++) {
                     if (!model_sequence_base_valid(seq->cds_bytes[(size_t)off + i])) {
@@ -467,12 +506,19 @@ duckvep_status_t duckvep_model_open(
                                     "prepared CDS contains a non-ACGTN base");
                     }
                 }
-            } else if (transcripts->cds_start1[t] == 0u &&
-                       seq->codon_table[t] != 0u && seq->codon_table[t] != 1u &&
-                       seq->codon_table[t] != 2u) {
-                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                            DVW_MODEL_SEQ_CONTRACT,
-                            "non-coding transcript has an invalid codon-table value");
+            } else {
+                if (pre_len != 0u || post_len != 0u) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "transcript without prepared CDS has sequence flanks");
+                }
+                if (transcripts->cds_start1[t] == 0u &&
+                    seq->codon_table[t] != 0u && seq->codon_table[t] != 1u &&
+                    seq->codon_table[t] != 2u) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "non-coding transcript has an invalid codon-table value");
+                }
             }
             if ((size_t)len > max_cds_len) max_cds_len = (size_t)len;
         }
@@ -864,38 +910,6 @@ static int insertion_placement_uses_right_flank(
                                        right, &projection);
 }
 
-static int event_feature_alleles(
-    const duckvep_variant_batch_t *variants,
-    uint32_t                       variant_idx,
-    const duckvep_event_t         *event,
-    const uint8_t                **ref,
-    uint16_t                      *ref_length,
-    const uint8_t                **alt,
-    uint16_t                      *alt_length) {
-
-    uint16_t offset;
-    uint16_t raw_ref_length;
-    uint16_t raw_alt_length;
-
-    if (variants == NULL || event == NULL || ref == NULL ||
-        ref_length == NULL || alt == NULL || alt_length == NULL ||
-        variants->allele_bytes == NULL || variants->ref_offset == NULL ||
-        variants->alt_offset == NULL || variants->ref_length == NULL ||
-        variants->alt_length == NULL) {
-        return 0;
-    }
-    offset = event->feature_allele_offset;
-    raw_ref_length = variants->ref_length[variant_idx];
-    raw_alt_length = variants->alt_length[variant_idx];
-    if (offset > raw_ref_length || offset > raw_alt_length) return 0;
-
-    *ref = variants->allele_bytes + variants->ref_offset[variant_idx] + offset;
-    *alt = variants->allele_bytes + variants->alt_offset[variant_idx] + offset;
-    *ref_length = (uint16_t)(raw_ref_length - offset);
-    *alt_length = (uint16_t)(raw_alt_length - offset);
-    return 1;
-}
-
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
@@ -930,7 +944,7 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     pos = event.start1;
     topology_start1 = event.feature_start1;
     topology_end1 = event.feature_end1;
-    have_feature_alleles = event_feature_alleles(
+    have_feature_alleles = duckvep_event_feature_alleles(
         c->variants, variant_idx, &event,
         &feature_ref, &feature_ref_length,
         &feature_alt, &feature_alt_length);
@@ -1030,20 +1044,14 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
         if (c->delta_route_stats != NULL) {
             if (route == DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT) {
                 c->delta_route_stats->substitution_context++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_MNV_DIRECT_FALLBACK) {
-                c->delta_route_stats->mnv_direct_fallback++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT) {
+                c->delta_route_stats->boundary_context++;
             } else if (route == DUCKVEP_DELTA_ROUTE_DEL_CONTEXT) {
                 c->delta_route_stats->del_context++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_DEL_DIRECT_FALLBACK) {
-                c->delta_route_stats->del_direct_fallback++;
             } else if (route == DUCKVEP_DELTA_ROUTE_INS_CONTEXT) {
                 c->delta_route_stats->ins_context++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INS_DIRECT_FALLBACK) {
-                c->delta_route_stats->ins_direct_fallback++;
             } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT) {
                 c->delta_route_stats->indel_context++;
-            } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_DIRECT_FALLBACK) {
-                c->delta_route_stats->indel_direct_fallback++;
             }
         }
         duckvep_effect_ctx_apply_delta(&ectx, &delta);
@@ -1052,7 +1060,12 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     duckvep_effect_ctx_finalize(&ectx);
 
     cmask = duckvep_effect_eval(ectx.pre_bits);
-    if (cmask == 0u) return 1; /* nothing to emit for this pair */
+    /* BaseVariationFeatureOverlapAllele::get_all_OverlapConsequences assigns
+     * VEP 116's default intergenic consequence when a real overlap allele has
+     * exhausted its predicate list without a match. Preserve the transcript
+     * candidate here. The adapter separately handles an input for which the
+     * model produced no transcript candidate at all. */
+    if (cmask == 0u) cmask = DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
     duckvep_nmd_predict(tx, &c->model->exons, (size_t)tx_idx, &event,
                         cmask, &nmd);
 
