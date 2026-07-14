@@ -5490,7 +5490,7 @@ TEST annotate_codon_mnv_same_codon_known_scene(void) {
     ASSERT_EQ((uint8_t)'G', rows[0].aa_alt);
     stats = duckvep_workspace_delta_route_stats(ws);
     ASSERT(stats != NULL);
-    ASSERT_EQ(1u, stats->mnv_context);
+    ASSERT_EQ(1u, stats->substitution_context);
     ASSERT_EQ(0u, stats->mnv_direct_fallback);
 
     duckvep_workspace_close(ws);
@@ -5568,7 +5568,7 @@ TEST annotate_codon_mnv_start_lost_route_known_scene(void) {
     ASSERT_EQ((uint8_t)'A', rows[0].aa_alt);
     stats = duckvep_workspace_delta_route_stats(ws);
     ASSERT(stats != NULL);
-    ASSERT_EQ(1u, stats->mnv_context);
+    ASSERT_EQ(1u, stats->substitution_context);
     ASSERT_EQ(0u, stats->mnv_direct_fallback);
 
     duckvep_workspace_close(ws);
@@ -5675,9 +5675,9 @@ TEST annotate_cursor_mnv_start_lost_route_matches_tile_known_scene(void) {
     ASSERT_EQ(1u, cursor_n);
     ASSERT(consequence_rows_equal(&tile_rows[0], &cursor_rows[0]));
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_START_LOST), cursor_rows[0].consequence_mask);
-    ASSERT_EQ(1u, tile_stats.mnv_context);
+    ASSERT_EQ(1u, tile_stats.substitution_context);
     ASSERT_EQ(0u, tile_stats.mnv_direct_fallback);
-    ASSERT_EQ(tile_stats.mnv_context, cursor_stats.mnv_context);
+    ASSERT_EQ(tile_stats.substitution_context, cursor_stats.substitution_context);
     ASSERT_EQ(tile_stats.mnv_direct_fallback, cursor_stats.mnv_direct_fallback);
 
     duckvep_annotate_cursor_close(cur);
@@ -5770,7 +5770,7 @@ TEST annotate_codon_mnv_len3_and_cross_codon_known_scene(void) {
     ASSERT_EQ(-1, rows[1].protein_pos);
     stats = duckvep_workspace_delta_route_stats(ws);
     ASSERT(stats != NULL);
-    ASSERT_EQ(2u, stats->mnv_context);
+    ASSERT_EQ(2u, stats->substitution_context);
     ASSERT_EQ(0u, stats->mnv_direct_fallback);
 
     duckvep_workspace_close(ws);
@@ -5883,7 +5883,7 @@ TEST annotate_codon_mnv_cross_codon_missense_known_scene(void) {
     }
     stats = duckvep_workspace_delta_route_stats(ws);
     ASSERT(stats != NULL);
-    ASSERT_EQ(5u, stats->mnv_context);
+    ASSERT_EQ(5u, stats->substitution_context);
     ASSERT_EQ(0u, stats->mnv_direct_fallback);
 
     duckvep_workspace_close(ws);
@@ -6107,7 +6107,9 @@ TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
         (uint8_t)DUCKVEP_KIND_INS
     };
     static const uint8_t  abytes[24] = {
-        'G','A','A','A', 'G','A','G','A',   /* GAAA>GAGA => cds5 A>G, K->R */
+        /* Complete feature spans codons 1-2 while only CDS5 changes. VEP sees
+         * MK>MR, so start_lost and start_retained_variant are both true. */
+        'G','A','A','A', 'G','A','G','A',
         'G','A','A','A','C', 'G','C',       /* GAAAC>GC deletes codon2 AAA */
         'A','C', 'A','G','C','C','C'        /* AC>AGCCC inserts GCC after codon2 */
     };
@@ -6116,13 +6118,14 @@ TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
     static const uint16_t rlen[3] = {4u, 5u, 2u};
     static const uint16_t alen[3] = {4u, 2u, 5u};
     static const uint64_t exp_mask[3] = {
-        DUCKVEP_SO(DUCKVEP_SO_MISSENSE),
+        DUCKVEP_SO(DUCKVEP_SO_START_LOST) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED),
         DUCKVEP_SO(DUCKVEP_SO_INFRAME_DELETION),
         DUCKVEP_SO(DUCKVEP_SO_INFRAME_INSERTION)
     };
-    static const int32_t exp_protein[3] = {2, 2, 3};
-    static const int32_t exp_cdna[3] = {5, -1, -1};
-    static const int32_t exp_cds[3] = {5, -1, -1};
+    static const int32_t exp_protein[3] = {-1, 2, 3};
+    static const int32_t exp_cdna[3] = {-1, -1, -1};
+    static const int32_t exp_cds[3] = {-1, -1, -1};
 
     duckvep_transcript_model_t tx;
     duckvep_exon_model_t exons;
@@ -6165,8 +6168,152 @@ TEST annotate_codon_padded_small_variant_delta_known_scene(void) {
         ASSERT_EQ(exp_cds[i], rows[i].cds_pos);
         ASSERT_EQ(exp_protein[i], rows[i].protein_pos);
     }
-    ASSERT_EQ((uint8_t)'K', rows[0].aa_ref);
-    ASSERT_EQ((uint8_t)'R', rows[0].aa_alt);
+    ASSERT_EQ((uint8_t)0u, rows[0].aa_ref);
+    ASSERT_EQ((uint8_t)0u, rows[0].aa_alt);
+
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
+TEST annotate_equal_length_feature_window_both_strands_known_scene(void) {
+    static const uint16_t tchrom[2] = {0u, 1u};
+    static const uint32_t tstart[2] = {1000u, 2000u};
+    static const uint32_t tend[2] = {1014u, 2014u};
+    static const int8_t tstrand[2] = {1, -1};
+    static const uint64_t tflags[2] = {0u, 0u};
+    static const uint32_t texoff[2] = {0u, 1u};
+    static const uint16_t texcnt[2] = {1u, 1u};
+    static const uint32_t tcds_s[2] = {1000u, 2000u};
+    static const uint32_t tcds_e[2] = {1014u, 2014u};
+    static const uint32_t estart[2] = {1000u, 2000u};
+    static const uint32_t eend[2] = {1014u, 2014u};
+    static const uint32_t ecdna_s[2] = {1u, 1u};
+    static const uint32_t ecdna_e[2] = {15u, 15u};
+    static const int8_t ephase[2] = {0, 0};
+    static const uint8_t cds_bytes[30] = {
+        'A','T','G', 'G','A','A', 'C','C','C', 'T','G','G', 'T','A','A',
+        'A','T','G', 'G','A','A', 'C','C','C', 'T','G','G', 'T','A','A'
+    };
+    static const uint64_t cds_off[2] = {0u, 15u};
+    static const uint32_t cds_len[2] = {15u, 15u};
+    static const uint8_t cds_tab[2] = {
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD,
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD
+    };
+
+    /* Each two-base feature differs at one base. Its paired one-base record has
+     * the same semantic CDS edit but does not select the adjacent start/stop codon. */
+    static const uint16_t vchrom[12] = {
+        0u, 0u, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 1u, 1u
+    };
+    static const uint32_t vpos[12] = {
+        1002u, 1003u, 1011u, 1011u, 1011u, 1011u,
+        2002u, 2002u, 2003u, 2003u, 2011u, 2011u
+    };
+    static const uint32_t vend[12] = {
+        1003u, 1003u, 1011u, 1011u, 1012u, 1012u,
+        2003u, 2003u, 2003u, 2003u, 2012u, 2011u
+    };
+    static const uint8_t vkind[12] = {
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV, (uint8_t)DUCKVEP_KIND_SNV
+    };
+    static const uint8_t abytes[36] = {
+        'G','G', 'G','A', 'G','A', 'G','A', 'G','T',
+        'G','T', 'A','T', 'G','T', 'T','T',
+        'A','C', 'A','A', 'A','C', 'A','T', 'C','A', 'C','T',
+        'C','C', 'T','C', 'C','T'
+    };
+    static const uint32_t roff[12] = {
+        0u, 4u, 6u, 8u, 10u, 14u, 18u, 22u, 26u, 28u, 30u, 34u
+    };
+    static const uint32_t aoff[12] = {
+        2u, 5u, 7u, 9u, 12u, 16u, 20u, 24u, 27u, 29u, 32u, 35u
+    };
+    static const uint16_t rlen[12] = {
+        2u, 1u, 1u, 1u, 2u, 2u, 2u, 2u, 1u, 1u, 2u, 1u
+    };
+    static const uint16_t alen[12] = {
+        2u, 1u, 1u, 1u, 2u, 2u, 2u, 2u, 1u, 1u, 2u, 1u
+    };
+    static const uint64_t expected[12] = {
+        DUCKVEP_SO(DUCKVEP_SO_START_LOST) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_MISSENSE),
+        DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED),
+        DUCKVEP_SO(DUCKVEP_SO_MISSENSE),
+        DUCKVEP_SO(DUCKVEP_SO_MISSENSE),
+        DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_MISSENSE),
+        DUCKVEP_SO(DUCKVEP_SO_MISSENSE),
+        DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED),
+        DUCKVEP_SO(DUCKVEP_SO_START_LOST) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_MISSENSE)
+    };
+    static const int32_t expected_protein[12] = {
+        -1, 2, 4, 4, -1, -1, -1, -1, 4, 4, -1, 2
+    };
+    static const uint8_t expected_ref_aa[12] = {
+        0u, 'E', 'W', 'W', 0u, 0u, 0u, 0u, 'W', 'W', 0u, 'E'
+    };
+    static const uint8_t expected_alt_aa[12] = {
+        0u, 'K', '*', 'C', 0u, 0u, 0u, 0u, 'C', '*', 0u, 'K'
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_sequence_pool_t seq;
+    duckvep_variant_batch_t v;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *ws = NULL;
+    duckvep_error_t err;
+    duckvep_consequence_t rows[12];
+    duckvep_result_builder_t rb;
+    const duckvep_workspace_delta_route_stats_t *stats;
+    size_t i;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    memset(&seq, 0, sizeof seq); memset(&v, 0, sizeof v); memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend; tx.strand = tstrand;
+    tx.flags = tflags; tx.exon_offset = texoff; tx.exon_count = texcnt;
+    tx.cds_start1 = tcds_s; tx.cds_end1 = tcds_e; tx.transcript_count = 2u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 2u;
+    seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
+    seq.cds_offset = cds_off; seq.cds_length = cds_len; seq.codon_table = cds_tab;
+    seq.transcript_count = 2u;
+    v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend; v.variant_kind = vkind;
+    v.allele_bytes = abytes; v.allele_bytes_len = sizeof abytes;
+    v.ref_offset = roff; v.alt_offset = aoff;
+    v.ref_length = rlen; v.alt_length = alen; v.count = 12u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_workspace_delta_route_stats_reset(ws);
+    duckvep_result_builder_init(&rb, rows, 12u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(12u, duckvep_result_builder_count(&rb));
+    for (i = 0u; i < 12u; i++) {
+        ASSERT_EQ_FMT((uint32_t)i, rows[i].variant_idx, "%u");
+        ASSERT_EQ(expected[i], rows[i].consequence_mask);
+        ASSERT_EQ(expected_protein[i], rows[i].protein_pos);
+        ASSERT_EQ(expected_ref_aa[i], rows[i].aa_ref);
+        ASSERT_EQ(expected_alt_aa[i], rows[i].aa_alt);
+    }
+    stats = duckvep_workspace_delta_route_stats(ws);
+    ASSERT(stats != NULL);
+    ASSERT_EQ(6u, stats->substitution_context);
+    ASSERT_EQ(0u, stats->mnv_direct_fallback);
 
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
@@ -8364,6 +8511,34 @@ static uint64_t start_codon_snv_to_so(uint32_t change, char aa_ref, char aa_alt)
     return mask;
 }
 
+/* Independent VEP-116 oracle for one codon selected by an equal-length uploaded
+ * feature. Unlike a minimized SNV, the start predicates inspect the complete
+ * feature: unequal local peptides make start_lost true, while the rebuilt ATG
+ * independently makes start_retained_variant true. */
+static uint64_t vep_feature_codon_to_so(
+    char ref_aa, char alt_aa, const char alt_codon[4], int overlaps_start) {
+
+    uint64_t mask = 0u;
+    int start_lost = overlaps_start && ref_aa != alt_aa;
+    int start_retained = overlaps_start &&
+        alt_codon[0] == 'A' && alt_codon[1] == 'T' && alt_codon[2] == 'G';
+
+    if (start_lost) mask |= DUCKVEP_SO(DUCKVEP_SO_START_LOST);
+    if (start_retained) mask |= DUCKVEP_SO(DUCKVEP_SO_START_RETAINED);
+    if (ref_aa == '*' && alt_aa != '*') {
+        mask |= DUCKVEP_SO(DUCKVEP_SO_STOP_LOST);
+    } else if (ref_aa == '*' && alt_aa == '*') {
+        mask |= DUCKVEP_SO(DUCKVEP_SO_STOP_RETAINED);
+    } else if (ref_aa != '*' && alt_aa == '*') {
+        mask |= DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED);
+    } else if (ref_aa == alt_aa) {
+        if (!start_retained) mask |= DUCKVEP_SO(DUCKVEP_SO_SYNONYMOUS);
+    } else if (!start_lost) {
+        mask |= DUCKVEP_SO(DUCKVEP_SO_MISSENSE);
+    }
+    return mask;
+}
+
 /* Coverage accounting so "across codon-change classes" is a checked claim, not a
  * hope: the run must actually observe each class at least once (the framework's
  * coverage signal, applied locally). */
@@ -8539,7 +8714,7 @@ static enum theft_trial_res prop_annotate_mnv_matches_codon_oracle(struct theft 
     }
     cr = duckvep_codon_change(ref_codon, alt_codon, DUCKVEP_CODON_TABLE_STANDARD);
     want = (codon_start == 1u && protein_pos == 1u)
-        ? start_codon_snv_to_so(cr.change, cr.aa_ref, cr.aa_alt)
+        ? vep_feature_codon_to_so(cr.aa_ref, cr.aa_alt, alt_codon, 1)
         : codon_change_to_so(cr.change, cr.aa_ref);
 
     if (s->alen == 2u) g_mnv_cov.len2++; else if (s->alen == 3u) g_mnv_cov.len3++;
@@ -8772,12 +8947,12 @@ static enum theft_trial_res prop_annotate_cross_codon_mnv_matches_oracle(struct 
     if (stats == NULL) { tr = THEFT_TRIAL_FAIL; goto done; }
     if (rows[0].consequence_mask != want) { tr = THEFT_TRIAL_FAIL; goto done; }
     if (f.valid) {
-        if (stats->mnv_context != 1u ||
+        if (stats->substitution_context != 1u ||
             stats->mnv_direct_fallback != 0u) {
             tr = THEFT_TRIAL_FAIL; goto done;
         }
     } else {
-        if (stats->mnv_context != 0u ||
+        if (stats->substitution_context != 0u ||
             stats->mnv_direct_fallback != 1u) {
             tr = THEFT_TRIAL_FAIL; goto done;
         }
@@ -11815,7 +11990,7 @@ TEST coding_context_delta_delins_known_scene(void) {
         ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_PROTEIN_ALTERING), rows[0].consequence_mask);
         stats = duckvep_workspace_delta_route_stats(ws);
         ASSERT(stats != NULL);
-        ASSERT_EQ(0u, stats->mnv_context);
+        ASSERT_EQ(0u, stats->substitution_context);
         ASSERT_EQ(0u, stats->mnv_direct_fallback);
         ASSERT_EQ(0u, stats->del_context);
         ASSERT_EQ(0u, stats->del_direct_fallback);
@@ -11969,7 +12144,7 @@ TEST annotate_delins_boundary_no_route_known_scene(void) {
             ASSERT_EQ(expected_masks[case_idx], rows[0].consequence_mask);
             stats = duckvep_workspace_delta_route_stats(ws);
             ASSERT(stats != NULL);
-            ASSERT_EQ(0u, stats->mnv_context);
+            ASSERT_EQ(0u, stats->substitution_context);
             ASSERT_EQ(0u, stats->mnv_direct_fallback);
             ASSERT_EQ(0u, stats->del_context);
             ASSERT_EQ(0u, stats->del_direct_fallback);
@@ -12035,7 +12210,7 @@ TEST annotate_inframe_insertion_route_known_scene(void) {
         ASSERT_EQ(3, rows[0].protein_pos);
         stats = duckvep_workspace_delta_route_stats(ws);
         ASSERT(stats != NULL);
-        ASSERT_EQ(0u, stats->mnv_context);
+        ASSERT_EQ(0u, stats->substitution_context);
         ASSERT_EQ(0u, stats->mnv_direct_fallback);
         ASSERT_EQ(0u, stats->del_context);
         ASSERT_EQ(0u, stats->del_direct_fallback);
@@ -12139,7 +12314,7 @@ TEST annotate_inframe_deletion_route_known_scene(void) {
         ASSERT_EQ(2, rows[0].protein_pos);
         stats = duckvep_workspace_delta_route_stats(ws);
         ASSERT(stats != NULL);
-        ASSERT_EQ(0u, stats->mnv_context);
+        ASSERT_EQ(0u, stats->substitution_context);
         ASSERT_EQ(0u, stats->mnv_direct_fallback);
         ASSERT_EQ(1u, stats->del_context);
         ASSERT_EQ(0u, stats->del_direct_fallback);
@@ -12600,7 +12775,7 @@ TEST sequence_delta_with_scratch_cross_codon_known_scene(void) {
     ASSERT(kprop_delta_is_coarse_cross_codon_missense(&shape));
     ASSERT(kprop_sequence_delta_equal(&shape, &direct));
     ASSERT(kprop_sequence_delta_equal(&shape, &routed));
-    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_CONTEXT, route);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
     PASS();
 }
 
@@ -12620,7 +12795,7 @@ TEST sequence_delta_with_scratch_cross_codon_reverse_known_scene(void) {
     ASSERT(kprop_delta_is_coarse_cross_codon_missense(&shape));
     ASSERT(kprop_sequence_delta_equal(&shape, &direct));
     ASSERT(kprop_sequence_delta_equal(&shape, &routed));
-    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_CONTEXT, route);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
     PASS();
 }
 
@@ -12665,7 +12840,7 @@ TEST sequence_delta_with_scratch_cross_codon_negative_scenes(void) {
            !direct.stop_retained && !direct.start_lost && !direct.start_retained);
     ASSERT(!shape.valid);
     ASSERT(kprop_sequence_delta_equal(&direct, &routed));
-    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_CONTEXT, route);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
 
     /* junction codon becomes a stop -> stop_gained */
     ASSERT(kprop_cross_codon_scene_deltas(1, stop_cds, 15u, 5u, 3u, stop_alt, 3u,
@@ -12675,7 +12850,7 @@ TEST sequence_delta_with_scratch_cross_codon_negative_scenes(void) {
            !direct.stop_retained && !direct.start_lost && !direct.start_retained);
     ASSERT(!shape.valid);
     ASSERT(kprop_sequence_delta_equal(&direct, &routed));
-    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_CONTEXT, route);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
 
     /* window includes the terminal (last) codon -> missense */
     ASSERT(kprop_cross_codon_scene_deltas(1, terminal_cds, 9u, 6u, 2u, terminal_alt, 2u,
@@ -12683,7 +12858,7 @@ TEST sequence_delta_with_scratch_cross_codon_negative_scenes(void) {
     ASSERT(direct.valid && direct.missense && direct.protein_pos == -1);
     ASSERT(!shape.valid);
     ASSERT(kprop_sequence_delta_equal(&direct, &routed));
-    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_CONTEXT, route);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
 
     /* four-base window spanning two codons -> missense */
     ASSERT(kprop_cross_codon_scene_deltas(1, wide_cds, 15u, 5u, 4u, wide_alt, 4u,
@@ -12691,7 +12866,7 @@ TEST sequence_delta_with_scratch_cross_codon_negative_scenes(void) {
     ASSERT(direct.valid && direct.missense && direct.protein_pos == -1);
     ASSERT(!shape.valid);
     ASSERT(kprop_sequence_delta_equal(&direct, &routed));
-    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_CONTEXT, route);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
 
     /* unequal ref/alt length on a KIND_MNV is a disguised delins: genuinely unsupported. */
     ASSERT(kprop_cross_codon_scene_deltas(1, length_cds, 15u, 6u, 2u, length_alt, 1u,
@@ -12700,6 +12875,92 @@ TEST sequence_delta_with_scratch_cross_codon_negative_scenes(void) {
     ASSERT(!shape.valid);
     ASSERT(!routed.valid);
     ASSERT_EQ(DUCKVEP_DELTA_ROUTE_MNV_DIRECT_FALLBACK, route);
+    PASS();
+}
+
+TEST feature_substitution_window_fails_closed_known_scene(void) {
+    static uint8_t cds[15] = {
+        'A','T','G',  'N','A','A',  'C','C','C',  'T','G','G',  'T','A','A'
+    };
+    struct kprop_coding s;
+    duckvep_haplotype_edit_t edits[4];
+    uint8_t alt_cds[64];
+    uint8_t ref_pep[32];
+    uint8_t alt_pep[32];
+    duckvep_delta_scratch_t scratch;
+    duckvep_event_t event;
+    duckvep_sequence_delta_t delta;
+    duckvep_sequence_delta_route_t route;
+
+    memset(&s, 0, sizeof s);
+    s.cds = cds; s.chrom = 0u; s.strand = 1; s.flags = 0u;
+    s.tstart = 1000u; s.tend = 1014u; s.cds_s = 1000u; s.cds_e = 1014u;
+    s.es = 1000u; s.ee = 1014u; s.ecds = 1u; s.ecde = 15u;
+    s.eph = 0; s.eeph = 0; s.exoff = 0u; s.excnt = 1u; s.vchrom = 0u;
+    s.vkind = (uint8_t)DUCKVEP_KIND_SNV;
+    s.roff = 0u; s.aoff = 2u; s.rlen = 2u; s.alen = 2u;
+    kprop_wire_coding_scene(&s, sizeof cds);
+
+    scratch.edits = edits; scratch.edits_cap = 4u;
+    scratch.alt_cds = alt_cds; scratch.alt_cds_cap = sizeof alt_cds;
+    scratch.ref_peptide = ref_pep; scratch.ref_peptide_cap = sizeof ref_pep;
+    scratch.alt_peptide = alt_pep; scratch.alt_peptide_cap = sizeof alt_pep;
+
+    /* The semantic edit is G>A at CDS position 3. The complete uploaded feature
+     * also retains an N in the next codon, so VEP cannot use the widened peptide
+     * window. Do not retry the apparently valid one-base edit. */
+    s.vpos = 1002u; s.vend = 1003u;
+    s.abytes[0] = 'G'; s.abytes[1] = 'N';
+    s.abytes[2] = 'A'; s.abytes[3] = 'N';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_AMBIGUOUS, delta.sequence_status);
+
+    /* The retained A is not the transcript's G at CDS position 12. The changed
+     * T>C base itself is valid, so validating only the trimmed edit would miss
+     * this reference mismatch and emit a supported terminal-stop consequence. */
+    s.vpos = 1011u; s.vend = 1012u;
+    s.abytes[0] = 'A'; s.abytes[1] = 'T';
+    s.abytes[2] = 'A'; s.abytes[3] = 'C';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH,
+              delta.sequence_status);
+
+    /* On the reverse strand genomic 1002-1003 maps to CDS positions 13-12.
+     * The same checks must follow genomic byte order while comparing against
+     * the reverse-complemented transcript bases. */
+    s.strand = -1;
+    kprop_wire_coding_scene(&s, sizeof cds);
+    s.vpos = 1002u; s.vend = 1003u;
+    s.abytes[0] = 'G'; s.abytes[1] = 'C';
+    s.abytes[2] = 'G'; s.abytes[3] = 'T';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH,
+              delta.sequence_status);
+
+    s.abytes[0] = 'N'; s.abytes[1] = 'C';
+    s.abytes[2] = 'N'; s.abytes[3] = 'T';
+    duckvep_event_load(&s.v, 0u, &event);
+    duckvep_sequence_delta_fill_for_annotation_trace(
+        DUCKVEP_KIND_SNV, &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u,
+        event.start1, s.strand, &scratch, &event, &route, &delta);
+    ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT, route);
+    ASSERT(!delta.valid);
+    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_AMBIGUOUS, delta.sequence_status);
     PASS();
 }
 
@@ -12854,9 +13115,9 @@ static enum theft_trial_res prop_cursor_padded_snv_matches_tile(struct theft *t,
     cursor_stats = *stats;
 
     if (!saw_full || tile_n != cursor_n || tile_n == 0u) { res = THEFT_TRIAL_FAIL; goto done; }
-    if (tile_stats.mnv_context != 0u ||
+    if (tile_stats.substitution_context != 1u ||
         tile_stats.mnv_direct_fallback != 0u ||
-        tile_stats.mnv_context != cursor_stats.mnv_context ||
+        tile_stats.substitution_context != cursor_stats.substitution_context ||
         tile_stats.mnv_direct_fallback != cursor_stats.mnv_direct_fallback) {
         res = THEFT_TRIAL_FAIL; goto done;
     }
@@ -12985,7 +13246,7 @@ static enum theft_trial_res prop_cursor_cross_codon_mnv_route_matches_tile(
     if (!consequence_rows_equal(&tile_rows[0], &cursor_rows[0])) {
         res = THEFT_TRIAL_FAIL; goto done;
     }
-    if (tile_stats.mnv_context != cursor_stats.mnv_context ||
+    if (tile_stats.substitution_context != cursor_stats.substitution_context ||
         tile_stats.mnv_direct_fallback != cursor_stats.mnv_direct_fallback) {
         res = THEFT_TRIAL_FAIL; goto done;
     }
@@ -12994,7 +13255,7 @@ static enum theft_trial_res prop_cursor_cross_codon_mnv_route_matches_tile(
      * resolves through the context interpreter. The
      * property under test is that a chunked cursor and a single tile agree on both the row
      * and the route stats for any output split — verified above. */
-    if (tile_stats.mnv_context != 1u ||
+    if (tile_stats.substitution_context != 1u ||
         tile_stats.mnv_direct_fallback != 0u) {
         res = THEFT_TRIAL_FAIL; goto done;
     }
@@ -13201,7 +13462,7 @@ static enum theft_trial_res prop_delta_scratch_cross_codon_mnv_matches_oracle(
      * resolves; the authoritative interpreter emits it directly and the router echoes it. */
     f = kprop_cross_codon_mnv_oracle_facts(s);
     if (!f.valid) return THEFT_TRIAL_FAIL;
-    if (route != DUCKVEP_DELTA_ROUTE_MNV_CONTEXT) return THEFT_TRIAL_FAIL;
+    if (route != DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT) return THEFT_TRIAL_FAIL;
     if (!direct.valid || !routed.valid) return THEFT_TRIAL_FAIL;
     if (!kprop_sequence_delta_equal(&direct, &routed)) return THEFT_TRIAL_FAIL;
     /* Coarse multi-codon window: protein_pos -1, no AA pair. */
@@ -13518,7 +13779,7 @@ static enum theft_trial_res prop_annotate_inframe_deletion_matches_oracle(struct
     stats = duckvep_workspace_delta_route_stats(ws);
     if (stats == NULL || stats->del_context != 1u ||
         stats->del_direct_fallback != 0u ||
-        stats->mnv_context != 0u ||
+        stats->substitution_context != 0u ||
         stats->mnv_direct_fallback != 0u) {
         tr = THEFT_TRIAL_FAIL; goto done;
     }
@@ -13613,7 +13874,7 @@ static enum theft_trial_res prop_cursor_del_route_matches_tile(struct theft *t, 
     if (!saw_full || tile_n != cursor_n || tile_n != 1u) { res = THEFT_TRIAL_FAIL; goto done; }
     if (tile_stats.del_context != 1u ||
         tile_stats.del_direct_fallback != 0u ||
-        tile_stats.mnv_context != 0u ||
+        tile_stats.substitution_context != 0u ||
         tile_stats.mnv_direct_fallback != 0u ||
         tile_stats.del_context != cursor_stats.del_context ||
         tile_stats.del_direct_fallback != cursor_stats.del_direct_fallback) {
@@ -13988,7 +14249,7 @@ static enum theft_trial_res prop_annotate_inframe_insertion_matches_oracle(struc
     if (rows[0].cdna_pos != -1 || rows[0].cds_pos != -1) { tr = THEFT_TRIAL_FAIL; goto done; }
     if (rows[0].protein_pos != (int32_t)((before_cds / 3u) + 1u)) { tr = THEFT_TRIAL_FAIL; goto done; }
     stats = duckvep_workspace_delta_route_stats(ws);
-    if (stats == NULL || stats->mnv_context != 0u ||
+    if (stats == NULL || stats->substitution_context != 0u ||
         stats->mnv_direct_fallback != 0u ||
         stats->del_context != 0u ||
         stats->del_direct_fallback != 0u ||
@@ -14087,7 +14348,7 @@ static enum theft_trial_res prop_cursor_ins_route_matches_tile(struct theft *t, 
     if (!saw_full || tile_n != cursor_n || tile_n != 1u) { res = THEFT_TRIAL_FAIL; goto done; }
     if (tile_stats.ins_context != 1u ||
         tile_stats.ins_direct_fallback != 0u ||
-        tile_stats.mnv_context != 0u ||
+        tile_stats.substitution_context != 0u ||
         tile_stats.mnv_direct_fallback != 0u ||
         tile_stats.del_context != 0u ||
         tile_stats.del_direct_fallback != 0u ||
@@ -14713,6 +14974,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_codon_mnv_reverse_strand_same_codon_known_scene);
     RUN_TEST(annotate_equal_length_cds_to_utr3_mapping_gap_known_scene);
     RUN_TEST(annotate_codon_padded_small_variant_delta_known_scene);
+    RUN_TEST(annotate_equal_length_feature_window_both_strands_known_scene);
     RUN_TEST(annotate_codon_indel_frameshift_known_scene);
     RUN_TEST(annotate_terminal_stop_frame_change_uses_transcript_tail);
     RUN_TEST(annotate_codon_delins_frameshift_known_scene);
@@ -14753,6 +15015,7 @@ int main(int argc, char **argv) {
     RUN_TEST(sequence_delta_with_scratch_cross_codon_known_scene);
     RUN_TEST(sequence_delta_with_scratch_cross_codon_reverse_known_scene);
     RUN_TEST(sequence_delta_with_scratch_cross_codon_negative_scenes);
+    RUN_TEST(feature_substitution_window_fails_closed_known_scene);
     RUN_TEST(sequence_delta_annotation_wrapper_matches_direct_shape);
     RUN_TEST(annotate_cursor_padded_snv_matches_tile_for_any_output_split);
     RUN_TEST(annotate_cursor_cross_codon_mnv_route_matches_tile_for_any_output_split);

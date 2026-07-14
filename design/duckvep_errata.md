@@ -36,6 +36,45 @@ VEP has separate start-codon predicates that may still emit `start_lost` or
 `start_retained_variant` without the ordinary peptide path. The executable witnesses and
 held-out differentials are the authority for the precise boundary.
 
+## Retained feature bases participate in peptide predicates
+
+When an equal-length uploaded feature maps wholly into CDS, VEP 116 uses every codon
+covered by that feature as the local peptide window. Common-prefix and suffix trimming
+still identifies the bases to apply, but it does not shrink the window used by the start,
+stop, synonymous, and missense predicates. Two records with the same changed CDS base can
+therefore receive different consequences.
+
+Paired VEP-116 witnesses isolate three forms of this representation dependence:
+
+| Complete uploaded feature | One-base counterpart | Exact VEP distinction |
+| --- | --- | --- |
+| `chrDuck:122 GG>GA` | `chrDuck:123 G>A` | `start_lost&start_retained_variant` vs `missense_variant` |
+| `chrDuck:237 GT>TT` | `chrDuck:237 G>T` | `stop_retained_variant` vs `missense_variant` |
+| `chrDuck:237 GT>AT` | `chrDuck:237 G>A` | `missense_variant` vs `stop_gained` |
+
+The first pair is especially non-obvious: the complete local peptides differ, so
+`start_lost` is true, while the rebuilt first codon is still `ATG`, so the independently
+evaluated `start_retained_variant` predicate is also true. In the third pair, the complete
+window has a stop in both peptides at different local indexes, so none of VEP's
+stop-lost, stop-retained, or stop-gained predicates succeeds and `missense_variant`
+remains.
+
+Keep one substitution evaluator over an explicitly selected peptide window. The uploaded
+feature selects that window; the trimmed edit supplies the replacement bases. Do not
+normalize the uploaded identity inside the consequence kernel or implement separate
+start/stop rule copies for MNV-shaped input.
+
+The complete feature is also the validation boundary. Every retained REF base must agree
+with the transcript CDS, and an ambiguous or incomplete codon anywhere in the selected
+window suppresses the specific peptide predicate. Once that window is authoritative,
+DuckVEP must preserve `reference_mismatch`, ambiguous-sequence, or `coding_sequence_variant`
+state; retrying the smaller trimmed edit would annotate a different input representation.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
+`::start_retained`, `::stop_lost`, `::stop_retained`, `::stop_gained`, and
+`::missense`. Fixed witnesses must remain paired with large held-out differentials so a
+special-case term substitution cannot satisfy conformance.
+
 ## ALT-only mismatch islands inherit an expanded intron cache
 
 VEP 116 can emit `intron_variant` for a lengthening replacement whose REF-shaped
