@@ -189,6 +189,10 @@ uint64_t duckvep_effect_eval_rules(
     const duckvep_consequence_rule_t *rules,
     size_t                            rule_count);
 
+/* Reference interpreter over the generated VEP rule program. Tests compare
+ * the compact production lookup against this independent execution path. */
+uint64_t duckvep_effect_eval_reference(uint64_t pre_bits);
+
 uint64_t duckvep_effect_eval(uint64_t pre_bits);
 
 #endif /* DUCKVEP_EFFECT_H */

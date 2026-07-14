@@ -107,6 +107,41 @@ stop_lost	0	stop_lost	HIGH	CDS	supported	-	90	70	24
 stop_retained	0	stop_retained_variant	LOW	CDS	supported	-	91	71	24
 intergenic	-	sequence_variant	MODIFIER	NULL	unresolved	no_feature_in_loaded_model	-	-	-
 
+# The compact surface runs the same kernel but preserves masks and enum bytes.
+query TTIIIIITTTTTII
+WITH variants(ord, id, seq_region, position, reference, alternate) AS (
+  VALUES
+    (1, 'missense', 1::UINTEGER, 124::UBIGINT, 'T', 'C'),
+    (2, 'intron', 1::UINTEGER, 160::UBIGINT, 'T', 'C'),
+    (3, 'reference_mismatch', 1::UINTEGER, 124::UBIGINT, 'A', 'C'),
+    (4, 'partial_no_feature', 0::UINTEGER, 100::UBIGINT, 'A', 'C')
+)
+SELECT
+  id,
+  coalesce(annotation.transcript_index::VARCHAR, '-'),
+  annotation.consequence_mask,
+  annotation.region_mask,
+  annotation.impact_code,
+  annotation.status_code,
+  annotation.reason_code,
+  coalesce(annotation.cdna_position::VARCHAR, '-'),
+  coalesce(annotation.cds_position::VARCHAR, '-'),
+  coalesce(annotation.protein_position::VARCHAR, '-'),
+  coalesce(annotation.reference_amino_acid_code::VARCHAR, '-'),
+  coalesce(annotation.alternate_amino_acid_code::VARCHAR, '-'),
+  annotation.nmd_prediction_code,
+  annotation.nmd_escape_reasons
+FROM variants,
+LATERAL unnest(duckvep_annotate_compact(
+  'fixture', seq_region, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord, annotation.transcript_index NULLS FIRST;
+----
+missense	0	8192	16	2	0	0	25	5	2	86	65	0	0
+intron	0	4	4	0	0	0	-	-	-	-	-	0	0
+reference_mismatch	0	2048	16	0	1	4	-	-	-	-	-	0	0
+partial_no_feature	-	0	0	0	1	1	-	-	-	-	-	0	0
+
 # VEP 116 keeps an equal-length uploaded feature as the peptide-predicate
 # window even when prefix/suffix trimming leaves the same one-base CDS edit as
 # a paired SNV. The retained start/stop codon changes the predicate state.
@@ -220,6 +255,15 @@ FROM unnest(duckvep_annotate(
 )) AS u(annotation);
 ----
 intergenic_variant	supported	-	intergenic
+
+query IIII
+SELECT annotation.consequence_mask, annotation.region_mask,
+       annotation.status_code, annotation.reason_code
+FROM unnest(duckvep_annotate_compact(
+  'fixture-complete', 0::UINTEGER, 100::UBIGINT, 'A', 'C'
+)) AS u(annotation);
+----
+8589934592	0	0	0
 
 statement error
 SELECT duckvep_annotate(

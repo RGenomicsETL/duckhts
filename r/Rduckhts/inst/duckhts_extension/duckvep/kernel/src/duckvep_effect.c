@@ -236,12 +236,10 @@ void duckvep_effect_ctx_fill_geometry(
     duckvep_splice_state_t splice;
 
     region = duckvep_region_classify_span(transcripts, exons, tx_idx,
-                                           region_start1, region_end1,
-                                           splice_region_exonic,
-                                           splice_region_intronic);
-    splice = duckvep_splice_classify_span(transcripts, exons, tx_idx,
-                                           splice_start1, splice_end1,
-                                           interbase);
+                                           region_start1, region_end1, 0u, 0u);
+    splice = duckvep_splice_classify_span_with_windows(
+        transcripts, exons, tx_idx, splice_start1, splice_end1, interbase,
+        splice_region_exonic, splice_region_intronic);
     duckvep_effect_ctx_fill_classified(
         transcripts, variant_idx, tx_idx, region_start1, region_end1,
         &region, &splice, out);
@@ -261,10 +259,12 @@ void duckvep_effect_ctx_fill_point_sorted(
     duckvep_region_state_t region;
     duckvep_splice_state_t splice;
 
+    /* The exact VEP predicate consumes the configured generic-region reaches;
+     * the coarse diagnostic pass is still unnecessary. */
     duckvep_classify_point_sorted(transcripts, exons, tx_idx, pos,
                                   splice_region_exonic,
-                                  splice_region_intronic, exon_rank_io,
-                                  &region, &splice);
+                                  splice_region_intronic,
+                                  exon_rank_io, &region, &splice);
     duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
                                     pos, pos, &region, &splice, out);
 }
@@ -400,7 +400,34 @@ uint64_t duckvep_effect_eval_rules(
     return mask;
 }
 
-uint64_t duckvep_effect_eval(uint64_t pre_bits) {
+uint64_t duckvep_effect_eval_reference(uint64_t pre_bits) {
     return duckvep_effect_eval_rules(pre_bits, k_rules,
                                      sizeof k_rules / sizeof k_rules[0]);
+}
+
+static unsigned duckvep_first_set_pre_bit(uint64_t mask) {
+#if defined(__GNUC__) || defined(__clang__)
+    return (unsigned)__builtin_ctzll(mask);
+#else
+    unsigned bit = 0u;
+    while ((mask & UINT64_C(1)) == 0u) {
+        mask >>= 1;
+        bit++;
+    }
+    return bit;
+#endif
+}
+
+uint64_t duckvep_effect_eval(uint64_t pre_bits) {
+    uint64_t bits;
+    uint64_t mask = 0u;
+
+    bits = pre_bits & k_rule_tier1_pre_mask;
+    if (bits == 0u) bits = pre_bits & k_rule_tier2_pre_mask;
+    if (bits == 0u) bits = pre_bits & k_rule_fallback_pre_mask;
+    while (bits != 0u) {
+        mask |= k_rule_so_by_pre_bit[duckvep_first_set_pre_bit(bits)];
+        bits &= bits - UINT64_C(1);
+    }
+    return mask;
 }

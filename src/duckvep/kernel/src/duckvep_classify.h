@@ -68,7 +68,9 @@ typedef struct duckvep_splice_state {
  * transcript must have non-decreasing positions. The model already limits exon
  * counts to uint16_t. Exons remain stored in transcript order, so genomic rank
  * runs forward on both strands while the implementation maps minus-strand ranks
- * back to the borrowed exon slice. */
+ * back to the borrowed exon slice. `splice_exonic` and `splice_intronic`
+ * configure the exact generic splice-region predicate; `region_out` omits the
+ * older coarse proximity bit because `splice_out` is authoritative. */
 void duckvep_classify_point_sorted(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -93,6 +95,18 @@ duckvep_splice_state_t duckvep_splice_classify_span(
     uint32_t                          end1,
     uint8_t                           interbase);
 
+/* Annotation uses the resolved per-call windows. The unsuffixed helper above
+ * remains the default-window oracle used by focused predicate tests. */
+duckvep_splice_state_t duckvep_splice_classify_span_with_windows(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          start1,
+    uint32_t                          end1,
+    uint8_t                           interbase,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic);
+
 /* VEP does not feed one minimized interval to its splice predicates. For
  * feature alleles longer than one base it XORs REF and ALT, groups contiguous
  * non-zero bytes, and accumulates every resulting mismatch island before
@@ -109,6 +123,18 @@ duckvep_splice_state_t duckvep_splice_classify_differing_regions(
     uint16_t                          feature_ref_length,
     const uint8_t                    *feature_alt,
     uint16_t                          feature_alt_length);
+
+duckvep_splice_state_t duckvep_splice_classify_differing_regions_with_windows(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          feature_start1,
+    const uint8_t                    *feature_ref,
+    uint16_t                          feature_ref_length,
+    const uint8_t                    *feature_alt,
+    uint16_t                          feature_alt_length,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic);
 
 /* Point compatibility wrapper. */
 duckvep_splice_state_t duckvep_splice_classify(

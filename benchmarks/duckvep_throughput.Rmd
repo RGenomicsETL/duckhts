@@ -16,31 +16,56 @@ history <- read.csv(
 history$revision <- substr(history$source_revision, 1, 8)
 ```
 
-This benchmark drives `duckvep_annotate` through DuckDB's stable extension API
-with nondecreasing sequence-region and position keys. It records vector adapter,
-sweep reuse, coding classification, list materialization, `unnest`, and final
-aggregation together.
+This benchmark drives either the rich `duckvep_annotate` result or the numeric
+`duckvep_annotate_compact` result through DuckDB's stable extension API with
+nondecreasing sequence-region and position keys. It records candidate sweep,
+consequence classification, list materialization, `unnest`, and final aggregation
+together. Model loading and input staging are outside the timed pass.
 
-The current checked-in workload has one transcript and two exons. It is a
-repeatable hot-transcript floor, not a whole-genome throughput claim. Production
-qualification also requires an imported Ensembl model and a sorted gnomAD-scale
-variant stream spanning realistic transcript density.
+The checked-in one-transcript workload is a repeatable adapter floor. The
+production-density workload uses a pre-staged DuckDB database containing
+`bench_regions`, `bench_transcripts`, `bench_exons`, and `bench_variants`. Its
+recorded Ensembl-116 GRCh38 model contains 644,292 chromosome transcripts and
+5,078,384 exon memberships; the input is a deterministic 1-in-40 hash sample of
+100,957 sorted GIAB sites. The external staging database is not committed.
+The production query restates `ORDER BY` in the timed input CTE, so its result
+includes the cost of enforcing the kernel's nondecreasing-input contract even
+though the staging table was already written in that order. The `79cfaaf2`
+rows predate that review correction and relied on the single-thread physical
+scan preserving insertion order; they remain only as historical measurements.
 
 ## Recorded runs
 
 ```{r runs}
 table <- history[, c(
-  "run_date", "revision", "workload", "threads", "variants", "passes",
-  "min_seconds", "median_seconds", "max_seconds", "variants_per_second",
-  "ns_per_variant", "cpu"
+  "run_date", "revision", "workload", "output_mode", "threads", "variants",
+  "transcripts", "exons", "annotated_rows", "passes", "min_seconds",
+  "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant",
+  "cpu"
 )]
 table$variants <- format(table$variants, big.mark = ",", scientific = FALSE)
+table$transcripts <- format(table$transcripts, big.mark = ",", scientific = FALSE)
+table$exons <- format(table$exons, big.mark = ",", scientific = FALSE)
+table$annotated_rows <- format(
+  table$annotated_rows,
+  big.mark = ",",
+  scientific = FALSE
+)
 table$variants_per_second <- round(table$variants_per_second)
 table$ns_per_variant <- round(table$ns_per_variant, 1)
 knitr::kable(table, row.names = FALSE)
 ```
 
-Each pass consumes every generated input and checks output cardinality and a
-consequence-string checksum. Rows with different workload, thread count, host,
-or variant count are separate measurements and should not be compared as if
-only the engine changed.
+Each pass consumes every staged input and checks output cardinality plus either
+the rendered consequence-byte total or the numeric consequence-mask sum. Rows
+with different workload, output mode, thread count, host, or variant count are
+separate measurements and should not be compared as if only the engine changed.
+
+The production form is run with:
+
+```sh
+Rscript benchmarks/duckvep_throughput.R \
+  --database /path/to/staged.duckdb \
+  --variants 100957 --passes 9 --warmup 10000 --threads 1 \
+  --output compact
+```
