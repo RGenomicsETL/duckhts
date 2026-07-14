@@ -1028,8 +1028,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
                                                          c->delta_route_stats != NULL ? &route : NULL,
                                                          &delta);
         if (c->delta_route_stats != NULL) {
-            if (route == DUCKVEP_DELTA_ROUTE_MNV_CONTEXT) {
-                c->delta_route_stats->mnv_context++;
+            if (route == DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT) {
+                c->delta_route_stats->substitution_context++;
             } else if (route == DUCKVEP_DELTA_ROUTE_MNV_DIRECT_FALLBACK) {
                 c->delta_route_stats->mnv_direct_fallback++;
             } else if (route == DUCKVEP_DELTA_ROUTE_DEL_CONTEXT) {

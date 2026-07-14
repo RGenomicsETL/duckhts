@@ -15,7 +15,7 @@
 #include "duckvep_kernel.h"
 
 typedef struct duckvep_workspace_delta_route_stats {
-    uint64_t mnv_context;
+    uint64_t substitution_context;
     uint64_t mnv_direct_fallback;
     uint64_t del_context;
     uint64_t del_direct_fallback;

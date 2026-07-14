@@ -383,6 +383,58 @@ if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
   }
 }
 
+# Pin VEP's use of the complete equal-length feature to select the peptide
+# predicate window. The paired one-base controls have the same semantic edit but
+# do not pull an unchanged start or stop codon into that window.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  if (identical(nuc(122L, 2L), "GG") && base_at(123L) == "G") {
+    emit(
+      122L,
+      "GG",
+      "GA",
+      "start_codon",
+      "feature_window_start_retained"
+    )
+    emit(
+      123L,
+      "G",
+      "A",
+      "start_codon",
+      "feature_window_start_control"
+    )
+  }
+  if (identical(nuc(237L, 2L), "GT")) {
+    emit(
+      237L,
+      "G",
+      "T",
+      "stop_codon",
+      "feature_window_stop_retained_control"
+    )
+    emit(
+      237L,
+      "G",
+      "A",
+      "stop_codon",
+      "feature_window_stop_index_control"
+    )
+    emit(
+      237L,
+      "GT",
+      "TT",
+      "stop_codon",
+      "feature_window_stop_retained"
+    )
+    emit(
+      237L,
+      "GT",
+      "AT",
+      "stop_codon",
+      "feature_window_stop_index_changed"
+    )
+  }
+}
+
 # Pin VEP 116's interval-tree intron prefilter. Both alleles have ALT-only
 # mismatch bases that extend across the first donor. The REF-shaped feature for
 # the first ends at 148, inside VEP's three-base intron-cache flank, while the
@@ -573,7 +625,19 @@ if (opt$check) {
       "missing terminal-CDS mapping control" =
         any(w$shape == "terminal_cds_mapping_control"),
       "missing terminal-CDS mapper-gap witness" =
-        any(w$shape == "terminal_cds_mapping_gap")
+        any(w$shape == "terminal_cds_mapping_gap"),
+      "missing complete-feature start witness" =
+        any(w$shape == "feature_window_start_retained"),
+      "missing minimized start control" =
+        any(w$shape == "feature_window_start_control"),
+      "missing complete-feature retained-stop witness" =
+        any(w$shape == "feature_window_stop_retained"),
+      "missing changed-stop-index witness" =
+        any(w$shape == "feature_window_stop_index_changed"),
+      "missing minimized terminal missense control" =
+        any(w$pos == 237L & w$ref == "G" & w$alt == "T"),
+      "missing minimized terminal stop-gained control" =
+        any(w$pos == 237L & w$ref == "G" & w$alt == "A")
     )
   }
   cat(glue(

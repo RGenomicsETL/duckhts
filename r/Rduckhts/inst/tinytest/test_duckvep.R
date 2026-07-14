@@ -337,6 +337,37 @@ expect_identical(
 expect_identical(terminal_stop_edits$status, rep("supported", 6))
 expect_true(all(is.na(terminal_stop_edits$reason)))
 
+feature_window_substitutions <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 122::UBIGINT, 'GG', 'GA'),",
+    "(2, 123::UBIGINT, 'G', 'A'),",
+    "(3, 237::UBIGINT, 'GT', 'TT'),",
+    "(4, 237::UBIGINT, 'G', 'T'),",
+    "(5, 237::UBIGINT, 'GT', 'AT'),",
+    "(6, 237::UBIGINT, 'G', 'A'))",
+    "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(feature_window_substitutions$ord, 1:6)
+expect_identical(
+  feature_window_substitutions$consequence,
+  c(
+    "start_lost&start_retained_variant",
+    "missense_variant",
+    "stop_retained_variant",
+    "missense_variant",
+    "missense_variant",
+    "stop_gained"
+  )
+)
+expect_identical(feature_window_substitutions$status, rep("supported", 6))
+expect_true(all(is.na(feature_window_substitutions$reason)))
+
 dbExecute(
   con,
   paste(
