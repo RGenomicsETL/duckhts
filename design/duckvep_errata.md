@@ -75,6 +75,38 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
 `::missense`. Fixed witnesses must remain paired with large held-out differentials so a
 special-case term substitution cannot satisfy conformance.
 
+## A five-prime boundary feature selects only the start codon
+
+VEP 116 treats the opposite CDS boundary asymmetrically. When an equal-length uploaded
+feature begins in the 5-prime UTR and continues into CDS, it does not suppress all peptide
+predicates as the CDS-to-3-prime-UTR mapping gap does. Instead, the feature reaches the
+start predicates, while the peptide view used there is limited to the first translated
+codon. Coding bases later in the same uploaded feature do not produce an additional
+missense or stop term through this path.
+
+Four real VEP-116 witnesses separate the states:
+
+| Uploaded feature | Coding change | Exact VEP terms |
+| --- | --- | --- |
+| `chrDuck:119 GA>AC` | start codon changes | `5_prime_UTR_variant&start_lost` |
+| `chrDuck:118 CGA>GAA` | only UTR bases change; retained `A` overlaps CDS | `5_prime_UTR_variant&start_retained_variant` |
+| `chrDuck:119 GATGGT>TATGAT` | `ATG` survives but the following coding bases change | `5_prime_UTR_variant&start_retained_variant` |
+| `chrDuck:119 GATG>GTAA` | start codon becomes `TAA` | `5_prime_UTR_variant&start_lost`, without `stop_gained` |
+
+The last two rows are the important guards: classifying the complete altered CDS would
+add a coding or stop consequence that VEP does not emit. Conversely, treating the feature
+like the 3-prime mapping gap would lose the start term. DuckVEP therefore retains the
+uploaded topology, applies its contiguous CDS slice through the shared edit/context
+engine, and selects codon one as the VEP peptide window. This is still one substitution
+authority; there is no separate UTR consequence classifier.
+
+Source anchors: Ensembl Variation 116
+`BaseTranscriptVariation.pm::translation_coords`,
+`TranscriptVariationAllele.pm::codon` / `::peptide`, and
+`VariationEffect.pm::start_lost`, `::start_retained_variant`,
+`::_snp_start_altered`. The fixed cases are generated and adjudicated by the real VEP
+executable; randomized distributions remain the regression guard against overfitting.
+
 ## ALT-only mismatch islands inherit an expanded intron cache
 
 VEP 116 can emit `intron_variant` for a lengthening replacement whose REF-shaped
