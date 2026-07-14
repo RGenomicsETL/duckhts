@@ -18,6 +18,7 @@ typedef struct duckvep_query_result {
 typedef struct duckvep_load_bind {
 	duckvep_registry_t *registry;
 	char *arguments[4];
+	char *mature_mirna_query;
 	int transcript_coverage_complete;
 } duckvep_load_bind_t;
 
@@ -156,6 +157,25 @@ duckvep_model_reserve_sequence(duckvep_owned_model_t *model, size_t needed)
 }
 
 static int
+duckvep_model_reserve_mature_mirna(duckvep_owned_model_t *model,
+	size_t needed)
+{
+	size_t capacity;
+
+	if (needed <= model->mature_mirna_capacity)
+		return 1;
+	capacity = duckvep_sql_next_capacity(model->mature_mirna_capacity,
+	    needed);
+	if (!duckvep_sql_resize((void **)&model->mature_mirna_starts,
+	    sizeof(*model->mature_mirna_starts), capacity) ||
+	    !duckvep_sql_resize((void **)&model->mature_mirna_ends,
+	    sizeof(*model->mature_mirna_ends), capacity))
+		return 0;
+	model->mature_mirna_capacity = capacity;
+	return 1;
+}
+
+static int
 duckvep_model_reserve_flanks(duckvep_owned_model_t *model, size_t needed)
 {
 	size_t capacity;
@@ -203,6 +223,9 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 	free(model->exon_cdna_ends);
 	free(model->exon_phases);
 	free(model->exon_end_phases);
+	free(model->mature_mirna_offsets);
+	free(model->mature_mirna_starts);
+	free(model->mature_mirna_ends);
 	free(model->cds_sequence_bytes);
 	free(model->flank_sequence_bytes);
 	if (model->interval_index != NULL) {
@@ -226,6 +249,10 @@ duckvep_owned_model_publish(duckvep_owned_model_t *model)
 	model->transcripts.exon_count = model->exon_counts;
 	model->transcripts.cds_start1 = model->cds_starts;
 	model->transcripts.cds_end1 = model->cds_ends;
+	model->transcripts.mature_mirna_offset = model->mature_mirna_offsets;
+	model->transcripts.mature_mirna_start1 = model->mature_mirna_starts;
+	model->transcripts.mature_mirna_end1 = model->mature_mirna_ends;
+	model->transcripts.mature_mirna_count = model->mature_mirna_count;
 	model->exons.start1 = model->exon_starts;
 	model->exons.end1 = model->exon_ends;
 	model->exons.cdna_start1 = model->exon_cdna_starts;
@@ -907,6 +934,147 @@ done:
 }
 
 static int
+duckvep_mature_mirna_segment_is_exonic(
+	const duckvep_owned_model_t *model, uint32_t transcript_index,
+	uint32_t start1, uint32_t end1)
+{
+	size_t offset, count, exon;
+
+	offset = model->exon_offsets[transcript_index];
+	count = model->exon_counts[transcript_index];
+	for (exon = offset; exon < offset + count; exon++) {
+		if (start1 >= model->exon_starts[exon] &&
+		    end1 <= model->exon_ends[exon])
+			return 1;
+	}
+	return 0;
+}
+
+static int
+duckvep_load_mature_mirna(duckdb_connection connection, const char *query,
+	duckvep_owned_model_t *model, char *error, size_t error_size)
+{
+	static const char *const names[] = {
+		"transcript_index", "mature_mirna_start", "mature_mirna_end"
+	};
+	static const duckdb_type types[] = {
+		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UBIGINT
+	};
+	duckvep_query_result_t query_result;
+	duckdb_data_chunk chunk;
+	uint32_t previous_transcript, previous_start;
+	int have_previous, ok;
+	size_t transcript;
+
+	if (model->transcripts.transcript_count >
+	    SIZE_MAX / sizeof(*model->mature_mirna_offsets) - 1u) {
+		duckvep_sql_set_error(error, error_size,
+		    "mature-miRNA row-offset array exceeds addressable memory");
+		return 0;
+	}
+	model->mature_mirna_offsets = calloc(
+	    model->transcripts.transcript_count + 1u,
+	    sizeof(*model->mature_mirna_offsets));
+	if (model->mature_mirna_offsets == NULL) {
+		duckvep_sql_set_error(error, error_size,
+		    "out of memory loading mature-miRNA row offsets");
+		return 0;
+	}
+	if (!duckvep_query_result_open(connection, query, &query_result, error,
+	    error_size))
+		return 0;
+	have_previous = 0;
+	previous_transcript = 0;
+	previous_start = 0;
+	ok = 0;
+	if (!duckvep_result_schema(&query_result.result, names, types, 3,
+	    SIZE_MAX, error, error_size))
+		goto done;
+	while ((chunk = duckdb_fetch_chunk(query_result.result)) != NULL) {
+		duckdb_vector vectors[3];
+		uint32_t *transcript_indices;
+		uint64_t *starts, *ends;
+		idx_t row, rows;
+		size_t column;
+
+		rows = duckdb_data_chunk_get_size(chunk);
+		for (column = 0; column < 3; column++)
+			vectors[column] = duckdb_data_chunk_get_vector(chunk,
+			    (idx_t)column);
+		transcript_indices = duckdb_vector_get_data(vectors[0]);
+		starts = duckdb_vector_get_data(vectors[1]);
+		ends = duckdb_vector_get_data(vectors[2]);
+		for (row = 0; row < rows; row++) {
+			uint32_t transcript_index;
+			size_t feature_index;
+
+			for (column = 0; column < 3; column++) {
+				if (duckvep_row_is_null(vectors[column], row)) {
+					(void)snprintf(error, error_size,
+					    "mature-miRNA query contains NULL in %s",
+					    names[column]);
+					duckdb_destroy_data_chunk(&chunk);
+					goto done;
+				}
+			}
+			transcript_index = transcript_indices[row];
+			if (transcript_index >= model->transcripts.transcript_count ||
+			    (have_previous &&
+			    (transcript_index < previous_transcript ||
+			    (transcript_index == previous_transcript &&
+			    starts[row] < previous_start)))) {
+				duckvep_sql_set_error(error, error_size,
+				    "mature-miRNA query must be ordered by transcript_index and mature_mirna_start");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			if (starts[row] == 0 || starts[row] > UINT32_MAX ||
+			    ends[row] > UINT32_MAX || ends[row] < starts[row] ||
+			    starts[row] < model->transcript_starts[transcript_index] ||
+			    ends[row] > model->transcript_ends[transcript_index] ||
+			    (model->transcript_flags[transcript_index] &
+			    (uint64_t)DUCKVEP_TX_BIOTYPE_MIRNA) == 0u ||
+			    !duckvep_mature_mirna_segment_is_exonic(model,
+			    transcript_index, (uint32_t)starts[row],
+			    (uint32_t)ends[row])) {
+				duckvep_sql_set_error(error, error_size,
+				    "mature-miRNA row is not an exonic interval of a miRNA transcript");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			feature_index = model->mature_mirna_count;
+			if (feature_index == (size_t)UINT32_MAX ||
+			    !duckvep_model_reserve_mature_mirna(model,
+			    feature_index + 1u)) {
+				duckvep_sql_set_error(error, error_size,
+				    "mature-miRNA side relation exceeds the uint32 model limit");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			model->mature_mirna_starts[feature_index] =
+			    (uint32_t)starts[row];
+			model->mature_mirna_ends[feature_index] =
+			    (uint32_t)ends[row];
+			model->mature_mirna_offsets[transcript_index + 1u]++;
+			model->mature_mirna_count++;
+			previous_transcript = transcript_index;
+			previous_start = (uint32_t)starts[row];
+			have_previous = 1;
+		}
+		duckdb_destroy_data_chunk(&chunk);
+	}
+	for (transcript = 1u;
+	    transcript <= model->transcripts.transcript_count; transcript++) {
+		model->mature_mirna_offsets[transcript] +=
+		    model->mature_mirna_offsets[transcript - 1u];
+	}
+	ok = 1;
+done:
+	duckvep_query_result_close(&query_result);
+	return ok;
+}
+
+static int
 duckvep_query_command(duckdb_connection connection, const char *sql,
 	char *error, size_t error_size)
 {
@@ -925,7 +1093,8 @@ duckvep_query_command(duckdb_connection connection, const char *sql,
 static int
 duckvep_model_load_queries(duckdb_connection connection,
 	const char *region_query, const char *transcript_query,
-	const char *exon_query, int transcript_coverage_complete,
+	const char *exon_query, const char *mature_mirna_query,
+	int transcript_coverage_complete,
 	duckvep_owned_model_t *model,
 	char *error, size_t error_size)
 {
@@ -947,7 +1116,10 @@ duckvep_model_load_queries(duckdb_connection connection,
 	    error_size) &&
 	    duckvep_load_transcripts(connection, transcript_query, model, error,
 	    error_size) &&
-	    duckvep_load_exons(connection, exon_query, model, error, error_size);
+	    duckvep_load_exons(connection, exon_query, model, error, error_size) &&
+	    (mature_mirna_query == NULL ||
+	    duckvep_load_mature_mirna(connection, mature_mirna_query, model,
+	    error, error_size));
 	if (ok)
 		ok = duckvep_query_command(connection, "COMMIT", error, error_size);
 	if (!ok)
@@ -1203,6 +1375,8 @@ duckvep_model_load_bind_destroy(void *pointer)
 		if (bind->arguments[index] != NULL)
 			duckdb_free(bind->arguments[index]);
 	}
+	if (bind->mature_mirna_query != NULL)
+		duckdb_free(bind->mature_mirna_query);
 	free(bind);
 }
 
@@ -1211,6 +1385,7 @@ duckvep_model_load_bind(duckdb_bind_info info)
 {
 	duckvep_load_bind_t *bind;
 	duckdb_value complete_value;
+	duckdb_value mature_mirna_value;
 	duckdb_logical_type bool_type;
 	idx_t parameter_count;
 	size_t index;
@@ -1233,6 +1408,27 @@ duckvep_model_load_bind(duckdb_bind_info info)
 		    bind->arguments[index][0] == '\0') {
 			duckdb_bind_set_error(info,
 			    "duckvep_model_load: arguments must be non-empty strings");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+	}
+	mature_mirna_value = duckdb_bind_get_named_parameter(
+	    info, "mature_mirna_query");
+	if (mature_mirna_value != NULL) {
+		if (duckdb_is_null_value(mature_mirna_value)) {
+			duckdb_destroy_value(&mature_mirna_value);
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: mature_mirna_query cannot be NULL");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+		bind->mature_mirna_query = duckdb_get_varchar(
+		    mature_mirna_value);
+		duckdb_destroy_value(&mature_mirna_value);
+		if (bind->mature_mirna_query == NULL ||
+		    bind->mature_mirna_query[0] == '\0') {
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: mature_mirna_query must be a non-empty string");
 			duckvep_model_load_bind_destroy(bind);
 			return;
 		}
@@ -1307,6 +1503,7 @@ duckvep_model_load_init(duckdb_init_info info)
 	pthread_mutex_lock(&registry->query_mutex);
 	loaded = duckvep_model_load_queries(registry->query_connection,
 	    bind->arguments[1], bind->arguments[2], bind->arguments[3],
+	    bind->mature_mirna_query,
 	    bind->transcript_coverage_complete, &entry->model, error,
 	    sizeof(error));
 	pthread_mutex_unlock(&registry->query_mutex);
@@ -1439,6 +1636,8 @@ duckvep_register_model_functions(duckdb_connection connection,
 	duckdb_table_function_add_parameter(table, varchar_type);
 	duckdb_table_function_add_parameter(table, varchar_type);
 	duckdb_table_function_add_parameter(table, varchar_type);
+	duckdb_table_function_add_named_parameter(table,
+	    "mature_mirna_query", varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "transcript_coverage_complete", bool_type);
 	duckvep_registry_retain(registry);

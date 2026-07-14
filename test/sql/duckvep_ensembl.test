@@ -272,6 +272,95 @@ SELECT duckvep_model_drop('ensembl-test');
 ----
 1
 
+# Ensembl stores mature-miRNA cDNA ranges as repeated transcript attributes.
+# The importer projects them through ranked exons into a packed side relation;
+# VEP's tier-2 mature term then suppresses the generic noncoding-exon term.
+statement ok
+INSERT INTO duckvep_core.gene VALUES
+  (22, 'miRNA', 1, 'ENSG_TEST_MIRNA', 1);
+
+statement ok
+INSERT INTO duckvep_core.transcript VALUES
+  (33, 22, 10, 33, 40, 1, 'miRNA', 1, 'ENST_TEST_MIRNA', 1);
+
+statement ok
+INSERT INTO duckvep_core.exon VALUES
+  (43, 10, 33, 40, 1, -1, -1, 1, 'ENSE_TEST_MIRNA');
+
+statement ok
+INSERT INTO duckvep_core.exon_transcript VALUES (43, 33, 1);
+
+statement ok
+INSERT INTO duckvep_core.attrib_type VALUES (67, 'miRNA');
+
+statement ok
+INSERT INTO duckvep_core.transcript_attrib VALUES (33, 67, '2-5');
+
+statement ok
+CREATE TABLE duckvep_prepared_mirna AS
+SELECT * FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+);
+
+query IIIII
+SELECT transcript_index, region.cdna_start, region.cdna_end,
+       region.mature_mirna_start, region.mature_mirna_end
+FROM duckvep_prepared_mirna,
+LATERAL unnest(mature_mirna_regions) AS u(region)
+ORDER BY transcript_index, region.mature_mirna_start;
+----
+3	2	5	34	37
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'ensembl-mirna-test',
+  'SELECT seq_region, sequence_length FROM duckvep_prepared_regions ORDER BY seq_region',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_prepared_mirna ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_prepared_mirna, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
+  mature_mirna_query := 'SELECT transcript_index, region.mature_mirna_start, region.mature_mirna_end FROM duckvep_prepared_mirna, LATERAL unnest(mature_mirna_regions) AS u(region) ORDER BY transcript_index, region.mature_mirna_start',
+  transcript_coverage_complete := true
+);
+----
+1
+
+query IT
+WITH variants(ord, position) AS (VALUES
+  (1, 34::UBIGINT),
+  (2, 38::UBIGINT)
+)
+SELECT ord, annotation.consequence
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'ensembl-mirna-test', 0::UINTEGER, position, 'A', 'C', 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	mature_miRNA_variant
+2	non_coding_transcript_exon_variant
+
+query I
+SELECT duckvep_model_drop('ensembl-mirna-test');
+----
+1
+
+statement ok
+DELETE FROM duckvep_core.transcript_attrib WHERE transcript_id = 33;
+
+statement ok
+DELETE FROM duckvep_core.attrib_type WHERE attrib_type_id = 67;
+
+statement ok
+DELETE FROM duckvep_core.exon_transcript WHERE transcript_id = 33;
+
+statement ok
+DELETE FROM duckvep_core.exon WHERE exon_id = 43;
+
+statement ok
+DELETE FROM duckvep_core.transcript WHERE transcript_id = 33;
+
+statement ok
+DELETE FROM duckvep_core.gene WHERE gene_id = 22;
+
 statement ok
 CREATE TABLE duckvep_invalid_reference_chunks AS
 SELECT * REPLACE (
@@ -287,6 +376,40 @@ SELECT * FROM duckvep_ensembl_regions(
 );
 ----
 reference chunks must cover each contig contiguously from zero
+
+# VEP's core transcript source rejects records without a stable ID, artifact
+# biotypes, and readthrough_tra transcripts before assigning resident ordinals.
+statement ok
+UPDATE duckvep_core.transcript SET stable_id = NULL WHERE transcript_id = 31;
+
+query T
+SELECT transcript_stable_id FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+) ORDER BY transcript_index;
+----
+ENST_TEST_FORWARD
+ENST_TEST_EDITED
+
+statement ok
+UPDATE duckvep_core.transcript
+SET stable_id = 'ENST_TEST_REVERSE' WHERE transcript_id = 31;
+
+statement ok
+INSERT INTO duckvep_core.attrib_type VALUES (66, 'readthrough_tra');
+
+statement ok
+INSERT INTO duckvep_core.transcript_attrib VALUES (31, 66, '1');
+
+statement ok
+UPDATE duckvep_core.transcript SET biotype = 'artifact' WHERE transcript_id = 32;
+
+query IT
+SELECT transcript_index, transcript_stable_id
+FROM duckvep_ensembl_transcripts(
+  'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
+) ORDER BY transcript_index;
+----
+0	ENST_TEST_FORWARD
 
 # Real release-116 fixtures: GRCh38 exercises a real MANE pair and GRCh37
 # exercises the archived GENCODE-19 model. Both include MT fail-closed edits.
@@ -455,8 +578,8 @@ FROM (
   SELECT * FROM duckvep_grch37_receipt
 ) ORDER BY assembly;
 ----
-GRCh37	5145f11c77aafb961c7428cdbfeeb485545ecef76fcd149c5b88c5671841cfe3	all current transcripts on MT and GL000201.1
-GRCh38	75250115e0a344d22c3de89c416a1c60dac18e6f14920579a499991fd5c319b9	all current transcripts on MT and HG2047_PATCH
+GRCh37	36bf220cce11d94defe73c372afdc47148727704ab0fc4346ac28a855ee4edc9	all current transcripts on MT and GL000201.1
+GRCh38	9dd6f524bb87f3775b6cef1fe1499811cfbf56c087bfeb86cf293ee75167964c	all current transcripts on MT and HG2047_PATCH
 
 query I
 SELECT loaded FROM duckvep_model_load(

@@ -48,7 +48,10 @@ DUCKVEP_PROP_TRIALS=1000000 \
 
 For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_sequence_regions`, `duckvep_transcripts`, `duckvep_exons`, and
-`duckvep_transcript_names`, then run for example:
+`duckvep_transcript_names`. When the model carries Ensembl mature-miRNA
+attributes, also provide `duckvep_mature_mirna` with transcript index and
+inclusive genomic start/end columns. The runner loads that packed side relation
+automatically. Then run, for example:
 
 ```sh
 make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\

@@ -148,6 +148,21 @@ if (production) {
       "phase, end_phase FROM bench_exons ORDER BY transcript_index, exon_cdna_start"
     )
   )
+  present_relations <- dbGetQuery(
+    con,
+    paste(
+      "SELECT table_name FROM information_schema.tables",
+      "WHERE table_catalog = current_database() AND table_schema = 'main'"
+    )
+  )$table_name
+  mature_mirna_query <- if ("bench_mature_mirna" %in% present_relations) {
+    paste(
+      "SELECT transcript_index, mature_mirna_start, mature_mirna_end",
+      "FROM bench_mature_mirna ORDER BY transcript_index, mature_mirna_start"
+    )
+  } else {
+    NULL
+  }
   region_count <- counts[[1L]]
   transcript_count <- counts[[2L]]
   exon_count <- counts[[3L]]
@@ -176,15 +191,26 @@ if (production) {
       "ORDER BY transcript_index, exon_cdna_start"
     )
   )
+  mature_mirna_query <- NULL
 }
 if (variant_count < 1) {
   die("benchmark input contains no variants")
+}
+load_options <- character()
+if (!is.null(mature_mirna_query)) {
+  load_options <- c(
+    load_options,
+    glue("mature_mirna_query := {sql_q(mature_mirna_query)}")
+  )
+}
+if (complete_coverage) {
+  load_options <- c(load_options, "transcript_coverage_complete := TRUE")
 }
 model_load_sql <- glue(
   "SELECT loaded FROM duckvep_model_load(
      {sql_q(model_name)}, {sql_q(load_queries[1])},
      {sql_q(load_queries[2])}, {sql_q(load_queries[3])}
-     {if (complete_coverage) ', transcript_coverage_complete := TRUE' else ''})"
+     {if (length(load_options)) paste0(', ', paste(load_options, collapse = ', ')) else ''})"
 )
 model_load_timing <- system.time({
   loaded <- dbGetQuery(con, model_load_sql)$loaded

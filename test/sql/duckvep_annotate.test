@@ -106,6 +106,15 @@ FROM unnest(duckvep_annotate(
 ----
 frameshift_variant	supported	-
 
+query TTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'partial-cds-end', 1::UINTEGER, 109::UBIGINT, 'GGGT', 'G', 0::UBIGINT
+)) AS u(annotation);
+----
+inframe_deletion	supported	-
+
 # The pure-C model validator is also the final authority for SQL-loaded models.
 # A transcript span wider than its outer exon envelope must fail at load time.
 statement error
@@ -434,6 +443,62 @@ ORDER BY ord;
 2	protein_altering_variant&splice_region_variant	supported	-
 3	3_prime_UTR_variant	supported	-
 4	downstream_gene_variant	supported	-
+
+# Generic exon overlap, UTR mapping, and splice overlap use different VEP
+# insertion geometries. At an internal exon boundary, a non-coding insertion is
+# not an exon variant; an insertion whose other flank maps into UTR keeps the
+# UTR term. Splice predicates continue to use the reversed P+1,P interval.
+statement ok
+CREATE TABLE duckvep_insertion_boundary_transcripts AS
+SELECT
+  0::UINTEGER transcript_index, 1::UINTEGER seq_region,
+  300::UBIGINT transcript_start, 450::UBIGINT transcript_end,
+  1::TINYINT strand, 0::UINTEGER gene_index, 0::UBIGINT transcript_flags,
+  NULL::UBIGINT cds_start, NULL::UBIGINT cds_end, NULL::BLOB cds_sequence,
+  NULL::UTINYINT codon_table, NULL::BLOB pre_cds_sequence,
+  NULL::BLOB post_cds_sequence
+UNION ALL
+SELECT
+  1::UINTEGER, 1::UINTEGER, 1000::UBIGINT, 1150::UBIGINT,
+  1::TINYINT, 1::UINTEGER, 5::UBIGINT,
+  1021::UBIGINT, 1050::UBIGINT, repeat('A', 30)::BLOB,
+  1::UTINYINT, repeat('A', 21)::BLOB, repeat('A', 51)::BLOB;
+
+statement ok
+CREATE TABLE duckvep_insertion_boundary_exons AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 300::UBIGINT, 350::UBIGINT, 1::UBIGINT, 51::UBIGINT, -1::TINYINT, -1::TINYINT),
+  (0::UINTEGER, 400::UBIGINT, 450::UBIGINT, 52::UBIGINT, 102::UBIGINT, -1::TINYINT, -1::TINYINT),
+  (1::UINTEGER, 1000::UBIGINT, 1050::UBIGINT, 1::UBIGINT, 51::UBIGINT, 0::TINYINT, 0::TINYINT),
+  (1::UINTEGER, 1100::UBIGINT, 1150::UBIGINT, 52::UBIGINT, 102::UBIGINT, -1::TINYINT, -1::TINYINT)
+) t(transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end, phase, end_phase);
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'insertion-boundaries',
+  'SELECT seq_region FROM duckvep_test_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_insertion_boundary_transcripts ORDER BY transcript_index',
+  'SELECT * FROM duckvep_insertion_boundary_exons ORDER BY transcript_index, exon_cdna_start'
+);
+----
+1
+
+query IT
+WITH variants(ord, position, reference, alternate) AS (VALUES
+  (1, 350::UBIGINT, 'A', 'AT'),
+  (2, 1099::UBIGINT, 'A', 'AT')
+)
+SELECT ord,
+       list_aggregate(list_sort(string_split(annotation.consequence, '&')),
+                      'string_agg', '&')
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'insertion-boundaries', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	non_coding_transcript_variant&splice_region_variant
+2	3_prime_UTR_variant&NMD_transcript_variant&splice_region_variant
 
 # VEP handles a frame-changing edit that begins in the terminal stop through
 # stop_lost/stop_retained, not frameshift_variant. Deletions may need the first

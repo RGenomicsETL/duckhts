@@ -190,7 +190,10 @@ needed_relations <- c(
 )
 present_relations <- dbGetQuery(
   con,
-  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+  paste(
+    "SELECT table_name FROM information_schema.tables",
+    "WHERE table_catalog = current_database() AND table_schema = 'main'"
+  )
 )$table_name
 missing_relations <- setdiff(needed_relations, present_relations)
 if (length(missing_relations) != 0L) {
@@ -223,13 +226,28 @@ load_queries <- c(
     "ORDER BY transcript_index, exon_cdna_start"
   )
 )
+load_options <- character()
+if ("duckvep_mature_mirna" %in% present_relations) {
+  mature_mirna_query <- paste(
+    "SELECT transcript_index, mature_mirna_start, mature_mirna_end",
+    "FROM duckvep_mature_mirna",
+    "ORDER BY transcript_index, mature_mirna_start"
+  )
+  load_options <- c(
+    load_options,
+    glue("mature_mirna_query := {sql_q(mature_mirna_query)}")
+  )
+}
+if (complete_coverage) {
+  load_options <- c(load_options, "transcript_coverage_complete := TRUE")
+}
 loaded <- dbGetQuery(
   con,
   glue(
     "SELECT loaded FROM duckvep_model_load(
        {sql_q(opt$model_name)}, {sql_q(load_queries[1])},
        {sql_q(load_queries[2])}, {sql_q(load_queries[3])}
-       {if (complete_coverage) ', transcript_coverage_complete := TRUE' else ''})"
+       {if (length(load_options)) paste0(', ', paste(load_options, collapse = ', ')) else ''})"
   )
 )$loaded
 if (length(loaded) != 1L || !isTRUE(loaded[[1L]])) {
@@ -564,11 +582,13 @@ oracle_details <- if (identical(oracle_mode, "cache")) {
   "oracle=gff"
 }
 oracle_build <- paste(
-  glue("core={component_version('ensembl')}"),
-  glue("variation={component_version('ensembl-variation')}"),
-  glue("vep={oracle_version}"),
-  oracle_details,
-  sep = ";"
+  c(
+    glue("core={component_version('ensembl')}"),
+    glue("variation={component_version('ensembl-variation')}"),
+    glue("vep={oracle_version}"),
+    oracle_details
+  ),
+  collapse = ";"
 )
 
 vep_json <- tempfile(fileext = ".json")

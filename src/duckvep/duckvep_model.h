@@ -43,6 +43,10 @@ typedef struct duckvep_owned_model {
 	uint32_t *exon_cdna_ends;
 	int8_t *exon_phases;
 	int8_t *exon_end_phases;
+	uint32_t *mature_mirna_offsets;
+	uint32_t *mature_mirna_starts;
+	uint32_t *mature_mirna_ends;
+	size_t mature_mirna_count;
 	uint8_t *cds_sequence_bytes;
 	size_t cds_sequence_length;
 	uint8_t *flank_sequence_bytes;
@@ -54,6 +58,7 @@ typedef struct duckvep_owned_model {
 	size_t known_seq_region_capacity;
 	size_t transcript_capacity;
 	size_t exon_capacity;
+	size_t mature_mirna_capacity;
 	size_t cds_sequence_capacity;
 	size_t flank_sequence_capacity;
 } duckvep_owned_model_t;

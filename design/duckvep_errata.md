@@ -8,6 +8,49 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## An empty annotated UTR can overlap a spanning deletion
+
+VEP 116 constructs its transcript-oriented before- and after-coding intervals as
+`[transcript_start, cds_start - 1]` and `[cds_end + 1, transcript_end]`. When a CDS shares
+the corresponding transcript endpoint, one of those intervals is inverted and contains
+no annotated base. The generic `overlap()` predicate does not reject that empty interval;
+a deletion spanning the endpoint can satisfy its four endpoint comparisons. The separate
+cDNA-mapping requirement is also true, so VEP emits a UTR term together with
+`coding_sequence_variant` even though the transcript has no UTR bases on that side.
+
+The indexed VEP-116 cache exposed both orientations in the deterministic ClinVar chr21
+sample. For example, `chr21:33602313 ATGTGCTAACTGAATAGCTATTG>A` on
+`ENST00000417979` emits `3_prime_UTR_variant&coding_sequence_variant`. DuckVEP reproduces
+the predicate geometry for a length-changing span; it does not manufacture a UTR sequence
+or move the CDS endpoint. Complete feature-overlap states remain separate because VEP
+routes them through feature ablation rather than these UTR predicates.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::_before_coding`,
+`::_after_coding`, and `::overlap`. Keep the pure-C empty-interval witness and the real
+cache differential together: either one alone is too easy to satisfy with an endpoint
+special case that breaks the opposite strand or complete-overlap state.
+
+## A mature miRNA term replaces the generic non-coding exon term
+
+VEP 116 does not infer a mature miRNA from the transcript biotype alone. Ensembl stores
+one or more `miRNA` transcript attributes whose values are inclusive cDNA ranges. VEP maps
+each range through the transcript mapper, then tests the uploaded genomic span against the
+resulting genomic segments. When the test succeeds, `mature_miRNA_variant` is selected at
+an earlier consequence tier than the generic non-coding transcript and exon predicates;
+those generic terms are therefore absent rather than added alongside it.
+
+The deterministic ClinVar chromosome-21 cache sample exposed the final two differences:
+`ENST00000290239` carries ranges `3-24` and `44-66`, while `ENST00000611994` carries
+`41-61` and `6-28`. DuckVEP projects these cDNA ranges once during model preparation,
+splits an interval at exon boundaries, and packs the resulting genomic segments as a
+per-transcript side relation. The hot kernel checks that numeric slice; it does not parse
+attributes or rebuild cDNA mappings per variant.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::within_mature_miRNA`, the
+`miRNA` `attrib_type`, and the transcript mapper. Keep the rule-tier regression as well as
+the importer-to-resident-model test: emitting both mature and generic exon terms would
+find the right interval but still fail VEP compatibility.
+
 ## An empty predicate set becomes a transcript-associated intergenic result
 
 VEP 116 does not drop a `TranscriptVariationAllele` merely because every consequence
