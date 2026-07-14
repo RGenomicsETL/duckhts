@@ -143,15 +143,17 @@ SELECT * FROM duckvep_ensembl_transcripts(
   'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
 );
 
-query IITTIITI
+query IITTITIITI
 SELECT transcript_index, transcript_flags, CAST(cds_sequence AS VARCHAR),
-       CAST(post_cds_bases AS VARCHAR), cds_start, cds_end,
+       CAST(post_cds_bases AS VARCHAR),
+       octet_length(pre_cds_sequence),
+       CAST(post_cds_sequence AS VARCHAR), cds_start, cds_end,
        sequence_withheld_reason, length(exons)
 FROM duckvep_prepared_transcripts ORDER BY transcript_index;
 ----
-0	21507	ATGAAAGGGTAA	CC	1	16	NULL	2
-1	8197	ATGCCCTAA	AGG	24	32	NULL	1
-2	259	NULL	NULL	24	32	rna_edit,initial_methionine	1
+0	21507	ATGAAAGGGTAA	CC	0	CC	1	16	NULL	2
+1	8197	ATGCCCTAA	AGG	0	AGG	24	32	NULL	1
+2	259	NULL	NULL	NULL	NULL	24	32	rna_edit,initial_methionine	1
 
 query ITT
 SELECT transcript_index, mane_select_refseq, mane_plus_clinical_refseq
@@ -202,10 +204,11 @@ FROM duckvep_prepared_receipt;
 ----
 1	3	2	3	2	1	4
 
-query II
-SELECT length(model_sha256), cds_base_count FROM duckvep_prepared_receipt;
+query III
+SELECT length(model_sha256), cds_base_count, transcript_flank_base_count
+FROM duckvep_prepared_receipt;
 ----
-64	21
+64	21	5
 
 query TTTT
 SELECT source_name, source_version, assembly, transcript_filter
@@ -239,7 +242,7 @@ query I
 SELECT loaded FROM duckvep_model_load(
   'ensembl-test',
   'SELECT seq_region, sequence_length FROM duckvep_ensembl_regions(''duckvep_core'', ''duckvep_reference_chunks'', ''GRCh38'') ORDER BY seq_region',
-  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM duckvep_prepared_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_prepared_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_prepared_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
   transcript_coverage_complete := true
 );
@@ -452,14 +455,14 @@ FROM (
   SELECT * FROM duckvep_grch37_receipt
 ) ORDER BY assembly;
 ----
-GRCh37	88e3e65c1055c5a38ac821205c3f7a246042a781d73c487607d0c32c845db5cf	all current transcripts on MT and GL000201.1
-GRCh38	68bdd72a53027af9bc09d1853848b2609c34dee3b533fdcfa4eec5881dd12db0	all current transcripts on MT and HG2047_PATCH
+GRCh37	5145f11c77aafb961c7428cdbfeeb485545ecef76fcd149c5b88c5671841cfe3	all current transcripts on MT and GL000201.1
+GRCh38	75250115e0a344d22c3de89c416a1c60dac18e6f14920579a499991fd5c319b9	all current transcripts on MT and HG2047_PATCH
 
 query I
 SELECT loaded FROM duckvep_model_load(
   'ensembl-grch38-fixture',
   'SELECT seq_region, sequence_length FROM duckvep_grch38_regions ORDER BY seq_region',
-  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM duckvep_grch38_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_grch38_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch38_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
   transcript_coverage_complete := true
 );
@@ -470,7 +473,7 @@ query I
 SELECT loaded FROM duckvep_model_load(
   'ensembl-grch37-fixture',
   'SELECT seq_region, sequence_length FROM duckvep_grch37_regions ORDER BY seq_region',
-  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, post_cds_bases FROM duckvep_grch37_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_grch37_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch37_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
   transcript_coverage_complete := true
 );

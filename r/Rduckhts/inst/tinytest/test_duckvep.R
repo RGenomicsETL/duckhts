@@ -94,12 +94,16 @@ ensembl_model <- dbGetQuery(
   paste(
     "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
     "CAST(post_cds_bases AS VARCHAR) post_cds_bases,",
+    "CAST(pre_cds_sequence AS VARCHAR) pre_cds_sequence,",
+    "CAST(post_cds_sequence AS VARCHAR) post_cds_sequence,",
     "transcript_flags, mane_select_refseq, exons[1].phase phase",
     "FROM duckvep_r_ensembl_transcripts"
   )
 )
 expect_identical(ensembl_model$cds_sequence, "ATGAAATAA")
 expect_identical(ensembl_model$post_cds_bases, "CCC")
+expect_identical(ensembl_model$pre_cds_sequence, "")
+expect_identical(ensembl_model$post_cds_sequence, "CCC")
 expect_equal(ensembl_model$transcript_flags, 1027)
 expect_identical(ensembl_model$mane_select_refseq, "NM_R_TEST.1")
 expect_equal(ensembl_model$phase, -1)
@@ -115,6 +119,7 @@ ensembl_receipt <- dbGetQuery(
 expect_equal(ensembl_receipt$region_count, 1)
 expect_equal(ensembl_receipt$reference_base_count, 12)
 expect_equal(ensembl_receipt$transcript_count, 1)
+expect_equal(ensembl_receipt$transcript_flank_base_count, 3)
 expect_equal(nchar(ensembl_receipt$model_sha256), 64)
 expect_identical(
   names(ensembl_receipt)[1:6],
@@ -174,7 +179,9 @@ dbExecute(
     "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
     "120::UBIGINT cds_start, 240::UBIGINT cds_end,",
     "'ATGGTACGTACGTACGTACGTACGTACGTACTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAA'::BLOB cds_sequence,",
-    "1::UTINYINT codon_table, 'ACG'::BLOB post_cds_bases"
+    "1::UTINYINT codon_table,",
+    "'TACGTACGTACGTACGTACG'::BLOB pre_cds_sequence,",
+    "'ACGTACGTAC'::BLOB post_cds_sequence"
   )
 )
 dbExecute(
@@ -192,7 +199,7 @@ queries <- c(
   paste(
     "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
     "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table,",
-    "post_cds_bases",
+    "pre_cds_sequence, post_cds_sequence",
     "FROM duckvep_r_transcripts ORDER BY seq_region, transcript_start, transcript_index"
   ),
   paste(
@@ -404,11 +411,43 @@ expect_identical(
 )
 expect_identical(utr5_start_boundary$status, rep("supported", 4))
 
+length_changing_boundaries <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 117::UBIGINT, 'ACGA', 'A'),",
+    "(2, 118::UBIGINT, 'CGA', 'C'),",
+    "(3, 118::UBIGINT, 'CGA', 'CACAC'),",
+    "(4, 239::UBIGINT, 'AAA', 'A'),",
+    "(5, 239::UBIGINT, 'AAAC', 'A'),",
+    "(6, 240::UBIGINT, 'AA', 'C'))",
+    "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(length_changing_boundaries$ord, 1:6)
+expect_identical(
+  length_changing_boundaries$consequence,
+  c(
+    "start_lost&start_retained_variant&5_prime_UTR_variant",
+    "start_lost&5_prime_UTR_variant",
+    "start_lost&5_prime_UTR_variant",
+    "stop_lost&3_prime_UTR_variant",
+    "stop_retained_variant&3_prime_UTR_variant",
+    "stop_lost&3_prime_UTR_variant"
+  )
+)
+expect_identical(length_changing_boundaries$status, rep("supported", 6))
+expect_true(all(is.na(length_changing_boundaries$reason)))
+
 dbExecute(
   con,
   paste(
     "CREATE TABLE duckvep_r_transcripts_no_tail AS",
-    "SELECT * EXCLUDE (post_cds_bases) FROM duckvep_r_transcripts"
+    "SELECT * EXCLUDE (pre_cds_sequence, post_cds_sequence)",
+    "FROM duckvep_r_transcripts"
   )
 )
 no_tail_queries <- queries
@@ -418,7 +457,12 @@ no_tail_queries[2] <- sub(
   no_tail_queries[2],
   fixed = TRUE
 )
-no_tail_queries[2] <- sub(", post_cds_bases", "", no_tail_queries[2], fixed = TRUE)
+no_tail_queries[2] <- sub(
+  ", pre_cds_sequence, post_cds_sequence",
+  "",
+  no_tail_queries[2],
+  fixed = TRUE
+)
 expect_true(load_model("r-no-tail", no_tail_queries)$loaded)
 missing_tail <- dbGetQuery(
   con,
@@ -431,6 +475,43 @@ missing_tail <- dbGetQuery(
 expect_identical(missing_tail$consequence, "coding_sequence_variant")
 expect_identical(missing_tail$status, "unresolved")
 expect_identical(missing_tail$reason, "missing_transcript_tail")
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_transcripts_legacy_tail AS",
+    "SELECT * EXCLUDE (pre_cds_sequence, post_cds_sequence),",
+    "'ACG'::BLOB AS post_cds_bases FROM duckvep_r_transcripts"
+  )
+)
+legacy_queries <- queries
+legacy_queries[2] <- sub(
+  "duckvep_r_transcripts",
+  "duckvep_r_transcripts_legacy_tail",
+  legacy_queries[2],
+  fixed = TRUE
+)
+legacy_queries[2] <- sub(
+  "pre_cds_sequence, post_cds_sequence",
+  "post_cds_bases",
+  legacy_queries[2],
+  fixed = TRUE
+)
+expect_true(load_model("r-legacy-tail", legacy_queries)$loaded)
+legacy_boundary <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status, a.reason FROM unnest(duckvep_annotate(",
+    "'r-legacy-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT",
+    ")) u(a)"
+  )
+)
+expect_identical(
+  legacy_boundary$consequence,
+  "coding_sequence_variant&5_prime_UTR_variant"
+)
+expect_identical(legacy_boundary$status, "unresolved")
+expect_identical(legacy_boundary$reason, "missing_transcript_flank")
 
 prepared_events <- dbGetQuery(
   con,
@@ -666,7 +747,7 @@ prepare_ensembl_fixture <- function(directory, assembly) {
     paste(
       "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
       "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence,",
-      "codon_table, post_cds_bases FROM", transcripts,
+      "codon_table, pre_cds_sequence, post_cds_sequence FROM", transcripts,
       "ORDER BY seq_region, transcript_start, transcript_index"
     ),
     paste(
@@ -761,6 +842,8 @@ expect_identical(fixture_mitochondrial$status, "unresolved")
 expect_identical(fixture_mitochondrial$reason, "missing_sequence")
 
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
+expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-no-tail') AS dropped")$dropped)
+expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-legacy-tail') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd') AS dropped")$dropped)
 expect_true(
   dbGetQuery(

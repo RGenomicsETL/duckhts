@@ -22,7 +22,8 @@ SELECT
   240::UBIGINT cds_end,
   'ATGGTACGTACGTACGTACGTACGTACGTACTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAA'::BLOB cds_sequence,
   1::UTINYINT codon_table,
-  'ACG'::BLOB post_cds_bases;
+  'TACGTACGTACGTACGTACG'::BLOB pre_cds_sequence,
+  'ACGTACGTAC'::BLOB post_cds_sequence;
 
 statement ok
 CREATE TABLE duckvep_test_exons AS
@@ -160,6 +161,33 @@ ORDER BY ord;
 3	start_retained_variant&5_prime_UTR_variant	supported
 4	start_lost&5_prime_UTR_variant	supported
 
+# VEP's length-changing start/stop predicates rebuild UTR+CDS strings. These
+# are real VEP-116 witnesses, including its odd lost+retained start state.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 117::UBIGINT, 'ACGA', 'A'),
+    (2, 118::UBIGINT, 'CGA', 'C'),
+    (3, 118::UBIGINT, 'CGA', 'CACAC'),
+    (4, 239::UBIGINT, 'AAA', 'A'),
+    (5, 239::UBIGINT, 'AAAC', 'A'),
+    (6, 240::UBIGINT, 'AA', 'C')
+)
+SELECT ord, annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	start_lost&start_retained_variant&5_prime_UTR_variant	supported	-
+2	start_lost&5_prime_UTR_variant	supported	-
+3	start_lost&5_prime_UTR_variant	supported	-
+4	stop_lost&3_prime_UTR_variant	supported	-
+5	stop_retained_variant&3_prime_UTR_variant	supported	-
+6	stop_lost&3_prime_UTR_variant	supported	-
+
 # The stronger overload requires contig lengths before a caller may declare
 # complete transcript coverage and receive supported intergenic assertions.
 statement error
@@ -241,7 +269,9 @@ statement ok
 CREATE TABLE duckvep_test_transcripts_structural AS
 SELECT * REPLACE (
   NULL::BLOB AS cds_sequence,
-  NULL::UTINYINT AS codon_table
+  NULL::UTINYINT AS codon_table,
+  NULL::BLOB AS pre_cds_sequence,
+  NULL::BLOB AS post_cds_sequence
 )
 FROM duckvep_test_transcripts;
 
@@ -339,12 +369,12 @@ ORDER BY ord;
 5	stop_lost	supported	-
 6	coding_sequence_variant&3_prime_UTR_variant	supported	-
 
-# The twelfth transcript column is optional for old/topology-only model
-# producers. A terminal deletion that needs it fails closed rather than becoming
-# a false frameshift.
+# The original eleven-column model remains valid. A terminal deletion that needs
+# post-CDS bases fails closed rather than becoming a false frameshift.
 statement ok
 CREATE TABLE duckvep_test_transcripts_no_tail AS
-SELECT * EXCLUDE (post_cds_bases) FROM duckvep_test_transcripts;
+SELECT * EXCLUDE (pre_cds_sequence, post_cds_sequence)
+FROM duckvep_test_transcripts;
 
 query I
 SELECT loaded FROM duckvep_model_load(
@@ -363,6 +393,41 @@ FROM unnest(duckvep_annotate(
 )) AS u(annotation);
 ----
 coding_sequence_variant	unresolved	missing_transcript_tail
+
+# The legacy twelfth column carries only a short post-CDS prefix. It still
+# resolves terminal codons, but it cannot pretend to contain a complete UTR.
+statement ok
+CREATE TABLE duckvep_test_transcripts_legacy_tail AS
+SELECT * EXCLUDE (pre_cds_sequence, post_cds_sequence),
+       'ACG'::BLOB AS post_cds_bases
+FROM duckvep_test_transcripts;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'fixture-legacy-tail',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_test_transcripts_legacy_tail ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start'
+);
+----
+1
+
+query TTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'fixture-legacy-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT
+)) AS u(annotation);
+----
+stop_retained_variant	supported	-
+
+query TTT
+SELECT annotation.consequence, annotation.status, annotation.reason
+FROM unnest(duckvep_annotate(
+  'fixture-legacy-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT
+)) AS u(annotation);
+----
+coding_sequence_variant&5_prime_UTR_variant	unresolved	missing_transcript_flank
 
 # NMD_transcript_variant is the VEP biotype predicate: it co-emits for a
 # variant inside a transcript already curated as nonsense_mediated_decay.
@@ -579,11 +644,12 @@ SELECT * FROM duckvep_model_load(
 ----
 duckvep_model_load: model name already exists
 
-query IIIIIII
+query IIIIIIII
 SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
        duckvep_model_drop('structural'), duckvep_model_drop('nmd'),
        duckvep_model_drop('nmd-prediction'),
        duckvep_model_drop('position-one'),
-       duckvep_model_drop('fixture-complete');
+       duckvep_model_drop('fixture-complete'),
+       duckvep_model_drop('fixture-legacy-tail');
 ----
-1	1	1	1	1	1	1
+1	1	1	1	1	1	1	1

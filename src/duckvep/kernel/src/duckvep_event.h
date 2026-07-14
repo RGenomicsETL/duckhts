@@ -7,8 +7,10 @@
  * Small variants carry three geometries:
  *
  *   raw_*      the uploaded VCF REF span;
- *   feature_*  VEP's VariationFeature span after its ordinary one-base indel
- *              anchor removal (VEP does not minimize substitutions by default);
+ *   feature_*  VEP's VariationFeature span. VEP 116 fully minimizes every
+ *              length-changing biallelic allele during parser post-processing,
+ *              even without --minimal; equal-length substitutions retain their
+ *              uploaded span;
  *   start/end  the fully trimmed semantic edit used for CDS projection.
  *
  * Region predicates consume feature_*. Splice predicates inspect the separate
@@ -36,7 +38,7 @@ typedef struct duckvep_event {
     uint16_t ref_diff_offset; /* offset inside REF where differing region starts */
     uint16_t alt_diff_offset; /* offset inside ALT where differing region starts */
     uint16_t anchor_ref_offset; /* REF base used to validate a pure insertion */
-    uint16_t feature_allele_offset; /* 0 or VEP's removed first indel anchor */
+    uint16_t feature_allele_offset; /* VEP feature allele offset inside REF/ALT */
     uint16_t ref_diff_length;
     uint16_t alt_diff_length;
     uint8_t  interbase;       /* pure insertion after trimming */
@@ -96,6 +98,45 @@ static inline int duckvep_event_allele_slices_ok(
     return roff <= pool && rlen <= pool - roff &&
            aoff <= pool && alen <= pool - aoff &&
            rlen <= UINT16_MAX && alen <= UINT16_MAX;
+}
+
+/* Borrow VEP's feature alleles. Length-changing pairs use the fully minimized
+ * differing slices; equal-length substitutions keep the complete uploaded
+ * alleles. Region, splice, and sequence predicates must all use this helper so
+ * feature geometry has one authority. */
+static inline int duckvep_event_feature_alleles(
+    const duckvep_variant_batch_t *batch,
+    size_t                         idx,
+    const duckvep_event_t         *event,
+    const uint8_t                **ref,
+    uint16_t                      *ref_length,
+    const uint8_t                **alt,
+    uint16_t                      *alt_length) {
+
+    uint16_t offset;
+    uint16_t raw_ref_length;
+    uint16_t raw_alt_length;
+
+    if (batch == NULL || event == NULL || ref == NULL || ref_length == NULL ||
+        alt == NULL || alt_length == NULL || idx >= batch->count ||
+        !duckvep_event_allele_slices_ok(batch, idx)) {
+        return 0;
+    }
+    offset = event->feature_allele_offset;
+    raw_ref_length = batch->ref_length[idx];
+    raw_alt_length = batch->alt_length[idx];
+    if (offset > raw_ref_length || offset > raw_alt_length) return 0;
+
+    *ref = batch->allele_bytes + batch->ref_offset[idx] + offset;
+    *alt = batch->allele_bytes + batch->alt_offset[idx] + offset;
+    if (raw_ref_length != raw_alt_length) {
+        *ref_length = event->ref_diff_length;
+        *alt_length = event->alt_diff_length;
+    } else {
+        *ref_length = raw_ref_length;
+        *alt_length = raw_alt_length;
+    }
+    return 1;
 }
 
 static inline void duckvep_event_load_raw_interval(
@@ -163,14 +204,6 @@ static inline int duckvep_event_prepare_small(
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
 
-    /* VEP's default VCF parser removes exactly one shared leading base from a
-     * length-changing allele. It leaves equal-length substitutions untouched;
-     * --minimal is a separate parser option. */
-    if (ref_len != alt_len && ref[0] == alt[0]) {
-        event->feature_allele_offset = 1u;
-        event->feature_start1++;
-    }
-
     while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) {
         prefix++;
     }
@@ -203,6 +236,14 @@ static inline int duckvep_event_prepare_small(
     }
 
     diff_start = duckvep_event_sat_add_u32_u16(pos1, prefix);
+    if (ref_len != alt_len) {
+        /* Parser::post_process_vfs calls minimise_alleles for every remaining
+         * non-minimal indel. trim_sequences adjusts both ends and represents an
+         * insertion with start=end+1. */
+        event->feature_allele_offset = prefix;
+        event->feature_start1 = diff_start;
+        event->feature_end1 = event->raw_end1 - (uint32_t)suffix;
+    }
     event->interbase = (uint8_t)(ref_diff_len == 0u);
     if (event->interbase) {
         event->insertion_boundary0 = (pos1 - 1u) + (uint32_t)prefix;

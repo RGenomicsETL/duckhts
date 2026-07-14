@@ -8,6 +8,49 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## An empty predicate set becomes a transcript-associated intergenic result
+
+VEP 116 does not drop a `TranscriptVariationAllele` merely because every consequence
+predicate returns false. After evaluating the complete consequence list,
+`BaseVariationFeatureOverlapAllele::get_all_OverlapConsequences` replaces an empty list
+with `$DEFAULT_OVERLAP_CONSEQUENCE`, whose term is `intergenic_variant`. The resulting
+row still carries the transcript identifier and may carry coding coordinates and peptide
+text. It is therefore not evidence that the uploaded variant lies between transcripts.
+
+Seed 71 exposed 18 such terminal coding delins for `DUCK1-201`; for example,
+`chrDuck:233 ACTGGTAA>AACCGGTTGACACTATTACTCATACCAATGGGTGC` has VEP codon and amino-acid
+fields but the sole consequence `intergenic_variant`. DuckVEP assigns the same default
+only after a real transcript candidate has exhausted its predicate set. This remains
+separate from the SQL adapter's no-candidate behavior: only a receipt-backed complete
+model may call a genuinely transcript-free input supported `intergenic_variant`; a
+partial model returns `no_feature_in_loaded_model`.
+
+Source anchors: Ensembl Variation 116
+`BaseVariationFeatureOverlapAllele.pm::get_all_OverlapConsequences` and
+`Utils/Constants.pm::$DEFAULT_OVERLAP_CONSEQUENCE`. Keep the transcript index in the
+fixed regression. Replacing the missing row with a transcript-free synthetic row would
+match the term while losing the upstream state.
+
+## A mapper Gap can manufacture a retained stop
+
+For a length-changing feature whose first or last transcript-mapper result is a `Gap`,
+VEP cannot define both `cds_start` and `cds_end`, so ordinary codon and peptide alleles
+do not exist. If any mapped part intersects CDS, the normal result is
+`coding_sequence_variant` plus the independent topology and splice terms.
+
+The terminal-stop path has a stranger outcome. `_overlaps_stop_codon_cil` ignores the
+failed transcript endpoint and tests the uploaded genomic span directly. When that span
+touches the terminal codon, `_ins_del_stop_altered_cil` then returns false because its
+cDNA/CDS endpoint is missing. `stop_retained` negates that false result and emits
+`stop_retained_variant` without ever editing or translating sequence. Held-out seed 71
+exposed 2,237 instances of this state; `chrDuck:202` with a 50-base REF deletion is the
+fixed witness. DuckVEP reproduces the predicate order rather than treating the missing
+endpoint as proof that the biological stop was examined.
+
+Source anchors: Ensembl Variation 116 `BaseTranscriptVariation::cds_start`,
+`VariationEffect.pm::coding_unknown`, `::_overlaps_stop_codon_cil`,
+`::_ins_del_stop_altered_cil`, and `::stop_retained`.
+
 ## An uploaded span can suppress a simpler coding edit
 
 VEP 116 maps an equal-length uploaded `VariationFeature` to CDS as one span; it does not
@@ -107,13 +150,71 @@ Source anchors: Ensembl Variation 116
 `::_snp_start_altered`. The fixed cases are generated and adjudicated by the real VEP
 executable; randomized distributions remain the regression guard against overfitting.
 
+## A length-changing start edit can be both lost and retained
+
+For a feature crossing the 5-prime UTR/CDS boundary, VEP 116 evaluates two independent
+string predicates. `_ins_del_start_altered` compares the edited UTR-plus-translateable
+sequence with the original strings and feeds `start_retained_variant`. `start_lost` also
+calls `_inv_start_altered`, even for an ordinary small allele; that helper asks whether
+`ATG` remains at the original start offset. An edit can therefore preserve the translated
+suffix while moving `ATG` away from that offset, making retained and lost true together.
+
+The fixed VEP witness `chrDuck:117 ACGA>A` emits exactly
+`start_lost&start_retained_variant&5_prime_UTR_variant`. This is why the resident model
+keeps the complete spliced pre-CDS sequence and why the kernel evaluates the two predicates
+separately over one allocation-free edited-sequence view. Do not collapse them into one
+boolean or “correct” the combination. Models without complete transcript flanks return
+`missing_transcript_flank`.
+
+The same independence applies to `inframe_insertion`. VEP suppresses that term for a
+start-retaining insertion only when the complete reference peptide is the *suffix* of the
+alternate peptide, meaning that new residues were added before translation began. When the
+reference peptide is the alternate *prefix*, the insertion follows the retained start and
+`inframe_insertion&start_retained_variant` remains valid. Held-out seed 71 exposed the
+minimal witness `chrDuck:121 T>TGTT`.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::_ins_del_start_altered`,
+`::_inv_start_altered`, `::start_lost`, `::start_retained_variant`, and
+`::inframe_insertion`. The reverse-strand kernel witness also pins VEP's genomic-left
+anchor removal, which is not transcript-left on the negative strand.
+
+## Length-changing predicates are independent
+
+VEP 116 does not first assign a length-changing coding edit to one clean biological
+class. `start_lost`, the three stop predicates, `frameshift`, `inframe_insertion`,
+`inframe_deletion`, and `protein_altering_variant` independently inspect one local
+codon/peptide state. DuckVEP therefore derives that state once and evaluates the same
+predicate set; selecting one term from allele length or net frame loses valid results.
+
+Four held-out VEP witnesses pin combinations that the older shape-specific paths left
+unresolved:
+
+| Uploaded feature | Exact VEP terms |
+| --- | --- |
+| `chrDuck:120 A>AAGTAAAATG` | `start_lost&stop_gained` |
+| `chrDuck:129 ACGTACGTACGTACG>ACATAG` | `protein_altering_variant&stop_gained` |
+| `chrDuck:202 CGTACGTACGTACGTACGTACGTACGTACGTACTGGTA>C` | `frameshift_variant&stop_lost` |
+| `chrDuck:221 ACGT>A` | `inframe_deletion&stop_gained` |
+
+The terminal shortening case follows another non-obvious guard in
+`_ins_del_stop_altered`: VEP edits translateable CDS plus the complete 3-prime UTR and,
+when that entire result is shorter than the original CDS, declares the original stop
+altered without trying to read a replacement codon at the old endpoint. A complete
+transcript flank proves this state; a model carrying only a short tail must fail closed.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`, `::stop_gained`,
+`::stop_lost`, `::frameshift`, `::inframe_deletion`,
+`::protein_altering_variant`, and `::_ins_del_stop_altered`.
+
 ## ALT-only mismatch islands inherit an expanded intron cache
 
 VEP 116 can emit `intron_variant` for a lengthening replacement whose REF-shaped
 `VariationFeature` remains entirely exonic. The result comes from two stages that are
 easy to miss when reading one predicate in isolation:
 
-- the VCF parser removes one shared indel anchor but leaves the feature end based on REF;
+- parser post-processing fully prefix/suffix-minimizes a length-changing biallelic pair,
+  then defines the feature span from the remaining REF (which is empty for a pure
+  insertion);
 - with `Set::IntervalTree`, `_overlapped_introns` preselects and caches introns over a
   three-base flank on both exon sides;
 - `_intron_effects` later compares REF and ALT bytewise, and an ALT-only mismatch island

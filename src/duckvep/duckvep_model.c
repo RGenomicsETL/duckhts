@@ -84,11 +84,10 @@ static int
 duckvep_model_reserve_transcripts(duckvep_owned_model_t *model,
 	size_t needed)
 {
-	size_t capacity, old_capacity;
+	size_t capacity;
 
 	if (needed <= model->transcript_capacity)
 		return 1;
-	old_capacity = model->transcript_capacity;
 	capacity = duckvep_sql_next_capacity(model->transcript_capacity,
 	    needed);
 #define DUCKVEP_RESIZE_TRANSCRIPT(member) \
@@ -108,15 +107,11 @@ duckvep_model_reserve_transcripts(duckvep_owned_model_t *model,
 	DUCKVEP_RESIZE_TRANSCRIPT(cds_sequence_offsets);
 	DUCKVEP_RESIZE_TRANSCRIPT(cds_sequence_lengths);
 	DUCKVEP_RESIZE_TRANSCRIPT(codon_tables);
+	DUCKVEP_RESIZE_TRANSCRIPT(pre_cds_sequence_offsets);
+	DUCKVEP_RESIZE_TRANSCRIPT(pre_cds_sequence_lengths);
+	DUCKVEP_RESIZE_TRANSCRIPT(post_cds_sequence_offsets);
+	DUCKVEP_RESIZE_TRANSCRIPT(post_cds_sequence_lengths);
 #undef DUCKVEP_RESIZE_TRANSCRIPT
-	if (capacity > SIZE_MAX / DUCKVEP_POST_CDS_BASE_COUNT ||
-	    !duckvep_sql_resize((void **)&model->post_cds_bases,
-	    sizeof(*model->post_cds_bases),
-	    capacity * DUCKVEP_POST_CDS_BASE_COUNT))
-		return 0;
-	memset(model->post_cds_bases +
-	    old_capacity * DUCKVEP_POST_CDS_BASE_COUNT, 0,
-	    (capacity - old_capacity) * DUCKVEP_POST_CDS_BASE_COUNT);
 	model->transcript_capacity = capacity;
 	return 1;
 }
@@ -160,6 +155,22 @@ duckvep_model_reserve_sequence(duckvep_owned_model_t *model, size_t needed)
 	return 1;
 }
 
+static int
+duckvep_model_reserve_flanks(duckvep_owned_model_t *model, size_t needed)
+{
+	size_t capacity;
+
+	if (needed <= model->flank_sequence_capacity)
+		return 1;
+	capacity = duckvep_sql_next_capacity(model->flank_sequence_capacity,
+	    needed);
+	if (!duckvep_sql_resize((void **)&model->flank_sequence_bytes,
+	    sizeof(*model->flank_sequence_bytes), capacity))
+		return 0;
+	model->flank_sequence_capacity = capacity;
+	return 1;
+}
+
 static void
 duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 {
@@ -182,7 +193,10 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 	free(model->cds_sequence_offsets);
 	free(model->cds_sequence_lengths);
 	free(model->codon_tables);
-	free(model->post_cds_bases);
+	free(model->pre_cds_sequence_offsets);
+	free(model->pre_cds_sequence_lengths);
+	free(model->post_cds_sequence_offsets);
+	free(model->post_cds_sequence_lengths);
 	free(model->exon_starts);
 	free(model->exon_ends);
 	free(model->exon_cdna_starts);
@@ -190,6 +204,7 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 	free(model->exon_phases);
 	free(model->exon_end_phases);
 	free(model->cds_sequence_bytes);
+	free(model->flank_sequence_bytes);
 	if (model->interval_index != NULL) {
 		/* cgranges 0.1.1 does not release its interval array. */
 		free(model->interval_index->r);
@@ -222,8 +237,15 @@ duckvep_owned_model_publish(duckvep_owned_model_t *model)
 	model->sequences.cds_offset = model->cds_sequence_offsets;
 	model->sequences.cds_length = model->cds_sequence_lengths;
 	model->sequences.codon_table = model->codon_tables;
-	model->sequences.post_cds_bases = model->post_cds_bases;
 	model->sequences.transcript_count = model->transcripts.transcript_count;
+	model->sequences.flank_bytes = model->flank_sequence_bytes;
+	model->sequences.flank_bytes_len = model->flank_sequence_length;
+	model->sequences.pre_cds_offset = model->pre_cds_sequence_offsets;
+	model->sequences.pre_cds_length = model->pre_cds_sequence_lengths;
+	model->sequences.post_cds_offset = model->post_cds_sequence_offsets;
+	model->sequences.post_cds_length = model->post_cds_sequence_lengths;
+	model->sequences.flanks_complete =
+	    (uint8_t)(model->transcript_flanks_complete != 0);
 }
 
 static int
@@ -462,11 +484,22 @@ static int
 duckvep_load_transcripts(duckdb_connection connection, const char *query,
 	duckvep_owned_model_t *model, char *error, size_t error_size)
 {
-	static const char *const names[] = {
+	static const char *const base_names[] = {
+		"transcript_index", "seq_region", "transcript_start",
+		"transcript_end", "strand", "gene_index", "transcript_flags",
+		"cds_start", "cds_end", "cds_sequence", "codon_table"
+	};
+	static const char *const legacy_names[] = {
 		"transcript_index", "seq_region", "transcript_start",
 		"transcript_end", "strand", "gene_index", "transcript_flags",
 		"cds_start", "cds_end", "cds_sequence", "codon_table",
 		"post_cds_bases"
+	};
+	static const char *const complete_names[] = {
+		"transcript_index", "seq_region", "transcript_start",
+		"transcript_end", "strand", "gene_index", "transcript_flags",
+		"cds_start", "cds_end", "cds_sequence", "codon_table",
+		"pre_cds_sequence", "post_cds_sequence"
 	};
 	static const duckdb_type types[] = {
 		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UINTEGER,
@@ -474,8 +507,10 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 		DUCKDB_TYPE_TINYINT, DUCKDB_TYPE_UINTEGER,
 		DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UBIGINT,
 		DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BLOB,
-		DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_BLOB
+		DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_BLOB,
+		DUCKDB_TYPE_BLOB
 	};
+	const char *const *names;
 	duckvep_query_result_t query_result;
 	duckdb_data_chunk chunk;
 	idx_t column_count;
@@ -486,21 +521,25 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 		return 0;
 	ok = 0;
 	column_count = duckdb_column_count(&query_result.result);
-	if (column_count != 11 && column_count != 12) {
+	if (column_count != 11 && column_count != 12 && column_count != 13) {
 		duckvep_sql_set_error(error, error_size,
-		    "transcript query must return 11 columns and optional post_cds_bases");
+		    "transcript query must return 11 columns, 12 with legacy post_cds_bases, or 13 with complete pre_cds_sequence and post_cds_sequence");
 		goto done;
 	}
+	names = column_count == 11 ? base_names :
+	    (column_count == 12 ? legacy_names : complete_names);
 	if (!duckvep_result_schema(&query_result.result, names, types,
 	    (size_t)column_count, 9,
 	    error, error_size))
 		goto done;
+	model->transcript_flanks_complete = column_count == 13;
 	while ((chunk = duckdb_fetch_chunk(query_result.result)) != NULL) {
-		duckdb_vector vectors[12];
+		duckdb_vector vectors[13];
 		uint32_t *transcript_indices, *seq_regions, *gene_indices;
 		uint64_t *starts, *ends, *flags, *cds_starts, *cds_ends;
 		int8_t *strands;
-		duckdb_string_t *sequences, *tails;
+		duckdb_string_t *sequences, *legacy_tails, *pre_flanks;
+		duckdb_string_t *post_flanks;
 		uint8_t *tables;
 		idx_t row, rows;
 		size_t column;
@@ -520,9 +559,15 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 		cds_ends = duckdb_vector_get_data(vectors[8]);
 		sequences = duckdb_vector_get_data(vectors[9]);
 		tables = duckdb_vector_get_data(vectors[10]);
-		tails = column_count == 12 ? duckdb_vector_get_data(vectors[11]) : NULL;
+		legacy_tails = column_count == 12
+		    ? duckdb_vector_get_data(vectors[11]) : NULL;
+		pre_flanks = column_count == 13
+		    ? duckdb_vector_get_data(vectors[11]) : NULL;
+		post_flanks = column_count == 13
+		    ? duckdb_vector_get_data(vectors[12]) : NULL;
 		for (row = 0; row < rows; row++) {
-			size_t index, sequence_length, sequence_offset, tail_length;
+			size_t flank_offset, index, post_length, pre_length;
+			size_t sequence_length, sequence_offset;
 			int cds_nulls, sequence_nulls;
 
 			for (column = 0; column < 7; column++) {
@@ -576,6 +621,18 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 				duckdb_destroy_data_chunk(&chunk);
 				goto done;
 			}
+			if (column_count == 13) {
+				int pre_null = duckvep_row_is_null(vectors[11], row);
+				int post_null = duckvep_row_is_null(vectors[12], row);
+
+				if (pre_null != post_null ||
+				    ((sequence_nulls == 0) == (pre_null != 0))) {
+					duckvep_sql_set_error(error, error_size,
+					    "complete transcript flanks must both be present exactly when CDS sequence is present");
+					duckdb_destroy_data_chunk(&chunk);
+					goto done;
+				}
+			}
 			sequence_offset = model->cds_sequence_length;
 			sequence_length = 0;
 			if (cds_nulls == 0) {
@@ -597,10 +654,6 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 				model->cds_ends[index] = 0;
 			}
 			model->codon_tables[index] = 1;
-			tail_length = 0;
-			memset(model->post_cds_bases +
-			    index * DUCKVEP_POST_CDS_BASE_COUNT, 0,
-			    DUCKVEP_POST_CDS_BASE_COUNT);
 			if (sequence_nulls == 0) {
 				sequence_length = (size_t)duckdb_string_t_length(
 				    sequences[row]);
@@ -624,26 +677,68 @@ duckvep_load_transcripts(duckdb_connection connection, const char *query,
 				    sequence_length);
 				model->codon_tables[index] = tables[row];
 			}
-			if (tails != NULL && !duckvep_row_is_null(vectors[11], row)) {
-				tail_length = (size_t)duckdb_string_t_length(tails[row]);
-				if (tail_length > DUCKVEP_POST_CDS_BASE_COUNT ||
-				    (tail_length != 0 && cds_nulls != 0)) {
+			flank_offset = model->flank_sequence_length;
+			pre_length = 0;
+			post_length = 0;
+			if (legacy_tails != NULL &&
+			    !duckvep_row_is_null(vectors[11], row)) {
+				post_length = (size_t)duckdb_string_t_length(
+				    legacy_tails[row]);
+				if (post_length > 3u ||
+				    (post_length != 0 && sequence_nulls != 0)) {
 					duckvep_sql_set_error(error, error_size,
-					    "post_cds_bases must contain at most three bases for a coding transcript");
+					    "post_cds_bases must contain at most three bases for a sequence-backed coding transcript");
 					duckdb_destroy_data_chunk(&chunk);
 					goto done;
 				}
-				if (tail_length != 0)
-					memcpy(model->post_cds_bases +
-					    index * DUCKVEP_POST_CDS_BASE_COUNT,
-					    duckdb_string_t_data(&tails[row]),
-					    tail_length);
+			} else if (pre_flanks != NULL) {
+				if (sequence_nulls == 0) {
+					pre_length = (size_t)duckdb_string_t_length(
+					    pre_flanks[row]);
+					post_length = (size_t)duckdb_string_t_length(
+					    post_flanks[row]);
+				}
+				if (pre_length > UINT32_MAX || post_length > UINT32_MAX) {
+					duckvep_sql_set_error(error, error_size,
+					    "transcript flank exceeds the uint32 model limit");
+					duckdb_destroy_data_chunk(&chunk);
+					goto done;
+				}
+			}
+			if (pre_length > SIZE_MAX - flank_offset ||
+			    post_length > SIZE_MAX - flank_offset - pre_length ||
+			    !duckvep_model_reserve_flanks(model,
+			    flank_offset + pre_length + post_length)) {
+				duckvep_sql_set_error(error, error_size,
+				    "out of memory loading transcript flanks");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			if (pre_length != 0)
+				memcpy(model->flank_sequence_bytes + flank_offset,
+				    duckdb_string_t_data(&pre_flanks[row]), pre_length);
+			if (post_length != 0) {
+				duckdb_string_t *source = legacy_tails != NULL
+				    ? legacy_tails : post_flanks;
+
+				memcpy(model->flank_sequence_bytes + flank_offset +
+				    pre_length, duckdb_string_t_data(&source[row]),
+				    post_length);
 			}
 			model->cds_sequence_offsets[index] =
 			    (uint64_t)sequence_offset;
 			model->cds_sequence_lengths[index] =
 			    (uint32_t)sequence_length;
+			model->pre_cds_sequence_offsets[index] =
+			    (uint64_t)flank_offset;
+			model->pre_cds_sequence_lengths[index] =
+			    (uint32_t)pre_length;
+			model->post_cds_sequence_offsets[index] =
+			    (uint64_t)(flank_offset + pre_length);
+			model->post_cds_sequence_lengths[index] =
+			    (uint32_t)post_length;
 			model->cds_sequence_length += sequence_length;
+			model->flank_sequence_length += pre_length + post_length;
 			model->transcripts.transcript_count++;
 		}
 		duckdb_destroy_data_chunk(&chunk);

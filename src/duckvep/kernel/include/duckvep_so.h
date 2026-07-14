@@ -77,7 +77,11 @@ typedef enum duckvep_so_bit {
     DUCKVEP_SO_INFRAME_INSERTION          = 30,
     DUCKVEP_SO_PROTEIN_ALTERING           = 31,
     DUCKVEP_SO_START_RETAINED             = 32,
-    DUCKVEP_SO_BIT_COUNT                  = 33
+    /* VEP assigns this default after a transcript-overlap allele has run every
+     * predicate without a match. This is distinct from the SQL adapter's
+     * complete-model assertion for an input with no transcript candidate. */
+    DUCKVEP_SO_INTERGENIC                 = 33,
+    DUCKVEP_SO_BIT_COUNT                  = 34
 } duckvep_so_bit_t;
 
 #ifdef __cplusplus

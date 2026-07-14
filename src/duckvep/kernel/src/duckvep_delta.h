@@ -120,8 +120,12 @@ typedef struct duckvep_coding_context {
     const uint8_t *alt_cds;     size_t alt_cds_len;
     const uint8_t *ref_peptide; size_t ref_peptide_len;
     const uint8_t *alt_peptide; size_t alt_peptide_len;
+    /* Borrowed complete transcript-oriented 5-prime sequence. A zero length
+     * with pre_cds_complete set means the CDS begins at cDNA base one. */
+    const uint8_t *pre_cds_bases;
+    size_t pre_cds_length;
     const uint8_t *post_cds_bases;
-    uint8_t post_cds_length;
+    size_t post_cds_length;
     uint8_t codon_table;
     int64_t length_diff;
     uint32_t flags;
@@ -129,6 +133,8 @@ typedef struct duckvep_coding_context {
     uint32_t single_edit_cds_start, single_edit_ref_len, single_edit_alt_len;
     uint8_t has_single_edit;
     uint8_t cds_changed;
+    uint8_t pre_cds_complete;
+    uint8_t post_cds_complete;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
@@ -155,19 +161,17 @@ typedef enum duckvep_context_delta_status {
     DUCKVEP_CONTEXT_DELTA_OK = 0,
     DUCKVEP_CONTEXT_DELTA_INVALID_ARG,
     DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
-    DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL
+    DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL,
+    DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_FLANK
 } duckvep_context_delta_status_t;
 
 typedef enum duckvep_sequence_delta_route {
     DUCKVEP_DELTA_ROUTE_DIRECT = 0,
     DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT,
-    DUCKVEP_DELTA_ROUTE_MNV_DIRECT_FALLBACK,
     DUCKVEP_DELTA_ROUTE_DEL_CONTEXT,
-    DUCKVEP_DELTA_ROUTE_DEL_DIRECT_FALLBACK,
     DUCKVEP_DELTA_ROUTE_INS_CONTEXT,
-    DUCKVEP_DELTA_ROUTE_INS_DIRECT_FALLBACK,
     DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT,
-    DUCKVEP_DELTA_ROUTE_INDEL_DIRECT_FALLBACK
+    DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT
 } duckvep_sequence_delta_route_t;
 
 /* Project one allele-trimmed small variant into the edit element consumed by the
@@ -261,24 +265,24 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
     uint64_t                        tx_flags,
     duckvep_sequence_delta_t       *delta);
 
-/* Raw scratch-aware sequence-delta dispatcher for one (variant, transcript) CDS-bucket
- * candidate. Passing scratch exercises the internal CodingContext path for supported
- * MNV and indel shapes. This entry point has no shape-specific fallback. Dispatches on the
- * variant SHAPE (duckvep_variant_kind_t):
+/* Pure-C reference dispatcher for one (variant, transcript) CDS-bucket candidate. The
+ * property suite calls this directly; production annotation calls
+ * duckvep_sequence_delta_fill_for_annotation instead. Passing scratch exercises the shared
+ * CodingContext interpreter. Omitting scratch selects deliberately narrow direct reference
+ * classifiers so properties can compare two implementations; a failed production context
+ * is never retried here. Dispatches on the variant SHAPE (duckvep_variant_kind_t):
  *   - SNV  -> the oracle-tested genomic-codon fast path (project the base to the
  *             coding frame, orient + apply, classify the codon change). Sets the
  *             codon FACTS (never SO labels — duckvep_effect_eval maps them).
- *   - MNV  -> with scratch, build variant CodingContext then classify narrow
- *             one-codon facts plus the two-adjacent-body-codon missense seam; without
- *             scratch, use the direct same-codon path plus the narrow
- *             two-codon non-terminal missense path.
+ *   - MNV  -> with scratch, build and classify the CodingContext; without scratch,
+ *             use the direct same-codon path plus a narrow two-codon reference path.
  *   - INS / DEL -> allele-trimmed single-edit frameshift, codon-boundary in-frame
  *             insertion, non-boundary protein-altering insertion, plus codon-aligned
  *             in-frame deletion, only when the affected bases are in non-terminal CDS
  *             body codons.
- *   - INDEL -> allele-trimmed frameshift delins when the replaced REF span is contiguous
- *             non-terminal CDS body and the net length change is not divisible by three;
- *             in-frame/protein-altering delins still fall back to the CDS bucket.
+ *   - INDEL -> the no-scratch reference accepts allele-trimmed frameshift delins only when
+ *             the replaced REF span is contiguous non-terminal CDS body and the net length
+ *             change is not divisible by three.
  *   - SV    -> currently leaves the delta INVALID. Structural edit interpretation
  *             belongs here; adapter code must not bypass this dispatcher by calling
  *             the internal CodingContext classifier directly.
@@ -311,9 +315,9 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill(
     duckvep_sequence_delta_t         *delta);
 
 /* Production annotation wrapper. It uses caller-owned workspace scratch for the
- * CodingContext path and, while that classifier remains incomplete, uses the direct
- * shape-specific path only when the context leaves `delta` invalid. Route reporting is
- * test instrumentation for making that fallback visible. */
+ * CodingContext path. Projection or classification failure remains reason-coded;
+ * annotation never retries through a shape-specific consequence classifier. Route
+ * reporting is internal test instrumentation. */
 DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation(
     duckvep_variant_kind_t            kind,
     const duckvep_transcript_model_t *transcripts,

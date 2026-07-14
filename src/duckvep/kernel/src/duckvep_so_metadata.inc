@@ -2,7 +2,7 @@
  * test/duckvep/conformance/data/so_consequences.tsv (VEP metadata) and
  * test/duckvep/conformance/data/so_bit_bindings.tsv (stable public bit bindings).
  * Do not hand-edit. */
-enum { DUCKVEP_GENERATED_SO_BINDING_COUNT = 33u };
+enum { DUCKVEP_GENERATED_SO_BINDING_COUNT = 34u };
 static const struct duckvep_so_metadata k_so[DUCKVEP_SO_BIT_COUNT] = {
     [DUCKVEP_SO_UPSTREAM_GENE] = { "upstream_gene_variant", DUCKVEP_IMPACT_MODIFIER, 32u, 3u },
     [DUCKVEP_SO_DOWNSTREAM_GENE] = { "downstream_gene_variant", DUCKVEP_IMPACT_MODIFIER, 33u, 3u },
@@ -37,6 +37,7 @@ static const struct duckvep_so_metadata k_so[DUCKVEP_SO_BIT_COUNT] = {
     [DUCKVEP_SO_INFRAME_INSERTION] = { "inframe_insertion", DUCKVEP_IMPACT_MODERATE, 11u, 3u },
     [DUCKVEP_SO_PROTEIN_ALTERING] = { "protein_altering_variant", DUCKVEP_IMPACT_MODERATE, 14u, 3u },
     [DUCKVEP_SO_START_RETAINED] = { "start_retained_variant", DUCKVEP_IMPACT_LOW, 20u, 3u },
+    [DUCKVEP_SO_INTERGENIC] = { "intergenic_variant", DUCKVEP_IMPACT_MODIFIER, 40u, 4u },
 };
 
 static const duckvep_so_bit_t k_so_render_order[DUCKVEP_SO_BIT_COUNT] = {
@@ -73,4 +74,5 @@ static const duckvep_so_bit_t k_so_render_order[DUCKVEP_SO_BIT_COUNT] = {
     DUCKVEP_SO_CODING_TRANSCRIPT,
     DUCKVEP_SO_UPSTREAM_GENE,
     DUCKVEP_SO_DOWNSTREAM_GENE,
+    DUCKVEP_SO_INTERGENIC,
 };

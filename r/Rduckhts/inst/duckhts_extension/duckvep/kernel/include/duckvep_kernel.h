@@ -29,12 +29,8 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 8
+#define DUCKVEP_KERNEL_VERSION_MINOR 9
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
-
-/* Transcript-oriented reference bases immediately after the CDS. VEP needs at
- * most three for an edit confined to the terminal stop codon. */
-#define DUCKVEP_POST_CDS_BASE_COUNT 3u
 
 /* --------------------------------------------------------------- status -- */
 
@@ -206,7 +202,18 @@ typedef struct duckvep_sequence_pool {
     const uint32_t *cds_length;    /* [transcript_count] 0 = non-coding                  */
     const uint8_t  *codon_table;   /* [transcript_count] duckvep_codon_table_t per tx    */
     size_t          transcript_count;
-    const uint8_t  *post_cds_bases;/* OPTIONAL [transcript_count * 3], 0-padded          */
+    /* Cold transcript-oriented sequence outside the CDS. Pre- and post-CDS
+     * slices share one byte pool; offsets and lengths are per transcript. A
+     * complete pool contains the entire spliced transcript flank on both sides.
+     * A partial pool may contain a short post-CDS prefix for legacy terminal-
+     * codon evaluation, but cannot resolve general CDS-boundary edits. */
+    const uint8_t  *flank_bytes;
+    size_t          flank_bytes_len;
+    const uint64_t *pre_cds_offset;
+    const uint32_t *pre_cds_length;
+    const uint64_t *post_cds_offset;
+    const uint32_t *post_cds_length;
+    uint8_t         flanks_complete;
 } duckvep_sequence_pool_t;
 
 /* ----------------------------------------------------------- compact output
@@ -231,7 +238,8 @@ typedef enum duckvep_sequence_status {
     DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT = 6,
     DUCKVEP_SEQUENCE_INVALID_PROJECTION = 7,
     DUCKVEP_SEQUENCE_INTERNAL_CAPACITY = 8,
-    DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL = 9
+    DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_TAIL = 9,
+    DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_FLANK = 10
 } duckvep_sequence_status_t;
 
 /* Variant-induced NMD prediction is deliberately separate from the

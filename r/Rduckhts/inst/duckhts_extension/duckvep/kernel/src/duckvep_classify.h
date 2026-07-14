@@ -98,7 +98,8 @@ duckvep_splice_state_t duckvep_splice_classify_span(
  * non-zero bytes, and accumulates every resulting mismatch island before
  * applying donor/acceptor/region suppression. Missing bytes in the shorter
  * allele compare as zero, matching Perl's string XOR. `feature_start1` and the
- * allele slices are after VEP's ordinary one-base indel-anchor removal. */
+ * allele slices are VEP's complete uploaded equal-length pair or its fully
+ * minimized length-changing pair. */
 duckvep_splice_state_t duckvep_splice_classify_differing_regions(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,

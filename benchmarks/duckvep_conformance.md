@@ -10,12 +10,13 @@ is append-only by source revision, corpus, and resident model.
 
 ## Latest tested revision
 
-| revision | corpus                     | model        | oracle    |  pairs | exact        | unresolved | resolved_disagreements | resolved_error_upper_95 |
-|:---------|:---------------------------|:-------------|:----------|-------:|:-------------|-----------:|-----------------------:|:------------------------|
-| fe6f0634 | state_exploration_seed_197 | differential | VEP 116.0 | 100248 | 91159/100248 |      19473 |                    537 | 0.72%                   |
-| fe6f0634 | state_exploration_seed_211 | differential | VEP 116.0 | 100250 | 90951/100250 |      19676 |                    567 | 0.76%                   |
-| fe6f0634 | state_exploration_seed_71  | differential | VEP 116.0 | 100242 | 90932/100242 |      19500 |                    532 | 0.72%                   |
-| fe6f0634 | witnesses                  | differential | VEP 116.0 |    262 | 258/262      |         10 |                      0 | 1.45%                   |
+| revision | corpus                     | model        | oracle    |  pairs | exact         | unresolved | resolved_disagreements | resolved_error_upper_95 |
+|:---------|:---------------------------|:-------------|:----------|-------:|:--------------|-----------:|-----------------------:|:------------------------|
+| 3c427df4 | state_exploration_seed_113 | differential | VEP 116.0 | 100268 | 100268/100268 |          0 |                      0 | 0.00%                   |
+| 3c427df4 | state_exploration_seed_197 | differential | VEP 116.0 | 100268 | 100268/100268 |          0 |                      0 | 0.00%                   |
+| 3c427df4 | state_exploration_seed_211 | differential | VEP 116.0 | 100268 | 100268/100268 |          0 |                      0 | 0.00%                   |
+| 3c427df4 | state_exploration_seed_71  | differential | VEP 116.0 | 100268 | 100268/100268 |          0 |                      0 | 0.00%                   |
+| 3c427df4 | witnesses                  | differential | VEP 116.0 |    268 | 268/268       |          0 |                      0 | 1.37%                   |
 
 Detailed consequence tables below use the largest corpus at this tested
 revision.
@@ -37,6 +38,11 @@ revision.
 | 2026-07-14 | 2ab08e2f        | state_exploration_seed_211 | differential | 100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
 | 2026-07-14 | 2ab08e2f        | state_exploration_seed_71  | differential | 100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
 | 2026-07-14 | 2ab08e2f        | witnesses                  | differential |    258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_113 | differential | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_197 | differential | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_211 | differential | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_71  | differential | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | witnesses                  | differential |    268 |         268 |          0 |        268 |                   0 | 100.00%    | 1.37%                   |
 | 2026-07-14 | 8b2a2dbc        | state_exploration_seed_197 | differential | 100248 |       88021 |      22598 |      77650 |                 550 | 87.80%     | 0.77%                   |
 | 2026-07-14 | 8b2a2dbc        | state_exploration_seed_211 | differential | 100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
 | 2026-07-14 | 8b2a2dbc        | state_exploration_seed_71  | differential | 100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
@@ -78,6 +84,7 @@ duplicate count. A failed suite does not append rows.
 | 2026-07-13 | defc9a1c        | 0x0000000000000071 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         142 | 189,962          |                18.793 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-13 | eb212de3        | 0xd0c0ffee12345678 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         141 | 190,064          |                23.425 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-14 | 2ab08e2f        | 0x0000000000000139 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         144 | 201,583          |                18.940 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-14 | 3c427df4        | 0x0000000000000139 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         149 | 202,513          |                19.027 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-14 | 8b2a2dbc        | 0x0000000000000139 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         145 | 201,595          |                21.217 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-14 | fe6f0634        | 0x0000000000000139 |                 40 | 3,900,500  | 3,900,500  |      0 |          0 |         146 | 201,660          |                18.570 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
@@ -133,29 +140,29 @@ carry several terms.
 
 | consequence_class                   | impact   |     n | exact_agree | unresolved | resolved_n | resolved_agree | resolved_discordant | term_mismatch | engine_extra | engine_missing | resolved_error_upper_95 |
 |:------------------------------------|:---------|------:|------------:|-----------:|-----------:|---------------:|--------------------:|--------------:|-------------:|---------------:|:------------------------|
-| splice_region_variant               | LOW      |  8120 |        7916 |        424 |       7696 |           7539 |                 157 |           204 |           78 |            126 | 2.38%                   |
-| splice_acceptor_variant             | HIGH     | 11580 |       11456 |       5351 |       6229 |           6119 |                 110 |           124 |          118 |              6 | 2.12%                   |
-| start_retained_variant              | LOW      |   333 |         240 |          4 |        329 |            240 |                  89 |            93 |            0 |             93 | 32.20%                  |
-| splice_polypyrimidine_tract_variant | LOW      | 10384 |       10189 |        121 |      10263 |          10189 |                  74 |           195 |           70 |            125 | 0.90%                   |
-| 5_prime_UTR_variant                 | MODIFIER | 15125 |       15014 |       4063 |      11062 |          10992 |                  70 |           111 |          111 |              0 | 0.80%                   |
-| splice_donor_5th_base_variant       | LOW      | 11330 |       11207 |       4964 |       6366 |           6309 |                  57 |           123 |          104 |             19 | 1.16%                   |
-| splice_donor_variant                | HIGH     | 12888 |       12821 |       5950 |       6938 |           6883 |                  55 |            67 |           66 |              1 | 1.03%                   |
-| 3_prime_UTR_variant                 | MODIFIER | 14023 |       13925 |       4533 |       9490 |           9435 |                  55 |            98 |           98 |              0 | 0.75%                   |
-| intron_variant                      | MODIFIER | 38632 |       38540 |      10673 |      27959 |          27913 |                  46 |            92 |           86 |              6 | 0.22%                   |
-| splice_donor_region_variant         | LOW      |  4672 |        4547 |       1025 |       3647 |           3613 |                  34 |           125 |           65 |             60 | 1.30%                   |
-| downstream_gene_variant             | MODIFIER |   438 |         423 |          0 |        438 |            423 |                  15 |            15 |            0 |             15 | 5.59%                   |
-| protein_altering_variant            | MODERATE |  2728 |        2589 |        129 |       2599 |           2589 |                  10 |           139 |            0 |            139 | 0.71%                   |
-| intergenic_variant                  | MODIFIER |    14 |           0 |          5 |          9 |              0 |                   9 |            14 |            0 |             14 | 100.00%                 |
-| inframe_insertion                   | MODERATE |  4216 |        4207 |          0 |       4216 |           4207 |                   9 |             9 |            0 |              9 | 0.40%                   |
-| start_lost                          | HIGH     |  8253 |        4946 |       3303 |       4950 |           4946 |                   4 |          3307 |            0 |           3307 | 0.21%                   |
-| stop_lost                           | HIGH     |  3730 |        1079 |       2649 |       1081 |           1079 |                   2 |          2651 |            2 |           2649 | 0.67%                   |
-| stop_retained_variant               | LOW      |  2428 |         140 |       2286 |        142 |            140 |                   2 |          2288 |            0 |           2288 | 5.00%                   |
-| stop_gained                         | HIGH     |  8707 |        8612 |         93 |       8614 |           8612 |                   2 |            95 |            2 |             93 | 0.08%                   |
-| coding_sequence_variant             | MODIFIER | 34241 |       25650 |      19676 |      14565 |          14565 |                   0 |          8591 |         8591 |              0 | 0.03%                   |
-| frameshift_variant                  | HIGH     | 16455 |       16256 |        199 |      16256 |          16256 |                   0 |           199 |            0 |            199 | 0.02%                   |
-| inframe_deletion                    | MODERATE |   408 |         367 |         41 |        367 |            367 |                   0 |            41 |            0 |             41 | 1.00%                   |
-| missense_variant                    | MODERATE |  4200 |        4200 |          0 |       4200 |           4200 |                   0 |             0 |            0 |              0 | 0.09%                   |
-| synonymous_variant                  | LOW      |   113 |         113 |          0 |        113 |            113 |                   0 |             0 |            0 |              0 | 3.21%                   |
+| intron_variant                      | MODIFIER | 38757 |       38757 |          0 |      38757 |          38757 |                   0 |             0 |            0 |              0 | 0.01%                   |
+| coding_sequence_variant             | MODIFIER | 25833 |       25833 |          0 |      25833 |          25833 |                   0 |             0 |            0 |              0 | 0.01%                   |
+| frameshift_variant                  | HIGH     | 16210 |       16210 |          0 |      16210 |          16210 |                   0 |             0 |            0 |              0 | 0.02%                   |
+| 5_prime_UTR_variant                 | MODIFIER | 14904 |       14904 |          0 |      14904 |          14904 |                   0 |             0 |            0 |              0 | 0.02%                   |
+| 3_prime_UTR_variant                 | MODIFIER | 13953 |       13953 |          0 |      13953 |          13953 |                   0 |             0 |            0 |              0 | 0.03%                   |
+| splice_donor_variant                | HIGH     | 12821 |       12821 |          0 |      12821 |          12821 |                   0 |             0 |            0 |              0 | 0.03%                   |
+| splice_acceptor_variant             | HIGH     | 11618 |       11618 |          0 |      11618 |          11618 |                   0 |             0 |            0 |              0 | 0.03%                   |
+| splice_donor_5th_base_variant       | LOW      | 11077 |       11077 |          0 |      11077 |          11077 |                   0 |             0 |            0 |              0 | 0.03%                   |
+| splice_polypyrimidine_tract_variant | LOW      | 10415 |       10415 |          0 |      10415 |          10415 |                   0 |             0 |            0 |              0 | 0.04%                   |
+| stop_gained                         | HIGH     |  8551 |        8551 |          0 |       8551 |           8551 |                   0 |             0 |            0 |              0 | 0.04%                   |
+| start_lost                          | HIGH     |  8145 |        8145 |          0 |       8145 |           8145 |                   0 |             0 |            0 |              0 | 0.05%                   |
+| splice_region_variant               | LOW      |  8071 |        8071 |          0 |       8071 |           8071 |                   0 |             0 |            0 |              0 | 0.05%                   |
+| splice_donor_region_variant         | LOW      |  4713 |        4713 |          0 |       4713 |           4713 |                   0 |             0 |            0 |              0 | 0.08%                   |
+| missense_variant                    | MODERATE |  4354 |        4354 |          0 |       4354 |           4354 |                   0 |             0 |            0 |              0 | 0.08%                   |
+| inframe_insertion                   | MODERATE |  4319 |        4319 |          0 |       4319 |           4319 |                   0 |             0 |            0 |              0 | 0.09%                   |
+| stop_lost                           | HIGH     |  3755 |        3755 |          0 |       3755 |           3755 |                   0 |             0 |            0 |              0 | 0.10%                   |
+| protein_altering_variant            | MODERATE |  2633 |        2633 |          0 |       2633 |           2633 |                   0 |             0 |            0 |              0 | 0.14%                   |
+| stop_retained_variant               | LOW      |  2469 |        2469 |          0 |       2469 |           2469 |                   0 |             0 |            0 |              0 | 0.15%                   |
+| inframe_deletion                    | MODERATE |   420 |         420 |          0 |        420 |            420 |                   0 |             0 |            0 |              0 | 0.87%                   |
+| downstream_gene_variant             | MODIFIER |   396 |         396 |          0 |        396 |            396 |                   0 |             0 |            0 |              0 | 0.93%                   |
+| start_retained_variant              | LOW      |   322 |         322 |          0 |        322 |            322 |                   0 |             0 |            0 |              0 | 1.14%                   |
+| synonymous_variant                  | LOW      |   106 |         106 |          0 |        106 |            106 |                   0 |             0 |            0 |              0 | 3.42%                   |
+| intergenic_variant                  | MODIFIER |    18 |          18 |          0 |         18 |             18 |                   0 |             0 |            0 |              0 | 18.53%                  |
 
 ## VEP impact classes
 
@@ -164,10 +171,10 @@ counted once.
 
 | impact   |     n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
 |:---------|------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
-| HIGH     | 54546 |       47553 |      17274 |      37272 |                 296 | 87.18%     | 0.89%                   |
-| LOW      | 14822 |       12709 |       2180 |      12642 |                 176 | 85.74%     | 1.61%                   |
-| MODERATE |  9345 |        9300 |         12 |       9333 |                  33 | 99.52%     | 0.50%                   |
-| MODIFIER | 21537 |       21389 |        210 |      21327 |                  62 | 99.31%     | 0.37%                   |
+| HIGH     | 54344 |       54344 |          0 |      54344 |                   0 | 100.00%    | 0.01%                   |
+| LOW      | 14877 |       14877 |          0 |      14877 |                   0 | 100.00%    | 0.02%                   |
+| MODERATE |  9521 |        9521 |          0 |       9521 |                   0 | 100.00%    | 0.04%                   |
+| MODIFIER | 21526 |       21526 |          0 |      21526 |                   0 | 100.00%    | 0.02%                   |
 
 The source artifact hash and exact Ensembl core/variation build remain
 in `test/duckvep/conformance/data/conformance_history.csv` for audit and
