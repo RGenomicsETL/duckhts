@@ -2,6 +2,20 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now matches all 126,320 transcript consequence sets
+  from the indexed VEP-116 cache for a deterministic 4,246-allele
+  ClinVar chromosome-21 sample (seed 1, at most 1,000 alleles per
+  shape/length bin), with no unresolved, extra, or missing rows.
+  `duckvep_ensembl_transcripts(...)` applies VEP’s core-transcript
+  selection and projects mature-miRNA cDNA attributes into genomic exon
+  segments; `duckvep_model_load(...)` accepts those segments through
+  optional `mature_mirna_query`, and annotation returns
+  `mature_miRNA_variant` with VEP’s precedence over generic non-coding
+  exon terms. The bundled engine also fixes insertion placement at
+  transcript/exon boundaries, VEP’s empty-UTR endpoint behavior, and
+  coding edits on `CDS_END_NF` transcripts with a one- or two-base
+  partial terminal codon; DBI tests cover the complete
+  Ensembl-import-to-resident-model path
 - bundle `duckvep_annotate_compact(...)`, returning the same DuckVEP
   transcript consequences as numeric SO/region masks and stable status,
   reason, amino-acid, and NMD codes so DBI workflows can filter and join
