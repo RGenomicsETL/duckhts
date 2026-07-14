@@ -138,6 +138,28 @@ ORDER BY ord;
 7	coding_sequence_variant	unresolved	reference_mismatch
 8	coding_sequence_variant	unresolved	ambiguous_sequence
 
+# VEP maps an equal-length feature crossing 5' UTR into CDS through the start
+# codon only. Preserving ATG suppresses later coding changes in the same feature.
+query ITT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 119::UBIGINT, 'GA', 'AC'),
+    (2, 118::UBIGINT, 'CGA', 'GAA'),
+    (3, 119::UBIGINT, 'GATGGT', 'TATGAT'),
+    (4, 119::UBIGINT, 'GATG', 'GTAA')
+)
+SELECT ord, annotation.consequence, annotation.status
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	start_lost&5_prime_UTR_variant	supported
+2	start_retained_variant&5_prime_UTR_variant	supported
+3	start_retained_variant&5_prime_UTR_variant	supported
+4	start_lost&5_prime_UTR_variant	supported
+
 # The stronger overload requires contig lengths before a caller may declare
 # complete transcript coverage and receive supported intergenic assertions.
 statement error

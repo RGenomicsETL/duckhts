@@ -378,6 +378,32 @@ expect_identical(
   c("reference_mismatch", "ambiguous_sequence")
 )
 
+utr5_start_boundary <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 119::UBIGINT, 'GA', 'AC'),",
+    "(2, 118::UBIGINT, 'CGA', 'GAA'),",
+    "(3, 119::UBIGINT, 'GATGGT', 'TATGAT'),",
+    "(4, 119::UBIGINT, 'GATG', 'GTAA'))",
+    "SELECT ord, a.consequence, a.status FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) u(a) ORDER BY ord"
+  )
+)
+expect_equal(utr5_start_boundary$ord, 1:4)
+expect_identical(
+  utr5_start_boundary$consequence,
+  c(
+    "start_lost&5_prime_UTR_variant",
+    "start_retained_variant&5_prime_UTR_variant",
+    "start_retained_variant&5_prime_UTR_variant",
+    "start_lost&5_prime_UTR_variant"
+  )
+)
+expect_identical(utr5_start_boundary$status, rep("supported", 4))
+
 dbExecute(
   con,
   paste(

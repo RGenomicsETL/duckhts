@@ -435,6 +435,49 @@ if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
   }
 }
 
+# Pin VEP's asymmetric 5' UTR/start-boundary peptide view. A feature that begins
+# in 5' UTR and reaches CDS is classified through the start codon only. The last
+# witness changes the following coding codon while preserving ATG; VEP still
+# emits start_retained_variant without missense_variant.
+if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
+  if (identical(nuc(119L, 2L), "GA")) {
+    emit(
+      119L,
+      "GA",
+      "AC",
+      "start_codon",
+      "utr5_start_boundary_lost"
+    )
+  }
+  if (identical(nuc(118L, 3L), "CGA")) {
+    emit(
+      118L,
+      "CGA",
+      "GAA",
+      "start_codon",
+      "utr5_start_boundary_retained_utr_only"
+    )
+  }
+  if (identical(nuc(119L, 6L), "GATGGT")) {
+    emit(
+      119L,
+      "GATGGT",
+      "TATGAT",
+      "start_codon",
+      "utr5_start_boundary_retained_coding_tail"
+    )
+  }
+  if (identical(nuc(119L, 4L), "GATG")) {
+    emit(
+      119L,
+      "GATG",
+      "GTAA",
+      "start_codon",
+      "utr5_start_boundary_stop_is_start_only"
+    )
+  }
+}
+
 # Pin VEP 116's interval-tree intron prefilter. Both alleles have ALT-only
 # mismatch bases that extend across the first donor. The REF-shaped feature for
 # the first ends at 148, inside VEP's three-base intron-cache flank, while the

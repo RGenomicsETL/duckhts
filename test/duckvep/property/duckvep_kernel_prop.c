@@ -6321,6 +6321,161 @@ TEST annotate_equal_length_feature_window_both_strands_known_scene(void) {
     PASS();
 }
 
+/* VEP maps a same-length feature crossing the 5' UTR/CDS boundary to the
+ * start codon only. The long cases also change the next coding codon but remain
+ * start_retained_variant when ATG survives; they must not gain missense. */
+TEST annotate_equal_length_utr5_start_boundary_both_strands_known_scene(void) {
+    static const uint16_t tchrom[2] = {0u, 1u};
+    static const uint32_t tstart[2] = {1000u, 2000u};
+    static const uint32_t tend[2] = {1011u, 2011u};
+    static const int8_t tstrand[2] = {1, -1};
+    static const uint64_t tflags[2] = {0u, 0u};
+    static const uint32_t texoff[2] = {0u, 1u};
+    static const uint16_t texcnt[2] = {1u, 1u};
+    static const uint32_t tcds_s[2] = {1003u, 2000u};
+    static const uint32_t tcds_e[2] = {1011u, 2008u};
+    static const uint32_t estart[2] = {1000u, 2000u};
+    static const uint32_t eend[2] = {1011u, 2011u};
+    static const uint32_t ecdna_s[2] = {1u, 1u};
+    static const uint32_t ecdna_e[2] = {12u, 12u};
+    static const int8_t ephase[2] = {0, 0};
+    static const uint8_t cds_bytes[18] = {
+        'A','T','G', 'G','A','A', 'T','A','A',
+        'A','T','G', 'G','A','A', 'T','A','A'
+    };
+    static const uint64_t cds_off[2] = {0u, 9u};
+    static const uint32_t cds_len[2] = {9u, 9u};
+    static const uint8_t cds_tab[2] = {
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD,
+        (uint8_t)DUCKVEP_CODON_TABLE_STANDARD
+    };
+
+    static const uint16_t vchrom[7] = {0u, 0u, 0u, 0u, 1u, 1u, 1u};
+    static const uint32_t vpos[7] = {
+        1001u, 1002u, 1002u, 1002u, 2004u, 2008u, 2008u
+    };
+    static const uint32_t vend[7] = {
+        1003u, 1003u, 1007u, 1005u, 2009u, 2009u, 2010u
+    };
+    static const uint8_t vkind[7] = {
+        (uint8_t)DUCKVEP_KIND_MNV, (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_MNV, (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_MNV, (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_MNV
+    };
+    static const uint8_t abytes[52] = {
+        'C','G','A', 'G','A','A',
+        'G','A', 'A','C',
+        'G','A','T','G','G','A', 'T','A','T','G','A','T',
+        'G','A','T','G', 'G','T','A','A',
+        'T','C','C','A','T','G', 'G','G','C','A','T','A',
+        'T','G', 'C','A',
+        'T','G','C', 'T','A','A'
+    };
+    static const uint32_t roff[7] = {0u, 6u, 10u, 22u, 30u, 42u, 46u};
+    static const uint32_t aoff[7] = {3u, 8u, 16u, 26u, 36u, 44u, 49u};
+    static const uint16_t rlen[7] = {3u, 2u, 6u, 4u, 6u, 2u, 3u};
+    static const uint16_t alen[7] = {3u, 2u, 6u, 4u, 6u, 2u, 3u};
+    static const uint64_t expected[7] = {
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_LOST),
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_LOST),
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED),
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_LOST),
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+            DUCKVEP_SO(DUCKVEP_SO_START_RETAINED)
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_sequence_pool_t seq;
+    duckvep_variant_batch_t v;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *ws = NULL;
+    duckvep_annotate_cursor_t *cursor = NULL;
+    duckvep_error_t err;
+    duckvep_consequence_t rows[7];
+    duckvep_consequence_t cursor_rows[7];
+    duckvep_consequence_t chunk[1];
+    duckvep_result_builder_t rb;
+    const duckvep_workspace_delta_route_stats_t *stats;
+    size_t cursor_count = 0u;
+    int saw_full = 0;
+    size_t i;
+
+    memset(&tx, 0, sizeof tx); memset(&exons, 0, sizeof exons);
+    memset(&seq, 0, sizeof seq); memset(&v, 0, sizeof v); memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend; tx.strand = tstrand;
+    tx.flags = tflags; tx.exon_offset = texoff; tx.exon_count = texcnt;
+    tx.cds_start1 = tcds_s; tx.cds_end1 = tcds_e; tx.transcript_count = 2u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 2u;
+    seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
+    seq.cds_offset = cds_off; seq.cds_length = cds_len; seq.codon_table = cds_tab;
+    seq.transcript_count = 2u;
+    v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend; v.variant_kind = vkind;
+    v.allele_bytes = abytes; v.allele_bytes_len = sizeof abytes;
+    v.ref_offset = roff; v.alt_offset = aoff;
+    v.ref_length = rlen; v.alt_length = alen; v.count = 7u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_workspace_delta_route_stats_reset(ws);
+    duckvep_result_builder_init(&rb, rows, 7u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(7u, duckvep_result_builder_count(&rb));
+    for (i = 0u; i < 7u; i++) {
+        ASSERT_EQ_FMT((uint32_t)i, rows[i].variant_idx, "%u");
+        ASSERT_EQ(expected[i], rows[i].consequence_mask);
+        ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, rows[i].sequence_status);
+        ASSERT_EQ(0u, rows[i].flags &
+                      (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED);
+    }
+    stats = duckvep_workspace_delta_route_stats(ws);
+    ASSERT(stats != NULL);
+    ASSERT_EQ(7u, stats->substitution_context);
+    ASSERT_EQ(0u, stats->mnv_direct_fallback);
+
+    duckvep_workspace_delta_route_stats_reset(ws);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_cursor_open(model, &v, opts, ws, &cursor, &err));
+    while (!duckvep_annotate_cursor_done(cursor)) {
+        duckvep_status_t status;
+        duckvep_result_builder_init(&rb, chunk, 1u);
+        status = duckvep_annotate_cursor_fill(cursor, &rb, &err);
+        ASSERT(status == DUCKVEP_OK || status == DUCKVEP_ERR_RESULT_FULL);
+        if (status == DUCKVEP_ERR_RESULT_FULL) saw_full = 1;
+        ASSERT(cursor_count + duckvep_result_builder_count(&rb) <= 7u);
+        for (i = 0u; i < duckvep_result_builder_count(&rb); i++) {
+            cursor_rows[cursor_count++] = chunk[i];
+        }
+    }
+    ASSERT(saw_full);
+    ASSERT_EQ(7u, cursor_count);
+    for (i = 0u; i < 7u; i++) {
+        ASSERT(consequence_rows_equal(&rows[i], &cursor_rows[i]));
+    }
+    stats = duckvep_workspace_delta_route_stats(ws);
+    ASSERT(stats != NULL);
+    ASSERT_EQ(7u, stats->substitution_context);
+    ASSERT_EQ(0u, stats->mnv_direct_fallback);
+
+    duckvep_annotate_cursor_close(cursor);
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
 TEST annotate_codon_indel_frameshift_known_scene(void) {
     static const uint16_t tchrom[1]  = {0u};
     static const uint32_t tstart[1]  = {1000u};
@@ -14975,6 +15130,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_equal_length_cds_to_utr3_mapping_gap_known_scene);
     RUN_TEST(annotate_codon_padded_small_variant_delta_known_scene);
     RUN_TEST(annotate_equal_length_feature_window_both_strands_known_scene);
+    RUN_TEST(annotate_equal_length_utr5_start_boundary_both_strands_known_scene);
     RUN_TEST(annotate_codon_indel_frameshift_known_scene);
     RUN_TEST(annotate_terminal_stop_frame_change_uses_transcript_tail);
     RUN_TEST(annotate_codon_delins_frameshift_known_scene);
