@@ -2,6 +2,17 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now uses one edit/CDS/peptide context for
+  length-changing small variants instead of retrying failed contexts
+  through a shape-specific classifier. Complete transcript-oriented
+  sequence before and after the CDS supports VEP 116’s independent
+  start/stop predicates, endpoint-mapper-Gap behavior, and
+  transcript-associated default `intergenic_variant`;
+  `duckvep_model_load(...)` accepts the complete 13-column projection
+  while retaining its 11/12-column compatibility, and older models
+  return `missing_transcript_flank` rather than guessing. The
+  regenerated differential is exact for all 268 fixed pairs and 401,072
+  pairs across four frozen 100,000-case distributions
 - bundled `duckvep_annotate(...)` now matches VEP 116 for equal-length
   features crossing from 5-prime UTR into the start codon: changing the
   start returns `start_lost` without a co-occurring stop term, while
