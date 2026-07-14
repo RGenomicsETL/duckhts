@@ -2,6 +2,22 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now matches VEP 116 for an insertion after the final
+  base of a mature-miRNA segment: VEP’s minimized reversed insertion
+  interval does not overlap that segment, so annotation returns
+  `non_coding_transcript_exon_variant` instead of a false
+  `mature_miRNA_variant`; the regression covers both transcript strands
+- bundled DuckVEP model preparation now reads Ensembl sequence-region
+  codon-table attributes and supports the full VEP 116/BioPerl
+  codon-table set. Valid single-residue initial-methionine,
+  selenocysteine, curated amino-acid-substitution, and stop-readthrough
+  edits can be packed by `duckvep_model_load(...)` and are applied to
+  the reference peptide during annotation; unsupported edit shapes
+  remain fail-closed. Numeric-only attribute columns inferred as
+  integers by dump staging are accepted at the importer boundary. Model
+  receipts hash and count mature-miRNA segments and peptide edits, and
+  the bundled GRCh38 and GRCh37 fixtures exercise real mitochondrial
+  codon-table and peptide-edit behavior
 - bundled DuckVEP now matches all 126,320 transcript consequence sets
   from the indexed VEP-116 cache for a deterministic 4,246-allele
   ClinVar chromosome-21 sample (seed 1, at most 1,000 alleles per
