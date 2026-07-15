@@ -211,10 +211,18 @@ pair_queries <- vapply(
          coalesce(v.nmd_prediction, 'not_measured') AS vep_nmd_prediction,
          coalesce(e.nmd_prediction, 'not_measured') AS engine_nmd_prediction,
          CASE
-           WHEN v.variant_id IS NULL OR e.variant_id IS NULL THEN 'not_comparable'
-           WHEN coalesce(v.nmd_prediction, 'not_measured') = 'not_measured' OR
-                coalesce(e.nmd_prediction, 'not_measured') = 'not_measured'
+           -- A present row with no NMD observation remains unmeasured even if
+           -- the other engine omitted its consequence row. Only measured
+           -- emissions can establish that a missing peer is not comparable.
+           WHEN (
+             v.variant_id IS NOT NULL AND
+             coalesce(v.nmd_prediction, 'not_measured') = 'not_measured'
+           ) OR (
+             e.variant_id IS NOT NULL AND
+             coalesce(e.nmd_prediction, 'not_measured') = 'not_measured'
+           )
              THEN 'not_measured'
+           WHEN v.variant_id IS NULL OR e.variant_id IS NULL THEN 'not_comparable'
            WHEN coalesce(v.nmd_prediction, 'not_measured') =
                 coalesce(e.nmd_prediction, 'not_measured') THEN 'match'
            ELSE 'mismatch'
