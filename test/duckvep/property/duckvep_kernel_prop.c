@@ -3188,6 +3188,20 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
 
+    /* Definedness, not nonzero coordinates, gates NMD.pm. An insertion before
+     * CDS base 1 projects to TranscriptVariation CDS 1..0 and therefore escapes. */
+    nmd_point_event(&event, 100u);
+    event.feature_start1 = 100u;
+    event.feature_end1 = 99u;
+    event.insertion_boundary0 = 99u;
+    event.start1 = 99u;
+    event.interbase = 1u;
+    event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+    event.ref_diff_length = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_ESCAPING, nmd.prediction);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
+
     nmd_point_event(&event, 348u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
@@ -3265,6 +3279,18 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     event.ref_diff_length = 0u;
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+
+    nmd_point_event(&event, 600u);
+    event.feature_start1 = 600u;
+    event.feature_end1 = 599u;
+    event.insertion_boundary0 = 599u;
+    event.start1 = 599u;
+    event.interbase = 1u;
+    event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+    event.ref_diff_length = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_ESCAPING, nmd.prediction);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
 
     /* NMD.pm projects the complete VariationFeature and reads its genomic end,
      * not the smaller mismatch island used to edit the CDS. These equal-length

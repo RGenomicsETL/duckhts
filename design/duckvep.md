@@ -366,7 +366,9 @@ and last mapped coordinates may enclose an internal mapper gap as long as both e
 map. For a pure insertion, the parent `TranscriptVariation` instead retains the empty
 feature as a reversed CDS range such as `102,101`; one genomic flank may be sufficient at
 an exon edge. This is different from the expanded `101..102` allele range rendered in
-VEP JSON, and `NMD.pm` reads the parent's lower `cds_end`.
+VEP JSON, and `NMD.pm` reads the parent's lower `cds_end`. Immediately before the first
+coding base, the valid parent range is `1,0`: the plugin tests whether both values are
+defined, not whether they are nonzero, and classifies the zero end as an early-CDS escape.
 
 Equal-length alleles retain unchanged uploaded bases in their feature. DuckVEP must
 therefore preserve both views: the minimized edit changes the CDS, while the full feature

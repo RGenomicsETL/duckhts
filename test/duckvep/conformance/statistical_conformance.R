@@ -163,7 +163,7 @@ invisible(dbExecute(
        ELSE coalesce(any_value(status), 'unknown')
      END AS engine_status,
      string_agg(DISTINCT reason, ';' ORDER BY reason) AS engine_reason,
-     any_value(coalesce(nmd_prediction, 'not_applicable')) AS nmd_prediction
+     any_value(coalesce(nmd_prediction, 'not_measured')) AS nmd_prediction
    FROM ann
    LEFT JOIN LATERAL unnest(string_split(coalesce(consequence, ''), '&')) u(term) ON true
    GROUP BY source, variant_id, coalesce(tx, '')"
@@ -212,9 +212,11 @@ pair_queries <- vapply(
          coalesce(e.nmd_prediction, 'not_measured') AS engine_nmd_prediction,
          CASE
            WHEN v.variant_id IS NULL OR e.variant_id IS NULL THEN 'not_comparable'
-           WHEN v.nmd_prediction = 'not_measured' OR
-                e.nmd_prediction = 'not_measured' THEN 'not_measured'
-           WHEN v.nmd_prediction = e.nmd_prediction THEN 'match'
+           WHEN coalesce(v.nmd_prediction, 'not_measured') = 'not_measured' OR
+                coalesce(e.nmd_prediction, 'not_measured') = 'not_measured'
+             THEN 'not_measured'
+           WHEN coalesce(v.nmd_prediction, 'not_measured') =
+                coalesce(e.nmd_prediction, 'not_measured') THEN 'match'
            ELSE 'mismatch'
          END AS nmd_comparison,
          CASE
