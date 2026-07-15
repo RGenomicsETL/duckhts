@@ -55,6 +55,9 @@ insertion order; they remain only as historical measurements.
 | 2026-07-14 | b204dd49 | ensembl116_grch38_final_giab_sites_hash40   | rich        |       1 | 100,957    | 644,427     | 5,068,416 | 1,174,245      |      9 |       0.239 |          0.244 |       0.263 |              413758 |         2416.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 4,812,480              |
 | 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40         | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.106 |          0.107 |       0.109 |              943523 |         1059.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 11,023,037             |
 | 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40         | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.221 |          0.225 |       0.231 |              448698 |         2228.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 5,242,067              |
+| 2026-07-15 | 1903f7fb | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     21 |       1.489 |          1.514 |       1.618 |              132100 |         7570.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,802,325              |
+| 2026-07-15 | 1903f7fb | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     31 |       0.323 |          0.329 |       0.362 |              109422 |         9138.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,183,964              |
+| 2026-07-15 | 1903f7fb | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     31 |       0.610 |          0.622 |       0.657 |              321543 |         3110.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,345,659              |
 | 2026-07-15 | 57b5b566 | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     15 |       1.467 |          1.480 |       1.489 |              135135 |         7400.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,889,676              |
 | 2026-07-15 | 57b5b566 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     21 |       0.310 |          0.322 |       0.351 |              111801 |         8944.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,253,180              |
 | 2026-07-15 | 57b5b566 | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     15 |       0.609 |          0.615 |       0.638 |              325203 |         3075.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,440,650              |
@@ -62,6 +65,9 @@ insertion order; they remain only as historical measurements.
 | 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     11 |       0.341 |          0.344 |       0.357 |              104651 |         9555.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,045,128              |
 | 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |      9 |       0.609 |          0.613 |       0.629 |              326264 |         3065.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,468,189              |
 | 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_giab_sites_hash40   | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 1,174,245      |      9 |       0.118 |          0.119 |       0.137 |              848378 |         1178.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 9,867,605              |
+| 2026-07-15 | a346a7aa | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     21 |       1.417 |          1.443 |       1.511 |              138600 |         7215.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,989,411              |
+| 2026-07-15 | a346a7aa | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     31 |       0.307 |          0.315 |       0.376 |              114286 |         8750.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,325,473              |
+| 2026-07-15 | a346a7aa | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     31 |       0.599 |          0.617 |       0.791 |              324149 |         3085.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,413,290              |
 | 2026-07-15 | ecb7eaae | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     15 |       1.467 |          1.495 |       1.512 |              133779 |         7475.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,850,649              |
 | 2026-07-15 | ecb7eaae | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     21 |       0.311 |          0.324 |       0.356 |              111111 |         9000.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,233,099              |
 | 2026-07-15 | ecb7eaae | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     15 |       0.605 |          0.610 |       0.624 |              327869 |         3050.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,509,836              |
@@ -114,6 +120,28 @@ input tables, pinned CPU, ordered query, compact output, and
 The coding-SNV row is a control: that route does not use mismatch-island
 classification. Its 5 ms movement is reported as measurement noise
 rather than attributed to this change.
+
+## Reused coding projection fact for NMD
+
+The `1903f7fb` rows are the exact merged source before this change. The
+`a346a7aa` rows retain the `CDS end <= 101` comparison already
+established by the sequence classifier and consume it when VEP 116 NMD
+prediction needs that same fact. Consequences outside the NMD plugin’s
+supported set skip NMD evaluation; splice and unresolved-sequence cases
+still use the exhaustive genomic-to-CDS projector. Both revisions were
+rebuilt and measured adjacently on the same final model, input tables,
+pinned CPU, ordered query, compact output, and 10,000-variant warmup.
+Positive change means less elapsed time.
+
+| workload           | variants | output rows | seconds before | variants/s before | seconds after | variants/s after | elapsed change (%) |
+|:-------------------|:---------|:------------|---------------:|------------------:|--------------:|-----------------:|-------------------:|
+| mixed coding       | 200,000  | 5,756,720   |          1.514 |            132100 |         1.443 |           138600 |                4.7 |
+| non-SNV coding     | 36,000   | 1,047,524   |          0.329 |            109422 |         0.315 |           114286 |                4.3 |
+| coding SNV control | 200,000  | 5,191,000   |          0.622 |            321543 |         0.617 |           324149 |                0.8 |
+
+The coding-SNV route does not carry the reused projection fact. Its 5 ms
+movement is reported as a control rather than attributed to the NMD
+change.
 
 ## Final GRCh38 model resources
 

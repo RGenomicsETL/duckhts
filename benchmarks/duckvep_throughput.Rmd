@@ -230,6 +230,77 @@ The coding-SNV row is a control: that route does not use mismatch-island
 classification. Its 5 ms movement is reported as measurement noise rather than
 attributed to this change.
 
+## Reused coding projection fact for NMD
+
+The `1903f7fb` rows are the exact merged source before this change. The
+`a346a7aa` rows retain the `CDS end <= 101` comparison already established by
+the sequence classifier and consume it when VEP 116 NMD prediction needs that
+same fact. Consequences outside the NMD plugin's supported set skip NMD
+evaluation; splice and unresolved-sequence cases still use the exhaustive
+genomic-to-CDS projector. Both revisions were rebuilt and measured adjacently
+on the same final model, input tables, pinned CPU, ordered query, compact output,
+and 10,000-variant warmup. Positive change means less elapsed time.
+
+```{r nmd-projection-reuse}
+nmd_before <- history[
+  history$revision == "1903f7fb" &
+    history$output_mode == "compact" &
+    history$threads == 1L,
+  c("workload", "variants", "annotated_rows", "median_seconds",
+    "variants_per_second")
+]
+nmd_after <- history[
+  history$revision == "a346a7aa" &
+    history$output_mode == "compact" &
+    history$threads == 1L,
+  c("workload", "variants", "annotated_rows", "median_seconds",
+    "variants_per_second")
+]
+nmd_table <- merge(
+  nmd_before,
+  nmd_after,
+  by = c("workload", "variants", "annotated_rows"),
+  suffixes = c("_before", "_after")
+)
+nmd_order <- c(
+  "ensembl116_grch38_final_coding_mixed_200k",
+  "ensembl116_grch38_final_coding_nonsnv_36k",
+  "ensembl116_grch38_final_coding_snv_200k"
+)
+nmd_labels <- c("mixed coding", "non-SNV coding", "coding SNV control")
+nmd_table <- nmd_table[
+  match(nmd_order, nmd_table$workload),
+  ,
+  drop = FALSE
+]
+nmd_table$workload <- nmd_labels
+nmd_table$elapsed_change_percent <- round(
+  100 * (nmd_table$median_seconds_before - nmd_table$median_seconds_after) /
+    nmd_table$median_seconds_before,
+  1
+)
+nmd_table$variants <- format(
+  nmd_table$variants, big.mark = ",", scientific = FALSE
+)
+nmd_table$annotated_rows <- format(
+  nmd_table$annotated_rows, big.mark = ",", scientific = FALSE
+)
+nmd_table$variants_per_second_before <- round(
+  nmd_table$variants_per_second_before
+)
+nmd_table$variants_per_second_after <- round(
+  nmd_table$variants_per_second_after
+)
+names(nmd_table) <- c(
+  "workload", "variants", "output rows", "seconds before", "variants/s before",
+  "seconds after", "variants/s after", "elapsed change (%)"
+)
+knitr::kable(nmd_table, row.names = FALSE)
+```
+
+The coding-SNV route does not carry the reused projection fact. Its 5 ms
+movement is reported as a control rather than attributed to the NMD change.
+
 ## Final GRCh38 model resources
 
 ```{r resources}

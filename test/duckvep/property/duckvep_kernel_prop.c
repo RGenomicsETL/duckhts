@@ -3143,35 +3143,35 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     event.ref_diff_length = 1u;
 
     event.start1 = event.end1 = 320u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
     ASSERT_EQ(0u, nmd.escape_reasons);
 
     event.start1 = event.end1 = 300u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_ESCAPING, nmd.prediction);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
     event.start1 = event.end1 = 301u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
 
     event.start1 = event.end1 = 348u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
               nmd.escape_reasons);
     event.start1 = event.end1 = 347u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
 
     event.start1 = event.end1 = 500u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_LAST_EXON, nmd.escape_reasons);
 
     excnt[0] = 1u;
     exon_end[0] = 599u;
     cdna_end[0] = 500u;
     event.start1 = event.end1 = 300u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_INTRONLESS |
               DUCKVEP_NMD_ESCAPE_LAST_EXON, nmd.escape_reasons);
     excnt[0] = 3u;
@@ -3180,28 +3180,28 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
 
     event.start1 = event.end1 = 320u;
     duckvep_nmd_predict(&tx, &ex, 0u, &event,
-                        DUCKVEP_SO(DUCKVEP_SO_MISSENSE), &nmd);
+                        DUCKVEP_SO(DUCKVEP_SO_MISSENSE), NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_NOT_APPLICABLE, nmd.prediction);
 
     tx.exon_offset = NULL;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
     tx.exon_offset = exoff;
 
     event.start1 = event.end1 = 250u;
     duckvep_nmd_predict(&tx, &ex, 0u, &event,
-                        DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR), &nmd);
+                        DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR), NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
 
     strand[0] = -1;
     ex.start1 = reverse_exon_start;
     ex.end1 = reverse_exon_end;
     event.start1 = event.end1 = 351u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
               nmd.escape_reasons);
     event.start1 = event.end1 = 352u;
-    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, &nmd);
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
     PASS();
 }
@@ -9413,6 +9413,71 @@ static void kprop_wire_coding_scene(struct kprop_coding *s, uint32_t cds_len) {
     s->v.alt_offset = &s->aoff; s->v.alt_length = &s->alen;
     s->v.allele_bytes = s->abytes; s->v.allele_bytes_len = sizeof s->abytes;
     s->v.variant_kind = &s->vkind; s->v.count = 1u;
+}
+
+TEST nmd_early_cds_fact_matches_exhaustive_projection_known_scene(void) {
+    static uint8_t cds[120];
+    static const uint32_t anchor_cds[2] = {100u, 101u};
+    static const uint8_t expected_fact[2] = {
+        (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101,
+        (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101
+    };
+    struct kprop_coding s;
+    duckvep_haplotype_edit_t edits[4];
+    uint8_t alt_cds[160];
+    uint8_t ref_peptide[64];
+    uint8_t alt_peptide[64];
+    duckvep_delta_scratch_t scratch;
+    size_t i;
+
+    memset(&s, 0, sizeof s);
+    memset(cds, 'A', sizeof cds);
+    cds[0] = (uint8_t)'A'; cds[1] = (uint8_t)'T'; cds[2] = (uint8_t)'G';
+    s.cds = cds; s.chrom = 0u; s.strand = 1; s.flags = 0u;
+    s.tstart = 1000u; s.tend = 1119u; s.cds_s = 1000u; s.cds_e = 1119u;
+    s.es = 1000u; s.ee = 1119u; s.ecds = 1u; s.ecde = 120u;
+    s.eph = 0; s.eeph = 0; s.exoff = 0u; s.excnt = 1u;
+    s.vchrom = 0u; s.vkind = (uint8_t)DUCKVEP_KIND_INS;
+    s.roff = 0u; s.aoff = 1u; s.rlen = 1u; s.alen = 2u;
+    s.abytes[0] = (uint8_t)'A';
+    s.abytes[1] = (uint8_t)'A'; s.abytes[2] = (uint8_t)'C';
+    kprop_wire_coding_scene(&s, sizeof cds);
+
+    memset(&scratch, 0, sizeof scratch);
+    scratch.edits = edits; scratch.edits_cap = 4u;
+    scratch.alt_cds = alt_cds; scratch.alt_cds_cap = sizeof alt_cds;
+    scratch.ref_peptide = ref_peptide;
+    scratch.ref_peptide_cap = sizeof ref_peptide;
+    scratch.alt_peptide = alt_peptide;
+    scratch.alt_peptide_cap = sizeof alt_peptide;
+
+    for (i = 0u; i < 2u; i++) {
+        duckvep_event_t event;
+        duckvep_sequence_delta_t delta;
+        duckvep_sequence_delta_route_t route;
+        duckvep_nmd_result_t cached;
+        duckvep_nmd_result_t exhaustive;
+        uint64_t frameshift = DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT);
+
+        s.vpos = s.tstart + anchor_cds[i] - 1u;
+        s.vend = s.vpos;
+        duckvep_event_load(&s.v, 0u, &event);
+        duckvep_sequence_delta_fill_for_annotation_trace(
+            DUCKVEP_KIND_INS, &s.tx, &s.ex, &s.seq, &s.v,
+            0u, 0u, s.vpos, s.strand, &scratch, &event,
+            (uint32_t)DUCKVEP_REGION_CDS, 0u, &route, &delta);
+        ASSERT_EQ(DUCKVEP_DELTA_ROUTE_INS_CONTEXT, route);
+        ASSERT(delta.valid && delta.frameshift);
+        ASSERT_EQ(expected_fact[i], delta.nmd_early_cds_fact);
+
+        duckvep_nmd_predict(&s.tx, &s.ex, 0u, &event, frameshift,
+                            &delta, &cached);
+        duckvep_nmd_predict(&s.tx, &s.ex, 0u, &event, frameshift,
+                            NULL, &exhaustive);
+        ASSERT_EQ(exhaustive.prediction, cached.prediction);
+        ASSERT_EQ(exhaustive.escape_reasons, cached.escape_reasons);
+    }
+    PASS();
 }
 
 /* VEP's coding_unknown predicate wins when either local peptide allele contains
@@ -16260,6 +16325,23 @@ static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct
     if (duckvep_annotate_tile(model, &s->v, opts, ws, &rb, &err) != DUCKVEP_OK) { tr = THEFT_TRIAL_FAIL; goto done; }
     if (duckvep_result_builder_count(&rb) != 1u) { tr = THEFT_TRIAL_FAIL; goto done; }
 
+    /* Production may reuse the sequence classifier's first-101-CDS-base fact.
+     * Compare its public NMD result with the independent exhaustive projector
+     * for every randomized insertion, deletion, delins, and strand. */
+    {
+        duckvep_event_t event;
+        duckvep_nmd_result_t exhaustive;
+
+        duckvep_event_load(&s->v, 0u, &event);
+        duckvep_nmd_predict(&s->tx, &s->ex, 0u, &event,
+                            rows[0].consequence_mask, NULL, &exhaustive);
+        if (rows[0].nmd_prediction != exhaustive.prediction ||
+            rows[0].nmd_escape_reasons != exhaustive.escape_reasons) {
+            tr = THEFT_TRIAL_FAIL;
+            goto done;
+        }
+    }
+
     if (s->vkind == (uint8_t)DUCKVEP_KIND_INS) {
         protein_cds = kprop_cds_pos_for_genomic(s, s->vpos);
         g_frameshift_cov.ins++;
@@ -17863,6 +17945,7 @@ int main(int argc, char **argv) {
     RUN_TEST(feature_substitution_window_fails_closed_known_scene);
     RUN_TEST(sequence_delta_annotation_wrapper_matches_direct_shape);
     RUN_TEST(sequence_delta_annotation_exon_hint_matches_unhinted);
+    RUN_TEST(nmd_early_cds_fact_matches_exhaustive_projection_known_scene);
     RUN_TEST(sequence_delta_snv_x_peptide_is_coding_unknown_known_scene);
     RUN_TEST(coding_context_incomplete_start_mnv_is_unknown_and_missense_known_scene);
     RUN_TEST(annotate_cursor_padded_snv_matches_tile_for_any_output_split);

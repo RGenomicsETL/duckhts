@@ -35,6 +35,12 @@
  * predicates). The rule table — not this struct — turns these into SO terms, so the
  * codon path never spells SO labels. Unsupported contexts leave `valid` clear and
  * render as an auditable coding_sequence_variant fallback. */
+typedef enum duckvep_nmd_early_cds_fact {
+    DUCKVEP_NMD_EARLY_CDS_UNKNOWN = 0,
+    DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101,
+    DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101
+} duckvep_nmd_early_cds_fact_t;
+
 typedef struct duckvep_sequence_delta {
     int32_t cdna_pos, cds_pos, protein_pos; /* 1-based; -1 when absent */
     uint8_t ref_aa, alt_aa;                 /* 1-letter AA; '*' = stop  */
@@ -43,7 +49,18 @@ typedef struct duckvep_sequence_delta {
     uint8_t protein_altering, coding_unknown, partial_codon;
     uint8_t valid;                          /* 1 when the delta is filled */
     uint8_t sequence_status;                /* duckvep_sequence_status_t  */
+    /* The one projected-CDS comparison consumed by VEP 116 NMD.pm. This fits
+     * in the struct's existing padding; UNKNOWN makes NMD project the event. */
+    uint8_t nmd_early_cds_fact;             /* duckvep_nmd_early_cds_fact_t */
 } duckvep_sequence_delta_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(duckvep_sequence_delta_t) == 32u,
+              "duckvep sequence delta no longer fits its hot-path budget");
+#else
+_Static_assert(sizeof(duckvep_sequence_delta_t) == 32u,
+               "duckvep sequence delta no longer fits its hot-path budget");
+#endif
 
 /* True when the prepared transcript CDS ends in a one- or two-base codon.
  * VEP's partial_codon predicate derives this from `_translateable_seq` length;

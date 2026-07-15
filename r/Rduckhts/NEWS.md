@@ -1,5 +1,6 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundled DuckVEP now reuses the coding classifier's exact first-101-CDS-base comparison for VEP 116 NMD prediction instead of projecting the same edit twice; splice and unresolved-sequence cases retain the exhaustive projection, and consequences outside the NMD plugin's supported set skip that work
 - bundled DuckVEP now reuses resolved intron coordinates while evaluating non-SNV mismatch islands and skips predicate evaluation when no intron, splice, or short-intron fact can change; the sorted-SNV classifier remains inlined
 - bundled DuckVEP now prepares validated CDS-to-cDNA projection coordinates once per resident transcript, avoiding repeated CDS-endpoint searches while annotating coding variants; topology-only transcripts retain the existing exhaustive projection behavior, and the common sorted-SNV lane keeps a stable instruction-cache-aligned entry
 - bundled DuckVEP now rebuilds multi-edit CDS haplotypes in one linear reverse-coordinate pass over distinct reference and worker-scratch buffers, replacing one CDS-tail move per edit while preserving edit, strand, reference-validation, and exact-alias behavior under the independent randomized rebuild oracle

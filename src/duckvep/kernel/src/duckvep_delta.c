@@ -4663,6 +4663,26 @@ static void sequence_delta_fill_indel_frameshift(
     delta->valid = 1u;
 }
 
+static void delta_capture_single_edit_nmd_fact(
+    const duckvep_coding_context_t *ctx,
+    duckvep_sequence_delta_t       *delta) {
+
+    uint64_t end;
+
+    if (ctx == NULL || delta == NULL || delta->valid == 0u ||
+        ctx->has_single_edit == 0u || ctx->single_edit_cds_start == 0u) {
+        return;
+    }
+    end = ctx->single_edit_ref_len == 0u
+        ? (uint64_t)ctx->single_edit_cds_start
+        : (uint64_t)ctx->single_edit_cds_start +
+          (uint64_t)ctx->single_edit_ref_len - 1u;
+    if (end > UINT32_MAX) return;
+    delta->nmd_early_cds_fact = end <= 101u
+        ? (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101
+        : (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101;
+}
+
 static void duckvep_sequence_delta_fill_with_scratch_event(
     duckvep_variant_kind_t            kind,
     const duckvep_transcript_model_t *transcripts,
@@ -4716,6 +4736,8 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
                 if (delta_status != DUCKVEP_CONTEXT_DELTA_OK) {
                     delta->sequence_status =
                         delta_sequence_status_from_delta(delta_status);
+                } else {
+                    delta_capture_single_edit_nmd_fact(&ctx, delta);
                 }
             }
         } else {
@@ -4752,6 +4774,8 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
                 if (delta_status != DUCKVEP_CONTEXT_DELTA_OK) {
                     delta->sequence_status =
                         delta_sequence_status_from_delta(delta_status);
+                } else {
+                    delta_capture_single_edit_nmd_fact(&ctx, delta);
                 }
             }
         } else {
