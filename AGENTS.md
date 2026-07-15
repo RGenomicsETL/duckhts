@@ -217,3 +217,9 @@ Follow `STYLE.md`. In particular: keep ownership explicit, return errors instead
 aborting DuckDB, bound input-driven allocation, avoid fake object systems and future-only
 interfaces, write R as R, preserve SQL composability, and make no benchmark claim beyond a
 measured documented workload.
+
+Do not use bare `boundary` as an explanation. Name the concrete axis and location: for
+example an exon–intron junction, CDS start or end, transcript endpoint, VCF anchor-removal
+case, reference/alternate differing-region edge, allocation limit, DuckDB/C ownership
+interface, or DuckDB vector edge. If a genuinely generic boundary is needed, define the
+term locally before using it.
