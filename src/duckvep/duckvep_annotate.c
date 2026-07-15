@@ -19,8 +19,9 @@ typedef struct duckvep_scalar_state {
 	duckvep_workspace_cache_t *workspace_cache;
 	duckvep_workspace_t *workspace;
 	duckvep_options_t *options;
-	uint32_t options_distance;
-	int have_options_distance;
+	uint32_t options_upstream_distance;
+	uint32_t options_downstream_distance;
+	int have_options_distances;
 	int64_t *interval_hits;
 	int64_t interval_hit_capacity;
 	uint32_t *seed_transcripts;
@@ -451,7 +452,7 @@ duckvep_scalar_u32_compare(const void *left, const void *right)
 
 static int
 duckvep_scalar_seed_cursor(duckvep_scalar_state_t *state,
-	uint16_t seq_region, uint32_t position, uint32_t distance,
+	uint16_t seq_region, uint32_t position, uint32_t halo_distance,
 	duckvep_annotate_cursor_t *cursor, char *error, size_t error_size)
 {
 	duckvep_owned_model_t *model;
@@ -462,12 +463,13 @@ duckvep_scalar_seed_cursor(duckvep_scalar_state_t *state,
 
 	model = &state->entry->model;
 	if (!model->interval_index_complete ||
-	    position > (uint32_t)INT32_MAX || distance >= (uint32_t)INT32_MAX ||
-	    position > (uint32_t)INT32_MAX - distance)
+	    position > (uint32_t)INT32_MAX ||
+	    halo_distance >= (uint32_t)INT32_MAX ||
+	    position > (uint32_t)INT32_MAX - halo_distance)
 		return 1;
-	query_start = position > distance + 1 ?
-	    (int32_t)(position - distance - 1) : 0;
-	query_end = (int32_t)(position + distance);
+	query_start = position > halo_distance + 1 ?
+	    (int32_t)(position - halo_distance - 1) : 0;
+	query_end = (int32_t)(position + halo_distance);
 	(void)snprintf(region_name, sizeof(region_name), "%u",
 	    (unsigned)seq_region);
 	hit_count = cr_overlap(model->interval_index, region_name, query_start,
@@ -517,27 +519,35 @@ duckvep_scalar_batch_slice(const duckvep_variant_batch_t *batch,
 static int
 duckvep_scalar_run(duckvep_scalar_state_t *state,
 	const duckvep_variant_batch_t *batch, size_t begin, size_t count,
-	uint64_t distance, char *error, size_t error_size)
+	uint64_t upstream_distance, uint64_t downstream_distance,
+	char *error, size_t error_size)
 {
 	duckvep_variant_batch_t slice;
 	duckvep_annotate_cursor_t *cursor;
 	duckvep_options_init_t options_init;
 	duckvep_error_t kernel_error;
 	duckvep_status_t status;
-	uint32_t sweep_distance;
+	uint32_t sweep_upstream_distance;
+	uint32_t sweep_downstream_distance;
+	uint32_t halo_distance;
 	uint32_t sequence_length;
 	size_t variant;
 
-	if (distance > UINT32_MAX) {
+	if (upstream_distance > UINT32_MAX || downstream_distance > UINT32_MAX) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate: distance exceeds the uint32 kernel limit");
+		    "duckvep_annotate: upstream/downstream distance exceeds the uint32 kernel limit");
 		return 0;
 	}
 	/* The kernel uses zero to request its 5 kb default. For an exact public
-	 * query, sweep one base on either side and discard the directional rows.
+	 * direction, sweep one base on that side and discard its directional rows.
 	 * This keeps the cgranges seed and avoids restarting at the first transcript
 	 * for every exact-position DuckDB vector. */
-	sweep_distance = distance == 0 ? 1u : (uint32_t)distance;
+	sweep_upstream_distance = upstream_distance == 0 ?
+	    1u : (uint32_t)upstream_distance;
+	sweep_downstream_distance = downstream_distance == 0 ?
+	    1u : (uint32_t)downstream_distance;
+	halo_distance = sweep_upstream_distance > sweep_downstream_distance ?
+	    sweep_upstream_distance : sweep_downstream_distance;
 	if (!duckvep_scalar_model_region(&state->entry->model,
 	    batch->chrom_id[begin], &sequence_length)) {
 		duckvep_sql_set_error(error, error_size,
@@ -560,15 +570,16 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 			return 0;
 		state->workspace = state->workspace_cache->workspace;
 	}
-	if (!state->have_options_distance ||
-	    state->options_distance != sweep_distance) {
+	if (!state->have_options_distances ||
+	    state->options_upstream_distance != sweep_upstream_distance ||
+	    state->options_downstream_distance != sweep_downstream_distance) {
 		duckvep_options_close(state->options);
 		state->options = NULL;
-		state->have_options_distance = 0;
+		state->have_options_distances = 0;
 		memset(&options_init, 0, sizeof(options_init));
-		options_init.upstream_dist = sweep_distance;
-		options_init.downstream_dist = sweep_distance;
-		options_init.halo = sweep_distance;
+		options_init.upstream_dist = sweep_upstream_distance;
+		options_init.downstream_dist = sweep_downstream_distance;
+		options_init.halo = halo_distance;
 		memset(&kernel_error, 0, sizeof(kernel_error));
 		if (duckvep_options_open(&options_init, &state->options,
 		    &kernel_error) != DUCKVEP_OK) {
@@ -576,8 +587,9 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 			    kernel_error.message);
 			return 0;
 		}
-		state->options_distance = sweep_distance;
-		state->have_options_distance = 1;
+		state->options_upstream_distance = sweep_upstream_distance;
+		state->options_downstream_distance = sweep_downstream_distance;
+		state->have_options_distances = 1;
 	}
 	slice = duckvep_scalar_batch_slice(batch, begin, count);
 	cursor = NULL;
@@ -589,7 +601,7 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 		return 0;
 	}
 	if (!duckvep_scalar_seed_cursor(state, batch->chrom_id[begin],
-	    batch->pos1[begin], sweep_distance, cursor, error, error_size)) {
+	    batch->pos1[begin], halo_distance, cursor, error, error_size)) {
 		duckvep_annotate_cursor_close(cursor);
 		return 0;
 	}
@@ -615,9 +627,10 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 			duckvep_consequence_t row;
 
 			row = builder.rows[index];
-			if (distance == 0 && (row.region_mask &
-			    (DUCKVEP_REGION_UPSTREAM |
-			    DUCKVEP_REGION_DOWNSTREAM)) != 0)
+			if ((upstream_distance == 0 && (row.region_mask &
+			    DUCKVEP_REGION_UPSTREAM) != 0) ||
+			    (downstream_distance == 0 && (row.region_mask &
+			    DUCKVEP_REGION_DOWNSTREAM) != 0))
 				continue;
 			row.variant_idx += (uint32_t)begin;
 			row.gene_idx = state->entry->model.gene_indices[row.tx_idx];
@@ -1129,12 +1142,16 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 {
 	duckvep_scalar_state_t *state;
 	duckvep_variant_batch_t batch;
-	duckdb_vector model_vector, distance_vector;
-	uint64_t *model_validity, *distance_validity;
+	duckdb_vector model_vector, upstream_distance_vector;
+	duckdb_vector downstream_distance_vector;
+	uint64_t *model_validity, *upstream_distance_validity;
+	uint64_t *downstream_distance_validity;
 	uint16_t *regions;
 	uint32_t *positions;
-	uint64_t *distances;
+	uint64_t *upstream_distances;
+	uint64_t *downstream_distances;
 	idx_t rows;
+	idx_t column_count;
 	size_t begin;
 	char error[DUCKVEP_SQL_ERROR_SIZE];
 
@@ -1164,47 +1181,72 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 		goto failed;
 	regions = state->seq_regions;
 	positions = state->positions;
-	distance_vector = duckdb_data_chunk_get_column_count(input) == 6 ?
+	column_count = duckdb_data_chunk_get_column_count(input);
+	upstream_distance_vector = column_count >= 6 ?
 	    duckdb_data_chunk_get_vector(input, 5) : NULL;
-	distance_validity = distance_vector != NULL ?
-	    duckdb_vector_get_validity(distance_vector) : NULL;
-	distances = distance_vector != NULL ?
-	    duckdb_vector_get_data(distance_vector) : NULL;
+	downstream_distance_vector = column_count >= 7 ?
+	    duckdb_data_chunk_get_vector(input, 6) : upstream_distance_vector;
+	upstream_distance_validity = upstream_distance_vector != NULL ?
+	    duckdb_vector_get_validity(upstream_distance_vector) : NULL;
+	downstream_distance_validity = downstream_distance_vector != NULL ?
+	    duckdb_vector_get_validity(downstream_distance_vector) : NULL;
+	upstream_distances = upstream_distance_vector != NULL ?
+	    duckdb_vector_get_data(upstream_distance_vector) : NULL;
+	downstream_distances = downstream_distance_vector != NULL ?
+	    duckdb_vector_get_data(downstream_distance_vector) : NULL;
 	state->result_count = 0;
 	begin = 0;
 	while (begin < (size_t)rows) {
-		uint64_t distance;
+		uint64_t upstream_distance;
+		uint64_t downstream_distance;
 		size_t end;
 
 		if (!duckvep_scalar_select_model(state, model_vector, (idx_t)begin,
 		    error, sizeof(error)))
 			goto failed;
 		if (positions[begin] == 0 ||
-		    (distance_vector != NULL &&
-		    duckvep_validity_is_null(distance_validity, (idx_t)begin))) {
+		    (upstream_distance_vector != NULL &&
+		    duckvep_validity_is_null(upstream_distance_validity,
+		    (idx_t)begin)) ||
+		    (downstream_distance_vector != NULL &&
+		    duckvep_validity_is_null(downstream_distance_validity,
+		    (idx_t)begin))) {
 			duckvep_sql_set_error(error, sizeof(error),
-			    "duckvep_annotate: position and distance must be non-NULL; position is one-based");
+			    "duckvep_annotate: position and upstream/downstream distances must be non-NULL; position is one-based");
 			goto failed;
 		}
-		distance = distances != NULL ? distances[begin] : 5000;
+		upstream_distance = upstream_distances != NULL ?
+		    upstream_distances[begin] : DUCKVEP_DEFAULT_UPSTREAM_DIST;
+		downstream_distance = downstream_distances != NULL ?
+		    downstream_distances[begin] : DUCKVEP_DEFAULT_DOWNSTREAM_DIST;
 		end = begin + 1;
 		while (end < (size_t)rows) {
-			uint64_t next_distance;
+			uint64_t next_upstream_distance;
+			uint64_t next_downstream_distance;
 
-			if (distance_vector != NULL &&
-			    duckvep_validity_is_null(distance_validity, (idx_t)end))
+			if ((upstream_distance_vector != NULL &&
+			    duckvep_validity_is_null(upstream_distance_validity,
+			    (idx_t)end)) ||
+			    (downstream_distance_vector != NULL &&
+			    duckvep_validity_is_null(downstream_distance_validity,
+			    (idx_t)end)))
 				break;
-			next_distance = distances != NULL ? distances[end] : 5000;
+			next_upstream_distance = upstream_distances != NULL ?
+			    upstream_distances[end] : DUCKVEP_DEFAULT_UPSTREAM_DIST;
+			next_downstream_distance = downstream_distances != NULL ?
+			    downstream_distances[end] : DUCKVEP_DEFAULT_DOWNSTREAM_DIST;
 			if (!duckvep_vector_string_equals(model_vector, model_validity,
 			    (idx_t)end, state->entry->name) ||
 			    regions[end] != regions[begin] ||
 			    positions[end] < positions[end - 1] ||
-			    next_distance != distance)
+			    next_upstream_distance != upstream_distance ||
+			    next_downstream_distance != downstream_distance)
 				break;
 			end++;
 		}
 		if (!duckvep_scalar_run(state, &batch, begin, end - begin,
-		    distance, error, sizeof(error)))
+		    upstream_distance, downstream_distance,
+		    error, sizeof(error)))
 			goto failed;
 		begin = end;
 	}
@@ -1303,7 +1345,7 @@ static void
 duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int with_distance, int compact)
+	int distance_parameters, int compact)
 {
 	duckdb_scalar_function scalar;
 	duckdb_logical_type result_type;
@@ -1318,7 +1360,9 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckdb_scalar_function_add_parameter(scalar, ubigint_type);
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	if (with_distance)
+	if (distance_parameters >= 1)
+		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+	if (distance_parameters >= 2)
 		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
 	duckdb_scalar_function_set_return_type(scalar, result_type);
 	duckdb_scalar_function_set_volatile(scalar);
@@ -1354,9 +1398,13 @@ register_duckvep_functions(duckdb_connection connection,
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
 	    uinteger_type, ubigint_type, 1, 0);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 0);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
 	    uinteger_type, ubigint_type, 0, 1);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
 	    uinteger_type, ubigint_type, 1, 1);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 1);
 	duckdb_destroy_logical_type(&varchar_type);
 	duckdb_destroy_logical_type(&uinteger_type);
 	duckdb_destroy_logical_type(&ubigint_type);

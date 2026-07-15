@@ -48,6 +48,11 @@ int duckvep_codon_table_supported(duckvep_codon_table_t table) {
            AA_TABLES[id] != NULL;
 }
 
+const char *duckvep_codon_table_amino_acids(duckvep_codon_table_t table) {
+    return duckvep_codon_table_supported(table)
+        ? AA_TABLES[(unsigned int)table] : NULL;
+}
+
 char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table) {
     const char *tab;
     int b1, b2, b3, idx;
@@ -57,7 +62,7 @@ char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table) {
     b3 = base2bit(codon3[2]);
     if (b1 < 0 || b2 < 0 || b3 < 0) return 'X';
     idx = (b1 << 4) | (b2 << 2) | b3;
-    tab = AA_TABLES[(unsigned int)table];
+    tab = duckvep_codon_table_amino_acids(table);
     return tab[idx];
 }
 

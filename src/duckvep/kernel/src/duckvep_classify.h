@@ -22,6 +22,7 @@ typedef struct duckvep_region_state {
     uint8_t  within_cdna;              /* overlaps at least one exon */
     uint8_t  overlaps_exon;
     uint8_t  overlaps_intron;
+    uint8_t  within_frameshift_intron; /* VEP gap with end - start <= 12 */
     uint8_t  overlaps_cds;
     uint8_t  overlaps_utr5;
     uint8_t  overlaps_utr3;
@@ -38,6 +39,20 @@ duckvep_region_state_t duckvep_region_classify_span(
     uint32_t                          end1,
     uint32_t                          splice_exonic,
     uint32_t                          splice_intronic);
+
+/* Sorted small-span fast path. `exon_rank_io` is the next genomic-order exon
+ * whose end is not before start1. Spans contained in one exon or one intron are
+ * classified in constant time; boundary-crossing spans use the exhaustive
+ * classifier above. */
+duckvep_region_state_t duckvep_region_classify_span_sorted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          start1,
+    uint32_t                          end1,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic,
+    uint16_t                         *exon_rank_io);
 
 /* Point compatibility wrapper. */
 uint32_t duckvep_region_mask(
@@ -59,6 +74,7 @@ typedef struct duckvep_splice_state {
     uint8_t splice_polypyrimidine;
     uint8_t splice_region;
     uint8_t intronic;
+    uint8_t within_frameshift_intron;
     uint8_t any;
 } duckvep_splice_state_t;
 
@@ -135,6 +151,22 @@ duckvep_splice_state_t duckvep_splice_classify_differing_regions_with_windows(
     uint16_t                          feature_alt_length,
     uint32_t                          splice_exonic,
     uint32_t                          splice_intronic);
+
+/* Return the same differing-region splice state while proving the common
+ * deep-inside-one-exon case empty from the sorted exon cursor. */
+duckvep_splice_state_t
+duckvep_splice_classify_differing_regions_sorted_with_windows(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          feature_start1,
+    const uint8_t                    *feature_ref,
+    uint16_t                          feature_ref_length,
+    const uint8_t                    *feature_alt,
+    uint16_t                          feature_alt_length,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic,
+    uint16_t                          exon_rank);
 
 /* Point compatibility wrapper. */
 duckvep_splice_state_t duckvep_splice_classify(

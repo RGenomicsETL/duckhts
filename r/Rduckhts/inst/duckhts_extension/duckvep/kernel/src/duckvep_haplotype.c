@@ -210,6 +210,49 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
     return haplo_partition_pass(edits, edit_count, blocks, required_blocks);
 }
 
+/* Exact input/output aliasing was accepted by the original implementation.
+ * Keep that compatibility path, where memmove is required because cumulative
+ * edit displacement can change sign within one haplotype. Normal callers use
+ * distinct reference and scratch buffers and take the linear rebuild below. */
+static duckvep_haplotype_status_t haplo_apply_exact_alias(
+    uint8_t                         *cds,
+    size_t                           ref_cds_len,
+    const duckvep_haplotype_edit_t  *edits,
+    size_t                           edit_count,
+    int8_t                           transcript_strand,
+    size_t                          *cds_len_out) {
+
+    size_t cur_len = ref_cds_len;
+    size_t i;
+
+    for (i = 0u; i < ref_cds_len; i++) {
+        char b = haplo_norm_cds_base(cds[i]);
+        if (b == '\0') return DUCKVEP_HAPLOTYPE_INVALID_BASE;
+        cds[i] = (uint8_t)b;
+    }
+
+    for (i = 0u; i < edit_count; i++) {
+        const duckvep_haplotype_edit_t *e = &edits[i];
+        size_t start0 = (size_t)e->cds_start - 1u;
+        size_t tail_start = start0 + (size_t)e->ref_len;
+        size_t tail_len = cur_len - tail_start;
+        size_t new_len = cur_len - (size_t)e->ref_len + (size_t)e->alt_len;
+        uint32_t j;
+        int reverse = e->variant_strand != transcript_strand;
+
+        memmove(cds + start0 + (size_t)e->alt_len,
+                cds + tail_start, tail_len);
+        for (j = 0u; j < e->alt_len; j++) {
+            cds[start0 + (size_t)j] = (uint8_t)haplo_oriented_base(
+                e->alt, e->alt_len, j, reverse);
+        }
+        cur_len = new_len;
+    }
+
+    *cds_len_out = cur_len;
+    return DUCKVEP_HAPLOTYPE_OK;
+}
+
 duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     const uint8_t                    *ref_cds,
     size_t                            ref_cds_len,
@@ -221,7 +264,7 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     size_t                           *cds_len_out,
     duckvep_haplotype_result_t       *result) {
 
-    size_t cur_len;
+    size_t final_len = ref_cds_len;
     size_t i;
     uint32_t prev_start = UINT32_MAX;
     uint32_t prev_ref_len = 0u;
@@ -237,22 +280,11 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
         (transcript_strand != (int8_t)1 && transcript_strand != (int8_t)-1)) {
         return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     }
-    if (ref_cds_len > cds_cap) {
-        return DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL;
-    }
-
-    for (i = 0u; i < ref_cds_len; i++) {
-        char b = haplo_norm_cds_base(ref_cds[i]);
-        if (b == '\0') return DUCKVEP_HAPLOTYPE_INVALID_BASE;
-        cds_out[i] = (uint8_t)b;
-    }
-    cur_len = ref_cds_len;
-
+    /* Validate the complete edit set and measure the final sequence before
+     * publishing output. Coordinates stay on the original CDS axis. */
     for (i = 0u; i < edit_count; i++) {
         const duckvep_haplotype_edit_t *e = &edits[i];
         size_t start0;
-        size_t tail_start;
-        size_t tail_len;
         size_t new_len;
         uint32_t j;
         int reverse;
@@ -267,10 +299,12 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
             return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_ARG);
         }
 
-        effective_end = e->ref_len == 0u ? e->cds_start : e->cds_start + e->ref_len - 1u;
-        if (effective_end < e->cds_start) {
+        if (e->ref_len != 0u &&
+            e->ref_len - 1u > UINT32_MAX - e->cds_start) {
             return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
+        effective_end = e->ref_len == 0u ? e->cds_start :
+            e->cds_start + e->ref_len - 1u;
         if (i > 0u) {
             if (e->cds_start > prev_start) {
                 return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
@@ -286,14 +320,15 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
         prev_ref_len = e->ref_len;
 
         start0 = (size_t)e->cds_start - 1u;
-        if (start0 > cur_len || (size_t)e->ref_len > cur_len - start0) {
+        if (start0 > ref_cds_len ||
+            (size_t)e->ref_len > ref_cds_len - start0) {
             return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
 
         reverse = (e->variant_strand != transcript_strand);
         for (j = 0u; j < e->ref_len; j++) {
             char expected = haplo_oriented_base(e->ref, e->ref_len, j, reverse);
-            char observed = haplo_norm_cds_base(cds_out[start0 + (size_t)j]);
+            char observed = haplo_norm_cds_base(ref_cds[start0 + (size_t)j]);
             if (expected == '\0') return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_BASE);
             if (observed == '\0') return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_BASE);
             if (observed == 'N' || observed != expected) {
@@ -308,35 +343,98 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
 
         d = diff_i64(e->alt_len, e->ref_len, &ok_diff);
         if (!ok_diff) return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
-        total_diff += d;
+        if (!haplo_add_i64(total_diff, d, &total_diff)) {
+            return haplo_fail(result, cds_len_out, NULL,
+                              DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+        }
         if (d != 0) flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
         if ((d % 3) != 0) saw_frameshift_edit = 1;
 
-        if ((size_t)e->alt_len > SIZE_MAX - (cur_len - (size_t)e->ref_len)) {
+        if ((size_t)e->ref_len > final_len ||
+            (size_t)e->alt_len >
+                SIZE_MAX - (final_len - (size_t)e->ref_len)) {
             return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
-        new_len = cur_len - (size_t)e->ref_len + (size_t)e->alt_len;
-        if (new_len > cds_cap) {
-            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL);
-        }
-
-        tail_start = start0 + (size_t)e->ref_len;
-        tail_len = cur_len - tail_start;
-        memmove(cds_out + start0 + (size_t)e->alt_len, cds_out + tail_start, tail_len);
-        for (j = 0u; j < e->alt_len; j++) {
-            cds_out[start0 + (size_t)j] = (uint8_t)haplo_oriented_base(e->alt, e->alt_len, j, reverse);
-        }
-        cur_len = new_len;
+        new_len = final_len - (size_t)e->ref_len + (size_t)e->alt_len;
+        final_len = new_len;
     }
 
-    if (cur_len < cds_cap) cds_out[cur_len] = (uint8_t)'\0';
-    *cds_len_out = cur_len;
+    if (final_len > cds_cap) {
+        return haplo_fail(result, cds_len_out, NULL,
+                          DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL);
+    }
+
+    if (ref_cds == cds_out) {
+        duckvep_haplotype_status_t alias_status = haplo_apply_exact_alias(
+            cds_out, ref_cds_len, edits, edit_count, transcript_strand,
+            cds_len_out);
+        if (alias_status != DUCKVEP_HAPLOTYPE_OK) {
+            return haplo_fail(result, cds_len_out, NULL, alias_status);
+        }
+    } else {
+        /* Rebuild once from right to left. Every reference byte and ALT byte is
+         * written exactly once; edit count no longer multiplies CDS-tail moves. */
+        size_t src_cursor = ref_cds_len;
+        size_t dst_cursor = final_len;
+
+        for (i = 0u; i < edit_count; i++) {
+            const duckvep_haplotype_edit_t *e = &edits[i];
+            size_t start0 = (size_t)e->cds_start - 1u;
+            size_t ref_end = start0 + (size_t)e->ref_len;
+            size_t suffix_len;
+            uint32_t j;
+            int reverse = e->variant_strand != transcript_strand;
+
+            if (ref_end > src_cursor) {
+                return haplo_fail(result, cds_len_out, NULL,
+                                  DUCKVEP_HAPLOTYPE_EDIT_ORDER);
+            }
+            suffix_len = src_cursor - ref_end;
+            if (suffix_len > dst_cursor ||
+                (size_t)e->alt_len > dst_cursor - suffix_len) {
+                return haplo_fail(result, cds_len_out, NULL,
+                                  DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+            }
+            while (src_cursor > ref_end) {
+                char b = haplo_norm_cds_base(ref_cds[--src_cursor]);
+                if (b == '\0') {
+                    return haplo_fail(result, cds_len_out, NULL,
+                                      DUCKVEP_HAPLOTYPE_INVALID_BASE);
+                }
+                cds_out[--dst_cursor] = (uint8_t)b;
+            }
+            src_cursor = start0;
+            for (j = e->alt_len; j > 0u; j--) {
+                cds_out[--dst_cursor] = (uint8_t)haplo_oriented_base(
+                    e->alt, e->alt_len, j - 1u, reverse);
+            }
+        }
+        if (src_cursor > dst_cursor) {
+            return haplo_fail(result, cds_len_out, NULL,
+                              DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+        }
+        while (src_cursor > 0u) {
+            char b = haplo_norm_cds_base(ref_cds[--src_cursor]);
+            if (b == '\0') {
+                return haplo_fail(result, cds_len_out, NULL,
+                                  DUCKVEP_HAPLOTYPE_INVALID_BASE);
+            }
+            cds_out[--dst_cursor] = (uint8_t)b;
+        }
+        if (dst_cursor != 0u) {
+            return haplo_fail(result, cds_len_out, NULL,
+                              DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+        }
+        *cds_len_out = final_len;
+    }
+
+    if (final_len < cds_cap) cds_out[final_len] = (uint8_t)'\0';
     if (saw_frameshift_edit) {
         if ((total_diff % 3) == 0) flags |= DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT;
         else flags |= DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT;
     }
     if (result != NULL) {
-        result->cds_len = cur_len;
+        result->cds_len = final_len;
         result->length_diff = total_diff;
         result->flags = flags;
         result->applied_edits = edit_count;

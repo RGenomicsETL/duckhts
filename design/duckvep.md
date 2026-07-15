@@ -362,9 +362,9 @@ claim that every transcript follows one universal NMD rule.
 
 ## Phased edits
 
-The pure C mutation core already applies several non-overlapping CDS edits in reverse CDS
-order, translates once, and partitions interactions while the frame is displaced or the
-next edit touches the same alternate codon. The missing stream groups edits by
+The pure C mutation core already rebuilds a CDS from several non-overlapping edits in one
+reverse-coordinate pass, translates once, and partitions interactions while the frame is
+displaced or the next edit touches the same alternate codon. The missing stream groups edits by
 `(model, transcript, sample, phase_set, haplotype)` and retains all contributing variant
 IDs.
 

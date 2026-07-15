@@ -795,6 +795,27 @@ complete_intergenic <- dbGetQuery(
 )
 expect_identical(complete_intergenic$consequence, "intergenic_variant")
 expect_identical(complete_intergenic$status, "supported")
+asymmetric_upstream <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.region FROM unnest(duckvep_annotate(",
+    "'r-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',",
+    "10::UBIGINT, 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(asymmetric_upstream$consequence, "upstream_gene_variant")
+expect_identical(asymmetric_upstream$region, "upstream")
+asymmetric_downstream <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.region_mask, a.status_code",
+    "FROM unnest(duckvep_annotate_compact(",
+    "'r-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'C',",
+    "0::UBIGINT, 10::UBIGINT)) u(a)"
+  )
+)
+expect_equal(asymmetric_downstream$region_mask, 2)
+expect_equal(asymmetric_downstream$status_code, 0)
 expect_error(
   dbGetQuery(
     con,

@@ -50,6 +50,8 @@ int duckvep_project_genomic_to_cdna(
 
     size_t off;
     size_t cnt;
+    size_t lo;
+    size_t hi;
     size_t i;
     int fwd;
 
@@ -59,16 +61,32 @@ int duckvep_project_genomic_to_cdna(
     if (!valid_tx_exon_slice(transcripts, exons, tx_idx, &off, &cnt)) return 0;
 
     fwd = transcripts->strand[tx_idx] >= 0;
-    for (i = off; i < off + cnt; i++) {
+    lo = 0u;
+    hi = cnt;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2u;
+        size_t ei = off + mid;
+
+        if (fwd ? exons->end1[ei] < genomic_pos
+                : exons->start1[ei] > genomic_pos) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo >= cnt) return 0;
+    i = off + lo;
+    {
         uint32_t es = exons->start1[i];
         uint32_t ee = exons->end1[i];
         uint32_t cs = exons->cdna_start1[i];
         uint32_t ce = exons->cdna_end1[i];
         uint32_t cdna;
 
-        if (es > ee || cs == 0u || ce < cs) return 0;
-        if (genomic_pos < es || genomic_pos > ee) continue;
-
+        if (es > ee || cs == 0u || ce < cs ||
+            genomic_pos < es || genomic_pos > ee) {
+            return 0;
+        }
         cdna = fwd ? (uint32_t)(cs + (genomic_pos - es))
                    : (uint32_t)(cs + (ee - genomic_pos));
         if (cdna > ce) return 0;
@@ -76,7 +94,6 @@ int duckvep_project_genomic_to_cdna(
         if (exon_idx_out != NULL) *exon_idx_out = (uint32_t)i;
         return 1;
     }
-    return 0;
 }
 
 int duckvep_project_cdna_to_genomic(
@@ -89,6 +106,8 @@ int duckvep_project_cdna_to_genomic(
 
     size_t off;
     size_t cnt;
+    size_t lo;
+    size_t hi;
     size_t i;
     int fwd;
 
@@ -98,16 +117,30 @@ int duckvep_project_cdna_to_genomic(
     if (!valid_tx_exon_slice(transcripts, exons, tx_idx, &off, &cnt)) return 0;
 
     fwd = transcripts->strand[tx_idx] >= 0;
-    for (i = off; i < off + cnt; i++) {
+    lo = 0u;
+    hi = cnt;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2u;
+        size_t ei = off + mid;
+
+        if (exons->cdna_end1[ei] < cdna_pos)
+            lo = mid + 1u;
+        else
+            hi = mid;
+    }
+    if (lo >= cnt) return 0;
+    i = off + lo;
+    {
         uint32_t es = exons->start1[i];
         uint32_t ee = exons->end1[i];
         uint32_t cs = exons->cdna_start1[i];
         uint32_t ce = exons->cdna_end1[i];
         uint32_t genomic;
 
-        if (es > ee || cs == 0u || ce < cs) return 0;
-        if (cdna_pos < cs || cdna_pos > ce) continue;
-
+        if (es > ee || cs == 0u || ce < cs ||
+            cdna_pos < cs || cdna_pos > ce) {
+            return 0;
+        }
         genomic = fwd ? (uint32_t)(es + (cdna_pos - cs))
                       : (uint32_t)(ee - (cdna_pos - cs));
         if (genomic < es || genomic > ee) return 0;
@@ -115,7 +148,6 @@ int duckvep_project_cdna_to_genomic(
         if (exon_idx_out != NULL) *exon_idx_out = (uint32_t)i;
         return 1;
     }
-    return 0;
 }
 
 int duckvep_project_coding_base(
@@ -200,10 +232,10 @@ int duckvep_project_event_to_cds(
     uint32_t                         *cds_start_out,
     uint32_t                         *cds_end_out) {
 
-    duckvep_coding_projection_t projection;
+    duckvep_coding_projection_t first_projection;
+    duckvep_coding_projection_t last_projection;
     uint32_t min_cds = UINT32_MAX;
     uint32_t max_cds = 0u;
-    uint16_t i;
 
     if (cds_start_out == NULL || cds_end_out == NULL) return 0;
     *cds_start_out = 0u;
@@ -219,30 +251,30 @@ int duckvep_project_event_to_cds(
         uint32_t cds_boundary;
 
         if (!duckvep_project_coding_base(transcripts, exons, tx_idx,
-                                         projected_pos, &projection)) {
+                                         projected_pos, &first_projection)) {
             projected_pos = event->anchor_side ==
                                 (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT
                               ? right
                               : boundary;
             if (projected_pos == 0u ||
                 !duckvep_project_coding_base(transcripts, exons, tx_idx,
-                                             projected_pos, &projection)) {
+                                             projected_pos, &first_projection)) {
                 return 0;
             }
         }
         if (projected_pos == boundary) {
             if (transcripts->strand[tx_idx] > 0) {
-                if (projection.cds_pos == UINT32_MAX) return 0;
-                cds_boundary = projection.cds_pos + 1u;
+                if (first_projection.cds_pos == UINT32_MAX) return 0;
+                cds_boundary = first_projection.cds_pos + 1u;
             } else {
-                cds_boundary = projection.cds_pos;
+                cds_boundary = first_projection.cds_pos;
             }
         } else if (projected_pos == right) {
             if (transcripts->strand[tx_idx] > 0) {
-                cds_boundary = projection.cds_pos;
+                cds_boundary = first_projection.cds_pos;
             } else {
-                if (projection.cds_pos == UINT32_MAX) return 0;
-                cds_boundary = projection.cds_pos + 1u;
+                if (first_projection.cds_pos == UINT32_MAX) return 0;
+                cds_boundary = first_projection.cds_pos + 1u;
             }
         } else {
             return 0;
@@ -253,17 +285,23 @@ int duckvep_project_event_to_cds(
         return 1;
     }
 
-    if (event->ref_diff_length == 0u) return 0;
-    for (i = 0u; i < event->ref_diff_length; i++) {
-        uint64_t genomic_pos = (uint64_t)event->start1 + (uint64_t)i;
-        if (genomic_pos > UINT32_MAX ||
-            !duckvep_project_coding_base(transcripts, exons, tx_idx,
-                                         (uint32_t)genomic_pos, &projection)) {
-            return 0;
-        }
-        if (projection.cds_pos < min_cds) min_cds = projection.cds_pos;
-        if (projection.cds_pos > max_cds) max_cds = projection.cds_pos;
+    if (event->ref_diff_length == 0u || event->start1 == 0u ||
+        (uint64_t)event->ref_diff_length - 1u >
+            (uint64_t)UINT32_MAX - (uint64_t)event->start1) {
+        return 0;
     }
+    if (!duckvep_project_coding_base(
+            transcripts, exons, tx_idx, event->start1, &first_projection) ||
+        !duckvep_project_coding_base(
+            transcripts, exons, tx_idx,
+            event->start1 + (uint32_t)event->ref_diff_length - 1u,
+            &last_projection)) {
+        return 0;
+    }
+    min_cds = first_projection.cds_pos < last_projection.cds_pos
+        ? first_projection.cds_pos : last_projection.cds_pos;
+    max_cds = first_projection.cds_pos > last_projection.cds_pos
+        ? first_projection.cds_pos : last_projection.cds_pos;
     if (min_cds == UINT32_MAX || max_cds < min_cds ||
         max_cds - min_cds + 1u != (uint32_t)event->ref_diff_length) {
         return 0;

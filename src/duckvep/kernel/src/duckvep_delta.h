@@ -40,10 +40,18 @@ typedef struct duckvep_sequence_delta {
     uint8_t ref_aa, alt_aa;                 /* 1-letter AA; '*' = stop  */
     uint8_t synonymous, missense, stop_gained, stop_lost, stop_retained;
     uint8_t start_lost, start_retained, frameshift, inframe_deletion, inframe_insertion;
-    uint8_t protein_altering, coding_unknown;
+    uint8_t protein_altering, coding_unknown, partial_codon;
     uint8_t valid;                          /* 1 when the delta is filled */
     uint8_t sequence_status;                /* duckvep_sequence_status_t  */
 } duckvep_sequence_delta_t;
+
+/* True when the prepared transcript CDS ends in a one- or two-base codon.
+ * VEP's partial_codon predicate derives this from `_translateable_seq` length;
+ * it is not reliably equivalent to the cds_end_NF transcript attribute (notably
+ * for mitochondrial transcripts). */
+DUCKVEP_INTERNAL_API int duckvep_transcript_has_partial_terminal_codon(
+    const duckvep_sequence_pool_t *seq,
+    size_t                         tx_idx);
 
 /* One or more projected CDS edits in translation orientation. A single small
  * variant may produce several edits; for example, an MNV with retained internal
@@ -120,6 +128,26 @@ typedef struct duckvep_coding_context {
     const uint8_t *alt_cds;     size_t alt_cds_len;
     const uint8_t *ref_peptide; size_t ref_peptide_len;
     const uint8_t *alt_peptide; size_t alt_peptide_len;
+    /* A model-backed single edit can expose the alternate CDS as a borrowed
+     * view instead of copying and translating the complete transcript. The
+     * accessors in duckvep_delta.c preserve the same coding predicates; the
+     * materialized fields above remain the compound-edit/Haplosaurus oracle. */
+    const uint8_t *single_edit_alt;
+    const uint8_t *local_alt_cds;
+    const uint8_t *local_ref_peptide;
+    const uint8_t *local_alt_peptide;
+    size_t local_cds_offset, local_ref_cds_len, local_alt_cds_len;
+    size_t local_peptide_offset;
+    size_t local_ref_peptide_len, local_alt_peptide_len;
+    int8_t transcript_strand;
+    int8_t single_edit_variant_strand;
+    uint8_t virtual_single_edit;
+    /* VEP's genomic _overlaps_stop_codon_cil result for a minimized pure
+     * insertion. CDS distance cannot derive this: an intron may lie between
+     * the insertion and terminal codon. */
+    uint8_t insertion_length_reaches_terminal_stop;
+    uint8_t local_ref_unambiguous;
+    uint8_t local_alt_unambiguous;
     /* Sparse Ensembl Translation SeqEdits. Positions are one-based and sorted.
      * They are an overlay on the reference peptide only: VEP deliberately
      * leaves the alternate peptide as the raw codon translation. */
@@ -263,9 +291,10 @@ DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_cod
 /* Classify a CodingContext into sequence-delta facts. The classifier handles
  * length-preserving substitutions across complete codon windows and guarded
  * single-edit frameshift, in-frame insertion, deletion, and delins contexts.
- * Ambiguous bases, incomplete codons, multi-edit contexts, and cases requiring an
- * incomplete compound consequence return UNSUPPORTED with `delta` invalid. The raw
- * dispatcher has no shape-specific fallback. */
+ * Ambiguous bases, incomplete codons, length-changing multi-edit contexts, and cases
+ * requiring an incomplete compound consequence return UNSUPPORTED with `delta`
+ * invalid. Length-preserving multi-edit substitutions use the same complete-CDS
+ * comparison as one uploaded MNV. The raw dispatcher has no shape-specific fallback. */
 DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta_fill(
     const duckvep_coding_context_t *ctx,
     uint64_t                        tx_flags,
@@ -350,6 +379,8 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     int8_t                            strand,
     duckvep_delta_scratch_t          *scratch,
     const duckvep_event_t            *prepared_event,
+    uint32_t                          classified_region_mask,
+    uint32_t                          exon_hint,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta);
 

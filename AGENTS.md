@@ -75,6 +75,17 @@ GitHub issues retain the path and backlog.
 - Pin exact upstream versions/commits and checksum-verify downloads.
 - Do not modify vendored code directly; use explicit patch files.
 
+### Pull Request Performance Evidence — Mandatory
+
+Every pull request description must contain a `## Performance` section sourced from a
+checked-in rendered benchmark report under `benchmarks/`. Name the report, source
+revision, workload, input and output denominators, thread count, and measured result; do
+not cite ad hoc terminal output. If the change touches a measured hot path, run and render
+the comparable workload at the PR revision and compare it with the nearest identical
+recorded workload. Do not claim "no regression" when workloads or environments differ.
+If no checked-in benchmark exercises the changed path, state that explicitly in the
+section, cite the nearest rendered baseline, and say what measurement is still missing.
+
 Useful validation commands:
 
 ```bash

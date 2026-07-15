@@ -2,9 +2,9 @@
  * duckvep_haplotype.h — multi-edit CDS haplotype mutation helpers (INTERNAL).
  *
  * Callers group and project phased variants, then pass a
- * transcript-oriented CDS plus per-haplotype edits. The kernel mutates a
- * caller-owned scratch sequence in reverse CDS-coordinate order, translates once,
- * and emits aggregate indel/frameshift flags. No allocation, no DuckDB/htslib.
+ * transcript-oriented CDS plus per-haplotype edits. The kernel rebuilds a
+ * caller-owned scratch sequence in one reverse CDS-coordinate pass, translates
+ * once, and emits aggregate indel/frameshift flags. No allocation, no DuckDB/htslib.
  *
  * This header owns sequence mutation and translation only. Stream grouping and
  * DuckDB materialization stay outside the kernel.
@@ -81,7 +81,10 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
 /* Apply edits to `ref_cds`, writing the mutated CDS to `cds_out` and its length
  * to `cds_len_out`. Edits must be sorted by descending original CDS coordinate
  * and must not overlap in original CDS space; this mirrors Ensembl's reverse
- * mapping-order application and avoids allocation/sorting in the hot path.
+ * mapping order and permits one linear rebuild without allocation or sorting.
+ * `ref_cds == cds_out` remains supported for compatibility, but distinct input
+ * and output buffers are the linear streaming path. Partially overlapping
+ * buffers are not supported.
  *
  * `ref`/`alt` alleles are oriented from variant_strand to transcript_strand
  * before validation/application. Bases must be A/C/G/T (case-insensitive; U is

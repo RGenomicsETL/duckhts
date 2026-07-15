@@ -115,6 +115,37 @@ FROM unnest(duckvep_annotate(
 ----
 inframe_deletion	supported	-
 
+# VEP's incomplete-terminal-codon predicate is separate from CDS_END_NF: it
+# becomes true only when the edit begins in the final one- or two-base codon.
+query TTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'partial-cds-end', 1::UINTEGER, 112::UBIGINT, 'T', 'A', 0::UBIGINT
+)) AS u(annotation);
+----
+incomplete_terminal_codon_variant&coding_sequence_variant	supported	-
+
+query TTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'partial-cds-end', 1::UINTEGER, 111::UBIGINT, 'GTT', 'G', 0::UBIGINT
+)) AS u(annotation);
+----
+protein_altering_variant&incomplete_terminal_codon_variant	supported	-
+
+# VEP does not suppress inframe_insertion when partial_codon is true, and its
+# X-bearing peptide also keeps coding_sequence_variant.
+query TTT
+SELECT annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-')
+FROM unnest(duckvep_annotate(
+  'partial-cds-end', 1::UINTEGER, 111::UBIGINT, 'G', 'GGCCA', 0::UBIGINT
+)) AS u(annotation);
+----
+inframe_insertion&incomplete_terminal_codon_variant&coding_sequence_variant	supported	-
+
 # The pure-C model validator is also the final authority for SQL-loaded models.
 # A transcript span wider than its outer exon envelope must fail at load time.
 statement error
@@ -323,6 +354,73 @@ FROM unnest(duckvep_annotate_compact(
 )) AS u(annotation);
 ----
 8589934592	0	0	0
+
+# Like VEP --distance U,D, the seven-argument overload controls the two
+# transcript-relative directions independently. A zero disables that direction.
+query TT
+SELECT annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',
+  10::UBIGINT, 0::UBIGINT
+)) AS u(annotation);
+----
+upstream_gene_variant	upstream
+
+query TT
+SELECT annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'C',
+  10::UBIGINT, 0::UBIGINT
+)) AS u(annotation);
+----
+intergenic_variant	intergenic
+
+query TT
+SELECT annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',
+  0::UBIGINT, 10::UBIGINT
+)) AS u(annotation);
+----
+intergenic_variant	intergenic
+
+query TT
+SELECT annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'C',
+  0::UBIGINT, 10::UBIGINT
+)) AS u(annotation);
+----
+downstream_gene_variant	downstream
+
+# VEP's minimized insertion feature is the reversed interval P+1,P. On the
+# downstream side, P at the nominal limit is therefore one base beyond it.
+query TT
+SELECT annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'AC',
+  0::UBIGINT, 10::UBIGINT
+)) AS u(annotation);
+----
+intergenic_variant	intergenic
+
+query TT
+SELECT annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'fixture-complete', 1::UINTEGER, 259::UBIGINT, 'A', 'AC',
+  0::UBIGINT, 10::UBIGINT
+)) AS u(annotation);
+----
+downstream_gene_variant	downstream
+
+query II
+SELECT annotation.region_mask, annotation.status_code
+FROM unnest(duckvep_annotate_compact(
+  'fixture-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',
+  10::UBIGINT, 0::UBIGINT
+)) AS u(annotation);
+----
+1	0
 
 statement error
 SELECT duckvep_annotate(
@@ -770,6 +868,27 @@ SELECT loaded FROM duckvep_model_load(
 );
 ----
 1
+
+# Upstream and downstream are transcript-relative. At the same genomic point,
+# the negative-strand transcript is upstream while the positive-strand one is
+# downstream.
+query ITT
+SELECT annotation.transcript_index, annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'position-one', 1::UINTEGER, 25::UBIGINT, 'A', 'C',
+  10::UBIGINT, 0::UBIGINT
+)) AS u(annotation);
+----
+1	upstream_gene_variant	upstream
+
+query ITT
+SELECT annotation.transcript_index, annotation.consequence, annotation.region
+FROM unnest(duckvep_annotate(
+  'position-one', 1::UINTEGER, 25::UBIGINT, 'A', 'C',
+  0::UBIGINT, 10::UBIGINT
+)) AS u(annotation);
+----
+0	downstream_gene_variant	downstream
 
 query IIT
 WITH variants(ord, reference, alternate) AS (

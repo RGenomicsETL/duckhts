@@ -126,6 +126,14 @@ static void duckvep_effect_ctx_set_topology(
     out->strand = transcripts->strand[tx_idx];
 
     out->region_state = *region_state;
+    if (splice_state->within_frameshift_intron) {
+        out->region_state.within_frameshift_intron = 1u;
+        if (coding && end1 >= transcripts->cds_start1[tx_idx] &&
+            start1 <= transcripts->cds_end1[tx_idx]) {
+            out->region_state.overlaps_cds = 1u;
+            out->region_state.region_mask |= (uint32_t)DUCKVEP_REGION_CDS;
+        }
+    }
     region = out->region_state.region_mask;
 
     /* Span placement is not mutually exclusive: one event can overlap CDS, UTR,
@@ -204,6 +212,32 @@ static void duckvep_effect_ctx_set_topology(
     if (out->splice.any) region |= (uint32_t)DUCKVEP_REGION_SPLICE;
     out->region = region;
     out->pre_bits = pre;
+    duckvep_effect_ctx_apply_exon_gate(
+        out, out->region_state.overlaps_exon != 0u);
+}
+
+void duckvep_effect_ctx_apply_exon_gate(
+    duckvep_effect_ctx_t *ctx,
+    int                   predicate_overlaps_exon) {
+
+    if (ctx == NULL || !predicate_overlaps_exon ||
+        !ctx->splice.splice_polypyrimidine) {
+        return;
+    }
+
+    ctx->splice.splice_polypyrimidine = 0u;
+    ctx->pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT);
+    ctx->splice.any = (uint8_t)(
+        ctx->splice.splice_donor || ctx->splice.splice_acceptor ||
+        ctx->splice.splice_donor_5th || ctx->splice.splice_donor_region ||
+        ctx->splice.splice_region);
+    if (ctx->splice.any) {
+        ctx->region |= (uint32_t)DUCKVEP_REGION_SPLICE;
+        ctx->region_state.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
+    } else {
+        ctx->region &= ~(uint32_t)DUCKVEP_REGION_SPLICE;
+        ctx->region_state.region_mask &= ~(uint32_t)DUCKVEP_REGION_SPLICE;
+    }
 }
 
 void duckvep_effect_ctx_fill_classified(
@@ -370,6 +404,8 @@ void duckvep_effect_ctx_apply_delta(
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_PROTEIN_ALTERING);
     if (delta->coding_unknown)
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN);
+    if (delta->partial_codon)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_PARTIAL_CODON);
 }
 
 void duckvep_effect_ctx_apply_sv(
