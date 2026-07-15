@@ -321,3 +321,64 @@ int duckvep_project_event_to_cds(
     *cds_end_out = max_cds;
     return 1;
 }
+
+int duckvep_project_feature_to_cds(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                         *cds_start_out,
+    uint32_t                         *cds_end_out) {
+
+    duckvep_coding_projection_t first;
+    duckvep_coding_projection_t last;
+    uint32_t feature_start1;
+    uint32_t feature_end1;
+
+    if (cds_start_out == NULL || cds_end_out == NULL) return 0;
+    *cds_start_out = 0u;
+    *cds_end_out = 0u;
+    if (transcripts == NULL || exons == NULL || event == NULL ||
+        tx_idx >= transcripts->transcript_count) {
+        return 0;
+    }
+
+    feature_start1 = event->feature_start1;
+    feature_end1 = event->feature_end1;
+    if (event->interbase) {
+        uint32_t cds_boundary;
+        uint32_t ignored_end;
+
+        if (feature_start1 == 0u || feature_end1 == UINT32_MAX ||
+            feature_start1 != feature_end1 + 1u) {
+            return 0;
+        }
+        /* VEP's mapper projects an empty insertion interval from whichever
+         * genomic flank maps, including an exon edge. The ordinary insertion
+         * projector implements that rule and returns the transcript boundary.
+         * TranscriptVariation then exposes the boundary as a reversed range. */
+        if (!duckvep_project_event_to_cds(
+                transcripts, exons, tx_idx, event,
+                &cds_boundary, &ignored_end) || cds_boundary == 0u) {
+            return 0;
+        }
+        *cds_start_out = cds_boundary;
+        *cds_end_out = cds_boundary - 1u;
+        return 1;
+    }
+    if (feature_start1 == 0u || feature_end1 == 0u ||
+        feature_end1 < feature_start1) {
+        return 0;
+    }
+    if (!duckvep_project_coding_base(
+            transcripts, exons, tx_idx, feature_start1, &first) ||
+        !duckvep_project_coding_base(
+            transcripts, exons, tx_idx, feature_end1, &last)) {
+        return 0;
+    }
+    *cds_start_out = first.cds_pos < last.cds_pos
+        ? first.cds_pos : last.cds_pos;
+    *cds_end_out = first.cds_pos > last.cds_pos
+        ? first.cds_pos : last.cds_pos;
+    return *cds_start_out != 0u && *cds_end_out != 0u;
+}

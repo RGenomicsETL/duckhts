@@ -90,6 +90,39 @@ latest_state_runs <- state_overall[
   ,
   drop = FALSE
 ]
+nmd_history <- history[
+  history$stratum_kind == "nmd_prediction",
+  ,
+  drop = FALSE
+]
+nmd_run_keys <- c(
+  "source_revision", "engine", "corpus", "model", "oracle_version",
+  "oracle_build"
+)
+latest_nmd_run_ids <- NULL
+if (nrow(nmd_history)) {
+  nmd_runs <- unique(nmd_history[, nmd_run_keys, drop = FALSE])
+  groups <- interaction(
+    nmd_runs$engine,
+    nmd_runs$corpus,
+    nmd_runs$model,
+    drop = TRUE
+  )
+  latest_nmd_run_ids <- do.call(rbind, lapply(
+    split(nmd_runs, groups),
+    function(rows) {
+      tested_ancestors <- revision_ancestry[
+        revision_ancestry %in% rows$source_revision
+      ]
+      revision <- if (length(tested_ancestors)) {
+        tested_ancestors[[1L]]
+      } else {
+        rows$source_revision[[nrow(rows)]]
+      }
+      rows[rows$source_revision == revision, , drop = FALSE]
+    }
+  ))
+}
 upper95 <- function(k, n) {
   if (n == 0) NA_real_ else binom.test(k, n, conf.level = 0.95)$conf.int[[2L]]
 }
@@ -522,3 +555,104 @@ knitr::kable(impact_counts, row.names = FALSE)
 
 The source artifact hash and exact Ensembl core/variation build remain in
 `test/duckvep/conformance/data/conformance_history.csv` for audit and reruns.
+
+## Variant-induced NMD
+
+This is a separate executable differential against the pinned VEP Plugins
+release/116 `NMD.pm`. It compares `triggering`, `escaping`, and `unresolved`
+for every eligible transcript pair; it does not infer NMD from the core
+`NMD_transcript_variant` biotype consequence.
+
+```{r nmd-summary}
+if (!is.null(latest_nmd_run_ids) && nrow(latest_nmd_run_ids)) {
+  latest_nmd <- merge(
+    nmd_history,
+    latest_nmd_run_ids,
+    by = nmd_run_keys
+  )
+  nmd_summary <- aggregate(
+    cbind(
+      n, exact_agree, term_mismatch, unresolved, resolved_n,
+      resolved_discordant, engine_extra, engine_missing
+    ) ~ source_revision + corpus + model,
+    data = latest_nmd,
+    FUN = sum
+  )
+  oracle_rows <- latest_nmd[
+    latest_nmd$consequence_class == "unresolved",
+    ,
+    drop = FALSE
+  ]
+  if (nrow(oracle_rows)) {
+    oracle_unresolved <- aggregate(
+      n ~ source_revision + corpus + model,
+      data = oracle_rows,
+      FUN = sum
+    )
+    names(oracle_unresolved)[names(oracle_unresolved) == "n"] <-
+      "oracle_unresolved"
+    nmd_summary <- merge(
+      nmd_summary,
+      oracle_unresolved,
+      by = c("source_revision", "corpus", "model"),
+      all.x = TRUE
+    )
+    nmd_summary$oracle_unresolved[is.na(nmd_summary$oracle_unresolved)] <- 0
+  } else {
+    nmd_summary$oracle_unresolved <- 0
+  }
+  nmd_summary$resolved_error_upper_95 <- percent(mapply(
+    upper95,
+    nmd_summary$resolved_discordant,
+    nmd_summary$resolved_n
+  ))
+  nmd_summary$revision <- short_revision(nmd_summary$source_revision)
+  nmd_summary$exact <- paste0(nmd_summary$exact_agree, "/", nmd_summary$n)
+  nmd_summary$not_comparable <-
+    nmd_summary$engine_extra + nmd_summary$engine_missing
+  knitr::kable(
+    nmd_summary[, c(
+      "revision", "corpus", "model", "exact", "term_mismatch",
+      "not_comparable", "oracle_unresolved", "unresolved",
+      "resolved_error_upper_95"
+    )],
+    col.names = c(
+      "revision", "corpus", "model", "exact", "mismatches",
+      "not comparable", "VEP unresolved", "DuckVEP unresolved",
+      "resolved error upper 95%"
+    ),
+    row.names = FALSE
+  )
+} else {
+  cat("No executable NMD-plugin differential is recorded.\n")
+}
+```
+
+The ledger keeps the prediction confusion matrix rather than only the total:
+
+```{r nmd-predictions}
+if (exists("latest_nmd") && nrow(latest_nmd)) {
+  nmd_predictions <- aggregate(
+    n ~ source_revision + corpus + consequence_class + engine_status,
+    data = latest_nmd,
+    FUN = sum
+  )
+  names(nmd_predictions)[names(nmd_predictions) == "consequence_class"] <-
+    "VEP_prediction"
+  names(nmd_predictions)[names(nmd_predictions) == "engine_status"] <-
+    "DuckVEP_prediction"
+  nmd_predictions$revision <- short_revision(nmd_predictions$source_revision)
+  knitr::kable(
+    nmd_predictions[, c(
+      "revision", "corpus", "VEP_prediction", "DuckVEP_prediction", "n"
+    )],
+    row.names = FALSE
+  )
+}
+```
+
+VEP projects the complete uploaded `VariationFeature` for the plugin's CDS and
+exon-position rules. DuckVEP therefore retains both geometries: minimized edit
+coordinates drive consequence and sequence changes, while the original feature
+endpoints drive NMD. A padded and a minimal allele can encode the same sequence
+edit but cross the plugin's inclusive positional threshold differently.

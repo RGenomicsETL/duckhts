@@ -33,6 +33,7 @@ op <- add_option(op, "--annotations", default = "")
 op <- add_option(op, "--out", default = "")
 op <- add_option(op, "--audit-out", dest = "audit_out", default = "")
 op <- add_option(op, "--pairs-out", dest = "pairs_out", default = "")
+op <- add_option(op, "--nmd-out", dest = "nmd_out", default = "")
 op <- add_option(
   op,
   "--history",
@@ -75,6 +76,9 @@ if (!nzchar(opt$audit_out)) {
 }
 if (!nzchar(opt$pairs_out)) {
   opt$pairs_out <- file.path(out_dir, glue("{stem}_pairs.parquet"))
+}
+if (!nzchar(opt$nmd_out)) {
+  opt$nmd_out <- file.path(out_dir, glue("{stem}_nmd_conformance.csv"))
 }
 
 upper95 <- function(k, n) {
@@ -128,6 +132,12 @@ if (!("oracle_version" %in% ann_columns)) {
 if (!("oracle_build" %in% ann_columns)) {
   invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN oracle_build VARCHAR"))
 }
+if (!("nmd_prediction" %in% ann_columns)) {
+  invisible(dbExecute(
+    con,
+    "ALTER TABLE ann ADD COLUMN nmd_prediction VARCHAR DEFAULT 'not_measured'"
+  ))
+}
 invisible(dbExecute(
   con,
   "CREATE TABLE ann_pairs AS
@@ -152,7 +162,8 @@ invisible(dbExecute(
        WHEN count(*) FILTER (WHERE status = 'unresolved') > 0 THEN 'unresolved'
        ELSE coalesce(any_value(status), 'unknown')
      END AS engine_status,
-     string_agg(DISTINCT reason, ';' ORDER BY reason) AS engine_reason
+     string_agg(DISTINCT reason, ';' ORDER BY reason) AS engine_reason,
+     any_value(coalesce(nmd_prediction, 'not_measured')) AS nmd_prediction
    FROM ann
    LEFT JOIN LATERAL unnest(string_split(coalesce(consequence, ''), '&')) u(term) ON true
    GROUP BY source, variant_id, coalesce(tx, '')"
@@ -197,6 +208,34 @@ pair_queries <- vapply(
          e.impact AS engine_impact,
          coalesce(e.engine_status, 'missing') AS engine_status,
          e.engine_reason,
+         coalesce(v.nmd_prediction, 'not_measured') AS vep_nmd_prediction,
+         coalesce(e.nmd_prediction, 'not_measured') AS engine_nmd_prediction,
+         CASE
+           -- A present row with no NMD observation remains unmeasured even if
+           -- the other engine omitted its consequence row. Only measured
+           -- emissions can establish that a missing peer is not comparable.
+           WHEN (
+             v.variant_id IS NOT NULL AND
+             coalesce(v.nmd_prediction, 'not_measured') = 'not_measured'
+           ) OR (
+             e.variant_id IS NOT NULL AND
+             coalesce(e.nmd_prediction, 'not_measured') = 'not_measured'
+           )
+             THEN 'not_measured'
+           -- A missing peer does not turn an ineligible consequence into an
+           -- NMD observation. Reserve not_comparable for an eligible NMD
+           -- prediction whose peer consequence row is absent.
+           WHEN (
+             v.variant_id IS NULL AND e.nmd_prediction = 'not_applicable'
+           ) OR (
+             e.variant_id IS NULL AND v.nmd_prediction = 'not_applicable'
+           )
+             THEN 'not_measured'
+           WHEN v.variant_id IS NULL OR e.variant_id IS NULL THEN 'not_comparable'
+           WHEN coalesce(v.nmd_prediction, 'not_measured') =
+                coalesce(e.nmd_prediction, 'not_measured') THEN 'match'
+           ELSE 'mismatch'
+         END AS nmd_comparison,
          CASE
            WHEN v.variant_id IS NULL THEN 'engine_extra'
            WHEN e.variant_id IS NULL THEN 'engine_missing'
@@ -354,11 +393,128 @@ audit$run_date <- as.character(Sys.Date())
 audit$upper95 <- mapply(upper95, audit$resolved_discordant, audit$resolved_n)
 audit$annotations <- opt$annotations
 
+nmd_stats <- dbGetQuery(
+  con,
+  "SELECT
+     engine,
+     corpus,
+     model,
+     oracle_version,
+     oracle_build,
+     vep_nmd_prediction,
+     engine_nmd_prediction,
+     nmd_comparison,
+     CASE
+       WHEN vep_consequence IS NULL THEN '(no_vep_emission)'
+       WHEN vep_consequence = '' THEN '(empty_vep_terms)'
+       ELSE vep_consequence
+     END AS consequence_class,
+     var_type,
+     length_bin,
+     count(*) AS n
+   FROM pairs
+   WHERE nmd_comparison <> 'not_measured'
+     AND (
+       vep_nmd_prediction <> 'not_applicable' OR
+       engine_nmd_prediction <> 'not_applicable'
+     )
+   GROUP BY ALL
+   ORDER BY engine, nmd_comparison DESC, n DESC, consequence_class,
+            var_type, length_bin"
+)
+nmd_audit <- dbGetQuery(
+  con,
+  "SELECT
+     engine,
+     corpus,
+     model,
+     count(*) AS n,
+     count(*) FILTER (WHERE nmd_comparison = 'match') AS exact_agree,
+     count(*) FILTER (WHERE nmd_comparison = 'mismatch') AS exact_discordant,
+     count(*) FILTER (WHERE nmd_comparison = 'not_comparable') AS not_comparable,
+     count(*) FILTER (
+       WHERE vep_nmd_prediction = 'unresolved'
+     ) AS oracle_unresolved,
+     count(*) FILTER (
+       WHERE engine_nmd_prediction = 'unresolved'
+     ) AS engine_unresolved
+   FROM pairs
+   WHERE nmd_comparison <> 'not_measured'
+     AND (
+       vep_nmd_prediction <> 'not_applicable' OR
+       engine_nmd_prediction <> 'not_applicable'
+     )
+   GROUP BY engine, corpus, model
+   ORDER BY engine, corpus, model"
+)
+if (nrow(nmd_audit) != 0L) {
+  comparable <- nmd_audit$exact_agree + nmd_audit$exact_discordant
+  nmd_audit$upper95 <- mapply(
+    upper95,
+    nmd_audit$exact_discordant,
+    comparable
+  )
+}
+nmd_history_stats <- dbGetQuery(
+  con,
+  "SELECT
+     engine,
+     corpus,
+     model,
+     any_value(oracle_version) AS oracle_version,
+     any_value(oracle_build) AS oracle_build,
+     vep_nmd_prediction,
+     engine_nmd_prediction,
+     count(*) AS n,
+     count(*) FILTER (WHERE nmd_comparison = 'match') AS exact_agree,
+     count(*) FILTER (WHERE nmd_comparison <> 'match') AS exact_discordant,
+     count(*) FILTER (
+       WHERE engine_nmd_prediction = 'unresolved'
+     ) AS unresolved,
+     count(*) FILTER (
+       WHERE nmd_comparison <> 'not_comparable'
+         AND vep_nmd_prediction <> 'unresolved'
+         AND engine_nmd_prediction <> 'unresolved'
+     ) AS resolved_n,
+     count(*) FILTER (
+       WHERE nmd_comparison = 'match'
+         AND vep_nmd_prediction <> 'unresolved'
+         AND engine_nmd_prediction <> 'unresolved'
+     ) AS resolved_agree,
+     count(*) FILTER (
+       WHERE nmd_comparison = 'mismatch'
+         AND vep_nmd_prediction <> 'unresolved'
+         AND engine_nmd_prediction <> 'unresolved'
+     ) AS resolved_discordant,
+     count(*) FILTER (WHERE nmd_comparison = 'mismatch') AS term_mismatch,
+     count(*) FILTER (WHERE comparison = 'engine_extra') AS engine_extra,
+     count(*) FILTER (WHERE comparison = 'engine_missing') AS engine_missing
+   FROM pairs
+   WHERE nmd_comparison <> 'not_measured'
+     AND (
+       vep_nmd_prediction <> 'not_applicable' OR
+       engine_nmd_prediction <> 'not_applicable'
+     )
+   GROUP BY engine, corpus, model, vep_nmd_prediction,
+            engine_nmd_prediction
+   ORDER BY engine, corpus, model, vep_nmd_prediction,
+            engine_nmd_prediction"
+)
+if (nrow(nmd_history_stats) != 0L) {
+  nmd_history_stats$upper95 <- mapply(
+    upper95,
+    nmd_history_stats$resolved_discordant,
+    nmd_history_stats$resolved_n
+  )
+}
+
 dir.create(dirname(opt$out), showWarnings = FALSE, recursive = TRUE)
 dir.create(dirname(opt$audit_out), showWarnings = FALSE, recursive = TRUE)
 dir.create(dirname(opt$pairs_out), showWarnings = FALSE, recursive = TRUE)
+dir.create(dirname(opt$nmd_out), showWarnings = FALSE, recursive = TRUE)
 utils::write.csv(stats, opt$out, row.names = FALSE)
 utils::write.csv(audit, opt$audit_out, row.names = FALSE)
+utils::write.csv(nmd_stats, opt$nmd_out, row.names = FALSE)
 
 if (nzchar(opt$history)) {
   if (!nzchar(opt$source_revision)) {
@@ -446,7 +602,40 @@ if (nzchar(opt$history)) {
     stringsAsFactors = FALSE,
     check.names = FALSE
   )[, history_columns]
-  history_rows <- rbind(history_all, history_stats)
+  history_nmd <- data.frame()
+  if (nrow(nmd_history_stats) != 0L) {
+    history_nmd <- data.frame(
+      run_date = rep(run_date, nrow(nmd_history_stats)),
+      source_revision = rep(opt$source_revision, nrow(nmd_history_stats)),
+      artifact_md5 = rep(artifact_md5, nrow(nmd_history_stats)),
+      engine = nmd_history_stats$engine,
+      corpus = nmd_history_stats$corpus,
+      model = nmd_history_stats$model,
+      oracle_version = nmd_history_stats$oracle_version,
+      oracle_build = nmd_history_stats$oracle_build,
+      stratum_kind = "nmd_prediction",
+      consequence_class = nmd_history_stats$vep_nmd_prediction,
+      impact = "(nmd)",
+      var_type = "(all)",
+      length_bin = "(all)",
+      engine_status = nmd_history_stats$engine_nmd_prediction,
+      engine_reason = "",
+      n = nmd_history_stats$n,
+      exact_agree = nmd_history_stats$exact_agree,
+      exact_discordant = nmd_history_stats$exact_discordant,
+      unresolved = nmd_history_stats$unresolved,
+      resolved_n = nmd_history_stats$resolved_n,
+      resolved_agree = nmd_history_stats$resolved_agree,
+      resolved_discordant = nmd_history_stats$resolved_discordant,
+      term_mismatch = nmd_history_stats$term_mismatch,
+      engine_extra = nmd_history_stats$engine_extra,
+      engine_missing = nmd_history_stats$engine_missing,
+      upper95 = nmd_history_stats$upper95,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )[, history_columns]
+  }
+  history_rows <- rbind(history_all, history_stats, history_nmd)
 
   dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
   if (file.exists(opt$history)) {
@@ -520,6 +709,25 @@ for (i in seq_len(nrow(audit))) {
 cat(glue("  strata -> {opt$out}"), "\n", sep = "")
 cat(glue("  audit  -> {opt$audit_out}"), "\n", sep = "")
 cat(glue("  pairs  -> {opt$pairs_out}"), "\n", sep = "")
+if (nrow(nmd_audit) != 0L) {
+  for (i in seq_len(nrow(nmd_audit))) {
+    comparable <- nmd_audit$exact_agree[i] + nmd_audit$exact_discordant[i]
+    cat(
+      glue(
+        "  NMD {nmd_audit$engine[i]}: exact ",
+        "{nmd_audit$exact_agree[i]}/{comparable}; ",
+        "discord {nmd_audit$exact_discordant[i]} ",
+        "(<= {sprintf('%.2e', nmd_audit$upper95[i])} @95%); ",
+        "not comparable {nmd_audit$not_comparable[i]}, ",
+        "oracle unresolved {nmd_audit$oracle_unresolved[i]}, ",
+        "engine unresolved {nmd_audit$engine_unresolved[i]}"
+      ),
+      "\n",
+      sep = ""
+    )
+  }
+  cat(glue("  NMD    -> {opt$nmd_out}"), "\n", sep = "")
+}
 if (nzchar(opt$history)) {
   cat(glue("  history -> {opt$history}"), "\n", sep = "")
 }

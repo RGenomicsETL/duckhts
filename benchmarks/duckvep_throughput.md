@@ -68,6 +68,9 @@ insertion order; they remain only as historical measurements.
 | 2026-07-15 | a346a7aa | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     21 |       1.417 |          1.443 |       1.511 |              138600 |         7215.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,989,411              |
 | 2026-07-15 | a346a7aa | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     31 |       0.307 |          0.315 |       0.376 |              114286 |         8750.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,325,473              |
 | 2026-07-15 | a346a7aa | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     31 |       0.599 |          0.617 |       0.791 |              324149 |         3085.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,413,290              |
+| 2026-07-15 | c361346f | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     21 |       1.445 |          1.468 |       1.498 |              136240 |         7340.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,921,471              |
+| 2026-07-15 | c361346f | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     31 |       0.320 |          0.323 |       0.341 |              111455 |         8972.2 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,243,108              |
+| 2026-07-15 | c361346f | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     31 |       0.584 |          0.602 |       0.779 |              332226 |         3010.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,622,924              |
 | 2026-07-15 | ecb7eaae | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     15 |       1.467 |          1.495 |       1.512 |              133779 |         7475.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,850,649              |
 | 2026-07-15 | ecb7eaae | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     21 |       0.311 |          0.324 |       0.356 |              111111 |         9000.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,233,099              |
 | 2026-07-15 | ecb7eaae | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     15 |       0.605 |          0.610 |       0.624 |              327869 |         3050.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,509,836              |
@@ -124,14 +127,16 @@ rather than attributed to this change.
 ## Reused coding projection fact for NMD
 
 The `1903f7fb` rows are the exact merged source before this change. The
-`a346a7aa` rows retain the `CDS end <= 101` comparison already
-established by the sequence classifier and consume it when VEP 116 NMD
-prediction needs that same fact. Consequences outside the NMD plugin’s
-supported set skip NMD evaluation; splice and unresolved-sequence cases
-still use the exhaustive genomic-to-CDS projector. Both revisions were
-rebuilt and measured adjacently on the same final model, input tables,
-pinned CPU, ordered query, compact output, and 10,000-variant warmup.
-Positive change means less elapsed time.
+`a346a7aa` rows record the first projection-cache optimization: retain
+the `CDS end <= 101` comparison already established by the sequence
+classifier and consume it when VEP 116 NMD prediction needs the same
+fact. That revision is a measured historical intermediate. The later
+executable-plugin audit proved that the fact is interchangeable only
+when the minimized edit and VEP feature cover exactly the same genomic
+bases. Both revisions below were rebuilt and measured adjacently on the
+same final model, input tables, pinned CPU, ordered query, compact
+output, and 10,000-variant warmup. Positive change means less elapsed
+time.
 
 | workload           | variants | output rows | seconds before | variants/s before | seconds after | variants/s after | elapsed change (%) |
 |:-------------------|:---------|:------------|---------------:|------------------:|--------------:|-----------------:|-------------------:|
@@ -142,6 +147,23 @@ Positive change means less elapsed time.
 The coding-SNV route does not carry the reused projection fact. Its 5 ms
 movement is reported as a control rather than attributed to the NMD
 change.
+
+## Cost of exact VEP feature projection
+
+The `c361346f` correction retains the cached fact only for identical
+genomic spans. Wider equal-length features and insertions instead
+project the same parent `TranscriptVariation` state read by `NMD.pm`.
+These rows compare that exact implementation with the earlier over-broad
+cache revision. Output row counts and consequence-mask checksums are
+identical for every workload. Negative elapsed change means the exact
+implementation took longer; the SNV lane is a control because it does
+not use this NMD path.
+
+| workload           | variants | output rows | seconds before | variants/s before | seconds exact | variants/s exact | elapsed change (%) |
+|:-------------------|:---------|:------------|---------------:|------------------:|--------------:|-----------------:|-------------------:|
+| mixed coding       | 200,000  | 5,756,720   |          1.443 |            138600 |         1.468 |           136240 |               -1.7 |
+| non-SNV coding     | 36,000   | 1,047,524   |          0.315 |            114286 |         0.323 |           111455 |               -2.5 |
+| coding SNV control | 200,000  | 5,191,000   |          0.617 |            324149 |         0.602 |           332226 |                2.4 |
 
 ## Final GRCh38 model resources
 

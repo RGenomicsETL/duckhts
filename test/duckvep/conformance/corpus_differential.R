@@ -126,6 +126,16 @@ op <- add_option(
   default = Sys.getenv("MICROMAMBA", "micromamba"),
   help = "micromamba executable [%default]"
 )
+op <- add_option(
+  op,
+  "--nmd-plugin-dir",
+  dest = "nmd_plugin_dir",
+  default = Sys.getenv("VEP_PLUGIN_DIR", ""),
+  help = paste(
+    "directory containing the pinned release/116 NMD.pm; when set, compare",
+    "DuckVEP variant-induced NMD predictions with the executable plugin"
+  )
+)
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
@@ -155,6 +165,53 @@ if (opt$sample_per_shape < 0L) {
 if (opt$distance < 0L) {
   die("--distance must be non-negative")
 }
+nmd_plugin_sha256 <- ""
+nmd_state_plugin_sha256 <- ""
+nmd_state_plugin <- file.path(
+  root,
+  "test",
+  "duckvep",
+  "conformance",
+  "DuckVEPNMDState.pm"
+)
+if (nzchar(opt$nmd_plugin_dir)) {
+  if (!dir.exists(opt$nmd_plugin_dir)) {
+    die("VEP plugin directory does not exist: {opt$nmd_plugin_dir}")
+  }
+  opt$nmd_plugin_dir <- normalizePath(opt$nmd_plugin_dir)
+  nmd_plugin <- file.path(opt$nmd_plugin_dir, "NMD.pm")
+  if (!file.exists(nmd_plugin)) {
+    die("NMD.pm does not exist in {opt$nmd_plugin_dir}")
+  }
+  sha_line <- system2("sha256sum", nmd_plugin, stdout = TRUE, stderr = FALSE)
+  if (length(sha_line) != 1L) {
+    die("cannot checksum {nmd_plugin}")
+  }
+  nmd_plugin_sha256 <- strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
+  expected_nmd_sha256 <-
+    "1e38bd67783ff09bad2775d09235dd77f23a7e5ade50fa56d4777235092e0eeb"
+  if (!identical(nmd_plugin_sha256, expected_nmd_sha256)) {
+    die(
+      "NMD.pm checksum mismatch: expected {expected_nmd_sha256}, ",
+      "found {nmd_plugin_sha256}"
+    )
+  }
+  if (!file.exists(nmd_state_plugin)) {
+    die("missing NMD coordinate observer: {nmd_state_plugin}")
+  }
+  state_sha_line <- system2(
+    "sha256sum",
+    nmd_state_plugin,
+    stdout = TRUE,
+    stderr = FALSE
+  )
+  if (length(state_sha_line) != 1L) {
+    die("cannot checksum {nmd_state_plugin}")
+  }
+  nmd_state_plugin_sha256 <-
+    strsplit(trimws(state_sha_line), "[[:space:]]+")[[1L]][1L]
+}
+nmd_oracle_enabled <- nzchar(nmd_plugin_sha256)
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 if (!nzchar(opt$annotations_out)) {
   opt$annotations_out <- file.path(
@@ -164,8 +221,24 @@ if (!nzchar(opt$annotations_out)) {
 }
 
 temporary_files <- character()
-cleanup <- function() unlink(temporary_files, recursive = FALSE, force = TRUE)
+cleanup <- function() unlink(temporary_files, recursive = TRUE, force = TRUE)
 on.exit(cleanup(), add = TRUE)
+nmd_plugin_run_dir <- opt$nmd_plugin_dir
+if (nmd_oracle_enabled) {
+  nmd_plugin_run_dir <- tempfile(pattern = "duckvep-nmd-plugins-")
+  if (!dir.create(nmd_plugin_run_dir)) {
+    die("cannot create staged NMD plugin directory: {nmd_plugin_run_dir}")
+  }
+  temporary_files <- c(temporary_files, nmd_plugin_run_dir)
+  copied <- file.copy(
+    c(nmd_plugin, nmd_state_plugin),
+    nmd_plugin_run_dir,
+    overwrite = FALSE
+  )
+  if (!all(copied)) {
+    die("cannot stage NMD oracle plugins in {nmd_plugin_run_dir}")
+  }
+}
 
 drv <- duckdb(
   dbdir = opt$database,
@@ -509,6 +582,11 @@ gff_for_vep <- if (identical(oracle_mode, "gff")) {
 }
 
 engine_time <- system.time({
+  engine_nmd_sql <- if (nmd_oracle_enabled) {
+    "coalesce(v.annotation.nmd_prediction, 'not_applicable')"
+  } else {
+    "'not_measured'::VARCHAR"
+  }
   dbExecute(
     con,
     glue(
@@ -533,7 +611,8 @@ engine_time <- system.time({
          ) AS consequence,
          v.annotation.impact,
          v.annotation.status,
-         v.annotation.reason
+         v.annotation.reason,
+         {engine_nmd_sql} AS nmd_prediction
        FROM annotated v
        JOIN duckvep_transcript_names n
          ON n.transcript_index = v.annotation.transcript_index
@@ -611,7 +690,13 @@ oracle_build <- paste(
     glue("core={component_version('ensembl')}"),
     glue("variation={component_version('ensembl-variation')}"),
     glue("vep={oracle_version}"),
-    oracle_details
+    oracle_details,
+    if (nmd_oracle_enabled) {
+      c(
+        glue("plugin=NMD.pm;plugin_sha256={nmd_plugin_sha256}"),
+        glue("state_plugin_sha256={nmd_state_plugin_sha256}")
+      )
+    }
   ),
   collapse = ";"
 )
@@ -651,6 +736,17 @@ if (identical(oracle_mode, "cache")) {
 } else {
   vep_args <- c(vep_args, "--gff", gff_for_vep)
 }
+if (nmd_oracle_enabled) {
+  vep_args <- c(
+    vep_args,
+    "--plugin",
+    "NMD",
+    "--plugin",
+    "DuckVEPNMDState",
+    "--dir_plugins",
+    nmd_plugin_run_dir
+  )
+}
 vep_time <- system.time({
   rc <- do.call(vep_command, as.list(vep_args)) |>
     blit::cmd_run(stdout = "", stderr = "", stdin = NULL, verbose = FALSE)
@@ -659,6 +755,25 @@ if (rc != 0L || !file.exists(vep_json) || file.info(vep_json)$size == 0) {
   die("VEP failed with exit status {rc}")
 }
 
+vep_nmd_sql <- if (nmd_oracle_enabled) {
+  "CASE
+     WHEN NOT (
+       list_contains(tc.consequence_terms, 'stop_gained') OR
+       list_contains(tc.consequence_terms, 'frameshift_variant') OR
+       list_contains(tc.consequence_terms, 'splice_donor_variant') OR
+       list_contains(tc.consequence_terms, 'splice_acceptor_variant')
+     ) THEN 'not_applicable'
+     WHEN coalesce(
+            json_extract_string(to_json(tc), '$.duckvep_nmd_cds'),
+            'undefined'
+          ) = 'undefined' THEN 'unresolved'
+     WHEN json_extract_string(to_json(tc), '$.nmd') =
+          'NMD_escaping_variant' THEN 'escaping'
+     ELSE 'triggering'
+   END"
+} else {
+  "'not_measured'::VARCHAR"
+}
 invisible(dbExecute(
   con,
   glue(
@@ -672,7 +787,8 @@ invisible(dbExecute(
        ) AS consequence,
        coalesce(tc.impact, '') AS impact,
        'oracle'::VARCHAR AS status,
-       NULL::VARCHAR AS reason
+       NULL::VARCHAR AS reason,
+       {vep_nmd_sql} AS nmd_prediction
      FROM read_json({sql_q(vep_json)}, format = 'newline_delimited', sample_size = -1) j,
      UNNEST(j.transcript_consequences) u(tc)"
   )
@@ -701,14 +817,16 @@ invisible(dbExecute(
        a.consequence,
        a.impact,
        a.status,
-       a.reason
+       a.reason,
+       a.nmd_prediction
      FROM vep_annotation a JOIN duckvep_sample v USING (variant_id)
      UNION ALL
      SELECT
        {sql_q(run_date)}, {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
        {sql_q(oracle_version)}, {sql_q(oracle_build)}, 'duckvep',
        a.variant_id, v.chrom, v.position, v.reference, v.alternate,
-       v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason
+       v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason,
+       a.nmd_prediction
      FROM duckvep_annotation a JOIN duckvep_sample v USING (variant_id)"
   )
 ))
