@@ -1514,8 +1514,12 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
      * candidate here. The adapter separately handles an input for which the
      * model produced no transcript candidate at all. */
     if (cmask == 0u) cmask = DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
-    duckvep_nmd_predict(tx, &c->model->exons, (size_t)tx_idx, &event,
-                        cmask, &nmd);
+    nmd.prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
+    nmd.escape_reasons = 0u;
+    if ((cmask & DUCKVEP_NMD_ELIGIBLE_SO_MASK) != 0u) {
+        duckvep_nmd_predict(tx, &c->model->exons, (size_t)tx_idx, &event,
+                            cmask, cds_delta_attempted ? &delta : NULL, &nmd);
+    }
 
     if (c->results->count >= c->results->capacity) {
         c->status = DUCKVEP_ERR_RESULT_FULL;

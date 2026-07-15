@@ -10,25 +10,22 @@ void duckvep_nmd_predict(
     size_t                            tx_idx,
     const duckvep_event_t            *event,
     uint64_t                          consequence_mask,
+    const duckvep_sequence_delta_t   *sequence_delta,
     duckvep_nmd_result_t             *out) {
 
-    const uint64_t eligible =
-        DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED) |
-        DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT) |
-        DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR) |
-        DUCKVEP_SO(DUCKVEP_SO_SPLICE_ACCEPTOR);
     uint32_t exon_offset;
     uint16_t exon_count;
     uint32_t variant_end1;
     uint32_t variant_cds_start;
     uint32_t variant_cds_end;
+    int early_cds_escape;
     uint8_t reasons = 0u;
 
     if (out == NULL) return;
     out->prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
     out->escape_reasons = 0u;
     if (transcripts == NULL || exons == NULL || event == NULL ||
-        (consequence_mask & eligible) == 0u) {
+        (consequence_mask & DUCKVEP_NMD_ELIGIBLE_SO_MASK) == 0u) {
         return;
     }
     if (tx_idx >= transcripts->transcript_count ||
@@ -46,18 +43,26 @@ void duckvep_nmd_predict(
         return;
     }
 
-    /* NMD.pm returns no prediction unless TranscriptVariation has both CDS
-     * coordinates. Keep that absence explicit for splice-crossing events. */
-    if (!duckvep_project_event_to_cds(transcripts, exons, tx_idx, event,
-                                      &variant_cds_start, &variant_cds_end)) {
-        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
-        return;
+    if (sequence_delta != NULL && sequence_delta->valid != 0u &&
+        sequence_delta->nmd_early_cds_fact !=
+            (uint8_t)DUCKVEP_NMD_EARLY_CDS_UNKNOWN) {
+        early_cds_escape = sequence_delta->nmd_early_cds_fact ==
+            (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101;
+    } else {
+        /* NMD.pm returns no prediction unless TranscriptVariation has both CDS
+         * coordinates. Keep that absence explicit for splice-crossing events. */
+        if (!duckvep_project_event_to_cds(transcripts, exons, tx_idx, event,
+                                          &variant_cds_start, &variant_cds_end)) {
+            out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+            return;
+        }
+        if (variant_cds_start == 0u || variant_cds_end < variant_cds_start) {
+            out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+            return;
+        }
+        early_cds_escape = variant_cds_end <= 101u;
     }
-    if (variant_cds_start == 0u || variant_cds_end < variant_cds_start) {
-        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
-        return;
-    }
-    if (variant_cds_end <= 101u) {
+    if (early_cds_escape) {
         reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_EARLY_CDS;
     }
 

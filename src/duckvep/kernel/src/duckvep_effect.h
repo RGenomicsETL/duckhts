@@ -12,6 +12,7 @@
 #include "duckvep_delta.h"
 #include "duckvep_event.h"
 #include "duckvep_kernel.h"
+#include "duckvep_so.h"
 #include "duckvep_sv.h"
 
 #include <stddef.h>
@@ -176,15 +177,23 @@ typedef struct duckvep_nmd_result {
     uint8_t escape_reasons;
 } duckvep_nmd_result_t;
 
+#define DUCKVEP_NMD_ELIGIBLE_SO_MASK ( \
+    DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED) | \
+    DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT) | \
+    DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR) | \
+    DUCKVEP_SO(DUCKVEP_SO_SPLICE_ACCEPTOR))
+
 /* Apply the pinned VEP Plugins release/116 NMD.pm location rules after the SO
- * consequence set is known. Eligible splice consequences without a contiguous
- * coding projection are unresolved. */
+ * consequence set is known. `sequence_delta` may carry the first-101-CDS-base
+ * comparison already resolved by coding classification; otherwise NMD performs
+ * the exhaustive projection needed by splice and unresolved sequence cases. */
 void duckvep_nmd_predict(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     size_t                            tx_idx,
     const duckvep_event_t            *event,
     uint64_t                          consequence_mask,
+    const duckvep_sequence_delta_t   *sequence_delta,
     duckvep_nmd_result_t             *out);
 
 typedef struct duckvep_consequence_rule {
