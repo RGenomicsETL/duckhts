@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now reuses the coding classifier’s exact
+  first-101-CDS-base comparison for VEP 116 NMD prediction instead of
+  projecting the same edit twice; splice and unresolved-sequence cases
+  retain the exhaustive projection, and consequences outside the NMD
+  plugin’s supported set skip that work
 - bundled DuckVEP now reuses resolved intron coordinates while
   evaluating non-SNV mismatch islands and skips predicate evaluation
   when no intron, splice, or short-intron fact can change; the
