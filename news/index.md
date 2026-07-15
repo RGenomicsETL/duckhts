@@ -2,6 +2,36 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now rebuilds multi-edit CDS haplotypes in one linear
+  reverse-coordinate pass over distinct reference and worker-scratch
+  buffers, replacing one CDS-tail move per edit while preserving edit,
+  strand, reference-validation, and exact-alias behavior under the
+  independent randomized rebuild oracle
+- bundled DuckVEP now matches all 40,732 indexed Ensembl Genomes VEP 63
+  transcript consequence sets in the retained 8,444-allele *P.
+  falciparum* corpus, with every pair resolved and no disagreements,
+  extra rows, or missing rows; the fixes are generic rather than
+  organism-specific
+- bundled DuckVEP now matches all 486,464 indexed VEP 116 transcript
+  consequence sets in a deterministic 65,616-allele cross-chromosome
+  GRCh37 sample, with every pair resolved and no disagreements, extra
+  rows, or missing rows. The bundled engine now covers the corresponding
+  start, terminal-stop, incomplete-CDS, short-intron, inclusive
+  splice-window, CDS-boundary insertion, and outer-transcript mapper-gap
+  states—including VEP’s retained-stop plus protein-altering
+  combination—without turning supported generic results into sequence
+  errors
+- bundled `duckvep_annotate(...)` and `duckvep_annotate_compact(...)`
+  now accept VEP-style separate upstream and downstream distances in
+  addition to the existing shared distance; omitted values retain the
+  5,000-base default and zero disables that direction
+- bundled DuckVEP now reproduces VEP 116’s reverse-strand
+  insertion-length terminal-stop fallback, reconstructing the original
+  CDS endpoint after the edit before deciding whether the terminal stop
+  is retained
+- bundled DuckVEP now reproduces VEP 116’s independent unknown-coding
+  and missense predicates for equal-length edits on incomplete-start
+  transcripts
 - bundled DuckVEP now matches VEP 116 for an insertion after the final
   base of a mature-miRNA segment: VEP’s minimized reversed insertion
   interval does not overlap that segment, so annotation returns
