@@ -1,5 +1,6 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundled DuckVEP now reuses resolved intron coordinates while evaluating non-SNV mismatch islands and skips predicate evaluation when no intron, splice, or short-intron fact can change; the sorted-SNV classifier remains inlined
 - bundled DuckVEP now prepares validated CDS-to-cDNA projection coordinates once per resident transcript, avoiding repeated CDS-endpoint searches while annotating coding variants; topology-only transcripts retain the existing exhaustive projection behavior, and the common sorted-SNV lane keeps a stable instruction-cache-aligned entry
 - bundled DuckVEP now rebuilds multi-edit CDS haplotypes in one linear reverse-coordinate pass over distinct reference and worker-scratch buffers, replacing one CDS-tail move per edit while preserving edit, strand, reference-validation, and exact-alias behavior under the independent randomized rebuild oracle
 - bundled DuckVEP now matches all 40,732 indexed Ensembl Genomes VEP 63 transcript consequence sets in the retained 8,444-allele *P. falciparum* corpus, with every pair resolved and no disagreements, extra rows, or missing rows; the fixes are generic rather than organism-specific

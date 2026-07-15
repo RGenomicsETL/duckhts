@@ -6,6 +6,12 @@
 
 #include <string.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define DUCKVEP_CLASSIFY_INLINE __attribute__((always_inline)) inline
+#else
+#define DUCKVEP_CLASSIFY_INLINE inline
+#endif
+
 static int span_overlaps_u32(uint32_t as, uint32_t ae,
                              uint32_t bs, uint32_t be) {
     return ae >= bs && as <= be;
@@ -103,28 +109,28 @@ static int splice_region_overlaps_gap(int64_t start1, int64_t end1,
     return overlaps;
 }
 
-/* Accumulate VEP's splice predicates for one intron. Span and sorted-point
- * traversal deliberately share this code: the optimization chooses fewer gaps,
- * never a second definition of the biology. */
-static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
-                                size_t left_idx, size_t right_idx,
-                                int64_t irs, int64_t ire,
-                                int64_t lo_s, int64_t hi_s,
-                                uint8_t interbase,
-                                int intron_cached,
-                                int boundary_cached,
-                                uint32_t splice_exonic,
-                                uint32_t splice_intronic,
-                                struct duckvep_splice_accum *a,
-                                int64_t *reach_lo, int64_t *reach_hi) {
-    uint32_t gap_start;
-    uint32_t gap_end;
+/* Accumulate VEP's splice predicates for one already-resolved intron. Span,
+ * mismatch-island, and sorted-point traversal deliberately share this code:
+ * each caller may choose fewer gaps, but none owns a second definition of the
+ * biology. */
+static DUCKVEP_CLASSIFY_INLINE int splice_accum_add_gap_bounds(
+    uint32_t gap_start,
+    uint32_t gap_end,
+    int64_t irs,
+    int64_t ire,
+    int64_t lo_s,
+    int64_t hi_s,
+    uint8_t interbase,
+    int intron_cached,
+    int boundary_cached,
+    uint32_t splice_exonic,
+    uint32_t splice_intronic,
+    struct duckvep_splice_accum *a,
+    int64_t *reach_lo,
+    int64_t *reach_hi) {
     int64_t is;
     int64_t ie;
 
-    if (!gap_between_exons(exons, left_idx, right_idx,
-                           &gap_start, &gap_end))
-        return 0;
     is = (int64_t)gap_start;
     ie = (int64_t)gap_end;
     if (reach_lo != NULL || reach_hi != NULL) {
@@ -174,6 +180,30 @@ static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
     return 1;
 }
 
+static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
+                                size_t left_idx, size_t right_idx,
+                                int64_t irs, int64_t ire,
+                                int64_t lo_s, int64_t hi_s,
+                                uint8_t interbase,
+                                int intron_cached,
+                                int boundary_cached,
+                                uint32_t splice_exonic,
+                                uint32_t splice_intronic,
+                                struct duckvep_splice_accum *a,
+                                int64_t *reach_lo, int64_t *reach_hi) {
+    uint32_t gap_start;
+    uint32_t gap_end;
+
+    if (!gap_between_exons(exons, left_idx, right_idx,
+                           &gap_start, &gap_end)) {
+        return 0;
+    }
+    return splice_accum_add_gap_bounds(
+        gap_start, gap_end, irs, ire, lo_s, hi_s, interbase,
+        intron_cached, boundary_cached, splice_exonic, splice_intronic,
+        a, reach_lo, reach_hi);
+}
+
 static duckvep_splice_state_t splice_accum_finish(
     const struct duckvep_splice_accum *a, int fwd) {
     duckvep_splice_state_t st;
@@ -221,7 +251,7 @@ static void splice_accum_add_region(
     /* This is only a superset cache gate. Keep every fixed VEP predicate
      * reachable (the old -3/+7 window), and widen it when the caller asks the
      * generic splice-region predicate to see farther. Predicate coordinates
-     * themselves remain exact in splice_accum_add_gap(). */
+     * themselves remain exact in the shared intron predicate helper. */
     if (cache_intronic < 7) cache_intronic = 7;
 
     for (k = 0u; k + 1u < exon_count; k++) {
@@ -256,8 +286,11 @@ static void splice_accum_add_region(
             gap_is_frameshift_intron(gap_start, gap_end) &&
             span_overlaps_i64(region_start1, region_end1,
                               (int64_t)gap_start, (int64_t)gap_end);
-        (void)splice_accum_add_gap(
-            exons, exon_offset + k, exon_offset + k + 1u,
+        if (!intron_cached && !boundary_cached && !frameshift_overlap) {
+            continue;
+        }
+        (void)splice_accum_add_gap_bounds(
+            gap_start, gap_end,
             region_start1, region_end1, lo, hi, interbase,
             intron_cached, boundary_cached,
             splice_exonic, splice_intronic,

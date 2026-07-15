@@ -158,6 +158,78 @@ names(cache_table) <- c(
 knitr::kable(cache_table, row.names = FALSE)
 ```
 
+## Reused intron coordinates for mismatch islands
+
+The `ecb7eaae` rows are the merged projection-cache source immediately before
+the splice-classifier change. The `57b5b566` rows reuse the intron coordinates
+already resolved for each exon pair, avoid calling the shared predicate when
+neither the intron nor a splice or short-intron window can contribute, and keep
+that predicate inlined in the sorted point classifier. Both revisions use the
+same final model, input tables, pinned CPU, ordered query, compact output, and
+10,000-variant warmup. Positive change means less elapsed time.
+
+```{r splice-intron-reuse}
+splice_before <- history[
+  history$revision == "ecb7eaae" &
+    history$output_mode == "compact" &
+    history$threads == 1L,
+  c("workload", "variants", "annotated_rows", "median_seconds",
+    "variants_per_second")
+]
+splice_after <- history[
+  history$revision == "57b5b566" &
+    history$output_mode == "compact" &
+    history$threads == 1L,
+  c("workload", "variants", "annotated_rows", "median_seconds",
+    "variants_per_second")
+]
+splice_table <- merge(
+  splice_before,
+  splice_after,
+  by = c("workload", "variants", "annotated_rows"),
+  suffixes = c("_before", "_after")
+)
+splice_order <- c(
+  "ensembl116_grch38_final_coding_nonsnv_36k",
+  "ensembl116_grch38_final_coding_mixed_200k",
+  "ensembl116_grch38_final_coding_snv_200k"
+)
+splice_labels <- c("non-SNV coding", "mixed coding", "coding SNV control")
+splice_table <- splice_table[
+  match(splice_order, splice_table$workload),
+  ,
+  drop = FALSE
+]
+splice_table$workload <- splice_labels
+splice_table$elapsed_change_percent <- round(
+  100 * (splice_table$median_seconds_before -
+    splice_table$median_seconds_after) /
+    splice_table$median_seconds_before,
+  1
+)
+splice_table$variants <- format(
+  splice_table$variants, big.mark = ",", scientific = FALSE
+)
+splice_table$annotated_rows <- format(
+  splice_table$annotated_rows, big.mark = ",", scientific = FALSE
+)
+splice_table$variants_per_second_before <- round(
+  splice_table$variants_per_second_before
+)
+splice_table$variants_per_second_after <- round(
+  splice_table$variants_per_second_after
+)
+names(splice_table) <- c(
+  "workload", "variants", "output rows", "seconds before", "variants/s before",
+  "seconds after", "variants/s after", "elapsed change (%)"
+)
+knitr::kable(splice_table, row.names = FALSE)
+```
+
+The coding-SNV row is a control: that route does not use mismatch-island
+classification. Its 5 ms movement is reported as measurement noise rather than
+attributed to this change.
+
 ## Final GRCh38 model resources
 
 ```{r resources}
