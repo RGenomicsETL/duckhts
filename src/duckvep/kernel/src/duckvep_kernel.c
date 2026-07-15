@@ -60,6 +60,7 @@ struct duckvep_model {
     duckvep_exon_model_t       exons;
     duckvep_sequence_pool_t    seq;
     uint8_t                   *point_ordered;
+    uint8_t                   *has_frameshift_intron;
     size_t                     max_transcripts_per_chrom;
     size_t                     max_cds_len;
     int                        has_seq;
@@ -90,6 +91,71 @@ static int transcript_point_ordered(
         }
     }
     return 1;
+}
+
+static int transcript_has_frameshift_intron(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx) {
+
+    size_t off = (size_t)transcripts->exon_offset[tx_idx];
+    size_t cnt = (size_t)transcripts->exon_count[tx_idx];
+    size_t e;
+
+    for (e = 1u; e < cnt; e++) {
+        size_t previous = off + e - 1u;
+        size_t current = off + e;
+        uint32_t gap_start;
+        uint32_t gap_end;
+
+        if (transcripts->strand[tx_idx] >= 0) {
+            gap_start = exons->end1[previous] + 1u;
+            gap_end = exons->start1[current] - 1u;
+        } else {
+            gap_start = exons->end1[current] + 1u;
+            gap_end = exons->start1[previous] - 1u;
+        }
+        if (gap_end >= gap_start && gap_end - gap_start <= 12u)
+            return 1;
+    }
+    return 0;
+}
+
+static int event_overlaps_vep_stretched_exon(
+    const struct duckvep_model *model,
+    size_t                      tx_idx,
+    const duckvep_event_t      *event) {
+
+    const duckvep_transcript_model_t *transcripts = &model->transcripts;
+    const duckvep_exon_model_t *exons = &model->exons;
+    size_t off;
+    size_t cnt;
+    size_t e;
+    uint32_t event_lo;
+    uint32_t event_hi;
+
+    if (model->has_frameshift_intron == NULL ||
+        model->has_frameshift_intron[tx_idx] == 0u) {
+        return 0;
+    }
+
+    event_lo = event->feature_start1 < event->feature_end1
+        ? event->feature_start1 : event->feature_end1;
+    event_hi = event->feature_start1 > event->feature_end1
+        ? event->feature_start1 : event->feature_end1;
+    off = (size_t)transcripts->exon_offset[tx_idx];
+    cnt = (size_t)transcripts->exon_count[tx_idx];
+    for (e = 0u; e < cnt; e++) {
+        uint32_t exon_start = exons->start1[off + e];
+        uint32_t exon_end = exons->end1[off + e];
+        uint32_t stretched_start = exon_start > 12u ? exon_start - 12u : 0u;
+        uint32_t stretched_end = exon_end > UINT32_MAX - 12u
+            ? UINT32_MAX : exon_end + 12u;
+
+        if (event_hi >= stretched_start && event_lo <= stretched_end)
+            return 1;
+    }
+    return 0;
 }
 
 static int model_exon_for_genomic(
@@ -657,14 +723,23 @@ duckvep_status_t duckvep_model_open(
     if (transcripts->transcript_count > 0u) {
         m->point_ordered = (uint8_t *)calloc(transcripts->transcript_count,
                                               sizeof *m->point_ordered);
-        if (m->point_ordered == NULL) {
+        m->has_frameshift_intron = (uint8_t *)calloc(
+            transcripts->transcript_count,
+            sizeof *m->has_frameshift_intron);
+        if (m->point_ordered == NULL || m->has_frameshift_intron == NULL) {
+            free(m->has_frameshift_intron);
+            free(m->point_ordered);
             free(m);
             return fail(error, DUCKVEP_ERR_INTERNAL, DVW_MODEL_OOM,
-                        "model point-layout alloc failed");
+                        "model derived-layout alloc failed");
         }
-        for (t = 0u; t < transcripts->transcript_count; t++)
+        for (t = 0u; t < transcripts->transcript_count; t++) {
             m->point_ordered[t] = (uint8_t)transcript_point_ordered(
                 transcripts, exons, t);
+            m->has_frameshift_intron[t] =
+                (uint8_t)transcript_has_frameshift_intron(
+                    transcripts, exons, t);
+        }
     }
     m->max_transcripts_per_chrom = max_chrom_run;
     m->max_cds_len = max_cds_len;
@@ -678,6 +753,7 @@ duckvep_status_t duckvep_model_open(
 
 void duckvep_model_close(duckvep_model_t *model) {
     if (model != NULL) {
+        free(model->has_frameshift_intron);
         free(model->point_ordered);
         free(model);
     }
@@ -749,6 +825,7 @@ struct duckvep_workspace {
     size_t                   active_cap;
     uint16_t                 point_last_chrom;
     uint32_t                 point_last_pos;
+    uint32_t                 point_last_feature_start;
     int                      point_run_active;
     duckvep_delta_scratch_t                 delta_scratch;
     duckvep_workspace_delta_route_stats_t   delta_route_stats;
@@ -768,6 +845,7 @@ static int workspace_point_run_begin(
 
     uint16_t first_chrom;
     uint32_t first_pos;
+    uint32_t first_feature_start;
     int monotonic = 1;
     size_t i;
     size_t last;
@@ -775,14 +853,21 @@ static int workspace_point_run_begin(
     if (workspace == NULL || variants == NULL || variants->count == 0u) return 1;
     first_chrom = variants->chrom_id[0];
     first_pos = events != NULL ? events[0].start1 : variants->pos1[0];
+    first_feature_start = events != NULL
+        ? events[0].feature_start1 : variants->pos1[0];
     for (i = 1u; i < variants->count; i++) {
         uint32_t previous_pos = events != NULL
             ? events[i - 1u].start1 : variants->pos1[i - 1u];
         uint32_t current_pos = events != NULL
             ? events[i].start1 : variants->pos1[i];
+        uint32_t previous_feature_start = events != NULL
+            ? events[i - 1u].feature_start1 : variants->pos1[i - 1u];
+        uint32_t current_feature_start = events != NULL
+            ? events[i].feature_start1 : variants->pos1[i];
         if (variants->chrom_id[i] < variants->chrom_id[i - 1u] ||
             (variants->chrom_id[i] == variants->chrom_id[i - 1u] &&
-             current_pos < previous_pos)) {
+             (current_pos < previous_pos ||
+              current_feature_start < previous_feature_start))) {
             monotonic = 0;
             break;
         }
@@ -790,7 +875,8 @@ static int workspace_point_run_begin(
     if (workspace->point_run_active &&
         (first_chrom < workspace->point_last_chrom ||
          (first_chrom == workspace->point_last_chrom &&
-          first_pos < workspace->point_last_pos))) {
+          (first_pos < workspace->point_last_pos ||
+           first_feature_start < workspace->point_last_feature_start)))) {
         workspace_point_cursor_reset(workspace);
     }
     if (!monotonic) workspace_point_cursor_reset(workspace);
@@ -798,6 +884,8 @@ static int workspace_point_run_begin(
     workspace->point_last_chrom = variants->chrom_id[last];
     workspace->point_last_pos = events != NULL
         ? events[last].start1 : variants->pos1[last];
+    workspace->point_last_feature_start = events != NULL
+        ? events[last].feature_start1 : variants->pos1[last];
     workspace->point_run_active = 1;
     return monotonic;
 }
@@ -1054,6 +1142,37 @@ static int insertion_flanks_share_exon(
     return 0;
 }
 
+static int sorted_exon_index_at_rank(
+    const duckvep_transcript_model_t *transcripts,
+    size_t                            tx_idx,
+    uint16_t                          exon_rank,
+    size_t                           *exon_idx) {
+
+    size_t off = (size_t)transcripts->exon_offset[tx_idx];
+    uint32_t cnt = (uint32_t)transcripts->exon_count[tx_idx];
+
+    if (exon_idx == NULL || (uint32_t)exon_rank >= cnt) return 0;
+    *exon_idx = transcripts->strand[tx_idx] >= 0
+        ? off + (size_t)exon_rank
+        : off + (size_t)(cnt - (uint32_t)exon_rank - 1u);
+    return 1;
+}
+
+static int insertion_flanks_share_sorted_exon(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint16_t                          exon_rank,
+    uint32_t                          left1,
+    uint32_t                          right1) {
+
+    size_t ei;
+
+    if (!sorted_exon_index_at_rank(
+            transcripts, tx_idx, exon_rank, &ei)) return 0;
+    return left1 >= exons->start1[ei] && right1 <= exons->end1[ei];
+}
+
 /* VEP keeps three insertion questions distinct. Its generic exon overlap uses
  * the reversed feature interval P+1,P, so both flanks must lie in one exon.
  * UTR predicates instead use the transcript mapper and may accept either
@@ -1065,11 +1184,15 @@ static void insertion_apply_region_boundaries(
     const duckvep_exon_model_t       *exons,
     size_t                            tx_idx,
     const duckvep_event_t            *event,
+    int                               sorted_span,
+    uint16_t                          exon_rank,
     duckvep_region_state_t           *region) {
 
     uint32_t left1;
     uint32_t right1;
     uint32_t cds_start;
+    uint32_t cds_end;
+    int flanks_share_exon;
 
     if (transcripts == NULL || exons == NULL || event == NULL || region == NULL ||
         !event->interbase ||
@@ -1079,10 +1202,15 @@ static void insertion_apply_region_boundaries(
     left1 = event->insertion_boundary0;
     right1 = duckvep_event_right_flank1(event);
     cds_start = transcripts->cds_start1[tx_idx];
+    cds_end = transcripts->cds_end1[tx_idx];
+    flanks_share_exon = sorted_span
+        ? insertion_flanks_share_sorted_exon(
+            transcripts, exons, tx_idx, exon_rank, left1, right1)
+        : insertion_flanks_share_exon(
+            transcripts, exons, tx_idx, left1, right1);
 
     if (cds_start == 0u && region->overlaps_exon &&
-        !insertion_flanks_share_exon(
-            transcripts, exons, tx_idx, left1, right1)) {
+        !flanks_share_exon) {
         region->overlaps_exon = 0u;
         region->region_mask &= ~(uint32_t)DUCKVEP_REGION_EXON;
     }
@@ -1093,12 +1221,47 @@ static void insertion_apply_region_boundaries(
      * CDS placement remains governed by the established coding projection. */
     if (cds_start != 0u && left1 >= transcripts->start1[tx_idx] &&
         right1 <= transcripts->end1[tx_idx]) {
+        int before_coding;
+        int after_coding;
+
+        /* Away from an exon or CDS boundary, both flanks have the region facts
+         * already carried by the chosen placement point. Only the boundary
+         * case needs VEP's two independent mapper queries. */
+        if (flanks_share_exon &&
+            !(left1 < cds_start && right1 >= cds_start) &&
+            !(left1 <= cds_end && right1 > cds_end)) {
+            return;
+        }
         duckvep_region_state_t left = duckvep_region_classify_span(
             transcripts, exons, tx_idx, left1, left1, 0u, 0u);
         duckvep_region_state_t right = duckvep_region_classify_span(
             transcripts, exons, tx_idx, right1, right1, 0u, 0u);
 
         if (left.within_cdna || right.within_cdna) region->within_cdna = 1u;
+
+        /* VariationEffect::_before_coding and _after_coding each have an exact
+         * insertion exception. The mapper may accept the coding-side flank
+         * while the chosen topology point is intronic, so derive these two
+         * UTR facts from VEP's reversed feature interval P+1,P rather than from
+         * either flank's ordinary base classification. */
+        before_coding = event->feature_start1 > event->feature_end1 &&
+            event->feature_start1 - event->feature_end1 == 1u &&
+            event->feature_start1 == cds_start;
+        after_coding = event->feature_start1 > event->feature_end1 &&
+            event->feature_start1 - event->feature_end1 == 1u &&
+            event->feature_end1 == cds_end;
+        if (region->within_cdna) {
+            if ((transcripts->strand[tx_idx] >= 0 && before_coding) ||
+                (transcripts->strand[tx_idx] < 0 && after_coding)) {
+                region->overlaps_utr5 = 1u;
+                region->region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
+            }
+            if ((transcripts->strand[tx_idx] >= 0 && after_coding) ||
+                (transcripts->strand[tx_idx] < 0 && before_coding)) {
+                region->overlaps_utr3 = 1u;
+                region->region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
+            }
+        }
         if (left.overlaps_utr5 || right.overlaps_utr5) {
             region->overlaps_utr5 = 1u;
             region->region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
@@ -1134,8 +1297,11 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     duckvep_nmd_result_t nmd;
     uint64_t cmask;
     duckvep_consequence_t *row;
+    uint16_t projection_exon_rank = UINT16_MAX;
+    uint32_t projection_exon_hint = UINT32_MAX;
     int cds_delta_attempted = 0;
     int feature_mapping_blocks_peptide;
+    int has_partial_terminal_codon;
 
     if (c->status != DUCKVEP_OK) return 0;
 
@@ -1173,14 +1339,37 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
             c->options->splice_region_exonic,
             c->options->splice_region_intronic,
             &c->workspace->point_exon_rank[tx_idx], &ectx);
+        projection_exon_rank = c->workspace->point_exon_rank[tx_idx];
     } else if (kind != DUCKVEP_KIND_SV && have_feature_alleles) {
-        duckvep_region_state_t region = duckvep_region_classify_span(
-            tx, &c->model->exons, (size_t)tx_idx,
-            topology_start1, topology_end1, 0u, 0u);
+        int sorted_span = c->point_sorted_safe &&
+            c->model->point_ordered[tx_idx];
+        uint16_t sorted_rank = c->workspace->point_exon_rank[tx_idx];
+        uint16_t *rank_io = event.interbase
+            ? &sorted_rank : &c->workspace->point_exon_rank[tx_idx];
+        duckvep_region_state_t region = sorted_span
+            ? duckvep_region_classify_span_sorted(
+                tx, &c->model->exons, (size_t)tx_idx,
+                topology_start1, topology_end1, 0u, 0u,
+                rank_io)
+            : duckvep_region_classify_span(
+                tx, &c->model->exons, (size_t)tx_idx,
+                topology_start1, topology_end1, 0u, 0u);
+        if (sorted_span) {
+            sorted_rank = *rank_io;
+            projection_exon_rank = sorted_rank;
+        }
         insertion_apply_region_boundaries(
-            tx, &c->model->exons, (size_t)tx_idx, &event, &region);
-        duckvep_splice_state_t splice =
-            duckvep_splice_classify_differing_regions_with_windows(
+            tx, &c->model->exons, (size_t)tx_idx, &event,
+            sorted_span, sorted_rank, &region);
+        duckvep_splice_state_t splice = sorted_span
+            ? duckvep_splice_classify_differing_regions_sorted_with_windows(
+                tx, &c->model->exons, (size_t)tx_idx,
+                event.feature_start1,
+                feature_ref, feature_ref_length,
+                feature_alt, feature_alt_length,
+                c->options->splice_region_exonic,
+                c->options->splice_region_intronic, sorted_rank)
+            : duckvep_splice_classify_differing_regions_with_windows(
                 tx, &c->model->exons, (size_t)tx_idx,
                 event.feature_start1,
                 feature_ref, feature_ref_length,
@@ -1199,6 +1388,11 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
             c->options->splice_region_exonic,
             c->options->splice_region_intronic, &ectx);
     }
+    if (ectx.splice.splice_polypyrimidine &&
+        event_overlaps_vep_stretched_exon(c->model, (size_t)tx_idx,
+                                          &event)) {
+        duckvep_effect_ctx_apply_exon_gate(&ectx, 1);
+    }
     duckvep_effect_ctx_apply_event(tx, &ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {
         duckvep_sv_effect_t sv = duckvep_sv_effect_fill(&event, &ectx.region_state);
@@ -1206,25 +1400,36 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     }
 
     /* VEP maps an equal-length VariationFeature as one uploaded span. When that
-     * span crosses an intron or the CDS-to-3'-UTR boundary, one endpoint of
-     * BaseTranscriptVariation::cds_coords is a Mapper::Gap. The peptide path is
-     * therefore unavailable even if semantic trimming leaves a CDS-only mismatch.
-     * Preserve coding_unknown instead of translating that different edit. */
+     * span crosses an intron, the outer 5' transcript boundary, or an ordinary
+     * CDS-to-3'-UTR boundary, one endpoint of BaseTranscriptVariation::cds_coords
+     * is a Mapper::Gap. The peptide path is therefore unavailable even if
+     * semantic trimming leaves a CDS-only mismatch. A partial terminal codon is
+     * the 3' exception: VEP can still classify its first mapped coding piece. */
+    has_partial_terminal_codon = c->model->has_seq &&
+        duckvep_transcript_has_partial_terminal_codon(
+            &c->model->seq, (size_t)tx_idx);
     feature_mapping_blocks_peptide =
-        have_feature_alleles &&
-        feature_ref_length == feature_alt_length &&
         ectx.region_state.overlaps_cds &&
-        (ectx.region_state.overlaps_intron || ectx.region_state.overlaps_utr3);
+        (ectx.region_state.within_frameshift_intron ||
+         (have_feature_alleles &&
+          feature_ref_length == feature_alt_length &&
+          ((ectx.region_state.partial_overlap_feature &&
+            ectx.region_state.overlaps_utr5) ||
+           ectx.region_state.overlaps_intron ||
+           (ectx.region_state.overlaps_utr3 &&
+            (tx->flags[tx_idx] &
+             (uint64_t)DUCKVEP_TX_CDS_END_NF) == 0u &&
+            !has_partial_terminal_codon))));
 
     /* The symmetric sweep halo admits candidates up to max(up,down); enforce the
      * directional up/downstream window here so an asymmetric config is honored. */
     if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM)) {
-        dist = fwd ? tx->start1[tx_idx] - topology_end1
-                   : topology_start1 - tx->end1[tx_idx];
+        dist = fwd ? tx->start1[tx_idx] - event.feature_end1
+                   : event.feature_start1 - tx->end1[tx_idx];
         if (dist > c->options->upstream_dist) return 1;
     } else if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM)) {
-        dist = fwd ? topology_start1 - tx->end1[tx_idx]
-                   : tx->start1[tx_idx] - topology_end1;
+        dist = fwd ? event.feature_start1 - tx->end1[tx_idx]
+                   : tx->start1[tx_idx] - event.feature_end1;
         if (dist > c->options->downstream_dist) return 1;
     }
 
@@ -1235,6 +1440,30 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
         (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) &&
         !feature_mapping_blocks_peptide) {
         const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
+        size_t hinted_exon;
+
+        if (projection_exon_rank != UINT16_MAX &&
+            sorted_exon_index_at_rank(
+                tx, (size_t)tx_idx, projection_exon_rank, &hinted_exon) &&
+            hinted_exon <= UINT32_MAX) {
+            uint32_t exon_start = c->model->exons.start1[hinted_exon];
+            uint32_t exon_end = c->model->exons.end1[hinted_exon];
+            int contained;
+
+            if (event.interbase) {
+                uint32_t right1 = duckvep_event_right_flank1(&event);
+                contained = event.insertion_boundary0 >= exon_start &&
+                            right1 <= exon_end;
+            } else if (event.ref_diff_length == 0u) {
+                contained = 0;
+            } else {
+                uint64_t semantic_end = (uint64_t)event.start1 +
+                    (uint64_t)event.ref_diff_length - 1u;
+                contained = event.start1 >= exon_start &&
+                            semantic_end <= (uint64_t)exon_end;
+            }
+            if (contained) projection_exon_hint = (uint32_t)hinted_exon;
+        }
         cds_delta_attempted = 1;
         duckvep_sequence_delta_route_t route = DUCKVEP_DELTA_ROUTE_DIRECT;
         duckvep_sequence_delta_fill_for_annotation_trace(kind, tx, &c->model->exons,
@@ -1243,6 +1472,8 @@ static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
                                                          tx->strand[tx_idx],
                                                          c->delta_scratch,
                                                          &event,
+                                                         ectx.region,
+                                                         projection_exon_hint,
                                                          c->delta_route_stats != NULL ? &route : NULL,
                                                          &delta);
         if (c->delta_route_stats != NULL) {

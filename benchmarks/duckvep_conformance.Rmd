@@ -59,6 +59,25 @@ latest_runs <- overall[
   drop = FALSE
 ]
 latest <- latest_runs[which.max(latest_runs$n), , drop = FALSE]
+state_overall <- overall[
+  grepl("^state_exploration_seed_[0-9]+$", overall$corpus),
+  ,
+  drop = FALSE
+]
+state_revisions <- unique(state_overall$source_revision)
+state_ancestry <- revision_ancestry[revision_ancestry %in% state_revisions]
+latest_state_revision <- if (length(state_ancestry)) {
+  state_ancestry[[1L]]
+} else if (nrow(state_overall)) {
+  state_overall$source_revision[[nrow(state_overall)]]
+} else {
+  ""
+}
+latest_state_runs <- state_overall[
+  state_overall$source_revision == latest_state_revision,
+  ,
+  drop = FALSE
+]
 same_run <- function(x) {
   x$source_revision == latest$source_revision &
     x$engine == latest$engine &
@@ -111,7 +130,9 @@ latest_table <- data.frame(
 knitr::kable(latest_table, row.names = FALSE)
 ```
 
-Detailed consequence tables below use the largest corpus at this tested revision.
+The SO and impact tables below keep all corpora at this tested revision separate;
+they do not let the largest corpus hide a smaller species- or assembly-specific
+frontier.
 
 ## Prepared model receipts
 
@@ -161,6 +182,116 @@ timeline$resolved_error_upper_95 <- percent(timeline$upper95)
 timeline$upper95 <- NULL
 knitr::kable(timeline, row.names = FALSE)
 ```
+
+## Randomized executable-VEP state exploration
+
+This is the anti-overfitting lane against the VEP executable, not an internal
+property test. Each seed contains the fixed predicate witnesses plus 100,000
+unique alleles. Three quarters of random positions are within six bases of
+splice, exon, translation-start, and translation-stop boundaries; one quarter
+is uniform across the transcript. SNVs, MNVs, insertions, deletions, and delins
+are sampled with equal probability, with differing alleles up to 49 bases.
+
+```{r state-exploration}
+if (nrow(latest_state_runs)) {
+  state_table <- data.frame(
+    revision = short_revision(latest_state_runs$source_revision),
+    seed = sub("^state_exploration_seed_", "", latest_state_runs$corpus),
+    pairs = latest_state_runs$n,
+    exact = latest_state_runs$exact_agree,
+    unresolved = latest_state_runs$unresolved,
+    resolved_disagreements = latest_state_runs$resolved_discordant,
+    exact_error_upper_95_ppm = mapply(
+      upper95,
+      latest_state_runs$n - latest_state_runs$exact_agree,
+      latest_state_runs$n
+    ) * 1e6,
+    stringsAsFactors = FALSE
+  )
+  state_total_n <- sum(latest_state_runs$n)
+  state_total_exact <- sum(latest_state_runs$exact_agree)
+  state_table <- rbind(
+    state_table,
+    data.frame(
+      revision = short_revision(latest_state_revision),
+      seed = "combined",
+      pairs = state_total_n,
+      exact = state_total_exact,
+      unresolved = sum(latest_state_runs$unresolved),
+      resolved_disagreements = sum(latest_state_runs$resolved_discordant),
+      exact_error_upper_95_ppm = upper95(
+        state_total_n - state_total_exact,
+        state_total_n
+      ) * 1e6,
+      stringsAsFactors = FALSE
+    )
+  )
+  for (column in c("pairs", "exact", "unresolved", "resolved_disagreements")) {
+    state_table[[column]] <- format(
+      state_table[[column]],
+      big.mark = ",",
+      scientific = FALSE
+    )
+  }
+  state_table$exact_error_upper_95_ppm <- sprintf(
+    "%.1f",
+    state_table$exact_error_upper_95_ppm
+  )
+  knitr::kable(state_table, row.names = FALSE)
+} else {
+  cat("No randomized executable-VEP state exploration is recorded.\n")
+}
+```
+
+The same campaign covered the following SO terms. Counts are term memberships,
+not distinct transcript pairs, because one pair may carry several terms and the
+four seeds deliberately retain the same fixed witnesses.
+
+```{r state-exploration-so}
+if (nrow(latest_state_runs)) {
+  state_run_ids <- unique(latest_state_runs[, c(
+    "source_revision", "engine", "corpus", "model", "oracle_version", "oracle_build"
+  )])
+  state_term_rows <- merge(
+    history[history$stratum_kind == "so_term", , drop = FALSE],
+    state_run_ids,
+    by = c(
+      "source_revision", "engine", "corpus", "model", "oracle_version", "oracle_build"
+    )
+  )
+  state_term_counts <- aggregate(
+    cbind(n, unresolved, term_mismatch, engine_extra, engine_missing) ~
+      consequence_class + impact,
+    data = state_term_rows,
+    FUN = sum
+  )
+  state_seed_counts <- aggregate(
+    corpus ~ consequence_class + impact,
+    data = state_term_rows,
+    FUN = function(values) length(unique(values))
+  )
+  names(state_seed_counts)[names(state_seed_counts) == "corpus"] <- "seeds_observed"
+  state_term_counts <- merge(
+    state_term_counts,
+    state_seed_counts,
+    by = c("consequence_class", "impact")
+  )
+  state_term_counts <- state_term_counts[order(
+    -state_term_counts$n,
+    state_term_counts$consequence_class
+  ), c(
+    "consequence_class", "impact", "seeds_observed", "n", "unresolved",
+    "term_mismatch", "engine_extra", "engine_missing"
+  )]
+  knitr::kable(state_term_counts, row.names = FALSE)
+}
+```
+
+This distribution deliberately stresses local allele and boundary states on one
+engineered transcript. It does not replace the indexed-cache corpora, which add
+real transcript density, imported flags, exceptional peptide edits, codon tables,
+assemblies, and species. The revision is shown explicitly because this expensive
+campaign is not silently attributed to later code.
 
 ## Official Ensembl release corpus in Parquet
 
@@ -280,50 +411,104 @@ engine. A missing or extra term is therefore visible under its own SO name.
 Rows must not be summed across terms because one pair can carry several terms.
 
 ```{r so-terms}
-term_rows <- history[
-  history$stratum_kind == "so_term" & same_run(history),
-  ,
-  drop = FALSE
-]
+latest_run_ids <- unique(latest_runs[, c(
+  "source_revision", "engine", "corpus", "model", "oracle_version", "oracle_build"
+)])
+term_rows <- merge(
+  history[history$stratum_kind == "so_term", , drop = FALSE],
+  latest_run_ids,
+  by = c(
+    "source_revision", "engine", "corpus", "model", "oracle_version", "oracle_build"
+  )
+)
 term_counts <- aggregate(
   cbind(
     n, exact_agree, unresolved, resolved_n, resolved_agree,
     resolved_discordant, term_mismatch, engine_extra, engine_missing
-  ) ~ consequence_class + impact,
+  ) ~ corpus + consequence_class + impact,
   data = term_rows,
   FUN = sum
 )
-term_counts$upper95 <- mapply(
-  upper95,
-  term_counts$resolved_discordant,
-  term_counts$resolved_n
+corpus_labels <- c(
+  final_dbsnp157_windows_seed29 = "GRCh38 dbSNP",
+  final_giab_grch38_seed71 = "GRCh38 GIAB",
+  final_clinvar_coding_seed113 = "GRCh38 ClinVar coding",
+  final_clinvar_crosschrom_seed17 = "GRCh38 ClinVar cross-chromosome",
+  final_grch37_cache_seed37 = "GRCh37",
+  `plasmodium-falciparum-vep63-seed11663` = "P. falciparum"
 )
-term_counts <- term_counts[order(
-  -term_counts$resolved_discordant,
-  -term_counts$unresolved,
-  -term_counts$n,
-  term_counts$consequence_class
+term_counts$corpus_label <- unname(corpus_labels[term_counts$corpus])
+term_counts$corpus_label[is.na(term_counts$corpus_label)] <-
+  term_counts$corpus[is.na(term_counts$corpus_label)]
+
+term_coverage <- do.call(rbind, lapply(
+  split(term_counts, term_counts$corpus_label),
+  function(rows) data.frame(
+    corpus = rows$corpus_label[[1L]],
+    observed_terms = nrow(rows),
+    terms_with_mismatch = sum(rows$term_mismatch > 0),
+    term_mismatches = sum(rows$term_mismatch),
+    engine_extra = sum(rows$engine_extra),
+    engine_missing = sum(rows$engine_missing),
+    terms_with_unresolved = sum(rows$unresolved > 0),
+    unresolved_term_memberships = sum(rows$unresolved),
+    stringsAsFactors = FALSE
+  )
+))
+term_coverage <- term_coverage[match(
+  unname(corpus_labels),
+  term_coverage$corpus
 ), ]
-term_counts$resolved_error_upper_95 <- percent(term_counts$upper95)
-term_counts$upper95 <- NULL
-knitr::kable(term_counts, row.names = FALSE)
+term_coverage <- term_coverage[!is.na(term_coverage$corpus), ]
+knitr::kable(term_coverage, row.names = FALSE)
 ```
+
+`term_mismatches` counts an SO term that is missing or extra on a transcript
+pair. `unresolved_term_memberships` is reported separately: an unresolved pair
+can still carry the exact VEP term set, and a multi-term pair appears once under
+each term.
+
+```{r so-frontier}
+term_frontier <- term_counts[
+  term_counts$term_mismatch > 0 | term_counts$unresolved > 0,
+  c(
+    "corpus_label", "consequence_class", "impact", "n", "unresolved",
+    "term_mismatch", "engine_extra", "engine_missing"
+  ),
+  drop = FALSE
+]
+names(term_frontier)[names(term_frontier) == "corpus_label"] <- "corpus"
+term_frontier <- term_frontier[order(
+  match(term_frontier$corpus, unname(corpus_labels)),
+  -term_frontier$term_mismatch,
+  -term_frontier$unresolved,
+  term_frontier$consequence_class
+), ]
+knitr::kable(term_frontier, row.names = FALSE)
+```
+
+Terms absent from this frontier table were exact and resolved everywhere they
+were observed. The complete zero and nonzero strata remain in the CSV ledger.
 
 ## VEP impact classes
 
-This table uses full consequence sets, so each transcript pair is counted once.
+This table uses full consequence sets, so each transcript pair is counted once
+within each corpus.
 
 ```{r impact}
-set_rows <- history[
-  history$stratum_kind == "consequence_set" & same_run(history),
-  ,
-  drop = FALSE
-]
+set_rows <- merge(
+  history[history$stratum_kind == "consequence_set", , drop = FALSE],
+  latest_run_ids,
+  by = c(
+    "source_revision", "engine", "corpus", "model", "oracle_version", "oracle_build"
+  )
+)
 impact_counts <- aggregate(
-  cbind(n, exact_agree, unresolved, resolved_n, resolved_discordant) ~ impact,
+  cbind(n, exact_agree, unresolved, resolved_n, resolved_discordant) ~ corpus + impact,
   data = set_rows,
   FUN = sum
 )
+impact_counts$corpus <- unname(corpus_labels[impact_counts$corpus])
 impact_counts$upper95 <- mapply(
   upper95,
   impact_counts$resolved_discordant,

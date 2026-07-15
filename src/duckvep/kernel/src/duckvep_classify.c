@@ -41,6 +41,13 @@ static int gap_between_exons(const duckvep_exon_model_t *exons,
     return *gap_start <= *gap_end;
 }
 
+/* BaseTranscriptVariation::_create_intron_trees marks an intron as a
+ * frameshift intron when abs(end - start) <= 12. Normal prepared exon gaps have
+ * start <= end, so this is an inclusive intron length of at most 13 bases. */
+static int gap_is_frameshift_intron(uint32_t gap_start, uint32_t gap_end) {
+    return gap_end >= gap_start && gap_end - gap_start <= 12u;
+}
+
 struct duckvep_splice_accum {
     int start_ss;
     int end_ss;
@@ -51,6 +58,7 @@ struct duckvep_splice_accum {
     int ppt;
     int ppt_rev;
     int intronic;
+    int within_frameshift_intron;
     int region;
 };
 
@@ -133,6 +141,16 @@ static int splice_accum_add_gap(const duckvep_exon_model_t *exons,
         if (reach_hi != NULL) *reach_hi = hi > other_hi ? hi : other_hi;
     }
 
+    /* VEP checks this before every ordinary intron/splice predicate. A
+     * differing region that overlaps a short assembly-gap intron is treated as
+     * coding-but-unprojectable, not as donor, acceptor, splice region, PPT, or
+     * intron_variant. */
+    if (gap_is_frameshift_intron(gap_start, gap_end) &&
+        span_overlaps_i64(irs, ire, is, ie)) {
+        a->within_frameshift_intron = 1;
+        return 1;
+    }
+
     if (boundary_cached) {
         if (span_overlaps_i64(irs, ire, is, is + 1)) a->start_ss = 1;
         if (span_overlaps_i64(irs, ire, ie - 1, ie)) a->end_ss = 1;
@@ -174,6 +192,8 @@ static duckvep_splice_state_t splice_accum_finish(
     st.any = (uint8_t)(st.splice_donor || st.splice_acceptor ||
                        st.splice_donor_5th || st.splice_donor_region ||
                        st.splice_polypyrimidine || st.splice_region);
+    st.within_frameshift_intron =
+        (uint8_t)a->within_frameshift_intron;
     return st;
 }
 
@@ -209,6 +229,7 @@ static void splice_accum_add_region(
         uint32_t gap_end;
         int intron_cached;
         int boundary_cached;
+        int frameshift_overlap;
 
         if (!gap_between_exons(exons, exon_offset + k, exon_offset + k + 1u,
                                &gap_start, &gap_end)) {
@@ -231,13 +252,17 @@ static void splice_accum_add_region(
         intron_cached = span_overlaps_i64(
             feature_min1, feature_max1,
             (int64_t)gap_start - 3, (int64_t)gap_end + 3);
+        frameshift_overlap =
+            gap_is_frameshift_intron(gap_start, gap_end) &&
+            span_overlaps_i64(region_start1, region_end1,
+                              (int64_t)gap_start, (int64_t)gap_end);
         (void)splice_accum_add_gap(
             exons, exon_offset + k, exon_offset + k + 1u,
             region_start1, region_end1, lo, hi, interbase,
             intron_cached, boundary_cached,
             splice_exonic, splice_intronic,
             acc, NULL, NULL);
-        if (boundary_cached) {
+        if (boundary_cached && !frameshift_overlap) {
             /* VEP 116 assigns, rather than ORs, splice_region for each
              * differing island/intron pair. Later islands can therefore clear
              * an earlier hit; the other splice facts remain accumulators. */
@@ -277,6 +302,116 @@ static int overlaps_coarse_exon_reach(uint32_t start1, uint32_t end1,
         }
     }
     return 0;
+}
+
+/* Region rules are shared by the exhaustive scan and the sorted contained-span
+ * proof. Candidate traversal may change; the biological fact definitions do
+ * not. */
+static void region_add_exon_overlap(duckvep_region_state_t *st,
+                                    uint32_t start1, uint32_t end1,
+                                    uint32_t es, uint32_t ee,
+                                    uint32_t cds_s, uint32_t cds_e,
+                                    int fwd) {
+    uint32_t ov_s;
+    uint32_t ov_e;
+
+    if (st == NULL || !span_overlaps_u32(start1, end1, es, ee)) return;
+    st->within_cdna = 1u;
+    st->overlaps_exon = 1u;
+    if (cds_s == 0u) return;
+
+    ov_s = max_u32(start1, es);
+    ov_e = min_u32(end1, ee);
+    if (span_overlaps_u32(ov_s, ov_e, cds_s, cds_e)) {
+        st->overlaps_cds = 1u;
+    }
+    if (ov_s < cds_s) {
+        uint32_t utr_e = min_u32(ov_e, cds_s - 1u);
+        if (ov_s <= utr_e) {
+            if (fwd) st->overlaps_utr5 = 1u;
+            else     st->overlaps_utr3 = 1u;
+        }
+    }
+    if (ov_e > cds_e && cds_e != UINT32_MAX) {
+        uint32_t utr_s = max_u32(ov_s, cds_e + 1u);
+        if (utr_s <= ov_e) {
+            if (fwd) st->overlaps_utr3 = 1u;
+            else     st->overlaps_utr5 = 1u;
+        }
+    }
+}
+
+static void region_add_frameshift_intron(duckvep_region_state_t *st,
+                                         uint32_t start1,
+                                         uint32_t end1,
+                                         uint32_t cds_s,
+                                         uint32_t cds_e,
+                                         int fwd) {
+    if (st == NULL) return;
+    st->within_frameshift_intron = 1u;
+    st->within_cdna = 1u;
+    if (cds_s == 0u) {
+        /* _overlapped_exons uses the transcript-wide 12-base stretch to find
+         * candidates, but non_coding_exon_variant then checks the unextended
+         * exon coordinates. A point in the short intron is therefore within
+         * the transcript cDNA mapper without satisfying the exon predicate.
+         * Keep its physical region intronic; _intron_effects independently
+         * suppresses the intron_variant predicate for a frameshift intron. */
+        st->overlaps_intron = 1u;
+        return;
+    }
+    if (span_overlaps_u32(start1, end1, cds_s, cds_e))
+        st->overlaps_cds = 1u;
+    if (start1 < cds_s) {
+        if (fwd) st->overlaps_utr5 = 1u;
+        else     st->overlaps_utr3 = 1u;
+    }
+    if (end1 > cds_e) {
+        if (fwd) st->overlaps_utr3 = 1u;
+        else     st->overlaps_utr5 = 1u;
+    }
+}
+
+static void region_add_vep_endpoint_utr(duckvep_region_state_t *st,
+                                        uint32_t start1, uint32_t end1,
+                                        uint32_t ts, uint32_t te,
+                                        uint32_t cds_s, uint32_t cds_e,
+                                        int fwd) {
+    int before_coding;
+    int after_coding;
+
+    if (st == NULL || cds_s == 0u || !st->within_cdna ||
+        st->complete_overlap_feature) {
+        return;
+    }
+
+    /* VEP applies its four-comparison overlap test even when a UTR interval is
+     * inverted at a CDS/transcript endpoint. Keep that source-compatible state
+     * in one helper for both traversal paths. */
+    before_coding = cds_s > 0u && end1 >= ts && start1 <= cds_s - 1u;
+    after_coding = cds_e < UINT32_MAX && end1 >= cds_e + 1u && start1 <= te;
+    if (fwd) {
+        if (before_coding) st->overlaps_utr5 = 1u;
+        if (after_coding)  st->overlaps_utr3 = 1u;
+    } else {
+        if (before_coding) st->overlaps_utr3 = 1u;
+        if (after_coding)  st->overlaps_utr5 = 1u;
+    }
+}
+
+static void region_finish_mask(duckvep_region_state_t *st,
+                               uint32_t cds_s, int coarse_splice) {
+    if (st == NULL) return;
+    if (cds_s == 0u && st->overlaps_exon)
+        st->region_mask |= (uint32_t)DUCKVEP_REGION_EXON;
+    if (st->overlaps_cds)
+        st->region_mask |= (uint32_t)DUCKVEP_REGION_CDS;
+    if (st->overlaps_utr5 || st->overlaps_utr3)
+        st->region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
+    if (st->overlaps_intron)
+        st->region_mask |= (uint32_t)DUCKVEP_REGION_INTRON;
+    if (coarse_splice)
+        st->region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
 }
 
 duckvep_region_state_t duckvep_region_classify_span(
@@ -327,33 +462,8 @@ duckvep_region_state_t duckvep_region_classify_span(
         min_exon_start = min_u32(min_exon_start, es);
         max_exon_end = max_u32(max_exon_end, ee);
 
-        if (span_overlaps_u32(start1, end1, es, ee)) {
-            st.within_cdna = 1u;
-            st.overlaps_exon = 1u;
-            if (cds_s == 0u) {
-                /* Non-coding exon; no CDS/UTR split. */
-            } else {
-                uint32_t ov_s = max_u32(start1, es);
-                uint32_t ov_e = min_u32(end1, ee);
-                if (span_overlaps_u32(ov_s, ov_e, cds_s, cds_e)) {
-                    st.overlaps_cds = 1u;
-                }
-                if (ov_s < cds_s) {
-                    uint32_t utr_e = min_u32(ov_e, cds_s - 1u);
-                    if (ov_s <= utr_e) {
-                        if (fwd) st.overlaps_utr5 = 1u;
-                        else     st.overlaps_utr3 = 1u;
-                    }
-                }
-                if (ov_e > cds_e && cds_e != UINT32_MAX) {
-                    uint32_t utr_s = max_u32(ov_s, cds_e + 1u);
-                    if (utr_s <= ov_e) {
-                        if (fwd) st.overlaps_utr3 = 1u;
-                        else     st.overlaps_utr5 = 1u;
-                    }
-                }
-            }
-        }
+        region_add_exon_overlap(&st, start1, end1, es, ee,
+                                cds_s, cds_e, fwd);
         if ((splice_exonic | splice_intronic) != 0u &&
             overlaps_coarse_exon_reach(start1, end1, es, ee,
                                        splice_exonic, splice_intronic)) {
@@ -366,7 +476,12 @@ duckvep_region_state_t duckvep_region_classify_span(
         uint32_t ie;
         if (gap_between_exons(exons, off + e, off + e + 1u, &is, &ie) &&
             span_overlaps_u32(start1, end1, is, ie)) {
-            st.overlaps_intron = 1u;
+            if (gap_is_frameshift_intron(is, ie)) {
+                region_add_frameshift_intron(
+                    &st, start1, end1, cds_s, cds_e, fwd);
+            } else {
+                st.overlaps_intron = 1u;
+            }
         }
     }
     /* Prepared transcript spans normally coincide with their outer exons, but
@@ -374,7 +489,8 @@ duckvep_region_state_t duckvep_region_classify_span(
      * make span semantics total by treating any in-feature base outside the
      * exon envelope as non-exonic transcript sequence. Internal exon gaps were
      * detected above. */
-    if (cnt == 0u || !st.overlaps_exon ||
+    if (cnt == 0u ||
+        (!st.overlaps_exon && !st.within_frameshift_intron) ||
         max_u32(start1, ts) < min_exon_start ||
         min_u32(end1, te) > max_exon_end) {
         st.overlaps_intron = 1u;
@@ -388,36 +504,11 @@ duckvep_region_state_t duckvep_region_classify_span(
      * inverted interval. Preserve that observable state: a deletion crossing a
      * CDS endpoint may carry both coding_sequence_variant and a UTR term even
      * when the transcript has no UTR bases on that side. */
-    if (cds_s != 0u && st.within_cdna && !st.complete_overlap_feature) {
-        int before_coding = cds_s > 0u &&
-            end1 >= ts && start1 <= cds_s - 1u;
-        int after_coding = cds_e < UINT32_MAX &&
-            end1 >= cds_e + 1u && start1 <= te;
-
-        if (fwd) {
-            if (before_coding) st.overlaps_utr5 = 1u;
-            if (after_coding)  st.overlaps_utr3 = 1u;
-        } else {
-            if (before_coding) st.overlaps_utr3 = 1u;
-            if (after_coding)  st.overlaps_utr5 = 1u;
-        }
-    }
-
-    if (cds_s == 0u && st.overlaps_exon) {
-        st.region_mask |= (uint32_t)DUCKVEP_REGION_EXON;
-    }
-    if (st.overlaps_cds) {
-        st.region_mask |= (uint32_t)DUCKVEP_REGION_CDS;
-    }
-    if (st.overlaps_utr5 || st.overlaps_utr3) {
-        st.region_mask |= (uint32_t)DUCKVEP_REGION_UTR;
-    }
-    if (st.overlaps_intron) {
-        st.region_mask |= (uint32_t)DUCKVEP_REGION_INTRON;
-    }
-    if (coarse_splice) {
-        st.region_mask |= (uint32_t)DUCKVEP_REGION_SPLICE;
-    }
+    region_add_vep_endpoint_utr(&st, start1, end1, ts, te,
+                                cds_s, cds_e, fwd);
+    if (st.within_frameshift_intron && !st.overlaps_exon)
+        coarse_splice = 0;
+    region_finish_mask(&st, cds_s, coarse_splice);
     return st;
 }
 
@@ -628,6 +719,215 @@ static uint32_t point_exon_seek(const duckvep_transcript_model_t *transcripts,
     return rank;
 }
 
+duckvep_region_state_t duckvep_region_classify_span_sorted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          start1,
+    uint32_t                          end1,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic,
+    uint16_t                         *exon_rank_io) {
+
+    duckvep_region_state_t st;
+    uint32_t ts;
+    uint32_t te;
+    uint32_t cds_s;
+    uint32_t cds_e;
+    uint32_t cnt;
+    uint32_t rank;
+    int fwd;
+
+    memset(&st, 0, sizeof st);
+    if (transcripts == NULL || exons == NULL || exon_rank_io == NULL ||
+        tx_idx >= transcripts->transcript_count) {
+        return st;
+    }
+
+    cnt = (uint32_t)transcripts->exon_count[tx_idx];
+    rank = point_exon_seek(
+        transcripts, exons, tx_idx, start1, (uint32_t)*exon_rank_io);
+    *exon_rank_io = (uint16_t)rank;
+    ts = transcripts->start1[tx_idx];
+    te = transcripts->end1[tx_idx];
+    fwd = transcripts->strand[tx_idx] >= 0;
+
+    if (end1 < ts) {
+        st.region_mask = fwd ? (uint32_t)DUCKVEP_REGION_UPSTREAM
+                             : (uint32_t)DUCKVEP_REGION_DOWNSTREAM;
+        return st;
+    }
+    if (start1 > te) {
+        st.region_mask = fwd ? (uint32_t)DUCKVEP_REGION_DOWNSTREAM
+                             : (uint32_t)DUCKVEP_REGION_UPSTREAM;
+        return st;
+    }
+
+    /* Coarse splice-mask callers and any span crossing a transcript boundary
+     * retain the exhaustive definition. Production consequence annotation
+     * passes zero reaches here because its exact splice facts are separate. */
+    if (start1 > end1 || start1 < ts || end1 > te ||
+        (splice_exonic | splice_intronic) != 0u) {
+        return duckvep_region_classify_span(
+            transcripts, exons, tx_idx, start1, end1,
+            splice_exonic, splice_intronic);
+    }
+
+    st.within_feature = 1u;
+    st.complete_overlap_feature = (uint8_t)(start1 <= ts && end1 >= te);
+    st.complete_within_feature = 1u;
+    cds_s = transcripts->cds_start1[tx_idx];
+    cds_e = transcripts->cds_end1[tx_idx];
+
+    if (rank < cnt) {
+        size_t ei = point_exon_index(transcripts, tx_idx, rank);
+        uint32_t es = exons->start1[ei];
+        uint32_t ee = exons->end1[ei];
+
+        if (start1 >= es && end1 <= ee) {
+            region_add_exon_overlap(&st, start1, end1, es, ee,
+                                    cds_s, cds_e, fwd);
+        } else if (end1 < es) {
+            /* The cursor identifies the next exon. The preceding exon ended
+             * before start1, so the complete span lies in one gap. */
+            uint32_t gap_start;
+            uint32_t gap_end;
+
+            if (rank > 0u &&
+                gap_between_exons(
+                    exons,
+                    point_exon_index(transcripts, tx_idx, rank - 1u),
+                    point_exon_index(transcripts, tx_idx, rank),
+                    &gap_start, &gap_end) &&
+                gap_is_frameshift_intron(gap_start, gap_end)) {
+                region_add_frameshift_intron(
+                    &st, start1, end1, cds_s, cds_e, fwd);
+            } else {
+                st.overlaps_intron = 1u;
+            }
+        } else {
+            return duckvep_region_classify_span(
+                transcripts, exons, tx_idx, start1, end1, 0u, 0u);
+        }
+    } else {
+        /* Valid prepared models normally end with the outer exon. Preserve the
+         * exhaustive classifier's total semantics for any in-feature tail. */
+        st.overlaps_intron = 1u;
+    }
+
+    region_add_vep_endpoint_utr(&st, start1, end1, ts, te,
+                                cds_s, cds_e, fwd);
+    region_finish_mask(&st, cds_s, 0);
+    return st;
+}
+
+duckvep_splice_state_t
+duckvep_splice_classify_differing_regions_sorted_with_windows(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          feature_start1,
+    const uint8_t                    *feature_ref,
+    uint16_t                          feature_ref_length,
+    const uint8_t                    *feature_alt,
+    uint16_t                          feature_alt_length,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic,
+    uint16_t                          exon_rank) {
+
+    duckvep_splice_state_t empty;
+    uint32_t cnt;
+    uint32_t mismatch_span_length;
+    uint32_t empty_margin;
+
+    memset(&empty, 0, sizeof empty);
+    if (transcripts == NULL || exons == NULL ||
+        tx_idx >= transcripts->transcript_count ||
+        (feature_ref_length > 0u && feature_ref == NULL) ||
+        (feature_alt_length > 0u && feature_alt == NULL)) {
+        return empty;
+    }
+
+    cnt = (uint32_t)transcripts->exon_count[tx_idx];
+    if (cnt < 2u || exon_rank == UINT16_MAX || (uint32_t)exon_rank > cnt)
+        return cnt < 2u ? empty
+                        : duckvep_splice_classify_differing_regions_with_windows(
+                            transcripts, exons, tx_idx, feature_start1,
+                            feature_ref, feature_ref_length,
+                            feature_alt, feature_alt_length,
+                            splice_exonic, splice_intronic);
+
+    /* A 5 kb consequence halo creates many upstream/downstream transcript
+     * candidates. None can have a splice consequence when even the largest
+     * raw/mismatch span lies beyond the outermost intron plus the exon-side
+     * cache reach. Prove that from the first/last genomic gap before entering
+     * the exhaustive mismatch-island loop. The ALT length is included because
+     * Perl's padded XOR can expose an ALT-only island past the REF feature. */
+    {
+        uint32_t first_gap_start;
+        uint32_t last_gap_end;
+        uint32_t ignored_gap_endpoint;
+        uint32_t outer_margin = splice_exonic > splice_intronic
+            ? splice_exonic : splice_intronic;
+        uint32_t span_length = feature_ref_length > feature_alt_length
+            ? (uint32_t)feature_ref_length : (uint32_t)feature_alt_length;
+        int64_t query_lo = (int64_t)feature_start1;
+        int64_t query_hi = span_length == 0u
+            ? query_lo - 1 : query_lo + (int64_t)span_length - 1;
+
+        /* VEP leaves its short-intron PPT and generic splice windows
+         * unclamped, so an intron-side window may extend into an outer exon. */
+        if (outer_margin < 16u) outer_margin = 16u;
+        if (feature_ref_length == 0u) query_lo--;
+        if (gap_between_exons(
+                exons,
+                point_exon_index(transcripts, tx_idx, 0u),
+                point_exon_index(transcripts, tx_idx, 1u),
+                &first_gap_start, &ignored_gap_endpoint) &&
+            gap_between_exons(
+                exons,
+                point_exon_index(transcripts, tx_idx, cnt - 2u),
+                point_exon_index(transcripts, tx_idx, cnt - 1u),
+                &ignored_gap_endpoint, &last_gap_end) &&
+            (query_hi < (int64_t)first_gap_start - (int64_t)outer_margin ||
+             query_lo > (int64_t)last_gap_end + (int64_t)outer_margin)) {
+            return empty;
+        }
+    }
+
+    /* Most coding edits are far from a junction. The 16-base floor covers VEP's
+     * fixed PPT window; the configurable reaches cover its deliberately
+     * unclamped short-intron windows. */
+    mismatch_span_length = feature_ref_length > feature_alt_length
+        ? (uint32_t)feature_ref_length : (uint32_t)feature_alt_length;
+    empty_margin = splice_exonic > splice_intronic
+        ? splice_exonic : splice_intronic;
+    if (empty_margin < 16u) empty_margin = 16u;
+    if ((uint32_t)exon_rank < cnt && mismatch_span_length != 0u) {
+        size_t ei = point_exon_index(
+            transcripts, tx_idx, (uint32_t)exon_rank);
+        uint64_t mismatch_end1 = (uint64_t)feature_start1 +
+                                 (uint64_t)mismatch_span_length - 1u;
+
+        /* The fixed PPT window is inclusive.  In a short intron it can extend
+         * exactly 16 bases into the neighboring exon, and an insertion's
+         * reversed interval also reaches the base immediately before
+         * feature_start1.  Only skip the exhaustive predicates when both
+         * sides are strictly beyond that inclusive reach. */
+        if ((uint64_t)feature_start1 >
+                (uint64_t)exons->start1[ei] + empty_margin &&
+            mismatch_end1 + empty_margin < (uint64_t)exons->end1[ei]) {
+            return empty;
+        }
+    }
+
+    return duckvep_splice_classify_differing_regions_with_windows(
+        transcripts, exons, tx_idx, feature_start1,
+        feature_ref, feature_ref_length,
+        feature_alt, feature_alt_length,
+        splice_exonic, splice_intronic);
+}
+
 void duckvep_classify_point_sorted(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -712,10 +1012,27 @@ void duckvep_classify_point_sorted(
             }
         }
     }
-    if (!in_exon)
-        region.overlaps_intron = 1u;
+    if (!in_exon) {
+        uint32_t gap_start;
+        uint32_t gap_end;
 
-    if (transcripts->cds_start1[tx_idx] == 0u && in_exon)
+        if (rank > 0u && rank < cnt &&
+            gap_between_exons(
+                exons,
+                point_exon_index(transcripts, tx_idx, rank - 1u),
+                point_exon_index(transcripts, tx_idx, rank),
+                &gap_start, &gap_end) &&
+            gap_is_frameshift_intron(gap_start, gap_end)) {
+            cds_s = transcripts->cds_start1[tx_idx];
+            cds_e = transcripts->cds_end1[tx_idx];
+            region_add_frameshift_intron(
+                &region, pos, pos, cds_s, cds_e, fwd);
+        } else {
+            region.overlaps_intron = 1u;
+        }
+    }
+
+    if (transcripts->cds_start1[tx_idx] == 0u && region.overlaps_exon)
         region.region_mask |= (uint32_t)DUCKVEP_REGION_EXON;
     if (region.overlaps_cds)
         region.region_mask |= (uint32_t)DUCKVEP_REGION_CDS;

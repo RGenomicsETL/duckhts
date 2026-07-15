@@ -64,7 +64,8 @@ typedef enum duckvep_pre_bit {
     DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT  = 38,
     DUCKVEP_PRE_START_RETAINED          = 39,
     DUCKVEP_PRE_WITHIN_MATURE_MIRNA     = 40,
-    DUCKVEP_PRE_BIT_COUNT               = 41
+    DUCKVEP_PRE_PARTIAL_CODON            = 41,
+    DUCKVEP_PRE_BIT_COUNT               = 42
 } duckvep_pre_bit_t;
 
 #define DUCKVEP_PRE(b) (UINT64_C(1) << (b))
@@ -139,6 +140,14 @@ void duckvep_effect_ctx_fill_point_sorted(
     uint32_t                          splice_region_intronic,
     uint16_t                         *exon_rank_io,
     duckvep_effect_ctx_t             *out);
+
+/* Apply VEP's coarse OverlapConsequence `include => { exon => 0 }` gate.
+ * `predicate_overlaps_exon` is deliberately distinct from exact genomic exon
+ * overlap: VEP stretches every exon by 12 bases when the transcript contains
+ * any frameshift intron. */
+void duckvep_effect_ctx_apply_exon_gate(
+    duckvep_effect_ctx_t *ctx,
+    int                   predicate_overlaps_exon);
 
 /* Apply variant-class facts from canonical event topology, not the caller's
  * broad transport kind. VEP's insertion/deletion predicates are allele-length

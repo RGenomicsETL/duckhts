@@ -34,6 +34,11 @@ typedef enum duckvep_codon_table {
 
 int duckvep_codon_table_supported(duckvep_codon_table_t table);
 
+/* Borrow the immutable 64-amino-acid translation table for a supported NCBI
+ * table id. The caller retains no ownership; NULL means unsupported. This is
+ * the bulk-translation path after bases and table id have been validated. */
+const char *duckvep_codon_table_amino_acids(duckvep_codon_table_t table);
+
 /* Coding-change classification bits. */
 enum {
     DUCKVEP_CODON_SYNONYMOUS  = 1u << 0,

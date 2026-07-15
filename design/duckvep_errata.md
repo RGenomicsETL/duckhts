@@ -25,6 +25,105 @@ peptide authority would change VEP 116 behavior. The focused C regression combin
 terminal `TAA`, an `X` reference-peptide edit, and a one-base terminal deletion to pin the
 distinction.
 
+## The insertion-length stop check is strand-asymmetric
+
+VEP 116 has a second non-obvious state in the same fallback. For a minimized insertion,
+the uploaded genomic interval is reversed: `(P+1,P)`. `_overlaps_stop_codon_cil` changes
+the first coordinate by the inserted sequence length before testing the terminal codon.
+On a reverse-strand transcript this turns an insertion just before the stop into an
+ordinary interval that reaches the stop. On the forward strand the same arithmetic keeps
+the interval reversed, so it does not create the corresponding upstream reach. This is an
+observable strand asymmetry in the pinned implementation.
+
+The subsequent `_ins_del_stop_altered_cil` path applies the insertion to translateable
+CDS plus the 3-prime UTR, then retranslates the codon at the original CDS endpoint. The
+extended overlap alone therefore does **not** imply stop retention: nearby insertions can
+shift a non-stop codon into that position. The real GRCh38 witness
+`7:148807690 C>CATCAGCCT` on reverse-strand transcript `ENST00001066230` happens to retain
+the stop after that reconstruction. Its local peptides are `M/IG*X`, yet VEP emits
+`protein_altering_variant&stop_retained_variant`, not
+`frameshift_variant&stop_gained`. DuckVEP keeps transcript strand and uploaded-allele
+orientation in both materialized and borrowed coding contexts, reproduces the exact
+genomic coordinate calculation, and uses the shared CDS+tail endpoint reconstruction.
+The reduced C witness uses the same inserted bases and peptide state; a plus-strand
+“symmetry” rewrite or an overlap-implies-retention shortcut would be a compatibility
+regression.
+
+Source anchors: Ensembl Variation 116
+`VariationEffect.pm::_overlaps_stop_codon_cil`, `::_ins_del_stop_altered_cil`,
+`::stop_retained`, and `::frameshift`.
+
+## `coding_unknown` and `missense` can coexist
+
+VEP 116 does not treat an unknown peptide residue as a blanket failure. Its
+`synonymous_variant` predicate rejects peptide strings containing `X`, but
+`missense_variant` only asks whether the reference and alternate peptide strings have
+equal length and differ, after the start/stop guards. Separately, `coding_unknown`
+records that either local peptide contains `X`. Both predicates can therefore succeed
+for the same allele.
+
+The GRCh38 witness `17:75629084 GATGCCAGCAGA>TCTGCCTCTGGG` on
+`ENST00000581825` has an incomplete first CDS codon. Ensembl represents its leading
+bases as `NN`, giving local peptides `XLLAS/XPEAE`. VEP emits
+`coding_sequence_variant&missense_variant`: the first residue remains unknown while the
+later residues prove a missense change. DuckVEP permits `N` only in that declared
+`cds_start_NF` first codon; ambiguity elsewhere still fails closed. The two resulting
+facts remain independent rather than being cleaned into one biologically tidier label.
+
+Source anchors: Ensembl Variation 116
+`VariationEffect.pm::synonymous_variant`, `::missense_variant`, and `::coding_unknown`.
+
+The converse matters at an incomplete terminal codon. When an uploaded feature starts
+in a complete codon and reaches the trailing synthetic `X`, VEP may still prove a
+missense change in the complete prefix, but it may **not** call an unchanged prefix
+synonymous: `synonymous_variant` rejects the complete local peptide because it contains
+`X`. The GRCh37 witness `2:228564238 CC>GG` on `ENST00000419059` therefore emits only
+`coding_sequence_variant`, not `coding_sequence_variant&synonymous_variant`. Six
+independently sampled GRCh37 transcript pairs exposed the same state. DuckVEP classifies
+the complete-codon prefix, then applies the full-window `X` guard before retaining a
+synonymous fact.
+
+## A partial terminal codon is a sequence shape, not an attribute flag
+
+VEP's `partial_codon` predicate is selected by the first affected peptide coordinate.
+The durable model fact is the prepared CDS length modulo three, not merely Ensembl's
+`cds_end_NF` attribute. A transcript whose prepared CDS ends in one or two bases can
+therefore produce `incomplete_terminal_codon_variant` even when that attribute is absent;
+this occurs in real mitochondrial and nuclear models.
+
+Three nearby states must remain distinct:
+
+- an edit beginning inside the one- or two-base terminal codon is
+  `coding_sequence_variant&incomplete_terminal_codon_variant`;
+- an edit beginning in a complete codon and continuing into the partial tail classifies
+  the complete peptide prefix and independently records the trailing `X`;
+- an equal-length feature that continues beyond the transcript's 3-prime edge still
+  exposes its first mapped coding piece through `genomic2pep`, so the partial-codon term
+  survives the outer mapper gap.
+
+DuckVEP derives this from the prepared CDS byte length and the first mapped CDS position.
+It does not promote every edit touching the final rounded codon to partial, and it does
+not suppress the term just because one feature endpoint is a mapper gap. Fixed C cases
+cover both strands, with and without `cds_end_NF`, and both internal and outer 3-prime
+boundaries.
+
+## A leading unknown codon does not suppress the frameshift predicate
+
+For `cds_start_NF` transcripts, Ensembl may prefix the translateable sequence with one or
+two synthetic `N` bases to preserve phase; the corresponding local peptide begins with
+`X`. VEP still classifies a length-changing edit in that leading codon as a frameshift
+from CDS edit geometry. Peptide-dependent start, missense, and stop facts remain absent,
+but ambiguity is not a reason to discard the coordinate-level frameshift fact.
+
+DuckVEP permits those synthetic `N` bases only in the declared incomplete first codon.
+Its shared length-changing context resolves both a one-base insertion and one-base
+deletion there to `frameshift_variant` on either strand, while ambiguity elsewhere still
+fails closed. This is separate from the equal-length `coding_unknown&missense` state:
+one concerns net frame displacement, the other compares equal-length peptide strings.
+
+Source anchors: Ensembl Variation 116 `TranscriptVariationAllele.pm::peptide`,
+`VariationEffect.pm::frameshift`, and the transcript `cds_start_NF` attribute path.
+
 ## An empty annotated UTR can overlap a spanning deletion
 
 VEP 116 constructs its transcript-oriented before- and after-coding intervals as
@@ -46,6 +145,24 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::_before_coding`,
 `::_after_coding`, and `::overlap`. Keep the pure-C empty-interval witness and the real
 cache differential together: either one alone is too easy to satisfy with an endpoint
 special case that breaks the opposite strand or complete-overlap state.
+
+Pure insertions have two additional explicit exceptions in those same predicates. VEP
+stores an insertion after genomic base `P` as the reversed interval `(P+1,P)`.
+`_before_coding` returns true when `P+1` is the CDS start, and `_after_coding` returns true
+when `P` is the CDS end. The transcript mapper may accept the coding-side flank even when
+the topology point used for the insertion is in the adjacent intron. The reverse-strand
+GRCh37 witness `5:70356757 T>TG` on `ENST00000425596` consequently emits
+`5_prime_UTR_variant&splice_region_variant`; treating the insertion as one ordinary point
+loses the UTR term.
+
+An equal-length feature can similarly cover the first CDS base and one base outside the
+transcript. Its outer mapper endpoint is a `Gap`, so no start peptide exists, but the
+inverted empty 5-prime UTR still overlaps and the mapped CDS base makes `within_cdna`
+true. VEP's final result is supported
+`5_prime_UTR_variant&coding_sequence_variant`, not a sequence failure. The full GRCh37
+sample contained 36 such pairs on both strands. This outer 5-prime state must not be
+generalized to the 3-prime edge: a partial terminal codon there remains classifiable as
+described above.
 
 ## A mature miRNA term replaces the generic non-coding exon term
 
@@ -118,6 +235,26 @@ endpoint as proof that the biological stop was examined.
 Source anchors: Ensembl Variation 116 `BaseTranscriptVariation::cds_start`,
 `VariationEffect.pm::coding_unknown`, `::_overlaps_stop_codon_cil`,
 `::_ins_del_stop_altered_cil`, and `::stop_retained`.
+
+## A retained stop can still be protein-altering
+
+VEP's consequence list is a set of independently evaluated predicates, not a clean
+single-label hierarchy. For a length-changing insertion just before the terminal codon,
+`_overlaps_stop_codon_cil` may reach the annotated endpoint and
+`_ins_del_stop_altered_cil` may prove that the stop remains there. `stop_retained` then
+suppresses `frameshift`, but it does not suppress `protein_altering_variant`. If the
+local peptide strings have different lengths and the alternate preserves neither edge
+of the reference peptide, VEP emits both `stop_retained_variant` and
+`protein_altering_variant`.
+
+The held-out randomized C run found reverse-strand examples with local peptide shapes
+such as `M/IX`: the original endpoint still retranslates to stop, while the local
+peptide shape satisfies the separate protein-altering predicate. DuckVEP keeps both
+facts. The property oracle derives them separately from the local peptide strings; it
+does not merely allow either result.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::stop_retained`,
+`::frameshift`, and `::protein_altering_variant`.
 
 ## An uploaded span can suppress a simpler coding edit
 
@@ -274,6 +411,24 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`, `::stop_
 `::stop_lost`, `::frameshift`, `::inframe_deletion`,
 `::protein_altering_variant`, and `::_ins_del_stop_altered`.
 
+## Terminal overlap does not prove the stored codon is a stop
+
+VEP's `_overlaps_stop_codon` is a coordinate predicate. For a complete annotated CDS it
+asks whether the feature reaches the final three coding bases; it does not first require
+the stored terminal codon or reference peptide residue to be `*`. The later
+`_ins_del_stop_altered` comparison can consequently make `stop_lost` true for an edit at
+an annotated coding endpoint whose prepared CDS actually ends in a non-stop codon.
+
+The GRCh37 transcript `ENST00000599428` has a 60-base prepared CDS ending in `CCC`.
+At `10:135341026`, the insertion `G>GT` is nevertheless
+`frameshift_variant&stop_lost` in VEP 116. DuckVEP therefore separates “complete terminal
+coordinate exists” from “reference terminal peptide is a stop.” Requiring `*` in the
+coordinate gate loses this state; calling every endpoint edit stop-lost without running
+the altered-endpoint comparison invents others.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::_overlaps_stop_codon`,
+`::_ins_del_stop_altered`, `::stop_lost`, and `::frameshift`.
+
 ## ALT-only mismatch islands inherit an expanded intron cache
 
 VEP 116 can emit `intron_variant` for a lengthening replacement whose REF-shaped
@@ -300,6 +455,30 @@ cached list in `BaseTranscriptVariationAllele.pm::_intron_effects`. Fixed witnes
 `chrDuck:146 CGT>CACTGAGGGC` and `chrDuck:145 ACG>ACCTTCTGTGTA` pin the two sides of the
 cache boundary. Large held-out differentials remain necessary because transcript 3-prime
 shifting can move the predicate geometry before this cache is consulted.
+
+## The 12-base exon stretch is only a candidate set
+
+`BaseTranscriptVariation::_overlapped_exons` stretches every exon by 12 bases when the
+transcript contains any intron whose endpoint difference is at most 12. This is a coarse
+lookup rule, not a replacement exon model. `non_coding_exon_variant` explicitly tests the
+uploaded feature against each candidate's original exon coordinates before returning
+true. A point inside the short intron is therefore neither a non-coding exon variant nor
+an ordinary intron variant: `_intron_effects` recognizes the frameshift intron first and
+skips its normal intron and splice predicates. The transcript-level non-coding fallback
+remains.
+
+The GRCh37 deletion `22:38616642 GG>G` minimizes to position `38616643`, inside a
+four-base intron of `ENST00000541788`. VEP emits only
+`non_coding_transcript_variant`. DuckVEP keeps the physical region intronic for reporting,
+but keeps exact exon overlap and `within_intron` as separate predicate facts. The same
+transcript-wide stretch still matters for consequence metadata whose `include` rule asks
+for coarse exon exclusion, such as the polypyrimidine-tract gate; a remote short intron
+can affect that candidate gate without turning every stretched base into an exon.
+
+Source anchors: Ensembl Variation 116
+`BaseTranscriptVariation.pm::_overlapped_exons`, `::_create_intron_trees`,
+`BaseTranscriptVariationAllele.pm::_intron_effects`, and
+`VariationEffect.pm::non_coding_exon_variant`.
 
 ## Terminal-stop insertions are predicate states, not modulo-three classes
 
