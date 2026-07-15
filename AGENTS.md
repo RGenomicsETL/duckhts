@@ -86,6 +86,15 @@ recorded workload. Do not claim "no regression" when workloads or environments d
 If no checked-in benchmark exercises the changed path, state that explicitly in the
 section, cite the nearest rendered baseline, and say what measurement is still missing.
 
+### Pull Request Codex Review — Mandatory
+
+Every pull request must receive a Codex review of its current head commit before merge.
+After the ready-for-review PR is pushed, comment `@codex review` and wait for the Codex
+response. Address every actionable finding, push the fix, and request another review;
+repeat until Codex reports no major issue on the current head. Do not merge merely because
+GitHub marks the branch mergeable or because CI passes. Record the reviewed commit in the
+handoff when the review response names it.
+
 Useful validation commands:
 
 ```bash
