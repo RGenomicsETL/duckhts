@@ -84,6 +84,23 @@ int duckvep_project_event_to_cds(
     uint32_t                         *cds_start_out,
     uint32_t                         *cds_end_out);
 
+/* Project VEP's VariationFeature endpoints to CDS coordinates. Unlike the
+ * semantic edit projector above, this intentionally retains unchanged bases
+ * in equal-length uploaded alleles and permits an intron between two mapped
+ * endpoints. BaseTranscriptVariation::cds_coords makes the first or last
+ * mapper Gap undefined; this helper therefore requires both endpoints to map.
+ * A pure insertion reuses the one-flank insertion-boundary projector, including
+ * exon edges, and returns VEP's reversed TranscriptVariation CDS range
+ * (`cds_start > cds_end`). NMD.pm reads that lower `cds_end`; it is not the
+ * expanded allele range rendered in VEP JSON. */
+int duckvep_project_feature_to_cds(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                         *cds_start_out,
+    uint32_t                         *cds_end_out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -4665,12 +4665,23 @@ static void sequence_delta_fill_indel_frameshift(
 
 static void delta_capture_single_edit_nmd_fact(
     const duckvep_coding_context_t *ctx,
+    const duckvep_event_t          *event,
     duckvep_sequence_delta_t       *delta) {
 
     uint64_t end;
 
-    if (ctx == NULL || delta == NULL || delta->valid == 0u ||
+    if (ctx == NULL || event == NULL || delta == NULL || delta->valid == 0u ||
         ctx->has_single_edit == 0u || ctx->single_edit_cds_start == 0u) {
+        return;
+    }
+    /* The coding context describes the trimmed edit. VEP's NMD plugin instead
+     * projects the VariationFeature. Reuse this fact only when those genomic
+     * spans are identical; insertions require their two feature flanks and are
+     * projected by the plugin-specific path. */
+    if (event->interbase || event->ref_diff_length == 0u ||
+        event->feature_start1 != event->start1 ||
+        (uint64_t)event->start1 + (uint64_t)event->ref_diff_length - 1u !=
+            (uint64_t)event->feature_end1) {
         return;
     }
     end = ctx->single_edit_ref_len == 0u
@@ -4737,7 +4748,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
                     delta->sequence_status =
                         delta_sequence_status_from_delta(delta_status);
                 } else {
-                    delta_capture_single_edit_nmd_fact(&ctx, delta);
+                    delta_capture_single_edit_nmd_fact(&ctx, prepared_event, delta);
                 }
             }
         } else {
@@ -4775,7 +4786,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
                     delta->sequence_status =
                         delta_sequence_status_from_delta(delta_status);
                 } else {
-                    delta_capture_single_edit_nmd_fact(&ctx, delta);
+                    delta_capture_single_edit_nmd_fact(&ctx, prepared_event, delta);
                 }
             }
         } else {

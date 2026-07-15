@@ -3097,6 +3097,17 @@ TEST mature_mirna_predicate_known_scene(void) {
 /* VEP Plugins release/116 NMD.pm is a separate prediction from the curated
  * NMD transcript biotype. Pin its executable coordinate thresholds on both
  * strands, including the source's inclusive 51-base penultimate-exon offset. */
+static void nmd_point_event(duckvep_event_t *event, uint32_t pos1) {
+    memset(event, 0, sizeof *event);
+    event->raw_start1 = pos1;
+    event->raw_end1 = pos1;
+    event->feature_start1 = pos1;
+    event->feature_end1 = pos1;
+    event->start1 = pos1;
+    event->end1 = pos1;
+    event->ref_diff_length = 1u;
+}
+
 TEST variant_induced_nmd_prediction_known_scene(void) {
     static uint16_t chrom[1] = {0u};
     static uint32_t tstart[1] = {100u};
@@ -3140,37 +3151,59 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     ex.phase = phase;
     ex.end_phase = phase;
     ex.exon_count = 3u;
-    event.ref_diff_length = 1u;
-
-    event.start1 = event.end1 = 320u;
+    nmd_point_event(&event, 320u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
     ASSERT_EQ(0u, nmd.escape_reasons);
 
-    event.start1 = event.end1 = 300u;
+    nmd_point_event(&event, 300u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_ESCAPING, nmd.prediction);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
-    event.start1 = event.end1 = 301u;
+    nmd_point_event(&event, 301u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
 
-    event.start1 = event.end1 = 348u;
+    /* NMD.pm reads TranscriptVariation::cds_end. A pure insertion keeps a
+     * reversed CDS interval, so insertion after CDS 101 still has cds_end 101
+     * even though the allele JSON renderer reports an expanded 101..102. */
+    nmd_point_event(&event, 301u);
+    event.feature_start1 = 301u;
+    event.feature_end1 = 300u;
+    event.insertion_boundary0 = 300u;
+    event.start1 = 300u;
+    event.interbase = 1u;
+    event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+    event.ref_diff_length = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
+    nmd_point_event(&event, 302u);
+    event.feature_start1 = 302u;
+    event.feature_end1 = 301u;
+    event.insertion_boundary0 = 301u;
+    event.start1 = 301u;
+    event.interbase = 1u;
+    event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+    event.ref_diff_length = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+
+    nmd_point_event(&event, 348u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
               nmd.escape_reasons);
-    event.start1 = event.end1 = 347u;
+    nmd_point_event(&event, 347u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
 
-    event.start1 = event.end1 = 500u;
+    nmd_point_event(&event, 500u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_LAST_EXON, nmd.escape_reasons);
 
     excnt[0] = 1u;
     exon_end[0] = 599u;
     cdna_end[0] = 500u;
-    event.start1 = event.end1 = 300u;
+    nmd_point_event(&event, 300u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_INTRONLESS |
               DUCKVEP_NMD_ESCAPE_LAST_EXON, nmd.escape_reasons);
@@ -3178,7 +3211,7 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     exon_end[0] = 199u;
     cdna_end[0] = 100u;
 
-    event.start1 = event.end1 = 320u;
+    nmd_point_event(&event, 320u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event,
                         DUCKVEP_SO(DUCKVEP_SO_MISSENSE), NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_NOT_APPLICABLE, nmd.prediction);
@@ -3188,7 +3221,15 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
     tx.exon_offset = exoff;
 
-    event.start1 = event.end1 = 250u;
+    cds_start[0] = 0u;
+    cds_end[0] = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event,
+                        DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR), NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
+    cds_start[0] = 100u;
+    cds_end[0] = 599u;
+
+    nmd_point_event(&event, 250u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event,
                         DUCKVEP_SO(DUCKVEP_SO_SPLICE_DONOR), NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_UNRESOLVED, nmd.prediction);
@@ -3196,13 +3237,64 @@ TEST variant_induced_nmd_prediction_known_scene(void) {
     strand[0] = -1;
     ex.start1 = reverse_exon_start;
     ex.end1 = reverse_exon_end;
-    event.start1 = event.end1 = 351u;
+    nmd_point_event(&event, 351u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
               nmd.escape_reasons);
-    event.start1 = event.end1 = 352u;
+    nmd_point_event(&event, 352u);
     duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
     ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+
+    nmd_point_event(&event, 399u);
+    event.feature_start1 = 399u;
+    event.feature_end1 = 398u;
+    event.insertion_boundary0 = 398u;
+    event.start1 = 398u;
+    event.interbase = 1u;
+    event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+    event.ref_diff_length = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_EARLY_CDS, nmd.escape_reasons);
+    nmd_point_event(&event, 398u);
+    event.feature_start1 = 398u;
+    event.feature_end1 = 397u;
+    event.insertion_boundary0 = 397u;
+    event.start1 = 397u;
+    event.interbase = 1u;
+    event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+    event.ref_diff_length = 0u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+
+    /* NMD.pm projects the complete VariationFeature and reads its genomic end,
+     * not the smaller mismatch island used to edit the CDS. These equal-length
+     * padded features pin both source quirks on each strand. */
+    strand[0] = 1;
+    ex.start1 = exon_start;
+    ex.end1 = exon_end;
+    nmd_point_event(&event, 300u);
+    event.raw_end1 = 301u;
+    event.feature_end1 = 301u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+    ASSERT_EQ(0u, nmd.escape_reasons);
+
+    nmd_point_event(&event, 347u);
+    event.raw_end1 = 348u;
+    event.feature_end1 = 348u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END,
+              nmd.escape_reasons);
+
+    strand[0] = -1;
+    ex.start1 = reverse_exon_start;
+    ex.end1 = reverse_exon_end;
+    nmd_point_event(&event, 351u);
+    event.raw_end1 = 352u;
+    event.feature_end1 = 352u;
+    duckvep_nmd_predict(&tx, &ex, 0u, &event, stop_gained, NULL, &nmd);
+    ASSERT_EQ(DUCKVEP_NMD_PREDICTED_TRIGGERING, nmd.prediction);
+    ASSERT_EQ(0u, nmd.escape_reasons);
     PASS();
 }
 
@@ -3620,7 +3712,9 @@ static enum theft_trial_res prop_projection_matches_bruteforce(struct theft *t, 
 
 TEST projection_known_forward_reverse_and_phase(void) {
     duckvep_coding_projection_t p;
+    duckvep_event_t event;
     uint32_t cdna = 0u, genomic = 0u, exon_idx = 0u;
+    uint32_t cds_start = 0u, cds_end = 0u;
 
     /* Forward: exons [100,109]=>cDNA 1..10, [200,209]=>11..20; CDS 103..205. */
     {
@@ -3641,6 +3735,46 @@ TEST projection_known_forward_reverse_and_phase(void) {
         ASSERT_EQ(1, duckvep_project_coding_base(&s.tx, &s.ex, 0u, 200u, &p));
         ASSERT_EQ(11u, p.cdna_pos); ASSERT_EQ(8u, p.cds_pos); ASSERT_EQ(3u, p.protein_pos);
         ASSERT_EQ(0, duckvep_project_genomic_to_cdna(&s.tx, &s.ex, 0u, 150u, &cdna, NULL));
+
+        /* BaseTranscriptVariation projects the full feature endpoints and
+         * permits an internal mapper Gap. The semantic edit projector remains
+         * contiguous and sees only the changed base. */
+        memset(&event, 0, sizeof event);
+        event.start1 = 105u;
+        event.end1 = 105u;
+        event.ref_diff_length = 1u;
+        event.feature_start1 = 105u;
+        event.feature_end1 = 203u;
+        ASSERT_EQ(1, duckvep_project_event_to_cds(
+                         &s.tx, &s.ex, 0u, &event, &cds_start, &cds_end));
+        ASSERT_EQ(3u, cds_start); ASSERT_EQ(3u, cds_end);
+        ASSERT_EQ(1, duckvep_project_feature_to_cds(
+                         &s.tx, &s.ex, 0u, &event, &cds_start, &cds_end));
+        ASSERT_EQ(3u, cds_start); ASSERT_EQ(11u, cds_end);
+
+        event.interbase = 1u;
+        event.feature_start1 = 106u;
+        event.feature_end1 = 105u;
+        event.insertion_boundary0 = 105u;
+        event.start1 = 105u;
+        event.anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+        ASSERT_EQ(1, duckvep_project_feature_to_cds(
+                         &s.tx, &s.ex, 0u, &event, &cds_start, &cds_end));
+        ASSERT_EQ(4u, cds_start); ASSERT_EQ(3u, cds_end);
+
+        event.feature_start1 = 110u;
+        event.feature_end1 = 109u;
+        event.insertion_boundary0 = 109u;
+        event.start1 = 109u;
+        ASSERT_EQ(1, duckvep_project_feature_to_cds(
+                         &s.tx, &s.ex, 0u, &event, &cds_start, &cds_end));
+        ASSERT_EQ(8u, cds_start); ASSERT_EQ(7u, cds_end);
+
+        event.interbase = 0u;
+        event.feature_start1 = 110u;
+        event.feature_end1 = 200u;
+        ASSERT_EQ(0, duckvep_project_feature_to_cds(
+                         &s.tx, &s.ex, 0u, &event, &cds_start, &cds_end));
     }
 
     /* Reverse: transcript order is high-to-low. CDS genomic 104..205 starts at 205. */
@@ -9417,7 +9551,7 @@ static void kprop_wire_coding_scene(struct kprop_coding *s, uint32_t cds_len) {
 
 TEST nmd_early_cds_fact_matches_exhaustive_projection_known_scene(void) {
     static uint8_t cds[120];
-    static const uint32_t anchor_cds[2] = {100u, 101u};
+    static const uint32_t deleted_cds[2] = {101u, 102u};
     static const uint8_t expected_fact[2] = {
         (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101,
         (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101
@@ -9437,10 +9571,10 @@ TEST nmd_early_cds_fact_matches_exhaustive_projection_known_scene(void) {
     s.tstart = 1000u; s.tend = 1119u; s.cds_s = 1000u; s.cds_e = 1119u;
     s.es = 1000u; s.ee = 1119u; s.ecds = 1u; s.ecde = 120u;
     s.eph = 0; s.eeph = 0; s.exoff = 0u; s.excnt = 1u;
-    s.vchrom = 0u; s.vkind = (uint8_t)DUCKVEP_KIND_INS;
-    s.roff = 0u; s.aoff = 1u; s.rlen = 1u; s.alen = 2u;
-    s.abytes[0] = (uint8_t)'A';
-    s.abytes[1] = (uint8_t)'A'; s.abytes[2] = (uint8_t)'C';
+    s.vchrom = 0u; s.vkind = (uint8_t)DUCKVEP_KIND_DEL;
+    s.roff = 0u; s.aoff = 2u; s.rlen = 2u; s.alen = 1u;
+    s.abytes[0] = (uint8_t)'A'; s.abytes[1] = (uint8_t)'A';
+    s.abytes[2] = (uint8_t)'A';
     kprop_wire_coding_scene(&s, sizeof cds);
 
     memset(&scratch, 0, sizeof scratch);
@@ -9459,14 +9593,14 @@ TEST nmd_early_cds_fact_matches_exhaustive_projection_known_scene(void) {
         duckvep_nmd_result_t exhaustive;
         uint64_t frameshift = DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT);
 
-        s.vpos = s.tstart + anchor_cds[i] - 1u;
-        s.vend = s.vpos;
+        s.vpos = s.tstart + deleted_cds[i] - 2u;
+        s.vend = s.vpos + 1u;
         duckvep_event_load(&s.v, 0u, &event);
         duckvep_sequence_delta_fill_for_annotation_trace(
-            DUCKVEP_KIND_INS, &s.tx, &s.ex, &s.seq, &s.v,
+            DUCKVEP_KIND_DEL, &s.tx, &s.ex, &s.seq, &s.v,
             0u, 0u, s.vpos, s.strand, &scratch, &event,
             (uint32_t)DUCKVEP_REGION_CDS, 0u, &route, &delta);
-        ASSERT_EQ(DUCKVEP_DELTA_ROUTE_INS_CONTEXT, route);
+        ASSERT_EQ(DUCKVEP_DELTA_ROUTE_DEL_CONTEXT, route);
         ASSERT(delta.valid && delta.frameshift);
         ASSERT_EQ(expected_fact[i], delta.nmd_early_cds_fact);
 

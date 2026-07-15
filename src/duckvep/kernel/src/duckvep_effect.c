@@ -40,6 +40,7 @@ void duckvep_nmd_predict(
     }
     if (transcripts->cds_start1[tx_idx] == 0u ||
         transcripts->cds_end1[tx_idx] == 0u) {
+        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
         return;
     }
 
@@ -51,12 +52,13 @@ void duckvep_nmd_predict(
     } else {
         /* NMD.pm returns no prediction unless TranscriptVariation has both CDS
          * coordinates. Keep that absence explicit for splice-crossing events. */
-        if (!duckvep_project_event_to_cds(transcripts, exons, tx_idx, event,
-                                          &variant_cds_start, &variant_cds_end)) {
+        if (!duckvep_project_feature_to_cds(
+                transcripts, exons, tx_idx, event,
+                &variant_cds_start, &variant_cds_end)) {
             out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
             return;
         }
-        if (variant_cds_start == 0u || variant_cds_end < variant_cds_start) {
+        if (variant_cds_start == 0u || variant_cds_end == 0u) {
             out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
             return;
         }
@@ -77,9 +79,10 @@ void duckvep_nmd_predict(
         reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_INTRONLESS;
     }
 
-    /* VEP's parser removes the ordinary VCF padding base before constructing
-     * the VariationFeature. event.end1 is the equivalent prepared endpoint. */
-    variant_end1 = event->end1;
+    /* NMD.pm reads VariationFeature::seq_region_end directly. Equal-length
+     * alleles retain unchanged uploaded bases, so the semantic edit endpoint
+     * is not interchangeable with this coordinate. */
+    variant_end1 = event->feature_end1;
     {
         size_t last = (size_t)exon_offset + (size_t)exon_count - 1u;
         if (variant_end1 >= exons->start1[last] &&

@@ -357,8 +357,26 @@ transcript, an early-CDS event (`cds_end <= 101` in the plugin), an event in the
 exon, or an event in the plugin's inclusive 51-base penultimate-exon-end window. An
 eligible projected event matching none of those rules is `triggering`; an eligible event
 without coding coordinates is `unresolved`. The SQL result exposes each escape reason as
-a boolean. This is the pinned VEP positional policy, not a direct molecular assay or a
-claim that every transcript follows one universal NMD rule.
+a boolean.
+
+The plugin does not use the minimized sequence edit for those coordinates. Its
+`BaseTranscriptVariation::cds_coords` path projects the full VEP `VariationFeature` and
+its exon rules read `VariationFeature::seq_region_end`. For an ordinary span, the first
+and last mapped coordinates may enclose an internal mapper gap as long as both endpoints
+map. For a pure insertion, the parent `TranscriptVariation` instead retains the empty
+feature as a reversed CDS range such as `102,101`; one genomic flank may be sufficient at
+an exon edge. This is different from the expanded `101..102` allele range rendered in
+VEP JSON, and `NMD.pm` reads the parent's lower `cds_end`.
+
+Equal-length alleles retain unchanged uploaded bases in their feature. DuckVEP must
+therefore preserve both views: the minimized edit changes the CDS, while the full feature
+decides NMD position. The early-CDS fact cached by the coding classifier is reusable only
+when both genomic spans are identical; insertions and wider features use the feature
+projector. This representation-dependent behavior is pinned by paired executable-plugin
+witnesses on both strands.
+
+This is the pinned VEP positional policy, not a direct molecular assay or a claim that
+every transcript follows one universal NMD rule.
 
 ## Phased edits
 

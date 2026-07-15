@@ -10,8 +10,10 @@ through the differential runner below.
 
 Variant-induced NMD uses the separate VEP Plugins release/116 `NMD.pm` policy pinned at
 `0082591268417af618e03850c5ffdc7c09998a5d`. The pure-C fixed cases reproduce its four
-escape rules and executable thresholds on both strands. `NMD_transcript_variant` remains
-the independent VEP core biotype consequence.
+escape rules and executable thresholds on both strands. They also preserve the plugin's
+use of full VEP feature endpoints, which can differ from the minimized edit used for the
+consequence itself. `NMD_transcript_variant` remains the independent VEP core biotype
+consequence.
 
 The runner uses the current `WangLabCSU/blit` command API (tested at
 `940c2c1385ba6ad72f0c63b861e90abe8ae6e6f3`) to execute
@@ -78,6 +80,17 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --sample-per-shape 50000"
 ```
 
+Add `--nmd-plugin-dir /path/to/pinned/VEP_plugins` to the same command to run
+`NMD.pm`. The runner rejects any `NMD.pm` whose SHA-256 differs from the pinned
+release/116 file. The companion `DuckVEPNMDState.pm` only serializes the parent
+`TranscriptVariation` CDS coordinates that `NMD.pm` actually reads; this avoids
+mistaking the different allele-level CDS range in VEP JSON for the plugin's
+state. The runner stores both engines' `triggering`/`escaping`/`unresolved`
+prediction on every transcript row and writes a separate
+`*_nmd_conformance.csv` confusion table. Recording the run also adds
+`nmd_prediction` rows to `data/conformance_history.csv`, which the rendered
+report keeps separate from core SO-term agreement.
+
 `--gff` remains useful for small fixed fixtures and for auditing VEP's GFF
 importer. It is not interchangeable with the indexed cache: VEP may skip GFF
 feature types or parents that are present in the Ensembl core dump.
@@ -106,8 +119,9 @@ thread count, and source revision.
 
 `make duckvep-record-conformance` reruns the real VEP witnesses and records the current
 source revision in `data/conformance_history.csv`. Rows include the complete consequence
-set, individual SO terms, VEP impact, allele shape, unresolved reason, exact Ensembl
-build, and annotation-artifact hash. `make bench-duckvep-throughput` records the sorted
+set, individual SO terms, optional NMD-plugin predictions, VEP impact, allele shape,
+unresolved reason, exact Ensembl build, and annotation-artifact hash.
+`make bench-duckvep-throughput` records the sorted
 stable-API path in `benchmarks/data/duckvep_throughput.csv`; its checked-in fixture has
 one transcript and is not a whole-genome performance claim. Render both views with
 `make duckvep-render-reports`. `make duckvep-record-properties` runs the pure-C
