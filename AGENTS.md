@@ -86,6 +86,15 @@ recorded workload. Do not claim "no regression" when workloads or environments d
 If no checked-in benchmark exercises the changed path, state that explicitly in the
 section, cite the nearest rendered baseline, and say what measurement is still missing.
 
+### Pull Request Codex Review — Mandatory
+
+Every pull request must receive a Codex review of its current head commit before merge.
+After the ready-for-review PR is pushed, comment `@codex review` and wait for the Codex
+response. Address every actionable finding, push the fix, and request another review;
+repeat until Codex reports no major issue on the current head. Do not merge merely because
+GitHub marks the branch mergeable or because CI passes. Record the reviewed commit in the
+handoff when the review response names it.
+
 Useful validation commands:
 
 ```bash
@@ -208,3 +217,9 @@ Follow `STYLE.md`. In particular: keep ownership explicit, return errors instead
 aborting DuckDB, bound input-driven allocation, avoid fake object systems and future-only
 interfaces, write R as R, preserve SQL composability, and make no benchmark claim beyond a
 measured documented workload.
+
+Do not use bare `boundary` as an explanation. Name the concrete axis and location: for
+example an exon–intron junction, CDS start or end, transcript endpoint, VCF anchor-removal
+case, reference/alternate differing-region edge, allocation limit, DuckDB/C ownership
+interface, or DuckDB vector edge. If a genuinely generic boundary is needed, define the
+term locally before using it.
