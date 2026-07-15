@@ -202,6 +202,22 @@ static int delta_coding_cdna_bounds(
         transcripts->cds_end1 == NULL || transcripts->cds_start1[tx_idx] == 0u) {
         return 0;
     }
+    if (transcripts->cds_cdna_start1 != NULL &&
+        transcripts->cds_cdna_end1 != NULL &&
+        transcripts->cds_start_exon_index != NULL &&
+        transcripts->cds_cdna_start1[tx_idx] != 0u) {
+        *coding_start_cdna = transcripts->cds_cdna_start1[tx_idx];
+        *coding_end_cdna = transcripts->cds_cdna_end1[tx_idx];
+        if (*coding_start_cdna == 0u ||
+            *coding_end_cdna < *coding_start_cdna) {
+            return 0;
+        }
+        if (coding_start_exon != NULL) {
+            *coding_start_exon =
+                transcripts->cds_start_exon_index[tx_idx];
+        }
+        return 1;
+    }
     start_genomic = transcripts->strand[tx_idx] > 0
         ? transcripts->cds_start1[tx_idx] : transcripts->cds_end1[tx_idx];
     end_genomic = transcripts->strand[tx_idx] > 0

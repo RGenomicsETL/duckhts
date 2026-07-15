@@ -84,6 +84,80 @@ the rendered consequence-byte total or the numeric consequence-mask sum. Rows
 with different workload, output mode, thread count, host, or variant count are
 separate measurements and should not be compared as if only the engine changed.
 
+## Validated CDS projection cache
+
+The `7dd90ce8` extension source is byte-identical to the immediate pre-cache
+parent; the intervening commits changed only documentation and benchmark data.
+The `f649d724` rows measure the cache with the same final model, input tables,
+single pinned CPU, ordered query, compact output, and warmup size. Positive
+change means less elapsed time. The non-SNV and mixed lanes avoid repeated
+binary searches for both CDS endpoints. The sorted SNV and ordinary GIAB lanes
+show the control cost because they rarely or never consume that cache.
+
+```{r projection-cache}
+cache_before <- history[
+  history$revision == "7dd90ce8" &
+    history$output_mode == "compact" &
+    history$threads == 1L,
+  c("workload", "variants", "annotated_rows", "median_seconds",
+    "variants_per_second")
+]
+cache_after <- history[
+  history$revision == "f649d724" &
+    history$output_mode == "compact" &
+    history$threads == 1L,
+  c("workload", "variants", "annotated_rows", "median_seconds",
+    "variants_per_second")
+]
+cache_table <- merge(
+  cache_before,
+  cache_after,
+  by = c("workload", "variants", "annotated_rows"),
+  suffixes = c("_before", "_after")
+)
+cache_order <- c(
+  "ensembl116_grch38_final_coding_mixed_200k",
+  "ensembl116_grch38_final_coding_nonsnv_36k",
+  "ensembl116_grch38_final_coding_snv_200k",
+  "ensembl116_grch38_final_giab_sites_hash40"
+)
+cache_labels <- c(
+  "mixed coding",
+  "non-SNV coding",
+  "coding SNV",
+  "GIAB sites"
+)
+cache_table <- cache_table[
+  match(cache_order, cache_table$workload),
+  ,
+  drop = FALSE
+]
+cache_table$workload <- cache_labels
+cache_table$elapsed_change_percent <- round(
+  100 * (cache_table$median_seconds_before -
+    cache_table$median_seconds_after) /
+    cache_table$median_seconds_before,
+  1
+)
+cache_table$variants <- format(
+  cache_table$variants, big.mark = ",", scientific = FALSE
+)
+cache_table$annotated_rows <- format(
+  cache_table$annotated_rows, big.mark = ",", scientific = FALSE
+)
+cache_table$variants_per_second_before <- round(
+  cache_table$variants_per_second_before
+)
+cache_table$variants_per_second_after <- round(
+  cache_table$variants_per_second_after
+)
+names(cache_table) <- c(
+  "workload", "variants", "output rows", "seconds before", "variants/s before",
+  "seconds after", "variants/s after", "elapsed change (%)"
+)
+knitr::kable(cache_table, row.names = FALSE)
+```
+
 ## Final GRCh38 model resources
 
 ```{r resources}
@@ -125,6 +199,13 @@ buffer capacities (active and candidate transcript indices, one exon cursor per
 transcript, and worst-case edit/CDS/peptide scratch); allocator metadata is not
 included. The much smaller first-workspace RSS change reflects lazy or reused
 pages, not a smaller capacity.
+
+The standalone model ABI 0.12 cache adds three `uint32_t` arrays and one
+`uint8_t` array per transcript. Its exact element payload for this model is
+`r format(13 * last_resource$transcripts[[1L]], big.mark = ",", scientific = FALSE)`
+bytes (`r sprintf("%.3f MiB", 13 * last_resource$transcripts[[1L]] / 1024^2)`),
+plus four allocator records. This deterministic allocation is not retroactively
+included in the older `b204dd49` RSS measurement above.
 
 The production form is run with:
 

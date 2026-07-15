@@ -55,16 +55,38 @@ insertion order; they remain only as historical measurements.
 | 2026-07-14 | b204dd49 | ensembl116_grch38_final_giab_sites_hash40   | rich        |       1 | 100,957    | 644,427     | 5,068,416 | 1,174,245      |      9 |       0.239 |          0.244 |       0.263 |              413758 |         2416.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 4,812,480              |
 | 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40         | compact     |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.106 |          0.107 |       0.109 |              943523 |         1059.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 11,023,037             |
 | 2026-07-14 | bcca6f6c | ensembl116_grch38_giab_sites_hash40         | rich        |       1 | 100,957    | 644,292     | 5,078,384 | 1,179,465      |      9 |       0.221 |          0.225 |       0.231 |              448698 |         2228.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 5,242,067              |
-| 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |      3 |       1.560 |          1.561 |       1.566 |              128123 |         7805.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,687,841              |
-| 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |      5 |       0.339 |          0.340 |       0.347 |              105882 |         9444.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,080,953              |
+| 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |      9 |       1.550 |          1.572 |       1.583 |              127226 |         7860.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,662,036              |
+| 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     11 |       0.341 |          0.344 |       0.357 |              104651 |         9555.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,045,128              |
 | 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |      9 |       0.609 |          0.613 |       0.629 |              326264 |         3065.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,468,189              |
 | 2026-07-15 | 7dd90ce8 | ensembl116_grch38_final_giab_sites_hash40   | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 1,174,245      |      9 |       0.118 |          0.119 |       0.137 |              848378 |         1178.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 9,867,605              |
+| 2026-07-15 | f649d724 | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |      9 |       1.487 |          1.504 |       1.626 |              132979 |         7520.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,827,606              |
+| 2026-07-15 | f649d724 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     11 |       0.324 |          0.327 |       0.342 |              110092 |         9083.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,203,437              |
+| 2026-07-15 | f649d724 | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     11 |       0.611 |          0.613 |       0.634 |              326264 |         3065.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,468,189              |
+| 2026-07-15 | f649d724 | ensembl116_grch38_final_giab_sites_hash40   | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 1,174,245      |     15 |       0.118 |          0.120 |       0.132 |              841308 |         1188.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 9,785,375              |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
 consequence-mask sum. Rows with different workload, output mode, thread
 count, host, or variant count are separate measurements and should not
 be compared as if only the engine changed.
+
+## Validated CDS projection cache
+
+The `7dd90ce8` extension source is byte-identical to the immediate
+pre-cache parent; the intervening commits changed only documentation and
+benchmark data. The `f649d724` rows measure the cache with the same
+final model, input tables, single pinned CPU, ordered query, compact
+output, and warmup size. Positive change means less elapsed time. The
+non-SNV and mixed lanes avoid repeated binary searches for both CDS
+endpoints. The sorted SNV and ordinary GIAB lanes show the control cost
+because they rarely or never consume that cache.
+
+| workload       | variants | output rows | seconds before | variants/s before | seconds after | variants/s after | elapsed change (%) |
+|:---------------|:---------|:------------|---------------:|------------------:|--------------:|-----------------:|-------------------:|
+| mixed coding   | 200,000  | 5,756,720   |          1.572 |            127226 |         1.504 |           132979 |                4.3 |
+| non-SNV coding | 36,000   | 1,047,524   |          0.344 |            104651 |         0.327 |           110092 |                4.9 |
+| coding SNV     | 200,000  | 5,191,000   |          0.613 |            326264 |         0.613 |           326264 |                0.0 |
+| GIAB sites     | 100,957  | 1,174,245   |          0.119 |            848378 |         0.120 |           841308 |               -0.8 |
 
 ## Final GRCh38 model resources
 
@@ -94,6 +116,12 @@ planned per-worker number is the exact sum of the C buffer capacities
 transcript, and worst-case edit/CDS/peptide scratch); allocator metadata
 is not included. The much smaller first-workspace RSS change reflects
 lazy or reused pages, not a smaller capacity.
+
+The standalone model ABI 0.12 cache adds three `uint32_t` arrays and one
+`uint8_t` array per transcript. Its exact element payload for this model
+is 8,377,551 bytes (7.989 MiB), plus four allocator records. This
+deterministic allocation is not retroactively included in the older
+`b204dd49` RSS measurement above.
 
 The production form is run with:
 

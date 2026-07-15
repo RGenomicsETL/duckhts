@@ -187,30 +187,41 @@ int duckvep_project_coding_base(
         return 0;
     }
 
-    if (transcripts->strand[tx_idx] >= 0) {
-        coding_start_genomic = transcripts->cds_start1[tx_idx];
-        coding_end_genomic = transcripts->cds_end1[tx_idx];
+    if (transcripts->cds_cdna_start1 != NULL &&
+        transcripts->cds_cdna_end1 != NULL &&
+        transcripts->cds_start_exon_index != NULL &&
+        transcripts->cds_phase_offset != NULL &&
+        transcripts->cds_cdna_start1[tx_idx] != 0u) {
+        coding_start_cdna = transcripts->cds_cdna_start1[tx_idx];
+        coding_end_cdna = transcripts->cds_cdna_end1[tx_idx];
+        coding_start_exon_idx =
+            transcripts->cds_start_exon_index[tx_idx];
+        phase = transcripts->cds_phase_offset[tx_idx];
+        if (coding_start_exon_idx >= exons->exon_count || phase > 2u) {
+            return 0;
+        }
     } else {
-        coding_start_genomic = transcripts->cds_end1[tx_idx];
-        coding_end_genomic = transcripts->cds_start1[tx_idx];
-    }
-
-    if (!duckvep_project_genomic_to_cdna(transcripts, exons, tx_idx,
-                                         coding_start_genomic,
-                                         &coding_start_cdna,
-                                         &coding_start_exon_idx)) {
-        return 0;
-    }
-    if (!duckvep_project_genomic_to_cdna(transcripts, exons, tx_idx,
-                                         coding_end_genomic,
-                                         &coding_end_cdna,
-                                         &dummy_exon_idx)) {
-        return 0;
+        if (transcripts->strand[tx_idx] >= 0) {
+            coding_start_genomic = transcripts->cds_start1[tx_idx];
+            coding_end_genomic = transcripts->cds_end1[tx_idx];
+        } else {
+            coding_start_genomic = transcripts->cds_end1[tx_idx];
+            coding_end_genomic = transcripts->cds_start1[tx_idx];
+        }
+        if (!duckvep_project_genomic_to_cdna(transcripts, exons, tx_idx,
+                                             coding_start_genomic,
+                                             &coding_start_cdna,
+                                             &coding_start_exon_idx) ||
+            !duckvep_project_genomic_to_cdna(transcripts, exons, tx_idx,
+                                             coding_end_genomic,
+                                             &coding_end_cdna,
+                                             &dummy_exon_idx)) {
+            return 0;
+        }
+        phase = coding_phase_offset(exons, (size_t)coding_start_exon_idx);
     }
     if (coding_end_cdna < coding_start_cdna) return 0;
     if (cdna < coding_start_cdna || cdna > coding_end_cdna) return 0;
-
-    phase = coding_phase_offset(exons, (size_t)coding_start_exon_idx);
     cds_pos = (uint32_t)(cdna - coding_start_cdna + 1u + (uint32_t)phase);
 
     r.cdna_pos = cdna;
