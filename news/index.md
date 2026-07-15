@@ -2,6 +2,10 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now reuses resolved intron coordinates while
+  evaluating non-SNV mismatch islands and skips predicate evaluation
+  when no intron, splice, or short-intron fact can change; the
+  sorted-SNV classifier remains inlined
 - bundled DuckVEP now prepares validated CDS-to-cDNA projection
   coordinates once per resident transcript, avoiding repeated
   CDS-endpoint searches while annotating coding variants; topology-only
