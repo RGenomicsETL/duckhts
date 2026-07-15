@@ -2,11 +2,17 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
-- bundled DuckVEP now reuses the coding classifier’s exact
-  first-101-CDS-base comparison for VEP 116 NMD prediction instead of
-  projecting the same edit twice; splice and unresolved-sequence cases
-  retain the exhaustive projection, and consequences outside the NMD
-  plugin’s supported set skip that work
+- bundled DuckVEP now matches the pinned VEP Plugins release/116 NMD
+  implementation’s separate feature geometry: consequence and sequence
+  changes use the minimized edit, while NMD CDS and exon-end rules use
+  the complete VEP feature. This fixes padded equal-length alleles
+  crossing an early-CDS or penultimate-exon threshold and insertions at
+  coding exon edges, whose parent VEP object keeps a reversed CDS
+  range—including the defined `1,0` range immediately before CDS base 1;
+  the cached first-101-CDS-base result is reused only when both spans
+  are identical. The complete 48,967-allele ClinVar chromosome-21
+  comparison matched all 68,554 eligible NMD transcript predictions and
+  all 1,331,664 core consequence sets
 - bundled DuckVEP now reuses resolved intron coordinates while
   evaluating non-SNV mismatch islands and skips predicate evaluation
   when no intron, splice, or short-intron fact can change; the
