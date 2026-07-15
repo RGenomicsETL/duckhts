@@ -92,9 +92,10 @@ prediction on every transcript row and writes a separate
 report keeps separate from core SO-term agreement. A present consequence row
 without an NMD observation remains `not_measured`, even if the other engine
 omitted that consequence row. A missing consequence emission is
-`not_comparable` only when the emission that does exist contains a measured NMD
-prediction, so SO misses in older or plugin-free dumps cannot enter the NMD
-audit as observations.
+`not_comparable` only when the emission that does exist contains an eligible
+NMD observation (`triggering`, `escaping`, or `unresolved`). Rows marked
+`not_applicable` also stay out, so SO misses in older, plugin-free, or
+NMD-ineligible rows cannot enter the NMD audit as observations.
 
 `--gff` remains useful for small fixed fixtures and for auditing VEP's GFF
 importer. It is not interchangeable with the indexed cache: VEP may skip GFF

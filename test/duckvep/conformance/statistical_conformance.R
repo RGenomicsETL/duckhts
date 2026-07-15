@@ -222,6 +222,15 @@ pair_queries <- vapply(
              coalesce(e.nmd_prediction, 'not_measured') = 'not_measured'
            )
              THEN 'not_measured'
+           -- A missing peer does not turn an ineligible consequence into an
+           -- NMD observation. Reserve not_comparable for an eligible NMD
+           -- prediction whose peer consequence row is absent.
+           WHEN (
+             v.variant_id IS NULL AND e.nmd_prediction = 'not_applicable'
+           ) OR (
+             e.variant_id IS NULL AND v.nmd_prediction = 'not_applicable'
+           )
+             THEN 'not_measured'
            WHEN v.variant_id IS NULL OR e.variant_id IS NULL THEN 'not_comparable'
            WHEN coalesce(v.nmd_prediction, 'not_measured') =
                 coalesce(e.nmd_prediction, 'not_measured') THEN 'match'
