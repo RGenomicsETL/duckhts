@@ -40,25 +40,37 @@ model_receipts <- read.csv(
   colClasses = c(source_revision = "character", source_version = "character")
 )
 overall <- history[history$stratum_kind == "all", , drop = FALSE]
-tested_revisions <- unique(overall$source_revision)
 revision_ancestry <- suppressWarnings(system2(
   "git",
   c("-C", shQuote(root), "rev-list", "--topo-order", "HEAD"),
   stdout = TRUE,
   stderr = FALSE
 ))
-tested_ancestry <- revision_ancestry[revision_ancestry %in% tested_revisions]
-latest_revision <- if (length(tested_ancestry)) {
-  tested_ancestry[[1L]]
-} else {
-  overall$source_revision[[nrow(overall)]]
-}
-latest_runs <- overall[
-  overall$source_revision == latest_revision,
-  ,
-  drop = FALSE
-]
-latest <- latest_runs[which.max(latest_runs$n), , drop = FALSE]
+corpus_labels <- c(
+  final_dbsnp157_windows_seed29 = "GRCh38 dbSNP",
+  final_giab_grch38_seed71 = "GRCh38 GIAB",
+  final_clinvar_coding_seed113 = "GRCh38 ClinVar coding",
+  final_clinvar_crosschrom_seed17 = "GRCh38 ClinVar cross-chromosome",
+  final_grch37_cache_seed37 = "GRCh37",
+  `plasmodium-falciparum-vep63-seed11663` = "P. falciparum"
+)
+latest_runs <- do.call(rbind, lapply(names(corpus_labels), function(corpus) {
+  rows <- overall[overall$corpus == corpus, , drop = FALSE]
+  if (!nrow(rows)) return(NULL)
+  tested_ancestors <- revision_ancestry[
+    revision_ancestry %in% rows$source_revision
+  ]
+  revision <- if (length(tested_ancestors)) {
+    tested_ancestors[[1L]]
+  } else {
+    rows$source_revision[[nrow(rows)]]
+  }
+  rows[rows$source_revision == revision, , drop = FALSE]
+}))
+latest_runs$corpus_label <- unname(corpus_labels[latest_runs$corpus])
+latest_runs <- latest_runs[order(
+  match(latest_runs$corpus, names(corpus_labels))
+), , drop = FALSE]
 state_overall <- overall[
   grepl("^state_exploration_seed_[0-9]+$", overall$corpus),
   ,
@@ -78,12 +90,6 @@ latest_state_runs <- state_overall[
   ,
   drop = FALSE
 ]
-same_run <- function(x) {
-  x$source_revision == latest$source_revision &
-    x$engine == latest$engine &
-    x$corpus == latest$corpus &
-    x$model == latest$model
-}
 upper95 <- function(k, n) {
   if (n == 0) NA_real_ else binom.test(k, n, conf.level = 0.95)$conf.int[[2L]]
 }
@@ -109,12 +115,12 @@ corpus, and resident model. Independent frozen distributions and seeds are kept
 separate so a fix cannot improve its own hand-picked witnesses and hide a
 regression elsewhere.
 
-## Latest tested revision
+## Latest tested revision per corpus
 
 ```{r latest}
 latest_table <- data.frame(
   revision = short_revision(latest_runs$source_revision),
-  corpus = latest_runs$corpus,
+  corpus = latest_runs$corpus_label,
   model = latest_runs$model,
   assembly = oracle_field(latest_runs$oracle_build, "assembly"),
   species = oracle_field(latest_runs$oracle_build, "species"),
@@ -130,9 +136,11 @@ latest_table <- data.frame(
 knitr::kable(latest_table, row.names = FALSE)
 ```
 
-The SO and impact tables below keep all corpora at this tested revision separate;
-they do not let the largest corpus hide a smaller species- or assembly-specific
-frontier.
+Each row is the newest tested ancestor of the current source for that named
+corpus. Expensive corpora do not inherit evidence from a later run of another
+corpus, and a newly tested corpus does not hide older still-applicable evidence.
+The SO and impact tables keep the same runs separate so the largest corpus cannot
+hide a smaller species- or assembly-specific frontier.
 
 ## Prepared model receipts
 
@@ -428,14 +436,6 @@ term_counts <- aggregate(
   ) ~ corpus + consequence_class + impact,
   data = term_rows,
   FUN = sum
-)
-corpus_labels <- c(
-  final_dbsnp157_windows_seed29 = "GRCh38 dbSNP",
-  final_giab_grch38_seed71 = "GRCh38 GIAB",
-  final_clinvar_coding_seed113 = "GRCh38 ClinVar coding",
-  final_clinvar_crosschrom_seed17 = "GRCh38 ClinVar cross-chromosome",
-  final_grch37_cache_seed37 = "GRCh37",
-  `plasmodium-falciparum-vep63-seed11663` = "P. falciparum"
 )
 term_counts$corpus_label <- unname(corpus_labels[term_counts$corpus])
 term_counts$corpus_label[is.na(term_counts$corpus_label)] <-
