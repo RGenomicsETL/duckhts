@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundled DuckVEP now prepares validated CDS-to-cDNA projection
+  coordinates once per resident transcript, avoiding repeated
+  CDS-endpoint searches while annotating coding variants; topology-only
+  transcripts retain the existing exhaustive projection behavior, and
+  the common sorted-SNV lane keeps a stable instruction-cache-aligned
+  entry
 - bundled DuckVEP now rebuilds multi-edit CDS haplotypes in one linear
   reverse-coordinate pass over distinct reference and worker-scratch
   buffers, replacing one CDS-tail move per edit while preserving edit,
