@@ -47,49 +47,50 @@ recorded.
 
 ## History
 
-| run_date   | source_revision | corpus                                | model                    |      n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
-|:-----------|:----------------|:--------------------------------------|:-------------------------|-------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
-| 2026-07-11 | 8cc22218        | witnesses                             | differential             |    242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
-| 2026-07-13 | 24bb1714        | state_exploration_seed_29             | differential             | 100242 |       85238 |      28109 |      72133 |                1453 | 85.03%     | 2.12%                   |
-| 2026-07-13 | 24bb1714        | witnesses                             | differential             |    242 |         238 |         11 |        231 |                   0 | 98.35%     | 1.58%                   |
-| 2026-07-13 | 34b37ca1        | witnesses                             | differential             |    242 |         209 |         32 |        210 |                  10 | 86.36%     | 8.58%                   |
-| 2026-07-13 | 87f03a2a        | witnesses                             | differential             |    242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
-| 2026-07-13 | defc9a1c        | state_exploration_seed_113            | differential             | 100246 |       85598 |      28442 |      71804 |                1086 | 85.39%     | 1.60%                   |
-| 2026-07-13 | defc9a1c        | state_exploration_seed_71             | differential             | 100242 |       85646 |      27946 |      72296 |                1103 | 85.44%     | 1.62%                   |
-| 2026-07-13 | defc9a1c        | witnesses                             | differential             |    246 |         242 |         11 |        235 |                   0 | 98.37%     | 1.56%                   |
-| 2026-07-13 | eb212de3        | witnesses                             | differential             |    242 |         219 |         32 |        210 |                   0 | 90.50%     | 1.74%                   |
-| 2026-07-14 | 2ab08e2f        | state_exploration_seed_197            | differential             | 100248 |       88021 |      22598 |      77650 |                 550 | 87.80%     | 0.77%                   |
-| 2026-07-14 | 2ab08e2f        | state_exploration_seed_211            | differential             | 100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
-| 2026-07-14 | 2ab08e2f        | state_exploration_seed_71             | differential             | 100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
-| 2026-07-14 | 2ab08e2f        | witnesses                             | differential             |    258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
-| 2026-07-14 | 3c427df4        | state_exploration_seed_113            | differential             | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
-| 2026-07-14 | 3c427df4        | state_exploration_seed_197            | differential             | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
-| 2026-07-14 | 3c427df4        | state_exploration_seed_211            | differential             | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
-| 2026-07-14 | 3c427df4        | state_exploration_seed_71             | differential             | 100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
-| 2026-07-14 | 3c427df4        | witnesses                             | differential             |    268 |         268 |          0 |        268 |                   0 | 100.00%    | 1.37%                   |
-| 2026-07-14 | 5e5bc1e2        | clinvar_chr21_seed1                   | ensembl116_grch38_core   | 126320 |      126320 |          0 |     126320 |                   0 | 100.00%    | 0.00%                   |
-| 2026-07-14 | 8498b92a        | final_clinvar_coding_seed113          | final-coding             | 287859 |      287829 |          4 |     287855 |                  27 | 99.99%     | 0.01%                   |
-| 2026-07-14 | 8498b92a        | final_clinvar_crosschrom_seed17       | final-clinvar            | 316399 |      316388 |          2 |     316397 |                  10 | 100.00%    | 0.01%                   |
-| 2026-07-14 | 8498b92a        | final_dbsnp157_windows_seed29         | final-dbsnp              |  73620 |       73620 |          0 |      73620 |                   0 | 100.00%    | 0.01%                   |
-| 2026-07-14 | 8498b92a        | final_giab_grch38_seed71              | final-giab               |  54905 |       54905 |          0 |      54905 |                   0 | 100.00%    | 0.01%                   |
-| 2026-07-14 | 8498b92a        | final_grch37_cache_seed37             | final-grch37             | 486468 |      482665 |        102 |     486366 |                3747 | 99.22%     | 0.80%                   |
-| 2026-07-14 | 8498b92a        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |  40734 |       40730 |         24 |      40710 |                   4 | 99.99%     | 0.03%                   |
-| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_197            | differential             | 100248 |       88021 |      22598 |      77650 |                 550 | 87.80%     | 0.77%                   |
-| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_211            | differential             | 100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
-| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_71             | differential             | 100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
-| 2026-07-14 | 8b2a2dbc        | witnesses                             | differential             |    258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
-| 2026-07-14 | b204dd49        | final_clinvar_coding_seed113          | final-coding             | 287859 |      287829 |          4 |     287855 |                  27 | 99.99%     | 0.01%                   |
-| 2026-07-14 | b204dd49        | final_clinvar_crosschrom_seed17       | final-clinvar            | 316399 |      316388 |          2 |     316397 |                  10 | 100.00%    | 0.01%                   |
-| 2026-07-14 | b204dd49        | final_dbsnp157_windows_seed29         | final-dbsnp              |  73620 |       73620 |          0 |      73620 |                   0 | 100.00%    | 0.01%                   |
-| 2026-07-14 | b204dd49        | final_giab_grch38_seed71              | final-giab               |  54905 |       54905 |          0 |      54905 |                   0 | 100.00%    | 0.01%                   |
-| 2026-07-14 | b204dd49        | final_grch37_cache_seed37             | final-grch37             | 486468 |      486332 |        102 |     486366 |                  80 | 99.97%     | 0.02%                   |
-| 2026-07-14 | b204dd49        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |  40734 |       40730 |         24 |      40710 |                   4 | 99.99%     | 0.03%                   |
-| 2026-07-14 | fe6f0634        | state_exploration_seed_197            | differential             | 100248 |       91159 |      19473 |      80775 |                 537 | 90.93%     | 0.72%                   |
-| 2026-07-14 | fe6f0634        | state_exploration_seed_211            | differential             | 100250 |       90951 |      19676 |      80574 |                 567 | 90.72%     | 0.76%                   |
-| 2026-07-14 | fe6f0634        | state_exploration_seed_71             | differential             | 100242 |       90932 |      19500 |      80742 |                 532 | 90.71%     | 0.72%                   |
-| 2026-07-14 | fe6f0634        | witnesses                             | differential             |    262 |         258 |         10 |        252 |                   0 | 98.47%     | 1.45%                   |
-| 2026-07-15 | 7dd90ce8        | final_grch37_cache_seed37             | final-grch37             | 486464 |      486464 |          0 |     486464 |                   0 | 100.00%    | 0.00%                   |
-| 2026-07-15 | 7dd90ce8        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |  40732 |       40732 |          0 |      40732 |                   0 | 100.00%    | 0.01%                   |
+| run_date   | source_revision | corpus                                | model                    |       n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
+|:-----------|:----------------|:--------------------------------------|:-------------------------|--------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
+| 2026-07-11 | 8cc22218        | witnesses                             | differential             |     242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
+| 2026-07-13 | 24bb1714        | state_exploration_seed_29             | differential             |  100242 |       85238 |      28109 |      72133 |                1453 | 85.03%     | 2.12%                   |
+| 2026-07-13 | 24bb1714        | witnesses                             | differential             |     242 |         238 |         11 |        231 |                   0 | 98.35%     | 1.58%                   |
+| 2026-07-13 | 34b37ca1        | witnesses                             | differential             |     242 |         209 |         32 |        210 |                  10 | 86.36%     | 8.58%                   |
+| 2026-07-13 | 87f03a2a        | witnesses                             | differential             |     242 |         203 |         33 |        209 |                  15 | 83.88%     | 11.56%                  |
+| 2026-07-13 | defc9a1c        | state_exploration_seed_113            | differential             |  100246 |       85598 |      28442 |      71804 |                1086 | 85.39%     | 1.60%                   |
+| 2026-07-13 | defc9a1c        | state_exploration_seed_71             | differential             |  100242 |       85646 |      27946 |      72296 |                1103 | 85.44%     | 1.62%                   |
+| 2026-07-13 | defc9a1c        | witnesses                             | differential             |     246 |         242 |         11 |        235 |                   0 | 98.37%     | 1.56%                   |
+| 2026-07-13 | eb212de3        | witnesses                             | differential             |     242 |         219 |         32 |        210 |                   0 | 90.50%     | 1.74%                   |
+| 2026-07-14 | 2ab08e2f        | state_exploration_seed_197            | differential             |  100248 |       88021 |      22598 |      77650 |                 550 | 87.80%     | 0.77%                   |
+| 2026-07-14 | 2ab08e2f        | state_exploration_seed_211            | differential             |  100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
+| 2026-07-14 | 2ab08e2f        | state_exploration_seed_71             | differential             |  100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
+| 2026-07-14 | 2ab08e2f        | witnesses                             | differential             |     258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_113            | differential             |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_197            | differential             |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_211            | differential             |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | state_exploration_seed_71             | differential             |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 3c427df4        | witnesses                             | differential             |     268 |         268 |          0 |        268 |                   0 | 100.00%    | 1.37%                   |
+| 2026-07-14 | 5e5bc1e2        | clinvar_chr21_seed1                   | ensembl116_grch38_core   |  126320 |      126320 |          0 |     126320 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-14 | 8498b92a        | final_clinvar_coding_seed113          | final-coding             |  287859 |      287829 |          4 |     287855 |                  27 | 99.99%     | 0.01%                   |
+| 2026-07-14 | 8498b92a        | final_clinvar_crosschrom_seed17       | final-clinvar            |  316399 |      316388 |          2 |     316397 |                  10 | 100.00%    | 0.01%                   |
+| 2026-07-14 | 8498b92a        | final_dbsnp157_windows_seed29         | final-dbsnp              |   73620 |       73620 |          0 |      73620 |                   0 | 100.00%    | 0.01%                   |
+| 2026-07-14 | 8498b92a        | final_giab_grch38_seed71              | final-giab               |   54905 |       54905 |          0 |      54905 |                   0 | 100.00%    | 0.01%                   |
+| 2026-07-14 | 8498b92a        | final_grch37_cache_seed37             | final-grch37             |  486468 |      482665 |        102 |     486366 |                3747 | 99.22%     | 0.80%                   |
+| 2026-07-14 | 8498b92a        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |   40734 |       40730 |         24 |      40710 |                   4 | 99.99%     | 0.03%                   |
+| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_197            | differential             |  100248 |       88021 |      22598 |      77650 |                 550 | 87.80%     | 0.77%                   |
+| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_211            | differential             |  100250 |       87815 |      22801 |      77449 |                 578 | 87.60%     | 0.81%                   |
+| 2026-07-14 | 8b2a2dbc        | state_exploration_seed_71             | differential             |  100242 |       87916 |      22502 |      77740 |                 546 | 87.70%     | 0.76%                   |
+| 2026-07-14 | 8b2a2dbc        | witnesses                             | differential             |     258 |         254 |         10 |        248 |                   0 | 98.45%     | 1.48%                   |
+| 2026-07-14 | b204dd49        | final_clinvar_coding_seed113          | final-coding             |  287859 |      287829 |          4 |     287855 |                  27 | 99.99%     | 0.01%                   |
+| 2026-07-14 | b204dd49        | final_clinvar_crosschrom_seed17       | final-clinvar            |  316399 |      316388 |          2 |     316397 |                  10 | 100.00%    | 0.01%                   |
+| 2026-07-14 | b204dd49        | final_dbsnp157_windows_seed29         | final-dbsnp              |   73620 |       73620 |          0 |      73620 |                   0 | 100.00%    | 0.01%                   |
+| 2026-07-14 | b204dd49        | final_giab_grch38_seed71              | final-giab               |   54905 |       54905 |          0 |      54905 |                   0 | 100.00%    | 0.01%                   |
+| 2026-07-14 | b204dd49        | final_grch37_cache_seed37             | final-grch37             |  486468 |      486332 |        102 |     486366 |                  80 | 99.97%     | 0.02%                   |
+| 2026-07-14 | b204dd49        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |   40734 |       40730 |         24 |      40710 |                   4 | 99.99%     | 0.03%                   |
+| 2026-07-14 | fe6f0634        | state_exploration_seed_197            | differential             |  100248 |       91159 |      19473 |      80775 |                 537 | 90.93%     | 0.72%                   |
+| 2026-07-14 | fe6f0634        | state_exploration_seed_211            | differential             |  100250 |       90951 |      19676 |      80574 |                 567 | 90.72%     | 0.76%                   |
+| 2026-07-14 | fe6f0634        | state_exploration_seed_71             | differential             |  100242 |       90932 |      19500 |      80742 |                 532 | 90.71%     | 0.72%                   |
+| 2026-07-14 | fe6f0634        | witnesses                             | differential             |     262 |         258 |         10 |        252 |                   0 | 98.47%     | 1.45%                   |
+| 2026-07-15 | 7dd90ce8        | final_grch37_cache_seed37             | final-grch37             |  486464 |      486464 |          0 |     486464 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-15 | 7dd90ce8        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |   40732 |       40732 |          0 |      40732 |                   0 | 100.00%    | 0.01%                   |
+| 2026-07-15 | c361346f        | nmd_clinvar_chr21                     | ensembl116-grch38-final  | 1331664 |     1331664 |          0 |    1331664 |                   0 | 100.00%    | 0.00%                   |
 
 ## Randomized executable-VEP state exploration
 
@@ -311,3 +312,30 @@ counted once within each corpus.
 The source artifact hash and exact Ensembl core/variation build remain
 in `test/duckvep/conformance/data/conformance_history.csv` for audit and
 reruns.
+
+## Variant-induced NMD
+
+This is a separate executable differential against the pinned VEP
+Plugins release/116 `NMD.pm`. It compares `triggering`, `escaping`, and
+`unresolved` for every eligible transcript pair; it does not infer NMD
+from the core `NMD_transcript_variant` biotype consequence.
+
+| revision | corpus            | model                   | exact       | mismatches | not comparable | VEP unresolved | DuckVEP unresolved | resolved error upper 95% |
+|:---------|:------------------|:------------------------|:------------|-----------:|---------------:|---------------:|-------------------:|:-------------------------|
+| c361346f | nmd_clinvar_chr21 | ensembl116-grch38-final | 68554/68554 |          0 |              0 |          29416 |              29416 | 0.01%                    |
+
+The ledger keeps the prediction confusion matrix rather than only the
+total:
+
+| revision | corpus            | VEP_prediction | DuckVEP_prediction |     n |
+|:---------|:------------------|:---------------|:-------------------|------:|
+| c361346f | nmd_clinvar_chr21 | escaping       | escaping           |  6937 |
+| c361346f | nmd_clinvar_chr21 | triggering     | triggering         | 32201 |
+| c361346f | nmd_clinvar_chr21 | unresolved     | unresolved         | 29416 |
+
+VEP projects the complete uploaded `VariationFeature` for the plugin’s
+CDS and exon-position rules. DuckVEP therefore retains both geometries:
+minimized edit coordinates drive consequence and sequence changes, while
+the original feature endpoints drive NMD. A padded and a minimal allele
+can encode the same sequence edit but cross the plugin’s inclusive
+positional threshold differently.
