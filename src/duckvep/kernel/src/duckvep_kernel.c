@@ -32,6 +32,17 @@
 #define DUCKVEP_STRINGIFY_INNER(value) #value
 #define DUCKVEP_STRINGIFY(value) DUCKVEP_STRINGIFY_INNER(value)
 
+#if defined(__GNUC__) || defined(__clang__)
+#define DUCKVEP_NOINLINE __attribute__((noinline))
+#define DUCKVEP_HOT_ALIGN __attribute__((aligned(64)))
+#elif defined(_MSC_VER)
+#define DUCKVEP_NOINLINE __declspec(noinline)
+#define DUCKVEP_HOT_ALIGN
+#else
+#define DUCKVEP_NOINLINE
+#define DUCKVEP_HOT_ALIGN
+#endif
+
 const char *duckvep_kernel_version(void) {
     return DUCKVEP_STRINGIFY(DUCKVEP_KERNEL_VERSION_MAJOR) "."
            DUCKVEP_STRINGIFY(DUCKVEP_KERNEL_VERSION_MINOR) "."
@@ -59,12 +70,22 @@ struct duckvep_model {
     duckvep_transcript_model_t transcripts;
     duckvep_exon_model_t       exons;
     duckvep_sequence_pool_t    seq;
+    uint32_t                  *cds_cdna_start1;
+    uint32_t                  *cds_cdna_end1;
+    uint32_t                  *cds_start_exon_index;
+    uint8_t                   *cds_phase_offset;
     uint8_t                   *point_ordered;
     uint8_t                   *has_frameshift_intron;
     size_t                     max_transcripts_per_chrom;
     size_t                     max_cds_len;
     int                        has_seq;
 };
+
+static DUCKVEP_NOINLINE duckvep_status_t model_prepare_derived_layout(
+    struct duckvep_model              *model,
+    const duckvep_transcript_model_t  *transcripts,
+    const duckvep_exon_model_t        *exons,
+    duckvep_error_t                   *error);
 
 static int transcript_point_ordered(
     const duckvep_transcript_model_t *transcripts,
@@ -274,6 +295,7 @@ duckvep_status_t duckvep_model_open(
     duckvep_error_t                  *error) {
 
     struct duckvep_model *m;
+    duckvep_status_t status;
     size_t t;
     size_t chrom_run = 0u;
     size_t max_chrom_run = 0u;
@@ -720,26 +742,10 @@ duckvep_status_t duckvep_model_open(
     }
     m->transcripts = *transcripts;
     m->exons = *exons;
-    if (transcripts->transcript_count > 0u) {
-        m->point_ordered = (uint8_t *)calloc(transcripts->transcript_count,
-                                              sizeof *m->point_ordered);
-        m->has_frameshift_intron = (uint8_t *)calloc(
-            transcripts->transcript_count,
-            sizeof *m->has_frameshift_intron);
-        if (m->point_ordered == NULL || m->has_frameshift_intron == NULL) {
-            free(m->has_frameshift_intron);
-            free(m->point_ordered);
-            free(m);
-            return fail(error, DUCKVEP_ERR_INTERNAL, DVW_MODEL_OOM,
-                        "model derived-layout alloc failed");
-        }
-        for (t = 0u; t < transcripts->transcript_count; t++) {
-            m->point_ordered[t] = (uint8_t)transcript_point_ordered(
-                transcripts, exons, t);
-            m->has_frameshift_intron[t] =
-                (uint8_t)transcript_has_frameshift_intron(
-                    transcripts, exons, t);
-        }
+    status = model_prepare_derived_layout(m, transcripts, exons, error);
+    if (status != DUCKVEP_OK) {
+        duckvep_model_close(m);
+        return status;
     }
     m->max_transcripts_per_chrom = max_chrom_run;
     m->max_cds_len = max_cds_len;
@@ -755,6 +761,10 @@ void duckvep_model_close(duckvep_model_t *model) {
     if (model != NULL) {
         free(model->has_frameshift_intron);
         free(model->point_ordered);
+        free(model->cds_phase_offset);
+        free(model->cds_start_exon_index);
+        free(model->cds_cdna_end1);
+        free(model->cds_cdna_start1);
         free(model);
     }
 }
@@ -1277,7 +1287,10 @@ static void insertion_apply_region_boundaries(
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
  * a rule in duckvep_effect.c. */
-static int annotate_pair(uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
+/* This is the per-candidate hot loop. Keep its entry on one instruction-cache
+ * line so changes to one-time model preparation do not perturb common SNVs. */
+static DUCKVEP_HOT_ALIGN int annotate_pair(
+    uint32_t variant_idx, uint32_t tx_idx, void *vctx) {
     struct annotate_ctx *c = (struct annotate_ctx *)vctx;
     const duckvep_transcript_model_t *tx;
     uint32_t pos;
@@ -1948,4 +1961,84 @@ duckvep_status_t duckvep_annotate_tile(
     status = annotate_cursor_fill(cursor, results, 0, error);
     duckvep_annotate_cursor_close(cursor);
     return status;
+}
+
+/* Model preparation is deliberately kept after the annotation functions. It
+ * runs once per immutable model, while the functions above run for every
+ * variant/transcript pair. Keeping cold preparation code out of their layout
+ * also makes instruction-cache measurements stable when derived model fields
+ * are added. */
+static DUCKVEP_NOINLINE duckvep_status_t model_prepare_derived_layout(
+    struct duckvep_model              *model,
+    const duckvep_transcript_model_t  *transcripts,
+    const duckvep_exon_model_t        *exons,
+    duckvep_error_t                   *error) {
+
+    size_t t;
+
+    if (transcripts->transcript_count == 0u) return DUCKVEP_OK;
+    model->cds_cdna_start1 = (uint32_t *)calloc(
+        transcripts->transcript_count, sizeof *model->cds_cdna_start1);
+    model->cds_cdna_end1 = (uint32_t *)calloc(
+        transcripts->transcript_count, sizeof *model->cds_cdna_end1);
+    model->cds_start_exon_index = (uint32_t *)calloc(
+        transcripts->transcript_count, sizeof *model->cds_start_exon_index);
+    model->cds_phase_offset = (uint8_t *)calloc(
+        transcripts->transcript_count, sizeof *model->cds_phase_offset);
+    model->point_ordered = (uint8_t *)calloc(
+        transcripts->transcript_count, sizeof *model->point_ordered);
+    model->has_frameshift_intron = (uint8_t *)calloc(
+        transcripts->transcript_count, sizeof *model->has_frameshift_intron);
+    if (model->cds_cdna_start1 == NULL || model->cds_cdna_end1 == NULL ||
+        model->cds_start_exon_index == NULL ||
+        model->cds_phase_offset == NULL || model->point_ordered == NULL ||
+        model->has_frameshift_intron == NULL) {
+        return fail(error, DUCKVEP_ERR_INTERNAL, DVW_MODEL_OOM,
+                    "model derived-layout alloc failed");
+    }
+
+    for (t = 0u; t < transcripts->transcript_count; t++) {
+        uint32_t coding_start_genomic;
+        uint32_t coding_end_genomic;
+        size_t coding_start_exon = 0u;
+
+        model->point_ordered[t] = (uint8_t)transcript_point_ordered(
+            transcripts, exons, t);
+        model->has_frameshift_intron[t] =
+            (uint8_t)transcript_has_frameshift_intron(
+                transcripts, exons, t);
+        if (transcripts->cds_start1[t] == 0u) continue;
+        coding_start_genomic = transcripts->strand[t] > 0
+            ? transcripts->cds_start1[t] : transcripts->cds_end1[t];
+        coding_end_genomic = transcripts->strand[t] > 0
+            ? transcripts->cds_end1[t] : transcripts->cds_start1[t];
+        if (!model_genomic_to_cdna(
+                transcripts, exons, t, coding_start_genomic,
+                &model->cds_cdna_start1[t], &coding_start_exon) ||
+            !model_genomic_to_cdna(
+                transcripts, exons, t, coding_end_genomic,
+                &model->cds_cdna_end1[t], NULL) ||
+            coding_start_exon > UINT32_MAX ||
+            model->cds_cdna_end1[t] < model->cds_cdna_start1[t]) {
+            /* Topology-only models may describe a CDS span without the
+             * complete exon/cDNA relation needed for sequence projection.
+             * Keep that accepted model usable and leave this transcript on
+             * the exhaustive path. Sequence-backed coding models proved this
+             * relation during validation. */
+            model->cds_cdna_start1[t] = 0u;
+            model->cds_cdna_end1[t] = 0u;
+            continue;
+        }
+        model->cds_start_exon_index[t] = (uint32_t)coding_start_exon;
+        if (exons->phase != NULL && exons->phase[coding_start_exon] > 0) {
+            model->cds_phase_offset[t] =
+                (uint8_t)exons->phase[coding_start_exon];
+        }
+    }
+    model->transcripts.cds_cdna_start1 = model->cds_cdna_start1;
+    model->transcripts.cds_cdna_end1 = model->cds_cdna_end1;
+    model->transcripts.cds_start_exon_index =
+        model->cds_start_exon_index;
+    model->transcripts.cds_phase_offset = model->cds_phase_offset;
+    return DUCKVEP_OK;
 }

@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 11
+#define DUCKVEP_KERNEL_VERSION_MINOR 12
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -176,6 +176,15 @@ typedef struct duckvep_transcript_model {
     const uint32_t *cds_start1;    /* [transcript_count] 0 = non-coding        */
     const uint32_t *cds_end1;      /* [transcript_count]                       */
     size_t          transcript_count;
+    /* Optional model-open projection cache. A prepared kernel model fills
+     * these four arrays once from the validated exon/cDNA relation. Direct
+     * borrowed-view callers may leave them NULL; projection then uses the
+     * exon search reference path. Keeping the CDS cDNA origin here avoids
+     * re-projecting both CDS endpoints for every coding base. */
+    const uint32_t *cds_cdna_start1;       /* [transcript_count], 0 = non-coding */
+    const uint32_t *cds_cdna_end1;         /* [transcript_count]                  */
+    const uint32_t *cds_start_exon_index;  /* [transcript_count], absolute index  */
+    const uint8_t  *cds_phase_offset;      /* [transcript_count], 0/1/2           */
     /* Mature-miRNA attributes are projected to exonic genomic segments by the
      * model builder. `mature_mirna_offset` is a packed row-offset array of
      * length transcript_count + 1; transcript t owns segments in
