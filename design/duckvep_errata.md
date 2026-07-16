@@ -8,6 +8,45 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## BND topology stays local while truncation observes both overlap alleles
+
+VEP 116 does not evaluate a BND as two ordinary point variants. `BaseVCF4::get_start`
+shifts the local VCF `POS` by one. `StructuralVariationFeature::_parse_breakends` keeps the
+mate coordinate verbatim, and `StructuralVariationOverlap` can build an overlap allele for
+each endpoint within its fixed 5 kb admission distance. Ordinary transcript predicates
+still inspect the shifted local feature. Only `feature_truncation` inspects the current
+overlap allele's endpoint.
+
+The consequences are deliberately odd. A local intronic endpoint plus an intragenic mate
+can produce `feature_truncation&intron_variant`. A transcript found only through an
+interchromosomal mate produces `feature_truncation` with no local region. A mate near but
+outside a transcript can create an internal overlap allele whose predicate list falls back
+to `intergenic_variant`. The four VCF bracket orientations do not alter these transcript
+consequence sets.
+
+Raw VEP output may contain two allele rows for one BND/transcript. DuckVEP supplies both
+loci to one event, performs two cgranges candidate queries, evaluates ordinary topology
+once from the local feature, applies mate-aware truncation, and emits the union once per
+transcript. The rich SQL region is NULL when only the mate contributes; the compact region
+mask is zero. Raw ALT, orientation, event identity, and provenance remain ordinary
+relation columns for HGVS, fusion, and round-trip work.
+
+VEP's executable oracle has a separate batching hazard. `InputBuffer::interval_tree`
+inserts every mate position into the same coordinate tree as the local positions without
+a chromosome key. When several cross-chromosome BNDs share a buffer, neighboring records
+can therefore change another record's transcript set. This is not a per-event consequence
+rule. The differential runs BNDs with `buffer_size=1` in one VEP process, preserving cache
+reuse while isolating the event whose semantics are being compared. It also writes the VCF
+with chromosomes contiguous and positions increasing, using the FASTA index only as the
+deterministic chromosome order.
+
+The broader seeded GRCh38 differential covers chromosomes 1, 2, 7, 21, and X, all four
+bracket orientations, same- and cross-chromosome pairs, and transcript/exon/intron/CDS/flank
+endpoint states. Its 1,004 BND events produced 91,428 transcript pairs, all exact against
+isolated executable VEP 116 with no disagreement, extra row, or missing row. Source anchors
+are VEP 116 `InputBuffer::interval_tree` and `BaseVCF4::get_start`, plus Ensembl Variation
+116 `StructuralVariationFeature::_parse_breakends` and `StructuralVariationOverlap`.
+
 ## Terminal-stop fallbacks bypass Translation SeqEdits
 
 VEP applies supported Ensembl Translation SeqEdits to the reference peptide returned by

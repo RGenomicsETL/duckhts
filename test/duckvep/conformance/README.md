@@ -154,6 +154,29 @@ extend the claim to paired breakends, imprecise coordinates, repeat payloads, or
 species; add those as explicit event modes and strata rather than silently widening this
 one.
 
+Paired BNDs have their own generated mode because one event has two loci and cannot be
+represented as one structural span. It crosses same- and cross-chromosome endpoint pairs
+with all four bracket orientations and keeps raw ALT and orientation in the sampled VCF:
+
+```sh
+make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
+  --event-mode breakend \
+  --corpus bnd_grch38_seed31 \
+  --database /data/homo_sapiens_116_GRCh38.duckdb \
+  --model-sql '' \
+  --cache-dir /data/vep-cache \
+  --fasta /data/GRCh38.fa \
+  --assembly GRCh38 --species homo_sapiens \
+  --chrom 1,2,7,21,X --seed 31 --sample-per-shape 2"
+```
+
+The FASTA index supplies the deterministic VCF chromosome order. More importantly, the
+runner forces VEP's BND `buffer_size` to one while retaining one Perl process. VEP 116
+inserts mate positions from every buffered record into a coordinate-only interval tree;
+larger BND buffers can therefore make one event gain or lose transcripts because of its
+neighbors. The isolated five-chromosome run generated 1,004 events and matched all 91,428
+transcript pairs, with no disagreement, extra row, or missing row.
+
 Ensembl also publishes release VCFs whose `VE` and `CSQ` fields contain every consequence
 computed by its variation pipeline. DuckHTS reads their `Format=...` CSQ header directly;
 the full typed record and the narrower consequence-oracle projection can be measured with:

@@ -17,7 +17,7 @@
  *
  * Current scope includes validated VCF-shaped small variants plus single-interval
  * structural events. Structural operation and copy direction are explicit fields;
- * breakends still reject because they require a two-locus event representation.
+ * breakends use the separate paired-locus annotation path.
  */
 #ifndef DUCKVEP_VARIANT_TILE_H
 #define DUCKVEP_VARIANT_TILE_H

@@ -3516,7 +3516,9 @@ TEST sv_metadata_validity_matrix_known(void) {
 
     ASSERT(duckvep_sv_geometry_valid(DUCKVEP_SV_DELETION, 100u, 200u));
     ASSERT(duckvep_sv_geometry_valid(DUCKVEP_SV_INSERTION, 100u, 100u));
+    ASSERT(duckvep_sv_geometry_valid(DUCKVEP_SV_BREAKEND, 100u, 100u));
     ASSERT(!duckvep_sv_geometry_valid(DUCKVEP_SV_INSERTION, 100u, 101u));
+    ASSERT(!duckvep_sv_geometry_valid(DUCKVEP_SV_BREAKEND, 100u, 101u));
     ASSERT(!duckvep_sv_geometry_valid(
         DUCKVEP_SV_INSERTION, UINT32_MAX, UINT32_MAX));
     ASSERT(!duckvep_sv_geometry_valid(DUCKVEP_SV_DELETION, 0u, 1u));
@@ -5795,6 +5797,121 @@ TEST annotate_sv_cnv_known_scene(void) {
 
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
+TEST annotate_breakend_pairs_keep_local_topology_and_mate_truncation(void) {
+    static const uint16_t tchrom[2] = {0u, 1u};
+    static const uint32_t tstart[2] = {100u, 400u};
+    static const uint32_t tend[2] = {300u, 500u};
+    static const int8_t strand[2] = {1, 1};
+    static const uint64_t flags[2] = {0u, 0u};
+    static const uint32_t exoff[2] = {0u, 2u};
+    static const uint16_t excnt[2] = {2u, 1u};
+    static const uint32_t cds_s[2] = {120u, 0u};
+    static const uint32_t cds_e[2] = {280u, 0u};
+    static const uint32_t es[3] = {100u, 250u, 400u};
+    static const uint32_t ee[3] = {150u, 300u, 500u};
+    static const uint16_t vchrom[2] = {0u, 0u};
+    static const uint32_t vpos[2] = {99u, 300u};
+    static const uint32_t vend[2] = {99u, 300u};
+    static const uint16_t mate_chrom[2] = {0u, 1u};
+    static const uint32_t mate_pos[2] = {180u, 450u};
+    static const uint8_t kind[2] = {DUCKVEP_KIND_SV, DUCKVEP_KIND_SV};
+    static const uint8_t sv_type[2] = {
+        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND
+    };
+    static const uint8_t copy_change[2] = {
+        DUCKVEP_COPY_CHANGE_UNKNOWN, DUCKVEP_COPY_CHANGE_UNKNOWN
+    };
+    static const uint32_t pair_variant[3] = {0u, 1u, 1u};
+    static const uint32_t pair_tx[3] = {0u, 0u, 1u};
+    static const uint64_t expected[3] = {
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+            DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR),
+        DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION)
+    };
+    static const uint32_t expected_region[3] = {
+        DUCKVEP_REGION_UTR,
+        DUCKVEP_REGION_DOWNSTREAM,
+        0u
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_variant_batch_t variants;
+    duckvep_candidate_pairs_t pairs;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[3];
+    duckvep_result_builder_t results;
+    duckvep_error_t error;
+    size_t row;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&ex, 0, sizeof ex);
+    memset(&variants, 0, sizeof variants);
+    memset(&pairs, 0, sizeof pairs);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = strand; tx.flags = flags; tx.exon_offset = exoff;
+    tx.exon_count = excnt; tx.cds_start1 = cds_s; tx.cds_end1 = cds_e;
+    tx.transcript_count = 2u;
+    ex.start1 = es; ex.end1 = ee; ex.exon_count = 3u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
+    variants.mate_chrom_id = mate_chrom; variants.mate_pos1 = mate_pos;
+    variants.variant_kind = kind; variants.sv_type = sv_type;
+    variants.copy_change = copy_change; variants.count = 2u;
+    pairs.variant_idx = pair_variant; pairs.tx_idx = pair_tx; pairs.count = 3u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &ex, NULL, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_workspace_open(model, &workspace, &error));
+    duckvep_result_builder_init(&results, rows, 3u);
+    ASSERT_EQ(DUCKVEP_ERR_UNSUPPORTED,
+              duckvep_annotate_tile(model, &variants, options, workspace,
+                                    &results, &error));
+    duckvep_result_builder_reset(&results);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_pairs(model, &variants, &pairs, options,
+                                     workspace, &results, &error));
+    ASSERT_EQ(3u, duckvep_result_builder_count(&results));
+    for (row = 0u; row < 3u; row++) {
+        ASSERT_EQ(pair_variant[row], rows[row].variant_idx);
+        ASSERT_EQ(pair_tx[row], rows[row].tx_idx);
+        ASSERT_EQ(expected[row], rows[row].consequence_mask);
+        ASSERT_EQ(expected_region[row], rows[row].region_mask);
+    }
+    {
+        static const uint32_t duplicate_variant[2] = {0u, 0u};
+        static const uint32_t duplicate_tx[2] = {0u, 0u};
+        duckvep_candidate_pairs_t bad_pairs = pairs;
+
+        bad_pairs.variant_idx = duplicate_variant;
+        bad_pairs.tx_idx = duplicate_tx;
+        bad_pairs.count = 2u;
+        duckvep_result_builder_reset(&results);
+        ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG,
+                  duckvep_annotate_pairs(model, &variants, &bad_pairs,
+                                         options, workspace, &results, &error));
+    }
+    {
+        duckvep_variant_batch_t missing_mate = variants;
+        duckvep_candidate_pairs_t one_pair = pairs;
+
+        missing_mate.mate_chrom_id = NULL;
+        one_pair.count = 1u;
+        duckvep_result_builder_reset(&results);
+        ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG,
+                  duckvep_annotate_pairs(model, &missing_mate, &one_pair,
+                                         options, workspace, &results, &error));
+    }
+
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
     duckvep_model_close(model);
     PASS();
 }
@@ -9434,6 +9551,16 @@ TEST annotate_directional_distance_filter(void) {
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_UPSTREAM_GENE), rows[0].consequence_mask);
     ASSERT_EQ_FMT(2u, rows[1].variant_idx, "%u"); /* down50 kept */
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE), rows[1].consequence_mask);
+
+    duckvep_options_close(opts);
+    opts = NULL;
+    memset(&init, 0, sizeof init);
+    init.distances_are_explicit = 1u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &opts, &err));
+    duckvep_result_builder_reset(&rb);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(0u, duckvep_result_builder_count(&rb));
 
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
@@ -18455,6 +18582,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_structural_known_scene);
     RUN_TEST(annotate_padded_small_variants_use_differing_region_topology);
     RUN_TEST(annotate_sv_cnv_known_scene);
+    RUN_TEST(annotate_breakend_pairs_keep_local_topology_and_mate_truncation);
     RUN_TEST(annotate_sv_insertion_at_noncoding_exon_entrance);
     RUN_TEST(annotate_complete_neutral_sv_uses_transcript_fallbacks);
     RUN_TEST(annotate_region_mask_truthful_known_scene);

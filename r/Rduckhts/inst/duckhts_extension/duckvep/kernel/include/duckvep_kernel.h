@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 12
+#define DUCKVEP_KERNEL_VERSION_MINOR 13
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -111,17 +111,17 @@ typedef enum duckvep_copy_change {
     DUCKVEP_COPY_CHANGE_GAIN
 } duckvep_copy_change_t;
 
-/* Validate one single-locus structural operation/copy-direction pair. This is
- * shared by direct borrowed-view callers and adapter-side transport validation,
- * so contradictory compound semantics cannot enter the predicate kernel. BND is
- * metadata-valid here but remains unsupported by the one-interval executor. */
+/* Validate one structural operation/copy-direction pair. This is shared by
+ * direct borrowed-view callers and adapter-side transport validation, so
+ * contradictory compound semantics cannot enter the predicate kernel. */
 int duckvep_sv_metadata_valid(duckvep_sv_type_t sv_type,
                               duckvep_copy_change_t copy_change);
 
-/* Validate the single-locus geometry accepted by the borrowed SV batch.
- * Ordinary operations use an exact inclusive span. INSERTION uses start1=end1
- * as the interbase boundary after that reference base; event preparation turns
- * it into VEP's reversed P+1,P feature interval. */
+/* Validate the geometry accepted by the borrowed SV batch. Ordinary operations
+ * use an exact inclusive span. INSERTION uses start1=end1 as the interbase
+ * boundary after that reference base; event preparation turns it into VEP's
+ * reversed P+1,P feature interval. BND uses start1=end1 for its local VCF
+ * endpoint and additionally requires mate_chrom_id/mate_pos1. */
 int duckvep_sv_geometry_valid(duckvep_sv_type_t sv_type,
                               uint32_t start1, uint32_t end1);
 
@@ -158,8 +158,10 @@ typedef enum duckvep_tx_flag {
 
 typedef struct duckvep_variant_batch {
     const uint16_t *chrom_id;      /* [count] model-local contig ordinal      */
-    const uint32_t *pos1;          /* [count] 1-based start                    */
+    const uint32_t *pos1;          /* [count] 1-based start; raw local BND POS */
     const uint32_t *end1;          /* [count] 1-based inclusive end            */
+    const uint16_t *mate_chrom_id; /* OPTIONAL [count] BND mate contig         */
+    const uint32_t *mate_pos1;     /* OPTIONAL [count] raw BND mate position   */
     const uint32_t *ref_offset;    /* [count] byte offset into allele_bytes    */
     const uint16_t *ref_length;    /* [count]                                  */
     const uint32_t *alt_offset;    /* [count] byte offset into allele_bytes    */
@@ -171,6 +173,15 @@ typedef struct duckvep_variant_batch {
     const uint8_t  *copy_change;   /* OPTIONAL [count] duckvep_copy_change_t; CNV direction */
     size_t          count;
 } duckvep_variant_batch_t;
+
+/* Candidate pairs prepared by an external interval index or relational range
+ * join. Pairs are ordered and unique by (variant_idx, tx_idx); both indices
+ * address the borrowed views supplied to duckvep_annotate_pairs. */
+typedef struct duckvep_candidate_pairs {
+    const uint32_t *variant_idx;   /* [count] */
+    const uint32_t *tx_idx;        /* [count] */
+    size_t          count;
+} duckvep_candidate_pairs_t;
 
 typedef struct duckvep_transcript_model {
     const uint16_t *chrom_id;      /* [transcript_count]                       */
@@ -350,22 +361,25 @@ typedef struct duckvep_result_builder {
  * engine hardcodes them. Override per-call via duckvep_options_init_t. */
 #define DUCKVEP_DEFAULT_UPSTREAM_DIST          5000u /* up-/downstream gene window      */
 #define DUCKVEP_DEFAULT_DOWNSTREAM_DIST        5000u
+#define DUCKVEP_BREAKEND_ALLELE_DISTANCE       5000u /* VEP _close_to_feature cap       */
 #define DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC   3u    /* generic term: bases 1-3 in exon  */
 #define DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC 8u    /* generic term: bases 3-8 in intron */
 
 /* ----------------------------------------------------------- options init
  * Plain-old-data init descriptor; the opaque duckvep_options_t is prepared from
- * it once. Zero-initialize and override what you need (0 fields take the
- * DUCKVEP_DEFAULT_* values above at open time). */
+ * it once. Zero-initialize and override what you need. Distance zero selects
+ * the defaults unless distances_are_explicit is set, in which case zero
+ * disables that directional transcript reach. */
 typedef struct duckvep_options_init {
-    uint32_t upstream_dist;          /* 0 -> DUCKVEP_DEFAULT_UPSTREAM_DIST              */
-    uint32_t downstream_dist;        /* 0 -> DUCKVEP_DEFAULT_DOWNSTREAM_DIST            */
+    uint32_t upstream_dist;          /* default unless distances_are_explicit           */
+    uint32_t downstream_dist;        /* default unless distances_are_explicit           */
     /* Configure only the generic splice_region_variant reach. Essential
      * donor/acceptor, donor-fifth, donor-region, and polypyrimidine predicates
      * retain their VEP-116 coordinates. */
     uint32_t splice_region_exonic;   /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC       */
     uint32_t splice_region_intronic; /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC     */
     uint32_t halo;                   /* 0 -> max(upstream_dist, downstream_dist)        */
+    uint8_t  distances_are_explicit; /* preserve upstream/downstream zero               */
 } duckvep_options_init_t;
 
 /* ------------------------------------------------------------- entry points
@@ -475,6 +489,20 @@ duckvep_status_t duckvep_annotate_tile(
     duckvep_workspace_t            *workspace,
     duckvep_result_builder_t       *results,
     duckvep_error_t                *error);
+
+/* Evaluate an explicit, ordered set of event-transcript candidates. This is the
+ * two-locus BND entry point and the general join point for candidate discovery
+ * performed outside the sorted sweep. A BND row must carry both mate columns;
+ * ordinary sweep APIs reject BND because one local interval cannot discover
+ * transcripts around its mate. */
+duckvep_status_t duckvep_annotate_pairs(
+    const duckvep_model_t            *model,
+    const duckvep_variant_batch_t    *variants,
+    const duckvep_candidate_pairs_t  *pairs,
+    const duckvep_options_t          *options,
+    duckvep_workspace_t              *workspace,
+    duckvep_result_builder_t         *results,
+    duckvep_error_t                  *error);
 
 #ifdef __cplusplus
 }

@@ -29,6 +29,8 @@ typedef struct duckvep_scalar_state {
 	uint16_t *seq_regions;
 	uint32_t *positions;
 	uint32_t *ends;
+	uint16_t *mate_seq_regions;
+	uint32_t *mate_positions;
 	uint32_t *reference_offsets;
 	uint16_t *reference_lengths;
 	uint32_t *alternate_offsets;
@@ -40,6 +42,9 @@ typedef struct duckvep_scalar_state {
 	uint8_t *allele_bytes;
 	size_t variant_capacity;
 	size_t allele_capacity;
+	uint32_t *pair_variant_indices;
+	uint32_t *pair_transcript_indices;
+	size_t pair_capacity;
 	duckvep_consequence_t *results;
 	size_t result_count;
 	size_t result_capacity;
@@ -61,6 +66,8 @@ duckvep_scalar_variant_reserve(duckvep_scalar_state_t *state, size_t needed)
 	DUCKVEP_SCALAR_VARIANT_RESIZE(seq_regions);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(positions);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(ends);
+	DUCKVEP_SCALAR_VARIANT_RESIZE(mate_seq_regions);
+	DUCKVEP_SCALAR_VARIANT_RESIZE(mate_positions);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(reference_offsets);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(reference_lengths);
 	DUCKVEP_SCALAR_VARIANT_RESIZE(alternate_offsets);
@@ -71,6 +78,23 @@ duckvep_scalar_variant_reserve(duckvep_scalar_state_t *state, size_t needed)
 	DUCKVEP_SCALAR_VARIANT_RESIZE(transcript_coverage_complete);
 #undef DUCKVEP_SCALAR_VARIANT_RESIZE
 	state->variant_capacity = capacity;
+	return 1;
+}
+
+static int
+duckvep_scalar_pair_reserve(duckvep_scalar_state_t *state, size_t needed)
+{
+	size_t capacity;
+
+	if (needed <= state->pair_capacity)
+		return 1;
+	capacity = duckvep_sql_next_capacity(state->pair_capacity, needed);
+	if (!duckvep_sql_resize((void **)&state->pair_variant_indices,
+	    sizeof(*state->pair_variant_indices), capacity) ||
+	    !duckvep_sql_resize((void **)&state->pair_transcript_indices,
+	    sizeof(*state->pair_transcript_indices), capacity))
+		return 0;
+	state->pair_capacity = capacity;
 	return 1;
 }
 
@@ -139,6 +163,8 @@ duckvep_scalar_state_destroy(void *pointer)
 	free(state->seq_regions);
 	free(state->positions);
 	free(state->ends);
+	free(state->mate_seq_regions);
+	free(state->mate_positions);
 	free(state->reference_offsets);
 	free(state->reference_lengths);
 	free(state->alternate_offsets);
@@ -148,6 +174,8 @@ duckvep_scalar_state_destroy(void *pointer)
 	free(state->copy_changes);
 	free(state->transcript_coverage_complete);
 	free(state->allele_bytes);
+	free(state->pair_variant_indices);
+	free(state->pair_transcript_indices);
 	free(state->results);
 	free(state);
 }
@@ -552,7 +580,7 @@ duckvep_scalar_prepare_sv_batch(duckvep_scalar_state_t *state,
 		}
 		if (sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: BND requires paired two-locus input");
+			    "duckvep_annotate_sv: use duckvep_annotate_breakend with both loci");
 			return 0;
 		}
 		if (!duckvep_sv_metadata_valid((duckvep_sv_type_t)sv_type,
@@ -578,6 +606,75 @@ duckvep_scalar_prepare_sv_batch(duckvep_scalar_state_t *state,
 	batch->chrom_id = state->seq_regions;
 	batch->pos1 = state->positions;
 	batch->end1 = state->ends;
+	batch->variant_kind = state->variant_kinds;
+	batch->sv_type = state->sv_types;
+	batch->copy_change = state->copy_changes;
+	batch->count = (size_t)rows;
+	return 1;
+}
+
+static int
+duckvep_scalar_prepare_breakend_batch(duckvep_scalar_state_t *state,
+	duckdb_data_chunk input, duckvep_variant_batch_t *batch,
+	char *error, size_t error_size)
+{
+	duckdb_vector region_vector, position_vector;
+	duckdb_vector mate_region_vector, mate_position_vector;
+	uint32_t *regions, *mate_regions;
+	uint64_t *positions, *mate_positions;
+	uint64_t *region_validity, *position_validity;
+	uint64_t *mate_region_validity, *mate_position_validity;
+	idx_t row, rows;
+
+	rows = duckdb_data_chunk_get_size(input);
+	region_vector = duckdb_data_chunk_get_vector(input, 1);
+	position_vector = duckdb_data_chunk_get_vector(input, 2);
+	mate_region_vector = duckdb_data_chunk_get_vector(input, 3);
+	mate_position_vector = duckdb_data_chunk_get_vector(input, 4);
+	if (!duckvep_scalar_variant_reserve(state, (size_t)rows)) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: out of memory");
+		return 0;
+	}
+	regions = duckdb_vector_get_data(region_vector);
+	positions = duckdb_vector_get_data(position_vector);
+	mate_regions = duckdb_vector_get_data(mate_region_vector);
+	mate_positions = duckdb_vector_get_data(mate_position_vector);
+	region_validity = duckdb_vector_get_validity(region_vector);
+	position_validity = duckdb_vector_get_validity(position_vector);
+	mate_region_validity = duckdb_vector_get_validity(mate_region_vector);
+	mate_position_validity = duckdb_vector_get_validity(mate_position_vector);
+	for (row = 0; row < rows; row++) {
+		if (duckvep_validity_is_null(region_validity, row) ||
+		    duckvep_validity_is_null(position_validity, row) ||
+		    duckvep_validity_is_null(mate_region_validity, row) ||
+		    duckvep_validity_is_null(mate_position_validity, row)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_breakend: both loci are required");
+			return 0;
+		}
+		if (regions[row] > UINT16_MAX || mate_regions[row] > UINT16_MAX ||
+		    positions[row] == 0u || positions[row] >= UINT32_MAX ||
+		    mate_positions[row] == 0u || mate_positions[row] > UINT32_MAX) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_breakend: invalid one-based endpoint coordinate");
+			return 0;
+		}
+		state->seq_regions[row] = (uint16_t)regions[row];
+		state->positions[row] = (uint32_t)positions[row];
+		state->ends[row] = (uint32_t)positions[row];
+		state->mate_seq_regions[row] = (uint16_t)mate_regions[row];
+		state->mate_positions[row] = (uint32_t)mate_positions[row];
+		state->variant_kinds[row] = (uint8_t)DUCKVEP_KIND_SV;
+		state->sv_types[row] = (uint8_t)DUCKVEP_SV_BREAKEND;
+		state->copy_changes[row] = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+	}
+	memset(batch, 0, sizeof(*batch));
+	batch->chrom_id = state->seq_regions;
+	batch->pos1 = state->positions;
+	batch->end1 = state->ends;
+	batch->mate_chrom_id = state->mate_seq_regions;
+	batch->mate_pos1 = state->mate_positions;
 	batch->variant_kind = state->variant_kinds;
 	batch->sv_type = state->sv_types;
 	batch->copy_change = state->copy_changes;
@@ -675,6 +772,10 @@ duckvep_scalar_batch_slice(const duckvep_variant_batch_t *batch,
 	slice.chrom_id += begin;
 	slice.pos1 += begin;
 	slice.end1 += begin;
+	if (slice.mate_chrom_id != NULL)
+		slice.mate_chrom_id += begin;
+	if (slice.mate_pos1 != NULL)
+		slice.mate_pos1 += begin;
 	if (slice.ref_offset != NULL)
 		slice.ref_offset += begin;
 	if (slice.ref_length != NULL)
@@ -701,8 +802,6 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 	duckvep_options_init_t options_init;
 	duckvep_error_t kernel_error;
 	duckvep_status_t status;
-	uint32_t sweep_upstream_distance;
-	uint32_t sweep_downstream_distance;
 	uint32_t halo_distance;
 	uint32_t sequence_length;
 	size_t variant;
@@ -712,16 +811,8 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 		    "duckvep_annotate: upstream/downstream distance exceeds the uint32 kernel limit");
 		return 0;
 	}
-	/* The kernel uses zero to request its 5 kb default. For an exact public
-	 * direction, sweep one base on that side and discard its directional rows.
-	 * This keeps the cgranges seed and avoids restarting at the first transcript
-	 * for every exact-position DuckDB vector. */
-	sweep_upstream_distance = upstream_distance == 0 ?
-	    1u : (uint32_t)upstream_distance;
-	sweep_downstream_distance = downstream_distance == 0 ?
-	    1u : (uint32_t)downstream_distance;
-	halo_distance = sweep_upstream_distance > sweep_downstream_distance ?
-	    sweep_upstream_distance : sweep_downstream_distance;
+	halo_distance = upstream_distance > downstream_distance ?
+	    (uint32_t)upstream_distance : (uint32_t)downstream_distance;
 	if (!duckvep_scalar_model_region(&state->entry->model,
 	    batch->chrom_id[begin], &sequence_length)) {
 		duckvep_sql_set_error(error, error_size,
@@ -745,15 +836,16 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 		state->workspace = state->workspace_cache->workspace;
 	}
 	if (!state->have_options_distances ||
-	    state->options_upstream_distance != sweep_upstream_distance ||
-	    state->options_downstream_distance != sweep_downstream_distance) {
+	    state->options_upstream_distance != (uint32_t)upstream_distance ||
+	    state->options_downstream_distance != (uint32_t)downstream_distance) {
 		duckvep_options_close(state->options);
 		state->options = NULL;
 		state->have_options_distances = 0;
 		memset(&options_init, 0, sizeof(options_init));
-		options_init.upstream_dist = sweep_upstream_distance;
-		options_init.downstream_dist = sweep_downstream_distance;
+		options_init.upstream_dist = (uint32_t)upstream_distance;
+		options_init.downstream_dist = (uint32_t)downstream_distance;
 		options_init.halo = halo_distance;
+		options_init.distances_are_explicit = 1u;
 		memset(&kernel_error, 0, sizeof(kernel_error));
 		if (duckvep_options_open(&options_init, &state->options,
 		    &kernel_error) != DUCKVEP_OK) {
@@ -761,8 +853,8 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 			    kernel_error.message);
 			return 0;
 		}
-		state->options_upstream_distance = sweep_upstream_distance;
-		state->options_downstream_distance = sweep_downstream_distance;
+		state->options_upstream_distance = (uint32_t)upstream_distance;
+		state->options_downstream_distance = (uint32_t)downstream_distance;
 		state->have_options_distances = 1;
 	}
 	slice = duckvep_scalar_batch_slice(batch, begin, count);
@@ -801,11 +893,6 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 			duckvep_consequence_t row;
 
 			row = builder.rows[index];
-			if ((upstream_distance == 0 && (row.region_mask &
-			    DUCKVEP_REGION_UPSTREAM) != 0) ||
-			    (downstream_distance == 0 && (row.region_mask &
-			    DUCKVEP_REGION_DOWNSTREAM) != 0))
-				continue;
 			row.variant_idx += (uint32_t)begin;
 			row.gene_idx = state->entry->model.gene_indices[row.tx_idx];
 			state->results[write++] = row;
@@ -821,6 +908,190 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 		}
 	}
 	duckvep_annotate_cursor_close(cursor);
+	return 1;
+}
+
+static int
+duckvep_scalar_append_endpoint_candidates(duckvep_scalar_state_t *state,
+	uint16_t seq_region, uint32_t position, uint32_t halo_distance,
+	size_t *candidate_count, char *error, size_t error_size)
+{
+	duckvep_owned_model_t *model;
+	int32_t query_start, query_end;
+	int64_t hit_count, hit;
+	char region_name[16];
+
+	model = &state->entry->model;
+	if (!model->interval_index_complete || position > (uint32_t)INT32_MAX ||
+	    halo_distance > (uint32_t)INT32_MAX ||
+	    position > (uint32_t)INT32_MAX - halo_distance) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: resident transcript index cannot represent an endpoint");
+		return 0;
+	}
+	query_start = position > halo_distance + 1u ?
+	    (int32_t)(position - halo_distance - 1u) : 0;
+	query_end = (int32_t)(position + halo_distance);
+	(void)snprintf(region_name, sizeof(region_name), "%u",
+	    (unsigned)seq_region);
+	hit_count = cr_overlap(model->interval_index, region_name, query_start,
+	    query_end, &state->interval_hits, &state->interval_hit_capacity);
+	if (hit_count < 0 || (uint64_t)hit_count > SIZE_MAX - *candidate_count ||
+	    !duckvep_scalar_seed_reserve(state,
+	    *candidate_count + (size_t)hit_count)) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: could not collect endpoint transcripts");
+		return 0;
+	}
+	for (hit = 0; hit < hit_count; hit++)
+		state->seed_transcripts[(*candidate_count)++] =
+		    (uint32_t)cr_label(model->interval_index,
+		    state->interval_hits[hit]);
+	return 1;
+}
+
+static int
+duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
+	const duckvep_variant_batch_t *batch, size_t begin, size_t count,
+	uint64_t upstream_distance, uint64_t downstream_distance,
+	char *error, size_t error_size)
+{
+	duckvep_variant_batch_t slice;
+	duckvep_candidate_pairs_t pairs;
+	duckvep_options_init_t options_init;
+	duckvep_error_t kernel_error;
+	duckvep_result_builder_t builder;
+	duckvep_status_t status;
+	uint32_t halo_distance;
+	uint32_t search_distance;
+	size_t pair_count, variant, old_count, result;
+
+	if (upstream_distance > UINT32_MAX || downstream_distance > UINT32_MAX) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: transcript distance exceeds the uint32 kernel limit");
+		return 0;
+	}
+	halo_distance = upstream_distance > downstream_distance ?
+	    (uint32_t)upstream_distance : (uint32_t)downstream_distance;
+	search_distance = halo_distance < DUCKVEP_BREAKEND_ALLELE_DISTANCE ?
+	    halo_distance : DUCKVEP_BREAKEND_ALLELE_DISTANCE;
+	for (variant = begin; variant < begin + count; variant++) {
+		uint32_t local_length, mate_length;
+
+		state->transcript_coverage_complete[variant] = (uint8_t)
+		    state->entry->model.transcript_coverage_complete;
+		if (!duckvep_scalar_model_region(&state->entry->model,
+		    batch->chrom_id[variant], &local_length) ||
+		    !duckvep_scalar_model_region(&state->entry->model,
+		    batch->mate_chrom_id[variant], &mate_length)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_breakend: endpoint region is absent from the loaded model");
+			return 0;
+		}
+		if ((local_length != 0u && batch->pos1[variant] > local_length) ||
+		    (mate_length != 0u && batch->mate_pos1[variant] > mate_length)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_breakend: endpoint exceeds sequence-region length");
+			return 0;
+		}
+	}
+	if (state->workspace == NULL) {
+		state->workspace_cache = duckvep_registry_workspace_take(
+		    state->registry, state->entry, error, error_size);
+		if (state->workspace_cache == NULL)
+			return 0;
+		state->workspace = state->workspace_cache->workspace;
+	}
+	if (!state->have_options_distances ||
+	    state->options_upstream_distance != (uint32_t)upstream_distance ||
+	    state->options_downstream_distance != (uint32_t)downstream_distance) {
+		duckvep_options_close(state->options);
+		state->options = NULL;
+		state->have_options_distances = 0;
+		memset(&options_init, 0, sizeof(options_init));
+		options_init.upstream_dist = (uint32_t)upstream_distance;
+		options_init.downstream_dist = (uint32_t)downstream_distance;
+		options_init.halo = halo_distance;
+		options_init.distances_are_explicit = 1u;
+		memset(&kernel_error, 0, sizeof(kernel_error));
+		if (duckvep_options_open(&options_init, &state->options,
+		    &kernel_error) != DUCKVEP_OK) {
+			(void)snprintf(error, error_size,
+			    "duckvep_annotate_breakend: %s", kernel_error.message);
+			return 0;
+		}
+		state->options_upstream_distance = (uint32_t)upstream_distance;
+		state->options_downstream_distance = (uint32_t)downstream_distance;
+		state->have_options_distances = 1;
+	}
+
+	pair_count = 0u;
+	for (variant = 0u; variant < count; variant++) {
+		size_t candidate_count = 0u;
+		size_t candidate, unique_count;
+		uint32_t local_point = batch->pos1[begin + variant] + 1u;
+
+		if (!duckvep_scalar_append_endpoint_candidates(state,
+		    batch->chrom_id[begin + variant], local_point,
+		    search_distance, &candidate_count, error, error_size) ||
+		    !duckvep_scalar_append_endpoint_candidates(state,
+		    batch->mate_chrom_id[begin + variant],
+		    batch->mate_pos1[begin + variant], search_distance,
+		    &candidate_count, error, error_size))
+			return 0;
+		if (candidate_count > 1u)
+			qsort(state->seed_transcripts, candidate_count,
+			    sizeof(*state->seed_transcripts),
+			    duckvep_scalar_u32_compare);
+		unique_count = 0u;
+		for (candidate = 0u; candidate < candidate_count; candidate++) {
+			if (candidate == 0u || state->seed_transcripts[candidate] !=
+			    state->seed_transcripts[candidate - 1u])
+				state->seed_transcripts[unique_count++] =
+				    state->seed_transcripts[candidate];
+		}
+		if (unique_count > SIZE_MAX - pair_count ||
+		    !duckvep_scalar_pair_reserve(state, pair_count + unique_count)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_breakend: out of memory collecting candidate pairs");
+			return 0;
+		}
+		for (candidate = 0u; candidate < unique_count; candidate++) {
+			state->pair_variant_indices[pair_count] = (uint32_t)variant;
+			state->pair_transcript_indices[pair_count] =
+			    state->seed_transcripts[candidate];
+			pair_count++;
+		}
+	}
+	if (pair_count == 0u)
+		return 1;
+	old_count = state->result_count;
+	if (pair_count > SIZE_MAX - old_count ||
+	    !duckvep_scalar_result_reserve(state, old_count + pair_count)) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: out of memory growing results");
+		return 0;
+	}
+	slice = duckvep_scalar_batch_slice(batch, begin, count);
+	pairs.variant_idx = state->pair_variant_indices;
+	pairs.tx_idx = state->pair_transcript_indices;
+	pairs.count = pair_count;
+	duckvep_result_builder_init(&builder, state->results + old_count,
+	    state->result_capacity - old_count);
+	memset(&kernel_error, 0, sizeof(kernel_error));
+	status = duckvep_annotate_pairs(state->entry->model.kernel, &slice,
+	    &pairs, state->options, state->workspace, &builder, &kernel_error);
+	if (status != DUCKVEP_OK) {
+		(void)snprintf(error, error_size, "duckvep_annotate_breakend: %s",
+		    kernel_error.message);
+		return 0;
+	}
+	for (result = 0u; result < builder.count; result++) {
+		duckvep_consequence_t *row = &state->results[old_count + result];
+		row->variant_idx += (uint32_t)begin;
+		row->gene_idx = state->entry->model.gene_indices[row->tx_idx];
+	}
+	state->result_count = old_count + builder.count;
 	return 1;
 }
 
@@ -1058,12 +1329,14 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			result = &state->results[source];
 			transcript_indices[output_count] = result->tx_idx;
 			gene_indices[output_count] = result->gene_idx;
-			if (!duckvep_scalar_format_terms(result->consequence_mask,
-			    consequence, sizeof(consequence), &consequence_length) ||
-			    !duckvep_scalar_format_region(result->region_mask, region,
-			    sizeof(region), &region_length)) {
-				duckvep_sql_set_error(error, error_size,
-				    "duckvep_annotate: could not render a kernel result");
+			if (result->consequence_mask == 0u ||
+			    !duckvep_scalar_format_terms(result->consequence_mask,
+			    consequence, sizeof(consequence), &consequence_length)) {
+				(void)snprintf(error, error_size,
+				    "duckvep_annotate: could not render consequence mask "
+				    "0x%llx for variant %u transcript %u",
+				    (unsigned long long)result->consequence_mask,
+				    result->variant_idx, result->tx_idx);
 				return 0;
 			}
 			duckvep_scalar_assign_ascii(vectors[2], (idx_t)output_count,
@@ -1072,8 +1345,24 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			    (duckvep_impact_t)result->impact);
 			duckvep_scalar_assign_ascii(vectors[3], (idx_t)output_count,
 			    impact, strlen(impact));
-			duckvep_scalar_assign_ascii(vectors[4], (idx_t)output_count,
-			    region, region_length);
+			if (result->region_mask == 0u) {
+				/* A cross-contig breakend can affect a transcript only through
+				 * its mate. VEP then has no local topological region to report. */
+				duckvep_scalar_set_null(vectors[4], &validity[4],
+				    (idx_t)output_count);
+			} else {
+				if (!duckvep_scalar_format_region(result->region_mask,
+				    region, sizeof(region), &region_length)) {
+					(void)snprintf(error, error_size,
+					    "duckvep_annotate: could not render region mask "
+					    "0x%x for variant %u transcript %u",
+					    result->region_mask, result->variant_idx,
+					    result->tx_idx);
+					return 0;
+				}
+				duckvep_scalar_assign_ascii(vectors[4],
+				    (idx_t)output_count, region, region_length);
+			}
 			status = (result->flags &
 			    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED) != 0 ?
 			    "unresolved" : "supported";
@@ -1310,9 +1599,16 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 	return 1;
 }
 
+typedef enum duckvep_scalar_event_family {
+	DUCKVEP_SCALAR_SMALL = 0,
+	DUCKVEP_SCALAR_STRUCTURAL,
+	DUCKVEP_SCALAR_BREAKEND
+} duckvep_scalar_event_family_t;
+
 static void
 duckvep_annotate_scalar_execute(duckdb_function_info info,
-	duckdb_data_chunk input, duckdb_vector output, int compact, int structural)
+	duckdb_data_chunk input, duckdb_vector output, int compact,
+	duckvep_scalar_event_family_t event_family)
 {
 	duckvep_scalar_state_t *state;
 	duckvep_variant_batch_t batch;
@@ -1351,8 +1647,11 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 	}
 	model_vector = duckdb_data_chunk_get_vector(input, 0);
 	model_validity = duckdb_vector_get_validity(model_vector);
-	if (!(structural ?
+	if (!((event_family == DUCKVEP_SCALAR_STRUCTURAL) ?
 	    duckvep_scalar_prepare_sv_batch(state, input, &batch, error,
+	    sizeof(error)) :
+	    (event_family == DUCKVEP_SCALAR_BREAKEND) ?
+	    duckvep_scalar_prepare_breakend_batch(state, input, &batch, error,
 	    sizeof(error)) :
 	    duckvep_scalar_prepare_batch(state, input, &batch, error,
 	    sizeof(error))))
@@ -1360,7 +1659,7 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 	regions = state->seq_regions;
 	positions = state->positions;
 	column_count = duckdb_data_chunk_get_column_count(input);
-	distance_column = structural ? 6 : 5;
+	distance_column = event_family == DUCKVEP_SCALAR_STRUCTURAL ? 6 : 5;
 	upstream_distance_vector = column_count > distance_column ?
 	    duckdb_data_chunk_get_vector(input, distance_column) : NULL;
 	downstream_distance_vector = column_count > distance_column + 1 ?
@@ -1424,9 +1723,11 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 				break;
 			end++;
 		}
-		if (!duckvep_scalar_run(state, &batch, begin, end - begin,
+		if (!((event_family == DUCKVEP_SCALAR_BREAKEND ?
+		    duckvep_scalar_run_breakends : duckvep_scalar_run)(
+		    state, &batch, begin, end - begin,
 		    upstream_distance, downstream_distance,
-		    error, sizeof(error)))
+		    error, sizeof(error))))
 			goto failed;
 		begin = end;
 	}
@@ -1461,14 +1762,32 @@ static void
 duckvep_annotate_sv_scalar(duckdb_function_info info,
 	duckdb_data_chunk input, duckdb_vector output)
 {
-	duckvep_annotate_scalar_execute(info, input, output, 0, 1);
+	duckvep_annotate_scalar_execute(info, input, output, 0,
+	    DUCKVEP_SCALAR_STRUCTURAL);
 }
 
 static void
 duckvep_annotate_sv_compact_scalar(duckdb_function_info info,
 	duckdb_data_chunk input, duckdb_vector output)
 {
-	duckvep_annotate_scalar_execute(info, input, output, 1, 1);
+	duckvep_annotate_scalar_execute(info, input, output, 1,
+	    DUCKVEP_SCALAR_STRUCTURAL);
+}
+
+static void
+duckvep_annotate_breakend_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckvep_annotate_scalar_execute(info, input, output, 0,
+	    DUCKVEP_SCALAR_BREAKEND);
+}
+
+static void
+duckvep_annotate_breakend_compact_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckvep_annotate_scalar_execute(info, input, output, 1,
+	    DUCKVEP_SCALAR_BREAKEND);
 }
 
 static duckdb_logical_type
@@ -1539,24 +1858,36 @@ static void
 duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int distance_parameters, int compact, int structural)
+	int distance_parameters, int compact,
+	duckvep_scalar_event_family_t event_family)
 {
 	duckdb_scalar_function scalar;
 	duckdb_logical_type result_type;
+	const char *name;
 
 	scalar = duckdb_create_scalar_function();
 	result_type = compact ? duckvep_compact_annotation_list_type() :
 	    duckvep_annotation_list_type();
-	duckdb_scalar_function_set_name(scalar, structural ?
-	    (compact ? "duckvep_annotate_sv_compact" : "duckvep_annotate_sv") :
-	    (compact ? "duckvep_annotate_compact" : "duckvep_annotate"));
+	if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
+		name = compact ? "duckvep_annotate_sv_compact" :
+		    "duckvep_annotate_sv";
+	else if (event_family == DUCKVEP_SCALAR_BREAKEND)
+		name = compact ? "duckvep_annotate_breakend_compact" :
+		    "duckvep_annotate_breakend";
+	else
+		name = compact ? "duckvep_annotate_compact" :
+		    "duckvep_annotate";
+	duckdb_scalar_function_set_name(scalar, name);
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
 	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
 	duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	if (structural) {
+	if (event_family == DUCKVEP_SCALAR_STRUCTURAL) {
 		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
 		duckdb_scalar_function_add_parameter(scalar, varchar_type);
 		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	} else if (event_family == DUCKVEP_SCALAR_BREAKEND) {
+		duckdb_scalar_function_add_parameter(scalar, uinteger_type);
+		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
 	} else {
 		duckdb_scalar_function_add_parameter(scalar, varchar_type);
 		duckdb_scalar_function_add_parameter(scalar, varchar_type);
@@ -1570,9 +1901,13 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckvep_registry_retain(registry);
 	duckdb_scalar_function_set_extra_info(scalar, registry,
 	    duckvep_registry_release);
-	if (structural)
+	if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
 		duckdb_scalar_function_set_function(scalar, compact ?
 		    duckvep_annotate_sv_compact_scalar : duckvep_annotate_sv_scalar);
+	else if (event_family == DUCKVEP_SCALAR_BREAKEND)
+		duckdb_scalar_function_set_function(scalar, compact ?
+		    duckvep_annotate_breakend_compact_scalar :
+		    duckvep_annotate_breakend_scalar);
 	else
 		duckdb_scalar_function_set_function(scalar, compact ?
 		    duckvep_annotate_compact_scalar : duckvep_annotate_scalar);
@@ -1599,29 +1934,41 @@ register_duckvep_functions(duckdb_connection connection,
 	uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0, 0);
+	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0, 0);
+	    uinteger_type, ubigint_type, 1, 0, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0, 0);
+	    uinteger_type, ubigint_type, 2, 0, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1, 0);
+	    uinteger_type, ubigint_type, 0, 1, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1, 0);
+	    uinteger_type, ubigint_type, 1, 1, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1, 0);
+	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0, 1);
+	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_STRUCTURAL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0, 1);
+	    uinteger_type, ubigint_type, 1, 0, DUCKVEP_SCALAR_STRUCTURAL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0, 1);
+	    uinteger_type, ubigint_type, 2, 0, DUCKVEP_SCALAR_STRUCTURAL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1, 1);
+	    uinteger_type, ubigint_type, 0, 1, DUCKVEP_SCALAR_STRUCTURAL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1, 1);
+	    uinteger_type, ubigint_type, 1, 1, DUCKVEP_SCALAR_STRUCTURAL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1, 1);
+	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_STRUCTURAL);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_BREAKEND);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, 0, DUCKVEP_SCALAR_BREAKEND);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 0, DUCKVEP_SCALAR_BREAKEND);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, 1, DUCKVEP_SCALAR_BREAKEND);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, 1, DUCKVEP_SCALAR_BREAKEND);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_BREAKEND);
 	duckdb_destroy_logical_type(&varchar_type);
 	duckdb_destroy_logical_type(&uinteger_type);
 	duckdb_destroy_logical_type(&ubigint_type);
