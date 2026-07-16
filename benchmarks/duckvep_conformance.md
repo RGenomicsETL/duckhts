@@ -91,6 +91,15 @@ recorded.
 | 2026-07-15 | 7dd90ce8        | final_grch37_cache_seed37             | final-grch37             |  486464 |      486464 |          0 |     486464 |                   0 | 100.00%    | 0.00%                   |
 | 2026-07-15 | 7dd90ce8        | plasmodium-falciparum-vep63-seed11663 | plasmodium-falciparum-63 |   40732 |       40732 |          0 |      40732 |                   0 | 100.00%    | 0.01%                   |
 | 2026-07-15 | c361346f        | nmd_clinvar_chr21                     | ensembl116-grch38-final  | 1331664 |     1331664 |          0 |    1331664 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chr1_seed29              | differential             |  124896 |      124896 |          0 |     124896 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chr11_seed307            | differential             |  528847 |      528847 |          0 |     528847 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chr17_seed97             | differential             |  120821 |      120821 |          0 |     120821 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chr2_seed211             | differential             |  484044 |      484044 |          0 |     484044 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chr22_seed401            | differential             |  547182 |      547182 |          0 |     547182 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chr6_seed71              | differential             |  110704 |      110704 |          0 |     110704 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_chrX_seed113             | differential             |   98072 |       98072 |          0 |      98072 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | generated_sv_seed17                   | differential             |  126345 |      126345 |          0 |     126345 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 24a5cf2a        | state_exploration_seed_20260716       | differential             |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
 
 ## Randomized executable-VEP state exploration
 
@@ -104,42 +113,39 @@ with equal probability, with differing alleles up to 49 bases.
 
 | revision | seed     | pairs   | exact   | unresolved | resolved_disagreements | exact_error_upper_95_ppm |
 |:---------|:---------|:--------|:--------|:-----------|:-----------------------|:-------------------------|
-| 3c427df4 | 113      | 100,268 | 100,268 | 0          | 0                      | 36.8                     |
-| 3c427df4 | 197      | 100,268 | 100,268 | 0          | 0                      | 36.8                     |
-| 3c427df4 | 211      | 100,268 | 100,268 | 0          | 0                      | 36.8                     |
-| 3c427df4 | 71       | 100,268 | 100,268 | 0          | 0                      | 36.8                     |
-| 3c427df4 | combined | 401,072 | 401,072 | 0          | 0                      | 9.2                      |
+| 24a5cf2a | 20260716 | 100,268 | 100,268 | 0          | 0                      | 36.8                     |
+| 24a5cf2a | combined | 100,268 | 100,268 | 0          | 0                      | 36.8                     |
 
 The same campaign covered the following SO terms. Counts are term
 memberships, not distinct transcript pairs, because one pair may carry
 several terms and the four seeds deliberately retain the same fixed
 witnesses.
 
-| consequence_class                   | impact   | seeds_observed |      n | unresolved | term_mismatch | engine_extra | engine_missing |
-|:------------------------------------|:---------|---------------:|-------:|-----------:|--------------:|-------------:|---------------:|
-| intron_variant                      | MODIFIER |              4 | 155083 |          0 |             0 |            0 |              0 |
-| coding_sequence_variant             | MODIFIER |              4 | 102522 |          0 |             0 |            0 |              0 |
-| frameshift_variant                  | HIGH     |              4 |  65380 |          0 |             0 |            0 |              0 |
-| 5_prime_UTR_variant                 | MODIFIER |              4 |  59622 |          0 |             0 |            0 |              0 |
-| 3_prime_UTR_variant                 | MODIFIER |              4 |  55666 |          0 |             0 |            0 |              0 |
-| splice_donor_variant                | HIGH     |              4 |  51327 |          0 |             0 |            0 |              0 |
-| splice_acceptor_variant             | HIGH     |              4 |  46174 |          0 |             0 |            0 |              0 |
-| splice_donor_5th_base_variant       | LOW      |              4 |  44685 |          0 |             0 |            0 |              0 |
-| splice_polypyrimidine_tract_variant | LOW      |              4 |  41762 |          0 |             0 |            0 |              0 |
-| stop_gained                         | HIGH     |              4 |  34559 |          0 |             0 |            0 |              0 |
-| start_lost                          | HIGH     |              4 |  32496 |          0 |             0 |            0 |              0 |
-| splice_region_variant               | LOW      |              4 |  32338 |          0 |             0 |            0 |              0 |
-| splice_donor_region_variant         | LOW      |              4 |  18897 |          0 |             0 |            0 |              0 |
-| inframe_insertion                   | MODERATE |              4 |  17255 |          0 |             0 |            0 |              0 |
-| missense_variant                    | MODERATE |              4 |  17024 |          0 |             0 |            0 |              0 |
-| stop_lost                           | HIGH     |              4 |  14985 |          0 |             0 |            0 |              0 |
-| protein_altering_variant            | MODERATE |              4 |  10763 |          0 |             0 |            0 |              0 |
-| stop_retained_variant               | LOW      |              4 |   9846 |          0 |             0 |            0 |              0 |
-| inframe_deletion                    | MODERATE |              4 |   1652 |          0 |             0 |            0 |              0 |
-| downstream_gene_variant             | MODIFIER |              4 |   1647 |          0 |             0 |            0 |              0 |
-| start_retained_variant              | LOW      |              4 |   1310 |          0 |             0 |            0 |              0 |
-| synonymous_variant                  | LOW      |              4 |    446 |          0 |             0 |            0 |              0 |
-| intergenic_variant                  | MODIFIER |              4 |     63 |          0 |             0 |            0 |              0 |
+| consequence_class                   | impact   | seeds_observed |     n | unresolved | term_mismatch | engine_extra | engine_missing |
+|:------------------------------------|:---------|---------------:|------:|-----------:|--------------:|-------------:|---------------:|
+| intron_variant                      | MODIFIER |              1 | 27021 |          0 |             0 |            0 |              0 |
+| frameshift_variant                  | HIGH     |              1 | 19827 |          0 |             0 |            0 |              0 |
+| 5_prime_UTR_variant                 | MODIFIER |              1 | 13501 |          0 |             0 |            0 |              0 |
+| 3_prime_UTR_variant                 | MODIFIER |              1 | 12213 |          0 |             0 |            0 |              0 |
+| missense_variant                    | MODERATE |              1 | 11147 |          0 |             0 |            0 |              0 |
+| splice_region_variant               | LOW      |              1 | 10302 |          0 |             0 |            0 |              0 |
+| splice_polypyrimidine_tract_variant | LOW      |              1 |  9985 |          0 |             0 |            0 |              0 |
+| coding_sequence_variant             | MODIFIER |              1 |  7825 |          0 |             0 |            0 |              0 |
+| start_lost                          | HIGH     |              1 |  4832 |          0 |             0 |            0 |              0 |
+| stop_gained                         | HIGH     |              1 |  4592 |          0 |             0 |            0 |              0 |
+| splice_acceptor_variant             | HIGH     |              1 |  4534 |          0 |             0 |            0 |              0 |
+| splice_donor_variant                | HIGH     |              1 |  4310 |          0 |             0 |            0 |              0 |
+| inframe_insertion                   | MODERATE |              1 |  4156 |          0 |             0 |            0 |              0 |
+| protein_altering_variant            | MODERATE |              1 |  3384 |          0 |             0 |            0 |              0 |
+| splice_donor_region_variant         | LOW      |              1 |  3189 |          0 |             0 |            0 |              0 |
+| splice_donor_5th_base_variant       | LOW      |              1 |  3166 |          0 |             0 |            0 |              0 |
+| stop_lost                           | HIGH     |              1 |  2945 |          0 |             0 |            0 |              0 |
+| downstream_gene_variant             | MODIFIER |              1 |   709 |          0 |             0 |            0 |              0 |
+| inframe_deletion                    | MODERATE |              1 |   424 |          0 |             0 |            0 |              0 |
+| start_retained_variant              | LOW      |              1 |   410 |          0 |             0 |            0 |              0 |
+| stop_retained_variant               | LOW      |              1 |   381 |          0 |             0 |            0 |              0 |
+| synonymous_variant                  | LOW      |              1 |   269 |          0 |             0 |            0 |              0 |
+| intergenic_variant                  | MODIFIER |              1 |    25 |          0 |             0 |            0 |              0 |
 
 This distribution deliberately stresses local allele and boundary states
 on one engineered transcript. It does not replace the indexed-cache
