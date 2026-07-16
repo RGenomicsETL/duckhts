@@ -501,7 +501,7 @@ pair. `unresolved_term_memberships` is reported separately: an unresolved pair
 can still carry the exact VEP term set, and a multi-term pair appears once under
 each term.
 
-```{r so-frontier}
+```{r so-frontier, results='asis'}
 term_frontier <- term_counts[
   term_counts$term_mismatch > 0 | term_counts$unresolved > 0,
   c(
@@ -517,7 +517,11 @@ term_frontier <- term_frontier[order(
   -term_frontier$unresolved,
   term_frontier$consequence_class
 ), ]
-knitr::kable(term_frontier, row.names = FALSE)
+if (nrow(term_frontier)) {
+  knitr::kable(term_frontier, row.names = FALSE)
+} else {
+  cat("No SO-term mismatch or unresolved membership remains in the latest declared runs.\n")
+}
 ```
 
 Terms absent from this frontier table were exact and resolved everywhere they
