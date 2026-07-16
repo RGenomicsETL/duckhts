@@ -2,6 +2,17 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundle typed exact single-locus structural-event consequence functions
+  `duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)`; DBI
+  callers provide one-based inclusive spans for
+  DEL/DUP/TDUP/INV/CNV/UNKNOWN, or `start = end = P` for an INS after
+  reference base P, plus explicit copy direction. Contradictory metadata
+  and BND reduced to one locus fail as errors. The bundled consequence
+  mask now retains stable assignments for all 41 terms in VEP 116’s
+  registry, including regulatory-region and
+  transcription-factor-binding-site terms. Seeded structural-event
+  exploration generated 40,375 GRCh38 events and matched all 2,140,911
+  executable-VEP transcript pairs across eight chromosome/seed campaigns
 - bundled DuckVEP now matches the pinned VEP Plugins release/116 NMD
   implementation’s separate feature geometry: consequence and sequence
   changes use the minimized edit, while NMD CDS and exon-end rules use
