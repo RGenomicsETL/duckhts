@@ -520,6 +520,22 @@ are close. Haplotype-resolved HPRC assemblies can be loaded as separately receip
 or explicit paths; comparison to GRCh37/38 remains a mapping relation, not a chromosome-name
 alias.
 
+The annotation-model receipt is not enough to reproduce a long-read result. A callset
+receipt must also identify the read chemistry, basecaller and model, alignment reference
+and aligner, small-variant/SV caller versions and options, phasing method, and any callable
+or confidence masks. Agreeing `GT` and phase-set fields do not by themselves make
+overlapping records compatible. The phased executor must prove that their reference and
+alternate sequences form one consistent local haplotype or return an explicit edit-conflict
+result while retaining every source record.
+
+An assembled HPRC haplotype is useful truth evidence, but it is not automatically a
+DuckVEP model. Path-coordinate annotation additionally requires transcripts projected or
+annotated on that exact path, mapping confidence, and locus-level assembly QC; a nominally
+haplotype-resolved assembly can still carry a flagged collapse or misassembly. Incremental
+annotation therefore invalidates work by dependency: an independent new allele can be
+annotated alone, while a changed phase block, caller interpretation, transcript projection,
+or model receipt requires recomputing the affected transcript haplotypes.
+
 Sorted input bounds lifetime: a transcript's phased state can be finalized once the stream
 passes its end. Reference paths stay implicit; non-reference paths should share compact
 edit prefixes across samples and translate each distinct leaf once. GT/PS decoding,
@@ -713,16 +729,18 @@ extra, missing, or discordant row. The separate NMD-plugin differential is exact
 68,554 eligible transcript pairs, including the 29,416 states both implementations leave
 unresolved.
 
-On the final 644,427-transcript GRCh38 model, the current one-core compact measurements are
-about 856,000 input alleles/s for the GIAB topology sample, 332,000/s for repeated coding
-SNVs, 112,000/s for repeated coding non-SNVs, and 135,000/s for the repeated mixed coding
-set. The paired-breakend lane reaches about 74,000 semantic events/s and 6.92 million
-emitted transcript rows/s. These include stable-API list materialization and aggregation
-but exclude model load and input staging. The one-million-input-allele target is not met on
-the final model; the mixed lane's roughly 3.89 million emitted transcript rows/s is a
-second denominator, not a substitute for the site-rate target. Exact revisions, checksums,
-row counts, resource measurements, and conditions live in the generated
-[conformance report](../benchmarks/duckvep_conformance.md) and
+On the final 644,427-transcript GRCh38 model, the current adjacent one-core compact
+measurements are about 841,000 input alleles/s for the transcript-only GIAB topology sample
+and 801,000/s when the same run also loads all 1,383,580 admitted regulatory/motif features
+and emits their overlaps. The latter produces about 9.36 million output rows/s. The nearest
+recorded coding-focused baselines are about 332,000/s for repeated coding SNVs, 112,000/s
+for repeated coding non-SNVs, and 135,000/s for the repeated mixed coding set. The
+paired-breakend lane reaches about 74,000 semantic events/s and 6.92 million emitted
+transcript rows/s. These include stable-API list materialization and aggregation but exclude
+model load and input staging. The one-million-input-allele target is not met on the final
+model; output-row rates are a second denominator, not a substitute for the site-rate target.
+Exact revisions, checksums, row counts, resource measurements, and conditions live in the
+generated [conformance report](../benchmarks/duckvep_conformance.md) and
 [throughput report](../benchmarks/duckvep_throughput.md).
 
 Open conformance and throughput work is tracked at

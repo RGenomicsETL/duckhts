@@ -20,6 +20,35 @@ resources <- read.csv(
   check.names = FALSE
 )
 resources$revision <- substr(resources$source_revision, 1, 8)
+
+nearest_tested_ancestor <- function(revisions) {
+  revisions <- unique(revisions[nzchar(revisions)])
+  distance <- vapply(
+    revisions,
+    function(revision) {
+      is_ancestor <- system2(
+        "git",
+        c("-C", root, "merge-base", "--is-ancestor", revision, "HEAD"),
+        stdout = FALSE,
+        stderr = FALSE
+      )
+      if (is_ancestor != 0L) {
+        return(Inf)
+      }
+      as.numeric(system2(
+        "git",
+        c("-C", root, "rev-list", "--count", paste0(revision, "..HEAD")),
+        stdout = TRUE,
+        stderr = FALSE
+      ))
+    },
+    numeric(1)
+  )
+  if (!length(distance) || all(!is.finite(distance))) {
+    return(NA_character_)
+  }
+  revisions[[which.min(distance)]]
+}
 ```
 
 This benchmark drives either the rich `duckvep_annotate` result or the numeric
@@ -107,17 +136,29 @@ regulation_runs <- history[
   drop = FALSE
 ]
 if (nrow(regulation_runs)) {
-  regulation <- regulation_runs[nrow(regulation_runs), , drop = FALSE]
-  transcript_control <- history[
-    history$source_revision == regulation$source_revision &
-      history$workload == "ensembl116_grch38_final_giab_sites_hash40" &
+  transcript_controls <- history[
+    history$workload == "ensembl116_grch38_final_giab_sites_hash40" &
       history$output_mode == "compact" & history$threads == 1L,
+    ,
+    drop = FALSE
+  ]
+  comparison_revision <- nearest_tested_ancestor(intersect(
+    regulation_runs$source_revision,
+    transcript_controls$source_revision
+  ))
+  regulation <- regulation_runs[
+    regulation_runs$source_revision == comparison_revision,
+    ,
+    drop = FALSE
+  ]
+  transcript_control <- transcript_controls[
+    transcript_controls$source_revision == comparison_revision,
     ,
     drop = FALSE
   ]
   comparison <- rbind(
     transcript_control[nrow(transcript_control), , drop = FALSE],
-    regulation
+    regulation[nrow(regulation), , drop = FALSE]
   )
   if (nrow(comparison) == 2L) {
     regulation_table <- data.frame(
