@@ -2,21 +2,33 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundle dedicated `duckvep_annotate_breakend(...)` and
+  `duckvep_annotate_breakend_compact(...)` functions. DBI callers
+  provide both raw VCF loci in one row and retain raw ALT, bracket
+  orientation, event identity, and provenance as ordinary columns; the
+  bundled engine queries transcripts around both endpoints and returns
+  the VEP-116 consequence-set union once per transcript. Mate-only
+  consequences have NULL rich region / zero compact region mask. A
+  generated five-chromosome campaign matched all 91,428 isolated
+  executable-VEP transcript pairs from 1,004 events; the oracle uses one
+  BND per VEP buffer to prevent VEP 116’s chromosome-blind
+  mate-coordinate tree from making one record depend on neighboring
+  breakends
 - re-audit the bundled DuckVEP consequence path on the retained
   full-model GRCh38 ClinVar samples: all 287,836 coding-enriched and
   316,397 cross-chromosome transcript pairs match the indexed VEP 116
   cache, with no unresolved, extra, missing, or discordant rows
-- bundle typed exact single-locus structural-event consequence functions
+- bundle typed exact structural-span consequence functions
   `duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)`; DBI
   callers provide one-based inclusive spans for
   DEL/DUP/TDUP/INV/CNV/UNKNOWN, or `start = end = P` for an INS after
   reference base P, plus explicit copy direction. Contradictory metadata
-  and BND reduced to one locus fail as errors. The bundled consequence
-  mask now retains stable assignments for all 41 terms in VEP 116’s
-  registry, including regulatory-region and
-  transcription-factor-binding-site terms. Seeded structural-event
-  exploration generated 40,375 GRCh38 events and matched all 2,140,911
-  executable-VEP transcript pairs across eight chromosome/seed campaigns
+  fails as an error. The bundled consequence mask now retains stable
+  assignments for all 41 terms in VEP 116’s registry, including
+  regulatory-region and transcription-factor-binding-site terms. Seeded
+  structural-event exploration generated 40,375 GRCh38 events and
+  matched all 2,140,911 executable-VEP transcript pairs across eight
+  chromosome/seed campaigns
 - bundled DuckVEP now matches the pinned VEP Plugins release/116 NMD
   implementation’s separate feature geometry: consequence and sequence
   changes use the minimized edit, while NMD CDS and exon-end rules use
