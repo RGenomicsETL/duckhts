@@ -2263,10 +2263,17 @@ static duckvep_status_t annotate_cursor_fill(
             transcript_rc = duckvep_sweep_cursor_next(
                 &cursor->transcript_sweep, &transcript_variant_idx,
                 &cursor->tx_indices, &cursor->tx_count);
-            feature_rc = duckvep_sweep_cursor_next(
-                &cursor->interval_feature_sweep, &feature_variant_idx,
-                &cursor->interval_feature_indices,
-                &cursor->interval_feature_count);
+            if (cursor->model->interval_features.feature_count != 0u) {
+                feature_rc = duckvep_sweep_cursor_next(
+                    &cursor->interval_feature_sweep, &feature_variant_idx,
+                    &cursor->interval_feature_indices,
+                    &cursor->interval_feature_count);
+            } else {
+                feature_rc = transcript_rc;
+                feature_variant_idx = transcript_variant_idx;
+                cursor->interval_feature_indices = NULL;
+                cursor->interval_feature_count = 0u;
+            }
             if (transcript_rc < 0 || feature_rc < 0) {
                 duckvep_status_t sweep_status = transcript_rc < 0
                     ? cursor->transcript_sweep.status

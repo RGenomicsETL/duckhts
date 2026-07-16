@@ -775,10 +775,13 @@ duckvep_scalar_seed_cursor(duckvep_scalar_state_t *state,
 	duckvep_owned_model_t *model;
 
 	model = &state->entry->model;
-	return duckvep_scalar_seed_index(state, model->interval_index,
+	if (!duckvep_scalar_seed_index(state, model->interval_index,
 	    model->interval_index_complete, seq_region, position, halo_distance,
-	    cursor, 0, error, error_size) &&
-	    duckvep_scalar_seed_index(state, model->interval_feature_index,
+	    cursor, 0, error, error_size))
+		return 0;
+	if (model->interval_feature_count == 0u)
+		return 1;
+	return duckvep_scalar_seed_index(state, model->interval_feature_index,
 	    model->interval_feature_index_complete, seq_region, position, 0u,
 	    cursor, 1, error, error_size);
 }
@@ -1133,6 +1136,28 @@ duckvep_scalar_set_null(duckdb_vector vector, uint64_t **validity, idx_t row)
 }
 
 static void
+duckvep_scalar_set_null_range(duckdb_vector vector, uint64_t **validity,
+	size_t count)
+{
+	size_t words;
+
+	if (count == 0u)
+		return;
+	if (*validity == NULL) {
+		duckdb_vector_ensure_validity_writable(vector);
+		*validity = duckdb_vector_get_validity(vector);
+	}
+	words = (count + 63u) / 64u;
+	memset(*validity, 0, words * sizeof(**validity));
+}
+
+static void
+duckvep_scalar_set_valid(uint64_t *validity, idx_t row)
+{
+	validity[row / 64] |= UINT64_C(1) << (row % 64);
+}
+
+static void
 duckvep_scalar_assign_ascii(duckdb_vector vector, idx_t row,
 	const char *text, size_t length)
 {
@@ -1248,7 +1273,8 @@ duckvep_result_range_has_transcript(const duckvep_scalar_state_t *state,
 
 static int
 duckvep_scalar_prepare_output_list(duckvep_scalar_state_t *state,
-	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
+	duckdb_vector output, idx_t input_rows, size_t *prepared_output_count,
+	char *error, size_t error_size)
 {
 	duckdb_list_entry *lists;
 	size_t output_count, source, row;
@@ -1294,6 +1320,7 @@ duckvep_scalar_prepare_output_list(duckvep_scalar_state_t *state,
 			lists[row].length++;
 		output_count += lists[row].length;
 	}
+	*prepared_output_count = output_count;
 	return 1;
 }
 
@@ -1311,6 +1338,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	size_t output_count, source, row, column;
 
 	if (!duckvep_scalar_prepare_output_list(state, output, input_rows,
+	    &output_count,
 	    error, error_size))
 		return 0;
 	child = duckdb_list_vector_get_child(output);
@@ -1329,6 +1357,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	nmd_escape_last_exon = duckdb_vector_get_data(vectors[15]);
 	nmd_escape_penultimate_exon_end = duckdb_vector_get_data(vectors[16]);
 	regulation_feature_indices = duckdb_vector_get_data(vectors[17]);
+	duckvep_scalar_set_null_range(vectors[17], &validity[17], output_count);
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -1375,10 +1404,12 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 				duckvep_scalar_assign_ascii(vectors[6],
 				    (idx_t)output_count, "no_feature_in_loaded_model",
 				    sizeof("no_feature_in_loaded_model") - 1);
-			for (column = 7; column < 19; column++)
+			for (column = 7; column < 17; column++)
 				duckvep_scalar_set_null(vectors[column],
 				    &validity[column],
 				    (idx_t)output_count);
+			duckvep_scalar_set_null(vectors[18], &validity[18],
+			    (idx_t)output_count);
 			output_count++;
 		}
 		for (source = begin; source < end; source++, output_count++) {
@@ -1392,12 +1423,12 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
 				transcript_indices[output_count] = result->tx_idx;
 				gene_indices[output_count] = result->gene_idx;
-				duckvep_scalar_set_null(vectors[17], &validity[17],
-				    (idx_t)output_count);
 			} else {
 				duckvep_scalar_set_null(vectors[0], &validity[0],
 				    (idx_t)output_count);
 				duckvep_scalar_set_null(vectors[1], &validity[1],
+				    (idx_t)output_count);
+				duckvep_scalar_set_valid(validity[17],
 				    (idx_t)output_count);
 				regulation_feature_indices[output_count] =
 				    result->interval_feature_idx;
@@ -1579,6 +1610,7 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 	size_t output_count, source, row, column;
 
 	if (!duckvep_scalar_prepare_output_list(state, output, input_rows,
+	    &output_count,
 	    error, error_size))
 		return 0;
 	child = duckdb_list_vector_get_child(output);
@@ -1603,6 +1635,7 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 	nmd_escape_reasons = duckdb_vector_get_data(vectors[13]);
 	regulation_feature_indices = duckdb_vector_get_data(vectors[14]);
 	overlap_object_codes = duckdb_vector_get_data(vectors[15]);
+	duckvep_scalar_set_null_range(vectors[14], &validity[14], output_count);
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -1637,8 +1670,6 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 			nmd_prediction_codes[output_count] =
 			    DUCKVEP_NMD_NOT_APPLICABLE;
 			nmd_escape_reasons[output_count] = 0;
-			duckvep_scalar_set_null(vectors[14], &validity[14],
-			    (idx_t)output_count);
 			duckvep_scalar_set_null(vectors[15], &validity[15],
 			    (idx_t)output_count);
 			output_count++;
@@ -1654,12 +1685,12 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
 				transcript_indices[output_count] = result->tx_idx;
 				gene_indices[output_count] = result->gene_idx;
-				duckvep_scalar_set_null(vectors[14], &validity[14],
-				    (idx_t)output_count);
 			} else {
 				duckvep_scalar_set_null(vectors[0], &validity[0],
 				    (idx_t)output_count);
 				duckvep_scalar_set_null(vectors[1], &validity[1],
+				    (idx_t)output_count);
+				duckvep_scalar_set_valid(validity[14],
 				    (idx_t)output_count);
 				regulation_feature_indices[output_count] =
 				    result->interval_feature_idx;
