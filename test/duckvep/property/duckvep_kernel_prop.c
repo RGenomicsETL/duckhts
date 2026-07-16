@@ -1440,6 +1440,19 @@ TEST sweep_known_scene_exact_pairs(void) {
     PASS();
 }
 
+TEST sweep_rejects_null_transcript_model(void) {
+    duckvep_variant_batch_t variants;
+    duckvep_sweep_cursor_t cursor;
+    uint32_t active[1];
+    uint32_t candidates[1];
+
+    memset(&variants, 0, sizeof variants);
+    duckvep_sweep_cursor_init(&cursor, &variants, NULL, 0u,
+                              active, 1u, candidates, 1u);
+    ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, cursor.status);
+    PASS();
+}
+
 /* Event ends are not monotone when events are sorted by start. A wide first
  * event must see the distant transcript, but that span-only tail must not enter
  * the persistent point active set or poison the following short event. */
@@ -18865,6 +18878,7 @@ int main(int argc, char **argv) {
     RUN_TEST(event_normalization_matches_trim_oracle);
     RUN_TEST(sweep_vep_feature_span_candidates_match_oracle);
     RUN_TEST(sweep_known_scene_exact_pairs);
+    RUN_TEST(sweep_rejects_null_transcript_model);
     RUN_TEST(sweep_span_tail_does_not_poison_point_frontier);
     RUN_TEST(sweep_uses_full_span_only_for_structural_events);
     RUN_TEST(sweep_small_variant_differing_region_tail_is_not_persistent);

@@ -29,6 +29,9 @@ void duckvep_sweep_cursor_init(
         transcripts != NULL ? transcripts->end1 : NULL,
         transcripts != NULL ? transcripts->transcript_count : 0u,
         halo, active, active_cap, candidates, candidate_cap);
+    if (cursor != NULL && transcripts == NULL) {
+        cursor->status = DUCKVEP_ERR_INVALID_ARG;
+    }
 }
 
 void duckvep_interval_sweep_cursor_init(
