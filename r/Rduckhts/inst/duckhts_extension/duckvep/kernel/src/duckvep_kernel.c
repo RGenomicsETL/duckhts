@@ -1773,7 +1773,6 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     row->variant_idx = variant_idx;
     row->tx_idx = tx_idx;
     row->gene_idx = 0u; /* gene grouping is an adapter concern for now */
-    row->interval_feature_idx = UINT32_MAX;
     row->overlap_object_kind =
         (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
     row->consequence_mask = cmask;
@@ -1829,7 +1828,6 @@ static int annotate_interval_feature(uint32_t variant_idx,
     row = &c->results->rows[c->results->count++];
     memset(row, 0, sizeof *row);
     row->variant_idx = variant_idx;
-    row->tx_idx = UINT32_MAX;
     row->gene_idx = UINT32_MAX;
     row->interval_feature_idx = feature_idx;
     row->overlap_object_kind = feature_kind ==

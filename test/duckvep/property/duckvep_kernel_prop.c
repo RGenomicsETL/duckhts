@@ -3160,7 +3160,6 @@ static int interval_feature_kernel_observations(
             if (count >= capacity ||
                 row.overlap_object_kind ==
                     (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT ||
-                row.tx_idx != UINT32_MAX ||
                 row.interval_feature_idx >= features->feature_count)
                 goto done;
             observed[count].variant_idx = row.variant_idx;

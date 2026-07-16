@@ -339,7 +339,13 @@ typedef enum duckvep_nmd_escape_bit {
 
 typedef struct duckvep_consequence {
     uint32_t variant_idx;
-    uint32_t tx_idx;
+    /* Tagged by overlap_object_kind. A row cannot refer to a transcript and a
+     * core interval feature at once, so keeping two ordinals would enlarge
+     * every hot result record for an impossible state. */
+    union {
+        uint32_t tx_idx;
+        uint32_t interval_feature_idx;
+    };
     uint32_t gene_idx;
 
     uint64_t consequence_mask;     /* SO terms as a bitset (duckvep_so.h)      */
@@ -357,10 +363,6 @@ typedef struct duckvep_consequence {
     uint8_t  aa_ref;
     uint8_t  aa_alt;
 
-    /* Transcript rows use tx_idx and set interval_feature_idx to UINT32_MAX.
-     * Regulatory/motif rows do the inverse. overlap_object_kind makes this
-     * explicit without stealing bits from either dense index. */
-    uint32_t interval_feature_idx;
     uint8_t  overlap_object_kind;
 } duckvep_consequence_t;
 
