@@ -28,8 +28,10 @@
 
 typedef struct duckvep_event {
     uint16_t chrom_id;
+    uint16_t mate_chrom_id;
     uint32_t raw_start1;
     uint32_t raw_end1;
+    uint32_t mate_pos1;
     uint32_t feature_start1;  /* VEP VariationFeature start; may exceed end */
     uint32_t feature_end1;
     uint32_t start1;          /* fully trimmed semantic edit coordinate */
@@ -46,6 +48,7 @@ typedef struct duckvep_event {
     uint8_t  kind;
     uint8_t  sv_type;
     uint8_t  copy_change;
+    uint8_t  has_mate;
 } duckvep_event_t;
 
 typedef enum duckvep_event_anchor {
@@ -334,6 +337,9 @@ static inline uint8_t duckvep_event_copy_change_at(
 static inline void duckvep_event_load(
     const duckvep_variant_batch_t *batch, size_t idx, duckvep_event_t *event) {
     event->chrom_id = batch->chrom_id[idx];
+    event->mate_chrom_id = 0u;
+    event->mate_pos1 = 0u;
+    event->has_mate = 0u;
     event->kind = batch->variant_kind != NULL ? batch->variant_kind[idx]
                                                : (uint8_t)DUCKVEP_KIND_SV;
     event->sv_type = duckvep_event_sv_type_at(batch, idx);
@@ -354,6 +360,22 @@ static inline void duckvep_event_load(
             event->insertion_boundary0 = event->raw_start1;
             event->interbase = 1u;
             event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_LEFT;
+        } else if (event->kind == (uint8_t)DUCKVEP_KIND_SV &&
+                   event->sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
+            /* BaseVCF4::get_start removes the local VCF anchor by advancing
+             * POS once. StructuralVariationFeature::_parse_breakends retains
+             * the mate coordinate verbatim. This asymmetry is observable in
+             * VEP 116 consequence predicates. */
+            event->feature_start1 = event->raw_start1 == UINT32_MAX
+                ? UINT32_MAX : event->raw_start1 + 1u;
+            event->feature_end1 = event->feature_start1;
+            event->start1 = event->feature_start1;
+            event->end1 = event->feature_start1;
+            if (batch->mate_chrom_id != NULL && batch->mate_pos1 != NULL) {
+                event->mate_chrom_id = batch->mate_chrom_id[idx];
+                event->mate_pos1 = batch->mate_pos1[idx];
+                event->has_mate = 1u;
+            }
         }
     } else {
         duckvep_event_load_small_differing_region(batch, idx, event);

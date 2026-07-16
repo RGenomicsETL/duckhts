@@ -476,16 +476,46 @@ not one lossy event shape. Deletion, duplication, inversion, CNV, breakend pairs
 sequence, and repeat changes retain their typed geometry. A breakend is two loci, not a
 wide interval or symbolic point.
 
-`duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)` accept exact
-single-locus events plus a typed DEL, DUP, tandem-DUP, INV, INS, CNV, or unknown operation
-and an explicit loss/neutral/gain/unknown copy direction. Span operations use one-based
-inclusive start/end coordinates. An insertion uses `start = end = P` for the interbase
-site after reference base `P`; preparing symbolic VCF therefore removes the left anchor,
-maps a span to `start = POS + 1, end = INFO/END`, and maps an insertion to `P = POS`.
-The adapter rejects contradictory operation/direction pairs before entering the kernel.
-These functions use the same sorted transcript sweep and rich/compact result contracts as
-independent small variants; symbolic REF/ALT strings are not used as a second structural
-parser.
+`duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)` accept exact single-locus
+events plus a typed DEL, DUP, tandem-DUP, INV, INS, CNV, or unknown operation and an
+explicit loss/neutral/gain/unknown copy direction. Span operations use one-based inclusive
+start/end coordinates. An insertion uses `start = end = P` for the interbase site after
+reference base `P`; preparing symbolic VCF therefore removes the left anchor, maps a span
+to `start = POS + 1, end = INFO/END`, and maps an insertion to `P = POS`. The adapter
+rejects contradictory operation/direction pairs. BND is rejected because it is not a
+single-locus event.
+
+`duckvep_annotate_breakend(...)` and its compact form accept the local and mate regions and
+raw one-based VCF positions in one row. They query the resident cgranges transcript index
+around both loci, merge and deduplicate the transcript candidates, and call the shared C
+evaluator with explicit variant/transcript pairs. This is intentionally separate from the
+sorted single-locus sweep: neither a wide span nor two independent endpoint calls can
+reproduce VEP 116.
+
+The exact VEP state is asymmetric. `BaseVCF4::get_start` moves the local BND `POS` to
+`POS + 1`; `StructuralVariationFeature::_parse_breakends` retains the mate coordinate.
+Ordinary intron, exon, UTR, splice, and coding predicates use only that shifted local
+feature. Candidate discovery also creates an overlap allele for the mate, but the mate
+changes transcript consequences only through the exceptional `feature_truncation`
+predicate. VEP may therefore emit two internal overlap-allele rows for one BND and
+transcript. DuckVEP returns their consequence-set union once. A transcript reached only
+through the mate has a zero region mask and NULL rich region because no local topology
+exists.
+
+The surrounding DuckDB relation retains event identity, bracket orientation, raw ALT, and
+provenance for HGVS, fusion, and round-trip consumers. Orientation does not change the
+transcript consequence set, so it is not an ignored kernel argument. The C lane preserves
+VEP's fixed 5 kb endpoint admission cap in addition to the configured directional
+upstream/downstream distances. A seeded executable differential covering chromosomes 1,
+2, 7, 21, and X, all four bracket orientations, same- and cross-chromosome pairs, and
+transcript/exon/intron/CDS/flank endpoint states matched all 91,428 transcript pairs from
+1,004 generated events.
+
+That differential isolates every BND in VEP with `buffer_size=1`. VEP 116 otherwise puts
+mate coordinates from several records into one chromosome-blind interval tree, so a
+neighboring BND can change the executable oracle's transcript set. One VEP process is
+retained for cache reuse; only the semantic event buffer is isolated. Chromosomes stay
+contiguous and positions increase within each chromosome in the generated VCF.
 
 The public SO mask now binds all 41 terms registered by VEP 116. Six regulatory-region and
 transcription-factor-binding-site terms are produced by a separate interval-feature
@@ -495,10 +525,14 @@ arrays. Importing those Ensembl regulation relations and exposing the joined-pai
 adapter remain open. `sequence_variant`, the forty-first registry term, has no VEP overlap
 predicate and is retained as metadata rather than emitted to hide an incomplete model.
 
-BND, inserted-sequence payloads, imprecise confidence intervals, and STR repeat-unit/count
-changes still need dedicated inputs and differentials. In particular, BND is rejected by
-the one-locus SQL function instead of being collapsed to a wide interval. That work is
-tracked at https://github.com/RGenomicsETL/duckhts/issues/98.
+Raw BND ALT parsing, inserted-sequence payloads, imprecise confidence intervals, and STR
+repeat-unit/count preparation remain outside the consequence kernel. The BND statistical
+differential is now part of the executable-VEP harness; broader chromosome, species, and
+real fusion corpora remain continuing evidence rather than a second implementation.
+STR records whose repeat unit and count expand to an ordinary small edit should enter the
+existing small-variant path once per allele; oversized or underspecified repeats still
+need a typed structural input. This work is tracked at
+https://github.com/RGenomicsETL/duckhts/issues/98.
 
 ## HGVS
 
@@ -523,8 +557,9 @@ not allocate HGVS strings. Rendering is late, after filtering. Before a public p
 is fixed, the projected-edit sidecar and external VEP-116 HGVS differential must cover
 both shift routines, both strands, exon/intron/UTR positions, repeat runs, position-one
 right anchors, and compound edits. Apply-then-diff sequence equivalence is an independent
-property oracle. Exact structural HGVS can later consume typed exact events; imprecise SV
-and BND remain explicit unsupported states until their complete geometry is present.
+property oracle. Exact structural HGVS can later consume typed exact events. BND HGVS
+additionally needs the paired relation's mate and orientation facts; imprecise structural
+events remain unsupported until their confidence geometry is represented.
 
 ## Supplementary annotations
 
@@ -569,7 +604,11 @@ belong as ignored arguments in the consequence-kernel API.
   1, 2, 6, 11, 17, 21, 22, and X and compared 2,140,911 emitted transcript pairs with the
   executable indexed VEP 116 cache. Every pair was resolved and exact, with no missing or
   extra emission. This is evidence for the sampled exact single-locus states, not a claim
-  for BND, imprecise coordinates, STR payloads, or untested species.
+  for imprecise coordinates, STR payloads, or untested species.
+- The paired-BND campaign generated 1,004 same- and cross-chromosome events on chromosomes
+  1, 2, 7, 21, and X and matched all 91,428 isolated executable-VEP transcript pairs.
+  BND oracle buffers contain one event because VEP's chromosome-blind mate-coordinate tree
+  otherwise makes a record's output depend on neighboring BNDs.
 - `make bench-duckvep-release-parquet` reads the official Ensembl variation consequence
   VCF through typed CSQ columns and records complete versus consequence-only Parquet size,
   checksum, cardinality, and elapsed time without committing the large artifacts.

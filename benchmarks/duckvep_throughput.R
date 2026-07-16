@@ -45,6 +45,13 @@ op <- add_option(
   default = "bench_variants",
   help = "prepared variant relation in --database [%default]"
 )
+op <- add_option(
+  op,
+  "--event-mode",
+  dest = "event_mode",
+  default = "small",
+  help = "prepared event shape: small or breakend [%default]"
+)
 op <- add_option(op, "--output", default = "rich")
 op <- add_option(op, "--workload-name", dest = "workload_name", default = "")
 op <- add_option(op, "--variants", type = "double", default = 10000000)
@@ -81,6 +88,9 @@ if (opt$threads < 1L) {
 if (!opt$output %in% c("rich", "compact")) {
   die("--output must be rich or compact")
 }
+if (!opt$event_mode %in% c("small", "breakend")) {
+  die("--event-mode must be small or breakend")
+}
 production <- nzchar(opt$database)
 inputs <- c(opt$extension, if (production) opt$database else opt$model_sql)
 missing <- inputs[!file.exists(inputs)]
@@ -103,13 +113,18 @@ invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 model_name <- "throughput"
 if (production) {
   variants_table <- identifier_q(opt$variants_table)
+  event_projection <- if (identical(opt$event_mode, "breakend")) {
+    "seq_region, \"position\", mate_seq_region, mate_position"
+  } else {
+    "seq_region, \"position\", \"reference\", \"alternate\""
+  }
   invisible(dbExecute(
     con,
     glue(
       "CREATE OR REPLACE TEMP TABLE duckvep_throughput_variants AS
-       SELECT seq_region, \"position\", \"reference\", \"alternate\"
+       SELECT {event_projection}
        FROM {variants_table}
-       ORDER BY seq_region, \"position\", \"reference\", \"alternate\"
+       ORDER BY seq_region, \"position\"
        LIMIT {variant_sql}"
     )
   ))
@@ -245,11 +260,20 @@ if (!identical(loaded, TRUE)) {
 
 annotation_query <- function(n) {
   input <- if (production) {
+    columns <- if (identical(opt$event_mode, "breakend")) {
+      "seq_region, \"position\", mate_seq_region, mate_position"
+    } else {
+      "seq_region, \"position\", \"reference\", \"alternate\""
+    }
     glue(
-      "SELECT seq_region, \"position\", \"reference\", \"alternate\"
-       FROM duckvep_throughput_variants
-       ORDER BY seq_region, \"position\", \"reference\", \"alternate\"
-       LIMIT {n}"
+      "SELECT {columns} FROM duckvep_throughput_variants
+       ORDER BY seq_region, \"position\" LIMIT {n}"
+    )
+  } else if (identical(opt$event_mode, "breakend")) {
+    glue(
+      "SELECT 1::UINTEGER AS seq_region, 159::UBIGINT AS \"position\",
+              1::UINTEGER AS mate_seq_region, 170::UBIGINT AS mate_position
+       FROM range({n})"
     )
   } else {
     glue(
@@ -259,7 +283,13 @@ annotation_query <- function(n) {
        FROM range({n}) r(i)"
     )
   }
-  function_name <- if (opt$output == "compact") {
+  function_name <- if (identical(opt$event_mode, "breakend")) {
+    if (opt$output == "compact") {
+      "duckvep_annotate_breakend_compact"
+    } else {
+      "duckvep_annotate_breakend"
+    }
+  } else if (opt$output == "compact") {
     "duckvep_annotate_compact"
   } else {
     "duckvep_annotate"
@@ -269,10 +299,15 @@ annotation_query <- function(n) {
   } else {
     "CAST(sum(length(annotation.consequence)) AS VARCHAR)"
   }
+  function_arguments <- if (identical(opt$event_mode, "breakend")) {
+    "seq_region, \"position\", mate_seq_region, mate_position"
+  } else {
+    "seq_region, \"position\", \"reference\", \"alternate\""
+  }
   glue(
     "WITH variants AS ({input}), annotated AS (
        SELECT unnest({function_name}(
-         {sql_q(model_name)}, seq_region, \"position\", \"reference\", \"alternate\",
+         {sql_q(model_name)}, {function_arguments},
          5000::UBIGINT
        )) AS annotation
        FROM variants

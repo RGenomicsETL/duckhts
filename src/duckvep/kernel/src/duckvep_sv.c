@@ -172,6 +172,9 @@ int duckvep_sv_geometry_valid(duckvep_sv_type_t sv_type,
     if (sv_type == DUCKVEP_SV_INSERTION) {
         return start1 == end1 && start1 != UINT32_MAX;
     }
+    if (sv_type == DUCKVEP_SV_BREAKEND) {
+        return start1 == end1;
+    }
     return 1;
 }
 
@@ -206,6 +209,23 @@ duckvep_sv_effect_t duckvep_sv_effect_fill(
     st.chromosome_breakpoint =
         (uint8_t)(event->sv_type == (uint8_t)DUCKVEP_SV_BREAKEND);
 
+    if (st.chromosome_breakpoint) {
+        int local_inside = event->chrom_id == transcripts->chrom_id[tx_idx] &&
+            event->feature_start1 >= transcripts->start1[tx_idx] &&
+            event->feature_start1 <= transcripts->end1[tx_idx];
+        int mate_inside = event->has_mate &&
+            event->mate_chrom_id == transcripts->chrom_id[tx_idx] &&
+            event->mate_pos1 >= transcripts->start1[tx_idx] &&
+            event->mate_pos1 <= transcripts->end1[tx_idx];
+
+        /* StructuralVariationOverlap builds one alternate allele for every
+         * close endpoint. feature_truncation is the exceptional predicate that
+         * inspects that allele's endpoint instead of the local feature. The
+         * compact transcript row is their consequence-set union. */
+        st.feature_truncation = (uint8_t)(local_inside || mate_inside);
+        if (event->chrom_id != transcripts->chrom_id[tx_idx]) return st;
+    }
+
     st.feature_ablation =
         (uint8_t)(region->complete_overlap_feature && st.deletion);
     st.feature_amplification =
@@ -214,12 +234,10 @@ duckvep_sv_effect_t duckvep_sv_effect_fill(
         (uint8_t)(region->within_cdna && region->complete_within_feature &&
                   (st.copy_number_gain || st.insertion));
 
-    /* VEP treats a chromosome breakpoint specially: a local breakend inside the
-     * feature truncates it even when the point is intronic. Other losses/deletions
-     * must overlap cDNA and be partial-overlap or wholly within the feature. */
-    if (st.chromosome_breakpoint) {
-        st.feature_truncation = region->within_feature;
-    } else {
+    /* Other losses/deletions must overlap cDNA and be partial-overlap or wholly
+     * within the feature. Breakpoint truncation was resolved from both loci
+     * above and must not be overwritten by the local region state. */
+    if (!st.chromosome_breakpoint) {
         st.feature_truncation =
             (uint8_t)(region->within_cdna &&
                       (region->partial_overlap_feature ||

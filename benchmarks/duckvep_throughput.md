@@ -24,6 +24,12 @@ favours warm model and sequence caches, so these rows measure the
 resident execution lanes, not file ingestion or an end-to-end genome
 run.
 
+The paired-breakend workload repeats the 1,004-event multichromosome
+seed-31 VEP differential to 200,000 sorted endpoint pairs. Both
+endpoints participate in candidate discovery and each transcript
+receives the union of the two endpoint consequence sets. Its much larger
+transcript fan-out makes output rows/s as important as paired events/s.
+
 Earlier chromosome-only and complete-primary staging rows remain in the
 ledger as historical measurements. They have different transcript
 inventories and checksums and must not be treated as revisions of the
@@ -78,6 +84,7 @@ insertion order; they remain only as historical measurements.
 | 2026-07-15 | f649d724 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     11 |       0.324 |          0.327 |       0.342 |              110092 |         9083.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,203,437              |
 | 2026-07-15 | f649d724 | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     11 |       0.611 |          0.613 |       0.634 |              326264 |         3065.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,468,189              |
 | 2026-07-15 | f649d724 | ensembl116_grch38_final_giab_sites_hash40   | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 1,174,245      |     15 |       0.118 |          0.120 |       0.132 |              841308 |         1188.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 9,785,375              |
+| 2026-07-16 | 360619ed | ensembl116_grch38_final_breakend_200k       | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 18,766,240     |     15 |       2.676 |          2.710 |       2.727 |               73801 |        13550.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 6,924,812              |
 | 2026-07-16 | 9c97cb07 | ensembl116_grch38_final_coding_mixed_200k   | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,756,720      |     15 |       1.451 |          1.481 |       1.638 |              135044 |         7405.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,887,049              |
 | 2026-07-16 | 9c97cb07 | ensembl116_grch38_final_coding_nonsnv_36k   | compact     |       1 | 36,000     | 644,427     | 5,068,416 | 1,047,524      |     15 |       0.317 |          0.322 |       0.339 |              111801 |         8944.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 3,253,180              |
 | 2026-07-16 | 9c97cb07 | ensembl116_grch38_final_coding_snv_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 5,191,000      |     15 |       0.593 |          0.603 |       0.709 |              331675 |         3015.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,608,624              |
@@ -88,6 +95,19 @@ either the rendered consequence-byte total or the numeric
 consequence-mask sum. Rows with different workload, output mode, thread
 count, host, or variant count are separate measurements and should not
 be compared as if only the engine changed.
+
+## Paired breakends
+
+| revision | paired_events | consequence_rows | rows_per_event | median_seconds | paired_events_per_second | consequence_rows_per_second |
+|:---------|:--------------|:-----------------|---------------:|---------------:|:-------------------------|:----------------------------|
+| 360619ed | 200,000       | 18,766,240       |          93.83 |           2.71 | 73,801                   | 6,924,812                   |
+
+This measurement used the complete receipt-hashed GRCh38 model, compact
+output, one DuckDB thread pinned with `taskset -c 2`, 15 timed passes,
+and a 10,000-event warmup. Model loading and staging were outside the
+timed region. The site-rate headline alone would be misleading: every
+paired event produced an average of 93.83 transcript consequence rows,
+and the checksum covered every emitted mask.
 
 ## Validated CDS projection cache
 

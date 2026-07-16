@@ -52,7 +52,8 @@ corpus_labels <- c(
   final_clinvar_coding_seed113 = "GRCh38 ClinVar coding",
   final_clinvar_crosschrom_seed17 = "GRCh38 ClinVar cross-chromosome",
   final_grch37_cache_seed37 = "GRCh37",
-  `plasmodium-falciparum-vep63-seed11663` = "P. falciparum"
+  `plasmodium-falciparum-vep63-seed11663` = "P. falciparum",
+  breakend_multichrom_seed31_isolated = "GRCh38 paired BND"
 )
 latest_runs <- do.call(rbind, lapply(names(corpus_labels), function(corpus) {
   rows <- overall[overall$corpus == corpus, , drop = FALSE]
@@ -174,6 +175,47 @@ corpus. Expensive corpora do not inherit evidence from a later run of another
 corpus, and a newly tested corpus does not hide older still-applicable evidence.
 The SO and impact tables keep the same runs separate so the largest corpus cannot
 hide a smaller species- or assembly-specific frontier.
+
+## Paired-breakend differential
+
+```{r paired-breakends}
+breakend_run <- latest_runs[
+  latest_runs$corpus == "breakend_multichrom_seed31_isolated",
+  ,
+  drop = FALSE
+]
+if (nrow(breakend_run)) {
+  breakend_table <- data.frame(
+    revision = short_revision(breakend_run$source_revision),
+    generated_events = format(1004, big.mark = ","),
+    transcript_pairs = format(breakend_run$n, big.mark = ","),
+    exact = paste0(
+      format(breakend_run$exact_agree, big.mark = ","),
+      "/",
+      format(breakend_run$n, big.mark = ",")
+    ),
+    unresolved = breakend_run$unresolved,
+    extra = breakend_run$engine_extra,
+    missing = breakend_run$engine_missing,
+    resolved_error_upper_95 = percent(breakend_run$upper95),
+    stringsAsFactors = FALSE
+  )
+  knitr::kable(breakend_table, row.names = FALSE)
+}
+```
+
+The generated seed-31 corpus spans chromosomes 1, 2, 7, 21, and X; intra- and
+interchromosomal mates; all four VCF bracket orientations; and transcript,
+exon, intron, CDS, and directional-flank endpoint states. The comparison is the
+union of consequences produced by both breakend endpoints for each transcript,
+which is VEP 116's transcript-level paired-breakend contract.
+
+VEP 116's buffered BND path inserts mate coordinates into a chromosome-blind
+interval tree. A multichromosome batch can therefore omit valid transcript
+pairs even when the input chromosomes are contiguous and position-sorted. The
+oracle command uses `--buffer_size 1` in one Perl process so every event is
+evaluated independently. This is oracle isolation, not a DuckVEP compatibility
+rule; the ledger records `breakend_buffer_size=1` and the artifact hash.
 
 ## Prepared model receipts
 

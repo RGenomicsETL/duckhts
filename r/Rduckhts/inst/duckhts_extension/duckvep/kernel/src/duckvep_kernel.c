@@ -284,7 +284,9 @@ enum {
     DVW_MODEL_CDS_PROJECTION = 70u,
     DVW_MODEL_SEQ_CONTRACT   = 71u,
     DVW_MODEL_MIRNA_LAYOUT   = 72u,
-    DVW_MODEL_PEPTIDE_EDIT_LAYOUT = 73u
+    DVW_MODEL_PEPTIDE_EDIT_LAYOUT = 73u,
+    DVW_ANN_PAIR_COLUMNS     = 74u,
+    DVW_ANN_PAIR_ORDER       = 75u
 };
 
 duckvep_status_t duckvep_model_open(
@@ -798,8 +800,14 @@ duckvep_status_t duckvep_options_open(
         return fail(error, DUCKVEP_ERR_INTERNAL, DVW_OPTIONS_OOM, "options alloc failed");
     }
 
-    o->upstream_dist          = (init != NULL && init->upstream_dist != 0u)          ? init->upstream_dist          : DUCKVEP_DEFAULT_UPSTREAM_DIST;
-    o->downstream_dist        = (init != NULL && init->downstream_dist != 0u)        ? init->downstream_dist        : DUCKVEP_DEFAULT_DOWNSTREAM_DIST;
+    o->upstream_dist = init != NULL && init->distances_are_explicit
+        ? init->upstream_dist
+        : (init != NULL && init->upstream_dist != 0u
+            ? init->upstream_dist : DUCKVEP_DEFAULT_UPSTREAM_DIST);
+    o->downstream_dist = init != NULL && init->distances_are_explicit
+        ? init->downstream_dist
+        : (init != NULL && init->downstream_dist != 0u
+            ? init->downstream_dist : DUCKVEP_DEFAULT_DOWNSTREAM_DIST);
     o->splice_region_exonic   = (init != NULL && init->splice_region_exonic != 0u)   ? init->splice_region_exonic   : DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC;
     o->splice_region_intronic = (init != NULL && init->splice_region_intronic != 0u) ? init->splice_region_intronic : DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC;
     {
@@ -1305,6 +1313,49 @@ static void insertion_apply_region_boundaries(
     }
 }
 
+static int breakend_endpoint_close_to_transcript(
+    const duckvep_transcript_model_t *transcripts,
+    size_t                            tx_idx,
+    uint16_t                          chrom_id,
+    uint32_t                          pos1) {
+
+    uint32_t start1;
+    uint32_t end1;
+
+    if (transcripts->chrom_id[tx_idx] != chrom_id || pos1 == 0u) return 0;
+    start1 = transcripts->start1[tx_idx];
+    end1 = transcripts->end1[tx_idx];
+    if (pos1 < start1) return start1 - pos1 <= DUCKVEP_BREAKEND_ALLELE_DISTANCE;
+    if (pos1 > end1) return pos1 - end1 <= DUCKVEP_BREAKEND_ALLELE_DISTANCE;
+    return 1;
+}
+
+static int breakend_endpoint_in_directional_window(
+    const duckvep_transcript_model_t *transcripts,
+    size_t                            tx_idx,
+    uint16_t                          chrom_id,
+    uint32_t                          pos1,
+    const duckvep_options_t          *options) {
+
+    uint32_t distance;
+    uint32_t allowed;
+
+    if (transcripts->chrom_id[tx_idx] != chrom_id || pos1 == 0u) return 0;
+    if (pos1 < transcripts->start1[tx_idx]) {
+        distance = transcripts->start1[tx_idx] - pos1;
+        allowed = transcripts->strand[tx_idx] >= 0
+            ? options->upstream_dist : options->downstream_dist;
+        return distance <= allowed;
+    }
+    if (pos1 > transcripts->end1[tx_idx]) {
+        distance = pos1 - transcripts->end1[tx_idx];
+        allowed = transcripts->strand[tx_idx] >= 0
+            ? options->downstream_dist : options->upstream_dist;
+        return distance <= allowed;
+    }
+    return 1;
+}
+
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
@@ -1337,11 +1388,35 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     int cds_delta_attempted = 0;
     int feature_mapping_blocks_peptide;
     int has_partial_terminal_codon;
+    int breakend;
+    int breakend_local_close = 0;
+    int breakend_mate_close = 0;
+    int breakend_mate_admits = 0;
 
     if (c->status != DUCKVEP_OK) return 0;
 
     tx = &c->model->transcripts;
     event = c->events[variant_idx];
+    breakend = event.kind == (uint8_t)DUCKVEP_KIND_SV &&
+        event.sv_type == (uint8_t)DUCKVEP_SV_BREAKEND;
+    if (breakend) {
+        int local_admits;
+
+        breakend_local_close = breakend_endpoint_close_to_transcript(
+            tx, (size_t)tx_idx, event.chrom_id, event.feature_start1);
+        breakend_mate_close = event.has_mate &&
+            breakend_endpoint_close_to_transcript(
+                tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1);
+        local_admits = breakend_local_close &&
+            breakend_endpoint_in_directional_window(
+                tx, (size_t)tx_idx, event.chrom_id, event.feature_start1,
+                c->options);
+        breakend_mate_admits = breakend_mate_close &&
+            breakend_endpoint_in_directional_window(
+                tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1,
+                c->options);
+        if (!local_admits && !breakend_mate_admits) return 1;
+    }
     pos = event.start1;
     topology_start1 = event.feature_start1;
     topology_end1 = event.feature_end1;
@@ -1363,7 +1438,21 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
-    if (kind == DUCKVEP_KIND_SNV && c->point_sorted_safe &&
+    if (breakend && !breakend_local_close) {
+        duckvep_region_state_t region;
+        duckvep_splice_state_t splice;
+
+        /* A transcript discovered only through the mate still receives a
+         * StructuralVariationOverlapAllele. Ordinary predicates keep the
+         * local feature, which cannot map here; only the mate-aware truncation
+         * predicate can add a non-default term. */
+        memset(&region, 0, sizeof region);
+        memset(&splice, 0, sizeof splice);
+        duckvep_effect_ctx_fill_classified(
+            tx, variant_idx, (size_t)tx_idx,
+            event.feature_start1, event.feature_end1,
+            &region, &splice, &ectx);
+    } else if (kind == DUCKVEP_KIND_SNV && c->point_sorted_safe &&
         c->model->point_ordered[tx_idx] &&
         event.feature_start1 == event.feature_end1 &&
         (!have_feature_alleles ||
@@ -1484,11 +1573,23 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM)) {
         dist = fwd ? tx->start1[tx_idx] - event.feature_end1
                    : event.feature_start1 - tx->end1[tx_idx];
-        if (dist > c->options->upstream_dist) return 1;
+        if (dist > c->options->upstream_dist) {
+            if (!breakend || !breakend_mate_admits) return 1;
+            ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM);
+            ectx.region &= ~(uint32_t)DUCKVEP_REGION_UPSTREAM;
+            ectx.region_state.region_mask &=
+                ~(uint32_t)DUCKVEP_REGION_UPSTREAM;
+        }
     } else if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM)) {
         dist = fwd ? event.feature_start1 - tx->end1[tx_idx]
                    : tx->start1[tx_idx] - event.feature_end1;
-        if (dist > c->options->downstream_dist) return 1;
+        if (dist > c->options->downstream_dist) {
+            if (!breakend || !breakend_mate_admits) return 1;
+            ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM);
+            ectx.region &= ~(uint32_t)DUCKVEP_REGION_DOWNSTREAM;
+            ectx.region_state.region_mask &=
+                ~(uint32_t)DUCKVEP_REGION_DOWNSTREAM;
+        }
     }
 
     /* Only the CDS bucket needs a sequence delta. The dispatcher takes borrowed
@@ -1624,6 +1725,7 @@ static duckvep_status_t validate_variant_batch(
     const duckvep_model_t         *model,
     const duckvep_variant_batch_t *variants,
     duckvep_event_t               *events,
+    int                            allow_breakends,
     duckvep_error_t               *error) {
 
     size_t i;
@@ -1668,8 +1770,16 @@ static duckvep_status_t validate_variant_batch(
         }
         if (kind == (uint8_t)DUCKVEP_KIND_SV &&
             sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
-            return fail(error, DUCKVEP_ERR_UNSUPPORTED, DVW_ANN_SV_TYPE,
-                        "breakends require paired two-locus coordinates");
+            if (!allow_breakends) {
+                return fail(error, DUCKVEP_ERR_UNSUPPORTED, DVW_ANN_SV_TYPE,
+                            "breakends require explicit two-locus candidate pairs");
+            }
+            if (variants->mate_chrom_id == NULL || variants->mate_pos1 == NULL ||
+                variants->pos1[i] == UINT32_MAX || variants->mate_pos1[i] == 0u) {
+                return fail(error, DUCKVEP_ERR_INVALID_ARG,
+                            DVW_ANN_COORD_RANGE,
+                            "breakend is missing a valid local or mate locus");
+            }
         }
         if (i > 0u &&
             (variants->chrom_id[i] < variants->chrom_id[i - 1u] ||
@@ -1781,6 +1891,7 @@ static duckvep_status_t validate_common_annotate_args(
     const duckvep_options_t       *options,
     duckvep_workspace_t           *workspace,
     duckvep_event_t               *events,
+    int                            allow_breakends,
     duckvep_error_t               *error) {
 
     duckvep_status_t validation_status;
@@ -1798,7 +1909,8 @@ static duckvep_status_t validate_common_annotate_args(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_COLUMNS,
                     "variant batch has count>0 but null required columns");
     }
-    validation_status = validate_variant_batch(model, variants, events, error);
+    validation_status = validate_variant_batch(
+        model, variants, events, allow_breakends, error);
     if (validation_status != DUCKVEP_OK) return validation_status;
     if (options == NULL) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_NULL_OPTIONS, "options is NULL");
@@ -1863,7 +1975,7 @@ duckvep_status_t duckvep_annotate_cursor_open(
                     "annotate cursor allocation failed");
     }
     st = validate_common_annotate_args(model, variants, options, workspace,
-                                       cursor->events, error);
+                                       cursor->events, 0, error);
     if (st != DUCKVEP_OK) {
         free(cursor);
         return st;
@@ -2018,6 +2130,91 @@ duckvep_status_t duckvep_annotate_tile(
     status = annotate_cursor_fill(cursor, results, 0, error);
     duckvep_annotate_cursor_close(cursor);
     return status;
+}
+
+duckvep_status_t duckvep_annotate_pairs(
+    const duckvep_model_t            *model,
+    const duckvep_variant_batch_t    *variants,
+    const duckvep_candidate_pairs_t  *pairs,
+    const duckvep_options_t          *options,
+    duckvep_workspace_t              *workspace,
+    duckvep_result_builder_t         *results,
+    duckvep_error_t                  *error) {
+
+    struct annotate_ctx ctx;
+    duckvep_event_t *events = NULL;
+    duckvep_status_t status;
+    size_t event_bytes = 0u;
+    size_t pair;
+
+    status = validate_result_builder_for_append(results, error);
+    if (status != DUCKVEP_OK) return status;
+    if (pairs == NULL ||
+        (pairs->count != 0u &&
+         (pairs->variant_idx == NULL || pairs->tx_idx == NULL))) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_COLUMNS,
+                    "candidate pair view has null required columns");
+    }
+    if (variants != NULL && variants->count != 0u) {
+        if (!size_mul_checked(variants->count, sizeof *events, &event_bytes)) {
+            return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_CURSOR_OOM,
+                        "candidate-pair event storage overflow");
+        }
+        events = (duckvep_event_t *)calloc(1u, event_bytes);
+        if (events == NULL) {
+            return fail(error, DUCKVEP_ERR_INTERNAL, DVW_CURSOR_OOM,
+                        "candidate-pair event allocation failed");
+        }
+    }
+    status = validate_common_annotate_args(
+        model, variants, options, workspace, events, 1, error);
+    if (status != DUCKVEP_OK) {
+        free(events);
+        return status;
+    }
+    for (pair = 0u; pair < pairs->count; pair++) {
+        uint32_t variant_idx = pairs->variant_idx[pair];
+        uint32_t tx_idx = pairs->tx_idx[pair];
+
+        if ((size_t)variant_idx >= variants->count ||
+            (size_t)tx_idx >= model->transcripts.transcript_count ||
+            (pair != 0u &&
+             (variant_idx < pairs->variant_idx[pair - 1u] ||
+              (variant_idx == pairs->variant_idx[pair - 1u] &&
+               tx_idx <= pairs->tx_idx[pair - 1u])))) {
+            free(events);
+            return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
+                        "candidate pairs are out of range, unsorted, or duplicated");
+        }
+    }
+
+    workspace_point_cursor_reset(workspace);
+    ctx.model = model;
+    ctx.variants = variants;
+    ctx.events = events;
+    ctx.options = options;
+    ctx.workspace = workspace;
+    ctx.delta_scratch = duckvep_workspace_delta_scratch(workspace);
+    ctx.delta_route_stats = workspace->delta_route_stats_enabled
+                              ? &workspace->delta_route_stats : NULL;
+    ctx.results = results;
+    ctx.status = DUCKVEP_OK;
+    ctx.point_sorted_safe = 0;
+    for (pair = 0u; pair < pairs->count; pair++) {
+        if (!annotate_pair(pairs->variant_idx[pair], pairs->tx_idx[pair],
+                           &ctx)) {
+            status = ctx.status == DUCKVEP_ERR_RESULT_FULL
+                ? fail(error, DUCKVEP_ERR_RESULT_FULL,
+                       DVW_ANN_RESULT_FULL,
+                       "result builder capacity exhausted")
+                : fail(error, ctx.status, DVW_ANN_PAIR_ORDER,
+                       "candidate-pair annotation failed");
+            free(events);
+            return status;
+        }
+    }
+    free(events);
+    return DUCKVEP_OK;
 }
 
 /* Model preparation is deliberately kept after the annotation functions. It

@@ -32,7 +32,7 @@ op <- add_option(
   "--event-mode",
   dest = "event_mode",
   default = "small",
-  help = "event family: small or structural [default: %default]"
+  help = "event family: small, structural, or breakend [default: %default]"
 )
 op <- add_option(
   op,
@@ -146,8 +146,8 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
-if (!(opt$event_mode %in% c("small", "structural"))) {
-  die("--event-mode must be small or structural")
+if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
+  die("--event-mode must be small, structural, or breakend")
 }
 if (
   !requireNamespace("blit", quietly = TRUE) ||
@@ -159,7 +159,8 @@ if (
   )
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
-required_files <- c(opt$fasta, opt$extension)
+fasta_index <- paste0(opt$fasta, ".fai")
+required_files <- c(opt$fasta, fasta_index, opt$extension)
 external_model_database <- !nzchar(opt$model_sql) &&
   !identical(opt$database, ":memory:")
 if (external_model_database) {
@@ -173,6 +174,16 @@ if (identical(oracle_mode, "gff")) {
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
+}
+
+fasta_index_lines <- readLines(fasta_index, warn = FALSE)
+fasta_chroms <- sub("\t.*$", "", fasta_index_lines)
+if (
+  length(fasta_chroms) == 0L ||
+    any(!nzchar(fasta_chroms)) ||
+    anyDuplicated(fasta_chroms)
+) {
+  die("FASTA index has missing or duplicate sequence names: {fasta_index}")
 }
 if (opt$sample_per_shape < 0L) {
   die("--sample-per-shape must be non-negative")
@@ -190,8 +201,8 @@ nmd_state_plugin <- file.path(
   "DuckVEPNMDState.pm"
 )
 if (nzchar(opt$nmd_plugin_dir)) {
-  if (identical(opt$event_mode, "structural")) {
-    die("the structural differential does not yet compare NMD plugin output")
+  if (!identical(opt$event_mode, "small")) {
+    die("structural and breakend differentials do not compare NMD plugin output")
   }
   if (!dir.exists(opt$nmd_plugin_dir)) {
     die("VEP plugin directory does not exist: {opt$nmd_plugin_dir}")
@@ -272,6 +283,16 @@ invisible(tryCatch(
     die("DuckDB JSON support is required: {conditionMessage(e)}")
   }
 ))
+invisible(dbWriteTable(
+  con,
+  "duckvep_oracle_sequence_order",
+  data.frame(
+    chrom = fasta_chroms,
+    fasta_order = seq_along(fasta_chroms),
+    stringsAsFactors = FALSE
+  ),
+  temporary = TRUE
+))
 
 if (external_model_database) {
   invisible(dbExecute(
@@ -338,6 +359,11 @@ region_columns <- dbGetQuery(
    WHERE table_name = 'duckvep_sequence_regions'"
 )$column_name
 complete_coverage <- "sequence_length" %in% region_columns
+model_sequence_length_sql <- if (complete_coverage) {
+  "r.sequence_length"
+} else {
+  "4294967294::UBIGINT"
+}
 model_query_relation <- function(relation) {
   relation_id <- as.character(dbQuoteIdentifier(con, relation))
   if (external_model_database) {
@@ -407,7 +433,9 @@ if (length(loaded) != 1L || !isTRUE(loaded[[1L]])) {
 source_vcf <- opt$vcf
 generate_structural <- identical(opt$event_mode, "structural") &&
   !nzchar(source_vcf)
-if (!nzchar(source_vcf) && !generate_structural) {
+generate_breakend <- identical(opt$event_mode, "breakend") &&
+  !nzchar(source_vcf)
+if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
   source_vcf <- tempfile(fileext = ".vcf")
   temporary_files <- c(temporary_files, source_vcf)
   rc <- system2(
@@ -462,11 +490,12 @@ if (generate_structural) {
     glue(
       "CREATE OR REPLACE TEMP TABLE duckvep_generated_structural_source AS
        WITH transcripts AS MATERIALIZED (
-         SELECT t.*, r.name AS chrom, r.sequence_length
+         SELECT t.*, r.name AS chrom,
+                {model_sequence_length_sql} AS sequence_length
          FROM duckvep_transcripts t
          JOIN duckvep_sequence_regions r USING (seq_region)
          WHERE t.transcript_start > 1
-           AND t.transcript_end <= r.sequence_length
+           AND t.transcript_end <= {model_sequence_length_sql}
            {generated_chrom_filter}
        ), exons AS MATERIALIZED (
          SELECT
@@ -673,8 +702,175 @@ if (generate_structural) {
   ))
 }
 
+if (generate_breakend) {
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP TABLE duckvep_generated_breakend_source AS
+       WITH transcripts AS MATERIALIZED (
+         SELECT t.*, r.name AS chrom,
+                {model_sequence_length_sql} AS sequence_length
+         FROM duckvep_transcripts t
+         JOIN duckvep_sequence_regions r USING (seq_region)
+         WHERE t.transcript_start > 1
+           AND t.transcript_end < {model_sequence_length_sql}
+           {generated_chrom_filter}
+       ), exons AS MATERIALIZED (
+         SELECT
+           e.*, t.seq_region, t.chrom, t.sequence_length,
+           t.transcript_start, t.transcript_end, t.cds_start, t.cds_end,
+           lead(e.exon_start) OVER (
+             PARTITION BY e.transcript_index ORDER BY e.exon_start, e.exon_end
+           ) AS next_exon_start
+         FROM duckvep_exons e
+         JOIN transcripts t USING (transcript_index)
+       ), endpoint_geometries AS (
+         SELECT 'transcript_start' AS event_state, transcript_index,
+                seq_region, chrom, transcript_start AS position
+         FROM transcripts
+         UNION ALL
+         SELECT 'transcript_mid', transcript_index, seq_region, chrom,
+                (transcript_start + transcript_end) // 2
+         FROM transcripts
+         UNION ALL
+         SELECT 'transcript_end', transcript_index, seq_region, chrom,
+                transcript_end
+         FROM transcripts
+         UNION ALL
+         SELECT 'upstream_flank', transcript_index, seq_region, chrom,
+                transcript_start - 1
+         FROM transcripts
+         UNION ALL
+         SELECT 'downstream_flank', transcript_index, seq_region, chrom,
+                transcript_end + 1
+         FROM transcripts
+         UNION ALL
+         SELECT 'cds_start', transcript_index, seq_region, chrom, cds_start
+         FROM transcripts WHERE cds_start IS NOT NULL
+         UNION ALL
+         SELECT 'cds_end', transcript_index, seq_region, chrom, cds_end
+         FROM transcripts WHERE cds_end IS NOT NULL
+         UNION ALL
+         SELECT 'exon_mid', transcript_index, seq_region, chrom,
+                (exon_start + exon_end) // 2
+         FROM exons
+         UNION ALL
+         SELECT 'exon_start', transcript_index, seq_region, chrom, exon_start
+         FROM exons
+         UNION ALL
+         SELECT 'before_exon_start', transcript_index, seq_region, chrom,
+                exon_start - 1
+         FROM exons
+         UNION ALL
+         SELECT 'exon_end', transcript_index, seq_region, chrom, exon_end
+         FROM exons
+         UNION ALL
+         SELECT 'after_exon_end', transcript_index, seq_region, chrom,
+                exon_end + 1
+         FROM exons
+         UNION ALL
+         SELECT 'intron_mid', transcript_index, seq_region, chrom,
+                (exon_end + next_exon_start) // 2
+         FROM exons
+         WHERE next_exon_start IS NOT NULL AND next_exon_start > exon_end + 1
+       ), distinct_geometries AS (
+         SELECT DISTINCT event_state, transcript_index, seq_region, chrom, position
+         FROM endpoint_geometries
+         WHERE position > 0 AND position < 4294967295
+       ), ranked_geometries AS (
+         SELECT *, row_number() OVER (
+           PARTITION BY event_state, seq_region
+           ORDER BY hash(
+             chrom, position, transcript_index, event_state, {opt$seed}
+           )
+         ) AS geometry_rank
+         FROM distinct_geometries
+       ), selected_geometries AS (
+         SELECT * FROM ranked_geometries {generated_filter}
+       ), numbered_endpoints AS (
+         SELECT *,
+           row_number() OVER (
+             PARTITION BY seq_region
+             ORDER BY hash(
+               event_state, position, transcript_index, {opt$seed}, 41
+             )
+           ) AS endpoint_rank,
+           count(*) OVER (PARTITION BY seq_region) AS endpoint_count
+         FROM selected_geometries
+       ), chrom_order AS (
+         SELECT seq_region,
+           coalesce(
+             lead(seq_region) OVER ordered_chroms,
+             first_value(seq_region) OVER ordered_chroms
+           ) AS mate_seq_region
+         FROM (SELECT DISTINCT seq_region FROM numbered_endpoints)
+         WINDOW ordered_chroms AS (
+           ORDER BY seq_region ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+         )
+       ), endpoint_pairs AS (
+         SELECT
+           'intra' AS pair_class,
+           l.event_state AS local_state, m.event_state AS mate_state,
+           l.transcript_index AS local_transcript_index,
+           m.transcript_index AS mate_transcript_index,
+           l.seq_region, l.chrom, l.position,
+           m.seq_region AS mate_seq_region, m.chrom AS mate_chrom,
+           m.position AS mate_position
+         FROM numbered_endpoints l
+         JOIN numbered_endpoints m
+           ON m.seq_region = l.seq_region
+          AND m.endpoint_rank = CASE
+            WHEN l.endpoint_rank = l.endpoint_count THEN 1
+            ELSE l.endpoint_rank + 1
+          END
+         WHERE l.endpoint_count > 1
+         UNION ALL
+         SELECT
+           'inter', l.event_state, m.event_state,
+           l.transcript_index, m.transcript_index,
+           l.seq_region, l.chrom, l.position,
+           m.seq_region, m.chrom, m.position
+         FROM numbered_endpoints l
+         JOIN chrom_order c USING (seq_region)
+         JOIN numbered_endpoints m
+           ON m.seq_region = c.mate_seq_region
+          AND m.endpoint_rank = 1 + ((l.endpoint_rank - 1) % m.endpoint_count)
+         WHERE c.mate_seq_region <> l.seq_region
+       ), oriented_pairs AS (
+         SELECT p.*, orientation
+         FROM endpoint_pairs p
+         CROSS JOIN (VALUES
+           ('N]M]'), ('N[M['), (']M]N'), ('[M[N')
+         ) orientations(orientation)
+       )
+       SELECT
+         concat(
+           'duckvep-bnd:', pair_class, ':', local_state, ':', mate_state, ':',
+           local_transcript_index, ':', mate_transcript_index, ':',
+           chrom, ':', position, ':', mate_chrom, ':', mate_position, ':',
+           orientation
+         ) AS source_id,
+         chrom, position AS raw_position, position AS raw_end,
+         'N' AS reference,
+         CASE orientation
+           WHEN 'N]M]' THEN concat('N]', mate_chrom, ':', mate_position, ']')
+           WHEN 'N[M[' THEN concat('N[', mate_chrom, ':', mate_position, '[')
+           WHEN ']M]N' THEN concat(']', mate_chrom, ':', mate_position, ']N')
+           ELSE concat('[', mate_chrom, ':', mate_position, '[N')
+         END AS alternate,
+         'BND' AS source_svtype, 'BND' AS structural_type,
+         concat(pair_class, '/', local_state, '/', mate_state, '/', orientation)
+           AS event_state,
+         mate_chrom, mate_position, orientation
+       FROM oriented_pairs"
+    )
+  ))
+}
+
 structural_source_sql <- if (generate_structural) {
   "SELECT * FROM duckvep_generated_structural_source"
+} else if (generate_breakend) {
+  "SELECT * FROM duckvep_generated_breakend_source"
 } else if (identical(opt$event_mode, "structural")) {
   glue(
     "SELECT DISTINCT
@@ -699,6 +895,35 @@ structural_source_sql <- if (generate_structural) {
      WHERE len(ALT) = 1
        AND regexp_full_match(ALT[1], '<[^>]+>')
        AND upper(INFO_SVTYPE) IN ('DEL', 'DUP', 'INV', 'INS', 'CNV')
+       {chrom_filter}"
+  )
+} else if (identical(opt$event_mode, "breakend")) {
+  glue(
+    "SELECT DISTINCT
+       coalesce(nullif(ID, ''), concat('duckvep-bnd:', CHROM, ':', POS, ':', ALT[1]))
+         AS source_id,
+       CHROM AS chrom,
+       POS::UBIGINT AS raw_position,
+       POS::UBIGINT AS raw_end,
+       REF AS reference,
+       ALT[1] AS alternate,
+       'BND' AS source_svtype,
+       'BND' AS structural_type,
+       'source' AS event_state,
+       regexp_extract(ALT[1], '([A-Za-z0-9_.-]+):([0-9]+)', 1) AS mate_chrom,
+       CAST(regexp_extract(ALT[1], '([A-Za-z0-9_.-]+):([0-9]+)', 2) AS UBIGINT)
+         AS mate_position,
+       CASE
+         WHEN ALT[1] LIKE 'N]%]%' THEN 'N]M]'
+         WHEN ALT[1] LIKE 'N[%[%' THEN 'N[M['
+         WHEN ALT[1] LIKE ']%]%N' THEN ']M]N'
+         WHEN ALT[1] LIKE '[%[%N' THEN '[M[N'
+         ELSE 'source'
+       END AS orientation
+     FROM read_bcf({sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential')
+     WHERE len(ALT) = 1
+       AND (upper(INFO_SVTYPE) = 'BND' OR regexp_matches(ALT[1], '[\\[\\]]'))
+       AND regexp_matches(ALT[1], '[A-Za-z0-9_.-]+:[0-9]+')
        {chrom_filter}"
   )
 } else {
@@ -762,6 +987,51 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
      JOIN duckvep_sequence_regions r ON r.name = chrom
      {sample_filter}
      ORDER BY r.seq_region, position, reference, alternate"
+  )
+} else if (identical(opt$event_mode, "breakend")) {
+  glue(
+    "CREATE OR REPLACE TEMP TABLE duckvep_breakend_events AS
+     WITH source_events AS (
+       {structural_source_sql}
+     ), prepared AS (
+       SELECT
+         CASE
+           WHEN source_id LIKE 'duckvep-bnd:%' THEN source_id
+           ELSE concat(
+             'duckvep-bnd:', source_id, ':', chrom, ':', raw_position, ':',
+             mate_chrom, ':', mate_position, ':', orientation
+           )
+         END AS variant_id,
+         lr.seq_region, chrom, raw_position AS position,
+         mr.seq_region AS mate_seq_region, mate_chrom, mate_position,
+         raw_position, raw_end, reference, alternate,
+         structural_type, 'UNKNOWN' AS copy_change, source_svtype,
+         'bnd' AS var_type, event_state AS length_bin, orientation,
+         row_number() OVER (
+           PARTITION BY event_state, orientation
+           ORDER BY hash(
+             chrom, raw_position, mate_chrom, mate_position,
+             alternate, source_id, {opt$seed}
+           )
+         ) AS sample_rank
+       FROM source_events s
+       JOIN duckvep_sequence_regions lr ON lr.name = s.chrom
+       JOIN duckvep_sequence_regions mr ON mr.name = s.mate_chrom
+       WHERE raw_position > 0 AND raw_position < 4294967295
+         AND mate_position > 0 AND mate_position < 4294967295
+     )
+     SELECT * EXCLUDE (sample_rank) FROM prepared {sample_filter};
+
+     CREATE OR REPLACE TEMP TABLE duckvep_sample AS
+     SELECT
+       variant_id, seq_region, chrom, position,
+       position AS event_start, position AS event_end,
+       raw_position, raw_end, reference, alternate,
+       structural_type, copy_change, source_svtype, var_type, length_bin,
+       'paired' AS endpoint_role, orientation,
+       mate_seq_region, mate_chrom, mate_position
+     FROM duckvep_breakend_events
+     ORDER BY seq_region, position, variant_id"
   )
 } else {
   glue(
@@ -840,6 +1110,12 @@ invisible(dbExecute(con, sample_sql))
 sample_count <- dbGetQuery(con, "SELECT count(*) AS n FROM duckvep_sample")$n[[
   1L
 ]]
+if (identical(opt$event_mode, "breakend")) {
+  sample_count <- dbGetQuery(
+    con,
+    "SELECT count(DISTINCT variant_id) AS n FROM duckvep_sample"
+  )$n[[1L]]
+}
 if (sample_count == 0) {
   die("the sampler found no supported {opt$event_mode} events in model regions")
 }
@@ -854,7 +1130,7 @@ if (!nzchar(sample_vcf)) {
 dir.create(dirname(sample_vcf), recursive = TRUE, showWarnings = FALSE)
 vc <- file(sample_vcf, open = "wt")
 vcf_header <- "##fileformat=VCFv4.2"
-if (identical(opt$event_mode, "structural")) {
+if (!identical(opt$event_mode, "small")) {
   vcf_header <- c(
     vcf_header,
     "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position\">",
@@ -865,16 +1141,49 @@ writeLines(
   c(vcf_header, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"),
   vc
 )
+sample_chrom_sql <- if (identical(opt$event_mode, "breakend")) {
+  "SELECT chrom FROM duckvep_sample UNION SELECT mate_chrom FROM duckvep_sample"
+} else {
+  "SELECT chrom FROM duckvep_sample"
+}
+missing_fasta_chroms <- dbGetQuery(
+  con,
+  glue(
+    "SELECT DISTINCT chrom FROM ({sample_chrom_sql}) sampled
+     EXCEPT SELECT chrom FROM duckvep_oracle_sequence_order
+     ORDER BY chrom"
+  )
+)$chrom
+if (length(missing_fasta_chroms) != 0L) {
+  close(vc)
+  die(
+    "sampled chromosome(s) are absent from the FASTA index: ",
+    "{paste(missing_fasta_chroms, collapse = ', ')}"
+  )
+}
+
+# Keep chromosomes contiguous and positions increasing for VEP. The FASTA index
+# supplies a deterministic chromosome order; model ordinals are independent.
 sample_vcf_query <- if (identical(opt$event_mode, "small")) {
   paste(
-    "SELECT chrom, position, variant_id, reference, alternate",
-    "FROM duckvep_sample ORDER BY seq_region, position, reference, alternate"
+    "SELECT v.chrom, v.position, v.variant_id, v.reference, v.alternate",
+    "FROM duckvep_sample v",
+    "JOIN duckvep_oracle_sequence_order o USING (chrom)",
+    "ORDER BY o.fasta_order, v.position, v.reference, v.alternate"
+  )
+} else if (identical(opt$event_mode, "breakend")) {
+  paste(
+    "SELECT v.chrom, v.position, v.variant_id, v.reference, v.alternate",
+    "FROM duckvep_breakend_events v",
+    "JOIN duckvep_oracle_sequence_order o USING (chrom)",
+    "ORDER BY o.fasta_order, v.position, v.variant_id"
   )
 } else {
   paste(
-    "SELECT chrom, raw_position AS position, raw_end, source_svtype,",
-    "variant_id, reference, alternate FROM duckvep_sample",
-    "ORDER BY seq_region, event_start, event_end, structural_type"
+    "SELECT v.chrom, v.raw_position AS position, v.raw_end, v.source_svtype,",
+    "v.variant_id, v.reference, v.alternate FROM duckvep_sample v",
+    "JOIN duckvep_oracle_sequence_order o USING (chrom)",
+    "ORDER BY o.fasta_order, v.event_start, v.event_end, v.structural_type"
   )
 }
 res <- dbSendQuery(
@@ -888,6 +1197,8 @@ repeat {
   }
   info <- if (identical(opt$event_mode, "small")) {
     rep(".", nrow(chunk))
+  } else if (identical(opt$event_mode, "breakend")) {
+    rep("SVTYPE=BND", nrow(chunk))
   } else {
     paste0("END=", chunk$raw_end, ";SVTYPE=", chunk$source_svtype)
   }
@@ -992,6 +1303,13 @@ engine_call_sql <- if (identical(opt$event_mode, "small")) {
        v.reference, v.alternate, {opt$distance}::UBIGINT
      )"
   )
+} else if (identical(opt$event_mode, "breakend")) {
+  glue(
+    "duckvep_annotate_breakend(
+       {sql_q(opt$model_name)}, v.seq_region, v.position,
+       v.mate_seq_region, v.mate_position, {opt$distance}::UBIGINT
+     )"
+  )
 } else {
   glue(
     "duckvep_annotate_sv(
@@ -1017,7 +1335,10 @@ engine_time <- system.time({
            v.seq_region,
            v.position,
            unnest({engine_call_sql}) AS annotation
-         FROM duckvep_sample v
+         FROM (
+           SELECT * FROM duckvep_sample
+           ORDER BY seq_region, position, variant_id
+         ) v
        )
        SELECT
          v.variant_id,
@@ -1102,6 +1423,13 @@ oracle_details <- if (identical(oracle_mode, "cache")) {
 } else {
   "oracle=gff"
 }
+if (identical(opt$event_mode, "breakend")) {
+  oracle_details <- c(
+    oracle_details,
+    "breakend_buffer_size=1",
+    "input_order=fasta_index"
+  )
+}
 oracle_build <- paste(
   c(
     glue("core={component_version('ensembl')}"),
@@ -1130,11 +1458,17 @@ vep_args <- c(
   "--json",
   "-o",
   vep_json,
-  "--fork",
-  opt$fork,
   "--force_overwrite",
   "--no_stats"
 )
+if (identical(opt$event_mode, "breakend")) {
+  # VEP's BND interval tree stores mate positions without a chromosome key.
+  # Isolate each event so neighboring cross-chromosome records cannot change
+  # the executable oracle's transcript set.
+  vep_args <- c(vep_args, "--buffer_size", "1")
+} else {
+  vep_args <- c(vep_args, "--fork", opt$fork)
+}
 if (identical(oracle_mode, "cache")) {
   vep_args <- c(
     vep_args,
@@ -1191,6 +1525,11 @@ vep_nmd_sql <- if (nmd_oracle_enabled) {
 } else {
   "'not_measured'::VARCHAR"
 }
+sample_event_relation <- if (identical(opt$event_mode, "breakend")) {
+  "duckvep_breakend_events"
+} else {
+  "duckvep_sample"
+}
 invisible(dbExecute(
   con,
   glue(
@@ -1236,7 +1575,7 @@ invisible(dbExecute(
        a.status,
        a.reason,
        a.nmd_prediction
-     FROM vep_annotation a JOIN duckvep_sample v USING (variant_id)
+     FROM vep_annotation a JOIN {sample_event_relation} v USING (variant_id)
      UNION ALL
      SELECT
        {sql_q(run_date)}, {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
@@ -1244,7 +1583,7 @@ invisible(dbExecute(
        a.variant_id, v.chrom, v.position, v.reference, v.alternate,
        v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason,
        a.nmd_prediction
-     FROM duckvep_annotation a JOIN duckvep_sample v USING (variant_id)"
+     FROM duckvep_annotation a JOIN {sample_event_relation} v USING (variant_id)"
   )
 ))
 dir.create(dirname(opt$annotations_out), recursive = TRUE, showWarnings = FALSE)

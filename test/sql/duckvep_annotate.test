@@ -494,8 +494,8 @@ FROM unnest(duckvep_annotate(
 ----
 coding_sequence_variant	unresolved	missing_sequence
 
-# Exact single-locus structural events use typed operation and copy-direction
-# fields. They do not pass symbolic alleles through the small-variant adapter.
+# Exact structural spans use typed operation and copy-direction fields. They do
+# not pass symbolic alleles through the small-variant adapter.
 query TTTT
 WITH events(ord, start1, end1, structural_type, copy_change) AS (
   VALUES
@@ -535,13 +535,65 @@ SELECT duckvep_annotate_sv(
 ----
 structural type contradicts copy change
 
+# One BND input carries both raw VCF endpoints. VEP shifts the local POS by one
+# for ordinary transcript topology, retains the mate coordinate verbatim, and
+# may create two internal overlap alleles. DuckVEP returns their transcript-level
+# consequence-set union once.
+query TTTT
+WITH bnd_event(event_id, local_region, local_position, mate_region, mate_position) AS (
+  VALUES ('bnd-1', 1::UINTEGER, 159::UBIGINT, 1::UINTEGER, 170::UBIGINT)
+)
+SELECT event_id, annotation.consequence,
+       coalesce(annotation.region, '-'), annotation.status
+FROM bnd_event,
+LATERAL unnest(duckvep_annotate_breakend(
+  'structural', local_region, local_position, mate_region, mate_position,
+  0::UBIGINT
+)) AS u(annotation);
+----
+bnd-1	feature_truncation&intron_variant	intron	supported
+
+query IIIII
+SELECT annotation.consequence_mask, annotation.region_mask,
+       annotation.impact_code, annotation.status_code, annotation.reason_code
+FROM unnest(duckvep_annotate_breakend_compact(
+  'structural', 1::UINTEGER, 159::UBIGINT,
+  1::UINTEGER, 170::UBIGINT, 0::UBIGINT
+)) AS u(annotation);
+----
+268435460	4	3	0	0
+
+# A transcript admitted only by the mate has no local topology. The rich region
+# is NULL and the compact region mask is zero; feature_truncation still survives.
+query TTI
+SELECT annotation.consequence, coalesce(annotation.region, '-'),
+       compact.region_mask
+FROM unnest(duckvep_annotate_breakend(
+  'structural', 1::UINTEGER, 300::UBIGINT,
+  1::UINTEGER, 170::UBIGINT, 0::UBIGINT
+)) AS u(annotation),
+unnest(duckvep_annotate_breakend_compact(
+  'structural', 1::UINTEGER, 300::UBIGINT,
+  1::UINTEGER, 170::UBIGINT, 0::UBIGINT
+)) AS c(compact);
+----
+feature_truncation	-	0
+
 statement error
 SELECT duckvep_annotate_sv(
   'structural', 1::UINTEGER, 100::UBIGINT, 100::UBIGINT,
   'BND', 'UNKNOWN'
 );
 ----
-BND requires paired two-locus input
+use duckvep_annotate_breakend with both loci
+
+statement error
+SELECT duckvep_annotate_breakend(
+  'structural', 1::UINTEGER, 0::UBIGINT,
+  1::UINTEGER, 170::UBIGINT
+);
+----
+invalid one-based endpoint coordinate
 
 # A REF disagreement with the prepared CDS is auditable and does not become a
 # generic unsupported-sequence result.

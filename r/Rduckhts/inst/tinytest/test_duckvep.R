@@ -529,6 +529,46 @@ structural_duplication <- dbGetQuery(
 expect_equal(structural_duplication$consequence_mask, 67108864)
 expect_equal(structural_duplication$status_code, 0)
 
+breakend <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.region, a.status",
+    "FROM unnest(duckvep_annotate_breakend(",
+    "'r-test', 1::UINTEGER, 159::UBIGINT,",
+    "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(
+  breakend$consequence,
+  "feature_truncation&intron_variant"
+)
+expect_identical(breakend$region, "intron")
+expect_identical(breakend$status, "supported")
+
+breakend_compact <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence_mask, a.region_mask, a.status_code",
+    "FROM unnest(duckvep_annotate_breakend_compact(",
+    "'r-test', 1::UINTEGER, 159::UBIGINT,",
+    "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
+  )
+)
+expect_equal(breakend_compact$consequence_mask, 268435460)
+expect_equal(breakend_compact$region_mask, 4)
+expect_equal(breakend_compact$status_code, 0)
+
+mate_only_breakend <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.region FROM unnest(duckvep_annotate_breakend(",
+    "'r-test', 1::UINTEGER, 300::UBIGINT,",
+    "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(mate_only_breakend$consequence, "feature_truncation")
+expect_true(is.na(mate_only_breakend$region))
+
 expect_error(
   dbGetQuery(
     con,
@@ -539,6 +579,30 @@ expect_error(
     )
   ),
   pattern = "structural type contradicts copy change"
+)
+
+expect_error(
+  dbGetQuery(
+    con,
+    paste(
+      "SELECT duckvep_annotate_sv(",
+      "'r-test', 1::UINTEGER, 100::UBIGINT, 100::UBIGINT,",
+      "'BND', 'UNKNOWN')"
+    )
+  ),
+  pattern = "use duckvep_annotate_breakend with both loci"
+)
+
+expect_error(
+  dbGetQuery(
+    con,
+    paste(
+      "SELECT duckvep_annotate_breakend(",
+      "'r-test', 1::UINTEGER, 0::UBIGINT,",
+      "1::UINTEGER, 170::UBIGINT)"
+    )
+  ),
+  pattern = "invalid one-based endpoint coordinate"
 )
 
 reference_mismatch <- dbGetQuery(
