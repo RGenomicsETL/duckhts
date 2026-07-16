@@ -81,7 +81,22 @@ typedef enum duckvep_so_bit {
      * predicate without a match. This is distinct from the SQL adapter's
      * complete-model assertion for an input with no transcript candidate. */
     DUCKVEP_SO_INTERGENIC                 = 33,
-    DUCKVEP_SO_BIT_COUNT                  = 34
+    /* Regulatory and motif-feature consequences are evaluated by the
+     * interval-feature lane, not by pretending those features are
+     * transcripts. These values append to the public mask; never reorder the
+     * transcript terms above. */
+    DUCKVEP_SO_TFBS_ABLATION              = 34,
+    DUCKVEP_SO_TFBS_AMPLIFICATION         = 35,
+    DUCKVEP_SO_TF_BINDING_SITE            = 36,
+    DUCKVEP_SO_REGULATORY_REGION_ABLATION = 37,
+    DUCKVEP_SO_REGULATORY_REGION_AMPLIFICATION = 38,
+    DUCKVEP_SO_REGULATORY_REGION          = 39,
+    /* VEP's registry contains sequence_variant as its generic database
+     * fallback. It has no overlap predicate and is therefore metadata only;
+     * an incomplete DuckVEP model must remain reason-coded unresolved rather
+     * than manufacturing this bit. */
+    DUCKVEP_SO_SEQUENCE_VARIANT            = 40,
+    DUCKVEP_SO_BIT_COUNT                   = 41
 } duckvep_so_bit_t;
 
 #ifdef __cplusplus

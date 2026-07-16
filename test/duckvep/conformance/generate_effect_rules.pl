@@ -112,6 +112,20 @@ for my $group (1, 2, 3) {
     $text .= "static const uint64_t k_rule_${name}_pre_mask =\n        $expr;\n";
 }
 
+# OverlapConsequence metadata restricts several transcript predicates to an
+# ordinary VariationFeature. StructuralVariationFeature inherits only the rules
+# declared for BaseVariationFeature. Generate that distinction from the pinned
+# VEP table so the C evaluator cannot drift into a hand-maintained term list.
+my @structural = grep {
+    $_->{variant_feature_class} eq
+        'Bio::EnsEMBL::Variation::BaseVariationFeature'
+} @rules;
+my $structural_expr = @structural
+    ? join(" |\n        ", map { $_->{required} } @structural)
+    : 'UINT64_C(0)';
+$text .= "static const uint64_t k_rule_structural_pre_mask =\n" .
+         "        $structural_expr;\n";
+
 if ($check) {
     die "--check requires target path\n" unless defined $target;
     open my $fh, '<', $target or die "cannot open generated target $target: $!";

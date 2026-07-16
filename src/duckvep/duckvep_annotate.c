@@ -302,6 +302,81 @@ duckvep_scalar_dna_copy(uint8_t *destination, const char *source, size_t length)
 }
 
 static int
+duckvep_scalar_ascii_equals(const duckdb_string_t *value, const char *text)
+{
+	const char *bytes;
+	size_t index, length, text_length;
+
+	if (value == NULL || text == NULL)
+		return 0;
+	bytes = duckdb_string_t_data((duckdb_string_t *)value);
+	length = (size_t)duckdb_string_t_length(*value);
+	text_length = strlen(text);
+	if (length != text_length)
+		return 0;
+	for (index = 0; index < length; index++) {
+		unsigned char left, right;
+
+		left = (unsigned char)bytes[index];
+		right = (unsigned char)text[index];
+		if (left >= 'a' && left <= 'z')
+			left = (unsigned char)(left - ('a' - 'A'));
+		if (right >= 'a' && right <= 'z')
+			right = (unsigned char)(right - ('a' - 'A'));
+		if (left != right)
+			return 0;
+	}
+	return 1;
+}
+
+static int
+duckvep_scalar_sv_type(const duckdb_string_t *value, uint8_t *result)
+{
+	if (duckvep_scalar_ascii_equals(value, "DEL") ||
+	    duckvep_scalar_ascii_equals(value, "DELETION"))
+		*result = (uint8_t)DUCKVEP_SV_DELETION;
+	else if (duckvep_scalar_ascii_equals(value, "DUP") ||
+	    duckvep_scalar_ascii_equals(value, "DUPLICATION"))
+		*result = (uint8_t)DUCKVEP_SV_DUPLICATION;
+	else if (duckvep_scalar_ascii_equals(value, "TDUP") ||
+	    duckvep_scalar_ascii_equals(value, "TANDEM_DUPLICATION"))
+		*result = (uint8_t)DUCKVEP_SV_TANDEM_DUPLICATION;
+	else if (duckvep_scalar_ascii_equals(value, "INV") ||
+	    duckvep_scalar_ascii_equals(value, "INVERSION"))
+		*result = (uint8_t)DUCKVEP_SV_INVERSION;
+	else if (duckvep_scalar_ascii_equals(value, "INS") ||
+	    duckvep_scalar_ascii_equals(value, "INSERTION"))
+		*result = (uint8_t)DUCKVEP_SV_INSERTION;
+	else if (duckvep_scalar_ascii_equals(value, "CNV") ||
+	    duckvep_scalar_ascii_equals(value, "COPY_NUMBER_VARIATION"))
+		*result = (uint8_t)DUCKVEP_SV_CNV;
+	else if (duckvep_scalar_ascii_equals(value, "UNKNOWN"))
+		*result = (uint8_t)DUCKVEP_SV_UNKNOWN;
+	else if (duckvep_scalar_ascii_equals(value, "BND") ||
+	    duckvep_scalar_ascii_equals(value, "BREAKEND"))
+		*result = (uint8_t)DUCKVEP_SV_BREAKEND;
+	else
+		return 0;
+	return 1;
+}
+
+static int
+duckvep_scalar_copy_change(const duckdb_string_t *value, uint8_t *result)
+{
+	if (duckvep_scalar_ascii_equals(value, "UNKNOWN"))
+		*result = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+	else if (duckvep_scalar_ascii_equals(value, "LOSS"))
+		*result = (uint8_t)DUCKVEP_COPY_CHANGE_LOSS;
+	else if (duckvep_scalar_ascii_equals(value, "NEUTRAL"))
+		*result = (uint8_t)DUCKVEP_COPY_CHANGE_NEUTRAL;
+	else if (duckvep_scalar_ascii_equals(value, "GAIN"))
+		*result = (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
+	else
+		return 0;
+	return 1;
+}
+
+static int
 duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 	duckdb_data_chunk input, duckvep_variant_batch_t *batch,
 	char *error, size_t error_size)
@@ -416,6 +491,101 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 }
 
 static int
+duckvep_scalar_prepare_sv_batch(duckvep_scalar_state_t *state,
+	duckdb_data_chunk input, duckvep_variant_batch_t *batch,
+	char *error, size_t error_size)
+{
+	duckdb_vector region_vector, start_vector, end_vector;
+	duckdb_vector type_vector, copy_vector;
+	duckdb_string_t *types, *copies;
+	uint32_t *regions;
+	uint64_t *starts, *ends;
+	uint64_t *region_validity, *start_validity, *end_validity;
+	uint64_t *type_validity, *copy_validity;
+	idx_t row, rows;
+
+	rows = duckdb_data_chunk_get_size(input);
+	region_vector = duckdb_data_chunk_get_vector(input, 1);
+	start_vector = duckdb_data_chunk_get_vector(input, 2);
+	end_vector = duckdb_data_chunk_get_vector(input, 3);
+	type_vector = duckdb_data_chunk_get_vector(input, 4);
+	copy_vector = duckdb_data_chunk_get_vector(input, 5);
+	if (!duckvep_scalar_variant_reserve(state, (size_t)rows)) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_sv: out of memory");
+		return 0;
+	}
+	regions = duckdb_vector_get_data(region_vector);
+	starts = duckdb_vector_get_data(start_vector);
+	ends = duckdb_vector_get_data(end_vector);
+	types = duckdb_vector_get_data(type_vector);
+	copies = duckdb_vector_get_data(copy_vector);
+	region_validity = duckdb_vector_get_validity(region_vector);
+	start_validity = duckdb_vector_get_validity(start_vector);
+	end_validity = duckdb_vector_get_validity(end_vector);
+	type_validity = duckdb_vector_get_validity(type_vector);
+	copy_validity = duckdb_vector_get_validity(copy_vector);
+	for (row = 0; row < rows; row++) {
+		uint8_t sv_type, copy_change;
+
+		if (duckvep_validity_is_null(region_validity, row) ||
+		    duckvep_validity_is_null(start_validity, row) ||
+		    duckvep_validity_is_null(end_validity, row) ||
+		    duckvep_validity_is_null(type_validity, row) ||
+		    duckvep_validity_is_null(copy_validity, row)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_sv: event fields cannot be NULL");
+			return 0;
+		}
+		if (regions[row] > UINT16_MAX || starts[row] == 0u ||
+		    starts[row] > UINT32_MAX || ends[row] < starts[row] ||
+		    ends[row] > UINT32_MAX) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_sv: invalid 1-based inclusive interval");
+			return 0;
+		}
+		if (!duckvep_scalar_sv_type(&types[row], &sv_type) ||
+		    !duckvep_scalar_copy_change(&copies[row], &copy_change)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_sv: unknown structural type or copy change");
+			return 0;
+		}
+		if (sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_sv: BND requires paired two-locus input");
+			return 0;
+		}
+		if (!duckvep_sv_metadata_valid((duckvep_sv_type_t)sv_type,
+		    (duckvep_copy_change_t)copy_change)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_sv: structural type contradicts copy change");
+			return 0;
+		}
+		if (!duckvep_sv_geometry_valid((duckvep_sv_type_t)sv_type,
+		    (uint32_t)starts[row], (uint32_t)ends[row])) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_sv: invalid structural event geometry");
+			return 0;
+		}
+		state->seq_regions[row] = (uint16_t)regions[row];
+		state->positions[row] = (uint32_t)starts[row];
+		state->ends[row] = (uint32_t)ends[row];
+		state->variant_kinds[row] = (uint8_t)DUCKVEP_KIND_SV;
+		state->sv_types[row] = sv_type;
+		state->copy_changes[row] = copy_change;
+	}
+	memset(batch, 0, sizeof(*batch));
+	batch->chrom_id = state->seq_regions;
+	batch->pos1 = state->positions;
+	batch->end1 = state->ends;
+	batch->variant_kind = state->variant_kinds;
+	batch->sv_type = state->sv_types;
+	batch->copy_change = state->copy_changes;
+	batch->count = (size_t)rows;
+	return 1;
+}
+
+static int
 duckvep_scalar_model_region(const duckvep_owned_model_t *model,
 	uint16_t seq_region, uint32_t *sequence_length)
 {
@@ -505,10 +675,14 @@ duckvep_scalar_batch_slice(const duckvep_variant_batch_t *batch,
 	slice.chrom_id += begin;
 	slice.pos1 += begin;
 	slice.end1 += begin;
-	slice.ref_offset += begin;
-	slice.ref_length += begin;
-	slice.alt_offset += begin;
-	slice.alt_length += begin;
+	if (slice.ref_offset != NULL)
+		slice.ref_offset += begin;
+	if (slice.ref_length != NULL)
+		slice.ref_length += begin;
+	if (slice.alt_offset != NULL)
+		slice.alt_offset += begin;
+	if (slice.alt_length != NULL)
+		slice.alt_length += begin;
 	slice.variant_kind += begin;
 	slice.sv_type += begin;
 	slice.copy_change += begin;
@@ -1138,7 +1312,7 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 
 static void
 duckvep_annotate_scalar_execute(duckdb_function_info info,
-	duckdb_data_chunk input, duckdb_vector output, int compact)
+	duckdb_data_chunk input, duckdb_vector output, int compact, int structural)
 {
 	duckvep_scalar_state_t *state;
 	duckvep_variant_batch_t batch;
@@ -1152,6 +1326,7 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 	uint64_t *downstream_distances;
 	idx_t rows;
 	idx_t column_count;
+	idx_t distance_column;
 	size_t begin;
 	char error[DUCKVEP_SQL_ERROR_SIZE];
 
@@ -1176,16 +1351,21 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 	}
 	model_vector = duckdb_data_chunk_get_vector(input, 0);
 	model_validity = duckdb_vector_get_validity(model_vector);
-	if (!duckvep_scalar_prepare_batch(state, input, &batch, error,
-	    sizeof(error)))
+	if (!(structural ?
+	    duckvep_scalar_prepare_sv_batch(state, input, &batch, error,
+	    sizeof(error)) :
+	    duckvep_scalar_prepare_batch(state, input, &batch, error,
+	    sizeof(error))))
 		goto failed;
 	regions = state->seq_regions;
 	positions = state->positions;
 	column_count = duckdb_data_chunk_get_column_count(input);
-	upstream_distance_vector = column_count >= 6 ?
-	    duckdb_data_chunk_get_vector(input, 5) : NULL;
-	downstream_distance_vector = column_count >= 7 ?
-	    duckdb_data_chunk_get_vector(input, 6) : upstream_distance_vector;
+	distance_column = structural ? 6 : 5;
+	upstream_distance_vector = column_count > distance_column ?
+	    duckdb_data_chunk_get_vector(input, distance_column) : NULL;
+	downstream_distance_vector = column_count > distance_column + 1 ?
+	    duckdb_data_chunk_get_vector(input, distance_column + 1) :
+	    upstream_distance_vector;
 	upstream_distance_validity = upstream_distance_vector != NULL ?
 	    duckdb_vector_get_validity(upstream_distance_vector) : NULL;
 	downstream_distance_validity = downstream_distance_vector != NULL ?
@@ -1267,14 +1447,28 @@ static void
 duckvep_annotate_scalar(duckdb_function_info info,
 	duckdb_data_chunk input, duckdb_vector output)
 {
-	duckvep_annotate_scalar_execute(info, input, output, 0);
+	duckvep_annotate_scalar_execute(info, input, output, 0, 0);
 }
 
 static void
 duckvep_annotate_compact_scalar(duckdb_function_info info,
 	duckdb_data_chunk input, duckdb_vector output)
 {
-	duckvep_annotate_scalar_execute(info, input, output, 1);
+	duckvep_annotate_scalar_execute(info, input, output, 1, 0);
+}
+
+static void
+duckvep_annotate_sv_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckvep_annotate_scalar_execute(info, input, output, 0, 1);
+}
+
+static void
+duckvep_annotate_sv_compact_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckvep_annotate_scalar_execute(info, input, output, 1, 1);
 }
 
 static duckdb_logical_type
@@ -1345,7 +1539,7 @@ static void
 duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int distance_parameters, int compact)
+	int distance_parameters, int compact, int structural)
 {
 	duckdb_scalar_function scalar;
 	duckdb_logical_type result_type;
@@ -1353,13 +1547,20 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 	scalar = duckdb_create_scalar_function();
 	result_type = compact ? duckvep_compact_annotation_list_type() :
 	    duckvep_annotation_list_type();
-	duckdb_scalar_function_set_name(scalar, compact ?
-	    "duckvep_annotate_compact" : "duckvep_annotate");
+	duckdb_scalar_function_set_name(scalar, structural ?
+	    (compact ? "duckvep_annotate_sv_compact" : "duckvep_annotate_sv") :
+	    (compact ? "duckvep_annotate_compact" : "duckvep_annotate"));
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
 	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
 	duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	if (structural) {
+		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	} else {
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	}
 	if (distance_parameters >= 1)
 		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
 	if (distance_parameters >= 2)
@@ -1369,8 +1570,12 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckvep_registry_retain(registry);
 	duckdb_scalar_function_set_extra_info(scalar, registry,
 	    duckvep_registry_release);
-	duckdb_scalar_function_set_function(scalar, compact ?
-	    duckvep_annotate_compact_scalar : duckvep_annotate_scalar);
+	if (structural)
+		duckdb_scalar_function_set_function(scalar, compact ?
+		    duckvep_annotate_sv_compact_scalar : duckvep_annotate_sv_scalar);
+	else
+		duckdb_scalar_function_set_function(scalar, compact ?
+		    duckvep_annotate_compact_scalar : duckvep_annotate_scalar);
 	(void)duckdb_register_scalar_function(connection, scalar);
 	duckdb_destroy_scalar_function(&scalar);
 	duckdb_destroy_logical_type(&result_type);
@@ -1394,17 +1599,29 @@ register_duckvep_functions(duckdb_connection connection,
 	uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0);
+	    uinteger_type, ubigint_type, 0, 0, 0);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0);
+	    uinteger_type, ubigint_type, 1, 0, 0);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0);
+	    uinteger_type, ubigint_type, 2, 0, 0);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1);
+	    uinteger_type, ubigint_type, 0, 1, 0);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1);
+	    uinteger_type, ubigint_type, 1, 1, 0);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1);
+	    uinteger_type, ubigint_type, 2, 1, 0);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, 0, 1);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, 0, 1);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 0, 1);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, 1, 1);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, 1, 1);
+	duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 1, 1);
 	duckdb_destroy_logical_type(&varchar_type);
 	duckdb_destroy_logical_type(&uinteger_type);
 	duckdb_destroy_logical_type(&ubigint_type);

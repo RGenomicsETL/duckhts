@@ -48,6 +48,15 @@ DUCKVEP_PROP_TRIALS=1000000 \
   make test-duckvep-state-exploration
 ```
 
+A held-out run with seed `20260716` raised both layers to 100,000 randomized cases. The
+pure-C layer passed 170 tests and 204,521 assertions. The executable differential wrote
+100,268 variants (268 fixed witnesses plus 100,000 generated alleles) and matched all
+100,268 VEP-116 transcript pairs, with no unresolved, missing, or extra rows. The generated
+alleles included 384 SNVs, 33,032 MNVs, 30,328 insertions, 1,442 deletions, and 34,814
+delins. These are measured counts for that seed, not an assertion that the accepted cases
+are uniformly distributed: duplicate rejection exhausts the small SNV/deletion state space
+sooner than the longer-allele spaces.
+
 For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_sequence_regions`, `duckvep_transcripts`, `duckvep_exons`, and
 `duckvep_transcript_names`. When the model carries Ensembl mature-miRNA
@@ -106,6 +115,44 @@ Sampling is deterministic within allele type and length-change bin. Set
 before the C engine runs. The output is a Parquet row set from both engines, a pair-level
 Parquet difference, and CSV summaries with exact matches, unresolved engine rows, resolved
 discordances, emission misses/extras, and exact binomial 95% upper bounds.
+
+Small-event sampling is not SNP-only. It retains four separate shapes: SNV, equal-length
+MNV, insertion-like, and deletion-like. The last two include ordinary insertions/deletions
+and non-empty delins; the pure-C properties independently generate all five semantic edit
+classes, shared prefixes/suffixes, position-one right anchors, same- and cross-codon MNVs,
+frame-changing edits, in-frame edits, and phased edit sets.
+
+Use structural mode without `--vcf` to generate events from the loaded model itself. Each
+seed samples real transcript-exact/containing/partial spans, coding segments of several
+lengths, introns, exon-to-intron spans, both UTRs, start and stop codons, and insertion sites
+in CDS, introns, and at exon/CDS edges. Span geometry is crossed with DEL, DUP, tandem DUP,
+INV, and undirected CNV; insertion geometry uses INS. VEP 116 remains the only label oracle:
+the generator supplies locations and operations, not expected consequences.
+
+```sh
+make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
+  --event-mode structural \
+  --corpus sv_chr21_seed17 \
+  --database /data/homo_sapiens_116_GRCh38.duckdb \
+  --model-sql '' \
+  --cache-dir /data/vep-cache \
+  --fasta /data/GRCh38.fa \
+  --assembly GRCh38 --species homo_sapiens \
+  --chrom 21 --seed 17 --sample-per-shape 100"
+```
+
+When `--model-sql` is empty, the runner loads DuckHTS in a private in-memory database and
+attaches the prepared model read-only. Independent chromosome/seed jobs can therefore run
+concurrently without copying the model or serializing on a DuckDB file lock. Every generated
+VCF ID contains its state, source transcript ordinal, coordinates, and operation; retaining
+`--sample-vcf` makes any discovered state directly reproducible.
+
+The first eight-seed GRCh38 campaign covered chromosomes 1, 2, 6, 11, 17, 21, 22, and X:
+40,375 generated events produced 2,140,911 transcript pairs, all exact against executable
+indexed-cache VEP 116. Treat those denominators as the tested distribution. They do not
+extend the claim to paired breakends, imprecise coordinates, repeat payloads, or other
+species; add those as explicit event modes and strata rather than silently widening this
+one.
 
 Ensembl also publishes release VCFs whose `VE` and `CSQ` fields contain every consequence
 computed by its variation pipeline. DuckHTS reads their `Format=...` CSQ header directly;

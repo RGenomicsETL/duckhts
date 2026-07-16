@@ -1219,6 +1219,20 @@ static void insertion_apply_region_boundaries(
         : insertion_flanks_share_exon(
             transcripts, exons, tx_idx, left1, right1);
 
+    /* VEP 116 clamps a reversed insertion interval to one exonic flank for
+     * within_cdna, even though its generic exon predicate still requires both
+     * flanks to share an exon. This combination enables feature_elongation plus
+     * non_coding_transcript_variant at an internal exon entrance. */
+    {
+        uint32_t cdna;
+        if (duckvep_project_genomic_to_cdna(
+                transcripts, exons, tx_idx, left1, &cdna, NULL) ||
+            duckvep_project_genomic_to_cdna(
+                transcripts, exons, tx_idx, right1, &cdna, NULL)) {
+            region->within_cdna = 1u;
+        }
+    }
+
     if (cds_start == 0u && region->overlaps_exon &&
         !flanks_share_exon) {
         region->overlaps_exon = 0u;
@@ -1260,6 +1274,14 @@ static void insertion_apply_region_boundaries(
         after_coding = event->feature_start1 > event->feature_end1 &&
             event->feature_start1 - event->feature_end1 == 1u &&
             event->feature_end1 == cds_end;
+        if (before_coding || after_coding) {
+            /* BaseTranscriptVariation::cds_coords is a mapper Gap for the
+             * reversed interval straddling the outer CDS edge. VEP therefore
+             * admits the UTR special case but excludes every consequence whose
+             * registry entry requires coding=1. */
+            region->overlaps_cds = 0u;
+            region->region_mask &= ~(uint32_t)DUCKVEP_REGION_CDS;
+        }
         if (region->within_cdna) {
             if ((transcripts->strand[tx_idx] >= 0 && before_coding) ||
                 (transcripts->strand[tx_idx] < 0 && after_coding)) {
@@ -1392,6 +1414,23 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         duckvep_effect_ctx_fill_classified(
             tx, variant_idx, (size_t)tx_idx,
             topology_start1, topology_end1, &region, &splice, &ectx);
+    } else if (kind == DUCKVEP_KIND_SV && event.interbase) {
+        duckvep_region_state_t region = duckvep_region_classify_span(
+            tx, &c->model->exons, (size_t)tx_idx,
+            topology_start1, topology_end1, 0u, 0u);
+        duckvep_splice_state_t splice;
+
+        insertion_apply_region_boundaries(
+            tx, &c->model->exons, (size_t)tx_idx, &event,
+            0, UINT16_MAX, &region);
+        splice = duckvep_splice_classify_span_with_windows(
+            tx, &c->model->exons, (size_t)tx_idx,
+            event.feature_start1, event.feature_end1, event.interbase,
+            c->options->splice_region_exonic,
+            c->options->splice_region_intronic);
+        duckvep_effect_ctx_fill_classified(
+            tx, variant_idx, (size_t)tx_idx,
+            topology_start1, topology_end1, &region, &splice, &ectx);
     } else {
         duckvep_effect_ctx_fill_geometry(
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
@@ -1406,9 +1445,18 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                                           &event)) {
         duckvep_effect_ctx_apply_exon_gate(&ectx, 1);
     }
+    has_partial_terminal_codon = c->model->has_seq &&
+        duckvep_transcript_has_partial_terminal_codon(
+            &c->model->seq, (size_t)tx_idx);
     duckvep_effect_ctx_apply_event(tx, &ectx, &event);
     if (kind == DUCKVEP_KIND_SV) {
-        duckvep_sv_effect_t sv = duckvep_sv_effect_fill(&event, &ectx.region_state);
+        uint32_t translateable_cds_length =
+            c->model->has_seq && c->model->seq.cds_length != NULL
+            ? c->model->seq.cds_length[tx_idx] : 0u;
+        duckvep_sv_effect_t sv = duckvep_sv_effect_fill(
+            tx, &c->model->exons, (size_t)tx_idx,
+            translateable_cds_length,
+            &event, &ectx.region_state);
         duckvep_effect_ctx_apply_sv(&ectx, &sv);
     }
 
@@ -1418,9 +1466,6 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
      * is a Mapper::Gap. The peptide path is therefore unavailable even if
      * semantic trimming leaves a CDS-only mismatch. A partial terminal codon is
      * the 3' exception: VEP can still classify its first mapped coding piece. */
-    has_partial_terminal_codon = c->model->has_seq &&
-        duckvep_transcript_has_partial_terminal_codon(
-            &c->model->seq, (size_t)tx_idx);
     feature_mapping_blocks_peptide =
         ectx.region_state.overlaps_cds &&
         (ectx.region_state.within_frameshift_intron ||
@@ -1507,7 +1552,9 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
 
     duckvep_effect_ctx_finalize(&ectx);
 
-    cmask = duckvep_effect_eval(ectx.pre_bits);
+    cmask = kind == DUCKVEP_KIND_SV
+        ? duckvep_effect_eval_structural(ectx.pre_bits)
+        : duckvep_effect_eval(ectx.pre_bits);
     /* BaseVariationFeatureOverlapAllele::get_all_OverlapConsequences assigns
      * VEP 116's default intergenic consequence when a real overlap allele has
      * exhausted its predicate list without a match. Preserve the transcript
@@ -1612,6 +1659,12 @@ static duckvep_status_t validate_variant_batch(
                                         (duckvep_copy_change_t)copy_change))) {
             return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_SV_TYPE,
                         "invalid structural subtype or copy-change value");
+        }
+        if (kind == (uint8_t)DUCKVEP_KIND_SV &&
+            !duckvep_sv_geometry_valid((duckvep_sv_type_t)sv_type,
+                                       variants->pos1[i], variants->end1[i])) {
+            return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_COORD_RANGE,
+                        "invalid structural event geometry");
         }
         if (kind == (uint8_t)DUCKVEP_KIND_SV &&
             sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {

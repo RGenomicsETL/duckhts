@@ -275,6 +275,30 @@
       ]
     },
     {
+      "name": "duckvep_annotate_sv",
+      "kind": "scalar",
+      "category": "Variant Annotation",
+      "signature": "duckvep_annotate_sv(model_name, seq_region, start, end, structural_type, copy_change [, distance] | [, upstream_distance, downstream_distance])",
+      "returns": "LIST<STRUCT(transcript_index UINTEGER, gene_index UINTEGER, consequence VARCHAR, impact VARCHAR, region VARCHAR, status VARCHAR, reason VARCHAR, cdna_position UBIGINT, cds_position UBIGINT, protein_position UBIGINT, reference_amino_acid VARCHAR, alternate_amino_acid VARCHAR, nmd_prediction VARCHAR, nmd_escape_intronless BOOLEAN, nmd_escape_early_cds BOOLEAN, nmd_escape_last_exon BOOLEAN, nmd_escape_penultimate_exon_end BOOLEAN)>",
+      "r_wrapper": "",
+      "description": "Annotate an exact single-locus structural event against a named resident transcript model. DEL, DUP, TDUP, INV, CNV, and UNKNOWN use a one-based inclusive start/end span. INS uses start = end = P for the interbase site after reference base P; symbolic VCF preparation therefore maps a span event to start = POS + 1 and end = INFO/END, but maps an insertion to P = POS after removing its left anchor. structural_type is DEL, DUP, TDUP, INV, INS, CNV, or UNKNOWN; copy_change is UNKNOWN, LOSS, NEUTRAL, or GAIN. Contradictory pairs such as DEL with GAIN fail instead of silently choosing one meaning. The optional distance arguments have the same 5000-base default, symmetric-sixth-argument form, separate upstream/downstream form, and zero-to-disable behavior as duckvep_annotate(...). Input must be sorted by model, seq_region, and start to retain the forward transcript sweep. This surface does not accept imprecise confidence intervals, STR repeat units, or BND: a breakend requires two loci and will not be reduced to one interval.",
+      "examples": [
+        "SELECT variant_id, annotation.* FROM (SELECT variant_id, unnest(duckvep_annotate_sv('grch38', seq_region, start1, end1, structural_type, copy_change)) AS annotation FROM sorted_structural_events);"
+      ]
+    },
+    {
+      "name": "duckvep_annotate_sv_compact",
+      "kind": "scalar",
+      "category": "Variant Annotation",
+      "signature": "duckvep_annotate_sv_compact(model_name, seq_region, start, end, structural_type, copy_change [, distance] | [, upstream_distance, downstream_distance])",
+      "returns": "LIST<STRUCT(transcript_index UINTEGER, gene_index UINTEGER, consequence_mask UBIGINT, region_mask UINTEGER, impact_code UTINYINT, status_code UTINYINT, reason_code UTINYINT, cdna_position UINTEGER, cds_position UINTEGER, protein_position UINTEGER, reference_amino_acid_code UTINYINT, alternate_amino_acid_code UTINYINT, nmd_prediction_code UTINYINT, nmd_escape_reasons UTINYINT)>",
+      "r_wrapper": "",
+      "description": "Run the same typed exact single-locus structural-event path, insertion-site convention, and distance controls as duckvep_annotate_sv(...), returning the same numeric consequence, region, impact, status, reason, coordinate, amino-acid, and NMD codes as duckvep_annotate_compact(...). This is the join-oriented form for filtering and aggregation before text rendering; it deliberately rejects BND, STR, and imprecise structural coordinates until those event shapes have dedicated inputs.",
+      "examples": [
+        "SELECT count(*) AS transcript_rows, bit_or(annotation.consequence_mask) AS observed_terms FROM (SELECT unnest(duckvep_annotate_sv_compact('grch38', seq_region, start1, end1, structural_type, copy_change)) AS annotation FROM sorted_structural_events);"
+      ]
+    },
+    {
       "name": "read_bcf",
       "kind": "table",
       "category": "Readers",

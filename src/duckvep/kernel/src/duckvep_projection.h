@@ -72,6 +72,23 @@ int duckvep_project_coding_base(
     uint32_t                          genomic_pos,
     duckvep_coding_projection_t      *out);
 
+/* Return VEP's BaseTranscriptVariation::translation_start projection for a
+ * non-insertion feature. The first mapper item is transcript-oriented: a
+ * leading UTR/intron Gap leaves translation_start undefined even when a later
+ * part of the uploaded span overlaps CDS. */
+int duckvep_project_feature_translation_start(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    duckvep_coding_projection_t      *out);
+
+/* VEP partial_codon asks whether the first affected CDS coordinate belongs to
+ * the incomplete codon at the end of the translateable CDS. */
+int duckvep_cds_position_is_partial_codon(
+    size_t   cds_length,
+    uint32_t cds_position1);
+
 /* Project one prepared small-variant event to its inclusive CDS-coordinate
  * bounds. Every changed reference base must map contiguously; splice-crossing
  * spans therefore fail instead of inventing a coding range. A pure insertion

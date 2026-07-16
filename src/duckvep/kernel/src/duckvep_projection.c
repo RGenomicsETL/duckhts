@@ -235,6 +235,48 @@ int duckvep_project_coding_base(
     return 1;
 }
 
+int duckvep_project_feature_translation_start(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    duckvep_coding_projection_t      *out) {
+
+    uint32_t first_genomic1;
+
+    if (out == NULL) return 0;
+    memset(out, 0, sizeof *out);
+    if (transcripts == NULL || event == NULL || event->interbase ||
+        tx_idx >= transcripts->transcript_count ||
+        event->feature_start1 == 0u ||
+        event->feature_end1 < event->feature_start1) {
+        return 0;
+    }
+
+    /* TranscriptMapper reverses mapper pieces for a reverse-strand
+     * transcript. Its first item is therefore the high genomic endpoint. */
+    first_genomic1 = transcripts->strand[tx_idx] >= 0
+        ? event->feature_start1 : event->feature_end1;
+    return duckvep_project_coding_base(
+        transcripts, exons, tx_idx, first_genomic1, out);
+}
+
+int duckvep_cds_position_is_partial_codon(
+    size_t   cds_length,
+    uint32_t cds_position1) {
+
+    size_t codon_start0;
+    size_t last_codon_length;
+
+    if (cds_position1 == 0u || (size_t)cds_position1 > cds_length ||
+        (cds_length % 3u) == 0u) {
+        return 0;
+    }
+    codon_start0 = ((size_t)cds_position1 - 1u) / 3u * 3u;
+    last_codon_length = cds_length - codon_start0;
+    return last_codon_length > 0u && last_codon_length < 3u;
+}
+
 int duckvep_project_event_to_cds(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,

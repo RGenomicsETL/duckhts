@@ -30,7 +30,10 @@ if (defined $expected_sha256) {
         if lc($actual) ne lc($expected_sha256);
 }
 
-my @cols = qw(SO_term SO_accession impact rank tier feature_SO_term predicate);
+my @cols = qw(
+    SO_term SO_accession impact rank tier feature_SO_term predicate
+    feature_class variant_feature_class
+);
 my @rows;
 while ($src =~ /->new_fast\(\{(.*?)\}\s*\)/sg) {
     my $block = $1;

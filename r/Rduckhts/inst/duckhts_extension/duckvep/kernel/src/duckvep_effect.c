@@ -131,6 +131,9 @@ static void duckvep_effect_ctx_set_topology(
     out->start1 = start1;
     out->end1 = end1;
     out->strand = transcripts->strand[tx_idx];
+    out->protein_coding = (uint8_t)(
+        (transcripts->flags[tx_idx] &
+         (uint64_t)DUCKVEP_TX_BIOTYPE_PROTEIN_CODING) != 0u);
 
     out->region_state = *region_state;
     if (splice_state->within_frameshift_intron) {
@@ -368,6 +371,25 @@ void duckvep_effect_ctx_apply_event(
         }
     }
     if (event->kind == (uint8_t)DUCKVEP_KIND_SV) {
+        if (ctx->region_state.complete_overlap_feature) {
+            /* BaseVariationFeatureOverlapAllele::_bvfo_preds returns early for
+             * a structural event that contains the complete transcript. It
+             * retains complete-overlap, within-feature and biotype facts, but
+             * deliberately does not populate CDS, UTR, exon, intron or splice
+             * preconditions. Transcript ablation/amplification or the coding/
+             * non-coding transcript fallback therefore remain the only paths. */
+            ctx->pre_bits &= ~(
+                DUCKVEP_PRE(DUCKVEP_PRE_CDS) |
+                DUCKVEP_PRE(DUCKVEP_PRE_UTR5) |
+                DUCKVEP_PRE(DUCKVEP_PRE_UTR3) |
+                DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_DONOR) |
+                DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_ACCEPTOR) |
+                DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_DONOR_5TH) |
+                DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_DONOR_REGION) |
+                DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_PPT) |
+                DUCKVEP_PRE(DUCKVEP_PRE_SPLICE_REGION) |
+                DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_INTRON));
+        }
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_SV);
         return;
     }
@@ -432,6 +454,76 @@ void duckvep_effect_ctx_apply_sv(
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_ELONGATION);
     if (sv->feature_truncation)
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_TRUNCATION);
+    if (sv->start_lost)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_LOST);
+    if (sv->start_retained)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_RETAINED);
+    if (sv->stop_lost)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_LOST);
+    if (sv->frameshift)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
+    if (sv->inframe_deletion)
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);
+}
+
+uint64_t duckvep_effect_eval_interval_feature(
+    duckvep_interval_feature_kind_t feature_kind,
+    const duckvep_event_t          *event,
+    uint32_t                        feature_start1,
+    uint32_t                        feature_end1) {
+
+    uint64_t pre = 0u;
+    int within;
+    int complete_overlap;
+    int deletion;
+    int copy_number_gain;
+
+    if (event == NULL || feature_start1 == 0u ||
+        feature_end1 < feature_start1 ||
+        (feature_kind != DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION &&
+         feature_kind != DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE)) {
+        return 0u;
+    }
+
+    /* These are the executable VariationEffect::within_feature and
+     * complete_overlap_feature comparisons. Keeping the insertion's reversed
+     * feature interval is intentional: an insertion exactly outside a feature
+     * must not acquire its consequence from an arbitrary anchor base. */
+    within = event->feature_end1 >= feature_start1 &&
+             event->feature_start1 <= feature_end1;
+    if (!within) return 0u;
+    complete_overlap = event->feature_start1 <= feature_start1 &&
+                       event->feature_end1 >= feature_end1;
+
+    if (event->kind == (uint8_t)DUCKVEP_KIND_SV) {
+        deletion = event->sv_type == (uint8_t)DUCKVEP_SV_DELETION ||
+                   event->copy_change == (uint8_t)DUCKVEP_COPY_CHANGE_LOSS;
+        copy_number_gain =
+            event->sv_type == (uint8_t)DUCKVEP_SV_DUPLICATION ||
+            event->sv_type == (uint8_t)DUCKVEP_SV_TANDEM_DUPLICATION ||
+            event->copy_change == (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
+    } else {
+        deletion = event->ref_diff_length > event->alt_diff_length;
+        /* VEP does not call every lengthening allele a copy-number gain.
+         * Small tandem-repeat/duplication recognition needs allele content and
+         * stays out until that typed event fact is available. */
+        copy_number_gain = 0;
+    }
+
+    if (feature_kind == DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE) {
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_TFBS);
+        if (complete_overlap && deletion)
+            pre |= DUCKVEP_PRE(DUCKVEP_PRE_TFBS_ABLATION);
+        if (complete_overlap && copy_number_gain)
+            pre |= DUCKVEP_PRE(DUCKVEP_PRE_TFBS_AMPLIFICATION);
+    } else {
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_REGULATORY_REGION);
+        if (complete_overlap && deletion)
+            pre |= DUCKVEP_PRE(DUCKVEP_PRE_REGULATORY_ABLATION);
+        if (complete_overlap && copy_number_gain)
+            pre |= DUCKVEP_PRE(DUCKVEP_PRE_REGULATORY_AMPLIFICATION);
+    }
+    return duckvep_effect_eval(pre);
 }
 
 void duckvep_effect_ctx_finalize(duckvep_effect_ctx_t *ctx) {
@@ -462,10 +554,16 @@ void duckvep_effect_ctx_finalize(duckvep_effect_ctx_t *ctx) {
      * fallback. Usually a resolved DELTA suppresses coding_unknown, but VEP can
      * set both explicitly (for example an in-frame insertion whose local peptide
      * ends in X); duckvep_effect_ctx_apply_delta preserves that fact above. */
-    if (coding && ctx->region_state.complete_overlap_feature) {
+    if (coding && ctx->protein_coding &&
+        ctx->region_state.complete_overlap_feature &&
+        (pre & DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u) {
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_TRANSCRIPT);
     } else if ((pre & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) != 0u &&
-               (pre & DUCKVEP_PRE(DUCKVEP_PRE_DELTA)) == 0u) {
+               (pre & DUCKVEP_PRE(DUCKVEP_PRE_DELTA)) == 0u &&
+               ((pre & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u ||
+                (pre & (DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT) |
+                        DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION) |
+                        DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION))) == 0u)) {
         pre |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN);
     }
 
@@ -501,6 +599,12 @@ uint64_t duckvep_effect_eval_reference(uint64_t pre_bits) {
                                      sizeof k_rules / sizeof k_rules[0]);
 }
 
+uint64_t duckvep_effect_eval_structural_reference(uint64_t pre_bits) {
+    return duckvep_effect_eval_rules(
+        pre_bits & k_rule_structural_pre_mask,
+        k_rules, sizeof k_rules / sizeof k_rules[0]);
+}
+
 static unsigned duckvep_first_set_pre_bit(uint64_t mask) {
 #if defined(__GNUC__) || defined(__clang__)
     return (unsigned)__builtin_ctzll(mask);
@@ -526,4 +630,8 @@ uint64_t duckvep_effect_eval(uint64_t pre_bits) {
         bits &= bits - UINT64_C(1);
     }
     return mask;
+}
+
+uint64_t duckvep_effect_eval_structural(uint64_t pre_bits) {
+    return duckvep_effect_eval(pre_bits & k_rule_structural_pre_mask);
 }
