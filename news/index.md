@@ -2,6 +2,10 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- re-audit the bundled DuckVEP consequence path on the retained
+  full-model GRCh38 ClinVar samples: all 287,836 coding-enriched and
+  316,397 cross-chromosome transcript pairs match the indexed VEP 116
+  cache, with no unresolved, extra, missing, or discordant rows
 - bundle typed exact single-locus structural-event consequence functions
   `duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)`; DBI
   callers provide one-based inclusive spans for
