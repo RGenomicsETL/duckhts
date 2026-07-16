@@ -582,10 +582,12 @@ belong as ignored arguments in the consequence-kernel API.
   once and stream ordered chunks directly into the consequence or phased executor.
 
 The generated reports are the numeric authority. At the latest tested ancestor for each
-corpus, GRCh38 dbSNP and GIAB, GRCh37, and *P. falciparum* are exact for their declared
-indexed-cache samples. The two GRCh38 ClinVar corpora retain small visible discrepancies.
-The separate NMD-plugin differential is exact for all 68,554 eligible transcript pairs,
-including the 29,416 states both implementations leave unresolved.
+corpus, the declared GRCh38 dbSNP, GIAB, ClinVar coding, and ClinVar cross-chromosome
+samples, GRCh37, and *P. falciparum* are exact against their indexed caches. The two
+GRCh38 ClinVar samples contain 604,233 transcript pairs together, with no unresolved,
+extra, missing, or discordant row. The separate NMD-plugin differential is exact for all
+68,554 eligible transcript pairs, including the 29,416 states both implementations leave
+unresolved.
 
 On the final 644,427-transcript GRCh38 model, the current one-core compact measurements are
 about 841,000 input alleles/s for the GIAB topology sample, 332,000/s for repeated coding
