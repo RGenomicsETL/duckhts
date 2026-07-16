@@ -177,14 +177,9 @@ void duckvep_effect_ctx_apply_sv(
 
 /* VEP's regulatory and motif consequences use the same event geometry and
  * structural operation facts as transcripts, but their features are ordinary
- * intervals. Candidate discovery belongs to a DuckDB range join; this helper
- * evaluates one joined pair and returns only VEP SO bits. `feature_start1` and
- * `feature_end1` are one-based inclusive. */
-typedef enum duckvep_interval_feature_kind {
-    DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION = 1,
-    DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE = 2
-} duckvep_interval_feature_kind_t;
-
+ * intervals. The resident feature sweep discovers candidates; this helper
+ * evaluates one event/feature pair and returns only VEP SO bits.
+ * `feature_start1` and `feature_end1` are one-based inclusive. */
 uint64_t duckvep_effect_eval_interval_feature(
     duckvep_interval_feature_kind_t feature_kind,
     const duckvep_event_t          *event,

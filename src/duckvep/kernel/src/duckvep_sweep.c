@@ -23,10 +23,34 @@ void duckvep_sweep_cursor_init(
     uint32_t                          *candidates,
     size_t                             candidate_cap) {
 
+    duckvep_interval_sweep_cursor_init(cursor, variants,
+        transcripts != NULL ? transcripts->chrom_id : NULL,
+        transcripts != NULL ? transcripts->start1 : NULL,
+        transcripts != NULL ? transcripts->end1 : NULL,
+        transcripts != NULL ? transcripts->transcript_count : 0u,
+        halo, active, active_cap, candidates, candidate_cap);
+}
+
+void duckvep_interval_sweep_cursor_init(
+    duckvep_sweep_cursor_t        *cursor,
+    const duckvep_variant_batch_t *variants,
+    const uint16_t                *interval_chrom_id,
+    const uint32_t                *interval_start1,
+    const uint32_t                *interval_end1,
+    size_t                         interval_count,
+    uint32_t                       halo,
+    uint32_t                      *active,
+    size_t                         active_cap,
+    uint32_t                      *candidates,
+    size_t                         candidate_cap) {
+
     if (cursor == NULL) return;
     memset(cursor, 0, sizeof *cursor);
     cursor->variants = variants;
-    cursor->transcripts = transcripts;
+    cursor->interval_chrom_id = interval_chrom_id;
+    cursor->interval_start1 = interval_start1;
+    cursor->interval_end1 = interval_end1;
+    cursor->interval_count = interval_count;
     cursor->halo = halo;
     cursor->active = active;
     cursor->active_cap = active_cap;
@@ -34,7 +58,10 @@ void duckvep_sweep_cursor_init(
     cursor->candidate_cap = candidate_cap;
     cursor->status = DUCKVEP_OK;
 
-    if (variants == NULL || transcripts == NULL ||
+    if (variants == NULL ||
+        (interval_count != 0u &&
+         (interval_chrom_id == NULL || interval_start1 == NULL ||
+          interval_end1 == NULL)) ||
         (active == NULL && active_cap > 0u) ||
         (candidates == NULL && candidate_cap > 0u) ||
         (active != NULL && candidates != NULL && active == candidates)) {
@@ -45,7 +72,6 @@ void duckvep_sweep_cursor_init(
 int duckvep_sweep_cursor_seed(duckvep_sweep_cursor_t *cursor,
                               const uint32_t *seed,
                               size_t seed_count) {
-    const duckvep_transcript_model_t *transcripts;
     uint16_t chrom;
     uint32_t event_start;
     uint32_t point_hi;
@@ -56,7 +82,7 @@ int duckvep_sweep_cursor_seed(duckvep_sweep_cursor_t *cursor,
 
     if (cursor == NULL || cursor->status != DUCKVEP_OK || cursor->vi != 0u ||
         cursor->have_chrom || cursor->variants == NULL ||
-        cursor->transcripts == NULL || cursor->variants->count == 0u ||
+        cursor->variants->count == 0u ||
         (seed_count != 0u && seed == NULL)) {
         if (cursor != NULL) cursor->status = DUCKVEP_ERR_INVALID_ARG;
         return 0;
@@ -66,39 +92,38 @@ int duckvep_sweep_cursor_seed(duckvep_sweep_cursor_t *cursor,
         return 0;
     }
 
-    transcripts = cursor->transcripts;
     chrom = cursor->variants->chrom_id[0];
     event_start = cursor->variants->pos1[0];
     point_hi = sat_add_u32(event_start, cursor->halo);
 
     chrom_begin = 0u;
-    chrom_end = transcripts->transcript_count;
+    chrom_end = cursor->interval_count;
     while (chrom_begin < chrom_end) {
         size_t middle = chrom_begin + (chrom_end - chrom_begin) / 2u;
-        if (transcripts->chrom_id[middle] < chrom) chrom_begin = middle + 1u;
+        if (cursor->interval_chrom_id[middle] < chrom) chrom_begin = middle + 1u;
         else chrom_end = middle;
     }
     chrom_end = chrom_begin;
-    while (chrom_end < transcripts->transcript_count &&
-           transcripts->chrom_id[chrom_end] == chrom) {
+    while (chrom_end < cursor->interval_count &&
+           cursor->interval_chrom_id[chrom_end] == chrom) {
         chrom_end++;
     }
     add = chrom_begin;
-    while (add < chrom_end && transcripts->start1[add] <= point_hi) add++;
+    while (add < chrom_end && cursor->interval_start1[add] <= point_hi) add++;
 
     for (i = 0u; i < seed_count; i++) {
         uint32_t tx = seed[i];
         if ((size_t)tx < chrom_begin || (size_t)tx >= add ||
-            transcripts->chrom_id[tx] != chrom ||
-            sat_add_u32(transcripts->end1[tx], cursor->halo) < event_start) {
+            cursor->interval_chrom_id[tx] != chrom ||
+            sat_add_u32(cursor->interval_end1[tx], cursor->halo) < event_start) {
             cursor->status = DUCKVEP_ERR_INVALID_ARG;
             return 0;
         }
         cursor->active[i] = tx;
     }
 
-    cursor->ti = chrom_begin;
-    cursor->tx_hi = chrom_end;
+    cursor->interval_pos = chrom_begin;
+    cursor->interval_hi = chrom_end;
     cursor->add = add;
     cursor->nact = seed_count;
     cursor->chrom = chrom;
@@ -109,11 +134,10 @@ int duckvep_sweep_cursor_seed(duckvep_sweep_cursor_t *cursor,
 int duckvep_sweep_cursor_next(
     duckvep_sweep_cursor_t *cursor,
     uint32_t                *variant_idx,
-    const uint32_t         **tx_indices,
-    size_t                  *tx_count) {
+    const uint32_t         **interval_indices,
+    size_t                  *candidate_count) {
 
     const duckvep_variant_batch_t *variants;
-    const duckvep_transcript_model_t *transcripts;
     uint16_t chrom;
     uint32_t event_start;
     uint32_t point_hi;
@@ -121,35 +145,36 @@ int duckvep_sweep_cursor_next(
     size_t k;
 
     if (variant_idx != NULL) *variant_idx = 0u;
-    if (tx_indices != NULL) *tx_indices = NULL;
-    if (tx_count != NULL) *tx_count = 0u;
-    if (cursor == NULL || variant_idx == NULL || tx_indices == NULL || tx_count == NULL) {
+    if (interval_indices != NULL) *interval_indices = NULL;
+    if (candidate_count != NULL) *candidate_count = 0u;
+    if (cursor == NULL || variant_idx == NULL || interval_indices == NULL ||
+        candidate_count == NULL) {
         if (cursor != NULL) cursor->status = DUCKVEP_ERR_INVALID_ARG;
         return -1;
     }
     if (cursor->status != DUCKVEP_OK) return -1;
 
     variants = cursor->variants;
-    transcripts = cursor->transcripts;
     if (cursor->vi >= variants->count) return 0;
 
     chrom = variants->chrom_id[cursor->vi];
     if (!cursor->have_chrom || chrom != cursor->chrom) {
-        if (cursor->have_chrom) cursor->ti = cursor->tx_hi;
+        if (cursor->have_chrom)
+            cursor->interval_pos = cursor->interval_hi;
         cursor->chrom = chrom;
         cursor->have_chrom = 1u;
         cursor->nact = 0u;
 
-        while (cursor->ti < transcripts->transcript_count &&
-               transcripts->chrom_id[cursor->ti] < chrom) {
-            cursor->ti++;
+        while (cursor->interval_pos < cursor->interval_count &&
+               cursor->interval_chrom_id[cursor->interval_pos] < chrom) {
+            cursor->interval_pos++;
         }
-        cursor->tx_hi = cursor->ti;
-        while (cursor->tx_hi < transcripts->transcript_count &&
-               transcripts->chrom_id[cursor->tx_hi] == chrom) {
-            cursor->tx_hi++;
+        cursor->interval_hi = cursor->interval_pos;
+        while (cursor->interval_hi < cursor->interval_count &&
+               cursor->interval_chrom_id[cursor->interval_hi] == chrom) {
+            cursor->interval_hi++;
         }
-        cursor->add = cursor->ti;
+        cursor->add = cursor->interval_pos;
     }
 
     event_start = variants->pos1[cursor->vi];
@@ -160,10 +185,10 @@ int duckvep_sweep_cursor_next(
             : duckvep_event_effective_end1_at(variants, cursor->vi),
         cursor->halo);
 
-    /* Persistent point frontier. Event starts are monotone, so each transcript is
-     * admitted once and an expired transcript can never overlap a later event. */
-    while (cursor->add < cursor->tx_hi &&
-           transcripts->start1[cursor->add] <= point_hi) {
+    /* Persistent point frontier. Event starts are monotone, so each interval is
+     * admitted once and an expired interval cannot overlap a later event. */
+    while (cursor->add < cursor->interval_hi &&
+           cursor->interval_start1[cursor->add] <= point_hi) {
         if (cursor->nact >= cursor->active_cap) {
             cursor->status = DUCKVEP_ERR_RESULT_FULL;
             return -1;
@@ -174,7 +199,7 @@ int duckvep_sweep_cursor_next(
 
     k = 0u;
     while (k < cursor->nact) {
-        uint32_t end1 = transcripts->end1[cursor->active[k]];
+        uint32_t end1 = cursor->interval_end1[cursor->active[k]];
         if (sat_add_u32(end1, cursor->halo) < event_start) {
             cursor->active[k] = cursor->active[--cursor->nact];
         } else {
@@ -184,14 +209,14 @@ int duckvep_sweep_cursor_next(
 
     *variant_idx = (uint32_t)cursor->vi;
     if (span_hi == point_hi) {
-        *tx_indices = cursor->active;
-        *tx_count = cursor->nact;
+        *interval_indices = cursor->active;
+        *candidate_count = cursor->nact;
     } else {
         size_t future_hi = cursor->add;
         size_t ncand = cursor->nact;
 
-        while (future_hi < cursor->tx_hi &&
-               transcripts->start1[future_hi] <= span_hi) {
+        while (future_hi < cursor->interval_hi &&
+               cursor->interval_start1[future_hi] <= span_hi) {
             future_hi++;
         }
         if (ncand > cursor->candidate_cap ||
@@ -206,8 +231,8 @@ int duckvep_sweep_cursor_next(
         for (k = cursor->add; k < future_hi; k++) {
             cursor->candidates[ncand++] = (uint32_t)k;
         }
-        *tx_indices = cursor->candidates;
-        *tx_count = ncand;
+        *interval_indices = cursor->candidates;
+        *candidate_count = ncand;
     }
     cursor->vi++;
     return 1;

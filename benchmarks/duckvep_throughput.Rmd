@@ -31,8 +31,10 @@ together. Model loading and input staging are outside the timed pass.
 The checked-in one-transcript workload is a repeatable adapter floor. The final
 production-density workload uses the receipt-hashed Ensembl 116 GRCh38 model:
 194 sequence regions, 644,427 transcripts, 5,068,416 exon memberships, and
-369,631 sequence-backed coding transcripts. Its ordinary topology workload is
-a deterministic 1-in-40 hash sample of 100,957 sorted GIAB sites. The coding
+369,631 sequence-backed coding transcripts. The regulation-enabled form adds
+380,818 RegulatoryFeature and 1,002,762 MotifFeature intervals in an independent
+resident SoA. Its ordinary topology workload is a deterministic 1-in-40 hash
+sample of 100,957 sorted GIAB sites. The coding
 workloads deliberately repeat a frozen set to stabilize one-core kernel timing:
 200,000 SNVs repeat 1,000 distinct alleles; the 36,000 non-SNV workload repeats
 1,000 MNVs and 8,000 length-changing alleles four times; the 200,000 mixed
@@ -60,7 +62,7 @@ scan preserving insertion order; they remain only as historical measurements.
 ```{r runs}
 table <- history[, c(
   "run_date", "revision", "workload", "output_mode", "threads", "variants",
-  "transcripts", "exons", "annotated_rows", "passes", "min_seconds",
+  "transcripts", "exons", "regulation_features", "annotated_rows", "passes", "min_seconds",
   "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant",
   "cpu"
 )]
@@ -70,6 +72,11 @@ table$output_rows_per_second <- round(
 table$variants <- format(table$variants, big.mark = ",", scientific = FALSE)
 table$transcripts <- format(table$transcripts, big.mark = ",", scientific = FALSE)
 table$exons <- format(table$exons, big.mark = ",", scientific = FALSE)
+table$regulation_features <- format(
+  table$regulation_features,
+  big.mark = ",",
+  scientific = FALSE
+)
 table$annotated_rows <- format(
   table$annotated_rows,
   big.mark = ",",
@@ -89,6 +96,61 @@ Each pass consumes every staged input and checks output cardinality plus either
 the rendered consequence-byte total or the numeric consequence-mask sum. Rows
 with different workload, output mode, thread count, host, or variant count are
 separate measurements and should not be compared as if only the engine changed.
+
+## Core regulation and motif sweep
+
+```{r regulation-throughput}
+regulation_runs <- history[
+  history$workload == "ensembl116_grch38_final_giab_sites_hash40_regulation" &
+    history$output_mode == "compact" & history$threads == 1L,
+  ,
+  drop = FALSE
+]
+if (nrow(regulation_runs)) {
+  regulation <- regulation_runs[nrow(regulation_runs), , drop = FALSE]
+  transcript_control <- history[
+    history$source_revision == regulation$source_revision &
+      history$workload == "ensembl116_grch38_final_giab_sites_hash40" &
+      history$output_mode == "compact" & history$threads == 1L,
+    ,
+    drop = FALSE
+  ]
+  comparison <- rbind(
+    transcript_control[nrow(transcript_control), , drop = FALSE],
+    regulation
+  )
+  if (nrow(comparison) == 2L) {
+    regulation_table <- data.frame(
+      lane = c("transcripts", "transcripts + regulation/motif"),
+      revision = comparison$revision,
+      input_variants = format(comparison$variants, big.mark = ","),
+      resident_interval_features = format(
+        comparison$regulation_features,
+        big.mark = ","
+      ),
+      output_rows = format(comparison$annotated_rows, big.mark = ","),
+      median_seconds = comparison$median_seconds,
+      variants_per_second = format(
+        round(comparison$variants_per_second),
+        big.mark = ","
+      ),
+      output_rows_per_second = format(
+        round(comparison$annotated_rows / comparison$median_seconds),
+        big.mark = ","
+      ),
+      stringsAsFactors = FALSE
+    )
+    knitr::kable(regulation_table, row.names = FALSE)
+  }
+}
+```
+
+This is one pinned-core comparison at one source revision. Both lanes load the
+same transcript model and consume the same coordinate-sorted GIAB sample. The
+second lane additionally loads every VEP-admitted GRCh38 RegulatoryFeature and
+MotifFeature interval and emits their compact consequence rows. The comparison
+therefore measures candidate traversal and the extra output together; it is not
+an isolated interval-lookup microbenchmark.
 
 ## Paired breakends
 
@@ -433,7 +495,7 @@ names(nmd_feature_table) <- c(
 knitr::kable(nmd_feature_table, row.names = FALSE)
 ```
 
-## Final GRCh38 model resources
+## Last measured transcript-only GRCh38 model resources
 
 ```{r resources}
 last_resource <- resources[nrow(resources), , drop = FALSE]
@@ -464,8 +526,11 @@ resource_table <- data.frame(
 knitr::kable(resource_table, row.names = FALSE)
 ```
 
-The artifact size is a compact DuckDB containing only `model_regions`,
-`model_transcripts`, and `model_receipt`; benchmark inputs are excluded. RSS is
+This resource row predates the resident regulation/motif relation and remains a
+transcript-only baseline; the throughput table above records the feature count
+for regulation-enabled runs. The artifact size is a compact DuckDB containing
+only `model_regions`, `model_transcripts`, and `model_receipt`; benchmark inputs
+are excluded. RSS is
 for one R/DuckDB process, not a C-heap estimate. The load peak includes both the
 DuckDB scan/cache and construction of the second immutable C representation.
 Dropping the model releases the C representation, but DuckDB retains its table
@@ -475,7 +540,7 @@ transcript, and worst-case edit/CDS/peptide scratch); allocator metadata is not
 included. The much smaller first-workspace RSS change reflects lazy or reused
 pages, not a smaller capacity.
 
-The standalone model ABI 0.12 cache adds three `uint32_t` arrays and one
+The historical standalone model ABI 0.12 cache adds three `uint32_t` arrays and one
 `uint8_t` array per transcript. Its exact element payload for this model is
 `r format(13 * last_resource$transcripts[[1L]], big.mark = ",", scientific = FALSE)`
 bytes (`r sprintf("%.3f MiB", 13 * last_resource$transcripts[[1L]] / 1024^2)`),
@@ -492,3 +557,7 @@ Rscript benchmarks/duckvep_throughput.R \
   --variants 100957 --passes 9 --warmup 10000 --threads 1 \
   --output compact
 ```
+
+Add `--regulatory` and use the
+`ensembl116_grch38_final_giab_sites_hash40_regulation` workload name to load
+`duckvep_regulation_features` and record the integrated core-feature lane.

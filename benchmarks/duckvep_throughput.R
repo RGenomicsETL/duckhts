@@ -4,7 +4,8 @@
 # database this uses the checked-in one-transcript fixture. --database expects
 # pre-staged bench_regions, bench_transcripts, bench_exons, and bench_variants.
 # Complete production models expose sequence_length plus full transcript flanks;
-# older topology-only staging databases remain accepted as partial models.
+# --regulatory additionally loads a prepared regulation-feature relation. Older
+# topology-only staging databases remain accepted as partial models.
 
 suppressMessages({
   library(DBI)
@@ -53,6 +54,13 @@ op <- add_option(
   help = "prepared event shape: small or breakend [%default]"
 )
 op <- add_option(op, "--output", default = "rich")
+op <- add_option(
+  op,
+  "--regulatory",
+  action = "store_true",
+  default = FALSE,
+  help = "load bench_regulation_features or duckvep_regulation_features"
+)
 op <- add_option(op, "--workload-name", dest = "workload_name", default = "")
 op <- add_option(op, "--variants", type = "double", default = 10000000)
 op <- add_option(op, "--passes", type = "integer", default = 3L)
@@ -92,6 +100,9 @@ if (!opt$event_mode %in% c("small", "breakend")) {
   die("--event-mode must be small or breakend")
 }
 production <- nzchar(opt$database)
+if (isTRUE(opt$regulatory) && !production) {
+  die("--regulatory requires a production --database")
+}
 inputs <- c(opt$extension, if (production) opt$database else opt$model_sql)
 missing <- inputs[!file.exists(inputs)]
 if (length(missing) != 0L) {
@@ -195,6 +206,36 @@ if (production) {
   } else {
     NULL
   }
+  regulation_relation <- if ("bench_regulation_features" %in% present_relations) {
+    "bench_regulation_features"
+  } else if ("duckvep_regulation_features" %in% present_relations) {
+    "duckvep_regulation_features"
+  } else {
+    NULL
+  }
+  if (isTRUE(opt$regulatory) && is.null(regulation_relation)) {
+    die(
+      "--regulatory requires bench_regulation_features or ",
+      "duckvep_regulation_features"
+    )
+  }
+  interval_feature_query <- if (isTRUE(opt$regulatory)) {
+    paste(
+      "SELECT regulation_feature_index, seq_region, feature_start, feature_end,",
+      "feature_kind FROM", regulation_relation,
+      "ORDER BY seq_region, feature_start, regulation_feature_index"
+    )
+  } else {
+    NULL
+  }
+  regulation_feature_count <- if (isTRUE(opt$regulatory)) {
+    dbGetQuery(
+      con,
+      glue("SELECT count(*) AS n FROM {regulation_relation}")
+    )$n[[1L]]
+  } else {
+    0
+  }
   region_count <- counts[[1L]]
   transcript_count <- counts[[2L]]
   exon_count <- counts[[3L]]
@@ -225,6 +266,8 @@ if (production) {
   )
   mature_mirna_query <- NULL
   peptide_edit_query <- NULL
+  interval_feature_query <- NULL
+  regulation_feature_count <- 0
 }
 if (variant_count < 1) {
   die("benchmark input contains no variants")
@@ -240,6 +283,12 @@ if (!is.null(peptide_edit_query)) {
   load_options <- c(
     load_options,
     glue("peptide_edit_query := {sql_q(peptide_edit_query)}")
+  )
+}
+if (!is.null(interval_feature_query)) {
+  load_options <- c(
+    load_options,
+    glue("interval_feature_query := {sql_q(interval_feature_query)}")
   )
 }
 if (complete_coverage) {
@@ -400,6 +449,7 @@ row <- data.frame(
   regions = as.integer(region_count),
   transcripts = as.integer(transcript_count),
   exons = as.integer(exon_count),
+  regulation_features = as.integer(regulation_feature_count),
   passes = opt$passes,
   warmup_variants = as.integer(warmup_count),
   min_seconds = min(elapsed),
@@ -424,7 +474,11 @@ if (nzchar(opt$history)) {
     old <- utils::read.csv(
       opt$history,
       stringsAsFactors = FALSE,
-      check.names = FALSE
+      check.names = FALSE,
+      colClasses = c(
+        source_revision = "character",
+        checksum_value = "character"
+      )
     )
     if (!identical(names(old), names(row))) {
       die("history schema does not match: {opt$history}")
@@ -467,7 +521,8 @@ cat(
   glue(
     "model load: {sprintf('%.3f', unname(model_load_timing[['elapsed']]))} s; ",
     "complete coverage: {tolower(as.character(complete_coverage))}; ",
-    "complete transcript flanks: {tolower(as.character(complete_flanks))}"
+    "complete transcript flanks: {tolower(as.character(complete_flanks))}; ",
+    "regulation features: {format(regulation_feature_count, big.mark = ',')}"
   ),
   "\n",
   sep = ""

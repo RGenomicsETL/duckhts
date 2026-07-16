@@ -7,9 +7,15 @@
 #
 # Prerequisites: samtools, bcftools, bgzip, tabix (all from htslib/samtools).
 #
-# Usage:  ./test/scripts/prepare_test_data.sh
+# Usage:  ./test/scripts/prepare_test_data.sh [--duckvep-only]
 
 set -euo pipefail
+
+MODE="${1:-}"
+if [[ -n "$MODE" && "$MODE" != "--duckvep-only" ]]; then
+  echo "usage: $0 [--duckvep-only]" >&2
+  exit 2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -29,6 +35,10 @@ rm -rf "$DUCKVEP_FIXTURE_DST"
 mkdir -p "$DUCKVEP_FIXTURE_DST"
 cp -a "$DUCKVEP_FIXTURE_SRC/." "$DUCKVEP_FIXTURE_DST/"
 echo "  DuckVEP Ensembl core fixture"
+if [[ "$MODE" == "--duckvep-only" ]]; then
+  echo "==> DuckVEP fixture sync complete"
+  exit 0
+fi
 
 # ---- BAM (copy + index) ----
 cp "$SRC/range.bam" "$DST/range.bam"

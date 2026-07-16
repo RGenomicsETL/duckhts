@@ -16,6 +16,7 @@ typedef struct duckvep_owned_model {
 	duckvep_transcript_model_t transcripts;
 	duckvep_exon_model_t exons;
 	duckvep_sequence_pool_t sequences;
+	duckvep_interval_feature_model_t interval_features;
 	duckvep_model_t *kernel;
 	uint16_t *known_seq_regions;
 	uint32_t *sequence_lengths;
@@ -55,8 +56,15 @@ typedef struct duckvep_owned_model {
 	size_t cds_sequence_length;
 	uint8_t *flank_sequence_bytes;
 	size_t flank_sequence_length;
+	uint16_t *interval_feature_seq_regions;
+	uint32_t *interval_feature_starts;
+	uint32_t *interval_feature_ends;
+	uint8_t *interval_feature_kinds;
+	size_t interval_feature_count;
 	cgranges_t *interval_index;
 	int interval_index_complete;
+	cgranges_t *interval_feature_index;
+	int interval_feature_index_complete;
 	int transcript_coverage_complete;
 	int transcript_flanks_complete;
 	size_t known_seq_region_capacity;
@@ -66,6 +74,7 @@ typedef struct duckvep_owned_model {
 	size_t peptide_edit_capacity;
 	size_t cds_sequence_capacity;
 	size_t flank_sequence_capacity;
+	size_t interval_feature_capacity;
 } duckvep_owned_model_t;
 
 typedef struct duckvep_workspace_cache {

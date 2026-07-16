@@ -492,13 +492,100 @@ duckvep_register_ensembl_transcripts(duckdb_connection connection)
 }
 
 static bool
+duckvep_register_ensembl_regulation_features(duckdb_connection connection)
+{
+	/* VEP 116 Database/RegFeat drops epigenetically_modified_region rows
+	 * before constructing overlap objects. The prepared resident relation must
+	 * make the same source selection; filtering only at output would still
+	 * waste interval-index and sweep capacity on objects VEP cannot emit. */
+	static const char *const sql[] = {
+		"CREATE OR REPLACE MACRO duckvep_ensembl_regulation_features(",
+		"funcgen_schema, regions_table) AS TABLE ",
+		"WITH regions AS MATERIALIZED (",
+		"SELECT CAST(seq_region AS UINTEGER) AS seq_region, ",
+		"CAST(sequence_length AS UBIGINT) AS sequence_length, ",
+		"CAST(source_seq_region_id AS BIGINT) AS source_seq_region_id ",
+		"FROM query_table(regions_table)",
+		"), source_features AS MATERIALIZED (",
+		"SELECT 'regulatory_feature' AS source_feature_table, ",
+		"'regulatory_region' AS feature_class, ",
+		"CAST(rf.regulatory_feature_id AS BIGINT) AS source_feature_id, ",
+		"CAST(rf.feature_type_id AS BIGINT) AS source_feature_type_id, ",
+		"NULL::BIGINT AS source_binding_matrix_id, ",
+		"CAST(rf.regulatory_build_id AS BIGINT) AS source_regulatory_build_id, ",
+		"r.seq_region, r.sequence_length, ",
+		"CAST(rf.seq_region_start AS BIGINT) AS feature_start, ",
+		"CAST(rf.seq_region_end AS BIGINT) AS feature_end, ",
+		"CAST(rf.seq_region_strand AS BIGINT) AS strand, ",
+		"CAST(rf.stable_id AS VARCHAR) AS stable_id, ",
+		"CAST(ft.name AS VARCHAR) AS feature_name, ",
+		"CAST(ft.so_accession AS VARCHAR) AS feature_so_accession, ",
+		"CAST(ft.so_term AS VARCHAR) AS feature_so_term, NULL::DOUBLE AS score, ",
+		"ft.feature_type_id IS NULL AS source_metadata_missing ",
+		"FROM query_table(funcgen_schema || '.regulatory_feature') rf ",
+		"JOIN regions r ON r.source_seq_region_id = rf.seq_region_id ",
+		"LEFT JOIN query_table(funcgen_schema || '.feature_type') ft ",
+		"ON ft.feature_type_id = rf.feature_type_id ",
+		"UNION ALL ",
+		"SELECT 'motif_feature', 'transcription_factor_binding_site', ",
+		"CAST(mf.motif_feature_id AS BIGINT), NULL::BIGINT, ",
+		"CAST(mf.binding_matrix_id AS BIGINT), NULL::BIGINT, ",
+		"r.seq_region, r.sequence_length, ",
+		"CAST(mf.seq_region_start AS BIGINT), ",
+		"CAST(mf.seq_region_end AS BIGINT), ",
+		"CAST(mf.seq_region_strand AS BIGINT), ",
+		"CAST(mf.stable_id AS VARCHAR), NULL::VARCHAR, NULL::VARCHAR, ",
+		"NULL::VARCHAR, CAST(mf.score AS DOUBLE), false ",
+		"FROM query_table(funcgen_schema || '.motif_feature') mf ",
+		"JOIN regions r ON r.source_seq_region_id = mf.seq_region_id",
+		"), validation AS MATERIALIZED (SELECT CASE ",
+		"WHEN (SELECT count(*) FROM regions) = 0 THEN ",
+		"error('duckvep_ensembl_regulation_features: regions table is empty') ",
+		"WHEN EXISTS (SELECT 1 FROM source_features WHERE source_feature_id IS NULL ",
+		"OR source_feature_id <= 0 OR feature_start IS NULL OR feature_end IS NULL ",
+		"OR feature_start <= 0 OR feature_end < feature_start ",
+		"OR feature_end > sequence_length OR feature_end > 4294967295 ",
+		"OR strand NOT IN (-1, 0, 1)) THEN ",
+		"error('duckvep_ensembl_regulation_features: source feature geometry is invalid') ",
+		"WHEN EXISTS (SELECT 1 FROM source_features WHERE source_metadata_missing) THEN ",
+		"error('duckvep_ensembl_regulation_features: regulatory feature type is missing') ",
+		"WHEN (SELECT count(*) FROM source_features) > 4294967296 THEN ",
+		"error('duckvep_ensembl_regulation_features: feature count exceeds the compact index range') ",
+		"ELSE true END AS valid) ",
+		"SELECT CAST(row_number() OVER (ORDER BY seq_region, feature_start, ",
+		"feature_end, feature_class, source_feature_id) - 1 AS UINTEGER) ",
+		"AS regulation_feature_index, seq_region, CAST(feature_start AS UINTEGER) AS feature_start, ",
+		"CAST(feature_end AS UINTEGER) AS feature_end, CAST(strand AS TINYINT) AS strand, ",
+		"CAST(CASE feature_class WHEN 'regulatory_region' THEN 1 ELSE 2 END AS UTINYINT) ",
+		"AS feature_kind, feature_class, source_feature_table, source_feature_id, stable_id, ",
+		"source_feature_type_id, source_binding_matrix_id, source_regulatory_build_id, ",
+		"feature_name, feature_so_accession, feature_so_term, score ",
+		"FROM source_features CROSS JOIN validation WHERE validation.valid ",
+		"AND (feature_class != 'regulatory_region' OR feature_so_term IS DISTINCT FROM ",
+		"'epigenetically_modified_region') ",
+		"ORDER BY regulation_feature_index"
+	};
+
+	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+}
+
+static bool
 duckvep_register_model_receipt(duckdb_connection connection)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO duckvep_model_receipt(regions_table, transcripts_table, source_name, source_version, ",
-		"assembly, source_manifest_sha256, reference_sha256, transcript_filter) AS TABLE ",
+		"assembly, source_manifest_sha256, reference_sha256, transcript_filter, ",
+		"regulation_features_table := NULL) AS TABLE ",
 		"WITH regions AS MATERIALIZED (SELECT * FROM query_table(regions_table)), ",
 		"model AS MATERIALIZED (SELECT * FROM query_table(transcripts_table)), ",
+		"regulation AS MATERIALIZED (SELECT regulation_feature_index, seq_region, ",
+		"feature_start, feature_end, feature_kind FROM query(CASE WHEN ",
+		"regulation_features_table IS NULL THEN 'SELECT NULL::UINTEGER AS ",
+		"regulation_feature_index, NULL::UINTEGER AS seq_region, NULL::UINTEGER AS ",
+		"feature_start, NULL::UINTEGER AS feature_end, NULL::UTINYINT AS ",
+		"feature_kind WHERE false' ELSE 'SELECT regulation_feature_index, seq_region, ",
+		"feature_start, feature_end, feature_kind FROM query_table(''' || ",
+		"replace(regulation_features_table, '''', '''''') || ''')' END)), ",
 		"validation AS MATERIALIZED (SELECT CASE ",
 		"WHEN source_name IS NULL OR source_name = '' OR source_version IS NULL OR source_version = '' ",
 		"OR assembly IS NULL OR assembly = '' OR transcript_filter IS NULL OR transcript_filter = '' THEN ",
@@ -523,6 +610,18 @@ duckvep_register_model_receipt(duckdb_connection connection)
 		"WHERE r.seq_region IS NULL OR r.sequence_length != m.sequence_length ",
 		"OR r.seq_region_name != m.seq_region_name) THEN ",
 		"error('duckvep_model_receipt: transcript and sequence-region mappings disagree') ",
+		"WHEN (SELECT count(*) FROM regulation) > 0 AND (",
+		"(SELECT count(DISTINCT regulation_feature_index) FROM regulation) != ",
+		"(SELECT count(*) FROM regulation) OR ",
+		"(SELECT min(regulation_feature_index) FROM regulation) != 0 OR ",
+		"(SELECT max(regulation_feature_index) FROM regulation) != ",
+		"(SELECT count(*) - 1 FROM regulation)) THEN ",
+		"error('duckvep_model_receipt: regulation-feature indexes must be dense and unique from zero') ",
+		"WHEN EXISTS (SELECT 1 FROM regulation f LEFT JOIN regions r USING (seq_region) ",
+		"WHERE r.seq_region IS NULL OR f.feature_start = 0 OR ",
+		"f.feature_end < f.feature_start OR f.feature_end > r.sequence_length OR ",
+		"f.feature_kind NOT IN (1, 2)) THEN ",
+		"error('duckvep_model_receipt: regulation-feature geometry, region, or kind is invalid') ",
 		"ELSE true END AS valid), ",
 		"region_fingerprint AS MATERIALIZED (SELECT sha256(string_agg(sha256(CAST(struct_pack(",
 		"seq_region := seq_region, seq_region_name := seq_region_name, sequence_length := sequence_length, ",
@@ -551,14 +650,25 @@ duckvep_register_model_receipt(duckdb_connection connection)
 		"FROM row_hashes GROUP BY block_index), ",
 		"transcript_fingerprint AS MATERIALIZED (SELECT sha256(string_agg(block_hash, '' ",
 		"ORDER BY block_index)) AS transcript_sha256 ",
-		"FROM hash_blocks), provenance_fingerprint AS MATERIALIZED (SELECT sha256(CAST(struct_pack(",
+		"FROM hash_blocks), regulation_row_hashes AS MATERIALIZED (SELECT ",
+		"regulation_feature_index, sha256(CAST(struct_pack(",
+		"regulation_feature_index := regulation_feature_index, seq_region := seq_region, ",
+		"feature_start := feature_start, feature_end := feature_end, ",
+		"feature_kind := feature_kind) AS VARCHAR)) AS row_hash FROM regulation), ",
+		"regulation_hash_blocks AS MATERIALIZED (SELECT regulation_feature_index // 4096 ",
+		"AS block_index, sha256(string_agg(row_hash, '' ORDER BY regulation_feature_index)) ",
+		"AS block_hash FROM regulation_row_hashes GROUP BY block_index), ",
+		"regulation_fingerprint AS MATERIALIZED (SELECT sha256(coalesce(string_agg(",
+		"block_hash, '' ORDER BY block_index), '')) AS regulation_sha256 ",
+		"FROM regulation_hash_blocks), provenance_fingerprint AS MATERIALIZED (SELECT sha256(CAST(struct_pack(",
 		"source_name := source_name, source_version := source_version, assembly := assembly, ",
 		"source_manifest_sha256 := lower(source_manifest_sha256), ",
 		"reference_sha256 := lower(reference_sha256), transcript_filter := transcript_filter) ",
 		"AS VARCHAR)) AS provenance_sha256), ",
 		"fingerprint AS MATERIALIZED (SELECT sha256(provenance_sha256 || region_sha256 || ",
-		"transcript_sha256) AS model_sha256 FROM provenance_fingerprint ",
-		"CROSS JOIN region_fingerprint CROSS JOIN transcript_fingerprint), ",
+		"transcript_sha256 || regulation_sha256) AS model_sha256 FROM provenance_fingerprint ",
+		"CROSS JOIN region_fingerprint CROSS JOIN transcript_fingerprint ",
+		"CROSS JOIN regulation_fingerprint), ",
 		"summary AS MATERIALIZED (SELECT count(*) AS transcript_count, count(DISTINCT gene_index) AS gene_count, ",
 		"count(*) FILTER (WHERE cds_start IS NOT NULL) AS coding_transcript_count, ",
 		"count(*) FILTER (WHERE cds_sequence IS NOT NULL) AS sequence_backed_transcript_count, ",
@@ -569,7 +679,10 @@ duckvep_register_model_receipt(duckdb_connection connection)
 		"sum(length(peptide_edits)) AS peptide_edit_count, ",
 		"sum(coalesce(octet_length(cds_sequence), 0)) AS cds_base_count, ",
 		"sum(coalesce(octet_length(pre_cds_sequence), 0) + ",
-		"coalesce(octet_length(post_cds_sequence), 0)) AS transcript_flank_base_count FROM model) ",
+		"coalesce(octet_length(post_cds_sequence), 0)) AS transcript_flank_base_count FROM model), ",
+		"regulation_summary AS MATERIALIZED (SELECT count(*) AS regulation_feature_count, ",
+		"count(*) FILTER (WHERE feature_kind = 1) AS regulatory_region_count, ",
+		"count(*) FILTER (WHERE feature_kind = 2) AS motif_feature_count FROM regulation) ",
 		"SELECT source_name AS \"source_name\", source_version AS \"source_version\", ",
 		"assembly AS \"assembly\", lower(source_manifest_sha256) AS source_manifest_sha256, ",
 		"lower(reference_sha256) AS reference_sha256, transcript_filter AS \"transcript_filter\", ",
@@ -580,8 +693,11 @@ duckvep_register_model_receipt(duckdb_connection connection)
 		"summary.coding_transcript_count, summary.sequence_backed_transcript_count, ",
 		"summary.sequence_withheld_transcript_count, summary.exon_membership_count, summary.cds_base_count, ",
 		"summary.mature_mirna_transcript_count, summary.mature_mirna_segment_count, ",
-		"summary.peptide_edit_count, summary.transcript_flank_base_count ",
-		"FROM summary CROSS JOIN fingerprint CROSS JOIN validation WHERE validation.valid"
+		"summary.peptide_edit_count, summary.transcript_flank_base_count, ",
+		"regulation_summary.regulation_feature_count, ",
+		"regulation_summary.regulatory_region_count, regulation_summary.motif_feature_count ",
+		"FROM summary CROSS JOIN regulation_summary CROSS JOIN fingerprint ",
+		"CROSS JOIN validation WHERE validation.valid"
 	};
 
 	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
@@ -592,5 +708,6 @@ register_duckvep_ensembl_functions(duckdb_connection connection)
 {
 	return duckvep_register_ensembl_regions(connection) &&
 	    duckvep_register_ensembl_transcripts(connection) &&
+	    duckvep_register_ensembl_regulation_features(connection) &&
 	    duckvep_register_model_receipt(connection);
 }

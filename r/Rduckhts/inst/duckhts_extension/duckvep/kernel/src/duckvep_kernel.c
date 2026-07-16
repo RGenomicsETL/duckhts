@@ -5,12 +5,11 @@
  * This translation unit (and every other under kernel/) links against NO
  * DuckDB, htslib, Arrow, or Parquet symbol. It sees only borrowed typed arrays
  * (duckvep_kernel.h) and produces compact result rows. annotate_tile fuses the
- * already-oracle-tested predicate kernels: the sorted multi-track sweep
- * (duckvep_sweep) generates candidate (variant, transcript) pairs, and the
- * structural classifier (duckvep_classify) places each pair relative to the
- * transcript; sequence-backed coding and structural/CNV predicate producers feed
- * the generated consequence program. HGVS and general edit-set semantics remain
- * late, separate layers.
+ * already-oracle-tested predicate kernels: two sorted sweeps generate transcript
+ * and core-regulation candidates from independent SoAs. The structural classifier
+ * places transcript pairs; sequence-backed coding, structural/CNV, regulatory,
+ * and motif fact producers feed the generated consequence program. HGVS and
+ * general edit-set semantics remain late, separate layers.
  */
 #include "duckvep_kernel.h"
 
@@ -68,6 +67,7 @@ static duckvep_status_t fail(duckvep_error_t *error,
  * the small view structs by value, but never the underlying arrays). */
 struct duckvep_model {
     duckvep_transcript_model_t transcripts;
+    duckvep_interval_feature_model_t interval_features;
     duckvep_exon_model_t       exons;
     duckvep_sequence_pool_t    seq;
     uint32_t                  *cds_cdna_start1;
@@ -77,6 +77,7 @@ struct duckvep_model {
     uint8_t                   *point_ordered;
     uint8_t                   *has_frameshift_intron;
     size_t                     max_transcripts_per_chrom;
+    size_t                     max_interval_features_per_chrom;
     size_t                     max_cds_len;
     int                        has_seq;
 };
@@ -286,21 +287,25 @@ enum {
     DVW_MODEL_MIRNA_LAYOUT   = 72u,
     DVW_MODEL_PEPTIDE_EDIT_LAYOUT = 73u,
     DVW_ANN_PAIR_COLUMNS     = 74u,
-    DVW_ANN_PAIR_ORDER       = 75u
+    DVW_ANN_PAIR_ORDER       = 75u,
+    DVW_MODEL_INTERVAL_FEATURE_LAYOUT = 76u
 };
 
-duckvep_status_t duckvep_model_open(
-    const duckvep_transcript_model_t *transcripts,
-    const duckvep_exon_model_t       *exons,
-    const duckvep_sequence_pool_t    *seq,
-    duckvep_model_t                 **out_model,
-    duckvep_error_t                  *error) {
+duckvep_status_t duckvep_model_open_with_interval_features(
+    const duckvep_transcript_model_t       *transcripts,
+    const duckvep_exon_model_t             *exons,
+    const duckvep_sequence_pool_t          *seq,
+    const duckvep_interval_feature_model_t *interval_features,
+    duckvep_model_t                       **out_model,
+    duckvep_error_t                        *error) {
 
     struct duckvep_model *m;
     duckvep_status_t status;
     size_t t;
     size_t chrom_run = 0u;
     size_t max_chrom_run = 0u;
+    size_t feature_chrom_run = 0u;
+    size_t max_feature_chrom_run = 0u;
     size_t max_cds_len = 0u;
 
     if (out_model == NULL) {
@@ -335,6 +340,63 @@ duckvep_status_t duckvep_model_open(
         (exons->phase == NULL) != (exons->end_phase == NULL)) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
                     "paired exon cDNA or phase columns are incomplete");
+    }
+    if (interval_features != NULL) {
+        size_t feature;
+
+        if (interval_features->feature_count > (size_t)UINT32_MAX) {
+            return fail(error, DUCKVEP_ERR_OUT_OF_RANGE,
+                        DVW_MODEL_INTERVAL_FEATURE_LAYOUT,
+                        "interval feature count exceeds uint32 index space");
+        }
+        if (interval_features->feature_count != 0u &&
+            (interval_features->chrom_id == NULL ||
+             interval_features->start1 == NULL ||
+             interval_features->end1 == NULL ||
+             interval_features->kind == NULL)) {
+            return fail(error, DUCKVEP_ERR_INVALID_ARG,
+                        DVW_MODEL_INTERVAL_FEATURE_LAYOUT,
+                        "interval feature view has count>0 but null columns");
+        }
+        for (feature = 0u; feature < interval_features->feature_count;
+             feature++) {
+            uint8_t kind = interval_features->kind[feature];
+
+            if (interval_features->start1[feature] == 0u ||
+                interval_features->start1[feature] >
+                    interval_features->end1[feature] ||
+                (kind != (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION &&
+                 kind != (uint8_t)DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE)) {
+                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_INTERVAL_FEATURE_LAYOUT,
+                            "interval feature has invalid coordinates or kind");
+            }
+            if (feature != 0u) {
+                uint16_t previous_chrom =
+                    interval_features->chrom_id[feature - 1u];
+                uint16_t current_chrom = interval_features->chrom_id[feature];
+
+                if (current_chrom < previous_chrom ||
+                    (current_chrom == previous_chrom &&
+                     interval_features->start1[feature] <
+                         interval_features->start1[feature - 1u])) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_INTERVAL_FEATURE_LAYOUT,
+                                "interval features are not sorted by contig and start");
+                }
+                if (current_chrom == previous_chrom) {
+                    feature_chrom_run++;
+                } else {
+                    if (feature_chrom_run > max_feature_chrom_run)
+                        max_feature_chrom_run = feature_chrom_run;
+                    feature_chrom_run = 1u;
+                }
+            } else {
+                feature_chrom_run = 1u;
+            }
+        }
+        if (feature_chrom_run > max_feature_chrom_run)
+            max_feature_chrom_run = feature_chrom_run;
     }
     {
         int any_mature_column = transcripts->mature_mirna_offset != NULL ||
@@ -750,13 +812,27 @@ duckvep_status_t duckvep_model_open(
         return status;
     }
     m->max_transcripts_per_chrom = max_chrom_run;
+    m->max_interval_features_per_chrom = max_feature_chrom_run;
     m->max_cds_len = max_cds_len;
+    if (interval_features != NULL)
+        m->interval_features = *interval_features;
     if (seq != NULL) {
         m->seq = *seq;
         m->has_seq = 1;
     }
     *out_model = m;
     return DUCKVEP_OK;
+}
+
+duckvep_status_t duckvep_model_open(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    duckvep_model_t                 **out_model,
+    duckvep_error_t                  *error) {
+
+    return duckvep_model_open_with_interval_features(
+        transcripts, exons, seq, NULL, out_model, error);
 }
 
 void duckvep_model_close(duckvep_model_t *model) {
@@ -838,9 +914,12 @@ struct duckvep_workspace {
     const duckvep_model_t    *model;
     uint32_t                *active;
     uint32_t                *candidates;
+    uint32_t                *interval_feature_active;
+    uint32_t                *interval_feature_candidates;
     uint16_t                *point_exon_rank;
     size_t                   point_exon_count;
     size_t                   active_cap;
+    size_t                   interval_feature_active_cap;
     uint16_t                 point_last_chrom;
     uint32_t                 point_last_pos;
     uint32_t                 point_last_feature_start;
@@ -991,6 +1070,7 @@ duckvep_status_t duckvep_workspace_open(
     struct duckvep_workspace *w;
     duckvep_status_t st;
     size_t cap;
+    size_t interval_feature_cap;
     size_t point_bytes = 0u;
 
     if (out_workspace == NULL || model == NULL) {
@@ -1003,6 +1083,8 @@ duckvep_status_t duckvep_workspace_open(
      * across the whole model. */
     cap = model->max_transcripts_per_chrom;
     if (cap == 0u) cap = 1u; /* always have a non-NULL active buffer */
+    interval_feature_cap = model->max_interval_features_per_chrom;
+    if (interval_feature_cap == 0u) interval_feature_cap = 1u;
     if (model->transcripts.transcript_count > 0u &&
         !size_mul_checked(model->transcripts.transcript_count,
                           sizeof *w->point_exon_rank, &point_bytes)) {
@@ -1016,14 +1098,22 @@ duckvep_status_t duckvep_workspace_open(
     }
     w->active = (uint32_t *)calloc(cap, sizeof *w->active);
     w->candidates = (uint32_t *)calloc(cap, sizeof *w->candidates);
+    w->interval_feature_active = (uint32_t *)calloc(
+        interval_feature_cap, sizeof *w->interval_feature_active);
+    w->interval_feature_candidates = (uint32_t *)calloc(
+        interval_feature_cap, sizeof *w->interval_feature_candidates);
     if (model->transcripts.transcript_count > 0u) {
         w->point_exon_rank = (uint16_t *)malloc(point_bytes);
     }
     if (w->active == NULL || w->candidates == NULL ||
+        w->interval_feature_active == NULL ||
+        w->interval_feature_candidates == NULL ||
         (model->transcripts.transcript_count > 0u &&
          w->point_exon_rank == NULL)) {
         free(w->active);
         free(w->candidates);
+        free(w->interval_feature_active);
+        free(w->interval_feature_candidates);
         free(w->point_exon_rank);
         free(w);
         return fail(error, DUCKVEP_ERR_INTERNAL, DVW_WS_OOM,
@@ -1033,6 +1123,8 @@ duckvep_status_t duckvep_workspace_open(
     if (st != DUCKVEP_OK) {
         free(w->active);
         free(w->candidates);
+        free(w->interval_feature_active);
+        free(w->interval_feature_candidates);
         free(w->point_exon_rank);
         free(w);
         return st;
@@ -1041,6 +1133,7 @@ duckvep_status_t duckvep_workspace_open(
     w->point_exon_count = model->transcripts.transcript_count;
     workspace_point_cursor_reset(w);
     w->active_cap = cap;
+    w->interval_feature_active_cap = interval_feature_cap;
     *out_workspace = w;
     return DUCKVEP_OK;
 }
@@ -1049,6 +1142,8 @@ void duckvep_workspace_close(duckvep_workspace_t *workspace) {
     if (workspace != NULL) {
         free(workspace->active);
         free(workspace->candidates);
+        free(workspace->interval_feature_active);
+        free(workspace->interval_feature_candidates);
         free(workspace->point_exon_rank);
         workspace_delta_scratch_free(&workspace->delta_scratch);
         free(workspace);
@@ -1678,6 +1773,9 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     row->variant_idx = variant_idx;
     row->tx_idx = tx_idx;
     row->gene_idx = 0u; /* gene grouping is an adapter concern for now */
+    row->interval_feature_idx = UINT32_MAX;
+    row->overlap_object_kind =
+        (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
     row->consequence_mask = cmask;
     if (cds_delta_attempted && !delta.valid) {
         row->flags |= (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED;
@@ -1700,6 +1798,51 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         row->cds_pos = -1;
         row->protein_pos = -1;
     }
+    return 1;
+}
+
+static int annotate_interval_feature(uint32_t variant_idx,
+                                     uint32_t feature_idx,
+                                     struct annotate_ctx *c) {
+    const duckvep_interval_feature_model_t *features;
+    duckvep_consequence_t *row;
+    uint64_t consequence_mask;
+    uint8_t feature_kind;
+
+    features = &c->model->interval_features;
+    if ((size_t)feature_idx >= features->feature_count) {
+        c->status = DUCKVEP_ERR_INTERNAL;
+        return 0;
+    }
+    feature_kind = features->kind[feature_idx];
+    consequence_mask = duckvep_effect_eval_interval_feature(
+        (duckvep_interval_feature_kind_t)feature_kind,
+        &c->events[variant_idx], features->start1[feature_idx],
+        features->end1[feature_idx]);
+    /* The sweep uses a coarse outer interval. VEP's minimized/reversed
+     * insertion geometry can reject a pair at an interval endpoint. */
+    if (consequence_mask == 0u) return 1;
+    if (c->results->count >= c->results->capacity) {
+        c->status = DUCKVEP_ERR_RESULT_FULL;
+        return 0;
+    }
+    row = &c->results->rows[c->results->count++];
+    memset(row, 0, sizeof *row);
+    row->variant_idx = variant_idx;
+    row->tx_idx = UINT32_MAX;
+    row->gene_idx = UINT32_MAX;
+    row->interval_feature_idx = feature_idx;
+    row->overlap_object_kind = feature_kind ==
+        (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION
+        ? (uint8_t)DUCKVEP_OVERLAP_OBJECT_REGULATORY_REGION
+        : (uint8_t)DUCKVEP_OVERLAP_OBJECT_TF_BINDING_SITE;
+    row->consequence_mask = consequence_mask;
+    row->impact = (uint8_t)duckvep_so_impact(consequence_mask);
+    row->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_NOT_APPLICABLE;
+    row->nmd_prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
+    row->cdna_pos = -1;
+    row->cds_pos = -1;
+    row->protein_pos = -1;
     return 1;
 }
 
@@ -1874,11 +2017,15 @@ struct duckvep_annotate_cursor {
     const duckvep_variant_batch_t *variants;
     const duckvep_options_t       *options;
     duckvep_workspace_t           *workspace;
-    duckvep_sweep_cursor_t         sweep;
+    duckvep_sweep_cursor_t         transcript_sweep;
+    duckvep_sweep_cursor_t         interval_feature_sweep;
     uint32_t                       variant_idx;
     const uint32_t                *tx_indices;
     size_t                         tx_count;
     size_t                         tx_pos;
+    const uint32_t                *interval_feature_indices;
+    size_t                         interval_feature_count;
+    size_t                         interval_feature_pos;
     int                            have_slice;
     int                            done;
     int                            point_sorted_safe;
@@ -1987,12 +2134,29 @@ duckvep_status_t duckvep_annotate_cursor_open(
     cursor->workspace = workspace;
     cursor->point_sorted_safe = workspace_point_run_begin(
         workspace, variants, cursor->events);
-    duckvep_sweep_cursor_init(&cursor->sweep, cursor->variants, &model->transcripts,
-                              options->halo, workspace->active, workspace->active_cap,
+    duckvep_sweep_cursor_init(&cursor->transcript_sweep, cursor->variants,
+                              &model->transcripts, options->halo,
+                              workspace->active, workspace->active_cap,
                               workspace->candidates, workspace->active_cap);
-    cursor->sweep.events = cursor->events;
-    if (cursor->sweep.status != DUCKVEP_OK) {
-        st = fail(error, cursor->sweep.status, DVW_ANN_SWEEP,
+    cursor->transcript_sweep.events = cursor->events;
+    duckvep_interval_sweep_cursor_init(
+        &cursor->interval_feature_sweep, cursor->variants,
+        model->interval_features.chrom_id,
+        model->interval_features.start1,
+        model->interval_features.end1,
+        model->interval_features.feature_count, 0u,
+        workspace->interval_feature_active,
+        workspace->interval_feature_active_cap,
+        workspace->interval_feature_candidates,
+        workspace->interval_feature_active_cap);
+    cursor->interval_feature_sweep.events = cursor->events;
+    if (cursor->transcript_sweep.status != DUCKVEP_OK ||
+        cursor->interval_feature_sweep.status != DUCKVEP_OK) {
+        duckvep_status_t sweep_status =
+            cursor->transcript_sweep.status != DUCKVEP_OK
+            ? cursor->transcript_sweep.status
+            : cursor->interval_feature_sweep.status;
+        st = fail(error, sweep_status, DVW_ANN_SWEEP,
                   "candidate sweep initialization failed");
         free(cursor);
         return st;
@@ -2019,14 +2183,40 @@ duckvep_status_t duckvep_annotate_cursor_seed(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_CURSOR_NULL,
                     "annotate cursor is NULL");
     }
-    if (cursor->have_slice || cursor->done || cursor->sweep.vi != 0u) {
+    if (cursor->have_slice || cursor->done ||
+        cursor->transcript_sweep.vi != 0u) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_SWEEP,
                     "annotate cursor can only be seeded before its first fill");
     }
-    if (!duckvep_sweep_cursor_seed(&cursor->sweep, transcript_indices,
+    if (!duckvep_sweep_cursor_seed(&cursor->transcript_sweep,
+                                   transcript_indices,
                                    transcript_count)) {
-        return fail(error, cursor->sweep.status, DVW_ANN_SWEEP,
+        return fail(error, cursor->transcript_sweep.status, DVW_ANN_SWEEP,
                     "candidate sweep seed is invalid");
+    }
+    return DUCKVEP_OK;
+}
+
+duckvep_status_t duckvep_annotate_cursor_seed_interval_features(
+    duckvep_annotate_cursor_t *cursor,
+    const uint32_t            *feature_indices,
+    size_t                     feature_count,
+    duckvep_error_t           *error) {
+
+    if (cursor == NULL) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_CURSOR_NULL,
+                    "annotate cursor is NULL");
+    }
+    if (cursor->have_slice || cursor->done ||
+        cursor->interval_feature_sweep.vi != 0u) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_SWEEP,
+                    "interval-feature sweep can only be seeded before its first fill");
+    }
+    if (!duckvep_sweep_cursor_seed(&cursor->interval_feature_sweep,
+                                   feature_indices, feature_count)) {
+        return fail(error, cursor->interval_feature_sweep.status,
+                    DVW_ANN_SWEEP,
+                    "interval-feature sweep seed is invalid");
     }
     return DUCKVEP_OK;
 }
@@ -2066,20 +2256,39 @@ static duckvep_status_t annotate_cursor_fill(
     ctx.point_sorted_safe = cursor->point_sorted_safe;
 
     for (;;) {
-        if (!cursor->have_slice || cursor->tx_pos >= cursor->tx_count) {
-            int rc = duckvep_sweep_cursor_next(&cursor->sweep, &cursor->variant_idx,
-                                               &cursor->tx_indices, &cursor->tx_count);
-            if (rc < 0) {
-                return fail(error, cursor->sweep.status, DVW_ANN_SWEEP,
+        if (!cursor->have_slice) {
+            uint32_t transcript_variant_idx, feature_variant_idx;
+            int transcript_rc, feature_rc;
+
+            transcript_rc = duckvep_sweep_cursor_next(
+                &cursor->transcript_sweep, &transcript_variant_idx,
+                &cursor->tx_indices, &cursor->tx_count);
+            feature_rc = duckvep_sweep_cursor_next(
+                &cursor->interval_feature_sweep, &feature_variant_idx,
+                &cursor->interval_feature_indices,
+                &cursor->interval_feature_count);
+            if (transcript_rc < 0 || feature_rc < 0) {
+                duckvep_status_t sweep_status = transcript_rc < 0
+                    ? cursor->transcript_sweep.status
+                    : cursor->interval_feature_sweep.status;
+                return fail(error, sweep_status, DVW_ANN_SWEEP,
                             "candidate sweep failed");
             }
-            if (rc == 0) {
+            if (transcript_rc != feature_rc ||
+                (transcript_rc != 0 &&
+                 transcript_variant_idx != feature_variant_idx)) {
+                return fail(error, DUCKVEP_ERR_INTERNAL, DVW_ANN_SWEEP,
+                            "transcript and interval-feature sweeps diverged");
+            }
+            if (transcript_rc == 0) {
                 cursor->done = 1;
                 cursor->have_slice = 0;
                 return DUCKVEP_OK;
             }
+            cursor->variant_idx = transcript_variant_idx;
             cursor->have_slice = 1;
             cursor->tx_pos = 0u;
+            cursor->interval_feature_pos = 0u;
         }
 
         while (cursor->tx_pos < cursor->tx_count) {
@@ -2093,6 +2302,27 @@ static duckvep_status_t annotate_cursor_fill(
             cursor->tx_pos++;
             if (pause_when_full && results->count >= results->capacity) {
                 return fail(error, DUCKVEP_ERR_RESULT_FULL, DVW_ANN_RESULT_FULL,
+                            "result builder capacity exhausted; cursor paused");
+            }
+        }
+        while (cursor->interval_feature_pos <
+               cursor->interval_feature_count) {
+            if (!annotate_interval_feature(
+                    cursor->variant_idx,
+                    cursor->interval_feature_indices[
+                        cursor->interval_feature_pos], &ctx)) {
+                if (ctx.status == DUCKVEP_ERR_RESULT_FULL) {
+                    return fail(error, DUCKVEP_ERR_RESULT_FULL,
+                                DVW_ANN_RESULT_FULL,
+                                "result builder capacity exhausted; cursor paused");
+                }
+                return fail(error, ctx.status, DVW_ANN_SWEEP,
+                            "interval-feature annotation failed");
+            }
+            cursor->interval_feature_pos++;
+            if (pause_when_full && results->count >= results->capacity) {
+                return fail(error, DUCKVEP_ERR_RESULT_FULL,
+                            DVW_ANN_RESULT_FULL,
                             "result builder capacity exhausted; cursor paused");
             }
         }

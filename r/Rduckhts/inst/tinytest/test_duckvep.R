@@ -101,6 +101,59 @@ dbExecute(
     "'duckvep_r_core', 'duckvep_r_reference', 'GRCh38')"
   )
 )
+funcgen_fixture_sql <- c(
+  "CREATE SCHEMA duckvep_r_funcgen",
+  paste(
+    "CREATE TABLE duckvep_r_funcgen.feature_type AS SELECT",
+    "70::BIGINT feature_type_id, 'Promoter'::VARCHAR \"name\",",
+    "'SO:0000167'::VARCHAR so_accession, 'promoter'::VARCHAR so_term"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_funcgen.regulatory_feature AS SELECT",
+    "80::BIGINT regulatory_feature_id, 70::BIGINT feature_type_id,",
+    "1::BIGINT seq_region_id, 0::BIGINT seq_region_strand,",
+    "2::BIGINT seq_region_start, 6::BIGINT seq_region_end,",
+    "'ENSR_R_TEST'::VARCHAR stable_id, 1::BIGINT regulatory_build_id"
+  ),
+  paste(
+    "CREATE TABLE duckvep_r_funcgen.motif_feature AS SELECT",
+    "90::BIGINT motif_feature_id, 100::BIGINT binding_matrix_id,",
+    "1::BIGINT seq_region_id, 7::BIGINT seq_region_start,",
+    "10::BIGINT seq_region_end, 1::BIGINT seq_region_strand,",
+    "8.5::DOUBLE score, 'ENSM_R_TEST'::VARCHAR stable_id"
+  )
+)
+for (sql in funcgen_fixture_sql) {
+  dbExecute(con, sql)
+}
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_ensembl_regulation AS SELECT * FROM",
+    "duckvep_ensembl_regulation_features(",
+    "'duckvep_r_funcgen', 'duckvep_r_ensembl_regions')"
+  )
+)
+regulation_features <- dbGetQuery(
+  con,
+  paste(
+    "SELECT feature_class, source_feature_table, stable_id",
+    "FROM duckvep_r_ensembl_regulation",
+    "ORDER BY regulation_feature_index"
+  )
+)
+expect_identical(
+  regulation_features$feature_class,
+  c("regulatory_region", "transcription_factor_binding_site")
+)
+expect_identical(
+  regulation_features$source_feature_table,
+  c("regulatory_feature", "motif_feature")
+)
+expect_identical(
+  regulation_features$stable_id,
+  c("ENSR_R_TEST", "ENSM_R_TEST")
+)
 ensembl_model <- dbGetQuery(
   con,
   paste(
@@ -140,7 +193,8 @@ ensembl_receipt <- dbGetQuery(
     "SELECT * FROM duckvep_model_receipt(",
     "'duckvep_r_ensembl_regions', 'duckvep_r_ensembl_transcripts',",
     "'Ensembl', '116', 'GRCh38', repeat('a', 64), repeat('b', 64),",
-    "'all current transcripts on FASTA-covered assembly regions')"
+    "'all current transcripts on FASTA-covered assembly regions',",
+    "regulation_features_table := 'duckvep_r_ensembl_regulation')"
   )
 )
 expect_equal(ensembl_receipt$region_count, 1)
@@ -149,6 +203,9 @@ expect_equal(ensembl_receipt$transcript_count, 2)
 expect_equal(ensembl_receipt$mature_mirna_transcript_count, 1)
 expect_equal(ensembl_receipt$mature_mirna_segment_count, 1)
 expect_equal(ensembl_receipt$transcript_flank_base_count, 3)
+expect_equal(ensembl_receipt$regulation_feature_count, 2)
+expect_equal(ensembl_receipt$regulatory_region_count, 1)
+expect_equal(ensembl_receipt$motif_feature_count, 1)
 expect_equal(nchar(ensembl_receipt$model_sha256), 64)
 expect_identical(
   names(ensembl_receipt)[1:6],
@@ -272,7 +329,8 @@ load_model <- function(
   model_queries,
   transcript_coverage_complete = FALSE,
   mature_mirna_query = NULL,
-  peptide_edit_query = NULL
+  peptide_edit_query = NULL,
+  interval_feature_query = NULL
 ) {
   arguments <- paste(
     vapply(
@@ -298,6 +356,16 @@ load_model <- function(
       paste0(
         "peptide_edit_query := ",
         as.character(dbQuoteString(con, peptide_edit_query))
+      ),
+      sep = ", "
+    )
+  }
+  if (!is.null(interval_feature_query)) {
+    arguments <- paste(
+      arguments,
+      paste0(
+        "interval_feature_query := ",
+        as.character(dbQuoteString(con, interval_feature_query))
       ),
       sep = ", "
     )
@@ -345,12 +413,18 @@ ensembl_mirna_query <- paste(
   "LATERAL unnest(mature_mirna_regions) AS u(region)",
   "ORDER BY transcript_index, region.mature_mirna_start"
 )
+ensembl_regulation_query <- paste(
+  "SELECT regulation_feature_index, seq_region, feature_start, feature_end,",
+  "feature_kind FROM duckvep_r_ensembl_regulation",
+  "ORDER BY seq_region, feature_start, regulation_feature_index"
+)
 expect_true(
   load_model(
     "r-ensembl-mirna",
     ensembl_mirna_queries,
     transcript_coverage_complete = TRUE,
-    mature_mirna_query = ensembl_mirna_query
+    mature_mirna_query = ensembl_mirna_query,
+    interval_feature_query = ensembl_regulation_query
   )$loaded
 )
 ensembl_mirna_annotation <- dbGetQuery(
@@ -366,6 +440,39 @@ expect_identical(
   "mature_miRNA_variant"
 )
 expect_identical(ensembl_mirna_annotation$status, "supported")
+
+regulation_annotations <- dbGetQuery(
+  con,
+  paste(
+    "WITH small AS (SELECT a.* FROM unnest(duckvep_annotate(",
+    "'r-ensembl-mirna', 0::UINTEGER, 3::UBIGINT, 'G', 'A', 0::UBIGINT",
+    ")) u(a) WHERE a.regulation_feature_index IS NOT NULL),",
+    "structural AS (SELECT a.* FROM unnest(duckvep_annotate_sv(",
+    "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT, 12::UBIGINT,",
+    "'DUP', 'GAIN', 0::UBIGINT)) u(a)",
+    "WHERE a.regulation_feature_index IS NOT NULL)",
+    "SELECT 1 ord, regulation_feature_index, consequence, overlap_object",
+    "FROM small UNION ALL SELECT 2, regulation_feature_index, consequence,",
+    "overlap_object FROM structural ORDER BY ord, regulation_feature_index"
+  )
+)
+expect_equal(regulation_annotations$regulation_feature_index, c(0, 0, 1))
+expect_identical(
+  regulation_annotations$consequence,
+  c(
+    "regulatory_region_variant",
+    "regulatory_region_amplification&regulatory_region_variant",
+    "TFBS_amplification&TF_binding_site_variant"
+  )
+)
+expect_identical(
+  regulation_annotations$overlap_object,
+  c(
+    "regulatory_region",
+    "regulatory_region",
+    "transcription_factor_binding_site"
+  )
+)
 
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
@@ -1042,6 +1149,7 @@ prepare_ensembl_fixture <- function(directory, assembly) {
   reference <- paste0("duckvep_r_", directory, "_reference")
   regions <- paste0("duckvep_r_", directory, "_regions")
   transcripts <- paste0("duckvep_r_", directory, "_transcripts")
+  regulation <- paste0("duckvep_r_", directory, "_regulation")
   model <- paste0("r-ensembl-", directory)
 
   dbExecute(con, paste("CREATE SCHEMA", schema))
@@ -1083,6 +1191,43 @@ prepare_ensembl_fixture <- function(directory, assembly) {
       as.character(dbQuoteString(con, assembly)), ")"
     )
   )
+  if (identical(directory, "grch38")) {
+    funcgen_schema <- "duckvep_r_grch38_funcgen"
+    dbExecute(con, paste("CREATE SCHEMA", funcgen_schema))
+    for (table in c("feature_type", "regulatory_feature", "motif_feature")) {
+      path <- normalizePath(
+        file.path(fixture_dir, paste0("funcgen_", table, ".parquet")),
+        mustWork = TRUE
+      )
+      dbExecute(
+        con,
+        paste0(
+          "CREATE VIEW ", funcgen_schema, ".",
+          as.character(dbQuoteIdentifier(con, table)),
+          " AS SELECT * FROM read_parquet(",
+          as.character(dbQuoteString(con, path)), ")"
+        )
+      )
+    }
+    dbExecute(
+      con,
+      paste0(
+        "CREATE TABLE ", regulation,
+        " AS SELECT * FROM duckvep_ensembl_regulation_features(",
+        as.character(dbQuoteString(con, funcgen_schema)), ", ",
+        as.character(dbQuoteString(con, regions)), ")"
+      )
+    )
+  } else {
+    dbExecute(
+      con,
+      paste0(
+        "CREATE TABLE ", regulation, "(",
+        "regulation_feature_index UINTEGER, seq_region UINTEGER, ",
+        "feature_start UINTEGER, feature_end UINTEGER, feature_kind UTINYINT)"
+      )
+    )
+  }
   dbExecute(
     con,
     paste0(
@@ -1128,17 +1273,25 @@ prepare_ensembl_fixture <- function(directory, assembly) {
     "LATERAL unnest(peptide_edits) AS u(edit)",
     "ORDER BY transcript_index, edit.protein_position"
   )
+  interval_feature_query <- paste(
+    "SELECT regulation_feature_index, seq_region, feature_start,",
+    "feature_end, feature_kind FROM", regulation,
+    "ORDER BY regulation_feature_index"
+  )
   expect_true(
     load_model(
       model,
       model_queries,
       transcript_coverage_complete = TRUE,
-      peptide_edit_query = peptide_edit_query
+      peptide_edit_query = peptide_edit_query,
+      interval_feature_query = interval_feature_query
     )$loaded
   )
   list(
     model = model,
+    regions = regions,
     transcripts = transcripts,
+    regulation = regulation,
     summary = summary
   )
 }
@@ -1152,6 +1305,19 @@ expect_equal(
 expect_equal(
   unlist(grch37_fixture$summary[1, ], use.names = FALSE),
   c(39, 15, 0, 48, 0)
+)
+fixture_regulation_summary <- dbGetQuery(
+  con,
+  paste(
+    "SELECT (SELECT count(*) FROM", grch38_fixture$regions,
+    ") region_count, count(*) feature_count,",
+    "count(*) FILTER (WHERE feature_kind = 2) motif_count FROM",
+    grch38_fixture$regulation
+  )
+)
+expect_equal(
+  unlist(fixture_regulation_summary[1, ], use.names = FALSE),
+  c(3, 3, 3)
 )
 
 grch38_mane <- dbGetQuery(
@@ -1172,7 +1338,7 @@ grch38_coding <- dbGetQuery(
     "a.protein_position, a.reference_amino_acid, a.alternate_amino_acid",
     "FROM unnest(duckvep_annotate(",
     as.character(dbQuoteString(con, grch38_fixture$model)), ",",
-    "1::UINTEGER, 32522::UBIGINT, 'C', 'T', 0::UBIGINT)) u(a)"
+    "2::UINTEGER, 32522::UBIGINT, 'C', 'T', 0::UBIGINT)) u(a)"
   )
 )
 expect_equal(grch38_coding$transcript_index, 38)
@@ -1218,6 +1384,26 @@ expect_identical(
 )
 expect_identical(fixture_mitochondrial$status, "supported")
 expect_true(is.na(fixture_mitochondrial$reason))
+
+fixture_motifs <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.regulation_feature_index, a.overlap_object,",
+    "a.consequence, a.status FROM unnest(duckvep_annotate(",
+    as.character(dbQuoteString(con, grch38_fixture$model)), ",",
+    "1::UINTEGER, 75::UBIGINT, 'A', 'C', 0::UBIGINT)) u(a)",
+    "WHERE a.overlap_object = 'transcription_factor_binding_site'",
+    "ORDER BY a.regulation_feature_index"
+  )
+)
+expect_equal(fixture_motifs$regulation_feature_index, c(0, 1))
+expect_true(all(
+  fixture_motifs$overlap_object == "transcription_factor_binding_site"
+))
+expect_true(all(
+  fixture_motifs$consequence == "TF_binding_site_variant"
+))
+expect_true(all(fixture_motifs$status == "supported"))
 
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-test') AS dropped")$dropped)
 expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-no-tail') AS dropped")$dropped)

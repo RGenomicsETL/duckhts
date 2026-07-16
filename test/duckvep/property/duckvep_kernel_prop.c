@@ -2934,8 +2934,8 @@ TEST effect_rule_table_known_pre_bits(void) {
     PASS();
 }
 
-/* Regulatory and motif features are not transcripts. DuckDB supplies candidate
- * interval pairs; this pins the VEP tier-2 predicates evaluated for one pair,
+/* Regulatory and motif features are independent resident interval arrays. This
+ * pins the VEP tier-2 predicates evaluated for one event/feature pair,
  * including the reversed insertion interval at a feature edge. */
 TEST interval_feature_consequences_known_scene(void) {
     duckvep_event_t event;
@@ -3020,6 +3020,313 @@ TEST interval_feature_consequences_known_scene(void) {
     ASSERT_EQ(0u, duckvep_effect_eval_interval_feature(
         (duckvep_interval_feature_kind_t)0,
         &event, 100u, 120u));
+    PASS();
+}
+
+TEST model_open_rejects_invalid_interval_feature_models(void) {
+    duckvep_transcript_model_t transcripts;
+    duckvep_exon_model_t exons;
+    duckvep_interval_feature_model_t features;
+    duckvep_model_t *model = NULL;
+    duckvep_error_t error;
+    uint16_t chrom[2] = {0u, 0u};
+    uint32_t start[2] = {100u, 200u};
+    uint32_t end[2] = {120u, 220u};
+    uint8_t kind[2] = {
+        (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
+        (uint8_t)DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE
+    };
+
+    memset(&transcripts, 0, sizeof transcripts);
+    memset(&exons, 0, sizeof exons);
+    memset(&features, 0, sizeof features);
+    memset(&error, 0, sizeof error);
+    features.chrom_id = chrom;
+    features.start1 = start;
+    features.end1 = end;
+    features.kind = kind;
+    features.feature_count = 2u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open_with_interval_features(
+        &transcripts, &exons, NULL, &features, &model, &error));
+    duckvep_model_close(model);
+    model = NULL;
+
+    features.kind = NULL;
+    ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG,
+              duckvep_model_open_with_interval_features(
+                  &transcripts, &exons, NULL, &features, &model, &error));
+    features.kind = kind;
+
+    start[0] = 0u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open_with_interval_features(
+                  &transcripts, &exons, NULL, &features, &model, &error));
+    start[0] = 100u;
+
+    kind[0] = 0u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open_with_interval_features(
+                  &transcripts, &exons, NULL, &features, &model, &error));
+    kind[0] = (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION;
+
+    start[0] = 201u;
+    ASSERT_EQ(DUCKVEP_ERR_MODEL_INVALID,
+              duckvep_model_open_with_interval_features(
+                  &transcripts, &exons, NULL, &features, &model, &error));
+    PASS();
+}
+
+struct interval_feature_observation {
+    uint32_t variant_idx;
+    uint32_t feature_idx;
+    uint64_t consequence_mask;
+};
+
+static int interval_feature_observation_cmp(const void *left,
+                                            const void *right) {
+    const struct interval_feature_observation *a =
+        (const struct interval_feature_observation *)left;
+    const struct interval_feature_observation *b =
+        (const struct interval_feature_observation *)right;
+
+    if (a->variant_idx != b->variant_idx)
+        return a->variant_idx < b->variant_idx ? -1 : 1;
+    if (a->feature_idx != b->feature_idx)
+        return a->feature_idx < b->feature_idx ? -1 : 1;
+    if (a->consequence_mask != b->consequence_mask)
+        return a->consequence_mask < b->consequence_mask ? -1 : 1;
+    return 0;
+}
+
+static int interval_feature_kernel_observations(
+    const duckvep_variant_batch_t *variants,
+    const duckvep_interval_feature_model_t *features,
+    struct interval_feature_observation *observed,
+    size_t capacity,
+    size_t *observed_count) {
+    duckvep_transcript_model_t transcripts;
+    duckvep_exon_model_t exons;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_annotate_cursor_t *cursor = NULL;
+    duckvep_error_t error;
+    uint32_t seed[KPROP_MAX_TX];
+    size_t seed_count = 0u;
+    size_t count = 0u;
+    size_t feature;
+    int ok = 0;
+
+    memset(&transcripts, 0, sizeof transcripts);
+    memset(&exons, 0, sizeof exons);
+    memset(&error, 0, sizeof error);
+    if (duckvep_model_open_with_interval_features(
+            &transcripts, &exons, NULL, features, &model, &error) !=
+        DUCKVEP_OK) goto done;
+    if (duckvep_options_open(NULL, &options, &error) != DUCKVEP_OK)
+        goto done;
+    if (duckvep_workspace_open(model, &workspace, &error) != DUCKVEP_OK)
+        goto done;
+    if (duckvep_annotate_cursor_open(model, variants, options, workspace,
+                                     &cursor, &error) != DUCKVEP_OK)
+        goto done;
+
+    /* This is the exact seed contract used by the cgranges adapter: only
+     * intervals overlapping the first raw point enter the persistent active
+     * set; a longer differing region is discovered from the forward frontier. */
+    for (feature = 0u; feature < features->feature_count; feature++) {
+        if (features->chrom_id[feature] == variants->chrom_id[0] &&
+            features->start1[feature] <= variants->pos1[0] &&
+            features->end1[feature] >= variants->pos1[0]) {
+            if (seed_count >= KPROP_MAX_TX) goto done;
+            seed[seed_count++] = (uint32_t)feature;
+        }
+    }
+    if (duckvep_annotate_cursor_seed_interval_features(
+            cursor, seed, seed_count, &error) != DUCKVEP_OK) goto done;
+
+    while (!duckvep_annotate_cursor_done(cursor)) {
+        duckvep_consequence_t row;
+        duckvep_result_builder_t builder;
+        duckvep_status_t status;
+
+        duckvep_result_builder_init(&builder, &row, 1u);
+        status = duckvep_annotate_cursor_fill(cursor, &builder, &error);
+        if (status != DUCKVEP_OK && status != DUCKVEP_ERR_RESULT_FULL)
+            goto done;
+        if (builder.count > 1u) goto done;
+        if (builder.count == 1u) {
+            if (count >= capacity ||
+                row.overlap_object_kind ==
+                    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT ||
+                row.tx_idx != UINT32_MAX ||
+                row.interval_feature_idx >= features->feature_count)
+                goto done;
+            observed[count].variant_idx = row.variant_idx;
+            observed[count].feature_idx = row.interval_feature_idx;
+            observed[count].consequence_mask = row.consequence_mask;
+            count++;
+        }
+    }
+    *observed_count = count;
+    ok = 1;
+done:
+    duckvep_annotate_cursor_close(cursor);
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    return ok;
+}
+
+static int interval_feature_bruteforce_observations(
+    const duckvep_variant_batch_t *variants,
+    const duckvep_interval_feature_model_t *features,
+    struct interval_feature_observation *observed,
+    size_t capacity,
+    size_t *observed_count) {
+    size_t count = 0u;
+    size_t variant;
+
+    for (variant = 0u; variant < variants->count; variant++) {
+        duckvep_event_t event;
+        size_t feature;
+
+        duckvep_event_load(variants, variant, &event);
+        for (feature = 0u; feature < features->feature_count; feature++) {
+            uint64_t mask;
+
+            if (variants->chrom_id[variant] != features->chrom_id[feature])
+                continue;
+            mask = duckvep_effect_eval_interval_feature(
+                (duckvep_interval_feature_kind_t)features->kind[feature],
+                &event, features->start1[feature], features->end1[feature]);
+            if (mask == 0u) continue;
+            if (count >= capacity) return 0;
+            observed[count].variant_idx = (uint32_t)variant;
+            observed[count].feature_idx = (uint32_t)feature;
+            observed[count].consequence_mask = mask;
+            count++;
+        }
+    }
+    *observed_count = count;
+    return 1;
+}
+
+static int interval_feature_run_matches_bruteforce(
+    const duckvep_variant_batch_t *variants,
+    const duckvep_interval_feature_model_t *features) {
+    struct interval_feature_observation kernel[KPROP_MAX_PAIRS];
+    struct interval_feature_observation brute[KPROP_MAX_PAIRS];
+    size_t kernel_count = 0u;
+    size_t brute_count = 0u;
+    size_t index;
+
+    if (!interval_feature_kernel_observations(
+            variants, features, kernel, KPROP_MAX_PAIRS, &kernel_count) ||
+        !interval_feature_bruteforce_observations(
+            variants, features, brute, KPROP_MAX_PAIRS, &brute_count))
+        return 0;
+    if (kernel_count != brute_count) return 0;
+    qsort(kernel, kernel_count, sizeof kernel[0],
+          interval_feature_observation_cmp);
+    qsort(brute, brute_count, sizeof brute[0],
+          interval_feature_observation_cmp);
+    for (index = 0u; index < kernel_count; index++) {
+        if (interval_feature_observation_cmp(&kernel[index],
+                                             &brute[index]) != 0)
+            return 0;
+    }
+    return 1;
+}
+
+static enum theft_trial_res prop_interval_feature_cursor_matches_bruteforce(
+    struct theft *theft, void *argument) {
+    const struct kprop_allele_sweep_scene *scene =
+        (const struct kprop_allele_sweep_scene *)argument;
+    duckvep_interval_feature_model_t features;
+    duckvep_variant_batch_t small;
+    duckvep_variant_batch_t structural;
+    uint8_t kinds[KPROP_MAX_TX];
+    uint8_t small_kinds[KPROP_MAX_VARIANTS];
+    uint8_t structural_kinds[KPROP_MAX_VARIANTS];
+    uint8_t structural_types[KPROP_MAX_VARIANTS];
+    uint8_t copy_changes[KPROP_MAX_VARIANTS];
+    size_t index;
+    (void)theft;
+
+    memset(&features, 0, sizeof features);
+    for (index = 0u; index < scene->tx.transcript_count; index++) {
+        kinds[index] = (uint8_t)(index % 2u == 0u
+            ? DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION
+            : DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE);
+    }
+    features.chrom_id = scene->tchrom;
+    features.start1 = scene->tstart;
+    features.end1 = scene->tend;
+    features.kind = kinds;
+    features.feature_count = scene->tx.transcript_count;
+
+    /* The shared sweep generator deliberately varies the uploaded allele
+     * representation. Derive the semantic event kind from its differing
+     * region, exactly as the SQL adapter does once per ALT, so this property
+     * exercises the kernel contract rather than feeding contradictory kinds. */
+    small = scene->v;
+    for (index = 0u; index < small.count; index++) {
+        duckvep_event_t event;
+        const uint8_t *ref = small.allele_bytes + small.ref_offset[index];
+        const uint8_t *alt = small.allele_bytes + small.alt_offset[index];
+
+        if (!duckvep_event_prepare_small(
+                small.pos1[index], ref, small.ref_length[index],
+                alt, small.alt_length[index], &event))
+            return THEFT_TRIAL_ERROR;
+        small_kinds[index] = event.kind;
+    }
+    small.variant_kind = small_kinds;
+    if (!interval_feature_run_matches_bruteforce(&small, &features))
+        return THEFT_TRIAL_FAIL;
+
+    memset(&structural, 0, sizeof structural);
+    structural = small;
+    structural.ref_offset = NULL;
+    structural.ref_length = NULL;
+    structural.alt_offset = NULL;
+    structural.alt_length = NULL;
+    structural.allele_bytes = NULL;
+    structural.allele_bytes_len = 0u;
+    structural.variant_kind = structural_kinds;
+    structural.sv_type = structural_types;
+    structural.copy_change = copy_changes;
+    for (index = 0u; index < structural.count; index++) {
+        structural_kinds[index] = (uint8_t)DUCKVEP_KIND_SV;
+        if (index % 3u == 0u) {
+            structural_types[index] = (uint8_t)DUCKVEP_SV_DELETION;
+            copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_LOSS;
+        } else if (index % 3u == 1u) {
+            structural_types[index] = (uint8_t)DUCKVEP_SV_DUPLICATION;
+            copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
+        } else {
+            structural_types[index] = (uint8_t)DUCKVEP_SV_INVERSION;
+            copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+        }
+    }
+    if (!interval_feature_run_matches_bruteforce(&structural, &features))
+        return THEFT_TRIAL_FAIL;
+    return THEFT_TRIAL_PASS;
+}
+
+TEST interval_feature_cursor_matches_bruteforce_for_random_events(void) {
+    struct theft_run_config config;
+
+    memset(&config, 0, sizeof config);
+    config.name = "regulation cursor + one-row resume == brute-force feature evaluator";
+    config.prop1 = prop_interval_feature_cursor_matches_bruteforce;
+    config.type_info[0] = &kprop_allele_sweep_scene_info;
+    config.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    config.seed = (theft_seed)kprop_env_u64(
+        "DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&config));
     PASS();
 }
 
@@ -18573,6 +18880,8 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_remote_frameshift_intron_suppresses_ppt);
     RUN_TEST(effect_rule_table_known_pre_bits);
     RUN_TEST(interval_feature_consequences_known_scene);
+    RUN_TEST(model_open_rejects_invalid_interval_feature_models);
+    RUN_TEST(interval_feature_cursor_matches_bruteforce_for_random_events);
     RUN_TEST(nmd_transcript_predicate_known_scene);
     RUN_TEST(mature_mirna_predicate_known_scene);
     RUN_TEST(variant_induced_nmd_prediction_known_scene);
