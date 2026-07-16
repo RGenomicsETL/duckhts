@@ -494,6 +494,55 @@ FROM unnest(duckvep_annotate(
 ----
 coding_sequence_variant	unresolved	missing_sequence
 
+# Exact single-locus structural events use typed operation and copy-direction
+# fields. They do not pass symbolic alleles through the small-variant adapter.
+query TTTT
+WITH events(ord, start1, end1, structural_type, copy_change) AS (
+  VALUES
+    (1, 90::UBIGINT, 260::UBIGINT, 'DEL', 'LOSS'),
+    (2, 90::UBIGINT, 260::UBIGINT, 'DUP', 'GAIN'),
+    (3, 110::UBIGINT, 230::UBIGINT, 'CNV', 'LOSS'),
+    (4, 110::UBIGINT, 230::UBIGINT, 'CNV', 'GAIN')
+)
+SELECT structural_type, copy_change, annotation.consequence, annotation.status
+FROM events,
+LATERAL unnest(duckvep_annotate_sv(
+  'structural', 1::UINTEGER, start1, end1, structural_type, copy_change,
+  0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+DEL	LOSS	transcript_ablation	supported
+DUP	GAIN	transcript_amplification	supported
+CNV	LOSS	start_lost&feature_truncation&start_retained_variant&coding_sequence_variant&5_prime_UTR_variant&intron_variant	supported
+CNV	GAIN	start_lost&feature_elongation&start_retained_variant&coding_sequence_variant&5_prime_UTR_variant&intron_variant	supported
+
+query IIIII
+SELECT annotation.consequence_mask, annotation.region_mask,
+       annotation.impact_code, annotation.status_code, annotation.reason_code
+FROM unnest(duckvep_annotate_sv_compact(
+  'structural', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,
+  'DUP', 'GAIN', 0::UBIGINT
+)) AS u(annotation);
+----
+67108864	116	3	0	0
+
+statement error
+SELECT duckvep_annotate_sv(
+  'structural', 1::UINTEGER, 100::UBIGINT, 200::UBIGINT,
+  'DEL', 'GAIN'
+);
+----
+structural type contradicts copy change
+
+statement error
+SELECT duckvep_annotate_sv(
+  'structural', 1::UINTEGER, 100::UBIGINT, 100::UBIGINT,
+  'BND', 'UNKNOWN'
+);
+----
+BND requires paired two-locus input
+
 # A REF disagreement with the prepared CDS is auditable and does not become a
 # generic unsupported-sequence result.
 query TTT

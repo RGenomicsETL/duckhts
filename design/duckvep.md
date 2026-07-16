@@ -20,6 +20,68 @@ edge projections, not the internal representation. VEP 116 is the behavioral aut
 pure-C properties and bcftools csq supply independent checks for mechanics and phased edit
 state.
 
+## Mental model
+
+DuckVEP does two different jobs at two different times.
+
+First, it compiles Ensembl relations and matching reference sequence into an immutable
+execution model. DuckDB keeps the rich source relations, stable identifiers, attributes,
+and hashes. The compiler checks them, assembles transcript-oriented sequence, and publishes
+compact C arrays containing only facts used repeatedly during annotation.
+
+Second, it runs a sorted stream of variant alleles through that model. Each allele is
+interpreted once, matched to candidate transcripts, projected through exon and CDS
+coordinates, and reduced to consequence facts. One generated VEP-116 rule program maps
+those facts to SO terms. Numeric rows leave the kernel first; identifiers, HGVS,
+supplementary annotations, and strings are joined or rendered later.
+
+```text
+model construction, once per declared source
+
+Ensembl core relations + matching FASTA
+                -> checked prepared relations + deterministic receipt
+                -> immutable transcript/exon/sequence arrays
+
+annotation, repeatedly
+
+sorted ALT alleles
+    -> raw VCF span + VEP feature span + minimized sequence edit
+    -> continuing transcript sweep
+    -> topology / splice / projection / sequence facts
+    -> one VEP-116 fact-to-SO program
+    -> compact transcript rows
+    -> SQL joins, identifiers, HGVS, CSQ/JSON, clinical evidence
+```
+
+The data placement follows the cost and lifetime of each fact:
+
+| Data | Where it lives and why |
+| --- | --- |
+| Ensembl identifiers, attributes, source tables, and receipts | DuckDB relations, because they are provenance and joinable data rather than hot-loop state. |
+| Transcript spans, exon maps, prepared CDS/flanks, and sparse sequence edits | One immutable named C model, because every variant reuses them. |
+| Variant alleles | Sorted batches, because genome-scale inputs stream and coordinate order makes candidate discovery nearly linear. |
+| dbSNP, ClinVar, gnomAD, scores, and interval tracks | DuckDB/Parquet streams or bounded tiles, because these sources can dwarf the transcript model and may be selected independently. |
+| Exon cursors, candidate lists, sequence scratch, and output buffers | One worker-owned workspace, because mutable state must not be shared across DuckDB workers or named models. |
+
+Five rules keep the design understandable:
+
+1. There is one biological authority for independent consequences: fact producers followed
+   by the generated VEP-116 rule program. A fast path must prove equality with it.
+2. The uploaded VCF span, VEP's feature span, and the minimized sequence edit are retained
+   separately because VEP predicates genuinely consume different coordinates.
+3. Coordinate order is part of the execution contract. cgranges seeds a run; a continuing
+   sweep, not a fresh transcript search per allele, handles the common sorted workload.
+4. Missing source facts stay explicit. A partial model, unsupported sequence edit, invalid
+   projection, or unknown reference is not silently converted into a supported consequence.
+5. Compatibility and speed are measured separately. VEP differentials compare the union of
+   all emitted variant-transcript pairs; throughput reports count input alleles, candidate
+   work, emitted rows, bytes, model, threads, and materialization.
+
+Phased haplotypes and structural variants reuse projection, sequence editing, and the SO
+rules, but they are not disguised as independent small variants. Haplotypes group several
+edits before translation; breakends retain two loci. Supplementary annotation and ACMG/AMP
+reasoning remain relational work above the deterministic consequence kernel.
+
 ## Responsibility split
 
 DuckDB owns:
@@ -97,10 +159,10 @@ core relations by name from the supplied schema:
 - `attrib_type`, `seq_region_attrib`, `transcript_attrib`, and `translation_attrib` supply
   codon tables, consequence-relevant flags, and exceptional sequence edits.
 
-Attribute values are cast to their semantic text form at this boundary. This matters for
-official dumps where a generic CSV/Parquet staging pass may infer a numeric-only `value`
-column as an integer; the model compiler does not require callers to rewrite an otherwise
-valid staged schema solely to satisfy string predicates.
+Attribute values are cast to their semantic text form while importing these relations.
+This matters for official dumps where a generic CSV/Parquet staging pass may infer a
+numeric-only `value` column as an integer; the model compiler does not require callers to
+rewrite an otherwise valid staged schema solely to satisfy string predicates.
 
 The reference relation has `(chrom, start, end, seq)`, where `start` is zero-based and
 `end` is half-open. It is normally persisted from tiled `fasta_nuc(..., include_seq :=
@@ -279,7 +341,7 @@ SELECT * FROM duckvep_ensembl_transcripts(
 );
 ```
 
-### Current boundary
+### What the builder does not implement
 
 The implemented builder does not yet:
 
@@ -297,7 +359,9 @@ Those richer facts should remain typed DuckDB relations joined by numeric source
 do not belong in every resident C transcript record. Exact VEP-compatible selection and
 the richer Ensembl relation set can therefore be separate named products built from the
 same staged release. Production-corpus conformance and throughput remain tracked at
-https://github.com/RGenomicsETL/duckhts/issues/95.
+https://github.com/RGenomicsETL/duckhts/issues/93 and
+https://github.com/RGenomicsETL/duckhts/issues/95. Further species and genetic-code
+coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 
 ## Ownership
 
@@ -312,12 +376,16 @@ https://github.com/RGenomicsETL/duckhts/issues/95.
 
 ## Independent-variant execution
 
-`duckvep_annotate(model, seq_region, position, reference, alternate [, distance])` is the
-current stable-C-API adapter for independent biallelic small variants. It copies one DuckDB
-vector into compact arrays, splits on model/contig/distance/order changes, seeds the first
-candidate set through cgranges, and advances a sorted C sweep. The SNV point path keeps a
-per-transcript exon rank and advances it monotonically; other spans use the exhaustive
-classifier. Both use the same splice predicates and are property-checked for equality.
+`duckvep_annotate(model, seq_region, position, reference, alternate
+[, distance] | [, upstream_distance, downstream_distance])` is the current stable-C-API
+adapter for independent biallelic small variants. Both direction windows default to VEP's
+5,000 bases; one optional distance changes both, while two values configure them separately
+and zero disables the corresponding direction (or both when it is the single symmetric
+value). The adapter copies one DuckDB vector into compact arrays, splits on
+model/contig/window/order changes, seeds the first candidate set through cgranges, and
+advances a sorted C sweep. The SNV point path keeps a per-transcript exon rank and advances
+it monotonically; other spans use the exhaustive classifier. Both use the same splice
+predicates and are property-checked for equality.
 
 The scalar callback has no expression-local state across DuckDB vectors, so it restarts the
 sweep at each vector. It is a real batch interface, not the stateful whole-stream contract.
@@ -341,8 +409,8 @@ Production MNVs and indels use the generalized edit/CDS/peptide context exactly 
 projection, sequence, capacity, or unsupported-state failure remains explicit and is never
 retried through a smaller shape-specific classifier. Narrow direct classifiers remain only
 as independent pure-C test references; the annotation path cannot select them after a
-context failure. Issue #93 owns continued real-VEP differential closure, not a second
-consequence implementation.
+context failure. https://github.com/RGenomicsETL/duckhts/issues/93 owns continued
+real-VEP differential closure, not a second consequence implementation.
 
 ## NMD prediction
 
@@ -394,6 +462,13 @@ edit prefixes across samples and translate each distinct leaf once. GT/PS decodi
 arbitrary ploidy, transcript-close flushing, and VEP Haplosaurus comparison are tracked at
 https://github.com/RGenomicsETL/duckhts/issues/92.
 
+DuckDB may decode genotypes, derive explicit sample/phase-set/haplotype columns, and sort
+the input relation by genomic coordinate before streaming it. That SQL grouping is not the
+same as biological edit interaction: the C executor still owns transcript lifetime,
+same-codon interactions, an open displaced frame, frame restoration, and the complete list
+of contributing variants. Benchmarks must include both an already-sorted stream and the
+same workload with DuckDB sorting included.
+
 ## Structural events
 
 Small edits and structural events share overlap, projection, provenance, and output, but
@@ -401,9 +476,55 @@ not one lossy event shape. Deletion, duplication, inversion, CNV, breakend pairs
 sequence, and repeat changes retain their typed geometry. A breakend is two loci, not a
 wide interval or symbolic point.
 
-The kernel currently classifies single-interval structural geometry; the SQL adapter does
-not yet accept the typed event fields. Full VEP-116 structural behavior and the remaining
-SO vocabulary are tracked at https://github.com/RGenomicsETL/duckhts/issues/98.
+`duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)` accept exact
+single-locus events plus a typed DEL, DUP, tandem-DUP, INV, INS, CNV, or unknown operation
+and an explicit loss/neutral/gain/unknown copy direction. Span operations use one-based
+inclusive start/end coordinates. An insertion uses `start = end = P` for the interbase
+site after reference base `P`; preparing symbolic VCF therefore removes the left anchor,
+maps a span to `start = POS + 1, end = INFO/END`, and maps an insertion to `P = POS`.
+The adapter rejects contradictory operation/direction pairs before entering the kernel.
+These functions use the same sorted transcript sweep and rich/compact result contracts as
+independent small variants; symbolic REF/ALT strings are not used as a second structural
+parser.
+
+The public SO mask now binds all 41 terms registered by VEP 116. Six regulatory-region and
+transcription-factor-binding-site terms are produced by a separate interval-feature
+evaluator over the same event geometry. Regulatory and motif features remain ordinary
+DuckDB relations for range joins; they are not inserted into the resident transcript
+arrays. Importing those Ensembl regulation relations and exposing the joined-pair SQL
+adapter remain open. `sequence_variant`, the forty-first registry term, has no VEP overlap
+predicate and is retained as metadata rather than emitted to hide an incomplete model.
+
+BND, inserted-sequence payloads, imprecise confidence intervals, and STR repeat-unit/count
+changes still need dedicated inputs and differentials. In particular, BND is rejected by
+the one-locus SQL function instead of being collapsed to a wide interval. That work is
+tracked at https://github.com/RGenomicsETL/duckhts/issues/98.
+
+## HGVS
+
+HGVS is a consumer of the projected edit, not a formatter over consequence names. The
+current event keeps the uploaded span, VEP feature span, minimized REF/ALT edit, insertion
+boundary, and anchor side separately. The transcript model keeps complete spliced
+pre-CDS/CDS/post-CDS sequence, and the sequence layer can apply one edit or a grouped edit
+set and compare the resulting peptide. Those facts must remain stable while phased work
+is added.
+
+The execution split is:
+
+- genomic `g.`/`m.` HGVS is computed once per allele and needs a genomic reference-window
+  provider; it uses VEP 116's genomic `get_3prime_seq_offset` behavior;
+- transcript `c.`/`n.` HGVS is per transcript and uses VEP's separate transcript
+  `perform_shift` path, not the genomic shift routine; and
+- protein `p.` HGVS consumes the alternate peptide difference produced by the same edit
+  set used for phased consequence classification.
+
+The hot transcript sweep therefore emits or retains numeric projected-edit facts; it does
+not allocate HGVS strings. Rendering is late, after filtering. Before a public phased API
+is fixed, the projected-edit sidecar and external VEP-116 HGVS differential must cover
+both shift routines, both strands, exon/intron/UTR positions, repeat runs, position-one
+right anchors, and compound edits. Apply-then-diff sequence equivalence is an independent
+property oracle. Exact structural HGVS can later consume typed exact events; imprecise SV
+and BND remain explicit unsupported states until their complete geometry is present.
 
 ## Supplementary annotations
 
@@ -412,6 +533,13 @@ range sources should remain interval streams. They share prepared variant keys a
 output, not a universal physical format. DuckDB/Parquet pruning, parallel reads, memory
 management, and spill are the first implementation. A custom cache requires a measured
 workload that those facilities do not meet.
+
+Variant-level exact and positional joins happen before transcript expansion. The compact
+consequence row already carries transcript and gene ordinals, so gene relations are joined
+after consequence expansion without repeating a gene lookup inside C. Regulatory, motif,
+domain, and other interval sources use range joins or sorted interval streams, followed by
+the smallest source-specific predicate needed for a joined pair. Strings and JSON remain
+the final projection.
 
 The stateful stable-API integration is tracked at
 https://github.com/RGenomicsETL/duckhts/issues/94. Supplementary source plumbing does not
@@ -426,12 +554,49 @@ belong as ignored arguments in the consequence-kernel API.
 - `make test-duckvep-differential` compares generated witnesses to pinned VEP 116.
 - `make duckvep-corpus-differential` records the union of emitted `(variant, transcript)`
   pairs, including mismatches, misses, extras, and unresolved rows.
+- The corpus runner's small-event mode samples SNVs, MNVs, insertion-like alleles, and
+  deletion-like alleles independently by length-change bin. Structural mode either reads
+  a symbolic VCF or generates seeded DEL/DUP/tandem-DUP/INV/CNV/INS events from real model
+  geometry at transcript, exon, intron, splice, UTR, CDS, start-codon, and stop-codon
+  states. Independent seeds can run concurrently against one read-only attached model.
+- A held-out small-event run with seed `20260716` executed 100,000 trials per randomized C
+  property (170 tests; 204,521 assertions) and compared 100,268 generated/fixed alleles
+  with executable VEP 116. All 100,268 transcript pairs were exact. Its generated set
+  contained SNVs, MNVs, insertions, deletions, and delins; duplicate rejection deliberately
+  makes the accepted shape counts non-uniform rather than resampling a cosmetically balanced
+  result.
+- The current eight-seed GRCh38 structural campaign generated 40,375 events on chromosomes
+  1, 2, 6, 11, 17, 21, 22, and X and compared 2,140,911 emitted transcript pairs with the
+  executable indexed VEP 116 cache. Every pair was resolved and exact, with no missing or
+  extra emission. This is evidence for the sampled exact single-locus states, not a claim
+  for BND, imprecise coordinates, STR payloads, or untested species.
 - `make bench-duckvep-release-parquet` reads the official Ensembl variation consequence
   VCF through typed CSQ columns and records complete versus consequence-only Parquet size,
   checksum, cardinality, and elapsed time without committing the large artifacts.
 - Throughput reports must state input variants, variant-transcript pairs, output rows and
   bytes, threads, model, and machine. Site-level rate and cohort haplotype-update rate are
   different measurements.
+- Comparisons with FastVEP report two timings over the same source and output contract:
+  annotation from already coordinate-sorted input, and read-plus-sort-plus-annotation.
+  Sorting cost is not hidden, but it is not charged only to DuckVEP either. DuckDB may sort
+  once and stream ordered chunks directly into the consequence or phased executor.
+
+The generated reports are the numeric authority. At the latest tested ancestor for each
+corpus, GRCh38 dbSNP and GIAB, GRCh37, and *P. falciparum* are exact for their declared
+indexed-cache samples. The two GRCh38 ClinVar corpora retain small visible discrepancies.
+The separate NMD-plugin differential is exact for all 68,554 eligible transcript pairs,
+including the 29,416 states both implementations leave unresolved.
+
+On the final 644,427-transcript GRCh38 model, the current one-core compact measurements are
+about 841,000 input alleles/s for the GIAB topology sample, 332,000/s for repeated coding
+SNVs, 111,000/s for repeated coding non-SNVs, and 136,000/s for the repeated mixed coding
+set. These include stable-API list materialization and aggregation but exclude model load
+and input staging. The one-million-input-allele target is not met on the final model; the
+mixed lane's roughly 3.92 million emitted transcript rows/s is a second denominator, not a
+substitute for the site-rate target. Exact revisions, checksums, row counts, resource
+measurements, and conditions live in the generated
+[conformance report](../benchmarks/duckvep_conformance.md) and
+[throughput report](../benchmarks/duckvep_throughput.md).
 
 Open conformance and throughput work is tracked at
 https://github.com/RGenomicsETL/duckhts/issues/93 and

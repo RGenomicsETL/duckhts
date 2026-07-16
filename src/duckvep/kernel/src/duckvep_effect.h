@@ -66,7 +66,14 @@ typedef enum duckvep_pre_bit {
     DUCKVEP_PRE_START_RETAINED          = 39,
     DUCKVEP_PRE_WITHIN_MATURE_MIRNA     = 40,
     DUCKVEP_PRE_PARTIAL_CODON            = 41,
-    DUCKVEP_PRE_BIT_COUNT               = 42
+    /* Facts owned by the separate regulatory/motif interval-feature lane. */
+    DUCKVEP_PRE_TFBS_ABLATION             = 42,
+    DUCKVEP_PRE_TFBS_AMPLIFICATION        = 43,
+    DUCKVEP_PRE_WITHIN_TFBS               = 44,
+    DUCKVEP_PRE_REGULATORY_ABLATION       = 45,
+    DUCKVEP_PRE_REGULATORY_AMPLIFICATION  = 46,
+    DUCKVEP_PRE_WITHIN_REGULATORY_REGION  = 47,
+    DUCKVEP_PRE_BIT_COUNT                 = 48
 } duckvep_pre_bit_t;
 
 #define DUCKVEP_PRE(b) (UINT64_C(1) << (b))
@@ -77,6 +84,7 @@ typedef struct duckvep_effect_ctx {
     uint32_t               start1;
     uint32_t               end1;
     int8_t                 strand;
+    uint8_t                protein_coding;
     uint32_t               region;
     uint64_t               pre_bits;
     duckvep_region_state_t region_state;
@@ -167,6 +175,22 @@ void duckvep_effect_ctx_apply_sv(
     duckvep_effect_ctx_t      *ctx,
     const duckvep_sv_effect_t *sv);
 
+/* VEP's regulatory and motif consequences use the same event geometry and
+ * structural operation facts as transcripts, but their features are ordinary
+ * intervals. Candidate discovery belongs to a DuckDB range join; this helper
+ * evaluates one joined pair and returns only VEP SO bits. `feature_start1` and
+ * `feature_end1` are one-based inclusive. */
+typedef enum duckvep_interval_feature_kind {
+    DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION = 1,
+    DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE = 2
+} duckvep_interval_feature_kind_t;
+
+uint64_t duckvep_effect_eval_interval_feature(
+    duckvep_interval_feature_kind_t feature_kind,
+    const duckvep_event_t          *event,
+    uint32_t                        feature_start1,
+    uint32_t                        feature_end1);
+
 /* Derive VEP predicates that depend on the complete fact set. Call exactly once
  * after variant-class, structural, and optional sequence-delta facts are applied
  * and before evaluating the generated consequence program. */
@@ -214,6 +238,13 @@ uint64_t duckvep_effect_eval_rules(
  * the compact production lookup against this independent execution path. */
 uint64_t duckvep_effect_eval_reference(uint64_t pre_bits);
 
+/* StructuralVariationFeature inherits only VEP rules whose pinned metadata
+ * names BaseVariationFeature. This is not equivalent to evaluating every
+ * transcript predicate over a wide interval: splice, missense, synonymous and
+ * several peptide predicates are ordinary-VariationFeature-only. */
+uint64_t duckvep_effect_eval_structural_reference(uint64_t pre_bits);
+
 uint64_t duckvep_effect_eval(uint64_t pre_bits);
+uint64_t duckvep_effect_eval_structural(uint64_t pre_bits);
 
 #endif /* DUCKVEP_EFFECT_H */

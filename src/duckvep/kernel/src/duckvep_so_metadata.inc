@@ -2,7 +2,7 @@
  * test/duckvep/conformance/data/so_consequences.tsv (VEP metadata) and
  * test/duckvep/conformance/data/so_bit_bindings.tsv (stable public bit bindings).
  * Do not hand-edit. */
-enum { DUCKVEP_GENERATED_SO_BINDING_COUNT = 34u };
+enum { DUCKVEP_GENERATED_SO_BINDING_COUNT = 41u };
 static const struct duckvep_so_metadata k_so[DUCKVEP_SO_BIT_COUNT] = {
     [DUCKVEP_SO_UPSTREAM_GENE] = { "upstream_gene_variant", DUCKVEP_IMPACT_MODIFIER, 32u, 3u },
     [DUCKVEP_SO_DOWNSTREAM_GENE] = { "downstream_gene_variant", DUCKVEP_IMPACT_MODIFIER, 33u, 3u },
@@ -38,6 +38,13 @@ static const struct duckvep_so_metadata k_so[DUCKVEP_SO_BIT_COUNT] = {
     [DUCKVEP_SO_PROTEIN_ALTERING] = { "protein_altering_variant", DUCKVEP_IMPACT_MODERATE, 14u, 3u },
     [DUCKVEP_SO_START_RETAINED] = { "start_retained_variant", DUCKVEP_IMPACT_LOW, 20u, 3u },
     [DUCKVEP_SO_INTERGENIC] = { "intergenic_variant", DUCKVEP_IMPACT_MODIFIER, 40u, 4u },
+    [DUCKVEP_SO_TFBS_ABLATION] = { "TFBS_ablation", DUCKVEP_IMPACT_MODERATE, 34u, 2u },
+    [DUCKVEP_SO_TFBS_AMPLIFICATION] = { "TFBS_amplification", DUCKVEP_IMPACT_MODIFIER, 35u, 2u },
+    [DUCKVEP_SO_TF_BINDING_SITE] = { "TF_binding_site_variant", DUCKVEP_IMPACT_MODIFIER, 36u, 2u },
+    [DUCKVEP_SO_REGULATORY_REGION_ABLATION] = { "regulatory_region_ablation", DUCKVEP_IMPACT_MODIFIER, 37u, 2u },
+    [DUCKVEP_SO_REGULATORY_REGION_AMPLIFICATION] = { "regulatory_region_amplification", DUCKVEP_IMPACT_MODIFIER, 38u, 2u },
+    [DUCKVEP_SO_REGULATORY_REGION] = { "regulatory_region_variant", DUCKVEP_IMPACT_MODIFIER, 39u, 2u },
+    [DUCKVEP_SO_SEQUENCE_VARIANT] = { "sequence_variant", DUCKVEP_IMPACT_MODIFIER, 41u, 4u },
 };
 
 static const duckvep_so_bit_t k_so_render_order[DUCKVEP_SO_BIT_COUNT] = {
@@ -74,5 +81,12 @@ static const duckvep_so_bit_t k_so_render_order[DUCKVEP_SO_BIT_COUNT] = {
     DUCKVEP_SO_CODING_TRANSCRIPT,
     DUCKVEP_SO_UPSTREAM_GENE,
     DUCKVEP_SO_DOWNSTREAM_GENE,
+    DUCKVEP_SO_TFBS_ABLATION,
+    DUCKVEP_SO_TFBS_AMPLIFICATION,
+    DUCKVEP_SO_TF_BINDING_SITE,
+    DUCKVEP_SO_REGULATORY_REGION_ABLATION,
+    DUCKVEP_SO_REGULATORY_REGION_AMPLIFICATION,
+    DUCKVEP_SO_REGULATORY_REGION,
     DUCKVEP_SO_INTERGENIC,
+    DUCKVEP_SO_SEQUENCE_VARIANT,
 };

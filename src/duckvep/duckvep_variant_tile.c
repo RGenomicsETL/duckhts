@@ -173,7 +173,8 @@ duckvep_tile_status_t duckvep_variant_tile_append_event(
             return DUCKVEP_TILE_INVALID;
         }
     } else if (kind == (uint8_t)DUCKVEP_KIND_SV) {
-        if (pos1 == 0u || end1 < pos1) {
+        if (!duckvep_sv_geometry_valid((duckvep_sv_type_t)sv_type,
+                                       pos1, end1)) {
             tile_set_error(t, "SV requires a valid 1-based inclusive interval");
             return DUCKVEP_TILE_INVALID;
         }

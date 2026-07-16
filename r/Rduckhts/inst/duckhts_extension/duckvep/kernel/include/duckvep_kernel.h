@@ -118,6 +118,13 @@ typedef enum duckvep_copy_change {
 int duckvep_sv_metadata_valid(duckvep_sv_type_t sv_type,
                               duckvep_copy_change_t copy_change);
 
+/* Validate the single-locus geometry accepted by the borrowed SV batch.
+ * Ordinary operations use an exact inclusive span. INSERTION uses start1=end1
+ * as the interbase boundary after that reference base; event preparation turns
+ * it into VEP's reversed P+1,P feature interval. */
+int duckvep_sv_geometry_valid(duckvep_sv_type_t sv_type,
+                              uint32_t start1, uint32_t end1);
+
 /* Distilled transcript facts produced by the Ensembl-cache/prepared-model import
  * layer. The kernel is organism-blind: it never switches on raw biotype strings or
  * attrib codes, only these stable bits. Build-time DuckDB SQL (MySQL extension or

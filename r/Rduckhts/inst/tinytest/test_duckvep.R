@@ -506,6 +506,41 @@ expect_equal(compact_annotation$alternate_amino_acid_code, utf8ToInt("A"))
 expect_equal(compact_annotation$nmd_prediction_code, 0)
 expect_equal(compact_annotation$nmd_escape_reasons, 0)
 
+structural_deletion <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate_sv(",
+    "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
+    "'DEL', 'LOSS', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(structural_deletion$consequence, "transcript_ablation")
+expect_identical(structural_deletion$status, "supported")
+
+structural_duplication <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence_mask, a.status_code",
+    "FROM unnest(duckvep_annotate_sv_compact(",
+    "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
+    "'DUP', 'GAIN', 0::UBIGINT)) u(a)"
+  )
+)
+expect_equal(structural_duplication$consequence_mask, 67108864)
+expect_equal(structural_duplication$status_code, 0)
+
+expect_error(
+  dbGetQuery(
+    con,
+    paste(
+      "SELECT duckvep_annotate_sv(",
+      "'r-test', 1::UINTEGER, 100::UBIGINT, 200::UBIGINT,",
+      "'DEL', 'GAIN')"
+    )
+  ),
+  pattern = "structural type contradicts copy change"
+)
+
 reference_mismatch <- dbGetQuery(
   con,
   paste(

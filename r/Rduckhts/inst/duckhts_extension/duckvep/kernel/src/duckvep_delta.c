@@ -30,26 +30,6 @@ static int delta_transcript_has_sequence(const duckvep_sequence_pool_t *seq,
 static char delta_context_cds_base(const duckvep_coding_context_t *ctx,
                                    int alternate, size_t position0);
 
-/* VEP's partial_codon predicate is about the first affected peptide
- * coordinate, not merely whether the rounded local window reaches an
- * incomplete tail. For a 14-base CDS, an edit beginning at CDS 11 starts in
- * the complete fourth codon and is not partial; one beginning at CDS 13 is. */
-static int delta_cds_position_is_partial_codon(
-    size_t   cds_length,
-    uint32_t cds_position1) {
-
-    size_t codon_start0;
-    size_t last_codon_length;
-
-    if (cds_position1 == 0u || (size_t)cds_position1 > cds_length ||
-        (cds_length % 3u) == 0u) {
-        return 0;
-    }
-    codon_start0 = ((size_t)cds_position1 - 1u) / 3u * 3u;
-    last_codon_length = cds_length - codon_start0;
-    return last_codon_length > 0u && last_codon_length < 3u;
-}
-
 /* Apply the guards used by VEP 116's partial_codon callers. In-frame
  * insertion and stop-gained are intentionally not cleared: VEP evaluates
  * those predicates independently, and coding_unknown may coexist with an
@@ -76,72 +56,30 @@ static int delta_event_first_coding_base_is_partial_codon(
     const duckvep_exon_model_t       *exons,
     const duckvep_sequence_pool_t    *seq,
     size_t                            tx_idx,
-    int8_t                            strand,
     const duckvep_event_t            *event,
     uint32_t                         *protein_position1) {
 
     duckvep_coding_projection_t projection;
     const uint8_t *cds;
     size_t cds_length;
-    uint32_t exon_offset;
-    uint16_t exon_count;
-    uint16_t i;
-    uint32_t first_cds_position1 = UINT32_MAX;
-    uint32_t first_protein_position1 = 0u;
 
     if (protein_position1 != NULL) *protein_position1 = 0u;
     if (event == NULL || event->interbase || event->feature_start1 == 0u ||
         event->feature_end1 < event->feature_start1 ||
         transcripts == NULL || exons == NULL ||
-        transcripts->exon_offset == NULL || transcripts->exon_count == NULL ||
-        transcripts->cds_start1 == NULL || transcripts->cds_end1 == NULL ||
-        exons->start1 == NULL || exons->end1 == NULL ||
         tx_idx >= transcripts->transcript_count ||
         !delta_cds_slice(seq, tx_idx, &cds, &cds_length)) {
         return 0;
     }
     (void)cds;
-    exon_offset = transcripts->exon_offset[tx_idx];
-    exon_count = transcripts->exon_count[tx_idx];
-    if (exon_offset > exons->exon_count ||
-        exon_count > exons->exon_count - exon_offset) {
-        return 0;
-    }
-
-    /* genomic2pep returns a coordinate for the first mapped coding piece even
-     * when the uploaded feature begins or ends in a mapper Gap. Find that piece
-     * without walking bases: intersect the feature with each coding exon and
-     * retain its earliest CDS coordinate. */
-    for (i = 0u; i < exon_count; i++) {
-        size_t exon_idx = (size_t)exon_offset + (size_t)i;
-        uint32_t lo = exons->start1[exon_idx];
-        uint32_t hi = exons->end1[exon_idx];
-        uint32_t genomic1;
-
-        if (lo < transcripts->cds_start1[tx_idx]) {
-            lo = transcripts->cds_start1[tx_idx];
-        }
-        if (lo < event->feature_start1) lo = event->feature_start1;
-        if (hi > transcripts->cds_end1[tx_idx]) {
-            hi = transcripts->cds_end1[tx_idx];
-        }
-        if (hi > event->feature_end1) hi = event->feature_end1;
-        if (lo > hi) continue;
-        genomic1 = strand > 0 ? lo : hi;
-        if (duckvep_project_coding_base(
-                transcripts, exons, tx_idx, genomic1, &projection) &&
-            projection.cds_pos < first_cds_position1) {
-            first_cds_position1 = projection.cds_pos;
-            first_protein_position1 = projection.protein_pos;
-        }
-    }
-    if (first_cds_position1 == UINT32_MAX ||
-        !delta_cds_position_is_partial_codon(
-            cds_length, first_cds_position1)) {
+    if (!duckvep_project_feature_translation_start(
+            transcripts, exons, tx_idx, event, &projection) ||
+        !duckvep_cds_position_is_partial_codon(
+            cds_length, projection.cds_pos)) {
         return 0;
     }
     if (protein_position1 != NULL) {
-        *protein_position1 = first_protein_position1;
+        *protein_position1 = projection.protein_pos;
     }
     return 1;
 }
@@ -685,7 +623,7 @@ static int delta_feature_length_change_mapper_gap_fill(
 
     if (transcripts->flags != NULL) tx_flags = transcripts->flags[tx_idx];
     partial_codon = delta_event_first_coding_base_is_partial_codon(
-        transcripts, exons, seq, tx_idx, strand, event,
+        transcripts, exons, seq, tx_idx, event,
         &partial_protein_position);
     if (!partial_codon &&
         (tx_flags & (uint64_t)DUCKVEP_TX_CDS_END_NF) == 0u) {
@@ -780,7 +718,7 @@ static int delta_feature_length_change_boundary_fill(
     }
     partial_codon = crosses_stop &&
         delta_event_first_coding_base_is_partial_codon(
-            transcripts, exons, seq, tx_idx, strand, event,
+            transcripts, exons, seq, tx_idx, event,
             &partial_protein_position);
     if (partial_codon ||
         (tx_flags & (uint64_t)DUCKVEP_TX_CDS_END_NF) != 0u) {
@@ -3210,7 +3148,7 @@ static duckvep_context_delta_status_t delta_context_length_change_predicates(
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
     nt_offset = view.peptide_offset * 3u;
-    delta->partial_codon = (uint8_t)delta_cds_position_is_partial_codon(
+    delta->partial_codon = (uint8_t)duckvep_cds_position_is_partial_codon(
         ctx->ref_cds_len, ctx->single_edit_cds_start);
     local_unambiguous =
         nt_offset <= ctx->ref_cds_len &&
@@ -3651,7 +3589,7 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
                        : DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
     if (ctx->has_single_edit && ctx->cds_changed != 0u &&
-        delta_cds_position_is_partial_codon(
+        duckvep_cds_position_is_partial_codon(
             ctx->ref_cds_len, ctx->single_edit_cds_start)) {
         delta->cdna_pos = -1;
         delta->cds_pos = -1;
@@ -3777,7 +3715,7 @@ static int delta_feature_substitution_fill(
         ((tx_flags & (uint64_t)DUCKVEP_TX_CDS_END_NF) != 0u ||
          duckvep_transcript_has_partial_terminal_codon(seq, tx_idx))) {
         int partial_codon = delta_event_first_coding_base_is_partial_codon(
-            transcripts, exons, seq, tx_idx, strand, event,
+            transcripts, exons, seq, tx_idx, event,
             &partial_protein_position);
 
         memset(delta, 0, sizeof *delta);
@@ -3923,7 +3861,7 @@ static int delta_feature_substitution_fill(
      * reconstruction: VEP emits the partial-codon fact and coding_unknown even
      * though that local peptide is represented as X. */
     if (have_cds && first_cds != UINT32_MAX &&
-        delta_cds_position_is_partial_codon(cds_len, first_cds)) {
+        duckvep_cds_position_is_partial_codon(cds_len, first_cds)) {
         memset(delta, 0, sizeof *delta);
         delta->cdna_pos = -1;
         delta->cds_pos = -1;
@@ -4279,7 +4217,7 @@ static void sequence_delta_fill_snv(
     /* duckvep_coding_snv_from_cds requires a complete three-base codon. VEP
      * instead gives an SNV in the final one- or two-base codon the explicit
      * partial-codon and coding-unknown facts. */
-    if (delta_cds_position_is_partial_codon(cds_len, proj.cds_pos)) {
+    if (duckvep_cds_position_is_partial_codon(cds_len, proj.cds_pos)) {
         char cds_base = delta_norm_base(
             (char)cds_seq[(size_t)proj.cds_pos - 1u]);
         char ref_tx = delta_orient_genomic_base(gref, strand);

@@ -562,3 +562,78 @@ Source anchors: Ensembl Variation 116
 `VariationEffect.pm::protein_altering_variant`, and
 `Sequence.pm::trim_sequences`. Keep the deletion and insertion predicates separate;
 making one the length-sign mirror of the other changes VEP results.
+
+## The NMD plugin projects the full uploaded feature, not the minimized edit
+
+Variant-induced NMD prediction in VEP Plugins release/116 does not consume the same
+coordinates used to change CDS sequence. `NMD.pm` asks the parent
+`TranscriptVariation` for CDS coordinates derived from the complete uploaded
+`VariationFeature`, and reads the feature's genomic end for its exon-position rules.
+Common-prefix/suffix minimization can therefore preserve the sequence change while
+changing the NMD result.
+
+Pure insertions expose the most surprising state. The parent transcript variation keeps an
+empty feature as a reversed CDS interval such as `102,101`; it does not use the expanded
+`101..102` allele range rendered in VEP JSON. At an exon edge, mapping one genomic flank
+can be sufficient. Immediately before the first coding base, `1,0` is a valid result:
+`NMD.pm` checks whether both coordinates are defined, not whether the numeric values are
+nonzero, then treats the zero CDS end as an early-CDS escape.
+
+DuckVEP consequently retains two projections:
+
+- the minimized edit projection for REF validation, sequence application, translation,
+  and core consequence predicates; and
+- the full uploaded-feature projection for the NMD plugin's early-CDS, last-exon, and
+  penultimate-exon-end rules.
+
+A cached early-CDS fact from consequence prediction is reusable only when the full feature
+and minimized edit cover identical genomic spans. Equal-length padded features and pure
+insertions must use the full-feature projector. Broadening that cache condition changes
+valid VEP results even when the underlying sequence edit is identical.
+
+Source authority: VEP Plugins release/116 `NMD.pm`, commit
+`0082591268417af618e03850c5ffdc7c09998a5d`, together with VEP 116
+`BaseTranscriptVariation::cds_coords` and `TranscriptVariation` insertion mapping. Fixed
+executable-plugin witnesses cover both strands, reversed insertion ranges, and the valid
+`1,0` coordinate. The checked-in ClinVar chromosome-21 differential matches all 68,554
+eligible transcript pairs, including 29,416 states both implementations leave unresolved.
+
+## Structural coding predicates do not share one projection rule
+
+VEP 116's structural consequence predicates reuse different pieces of mapper state. Five
+cases found by seeded executable-VEP exploration must remain distinct:
+
+- For an ordinary structural span, `_overlaps_start_codon` requires the first and last
+  genomic positions to map to cDNA. A deletion or inversion can cover the genomic start
+  codon but emit no start term when its other endpoint is intronic. When both endpoints are
+  exonic, a structural allele has no inserted sequence, so VEP can emit the apparently
+  contradictory pair `start_lost&start_retained_variant`.
+- A structural insertion is different. `Mapper::map_insert` exposes its cDNA location as
+  `start = end + 1` on both transcript strands. At an exon edge, its one mapped flank still
+  determines which side of that base owns the insertion. Sorting the two coordinates or
+  collapsing a one-flank result to a point invents start terms immediately before the CDS
+  and after the third start-codon base. The reversed coordinate can nevertheless overlap a
+  start codon split across exons, for example after its second base.
+- structural `frameshift` requires a deletion wholly inside one exon and a length not
+  divisible by three. It does not inspect `cds_coords`. Structural `inframe_deletion`
+  additionally requires exactly one CDS `Coordinate` and no mapper `Gap`. A deletion that
+  runs from CDS into 3-prime UTR can therefore be a frameshift when its length is not
+  divisible by three, but only `coding_sequence_variant` when the same geometry has a
+  length divisible by three.
+- structural `stop_lost` calls the shared `partial_codon` predicate first. That predicate
+  uses the event's transcript-oriented `translation_start`, not a transcript-wide
+  "incomplete CDS" flag. On a 160-base prepared CDS, a deletion beginning in CDS base 158
+  may still lose the stop because its first peptide coordinate names a complete codon;
+  one beginning at CDS base 160 is suppressed as partial. If the event begins with a
+  mapper `Gap`, `translation_start` is undefined and the partial-codon guard is false.
+- `coding_transcript_variant` is restricted to the literal `protein_coding` biotype. Some
+  Ensembl transcripts have a translation/CDS but another biotype; a neutral structural
+  event containing such a transcript can exhaust the registry predicates and receive the
+  transcript-associated default `intergenic_variant`.
+
+These are compatibility facts, not a proposed biological cleanup. Fixed C witnesses pin
+each state, while held-out generated structural events compare exact term sets against the
+indexed VEP 116 cache. Source anchors: Ensembl Variation 116
+`Mapper.pm::map_insert`, `BaseTranscriptVariation.pm::translation_start`,
+`VariationEffect.pm::_overlaps_start_codon`, `partial_codon`, `stop_lost`, `frameshift`,
+`inframe_deletion`, and the `coding_transcript_variant` registry entry in `Constants.pm`.
