@@ -21,6 +21,7 @@ typedef struct duckvep_load_bind {
 	char *arguments[4];
 	char *mature_mirna_query;
 	char *peptide_edit_query;
+	char *interval_feature_query;
 	int transcript_coverage_complete;
 } duckvep_load_bind_t;
 
@@ -212,6 +213,29 @@ duckvep_model_reserve_flanks(duckvep_owned_model_t *model, size_t needed)
 	return 1;
 }
 
+static int
+duckvep_model_reserve_interval_features(duckvep_owned_model_t *model,
+	size_t needed)
+{
+	size_t capacity;
+
+	if (needed <= model->interval_feature_capacity)
+		return 1;
+	capacity = duckvep_sql_next_capacity(model->interval_feature_capacity,
+	    needed);
+#define DUCKVEP_RESIZE_INTERVAL_FEATURE(member) \
+	if (!duckvep_sql_resize((void **)&model->member, \
+	    sizeof(*model->member), capacity)) \
+		return 0
+	DUCKVEP_RESIZE_INTERVAL_FEATURE(interval_feature_seq_regions);
+	DUCKVEP_RESIZE_INTERVAL_FEATURE(interval_feature_starts);
+	DUCKVEP_RESIZE_INTERVAL_FEATURE(interval_feature_ends);
+	DUCKVEP_RESIZE_INTERVAL_FEATURE(interval_feature_kinds);
+#undef DUCKVEP_RESIZE_INTERVAL_FEATURE
+	model->interval_feature_capacity = capacity;
+	return 1;
+}
+
 static void
 duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 {
@@ -252,11 +276,21 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 	free(model->peptide_edit_alts);
 	free(model->cds_sequence_bytes);
 	free(model->flank_sequence_bytes);
+	free(model->interval_feature_seq_regions);
+	free(model->interval_feature_starts);
+	free(model->interval_feature_ends);
+	free(model->interval_feature_kinds);
 	if (model->interval_index != NULL) {
 		/* cgranges 0.1.1 does not release its interval array. */
 		free(model->interval_index->r);
 		model->interval_index->r = NULL;
 		cr_destroy(model->interval_index);
+	}
+	if (model->interval_feature_index != NULL) {
+		/* cgranges 0.1.1 does not release its interval array. */
+		free(model->interval_feature_index->r);
+		model->interval_feature_index->r = NULL;
+		cr_destroy(model->interval_feature_index);
 	}
 	memset(model, 0, sizeof(*model));
 }
@@ -301,49 +335,74 @@ duckvep_owned_model_publish(duckvep_owned_model_t *model)
 	model->sequences.post_cds_length = model->post_cds_sequence_lengths;
 	model->sequences.flanks_complete =
 	    (uint8_t)(model->transcript_flanks_complete != 0);
+	model->interval_features.chrom_id =
+	    model->interval_feature_seq_regions;
+	model->interval_features.start1 = model->interval_feature_starts;
+	model->interval_features.end1 = model->interval_feature_ends;
+	model->interval_features.kind = model->interval_feature_kinds;
+	model->interval_features.feature_count = model->interval_feature_count;
+}
+
+static int
+duckvep_owned_interval_index(duckvep_owned_model_t *model,
+	const uint16_t *seq_regions, const uint32_t *starts,
+	const uint32_t *ends, size_t count, const char *object_name,
+	cgranges_t **result, int *complete, char *error, size_t error_size)
+{
+	size_t index;
+	char message[128], region_name[16];
+
+	*complete = 0;
+	if (count > (size_t)INT32_MAX)
+		return 1;
+	for (index = 0; index < count; index++) {
+		if (starts[index] > (uint32_t)INT32_MAX ||
+		    ends[index] > (uint32_t)INT32_MAX)
+			return 1;
+	}
+	*result = cr_init();
+	if (*result == NULL) {
+		(void)snprintf(message, sizeof(message),
+		    "out of memory building %s interval index", object_name);
+		duckvep_sql_set_error(error, error_size, message);
+		return 0;
+	}
+	for (index = 0; index < model->known_seq_region_count; index++) {
+		(void)snprintf(region_name, sizeof(region_name), "%u",
+		    model->known_seq_regions[index]);
+		(void)cr_add_ctg(*result, region_name, 0);
+	}
+	for (index = 0; index < count; index++) {
+		(void)snprintf(region_name, sizeof(region_name), "%u",
+		    seq_regions[index]);
+		if (cr_add(*result, region_name,
+		    (int32_t)(starts[index] - 1), (int32_t)ends[index],
+		    (int32_t)index) == NULL) {
+			(void)snprintf(message, sizeof(message),
+			    "could not build %s interval index", object_name);
+			duckvep_sql_set_error(error, error_size, message);
+			return 0;
+		}
+	}
+	cr_index(*result);
+	*complete = 1;
+	return 1;
 }
 
 static int
 duckvep_owned_model_index(duckvep_owned_model_t *model, char *error,
 	size_t error_size)
 {
-	size_t index;
-	char region_name[16];
-
-	model->interval_index_complete = 0;
-	if (model->transcripts.transcript_count > (size_t)INT32_MAX)
-		return 1;
-	for (index = 0; index < model->transcripts.transcript_count; index++) {
-		if (model->transcript_starts[index] > (uint32_t)INT32_MAX ||
-		    model->transcript_ends[index] > (uint32_t)INT32_MAX)
-			return 1;
-	}
-	model->interval_index = cr_init();
-	if (model->interval_index == NULL) {
-		duckvep_sql_set_error(error, error_size,
-		    "out of memory building transcript interval index");
-		return 0;
-	}
-	for (index = 0; index < model->known_seq_region_count; index++) {
-		(void)snprintf(region_name, sizeof(region_name), "%u",
-		    model->known_seq_regions[index]);
-		(void)cr_add_ctg(model->interval_index, region_name, 0);
-	}
-	for (index = 0; index < model->transcripts.transcript_count; index++) {
-		(void)snprintf(region_name, sizeof(region_name), "%u",
-		    model->seq_regions[index]);
-		if (cr_add(model->interval_index, region_name,
-		    (int32_t)(model->transcript_starts[index] - 1),
-		    (int32_t)model->transcript_ends[index],
-		    (int32_t)index) == NULL) {
-			duckvep_sql_set_error(error, error_size,
-			    "could not build transcript interval index");
-			return 0;
-		}
-	}
-	cr_index(model->interval_index);
-	model->interval_index_complete = 1;
-	return 1;
+	return duckvep_owned_interval_index(model, model->seq_regions,
+	    model->transcript_starts, model->transcript_ends,
+	    model->transcripts.transcript_count, "transcript",
+	    &model->interval_index, &model->interval_index_complete,
+	    error, error_size) &&
+	    duckvep_owned_interval_index(model,
+	    model->interval_feature_seq_regions, model->interval_feature_starts,
+	    model->interval_feature_ends, model->interval_feature_count,
+	    "regulation feature", &model->interval_feature_index,
+	    &model->interval_feature_index_complete, error, error_size);
 }
 
 static void
@@ -1236,6 +1295,141 @@ done:
 }
 
 static int
+duckvep_model_region_length(const duckvep_owned_model_t *model,
+	uint32_t seq_region, uint32_t *sequence_length)
+{
+	size_t begin, end;
+
+	begin = 0u;
+	end = model->known_seq_region_count;
+	while (begin < end) {
+		size_t middle;
+
+		middle = begin + (end - begin) / 2u;
+		if ((uint32_t)model->known_seq_regions[middle] < seq_region)
+			begin = middle + 1u;
+		else
+			end = middle;
+	}
+	if (begin >= model->known_seq_region_count ||
+	    (uint32_t)model->known_seq_regions[begin] != seq_region)
+		return 0;
+	if (sequence_length != NULL)
+		*sequence_length = model->sequence_lengths[begin];
+	return 1;
+}
+
+static int
+duckvep_load_interval_features(duckdb_connection connection,
+	const char *query, duckvep_owned_model_t *model, char *error,
+	size_t error_size)
+{
+	static const char *const names[] = {
+		"regulation_feature_index", "seq_region", "feature_start",
+		"feature_end", "feature_kind"
+	};
+	static const duckdb_type types[] = {
+		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UINTEGER,
+		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UINTEGER,
+		DUCKDB_TYPE_UTINYINT
+	};
+	duckvep_query_result_t query_result;
+	duckdb_data_chunk chunk;
+	uint32_t previous_seq_region, previous_start;
+	int have_previous, ok;
+
+	if (!duckvep_query_result_open(connection, query, &query_result, error,
+	    error_size))
+		return 0;
+	ok = 0;
+	have_previous = 0;
+	previous_seq_region = 0u;
+	previous_start = 0u;
+	if (!duckvep_result_schema(&query_result.result, names, types, 5,
+	    SIZE_MAX, error, error_size))
+		goto done;
+	while ((chunk = duckdb_fetch_chunk(query_result.result)) != NULL) {
+		duckdb_vector vectors[5];
+		uint32_t *indices, *seq_regions, *starts, *ends;
+		uint8_t *kinds;
+		idx_t row, rows;
+		size_t column;
+
+		rows = duckdb_data_chunk_get_size(chunk);
+		for (column = 0u; column < 5u; column++)
+			vectors[column] = duckdb_data_chunk_get_vector(chunk,
+			    (idx_t)column);
+		indices = duckdb_vector_get_data(vectors[0]);
+		seq_regions = duckdb_vector_get_data(vectors[1]);
+		starts = duckdb_vector_get_data(vectors[2]);
+		ends = duckdb_vector_get_data(vectors[3]);
+		kinds = duckdb_vector_get_data(vectors[4]);
+		for (row = 0; row < rows; row++) {
+			size_t index;
+			uint32_t sequence_length;
+
+			for (column = 0u; column < 5u; column++) {
+				if (duckvep_row_is_null(vectors[column], row)) {
+					(void)snprintf(error, error_size,
+					    "interval-feature query contains NULL in %s",
+					    names[column]);
+					duckdb_destroy_data_chunk(&chunk);
+					goto done;
+				}
+			}
+			index = model->interval_feature_count;
+			sequence_length = 0u;
+			if ((uint64_t)index > UINT32_MAX ||
+			    indices[row] != (uint32_t)index ||
+			    seq_regions[row] > UINT16_MAX || starts[row] == 0u ||
+			    ends[row] < starts[row] ||
+			    (kinds[row] !=
+			    (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION &&
+			    kinds[row] !=
+			    (uint8_t)DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE) ||
+			    !duckvep_model_region_length(model, seq_regions[row],
+			    &sequence_length) ||
+			    (sequence_length != 0u && ends[row] > sequence_length)) {
+				duckvep_sql_set_error(error, error_size,
+				    "interval-feature row has an invalid dense index, region, coordinate, or kind");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			if (have_previous &&
+			    (seq_regions[row] < previous_seq_region ||
+			    (seq_regions[row] == previous_seq_region &&
+			    starts[row] < previous_start))) {
+				duckvep_sql_set_error(error, error_size,
+				    "interval-feature query must be ordered by seq_region, feature_start, and regulation_feature_index");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			if (!duckvep_model_reserve_interval_features(model,
+			    index + 1u)) {
+				duckvep_sql_set_error(error, error_size,
+				    "out of memory loading interval features");
+				duckdb_destroy_data_chunk(&chunk);
+				goto done;
+			}
+			model->interval_feature_seq_regions[index] =
+			    (uint16_t)seq_regions[row];
+			model->interval_feature_starts[index] = starts[row];
+			model->interval_feature_ends[index] = ends[row];
+			model->interval_feature_kinds[index] = kinds[row];
+			model->interval_feature_count++;
+			previous_seq_region = seq_regions[row];
+			previous_start = starts[row];
+			have_previous = 1;
+		}
+		duckdb_destroy_data_chunk(&chunk);
+	}
+	ok = 1;
+done:
+	duckvep_query_result_close(&query_result);
+	return ok;
+}
+
+static int
 duckvep_query_command(duckdb_connection connection, const char *sql,
 	char *error, size_t error_size)
 {
@@ -1255,7 +1449,7 @@ static int
 duckvep_model_load_queries(duckdb_connection connection,
 	const char *region_query, const char *transcript_query,
 	const char *exon_query, const char *mature_mirna_query,
-	const char *peptide_edit_query,
+	const char *peptide_edit_query, const char *interval_feature_query,
 	int transcript_coverage_complete,
 	duckvep_owned_model_t *model,
 	char *error, size_t error_size)
@@ -1284,7 +1478,10 @@ duckvep_model_load_queries(duckdb_connection connection,
 	    error, error_size)) &&
 	    (peptide_edit_query == NULL ||
 	    duckvep_load_peptide_edits(connection, peptide_edit_query, model,
-	    error, error_size));
+	    error, error_size)) &&
+	    (interval_feature_query == NULL ||
+	    duckvep_load_interval_features(connection, interval_feature_query,
+	    model, error, error_size));
 	if (ok)
 		ok = duckvep_query_command(connection, "COMMIT", error, error_size);
 	if (!ok)
@@ -1315,8 +1512,9 @@ duckvep_model_load_queries(duckdb_connection connection,
 		}
 	}
 	memset(&kernel_error, 0, sizeof(kernel_error));
-	if (duckvep_model_open(&model->transcripts, &model->exons,
-	    &model->sequences, &model->kernel, &kernel_error) != DUCKVEP_OK) {
+	if (duckvep_model_open_with_interval_features(&model->transcripts,
+	    &model->exons, &model->sequences, &model->interval_features,
+	    &model->kernel, &kernel_error) != DUCKVEP_OK) {
 		(void)snprintf(error, error_size, "invalid transcript model: %s",
 		    kernel_error.message[0] != '\0' ? kernel_error.message :
 		    "kernel validation failed");
@@ -1544,6 +1742,8 @@ duckvep_model_load_bind_destroy(void *pointer)
 		duckdb_free(bind->mature_mirna_query);
 	if (bind->peptide_edit_query != NULL)
 		duckdb_free(bind->peptide_edit_query);
+	if (bind->interval_feature_query != NULL)
+		duckdb_free(bind->interval_feature_query);
 	free(bind);
 }
 
@@ -1554,6 +1754,7 @@ duckvep_model_load_bind(duckdb_bind_info info)
 	duckdb_value complete_value;
 	duckdb_value mature_mirna_value;
 	duckdb_value peptide_edit_value;
+	duckdb_value interval_feature_value;
 	duckdb_logical_type bool_type;
 	idx_t parameter_count;
 	size_t index;
@@ -1618,6 +1819,27 @@ duckvep_model_load_bind(duckdb_bind_info info)
 		    bind->peptide_edit_query[0] == '\0') {
 			duckdb_bind_set_error(info,
 			    "duckvep_model_load: peptide_edit_query must be a non-empty string");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+	}
+	interval_feature_value = duckdb_bind_get_named_parameter(
+	    info, "interval_feature_query");
+	if (interval_feature_value != NULL) {
+		if (duckdb_is_null_value(interval_feature_value)) {
+			duckdb_destroy_value(&interval_feature_value);
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: interval_feature_query cannot be NULL");
+			duckvep_model_load_bind_destroy(bind);
+			return;
+		}
+		bind->interval_feature_query = duckdb_get_varchar(
+		    interval_feature_value);
+		duckdb_destroy_value(&interval_feature_value);
+		if (bind->interval_feature_query == NULL ||
+		    bind->interval_feature_query[0] == '\0') {
+			duckdb_bind_set_error(info,
+			    "duckvep_model_load: interval_feature_query must be a non-empty string");
 			duckvep_model_load_bind_destroy(bind);
 			return;
 		}
@@ -1694,6 +1916,7 @@ duckvep_model_load_init(duckdb_init_info info)
 	    bind->arguments[1], bind->arguments[2], bind->arguments[3],
 	    bind->mature_mirna_query,
 	    bind->peptide_edit_query,
+	    bind->interval_feature_query,
 	    bind->transcript_coverage_complete, &entry->model, error,
 	    sizeof(error));
 	pthread_mutex_unlock(&registry->query_mutex);
@@ -1830,6 +2053,8 @@ duckvep_register_model_functions(duckdb_connection connection,
 	    "mature_mirna_query", varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "peptide_edit_query", varchar_type);
+	duckdb_table_function_add_named_parameter(table,
+	    "interval_feature_query", varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "transcript_coverage_complete", bool_type);
 	duckvep_registry_retain(registry);

@@ -8,6 +8,26 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## VEP removes EMAR rows before regulatory overlap evaluation
+
+The Ensembl funcgen `regulatory_feature` table contains
+`epigenetically_modified_region` rows whose feature-type name is EMAR. VEP 116 does not
+turn those rows into `RegulatoryFeatureVariation` objects. Both its database annotation
+source and the regulation-effect pipeline explicitly remove them before overlap
+consequences are computed; the source comment says this avoids their very long names.
+The indexed cache therefore cannot emit an EMAR stable ID even when an allele overlaps
+the corresponding funcgen interval.
+
+Loading every raw funcgen row produced a clean diagnostic signature: ordinary promoter,
+enhancer, CTCF, open-chromatin, and motif overlaps agreed, while every extra DuckVEP row
+was an EMAR `regulatory_region_variant`. The model compiler now removes EMAR rows before
+dense feature ordinals, the resident SoA, and the cgranges index are built. This is source
+selection, not a consequence suppression rule; keeping EMAR in the hot model and hiding
+its output would waste memory and traversal work on features VEP never admits.
+
+Source anchors: VEP 116 `AnnotationSource/Database/RegFeat.pm` and Ensembl Variation 116
+`Pipeline/RegulationEffect.pm`.
+
 ## BND topology stays local while truncation observes both overlap alleles
 
 VEP 116 does not evaluate a BND as two ordinary point variants. `BaseVCF4::get_start`

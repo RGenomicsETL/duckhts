@@ -53,7 +53,9 @@ corpus_labels <- c(
   final_clinvar_crosschrom_seed17 = "GRCh38 ClinVar cross-chromosome",
   final_grch37_cache_seed37 = "GRCh37",
   `plasmodium-falciparum-vep63-seed11663` = "P. falciparum",
-  breakend_multichrom_seed31_isolated = "GRCh38 paired BND"
+  breakend_multichrom_seed31_isolated = "GRCh38 paired BND",
+  regulation_giab_chr21_seed1 = "GRCh38 GIAB + core regulation",
+  regulation_sv_chr21_seed17 = "GRCh38 exact SV + core regulation"
 )
 latest_runs <- do.call(rbind, lapply(names(corpus_labels), function(corpus) {
   rows <- overall[overall$corpus == corpus, , drop = FALSE]
@@ -141,13 +143,14 @@ oracle_field <- function(x, field) {
 }
 ```
 
-This report records exact transcript-level consequence agreement with the real
-Ensembl VEP 116 executable, using either its declared indexed cache or a staged
-GFF oracle. Unresolved DuckVEP rows remain in the denominator; they are not
-discarded as unsupported cases. The CSV is append-only by source revision,
-corpus, and resident model. Independent frozen distributions and seeds are kept
-separate so a fix cannot improve its own hand-picked witnesses and hide a
-regression elsewhere.
+This report records exact consequence agreement with the real Ensembl VEP 116
+executable at the object VEP annotates: a transcript, RegulatoryFeature, or
+MotifFeature. It uses either VEP's declared indexed cache or a staged GFF oracle.
+Unresolved DuckVEP rows remain in the denominator; they are not discarded as
+unsupported cases. The CSV is append-only by source revision, corpus, and
+resident model. Independent frozen distributions and seeds are kept separate so
+a fix cannot improve its own hand-picked witnesses and hide a regression
+elsewhere.
 
 ## Latest tested revision per corpus
 
@@ -217,6 +220,100 @@ oracle command uses `--buffer_size 1` in one Perl process so every event is
 evaluated independently. This is oracle isolation, not a DuckVEP compatibility
 rule; the ledger records `breakend_buffer_size=1` and the artifact hash.
 
+## Core regulation and motif differential
+
+```{r regulation}
+regulation_corpora <- c(
+  regulation_giab_chr21_seed1 = "GIAB chromosome 21",
+  regulation_sv_chr21_seed17 = "generated exact SVs"
+)
+regulation_inputs <- c(
+  regulation_giab_chr21_seed1 = 1196,
+  regulation_sv_chr21_seed17 = 2700
+)
+regulation_runs <- latest_runs[
+  latest_runs$corpus %in% names(regulation_corpora),
+  ,
+  drop = FALSE
+]
+if (nrow(regulation_runs)) {
+  regulation_table <- data.frame(
+    revision = short_revision(regulation_runs$source_revision),
+    workload = unname(regulation_corpora[regulation_runs$corpus]),
+    input_events = format(
+      unname(regulation_inputs[regulation_runs$corpus]),
+      big.mark = ","
+    ),
+    object_pairs = format(regulation_runs$n, big.mark = ","),
+    exact = paste0(
+      format(regulation_runs$exact_agree, big.mark = ","),
+      "/",
+      format(regulation_runs$n, big.mark = ",")
+    ),
+    unresolved = regulation_runs$unresolved,
+    extra = regulation_runs$engine_extra,
+    missing = regulation_runs$engine_missing,
+    exact_error_upper_95 = percent(regulation_runs$upper95),
+    stringsAsFactors = FALSE
+  )
+  knitr::kable(regulation_table, row.names = FALSE)
+
+  regulation_terms <- c(
+    "TFBS_ablation", "TFBS_amplification", "TF_binding_site_variant",
+    "regulatory_region_ablation", "regulatory_region_amplification",
+    "regulatory_region_variant"
+  )
+  regulation_revisions <- setNames(
+    regulation_runs$source_revision,
+    regulation_runs$corpus
+  )
+  term_rows <- history[
+    history$stratum_kind == "so_term" &
+      history$consequence_class %in% regulation_terms &
+      history$corpus %in% names(regulation_revisions),
+    ,
+    drop = FALSE
+  ]
+  term_rows <- term_rows[
+    term_rows$source_revision == unname(regulation_revisions[term_rows$corpus]),
+    ,
+    drop = FALSE
+  ]
+  if (nrow(term_rows)) {
+    term_counts <- aggregate(
+      cbind(n, exact_agree) ~ corpus + consequence_class,
+      term_rows,
+      sum
+    )
+    term_counts$workload <- unname(regulation_corpora[term_counts$corpus])
+    term_counts$memberships <- format(term_counts$n, big.mark = ",")
+    term_counts$exact <- paste0(
+      format(term_counts$exact_agree, big.mark = ","),
+      "/",
+      format(term_counts$n, big.mark = ",")
+    )
+    term_counts <- term_counts[
+      order(
+        match(term_counts$consequence_class, regulation_terms),
+        match(term_counts$corpus, names(regulation_corpora))
+      ),
+      c("workload", "consequence_class", "memberships", "exact"),
+      drop = FALSE
+    ]
+    knitr::kable(term_counts, row.names = FALSE)
+  }
+}
+```
+
+The GIAB run checks ordinary alleles against transcript and core funcgen objects.
+The generated structural run deliberately crosses, contains, exactly matches,
+and partially overlaps RegulatoryFeature and MotifFeature intervals under DEL,
+DUP, TDUP, INV, INS, CNV, and unknown exact-span operations. The resident model
+contains only VEP-admitted core funcgen objects: VEP 116 removes
+`epigenetically_modified_region` rows before constructing RegulatoryFeature
+overlap objects, so DuckVEP excludes them during deterministic model preparation
+rather than filtering output after candidate traversal.
+
 ## Prepared model receipts
 
 ```{r model-receipts}
@@ -237,6 +334,11 @@ receipt_table <- data.frame(
     big.mark = ","
   ),
   peptide_edits = format(model_receipts$peptide_edit_count, big.mark = ","),
+  regulatory_regions = format(
+    model_receipts$regulatory_region_count,
+    big.mark = ","
+  ),
+  motif_features = format(model_receipts$motif_feature_count, big.mark = ","),
   codon_tables = model_receipts$codon_table_counts,
   model_sha256 = substr(model_receipts$model_sha256, 1, 12),
   stringsAsFactors = FALSE,

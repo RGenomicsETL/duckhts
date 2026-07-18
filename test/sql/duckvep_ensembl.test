@@ -135,6 +135,84 @@ SELECT * FROM duckvep_ensembl_regions(
   'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
 );
 
+# Ensembl regulation is prepared as its own SoA relation. RegulatoryFeature and
+# MotifFeature rows retain distinct feature classes and source IDs; the named
+# model loads only the five hot columns while metadata remains relational.
+statement ok
+CREATE SCHEMA duckvep_funcgen;
+
+statement ok
+CREATE TABLE duckvep_funcgen.feature_type(
+  feature_type_id BIGINT, name VARCHAR, so_accession VARCHAR, so_term VARCHAR
+);
+
+statement ok
+INSERT INTO duckvep_funcgen.feature_type VALUES
+  (70, 'Promoter', 'SO:0000167', 'promoter'),
+  (71, 'EMAR', 'SO:0001720', 'epigenetically_modified_region');
+
+statement ok
+CREATE TABLE duckvep_funcgen.regulatory_feature(
+  regulatory_feature_id BIGINT, feature_type_id BIGINT, seq_region_id BIGINT,
+  seq_region_strand BIGINT, seq_region_start BIGINT, seq_region_end BIGINT,
+  stable_id VARCHAR, regulatory_build_id BIGINT
+);
+
+statement ok
+INSERT INTO duckvep_funcgen.regulatory_feature VALUES
+  (80, 70, 10, 0, 2, 6, 'ENSR_TEST_1', 1),
+  (81, 71, 10, 0, 20, 22, 'ENSR_TEST_EMAR', 1);
+
+statement ok
+CREATE TABLE duckvep_funcgen.motif_feature(
+  motif_feature_id BIGINT, binding_matrix_id BIGINT, seq_region_id BIGINT,
+  seq_region_start BIGINT, seq_region_end BIGINT, seq_region_strand BIGINT,
+  score DOUBLE, stable_id VARCHAR
+);
+
+statement ok
+INSERT INTO duckvep_funcgen.motif_feature VALUES
+  (90, 100, 10, 11, 14, 1, 8.5, 'ENSM_TEST_1');
+
+statement ok
+CREATE TABLE duckvep_prepared_regulation AS
+SELECT * FROM duckvep_ensembl_regulation_features(
+  'duckvep_funcgen', 'duckvep_prepared_regions'
+);
+
+query IITTIITTT
+SELECT regulation_feature_index, feature_kind, feature_class, source_feature_table,
+       source_feature_id, source_feature_type_id,
+       source_binding_matrix_id, stable_id, feature_so_term
+FROM duckvep_prepared_regulation ORDER BY regulation_feature_index;
+----
+0	1	regulatory_region	regulatory_feature	80	70	NULL	ENSR_TEST_1	promoter
+1	2	transcription_factor_binding_site	motif_feature	90	NULL	100	ENSM_TEST_1	NULL
+
+# VEP 116 deliberately removes epigenetically_modified_region (EMAR) rows
+# before it constructs regulatory overlap objects.
+query I
+SELECT count(*) FROM duckvep_prepared_regulation WHERE stable_id = 'ENSR_TEST_EMAR';
+----
+0
+
+statement ok
+BEGIN TRANSACTION;
+
+statement ok
+INSERT INTO duckvep_funcgen.regulatory_feature VALUES
+  (82, 999, 10, 0, 20, 22, 'ENSR_TEST_MISSING_TYPE', 1);
+
+statement error
+SELECT * FROM duckvep_ensembl_regulation_features(
+  'duckvep_funcgen', 'duckvep_prepared_regions'
+);
+----
+regulatory feature type is missing
+
+statement ok
+ROLLBACK;
+
 query ITIITI
 SELECT seq_region, seq_region_name, sequence_length, source_seq_region_id,
        coord_system_name, coord_system_rank
@@ -316,7 +394,8 @@ SELECT * FROM duckvep_model_receipt(
   'duckvep_prepared_regions', 'duckvep_prepared_transcripts',
   'Ensembl', '116', 'GRCh38',
   repeat('a', 64), repeat('b', 64),
-  'all current transcripts on FASTA-covered assembly regions'
+  'all current transcripts on FASTA-covered assembly regions',
+  regulation_features_table := 'duckvep_prepared_regulation'
 );
 
 query IIIIIII
@@ -335,6 +414,12 @@ FROM duckvep_prepared_receipt;
 ----
 64	21	0	0	1	5
 
+query III
+SELECT regulation_feature_count, regulatory_region_count, motif_feature_count
+FROM duckvep_prepared_receipt;
+----
+2	1	1
+
 query TTTT
 SELECT source_name, source_version, assembly, transcript_filter
 FROM duckvep_prepared_receipt;
@@ -347,7 +432,8 @@ SELECT model_sha256 != (
     'duckvep_prepared_regions', 'duckvep_prepared_transcripts',
     'Ensembl', '116', 'GRCh38',
     repeat('a', 64), repeat('b', 64),
-    'MANE transcripts only'
+    'MANE transcripts only',
+    regulation_features_table := 'duckvep_prepared_regulation'
   )
 ) FROM duckvep_prepared_receipt;
 ----
@@ -358,7 +444,8 @@ SELECT * FROM duckvep_model_receipt(
   'duckvep_prepared_regions', 'duckvep_prepared_transcripts',
   'Ensembl', '116', 'GRCh38',
   NULL, repeat('b', 64),
-  'all current transcripts on FASTA-covered assembly regions'
+  'all current transcripts on FASTA-covered assembly regions',
+  regulation_features_table := 'duckvep_prepared_regulation'
 );
 ----
 source and reference SHA-256 values must contain 64 hexadecimal digits
@@ -447,15 +534,16 @@ SELECT * FROM duckvep_ensembl_transcripts(
   'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
 );
 
-query II
-SELECT mature_mirna_transcript_count, mature_mirna_segment_count
+query III
+SELECT mature_mirna_transcript_count, mature_mirna_segment_count,
+       regulation_feature_count
 FROM duckvep_model_receipt(
   'duckvep_prepared_regions', 'duckvep_prepared_mirna',
   'Ensembl', '116', 'GRCh38', repeat('a', 64), repeat('b', 64),
   'VEP 116 core selection on FASTA-covered assembly regions'
 );
 ----
-1	1
+1	1	0
 
 query IIIII
 SELECT transcript_index, region.cdna_start, region.cdna_end,
@@ -616,6 +704,18 @@ statement ok
 CREATE VIEW duckvep_grch38_reference AS FROM duckvep_fixture_file('grch38', 'reference_chunks');
 
 statement ok
+CREATE SCHEMA duckvep_grch38_funcgen;
+
+statement ok
+CREATE VIEW duckvep_grch38_funcgen.feature_type AS FROM duckvep_fixture_file('grch38', 'funcgen_feature_type');
+
+statement ok
+CREATE VIEW duckvep_grch38_funcgen.regulatory_feature AS FROM duckvep_fixture_file('grch38', 'funcgen_regulatory_feature');
+
+statement ok
+CREATE VIEW duckvep_grch38_funcgen.motif_feature AS FROM duckvep_fixture_file('grch38', 'funcgen_motif_feature');
+
+statement ok
 CREATE SCHEMA duckvep_grch37_core;
 
 statement ok
@@ -667,6 +767,12 @@ SELECT * FROM duckvep_ensembl_transcripts(
 );
 
 statement ok
+CREATE TABLE duckvep_grch38_regulation AS
+SELECT * FROM duckvep_ensembl_regulation_features(
+  'duckvep_grch38_funcgen', 'duckvep_grch38_regions'
+);
+
+statement ok
 CREATE TABLE duckvep_grch37_regions AS
 SELECT * FROM duckvep_ensembl_regions(
   'duckvep_grch37_core', 'duckvep_grch37_reference', 'GRCh37'
@@ -676,6 +782,15 @@ statement ok
 CREATE TABLE duckvep_grch37_transcripts AS
 SELECT * FROM duckvep_ensembl_transcripts(
   'duckvep_grch37_core', 'duckvep_grch37_reference', 'GRCh37'
+);
+
+statement ok
+CREATE TABLE duckvep_no_regulation(
+  regulation_feature_index UINTEGER,
+  seq_region UINTEGER,
+  feature_start UINTEGER,
+  feature_end UINTEGER,
+  feature_kind UTINYINT
 );
 
 query IIIIIII
@@ -689,7 +804,20 @@ SELECT
   count(*) FILTER (WHERE mane_select_refseq IS NOT NULL)
 FROM duckvep_grch38_transcripts;
 ----
-2	81258	39	14	0	40	1
+3	82401	39	14	0	40	1
+
+query III
+SELECT regulation_feature_count, regulatory_region_count, motif_feature_count
+FROM duckvep_model_receipt(
+  'duckvep_grch38_regions', 'duckvep_grch38_transcripts',
+  'Ensembl', '116', 'GRCh38',
+  '34eaee64f47916f2a9d3d864377f911424741c7ead12883e47dcf998f9677703',
+  '4fb2dcf3cc1844c54e8105695826d099be075c8cd5b18f74ccd80fb0d38d2cdf',
+  'all current transcripts and funcgen features on MT, KI270395.1, and HG2047_PATCH',
+  regulation_features_table := 'duckvep_grch38_regulation'
+);
+----
+3	0	3
 
 query IIIIIII
 SELECT
@@ -716,9 +844,10 @@ CREATE TABLE duckvep_grch38_receipt AS
 SELECT * FROM duckvep_model_receipt(
   'duckvep_grch38_regions', 'duckvep_grch38_transcripts',
   'Ensembl', '116', 'GRCh38',
-  'c5afd2ec87ad7aa402035a070e81068e7bd8f4c5bdae9f3c698f8ff5b2fd63d1',
-  '1ccef37f83c0784ebe74d89e4e0db8171e11625cd4b46ff47a9911e0ff471763',
-  'all current transcripts on MT and HG2047_PATCH'
+  '34eaee64f47916f2a9d3d864377f911424741c7ead12883e47dcf998f9677703',
+  '4fb2dcf3cc1844c54e8105695826d099be075c8cd5b18f74ccd80fb0d38d2cdf',
+  'all current transcripts and funcgen features on MT, KI270395.1, and HG2047_PATCH',
+  regulation_features_table := 'duckvep_grch38_regulation'
 );
 
 statement ok
@@ -726,7 +855,7 @@ CREATE TABLE duckvep_grch37_receipt AS
 SELECT * FROM duckvep_model_receipt(
   'duckvep_grch37_regions', 'duckvep_grch37_transcripts',
   'Ensembl', '116', 'GRCh37',
-  '46b8011c01b2628aa2678be753aa854528cf026c8d396afa54e99799d38ff8f0',
+  '768298c5f837c6c386eda3c0d4646b264641cf33dcb577290f480de6b2b91ac4',
   '09de6c8bdf434f9fe29e9803c7403b145452fdeefb5387292af67811f1523d80',
   'all current transcripts on MT and GL000201.1'
 );
@@ -739,8 +868,8 @@ FROM (
   SELECT * FROM duckvep_grch37_receipt
 ) ORDER BY assembly;
 ----
-GRCh37	1d7f9a8013d99626c1798cec4f20a212fae5a5c007944bc8bad8f0faa0929ff8	all current transcripts on MT and GL000201.1
-GRCh38	d1cb9e98fa6cdf8129536eec6d7254a7e2cb831500264a5570aa1f2946d52411	all current transcripts on MT and HG2047_PATCH
+GRCh37	0a11b81b8c9ac0c0550e153cc8903650c91b305e826c4d844394c2df2f92b007	all current transcripts on MT and GL000201.1
+GRCh38	d5e9d7efe42f561ffe3a7ab9e7871bdd510c603871ac3699874cabc46b82f9db	all current transcripts and funcgen features on MT, KI270395.1, and HG2047_PATCH
 
 query I
 SELECT loaded FROM duckvep_model_load(
@@ -749,6 +878,7 @@ SELECT loaded FROM duckvep_model_load(
   'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_grch38_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch38_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
   peptide_edit_query := 'SELECT transcript_index, edit.protein_position, edit.alternate_amino_acid FROM duckvep_grch38_transcripts, LATERAL unnest(peptide_edits) AS u(edit) ORDER BY transcript_index, edit.protein_position',
+  interval_feature_query := 'SELECT regulation_feature_index, seq_region, feature_start, feature_end, feature_kind FROM duckvep_grch38_regulation ORDER BY regulation_feature_index',
   transcript_coverage_complete := true
 );
 ----
@@ -761,6 +891,7 @@ SELECT loaded FROM duckvep_model_load(
   'SELECT transcript_index, seq_region, transcript_start, transcript_end, strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence FROM duckvep_grch37_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT transcript_index, exon.exon_start, exon.exon_end, exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase FROM duckvep_grch37_transcripts, LATERAL unnest(exons) AS u(exon) ORDER BY transcript_index, exon.exon_cdna_start',
   peptide_edit_query := 'SELECT transcript_index, edit.protein_position, edit.alternate_amino_acid FROM duckvep_grch37_transcripts, LATERAL unnest(peptide_edits) AS u(edit) ORDER BY transcript_index, edit.protein_position',
+  interval_feature_query := 'SELECT regulation_feature_index, seq_region, feature_start, feature_end, feature_kind FROM duckvep_no_regulation ORDER BY regulation_feature_index',
   transcript_coverage_complete := true
 );
 ----
@@ -771,7 +902,7 @@ SELECT annotation.transcript_index, annotation.consequence,
        annotation.status, annotation.cds_position, annotation.protein_position,
        annotation.reference_amino_acid, annotation.alternate_amino_acid
 FROM unnest(duckvep_annotate(
-  'ensembl-grch38-fixture', 1::UINTEGER, 32522::UBIGINT,
+  'ensembl-grch38-fixture', 2::UINTEGER, 32522::UBIGINT,
   'C', 'T', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -797,6 +928,19 @@ FROM unnest(duckvep_annotate(
 )) AS u(annotation);
 ----
 5	start_lost	supported	NULL
+
+query IITT
+SELECT annotation.regulation_feature_index, annotation.overlap_object,
+       annotation.consequence, annotation.status
+FROM unnest(duckvep_annotate(
+  'ensembl-grch38-fixture', 1::UINTEGER, 75::UBIGINT,
+  'A', 'C', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.overlap_object = 'transcription_factor_binding_site'
+ORDER BY annotation.regulation_feature_index;
+----
+0	transcription_factor_binding_site	TF_binding_site_variant	supported
+1	transcription_factor_binding_site	TF_binding_site_variant	supported
 
 query I
 SELECT duckvep_model_drop('ensembl-grch38-fixture');

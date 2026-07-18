@@ -3,25 +3,28 @@ DuckVEP conformance against Ensembl VEP 116
 
 <!-- duckvep_conformance.md is generated from duckvep_conformance.Rmd. -->
 
-This report records exact transcript-level consequence agreement with
-the real Ensembl VEP 116 executable, using either its declared indexed
-cache or a staged GFF oracle. Unresolved DuckVEP rows remain in the
-denominator; they are not discarded as unsupported cases. The CSV is
+This report records exact consequence agreement with the real Ensembl
+VEP 116 executable at the object VEP annotates: a transcript,
+RegulatoryFeature, or MotifFeature. It uses either VEP’s declared
+indexed cache or a staged GFF oracle. Unresolved DuckVEP rows remain in
+the denominator; they are not discarded as unsupported cases. The CSV is
 append-only by source revision, corpus, and resident model. Independent
 frozen distributions and seeds are kept separate so a fix cannot improve
 its own hand-picked witnesses and hide a regression elsewhere.
 
 ## Latest tested revision per corpus
 
-| revision | corpus                          | model                      | assembly       | species               | oracle_source | oracle    |  pairs | exact         | unresolved | resolved_disagreements | resolved_error_upper_95 |
-|:---------|:--------------------------------|:---------------------------|:---------------|:----------------------|:--------------|:----------|-------:|:--------------|-----------:|-----------------------:|:------------------------|
-| b204dd49 | GRCh38 dbSNP                    | final-dbsnp                | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  73620 | 73620/73620   |          0 |                      0 | 0.01%                   |
-| b204dd49 | GRCh38 GIAB                     | final-giab                 | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  54905 | 54905/54905   |          0 |                      0 | 0.01%                   |
-| 22803a40 | GRCh38 ClinVar coding           | final-coding               | GRCh38         | homo_sapiens          | cache         | VEP 116.0 | 287836 | 287836/287836 |          0 |                      0 | 0.00%                   |
-| 22803a40 | GRCh38 ClinVar cross-chromosome | final-clinvar              | GRCh38         | homo_sapiens          | cache         | VEP 116.0 | 316397 | 316397/316397 |          0 |                      0 | 0.00%                   |
-| 7dd90ce8 | GRCh37                          | final-grch37               | GRCh37         | homo_sapiens          | cache         | VEP 116.0 | 486464 | 486464/486464 |          0 |                      0 | 0.00%                   |
-| 7dd90ce8 | P. falciparum                   | plasmodium-falciparum-63   | GCA000002765v3 | plasmodium_falciparum | cache         | VEP 116.0 |  40732 | 40732/40732   |          0 |                      0 | 0.01%                   |
-| 360619ed | GRCh38 paired BND               | grch38_breakend_multichrom | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  91428 | 91428/91428   |          0 |                      0 | 0.00%                   |
+| revision | corpus                            | model                      | assembly       | species               | oracle_source | oracle    |  pairs | exact         | unresolved | resolved_disagreements | resolved_error_upper_95 |
+|:---------|:----------------------------------|:---------------------------|:---------------|:----------------------|:--------------|:----------|-------:|:--------------|-----------:|-----------------------:|:------------------------|
+| b204dd49 | GRCh38 dbSNP                      | final-dbsnp                | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  73620 | 73620/73620   |          0 |                      0 | 0.01%                   |
+| b204dd49 | GRCh38 GIAB                       | final-giab                 | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  54905 | 54905/54905   |          0 |                      0 | 0.01%                   |
+| 22803a40 | GRCh38 ClinVar coding             | final-coding               | GRCh38         | homo_sapiens          | cache         | VEP 116.0 | 287836 | 287836/287836 |          0 |                      0 | 0.00%                   |
+| 22803a40 | GRCh38 ClinVar cross-chromosome   | final-clinvar              | GRCh38         | homo_sapiens          | cache         | VEP 116.0 | 316397 | 316397/316397 |          0 |                      0 | 0.00%                   |
+| 7dd90ce8 | GRCh37                            | final-grch37               | GRCh37         | homo_sapiens          | cache         | VEP 116.0 | 486464 | 486464/486464 |          0 |                      0 | 0.00%                   |
+| 7dd90ce8 | P. falciparum                     | plasmodium-falciparum-63   | GCA000002765v3 | plasmodium_falciparum | cache         | VEP 116.0 |  40732 | 40732/40732   |          0 |                      0 | 0.01%                   |
+| 360619ed | GRCh38 paired BND                 | grch38_breakend_multichrom | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  91428 | 91428/91428   |          0 |                      0 | 0.00%                   |
+| 96b4cd45 | GRCh38 GIAB + core regulation     | differential               | GRCh38         | homo_sapiens          | cache         | VEP 116.0 |  14955 | 14955/14955   |          0 |                      0 | 0.02%                   |
+| 96b4cd45 | GRCh38 exact SV + core regulation | differential               | GRCh38         | homo_sapiens          | cache         | VEP 116.0 | 120224 | 120224/120224 |          0 |                      0 | 0.00%                   |
 
 Each row is the newest tested ancestor of the current source for that
 named corpus. Expensive corpora do not inherit evidence from a later run
@@ -51,13 +54,36 @@ contiguous and position-sorted. The oracle command uses
 independently. This is oracle isolation, not a DuckVEP compatibility
 rule; the ledger records `breakend_buffer_size=1` and the artifact hash.
 
+## Core regulation and motif differential
+
+| workload            | consequence_class               | memberships | exact       |
+|:--------------------|:--------------------------------|:------------|:------------|
+| generated exact SVs | TFBS_ablation                   | 766         | 766/ 766    |
+| generated exact SVs | TFBS_amplification              | 1,532       | 1,532/1,532 |
+| GIAB chromosome 21  | TF_binding_site_variant         | 2           | 2/ 2        |
+| generated exact SVs | TF_binding_site_variant         | 4,354       | 4,354/4,354 |
+| generated exact SVs | regulatory_region_ablation      | 358         | 358/ 358    |
+| generated exact SVs | regulatory_region_amplification | 716         | 716/ 716    |
+| GIAB chromosome 21  | regulatory_region_variant       | 54          | 54/ 54      |
+| generated exact SVs | regulatory_region_variant       | 2,689       | 2,689/2,689 |
+
+The GIAB run checks ordinary alleles against transcript and core funcgen
+objects. The generated structural run deliberately crosses, contains,
+exactly matches, and partially overlaps RegulatoryFeature and
+MotifFeature intervals under DEL, DUP, TDUP, INV, INS, CNV, and unknown
+exact-span operations. The resident model contains only VEP-admitted
+core funcgen objects: VEP 116 removes `epigenetically_modified_region`
+rows before constructing RegulatoryFeature overlap objects, so DuckVEP
+excludes them during deterministic model preparation rather than
+filtering output after candidate traversal.
+
 ## Prepared model receipts
 
-| revision | species               | release | assembly       | regions | transcripts | coding_backed | exons     | mature_miRNA_segments | peptide_edits | codon_tables     | model_sha256 |
-|:---------|:----------------------|:--------|:---------------|:--------|:------------|:--------------|:----------|:----------------------|:--------------|:-----------------|:-------------|
-| 8498b92a | homo_sapiens          | 116     | GRCh38         | 194     | 644,427     | 369,631       | 5,068,416 | 2,806                 | 389           | 1:369618;2:13    | 9c3404101b2b |
-| 8498b92a | homo_sapiens          | 116     | GRCh37         | 84      | 195,379     | 94,610        | 1,186,433 | 3,788                 | 129           | 1:94597;2:13     | 25459e62e50d |
-| 8498b92a | plasmodium_falciparum | 63/116  | GCA000002765v3 | 16      | 5,791       | 5,389         | 15,097    | 0                     | 4             | 1:5356;4:3;11:30 | c011cdd4deab |
+| revision | species               | release | assembly       | regions | transcripts | coding_backed | exons     | mature_miRNA_segments | peptide_edits | regulatory_regions | motif_features | codon_tables     | model_sha256 |
+|:---------|:----------------------|:--------|:---------------|:--------|:------------|:--------------|:----------|:----------------------|:--------------|:-------------------|:---------------|:-----------------|:-------------|
+| 96b4cd45 | homo_sapiens          | 116     | GRCh38         | 194     | 644,427     | 369,631       | 5,068,416 | 2,806                 | 389           | 380,818            | 1,002,762      | 1:369618;2:13    | 296bc9063356 |
+| 8498b92a | homo_sapiens          | 116     | GRCh37         | 84      | 195,379     | 94,610        | 1,186,433 | 3,788                 | 129           | 0                  | 0              | 1:94597;2:13     | 25459e62e50d |
+| 8498b92a | plasmodium_falciparum | 63/116  | GCA000002765v3 | 16      | 5,791       | 5,389         | 15,097    | 0                     | 4             | 0                  | 0              | 1:5356;4:3;11:30 | c011cdd4deab |
 
 These are complete model-build receipts, not counts inferred from a
 differential. The ledger retains the full source-manifest, reference,
@@ -125,6 +151,8 @@ recorded.
 | 2026-07-16 | 24a5cf2a        | generated_sv_seed17                   | differential               |  126345 |      126345 |          0 |     126345 |                   0 | 100.00%    | 0.00%                   |
 | 2026-07-16 | 24a5cf2a        | state_exploration_seed_20260716       | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                   |
 | 2026-07-16 | 360619ed        | breakend_multichrom_seed31_isolated   | grch38_breakend_multichrom |   91428 |       91428 |          0 |      91428 |                   0 | 100.00%    | 0.00%                   |
+| 2026-07-16 | 96b4cd45        | regulation_giab_chr21_seed1           | differential               |   14955 |       14955 |          0 |      14955 |                   0 | 100.00%    | 0.02%                   |
+| 2026-07-16 | 96b4cd45        | regulation_sv_chr21_seed17            | differential               |  120224 |      120224 |          0 |     120224 |                   0 | 100.00%    | 0.00%                   |
 
 ## Randomized executable-VEP state exploration
 
@@ -271,15 +299,17 @@ either engine. A missing or extra term is therefore visible under its
 own SO name. Rows must not be summed across terms because one pair can
 carry several terms.
 
-| corpus                          | observed_terms | terms_with_mismatch | term_mismatches | engine_extra | engine_missing | terms_with_unresolved | unresolved_term_memberships |
-|:--------------------------------|---------------:|--------------------:|----------------:|-------------:|---------------:|----------------------:|----------------------------:|
-| GRCh38 dbSNP                    |             22 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
-| GRCh38 GIAB                     |             19 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
-| GRCh38 ClinVar coding           |             27 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
-| GRCh38 ClinVar cross-chromosome |             28 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
-| GRCh37                          |             26 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
-| P. falciparum                   |             20 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
-| GRCh38 paired BND               |             14 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| corpus                            | observed_terms | terms_with_mismatch | term_mismatches | engine_extra | engine_missing | terms_with_unresolved | unresolved_term_memberships |
+|:----------------------------------|---------------:|--------------------:|----------------:|-------------:|---------------:|----------------------:|----------------------------:|
+| GRCh38 dbSNP                      |             22 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh38 GIAB                       |             19 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh38 ClinVar coding             |             27 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh38 ClinVar cross-chromosome   |             28 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh37                            |             26 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| P. falciparum                     |             20 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh38 paired BND                 |             14 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh38 GIAB + core regulation     |             15 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
+| GRCh38 exact SV + core regulation |             27 |                   0 |               0 |            0 |              0 |                     0 |                           0 |
 
 `term_mismatches` counts an SO term that is missing or extra on a
 transcript pair. `unresolved_term_memberships` is reported separately:
@@ -298,34 +328,42 @@ CSV ledger.
 This table uses full consequence sets, so each transcript pair is
 counted once within each corpus.
 
-| corpus                          | impact   |      n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
-|:--------------------------------|:---------|-------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
-| GRCh38 paired BND               | HIGH     |  69654 |       69654 |          0 |      69654 |                   0 | 100.00%    | 0.01%                   |
-| GRCh38 ClinVar coding           | HIGH     |  99103 |       99103 |          0 |      99103 |                   0 | 100.00%    | 0.00%                   |
-| GRCh38 ClinVar cross-chromosome | HIGH     |  79663 |       79663 |          0 |      79663 |                   0 | 100.00%    | 0.00%                   |
-| GRCh38 dbSNP                    | HIGH     |    118 |         118 |          0 |        118 |                   0 | 100.00%    | 3.08%                   |
-| GRCh38 GIAB                     | HIGH     |      4 |           4 |          0 |          4 |                   0 | 100.00%    | 60.24%                  |
-| GRCh37                          | HIGH     |  46645 |       46645 |          0 |      46645 |                   0 | 100.00%    | 0.01%                   |
-| P. falciparum                   | HIGH     |   4309 |        4309 |          0 |       4309 |                   0 | 100.00%    | 0.09%                   |
-| GRCh38 ClinVar coding           | LOW      |   5952 |        5952 |          0 |       5952 |                   0 | 100.00%    | 0.06%                   |
-| GRCh38 ClinVar cross-chromosome | LOW      |  28776 |       28776 |          0 |      28776 |                   0 | 100.00%    | 0.01%                   |
-| GRCh38 dbSNP                    | LOW      |    349 |         349 |          0 |        349 |                   0 | 100.00%    | 1.05%                   |
-| GRCh38 GIAB                     | LOW      |    260 |         260 |          0 |        260 |                   0 | 100.00%    | 1.41%                   |
-| GRCh37                          | LOW      |  23354 |       23354 |          0 |      23354 |                   0 | 100.00%    | 0.02%                   |
-| P. falciparum                   | LOW      |    210 |         210 |          0 |        210 |                   0 | 100.00%    | 1.74%                   |
-| GRCh38 ClinVar coding           | MODERATE |  59108 |       59108 |          0 |      59108 |                   0 | 100.00%    | 0.01%                   |
-| GRCh38 ClinVar cross-chromosome | MODERATE |  43286 |       43286 |          0 |      43286 |                   0 | 100.00%    | 0.01%                   |
-| GRCh38 dbSNP                    | MODERATE |    125 |         125 |          0 |        125 |                   0 | 100.00%    | 2.91%                   |
-| GRCh38 GIAB                     | MODERATE |     31 |          31 |          0 |         31 |                   0 | 100.00%    | 11.22%                  |
-| GRCh37                          | MODERATE |  23319 |       23319 |          0 |      23319 |                   0 | 100.00%    | 0.02%                   |
-| P. falciparum                   | MODERATE |   1937 |        1937 |          0 |       1937 |                   0 | 100.00%    | 0.19%                   |
-| GRCh38 paired BND               | MODIFIER |  21774 |       21774 |          0 |      21774 |                   0 | 100.00%    | 0.02%                   |
-| GRCh38 ClinVar coding           | MODIFIER | 123673 |      123673 |          0 |     123673 |                   0 | 100.00%    | 0.00%                   |
-| GRCh38 ClinVar cross-chromosome | MODIFIER | 164672 |      164672 |          0 |     164672 |                   0 | 100.00%    | 0.00%                   |
-| GRCh38 dbSNP                    | MODIFIER |  73028 |       73028 |          0 |      73028 |                   0 | 100.00%    | 0.01%                   |
-| GRCh38 GIAB                     | MODIFIER |  54610 |       54610 |          0 |      54610 |                   0 | 100.00%    | 0.01%                   |
-| GRCh37                          | MODIFIER | 393146 |      393146 |          0 |     393146 |                   0 | 100.00%    | 0.00%                   |
-| P. falciparum                   | MODIFIER |  34276 |       34276 |          0 |      34276 |                   0 | 100.00%    | 0.01%                   |
+| corpus                            | impact   |      n | exact_agree | unresolved | resolved_n | resolved_discordant | exact_rate | resolved_error_upper_95 |
+|:----------------------------------|:---------|-------:|------------:|-----------:|-----------:|--------------------:|:-----------|:------------------------|
+| GRCh38 paired BND                 | HIGH     |  69654 |       69654 |          0 |      69654 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 ClinVar coding             | HIGH     |  99103 |       99103 |          0 |      99103 |                   0 | 100.00%    | 0.00%                   |
+| GRCh38 ClinVar cross-chromosome   | HIGH     |  79663 |       79663 |          0 |      79663 |                   0 | 100.00%    | 0.00%                   |
+| GRCh38 dbSNP                      | HIGH     |    118 |         118 |          0 |        118 |                   0 | 100.00%    | 3.08%                   |
+| GRCh38 GIAB                       | HIGH     |      4 |           4 |          0 |          4 |                   0 | 100.00%    | 60.24%                  |
+| GRCh37                            | HIGH     |  46645 |       46645 |          0 |      46645 |                   0 | 100.00%    | 0.01%                   |
+| P. falciparum                     | HIGH     |   4309 |        4309 |          0 |       4309 |                   0 | 100.00%    | 0.09%                   |
+| GRCh38 GIAB + core regulation     | HIGH     |      3 |           3 |          0 |          3 |                   0 | 100.00%    | 70.76%                  |
+| GRCh38 exact SV + core regulation | HIGH     |  40135 |       40135 |          0 |      40135 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 ClinVar coding             | LOW      |   5952 |        5952 |          0 |       5952 |                   0 | 100.00%    | 0.06%                   |
+| GRCh38 ClinVar cross-chromosome   | LOW      |  28776 |       28776 |          0 |      28776 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 dbSNP                      | LOW      |    349 |         349 |          0 |        349 |                   0 | 100.00%    | 1.05%                   |
+| GRCh38 GIAB                       | LOW      |    260 |         260 |          0 |        260 |                   0 | 100.00%    | 1.41%                   |
+| GRCh37                            | LOW      |  23354 |       23354 |          0 |      23354 |                   0 | 100.00%    | 0.02%                   |
+| P. falciparum                     | LOW      |    210 |         210 |          0 |        210 |                   0 | 100.00%    | 1.74%                   |
+| GRCh38 GIAB + core regulation     | LOW      |     98 |          98 |          0 |         98 |                   0 | 100.00%    | 3.69%                   |
+| GRCh38 exact SV + core regulation | LOW      |    821 |         821 |          0 |        821 |                   0 | 100.00%    | 0.45%                   |
+| GRCh38 ClinVar coding             | MODERATE |  59108 |       59108 |          0 |      59108 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 ClinVar cross-chromosome   | MODERATE |  43286 |       43286 |          0 |      43286 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 dbSNP                      | MODERATE |    125 |         125 |          0 |        125 |                   0 | 100.00%    | 2.91%                   |
+| GRCh38 GIAB                       | MODERATE |     31 |          31 |          0 |         31 |                   0 | 100.00%    | 11.22%                  |
+| GRCh37                            | MODERATE |  23319 |       23319 |          0 |      23319 |                   0 | 100.00%    | 0.02%                   |
+| P. falciparum                     | MODERATE |   1937 |        1937 |          0 |       1937 |                   0 | 100.00%    | 0.19%                   |
+| GRCh38 GIAB + core regulation     | MODERATE |     41 |          41 |          0 |         41 |                   0 | 100.00%    | 8.60%                   |
+| GRCh38 exact SV + core regulation | MODERATE |    766 |         766 |          0 |        766 |                   0 | 100.00%    | 0.48%                   |
+| GRCh38 paired BND                 | MODIFIER |  21774 |       21774 |          0 |      21774 |                   0 | 100.00%    | 0.02%                   |
+| GRCh38 ClinVar coding             | MODIFIER | 123673 |      123673 |          0 |     123673 |                   0 | 100.00%    | 0.00%                   |
+| GRCh38 ClinVar cross-chromosome   | MODIFIER | 164672 |      164672 |          0 |     164672 |                   0 | 100.00%    | 0.00%                   |
+| GRCh38 dbSNP                      | MODIFIER |  73028 |       73028 |          0 |      73028 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 GIAB                       | MODIFIER |  54610 |       54610 |          0 |      54610 |                   0 | 100.00%    | 0.01%                   |
+| GRCh37                            | MODIFIER | 393146 |      393146 |          0 |     393146 |                   0 | 100.00%    | 0.00%                   |
+| P. falciparum                     | MODIFIER |  34276 |       34276 |          0 |      34276 |                   0 | 100.00%    | 0.01%                   |
+| GRCh38 GIAB + core regulation     | MODIFIER |  14813 |       14813 |          0 |      14813 |                   0 | 100.00%    | 0.02%                   |
+| GRCh38 exact SV + core regulation | MODIFIER |  78502 |       78502 |          0 |      78502 |                   0 | 100.00%    | 0.00%                   |
 
 The source artifact hash and exact Ensembl core/variation build remain
 in `test/duckvep/conformance/data/conformance_history.csv` for audit and

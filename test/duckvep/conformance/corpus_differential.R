@@ -99,6 +99,16 @@ op <- add_option(op, "--chrom", default = "")
 op <- add_option(op, "--distance", type = "integer", default = 5000L)
 op <- add_option(
   op,
+  "--regulatory",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "load duckvep_regulation_features and compare VEP --regulatory output",
+    "[default: %default]"
+  )
+)
+op <- add_option(
+  op,
   "--annotations-out",
   dest = "annotations_out",
   default = ""
@@ -190,6 +200,9 @@ if (opt$sample_per_shape < 0L) {
 }
 if (opt$distance < 0L) {
   die("--distance must be non-negative")
+}
+if (isTRUE(opt$regulatory) && identical(oracle_mode, "gff")) {
+  die("--regulatory requires the indexed VEP cache, not the GFF oracle")
 }
 nmd_plugin_sha256 <- ""
 nmd_state_plugin_sha256 <- ""
@@ -339,6 +352,9 @@ needed_relations <- c(
   "duckvep_exons",
   "duckvep_transcript_names"
 )
+if (isTRUE(opt$regulatory)) {
+  needed_relations <- c(needed_relations, "duckvep_regulation_features")
+}
 present_relations <- dbGetQuery(
   con,
   paste(
@@ -351,6 +367,32 @@ if (length(missing_relations) != 0L) {
   die(
     "model database is missing relation(s): {paste(missing_relations, collapse = ', ')}"
   )
+}
+
+if (isTRUE(opt$regulatory)) {
+  regulation_columns <- dbGetQuery(
+    con,
+    "SELECT column_name FROM duckdb_columns()
+     WHERE table_name = 'duckvep_regulation_features'"
+  )$column_name
+  required_regulation_columns <- c(
+    "regulation_feature_index",
+    "seq_region",
+    "feature_start",
+    "feature_end",
+    "feature_kind",
+    "stable_id"
+  )
+  missing_regulation_columns <- setdiff(
+    required_regulation_columns,
+    regulation_columns
+  )
+  if (length(missing_regulation_columns) != 0L) {
+    die(
+      "duckvep_regulation_features is missing column(s): ",
+      "{paste(missing_regulation_columns, collapse = ', ')}"
+    )
+  }
 }
 
 region_columns <- dbGetQuery(
@@ -412,6 +454,17 @@ if ("duckvep_peptide_edits" %in% present_relations) {
   load_options <- c(
     load_options,
     glue("peptide_edit_query := {sql_q(peptide_edit_query)}")
+  )
+}
+if (isTRUE(opt$regulatory)) {
+  interval_feature_query <- paste(
+    "SELECT regulation_feature_index, seq_region, feature_start, feature_end,",
+    "feature_kind FROM", model_query_relation("duckvep_regulation_features"),
+    "ORDER BY seq_region, feature_start, regulation_feature_index"
+  )
+  load_options <- c(
+    load_options,
+    glue("interval_feature_query := {sql_q(interval_feature_query)}")
   )
 }
 if (complete_coverage) {
@@ -483,6 +536,67 @@ generated_filter <- if (opt$sample_per_shape == 0L) {
 } else {
   glue("WHERE geometry_rank <= {opt$sample_per_shape}")
 }
+regulation_span_geometries <- if (isTRUE(opt$regulatory)) {
+  glue(
+    "UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_exact'
+       ),
+       f.regulation_feature_index AS source_index, r.name AS chrom,
+       f.feature_start AS event_start, f.feature_end AS event_end
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     WHERE f.feature_start > 1
+       AND f.feature_end <= {model_sequence_length_sql}
+       {generated_chrom_filter}
+     UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_containing'
+       ),
+       f.regulation_feature_index, r.name,
+       CASE WHEN f.feature_start > 18 THEN f.feature_start - 17 ELSE 2 END,
+       least({model_sequence_length_sql}, f.feature_end + 17)
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     WHERE f.feature_start > 1
+       AND f.feature_end <= {model_sequence_length_sql}
+       {generated_chrom_filter}
+     UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_left_partial'
+       ),
+       f.regulation_feature_index, r.name,
+       CASE WHEN f.feature_start > 18 THEN f.feature_start - 17 ELSE 2 END,
+       least(f.feature_end - 1, f.feature_start + 17)
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     WHERE f.feature_start > 1 AND f.feature_end > f.feature_start
+       AND f.feature_end <= {model_sequence_length_sql}
+       {generated_chrom_filter}
+     UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_right_partial'
+       ),
+       f.regulation_feature_index, r.name,
+       greatest(f.feature_start + 1, f.feature_end - 17),
+       least({model_sequence_length_sql}, f.feature_end + 17)
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     WHERE f.feature_start > 1 AND f.feature_end > f.feature_start
+       AND f.feature_end <= {model_sequence_length_sql}
+       {generated_chrom_filter}"
+  )
+} else {
+  ""
+}
 
 if (generate_structural) {
   invisible(dbExecute(
@@ -522,7 +636,8 @@ if (generate_structural) {
          WHERE next_exon_start IS NOT NULL AND next_exon_start > exon_end + 1
        ), span_geometries AS (
          SELECT
-           'transcript_exact' AS event_state, transcript_index, chrom,
+           'transcript_exact' AS event_state,
+           transcript_index AS source_index, chrom,
            transcript_start AS event_start, transcript_end AS event_end
          FROM transcripts
          UNION ALL
@@ -544,6 +659,7 @@ if (generate_structural) {
                     CASE WHEN transcript_end > 17 THEN transcript_end - 17 ELSE 2 END),
            least(sequence_length, transcript_end + 17)
          FROM transcripts
+         {regulation_span_geometries}
          UNION ALL
          SELECT
            'start_codon', transcript_index, chrom,
@@ -610,7 +726,8 @@ if (generate_structural) {
            AND greatest(exon_start, cds_end + 1) <= exon_end
        ), insertion_geometries AS (
          SELECT
-           'insertion_coding' AS event_state, transcript_index, chrom,
+           'insertion_coding' AS event_state,
+           transcript_index AS source_index, chrom,
            segment_start + (
              hash(transcript_index, {opt$seed}, 2) %
              (segment_end - segment_start + 1)
@@ -659,7 +776,7 @@ if (generate_structural) {
          SELECT *, row_number() OVER (
            PARTITION BY is_insertion, event_state
            ORDER BY hash(
-             chrom, event_start, event_end, transcript_index, {opt$seed}
+             chrom, event_start, event_end, source_index, {opt$seed}
            )
          ) AS geometry_rank
          FROM geometries
@@ -670,7 +787,7 @@ if (generate_structural) {
        ), span_events AS (
          SELECT
            concat(
-             'duckvep-generated:', event_state, ':', transcript_index, ':',
+             'duckvep-generated:', event_state, ':', source_index, ':',
              event_start, ':', event_end, ':', structural_type
            ) AS source_id,
            chrom, event_start - 1 AS raw_position, event_end AS raw_end,
@@ -688,7 +805,7 @@ if (generate_structural) {
        ), insertion_events AS (
          SELECT
            concat(
-             'duckvep-generated:', event_state, ':', transcript_index, ':',
+             'duckvep-generated:', event_state, ':', source_index, ':',
              event_start, ':', event_end, ':INS'
            ) AS source_id,
            chrom, event_start AS raw_position, event_end AS raw_end,
@@ -1325,6 +1442,29 @@ engine_time <- system.time({
   } else {
     "'not_measured'::VARCHAR"
   }
+  regulation_annotation_sql <- if (isTRUE(opt$regulatory)) {
+    glue(
+      "UNION ALL
+       SELECT
+         v.variant_id, v.seq_region, v.position,
+         1::UTINYINT AS object_order,
+         f.regulation_feature_index AS object_index,
+         f.stable_id AS tx,
+         list_aggregate(
+           list_sort(list_distinct(string_split(v.annotation.consequence, '&'))),
+           'string_agg', '&'
+         ) AS consequence,
+         v.annotation.impact,
+         v.annotation.status,
+         v.annotation.reason,
+         {engine_nmd_sql} AS nmd_prediction
+       FROM annotated v
+       JOIN duckvep_regulation_features f
+         ON f.regulation_feature_index = v.annotation.regulation_feature_index"
+    )
+  } else {
+    ""
+  }
   dbExecute(
     con,
     glue(
@@ -1339,22 +1479,29 @@ engine_time <- system.time({
            SELECT * FROM duckvep_sample
            ORDER BY seq_region, position, variant_id
          ) v
+       ), named AS (
+         SELECT
+           v.variant_id, v.seq_region, v.position,
+           0::UTINYINT AS object_order,
+           n.transcript_index AS object_index,
+           n.transcript_id AS tx,
+           list_aggregate(
+             list_sort(list_distinct(string_split(v.annotation.consequence, '&'))),
+             'string_agg', '&'
+           ) AS consequence,
+           v.annotation.impact,
+           v.annotation.status,
+           v.annotation.reason,
+           {engine_nmd_sql} AS nmd_prediction
+         FROM annotated v
+         JOIN duckvep_transcript_names n
+           ON n.transcript_index = v.annotation.transcript_index
+         {regulation_annotation_sql}
        )
        SELECT
-         v.variant_id,
-         n.transcript_id AS tx,
-         list_aggregate(
-           list_sort(list_distinct(string_split(v.annotation.consequence, '&'))),
-           'string_agg', '&'
-         ) AS consequence,
-         v.annotation.impact,
-         v.annotation.status,
-         v.annotation.reason,
-         {engine_nmd_sql} AS nmd_prediction
-       FROM annotated v
-       JOIN duckvep_transcript_names n
-         ON n.transcript_index = v.annotation.transcript_index
-       ORDER BY v.seq_region, v.position, n.transcript_index"
+         variant_id, tx, consequence, impact, status, reason, nmd_prediction
+       FROM named
+       ORDER BY seq_region, position, object_order, object_index"
     )
   )
 })
@@ -1430,6 +1577,9 @@ if (identical(opt$event_mode, "breakend")) {
     "input_order=fasta_index"
   )
 }
+if (isTRUE(opt$regulatory)) {
+  oracle_details <- c(oracle_details, "regulatory=true")
+}
 oracle_build <- paste(
   c(
     glue("core={component_version('ensembl')}"),
@@ -1468,6 +1618,9 @@ if (identical(opt$event_mode, "breakend")) {
   vep_args <- c(vep_args, "--buffer_size", "1")
 } else {
   vep_args <- c(vep_args, "--fork", opt$fork)
+}
+if (isTRUE(opt$regulatory)) {
+  vep_args <- c(vep_args, "--regulatory")
 }
 if (identical(oracle_mode, "cache")) {
   vep_args <- c(
@@ -1509,16 +1662,28 @@ if (rc != 0L || !file.exists(vep_json) || file.info(vep_json)$size == 0) {
 vep_nmd_sql <- if (nmd_oracle_enabled) {
   "CASE
      WHEN NOT (
-       list_contains(tc.consequence_terms, 'stop_gained') OR
-       list_contains(tc.consequence_terms, 'frameshift_variant') OR
-       list_contains(tc.consequence_terms, 'splice_donor_variant') OR
-       list_contains(tc.consequence_terms, 'splice_acceptor_variant')
+       list_contains(
+         CAST(json_extract(tc.value, '$.consequence_terms') AS VARCHAR[]),
+         'stop_gained'
+       ) OR
+       list_contains(
+         CAST(json_extract(tc.value, '$.consequence_terms') AS VARCHAR[]),
+         'frameshift_variant'
+       ) OR
+       list_contains(
+         CAST(json_extract(tc.value, '$.consequence_terms') AS VARCHAR[]),
+         'splice_donor_variant'
+       ) OR
+       list_contains(
+         CAST(json_extract(tc.value, '$.consequence_terms') AS VARCHAR[]),
+         'splice_acceptor_variant'
+       )
      ) THEN 'not_applicable'
      WHEN coalesce(
-            json_extract_string(to_json(tc), '$.duckvep_nmd_cds'),
+            json_extract_string(tc.value, '$.duckvep_nmd_cds'),
             'undefined'
           ) = 'undefined' THEN 'unresolved'
-     WHEN json_extract_string(to_json(tc), '$.nmd') =
+     WHEN json_extract_string(tc.value, '$.nmd') =
           'NMD_escaping_variant' THEN 'escaping'
      ELSE 'triggering'
    END"
@@ -1535,20 +1700,80 @@ invisible(dbExecute(
   glue(
     "CREATE OR REPLACE TEMP TABLE vep_annotation AS
      SELECT
-       j.id AS variant_id,
-       tc.transcript_id AS tx,
+       json_extract_string(to_json(j), '$.id') AS variant_id,
+       json_extract_string(tc.value, '$.transcript_id') AS tx,
        coalesce(
-         list_aggregate(list_sort(list_distinct(tc.consequence_terms)), 'string_agg', '&'),
+         list_aggregate(
+           list_sort(list_distinct(
+             CAST(json_extract(tc.value, '$.consequence_terms') AS VARCHAR[])
+           )),
+           'string_agg', '&'
+         ),
          ''
        ) AS consequence,
-       coalesce(tc.impact, '') AS impact,
+       coalesce(json_extract_string(tc.value, '$.impact'), '') AS impact,
        'oracle'::VARCHAR AS status,
        NULL::VARCHAR AS reason,
        {vep_nmd_sql} AS nmd_prediction
-     FROM read_json({sql_q(vep_json)}, format = 'newline_delimited', sample_size = -1) j,
-     UNNEST(j.transcript_consequences) u(tc)"
+     FROM read_json(
+       {sql_q(vep_json)}, format = 'newline_delimited', sample_size = -1
+     ) j,
+     LATERAL json_each(to_json(j), '$.transcript_consequences') tc
+     WHERE json_extract_string(tc.value, '$.transcript_id') IS NOT NULL"
   )
 ))
+if (isTRUE(opt$regulatory)) {
+  feature_nmd_prediction <- if (nmd_oracle_enabled) {
+    "'not_applicable'::VARCHAR"
+  } else {
+    "'not_measured'::VARCHAR"
+  }
+  invisible(dbExecute(
+    con,
+    glue(
+      "INSERT INTO vep_annotation
+       WITH records AS (
+         SELECT to_json(j) AS record
+         FROM read_json(
+           {sql_q(vep_json)}, format = 'newline_delimited', sample_size = -1
+         ) j
+       ), feature_rows AS (
+         SELECT
+           json_extract_string(record, '$.id') AS variant_id,
+           json_extract_string(fc.value, '$.regulatory_feature_id') AS tx,
+           CAST(json_extract(fc.value, '$.consequence_terms') AS VARCHAR[])
+             AS consequence_terms,
+           json_extract_string(fc.value, '$.impact') AS impact
+         FROM records,
+         LATERAL json_each(record, '$.regulatory_feature_consequences') fc
+         WHERE json_extract_string(fc.value, '$.regulatory_feature_id') IS NOT NULL
+         UNION ALL
+         SELECT
+           json_extract_string(record, '$.id'),
+           json_extract_string(fc.value, '$.motif_feature_id'),
+           CAST(json_extract(fc.value, '$.consequence_terms') AS VARCHAR[]),
+           json_extract_string(fc.value, '$.impact')
+         FROM records,
+         LATERAL json_each(record, '$.motif_feature_consequences') fc
+         WHERE json_extract_string(fc.value, '$.motif_feature_id') IS NOT NULL
+       )
+       SELECT
+         variant_id,
+         tx,
+         coalesce(
+           list_aggregate(
+             list_sort(list_distinct(consequence_terms)), 'string_agg', '&'
+           ),
+           ''
+         ),
+         coalesce(impact, ''),
+         'oracle'::VARCHAR,
+         NULL::VARCHAR,
+         {feature_nmd_prediction}
+       FROM feature_rows"
+    )
+  ))
+}
 
 run_date <- as.character(Sys.Date())
 invisible(dbExecute(
@@ -1597,7 +1822,7 @@ invisible(dbExecute(
 
 counts <- dbGetQuery(
   con,
-  "SELECT source, count(*) AS transcript_rows
+  "SELECT source, count(*) AS annotation_rows
    FROM duckvep_annotation_dump GROUP BY source ORDER BY source"
 )
 invisible(dbGetQuery(
@@ -1608,7 +1833,7 @@ invisible(dbGetQuery(
 cat(glue("sampled variants: {sample_count}"), "\n", sep = "")
 for (i in seq_len(nrow(counts))) {
   cat(
-    glue("{counts$source[i]} transcript rows: {counts$transcript_rows[i]}"),
+    glue("{counts$source[i]} annotation rows: {counts$annotation_rows[i]}"),
     "\n",
     sep = ""
   )

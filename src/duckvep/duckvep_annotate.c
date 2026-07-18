@@ -3,6 +3,7 @@
 DUCKDB_EXTENSION_EXTERN
 
 #include "duckvep_model.h"
+#include "kernel/src/duckvep_effect.h"
 #include "kernel/src/duckvep_event.h"
 #include "kernel/include/duckvep_kernel.h"
 #include "kernel/include/duckvep_so.h"
@@ -718,18 +719,18 @@ duckvep_scalar_u32_compare(const void *left, const void *right)
 }
 
 static int
-duckvep_scalar_seed_cursor(duckvep_scalar_state_t *state,
-	uint16_t seq_region, uint32_t position, uint32_t halo_distance,
-	duckvep_annotate_cursor_t *cursor, char *error, size_t error_size)
+duckvep_scalar_seed_index(duckvep_scalar_state_t *state,
+	cgranges_t *index, int index_complete, uint16_t seq_region,
+	uint32_t position, uint32_t halo_distance,
+	duckvep_annotate_cursor_t *cursor, int interval_features,
+	char *error, size_t error_size)
 {
-	duckvep_owned_model_t *model;
 	duckvep_error_t kernel_error;
 	int32_t query_start, query_end;
 	int64_t hit_count, hit;
 	char region_name[16];
 
-	model = &state->entry->model;
-	if (!model->interval_index_complete ||
+	if (!index_complete ||
 	    position > (uint32_t)INT32_MAX ||
 	    halo_distance >= (uint32_t)INT32_MAX ||
 	    position > (uint32_t)INT32_MAX - halo_distance)
@@ -739,27 +740,50 @@ duckvep_scalar_seed_cursor(duckvep_scalar_state_t *state,
 	query_end = (int32_t)(position + halo_distance);
 	(void)snprintf(region_name, sizeof(region_name), "%u",
 	    (unsigned)seq_region);
-	hit_count = cr_overlap(model->interval_index, region_name, query_start,
+	hit_count = cr_overlap(index, region_name, query_start,
 	    query_end, &state->interval_hits, &state->interval_hit_capacity);
 	if (hit_count < 0 ||
 	    !duckvep_scalar_seed_reserve(state, (size_t)hit_count)) {
-		duckvep_sql_set_error(error, error_size,
+		duckvep_sql_set_error(error, error_size, interval_features ?
+		    "duckvep_annotate: could not seed the sorted regulation-feature sweep" :
 		    "duckvep_annotate: could not seed the sorted transcript sweep");
 		return 0;
 	}
 	for (hit = 0; hit < hit_count; hit++)
 		state->seed_transcripts[hit] = (uint32_t)cr_label(
-		    model->interval_index, state->interval_hits[hit]);
+		    index, state->interval_hits[hit]);
 	qsort(state->seed_transcripts, (size_t)hit_count,
 	    sizeof(*state->seed_transcripts), duckvep_scalar_u32_compare);
 	memset(&kernel_error, 0, sizeof(kernel_error));
-	if (duckvep_annotate_cursor_seed(cursor, state->seed_transcripts,
-	    (size_t)hit_count, &kernel_error) != DUCKVEP_OK) {
+	if ((interval_features ?
+	    duckvep_annotate_cursor_seed_interval_features(cursor,
+	    state->seed_transcripts, (size_t)hit_count, &kernel_error) :
+	    duckvep_annotate_cursor_seed(cursor, state->seed_transcripts,
+	    (size_t)hit_count, &kernel_error)) != DUCKVEP_OK) {
 		(void)snprintf(error, error_size, "duckvep_annotate: %s",
 		    kernel_error.message);
 		return 0;
 	}
 	return 1;
+}
+
+static int
+duckvep_scalar_seed_cursor(duckvep_scalar_state_t *state,
+	uint16_t seq_region, uint32_t position, uint32_t halo_distance,
+	duckvep_annotate_cursor_t *cursor, char *error, size_t error_size)
+{
+	duckvep_owned_model_t *model;
+
+	model = &state->entry->model;
+	if (!duckvep_scalar_seed_index(state, model->interval_index,
+	    model->interval_index_complete, seq_region, position, halo_distance,
+	    cursor, 0, error, error_size))
+		return 0;
+	if (model->interval_feature_count == 0u)
+		return 1;
+	return duckvep_scalar_seed_index(state, model->interval_feature_index,
+	    model->interval_feature_index_complete, seq_region, position, 0u,
+	    cursor, 1, error, error_size);
 }
 
 static duckvep_variant_batch_t
@@ -894,7 +918,10 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 
 			row = builder.rows[index];
 			row.variant_idx += (uint32_t)begin;
-			row.gene_idx = state->entry->model.gene_indices[row.tx_idx];
+			if (row.overlap_object_kind ==
+			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
+				row.gene_idx =
+				    state->entry->model.gene_indices[row.tx_idx];
 			state->results[write++] = row;
 		}
 		state->result_count = write;
@@ -1089,7 +1116,10 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 	for (result = 0u; result < builder.count; result++) {
 		duckvep_consequence_t *row = &state->results[old_count + result];
 		row->variant_idx += (uint32_t)begin;
-		row->gene_idx = state->entry->model.gene_indices[row->tx_idx];
+		if (row->overlap_object_kind ==
+		    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
+			row->gene_idx =
+			    state->entry->model.gene_indices[row->tx_idx];
 	}
 	state->result_count = old_count + builder.count;
 	return 1;
@@ -1103,6 +1133,28 @@ duckvep_scalar_set_null(duckdb_vector vector, uint64_t **validity, idx_t row)
 		*validity = duckdb_vector_get_validity(vector);
 	}
 	(*validity)[row / 64] &= ~(UINT64_C(1) << (row % 64));
+}
+
+static void
+duckvep_scalar_set_null_range(duckdb_vector vector, uint64_t **validity,
+	size_t count)
+{
+	size_t words;
+
+	if (count == 0u)
+		return;
+	if (*validity == NULL) {
+		duckdb_vector_ensure_validity_writable(vector);
+		*validity = duckdb_vector_get_validity(vector);
+	}
+	words = (count + 63u) / 64u;
+	memset(*validity, 0, words * sizeof(**validity));
+}
+
+static void
+duckvep_scalar_set_valid(uint64_t *validity, idx_t row)
+{
+	validity[row / 64] |= UINT64_C(1) << (row % 64);
 }
 
 static void
@@ -1190,9 +1242,39 @@ duckvep_scalar_sequence_reason(uint8_t status)
 	}
 }
 
+static const char *
+duckvep_scalar_overlap_object_name(uint8_t kind)
+{
+	switch ((duckvep_overlap_object_kind_t)kind) {
+	case DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT:
+		return "transcript";
+	case DUCKVEP_OVERLAP_OBJECT_REGULATORY_REGION:
+		return "regulatory_region";
+	case DUCKVEP_OVERLAP_OBJECT_TF_BINDING_SITE:
+		return "transcription_factor_binding_site";
+	default:
+		return NULL;
+	}
+}
+
+static int
+duckvep_result_range_has_transcript(const duckvep_scalar_state_t *state,
+	size_t begin, size_t end)
+{
+	size_t source;
+
+	for (source = begin; source < end; source++) {
+		if (state->results[source].overlap_object_kind ==
+		    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
+			return 1;
+	}
+	return 0;
+}
+
 static int
 duckvep_scalar_prepare_output_list(duckvep_scalar_state_t *state,
-	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
+	duckdb_vector output, idx_t input_rows, size_t *prepared_output_count,
+	char *error, size_t error_size)
 {
 	duckdb_list_entry *lists;
 	size_t output_count, source, row;
@@ -1206,7 +1288,9 @@ duckvep_scalar_prepare_output_list(duckvep_scalar_state_t *state,
 		while (source < state->result_count &&
 		    state->results[source].variant_idx == (uint32_t)row)
 			source++;
-		output_count += source == begin ? 1 : source - begin;
+		output_count += source - begin;
+		if (!duckvep_result_range_has_transcript(state, begin, source))
+			output_count++;
 	}
 	if (source != state->result_count) {
 		duckvep_sql_set_error(error, error_size,
@@ -1231,9 +1315,12 @@ duckvep_scalar_prepare_output_list(duckvep_scalar_state_t *state,
 		    state->results[source].variant_idx == (uint32_t)row)
 			source++;
 		lists[row].offset = output_count;
-		lists[row].length = source == begin ? 1 : source - begin;
+		lists[row].length = source - begin;
+		if (!duckvep_result_range_has_transcript(state, begin, source))
+			lists[row].length++;
 		output_count += lists[row].length;
 	}
+	*prepared_output_count = output_count;
 	return 1;
 }
 
@@ -1241,19 +1328,21 @@ static int
 duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
 {
-	duckdb_vector child, vectors[17];
-	uint64_t *validity[17];
+	duckdb_vector child, vectors[19];
+	uint64_t *validity[19];
 	uint32_t *transcript_indices, *gene_indices;
+	uint32_t *regulation_feature_indices;
 	uint64_t *cdna_positions, *cds_positions, *protein_positions;
 	bool *nmd_escape_intronless, *nmd_escape_early_cds;
 	bool *nmd_escape_last_exon, *nmd_escape_penultimate_exon_end;
 	size_t output_count, source, row, column;
 
 	if (!duckvep_scalar_prepare_output_list(state, output, input_rows,
+	    &output_count,
 	    error, error_size))
 		return 0;
 	child = duckdb_list_vector_get_child(output);
-	for (column = 0; column < 17; column++) {
+	for (column = 0; column < 19; column++) {
 		vectors[column] = duckdb_struct_vector_get_child(child,
 		    (idx_t)column);
 		validity[column] = duckdb_vector_get_validity(vectors[column]);
@@ -1267,6 +1356,8 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	nmd_escape_early_cds = duckdb_vector_get_data(vectors[14]);
 	nmd_escape_last_exon = duckdb_vector_get_data(vectors[15]);
 	nmd_escape_penultimate_exon_end = duckdb_vector_get_data(vectors[16]);
+	regulation_feature_indices = duckdb_vector_get_data(vectors[17]);
+	duckvep_scalar_set_null_range(vectors[17], &validity[17], output_count);
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -1277,7 +1368,7 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 		    state->results[source].variant_idx == (uint32_t)row)
 			source++;
 		end = source;
-		if (begin == end) {
+		if (!duckvep_result_range_has_transcript(state, begin, end)) {
 			int complete;
 
 			complete = state->transcript_coverage_complete[row] != 0;
@@ -1317,8 +1408,9 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 				duckvep_scalar_set_null(vectors[column],
 				    &validity[column],
 				    (idx_t)output_count);
+			duckvep_scalar_set_null(vectors[18], &validity[18],
+			    (idx_t)output_count);
 			output_count++;
-			continue;
 		}
 		for (source = begin; source < end; source++, output_count++) {
 			const duckvep_consequence_t *result;
@@ -1327,8 +1419,34 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			size_t consequence_length, region_length;
 
 			result = &state->results[source];
-			transcript_indices[output_count] = result->tx_idx;
-			gene_indices[output_count] = result->gene_idx;
+			if (result->overlap_object_kind ==
+			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
+				transcript_indices[output_count] = result->tx_idx;
+				gene_indices[output_count] = result->gene_idx;
+			} else {
+				duckvep_scalar_set_null(vectors[0], &validity[0],
+				    (idx_t)output_count);
+				duckvep_scalar_set_null(vectors[1], &validity[1],
+				    (idx_t)output_count);
+				duckvep_scalar_set_valid(validity[17],
+				    (idx_t)output_count);
+				regulation_feature_indices[output_count] =
+				    result->interval_feature_idx;
+			}
+			{
+				const char *overlap_object;
+
+				overlap_object = duckvep_scalar_overlap_object_name(
+				    result->overlap_object_kind);
+				if (overlap_object == NULL) {
+					duckvep_sql_set_error(error, error_size,
+					    "duckvep_annotate: invalid overlap object kind");
+					return 0;
+				}
+				duckvep_scalar_assign_ascii(vectors[18],
+				    (idx_t)output_count, overlap_object,
+				    strlen(overlap_object));
+			}
 			if (result->consequence_mask == 0u ||
 			    !duckvep_scalar_format_terms(result->consequence_mask,
 			    consequence, sizeof(consequence), &consequence_length)) {
@@ -1479,21 +1597,24 @@ static int
 duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
 {
-	duckdb_vector child, vectors[14];
-	uint64_t *validity[14];
+	duckdb_vector child, vectors[16];
+	uint64_t *validity[16];
 	uint32_t *transcript_indices, *gene_indices, *region_masks;
+	uint32_t *regulation_feature_indices;
 	uint32_t *cdna_positions, *cds_positions, *protein_positions;
 	uint64_t *consequence_masks;
 	uint8_t *impact_codes, *status_codes, *reason_codes;
 	uint8_t *reference_amino_acids, *alternate_amino_acids;
 	uint8_t *nmd_prediction_codes, *nmd_escape_reasons;
+	uint8_t *overlap_object_codes;
 	size_t output_count, source, row, column;
 
 	if (!duckvep_scalar_prepare_output_list(state, output, input_rows,
+	    &output_count,
 	    error, error_size))
 		return 0;
 	child = duckdb_list_vector_get_child(output);
-	for (column = 0; column < 14; column++) {
+	for (column = 0; column < 16; column++) {
 		vectors[column] = duckdb_struct_vector_get_child(child,
 		    (idx_t)column);
 		validity[column] = duckdb_vector_get_validity(vectors[column]);
@@ -1512,6 +1633,9 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 	alternate_amino_acids = duckdb_vector_get_data(vectors[11]);
 	nmd_prediction_codes = duckdb_vector_get_data(vectors[12]);
 	nmd_escape_reasons = duckdb_vector_get_data(vectors[13]);
+	regulation_feature_indices = duckdb_vector_get_data(vectors[14]);
+	overlap_object_codes = duckdb_vector_get_data(vectors[15]);
+	duckvep_scalar_set_null_range(vectors[14], &validity[14], output_count);
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -1522,7 +1646,7 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 		    state->results[source].variant_idx == (uint32_t)row)
 			source++;
 		end = source;
-		if (begin == end) {
+		if (!duckvep_result_range_has_transcript(state, begin, end)) {
 			int complete;
 
 			complete = state->transcript_coverage_complete[row] != 0;
@@ -1546,8 +1670,9 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 			nmd_prediction_codes[output_count] =
 			    DUCKVEP_NMD_NOT_APPLICABLE;
 			nmd_escape_reasons[output_count] = 0;
+			duckvep_scalar_set_null(vectors[15], &validity[15],
+			    (idx_t)output_count);
 			output_count++;
-			continue;
 		}
 		for (source = begin; source < end; source++, output_count++) {
 			const duckvep_consequence_t *result;
@@ -1556,8 +1681,22 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 			result = &state->results[source];
 			unresolved = (result->flags &
 			    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED) != 0;
-			transcript_indices[output_count] = result->tx_idx;
-			gene_indices[output_count] = result->gene_idx;
+			if (result->overlap_object_kind ==
+			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
+				transcript_indices[output_count] = result->tx_idx;
+				gene_indices[output_count] = result->gene_idx;
+			} else {
+				duckvep_scalar_set_null(vectors[0], &validity[0],
+				    (idx_t)output_count);
+				duckvep_scalar_set_null(vectors[1], &validity[1],
+				    (idx_t)output_count);
+				duckvep_scalar_set_valid(validity[14],
+				    (idx_t)output_count);
+				regulation_feature_indices[output_count] =
+				    result->interval_feature_idx;
+			}
+			overlap_object_codes[output_count] =
+			    result->overlap_object_kind;
 			consequence_masks[output_count] = result->consequence_mask;
 			region_masks[output_count] = result->region_mask;
 			impact_codes[output_count] = result->impact;
@@ -1799,9 +1938,10 @@ duckvep_annotation_list_type(void)
 		"protein_position", "reference_amino_acid",
 		"alternate_amino_acid", "nmd_prediction",
 		"nmd_escape_intronless", "nmd_escape_early_cds",
-		"nmd_escape_last_exon", "nmd_escape_penultimate_exon_end"
+		"nmd_escape_last_exon", "nmd_escape_penultimate_exon_end",
+		"regulation_feature_index", "overlap_object"
 	};
-	duckdb_logical_type types[17], structure, list;
+	duckdb_logical_type types[19], structure, list;
 	size_t index;
 
 	types[0] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
@@ -1815,9 +1955,11 @@ duckvep_annotation_list_type(void)
 	types[12] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	for (index = 13; index < 17; index++)
 		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-	structure = duckdb_create_struct_type(types, names, 17);
+	types[17] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+	types[18] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+	structure = duckdb_create_struct_type(types, names, 19);
 	list = duckdb_create_list_type(structure);
-	for (index = 0; index < 17; index++)
+	for (index = 0; index < 19; index++)
 		duckdb_destroy_logical_type(&types[index]);
 	duckdb_destroy_logical_type(&structure);
 	return list;
@@ -1831,9 +1973,10 @@ duckvep_compact_annotation_list_type(void)
 		"region_mask", "impact_code", "status_code", "reason_code",
 		"cdna_position", "cds_position", "protein_position",
 		"reference_amino_acid_code", "alternate_amino_acid_code",
-		"nmd_prediction_code", "nmd_escape_reasons"
+		"nmd_prediction_code", "nmd_escape_reasons",
+		"regulation_feature_index", "overlap_object_code"
 	};
-	duckdb_logical_type types[14], structure, list;
+	duckdb_logical_type types[16], structure, list;
 	size_t index;
 
 	types[0] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
@@ -1846,9 +1989,11 @@ duckvep_compact_annotation_list_type(void)
 		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	for (index = 10; index < 14; index++)
 		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
-	structure = duckdb_create_struct_type(types, names, 14);
+	types[14] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+	types[15] = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+	structure = duckdb_create_struct_type(types, names, 16);
 	list = duckdb_create_list_type(structure);
-	for (index = 0; index < 14; index++)
+	for (index = 0; index < 16; index++)
 		duckdb_destroy_logical_type(&types[index]);
 	duckdb_destroy_logical_type(&structure);
 	return list;

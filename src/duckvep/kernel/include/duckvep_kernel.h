@@ -29,14 +29,14 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 13
+#define DUCKVEP_KERNEL_VERSION_MINOR 14
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
 
 typedef enum duckvep_status {
     DUCKVEP_OK = 0,
-    DUCKVEP_ERR_INVALID_ARG,    /* null/zero-length/contract violation at the boundary */
+    DUCKVEP_ERR_INVALID_ARG,    /* null/zero-length/API contract violation */
     DUCKVEP_ERR_MODEL_INVALID,  /* offsets/counts inconsistent at model-open           */
     DUCKVEP_ERR_OUT_OF_RANGE,   /* a 64->32 narrowing or index bound check failed      */
     DUCKVEP_ERR_RESULT_FULL,    /* result builder capacity exhausted (no truncation)   */
@@ -110,6 +110,20 @@ typedef enum duckvep_copy_change {
     DUCKVEP_COPY_CHANGE_NEUTRAL,
     DUCKVEP_COPY_CHANGE_GAIN
 } duckvep_copy_change_t;
+
+/* Core VEP interval features are part of consequence prediction, not
+ * supplementary annotation. They remain a separate SoA because they have no
+ * transcript, exon, CDS, or sequence fields. */
+typedef enum duckvep_interval_feature_kind {
+    DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION = 1,
+    DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE = 2
+} duckvep_interval_feature_kind_t;
+
+typedef enum duckvep_overlap_object_kind {
+    DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT = 0,
+    DUCKVEP_OVERLAP_OBJECT_REGULATORY_REGION = 1,
+    DUCKVEP_OVERLAP_OBJECT_TF_BINDING_SITE = 2
+} duckvep_overlap_object_kind_t;
 
 /* Validate one structural operation/copy-direction pair. This is shared by
  * direct borrowed-view callers and adapter-side transport validation, so
@@ -214,6 +228,18 @@ typedef struct duckvep_transcript_model {
     size_t          mature_mirna_count;
 } duckvep_transcript_model_t;
 
+/* Borrowed, start-sorted Ensembl RegulatoryFeature/MotifFeature view. The row
+ * ordinal is the stable model-local key used to join cold source metadata in
+ * DuckDB. These intervals participate in the same sorted event traversal as
+ * transcripts, but never masquerade as transcripts. */
+typedef struct duckvep_interval_feature_model {
+    const uint16_t *chrom_id;      /* [feature_count] model-local contig ordinal */
+    const uint32_t *start1;        /* [feature_count] one-based inclusive        */
+    const uint32_t *end1;          /* [feature_count] one-based inclusive        */
+    const uint8_t  *kind;          /* [feature_count] duckvep_interval_feature_kind_t */
+    size_t          feature_count;
+} duckvep_interval_feature_model_t;
+
 typedef struct duckvep_exon_model {
     const uint32_t *start1;        /* [exon_count] genomic                     */
     const uint32_t *end1;          /* [exon_count] genomic                     */
@@ -313,7 +339,13 @@ typedef enum duckvep_nmd_escape_bit {
 
 typedef struct duckvep_consequence {
     uint32_t variant_idx;
-    uint32_t tx_idx;
+    /* Tagged by overlap_object_kind. A row cannot refer to a transcript and a
+     * core interval feature at once, so keeping two ordinals would enlarge
+     * every hot result record for an impossible state. */
+    union {
+        uint32_t tx_idx;
+        uint32_t interval_feature_idx;
+    };
     uint32_t gene_idx;
 
     uint64_t consequence_mask;     /* SO terms as a bitset (duckvep_so.h)      */
@@ -330,13 +362,15 @@ typedef struct duckvep_consequence {
 
     uint8_t  aa_ref;
     uint8_t  aa_alt;
+
+    uint8_t  overlap_object_kind;
 } duckvep_consequence_t;
 
 /* ------------------------------------------------------------ opaque handles
  * Prepared once by the adapter, then immutable for the lifetime of a run.
  * Their layouts are private to the implementation translation units. */
 
-typedef struct duckvep_model          duckvep_model_t;          /* immutable transcript/exon/seq model */
+typedef struct duckvep_model          duckvep_model_t;          /* immutable transcript/exon/sequence/regulation model */
 typedef struct duckvep_options        duckvep_options_t;        /* distance and splice windows          */
 typedef struct duckvep_workspace      duckvep_workspace_t;      /* per-worker scratch arena (no malloc/row) */
 typedef struct duckvep_annotate_cursor duckvep_annotate_cursor_t; /* resumable tile-local annotator */
@@ -346,7 +380,7 @@ typedef struct duckvep_annotate_cursor duckvep_annotate_cursor_t; /* resumable t
  * truncate". The caller owns `rows` (capacity entries); the engine appends and
  * returns DUCKVEP_ERR_RESULT_FULL on overflow. `duckvep_annotate_tile` is the
  * one-shot convenience API and is not resumable; use `duckvep_annotate_cursor_*`
- * when the caller needs to pause on output buffer boundaries without recomputing
+ * when the caller needs to pause at fixed output capacity without recomputing
  * the tile. A row is never partially written. Use duckvep_result_builder_init;
  * do not poke the fields directly. */
 typedef struct duckvep_result_builder {
@@ -403,6 +437,17 @@ duckvep_status_t duckvep_model_open(
     const duckvep_sequence_pool_t    *seq,
     duckvep_model_t                 **out_model,
     duckvep_error_t                  *error);
+
+/* Extended model constructor for a VEP model that also owns the release's
+ * RegulatoryFeature/MotifFeature relation. The legacy constructor is exactly
+ * equivalent to passing interval_features=NULL. */
+duckvep_status_t duckvep_model_open_with_interval_features(
+    const duckvep_transcript_model_t       *transcripts,
+    const duckvep_exon_model_t             *exons,
+    const duckvep_sequence_pool_t          *seq,
+    const duckvep_interval_feature_model_t *interval_features,
+    duckvep_model_t                       **out_model,
+    duckvep_error_t                        *error);
 void duckvep_model_close(duckvep_model_t *model);
 
 /* Prepare options from a POD init (NULL init -> all defaults). */
@@ -430,7 +475,7 @@ size_t duckvep_result_builder_count(const duckvep_result_builder_t *builder);
 void   duckvep_result_builder_reset(duckvep_result_builder_t *builder);
 
 /* Open a tile-local annotation cursor over borrowed views. The cursor validates
- * the same boundary contract as `duckvep_annotate_tile`, then preserves the sweep
+ * the same tile input contract as `duckvep_annotate_tile`, then preserves the sweep
  * and candidate position across calls to `duckvep_annotate_cursor_fill`. It copies
  * the small `variants` view struct but borrows the arrays it points at; it does not
  * own `model`, `options`, or `workspace`; keep all borrowed storage alive
@@ -463,6 +508,16 @@ duckvep_status_t duckvep_annotate_cursor_seed(
     size_t                     transcript_count,
     duckvep_error_t           *error);
 
+/* Seed the independent core-regulation sweep at the first sorted event. The
+ * feature indexes must be the unique interval-feature rows overlapping that
+ * event. This is separate from transcript seeding because the two SoAs and
+ * interval indexes have independent cardinalities. */
+duckvep_status_t duckvep_annotate_cursor_seed_interval_features(
+    duckvep_annotate_cursor_t *cursor,
+    const uint32_t            *feature_indices,
+    size_t                     feature_count,
+    duckvep_error_t           *error);
+
 int  duckvep_annotate_cursor_done(const duckvep_annotate_cursor_t *cursor);
 void duckvep_annotate_cursor_close(duckvep_annotate_cursor_t *cursor);
 
@@ -470,7 +525,7 @@ void duckvep_annotate_cursor_close(duckvep_annotate_cursor_t *cursor);
  * emitting duckvep_consequence_t rows into `results`. `workspace` is this
  * worker's scratch.
  *
- * The boundary validates that `variants` is sorted ascending by
+ * The tile input contract validates that `variants` is sorted ascending by
  * (chrom_id, pos1), has valid 1-based intervals, and that REF/ALT slices are present,
  * inside `allele_bytes_len`, and consistent with variant kind/raw REF span whenever
  * sequence predicates or allele-trimmed small-variant topology can read them.
