@@ -58,7 +58,7 @@ tail -n 20 "$DEPS_LOG"
 
 CHECK_ROOT="$(mktemp -d /tmp/rduckhts-fedora-check.XXXXXX)"
 cd "$CHECK_ROOT"
-R CMD build --no-manual /repo/r/Rduckhts
+R CMD build --no-manual "$REPO_ROOT/r/Rduckhts"
 PACKAGE_TARBALL="$(find "$CHECK_ROOT" -maxdepth 1 -name 'Rduckhts_*.tar.gz' -print -quit)"
 test -n "$PACKAGE_TARBALL"
 set +e
