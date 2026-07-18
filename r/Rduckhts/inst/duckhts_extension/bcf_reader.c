@@ -3935,7 +3935,6 @@ typedef struct {
     int tidy_format;
     int overwrite;
     int include_file_offset;
-    int include_region_idx;
     int region_threads;
     int decompression_threads;
     bcf_decode_error_policy_t decode_error_policy;
@@ -3947,24 +3946,31 @@ typedef struct {
 
 typedef struct {
     duckdb_data_chunk chunk;
-    duckdb_logical_type types[8];
+    duckdb_logical_type types[7];
     duckdb_vector chrom;
     duckdb_vector pos;
     duckdb_vector ref;
     duckdb_vector alt;
     duckdb_vector sample_id;
-    duckdb_vector region_idx;
     duckdb_vector file_offset;
     duckdb_vector format_gt;
     idx_t row_count;
     idx_t column_count;
-    int include_region_idx;
     int include_file_offset;
 } bcf_appender_chunk_t;
 
 typedef struct {
+    int tid;
+    char **regions;
+    unsigned int n_regions;
+    unsigned int capacity;
+} bcf_appender_contig_task_t;
+
+typedef struct {
     const bcf_appender_bind_t *bind;
-    volatile int next_region_idx;
+    bcf_appender_contig_task_t *tasks;
+    int n_tasks;
+    volatile int next_task_idx;
     volatile int failed;
     char error[1024];
 } bcf_appender_region_shared_t;
@@ -4039,20 +4045,7 @@ static int bcf_appender_create_target(duckdb_connection con, const bcf_appender_
         if (!bcf_appender_exec_sql(con, sql, err, err_size)) return 0;
     }
 
-    if (bind->include_region_idx && bind->include_file_offset) {
-        snprintf(sql, sizeof(sql),
-                 "CREATE TABLE IF NOT EXISTS \"%s\" ("
-                 "CHROM VARCHAR, POS BIGINT, REF VARCHAR, ALT VARCHAR, "
-                 "SAMPLE_ID VARCHAR, duckhts_region_idx BIGINT, "
-                 "FILE_OFFSET UBIGINT, FORMAT_GT VARCHAR)",
-                 bind->target_table);
-    } else if (bind->include_region_idx) {
-        snprintf(sql, sizeof(sql),
-                 "CREATE TABLE IF NOT EXISTS \"%s\" ("
-                 "CHROM VARCHAR, POS BIGINT, REF VARCHAR, ALT VARCHAR, "
-                 "SAMPLE_ID VARCHAR, duckhts_region_idx BIGINT, FORMAT_GT VARCHAR)",
-                 bind->target_table);
-    } else if (bind->include_file_offset) {
+    if (bind->include_file_offset) {
         snprintf(sql, sizeof(sql),
                  "CREATE TABLE IF NOT EXISTS \"%s\" ("
                  "CHROM VARCHAR, POS BIGINT, REF VARCHAR, ALT VARCHAR, "
@@ -4075,11 +4068,6 @@ static void bcf_appender_chunk_refresh_vectors(bcf_appender_chunk_t *chunk) {
     chunk->ref = duckdb_data_chunk_get_vector(chunk->chunk, col++);
     chunk->alt = duckdb_data_chunk_get_vector(chunk->chunk, col++);
     chunk->sample_id = duckdb_data_chunk_get_vector(chunk->chunk, col++);
-    if (chunk->include_region_idx) {
-        chunk->region_idx = duckdb_data_chunk_get_vector(chunk->chunk, col++);
-    } else {
-        chunk->region_idx = NULL;
-    }
     if (chunk->include_file_offset) {
         chunk->file_offset = duckdb_data_chunk_get_vector(chunk->chunk, col++);
     } else {
@@ -4089,22 +4077,16 @@ static void bcf_appender_chunk_refresh_vectors(bcf_appender_chunk_t *chunk) {
 }
 
 static int bcf_appender_chunk_init(bcf_appender_chunk_t *chunk,
-                                   int include_region_idx,
                                    int include_file_offset) {
     idx_t col = 0;
     memset(chunk, 0, sizeof(*chunk));
-    chunk->include_region_idx = include_region_idx ? 1 : 0;
     chunk->include_file_offset = include_file_offset ? 1 : 0;
-    chunk->column_count = 6 + (chunk->include_region_idx ? 1 : 0) +
-                          (chunk->include_file_offset ? 1 : 0);
+    chunk->column_count = 6 + (chunk->include_file_offset ? 1 : 0);
     chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    if (chunk->include_region_idx) {
-        chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
-    }
     if (chunk->include_file_offset) {
         chunk->types[col++] = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
     }
@@ -4163,7 +4145,6 @@ static int bcf_appender_format_gt(const int32_t *sample_gt, int ploidy, kstring_
 static int bcf_appender_append_row(duckdb_appender appender, bcf_appender_chunk_t *chunk,
                                    const char *chrom, int64_t pos, const char *ref,
                                    const char *alt, const char *sample_id,
-                                   int64_t region_idx,
                                    int has_file_offset, uint64_t file_offset,
                                    const char *gt, size_t gt_len,
                                    uint64_t *rows_written,
@@ -4174,9 +4155,6 @@ static int bcf_appender_append_row(duckdb_appender appender, bcf_appender_chunk_
 
     idx_t row = chunk->row_count;
     int64_t *pos_data = (int64_t *)duckdb_vector_get_data(chunk->pos);
-    int64_t *region_idx_data = chunk->include_region_idx
-        ? (int64_t *)duckdb_vector_get_data(chunk->region_idx)
-        : NULL;
     uint64_t *offset_data = chunk->include_file_offset
         ? (uint64_t *)duckdb_vector_get_data(chunk->file_offset)
         : NULL;
@@ -4189,9 +4167,6 @@ static int bcf_appender_append_row(duckdb_appender appender, bcf_appender_chunk_
         duckdb_vector_assign_string_element(chunk->sample_id, row, sample_id);
     } else {
         bcf_appender_set_null(chunk->sample_id, row);
-    }
-    if (chunk->include_region_idx) {
-        region_idx_data[row] = region_idx;
     }
     if (chunk->include_file_offset) {
         if (has_file_offset) {
@@ -4260,7 +4235,6 @@ static int bcf_appender_append_record(duckdb_appender appender,
                                       bcf_hdr_t *hdr,
                                       bcf1_t *rec,
                                       int tidy_format,
-                                      int64_t region_idx,
                                       int has_file_offset,
                                       uint64_t file_offset,
                                       int input_is_bcf,
@@ -4346,7 +4320,7 @@ static int bcf_appender_append_record(duckdb_appender appender,
             if (!bcf_appender_append_row(appender, chunk,
                                          chrom, (int64_t)rec->pos + 1,
                                          ref, alt->s ? alt->s : "", hdr->samples[s],
-                                         region_idx, has_file_offset, file_offset,
+                                         has_file_offset, file_offset,
                                          gt_s, gt_len, rows_written,
                                          err, err_size)) {
                 return 0;
@@ -4356,7 +4330,7 @@ static int bcf_appender_append_record(duckdb_appender appender,
         if (!bcf_appender_append_row(appender, chunk,
                                      chrom, (int64_t)rec->pos + 1,
                                      ref, alt->s ? alt->s : "", NULL,
-                                     region_idx, has_file_offset, file_offset,
+                                     has_file_offset, file_offset,
                                      NULL, 0, rows_written,
                                      err, err_size)) {
             return 0;
@@ -4366,11 +4340,195 @@ static int bcf_appender_append_record(duckdb_appender appender,
     return 1;
 }
 
+static int bcf_appender_bcf_name2id(void *data, const char *name) {
+    return bcf_hdr_name2id((bcf_hdr_t *)data, name);
+}
+
+static int bcf_appender_tbx_name2id(void *data, const char *name) {
+    return tbx_name2id((tbx_t *)data, name);
+}
+
+static void bcf_appender_destroy_contig_tasks(bcf_appender_contig_task_t *tasks,
+                                               int n_tasks) {
+    if (!tasks) return;
+    for (int i = 0; i < n_tasks; i++) {
+        if (!tasks[i].regions) continue;
+        for (unsigned int j = 0; j < tasks[i].n_regions; j++) {
+            free(tasks[i].regions[j]);
+        }
+        free(tasks[i].regions);
+    }
+    free(tasks);
+}
+
+static int bcf_appender_contig_task_add(bcf_appender_contig_task_t *task,
+                                        const char *region) {
+    if (task->n_regions == task->capacity) {
+        unsigned int new_capacity = task->capacity ? task->capacity * 2 : 4;
+        if (new_capacity < task->capacity ||
+            (size_t)new_capacity > SIZE_MAX / sizeof(*task->regions)) {
+            return 0;
+        }
+        char **new_regions = (char **)realloc(
+            task->regions, (size_t)new_capacity * sizeof(*task->regions)
+        );
+        if (!new_regions) return 0;
+        task->regions = new_regions;
+        task->capacity = new_capacity;
+    }
+    task->regions[task->n_regions] = strdup(region);
+    if (!task->regions[task->n_regions]) return 0;
+    task->n_regions++;
+    return 1;
+}
+
+/* Build one job per primary contig.  Every job retains one native htslib
+ * multi-region iterator, so overlapping or repeated intervals on that contig
+ * are compacted and a spanning record is emitted once. */
+static int bcf_appender_build_contig_tasks(const bcf_appender_bind_t *bind,
+                                           bcf_appender_contig_task_t **out_tasks,
+                                           int *out_n_tasks,
+                                           char *err,
+                                           size_t err_size) {
+    htsFile *fp = NULL;
+    bcf_hdr_t *hdr = NULL;
+    hts_idx_t *idx = NULL;
+    tbx_t *tbx = NULL;
+    bcf_appender_contig_task_t *tasks = NULL;
+    int n_tasks = 0;
+    int ok = 0;
+
+    *out_tasks = NULL;
+    *out_n_tasks = 0;
+
+    fp = hts_open(bind->file_path, "r");
+    if (!fp) {
+        snprintf(err, err_size, "read_bcf_appender: failed to open BCF/VCF file");
+        goto cleanup;
+    }
+    duckhts_apply_remote_hts_tuning(fp, bind->file_path,
+                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
+    hdr = bcf_hdr_read(fp);
+    if (!hdr) {
+        snprintf(err, err_size, "read_bcf_appender: failed to read BCF/VCF header");
+        goto cleanup;
+    }
+
+    if (hts_get_format(fp)->format == bcf) {
+        idx = bcf_index_load3(bind->file_path, NULL,
+                              HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
+    } else {
+        tbx = tbx_index_load3(bind->file_path, NULL,
+                              HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
+        if (!tbx) {
+            idx = bcf_index_load3(bind->file_path, NULL,
+                                  HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
+        }
+    }
+    if (!idx && !tbx) {
+        snprintf(err, err_size, "read_bcf_appender: parallel region query requires an index");
+        goto cleanup;
+    }
+
+    tasks = (bcf_appender_contig_task_t *)calloc(bind->n_regions, sizeof(*tasks));
+    if (!tasks) {
+        snprintf(err, err_size, "read_bcf_appender: out of memory creating contig jobs");
+        goto cleanup;
+    }
+
+    for (unsigned int i = 0; i < bind->n_regions; i++) {
+        int tid = -1;
+        hts_pos_t beg;
+        hts_pos_t end;
+        const char *parsed;
+
+        if (strcmp(bind->regions[i], ".") == 0) {
+            tid = HTS_IDX_START;
+            parsed = bind->regions[i] + 1;
+        } else if (strcmp(bind->regions[i], "*") == 0) {
+            tid = HTS_IDX_NOCOOR;
+            parsed = bind->regions[i] + 1;
+        } else {
+            parsed = hts_parse_region(
+                bind->regions[i], &tid, &beg, &end,
+                tbx ? bcf_appender_tbx_name2id : bcf_appender_bcf_name2id,
+                tbx ? (void *)tbx : (void *)hdr,
+                HTS_PARSE_THOUSANDS_SEP
+            );
+        }
+        if (!parsed) {
+            if (tid < -1) {
+                snprintf(err, err_size, "read_bcf_appender: failed to parse region %s",
+                         bind->regions[i]);
+                goto cleanup;
+            }
+            hts_log_warning("Region '%s' specifies an unknown reference name; ignoring it",
+                            bind->regions[i]);
+            continue;
+        }
+
+        if (tid == HTS_IDX_START) {
+            bcf_appender_destroy_contig_tasks(tasks, n_tasks);
+            tasks = (bcf_appender_contig_task_t *)calloc(1, sizeof(*tasks));
+            n_tasks = tasks ? 1 : 0;
+            if (!tasks) {
+                snprintf(err, err_size, "read_bcf_appender: out of memory creating full-file job");
+                goto cleanup;
+            }
+            tasks[0].tid = HTS_IDX_START;
+            if (!bcf_appender_contig_task_add(&tasks[0], ".")) {
+                snprintf(err, err_size, "read_bcf_appender: out of memory creating full-file job");
+                goto cleanup;
+            }
+            ok = 1;
+            goto cleanup;
+        }
+
+        int task_idx = -1;
+        for (int j = 0; j < n_tasks; j++) {
+            if (tasks[j].tid == tid) {
+                task_idx = j;
+                break;
+            }
+        }
+        if (task_idx < 0) {
+            task_idx = n_tasks++;
+            tasks[task_idx].tid = tid;
+        }
+        if (!bcf_appender_contig_task_add(&tasks[task_idx], bind->regions[i])) {
+            snprintf(err, err_size, "read_bcf_appender: out of memory copying region");
+            goto cleanup;
+        }
+    }
+    ok = 1;
+
+cleanup:
+    if (idx) hts_idx_destroy(idx);
+    if (tbx) tbx_destroy(tbx);
+    if (hdr) bcf_hdr_destroy(hdr);
+    if (fp) hts_close(fp);
+    if (!ok) {
+        bcf_appender_destroy_contig_tasks(tasks, n_tasks);
+        return 0;
+    }
+    if (n_tasks == 0) {
+        free(tasks);
+        tasks = NULL;
+    }
+    *out_tasks = tasks;
+    *out_n_tasks = n_tasks;
+    return 1;
+}
+
 static void bcf_appender_region_set_error(bcf_appender_region_shared_t *shared, const char *msg) {
     if (!shared || !msg) return;
     if (__sync_bool_compare_and_swap(&shared->failed, 0, 1)) {
         snprintf(shared->error, sizeof(shared->error), "%s", msg);
     }
+}
+
+static int bcf_appender_region_failed(const bcf_appender_region_shared_t *shared) {
+    return shared && __atomic_load_n(&shared->failed, __ATOMIC_ACQUIRE) != 0;
 }
 
 static void *bcf_appender_region_worker_main(void *arg) {
@@ -4395,8 +4553,7 @@ static void *bcf_appender_region_worker_main(void *arg) {
     if (!shared || !bind) return NULL;
     memset(&chunk, 0, sizeof(chunk));
 
-    if (!bcf_appender_chunk_init(&chunk, bind->include_region_idx,
-                                 bind->include_file_offset)) {
+    if (!bcf_appender_chunk_init(&chunk, bind->include_file_offset)) {
         bcf_appender_region_set_error(shared, "read_bcf_appender: failed to create worker data chunk");
         return NULL;
     }
@@ -4439,46 +4596,35 @@ static void *bcf_appender_region_worker_main(void *arg) {
         goto cleanup;
     }
 
+    /* Claim jobs in a loop.  Empty indexed contigs consume a job and advance;
+     * they never recurse and never acquire another file/index handle. */
     for (;;) {
-        int claim = __sync_fetch_and_add(&shared->next_region_idx, 1);
-        if (shared->failed) break;
-        if (claim >= (int)bind->n_regions) break;
+        int claim = __sync_fetch_and_add(&shared->next_task_idx, 1);
+        if (bcf_appender_region_failed(shared)) break;
+        if (claim >= shared->n_tasks) break;
 
-        const char *region = bind->regions[claim];
-        if (idx) itr = bcf_itr_querys(idx, hdr, region);
-        else if (tbx) itr = tbx_itr_querys(tbx, region);
+        bcf_appender_contig_task_t *task = &shared->tasks[claim];
+        itr = bcf_open_region_iterator(idx, hdr, tbx,
+                                       task->regions, task->n_regions);
         if (!itr) continue;
 
         for (;;) {
-            int ret;
             uint64_t file_offset = 0;
             int has_file_offset = 0;
-
-            if (tbx) {
-                ret = tbx_itr_next(fp, tbx, itr, &line);
-                if (ret >= 0) {
-                    ret = vcf_parse1(&line, hdr, rec);
-                    line.l = 0;
-                }
-            } else {
-                ret = bcf_itr_next(fp, itr, rec);
-            }
-            if (ret == -1) break;
-            if (ret < -1) {
-                snprintf(err, sizeof(err), "read_bcf_appender: iterator failure for region %s", region);
+            int next_record = bcf_appender_next_record(
+                fp, hdr, rec, tbx, itr, &line,
+                bind->include_file_offset,
+                &file_offset, &has_file_offset,
+                err, sizeof(err)
+            );
+            if (next_record == 0) break;
+            if (next_record < 0) {
                 bcf_appender_region_set_error(shared, err);
                 break;
             }
-            if (bind->include_file_offset) {
-                BGZF *bgzf = hts_get_bgzfp(fp);
-                if (bgzf) {
-                    file_offset = (uint64_t)bgzf_tell(bgzf);
-                    has_file_offset = 1;
-                }
-            }
             if (!bcf_appender_append_record(worker->appender, &chunk,
                                             hdr, rec,
-                                            bind->tidy_format, (int64_t)claim + 1,
+                                            bind->tidy_format,
                                             has_file_offset, file_offset,
                                             bcf_reader_input_is_bcf(fp),
                                             bind->decode_error_policy,
@@ -4488,20 +4634,21 @@ static void *bcf_appender_region_worker_main(void *arg) {
                 bcf_appender_region_set_error(shared, err);
                 break;
             }
-            if (shared->failed) break;
+            if (bcf_appender_region_failed(shared)) break;
         }
 
         hts_itr_destroy(itr);
         itr = NULL;
-        if (shared->failed) break;
+        if (bcf_appender_region_failed(shared)) break;
     }
 
-    if (!shared->failed &&
+    if (!bcf_appender_region_failed(shared) &&
         !bcf_appender_chunk_flush(worker->appender, &chunk,
                                   err, sizeof(err))) {
         bcf_appender_region_set_error(shared, err);
     }
-    if (!shared->failed && duckdb_appender_close(worker->appender) == DuckDBError) {
+    if (!bcf_appender_region_failed(shared) &&
+        duckdb_appender_close(worker->appender) == DuckDBError) {
         const char *msg = duckdb_appender_error(worker->appender);
         bcf_appender_region_set_error(shared, msg ? msg : "duckdb_appender_close failed");
     }
@@ -4528,16 +4675,24 @@ static int bcf_appender_run_parallel_regions(const bcf_appender_bind_t *bind,
     bcf_appender_region_shared_t shared;
     pthread_t *threads = NULL;
     bcf_appender_region_worker_t *workers = NULL;
-    int n_threads = bind->region_threads;
+    int n_threads;
     int started = 0;
 
     *rows_written = 0;
-    if (n_threads > (int)bind->n_regions) n_threads = (int)bind->n_regions;
-    if (n_threads > BCF_APPENDER_MAX_REGION_THREADS) n_threads = BCF_APPENDER_MAX_REGION_THREADS;
-    if (n_threads < 1) n_threads = 1;
-
     memset(&shared, 0, sizeof(shared));
     shared.bind = bind;
+    if (!bcf_appender_build_contig_tasks(bind, &shared.tasks, &shared.n_tasks,
+                                         err, err_size)) {
+        return 0;
+    }
+    if (shared.n_tasks == 0) return 1;
+
+    /* Worker and open-handle count depends on requested contig jobs, not on
+     * the number of contig declarations in the file header. */
+    n_threads = bind->region_threads;
+    if (n_threads > shared.n_tasks) n_threads = shared.n_tasks;
+    if (n_threads > BCF_APPENDER_MAX_REGION_THREADS) n_threads = BCF_APPENDER_MAX_REGION_THREADS;
+    if (n_threads < 1) n_threads = 1;
 
     threads = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)n_threads);
     workers = (bcf_appender_region_worker_t *)calloc((size_t)n_threads, sizeof(*workers));
@@ -4545,6 +4700,7 @@ static int bcf_appender_run_parallel_regions(const bcf_appender_bind_t *bind,
         snprintf(err, err_size, "read_bcf_appender: out of memory creating region workers");
         free(threads);
         free(workers);
+        bcf_appender_destroy_contig_tasks(shared.tasks, shared.n_tasks);
         return 0;
     }
 
@@ -4571,8 +4727,9 @@ static int bcf_appender_run_parallel_regions(const bcf_appender_bind_t *bind,
     }
     free(threads);
     free(workers);
+    bcf_appender_destroy_contig_tasks(shared.tasks, shared.n_tasks);
 
-    if (shared.failed) {
+    if (bcf_appender_region_failed(&shared)) {
         snprintf(err, err_size, "%s", shared.error[0] ? shared.error : "read_bcf_appender: region worker failure");
         return 0;
     }
@@ -4627,7 +4784,7 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
         snprintf(err, err_size, "read_bcf_appender: failed to create appender for table %s", bind->target_table);
         goto cleanup;
     }
-    if (!bcf_appender_chunk_init(&chunk, 0, bind->include_file_offset)) {
+    if (!bcf_appender_chunk_init(&chunk, bind->include_file_offset)) {
         snprintf(err, err_size, "read_bcf_appender: failed to create data chunk");
         goto cleanup;
     }
@@ -4697,7 +4854,7 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
                 break;
             }
             if (!bcf_appender_append_record(appender, &chunk, hdr, rec,
-                                            bind->tidy_format, 0,
+                                            bind->tidy_format,
                                             has_file_offset, file_offset,
                                             bcf_reader_input_is_bcf(fp),
                                             bind->decode_error_policy,
@@ -4774,7 +4931,6 @@ static void bcf_appender_bind(duckdb_bind_info info) {
     bind->tidy_format = 1;
     bind->overwrite = 1;
     bind->include_file_offset = 0;
-    bind->include_region_idx = 0;
     bind->region_threads = 1;
     bind->decompression_threads = 0;
     bind->decode_error_policy = BCF_DECODE_ERROR_NULL;
@@ -4810,10 +4966,6 @@ static void bcf_appender_bind(duckdb_bind_info info) {
         bind->region_threads = (int)v;
     }
     if (region_threads_val) duckdb_destroy_value(&region_threads_val);
-    if (bind->n_regions > 1 && bind->region_threads > 1) {
-        bind->include_region_idx = 1;
-    }
-
     duckdb_value threads_val = duckdb_bind_get_named_parameter(info, "decompression_threads");
     if (threads_val && !duckdb_is_null_value(threads_val)) {
         int64_t v = duckdb_get_int64(threads_val);

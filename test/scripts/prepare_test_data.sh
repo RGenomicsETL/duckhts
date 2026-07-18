@@ -384,12 +384,15 @@ cp "$DST/duckvep/ensembl_release_consequences.vcf" \
   "$PKG_DST/ensembl_release_consequences.vcf"
 echo "  DuckVEP/csq minimal and Ensembl release consequence fixtures"
 
-# ---- Parallel empty-contig VCF regression fixture (bgzip + tabix) ----
+# ---- Parallel empty-contig VCF/BCF regression fixtures ----
 for out_dir in "$DST" "$PKG_DST"; do
   bgzip -c "$out_dir/parallel_empty_contigs.vcf" > "$out_dir/parallel_empty_contigs.vcf.gz"
   tabix -f -p vcf "$out_dir/parallel_empty_contigs.vcf.gz"
+  bcftools view --no-version -Ob -o "$out_dir/parallel_empty_contigs.bcf" \
+    "$out_dir/parallel_empty_contigs.vcf"
+  bcftools index -f "$out_dir/parallel_empty_contigs.bcf"
 done
-echo "  parallel_empty_contigs.vcf.gz + .tbi"
+echo "  parallel_empty_contigs.vcf.gz + .tbi and .bcf + .csi"
 
 # ---- bcftools_score multi-summary list / directory / generated-name collision fixtures ----
 # List entries intentionally use repo-root-relative paths to match upstream

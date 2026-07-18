@@ -1,0 +1,267 @@
+---
+title: "BCF appender contig-parallel benchmark"
+output:
+  github_document:
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+This report measures `read_bcf_appender(...)` after making `region_threads`
+partition work by primary contig. Each contig keeps its complete interval set
+in one htslib 1.24 multi-region iterator, so repeated and overlapping intervals
+produce the same target schema and row multiset at every thread count.
+
+The previous parallel implementation scanned each requested interval
+independently, emitted duplicate rows, and added `duckhts_region_idx`. Its row
+denominator and write schema therefore differ from this workload. There is no
+valid before/after throughput comparison. The nearest checked-in measurement
+is [`benchmark_multi_region_readers.md`](benchmark_multi_region_readers.md),
+which measures native iterator decoding without appender materialization.
+
+## Reproduction
+
+Build and install the current `Rduckhts` tarball, then render with the process
+allowed on all CPUs named below. The script pins the serial run to one CPU and
+the four-job run to four CPUs.
+
+```bash
+DUCKHTS_BENCH_SERIAL_CPU=16 \
+DUCKHTS_BENCH_PARALLEL_CPUS=16-19 \
+taskset -c 16-19 Rscript -e "rmarkdown::render('benchmarks/benchmark_bcf_appender_contigs.Rmd', output_format = 'github_document')"
+```
+
+The fixture contains four contigs with consecutive SNVs. Each contig receives
+eight 50,000-base intervals at a 25,000-base step. Fixture creation, BCF
+conversion, indexing, connection setup, and warm-up are outside the timed
+interval. The timed `seconds` value covers target-table replacement, contig-job
+planning, indexed reads, narrow-row materialization through DuckDB appenders,
+and commit.
+
+```{r benchmark, echo=FALSE}
+suppressPackageStartupMessages({
+  library(DBI)
+  library(duckdb)
+  library(Rduckhts)
+})
+
+sql_string <- function(x) {
+  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+}
+
+command_output <- function(command, args = character()) {
+  paste(system2(command, args, stdout = TRUE, stderr = TRUE), collapse = " ")
+}
+
+set_affinity <- function(cpus) {
+  output <- system2(
+    "taskset", c("-pc", cpus, Sys.getpid()), stdout = TRUE, stderr = TRUE
+  )
+  status <- attr(output, "status")
+  stopifnot(is.null(status) || identical(status, 0L))
+  cpus
+}
+
+git_revision <- command_output("git", c("rev-parse", "--short=12", "HEAD"))
+dirty <- length(system2(
+  "git", c("status", "--porcelain", "--untracked-files=no"), stdout = TRUE
+)) > 0L
+source_state <- if (dirty) paste0(git_revision, " + report-source changes") else git_revision
+
+serial_cpu <- Sys.getenv("DUCKHTS_BENCH_SERIAL_CPU", "16")
+parallel_cpus <- Sys.getenv("DUCKHTS_BENCH_PARALLEL_CPUS", "16-19")
+contig_count <- 4L
+rows_per_contig <- as.integer(Sys.getenv("DUCKHTS_APPENDER_ROWS_PER_CONTIG", "250000"))
+intervals_per_contig <- 8L
+interval_width <- 50000L
+interval_step <- 25000L
+starts <- 1L + (seq_len(intervals_per_contig) - 1L) * interval_step
+ends <- starts + interval_width - 1L
+stopifnot(max(ends) <= rows_per_contig)
+
+regions <- unlist(lapply(seq_len(contig_count), function(contig) {
+  sprintf("%d:%d-%d", contig, starts, ends)
+}), use.names = FALSE)
+region_spec <- paste(regions, collapse = ",")
+unique_rows_per_contig <- as.double(max(ends) - min(starts) + 1L)
+expected_rows <- unique_rows_per_contig * contig_count
+expected_position_sum <- contig_count *
+  unique_rows_per_contig * (min(starts) + max(ends)) / 2
+raw_interval_hits <- as.double(contig_count) * intervals_per_contig * interval_width
+
+fixture_dir <- tempfile("duckhts-appender-contigs-")
+invisible(dir.create(fixture_dir))
+vcf_path <- file.path(fixture_dir, "variants.vcf")
+bcf_path <- file.path(fixture_dir, "variants.bcf")
+
+out <- file(vcf_path, open = "wt")
+writeLines(c(
+  "##fileformat=VCFv4.3",
+  sprintf("##contig=<ID=%d,length=%d>", seq_len(contig_count), rows_per_contig),
+  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
+), out)
+chunk_size <- 100000L
+for (contig in seq_len(contig_count)) {
+  for (first in seq.int(1L, rows_per_contig, by = chunk_size)) {
+    last <- min(rows_per_contig, first + chunk_size - 1L)
+    pos <- seq.int(first, last)
+    writeLines(sprintf("%d\t%d\t.\tA\tC\t.\tPASS\t.", contig, pos), out)
+  }
+}
+close(out)
+
+stopifnot(system2(
+  "bcftools", c("view", "--no-version", "-Ob", "-o", bcf_path, vcf_path)
+) == 0L)
+stopifnot(system2("bcftools", c("index", "-f", bcf_path)) == 0L)
+
+con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
+invisible(rduckhts_load(con))
+invisible(dbExecute(con, "PRAGMA threads=1"))
+
+appender_sql <- function(target, region_threads) {
+  sprintf(
+    paste0(
+      "SELECT rows_written, seconds FROM read_bcf_appender(",
+      "%s, %s, region := %s, tidy_format := false, overwrite := true, ",
+      "include_file_offset := true, region_threads := %d, ",
+      "decompression_threads := 0)"
+    ),
+    sql_string(bcf_path), sql_string(target), sql_string(region_spec), region_threads
+  )
+}
+
+validate_target <- function(target) {
+  answer <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT count(*) AS rows, sum(POS)::HUGEINT AS position_sum, ",
+        "count(DISTINCT FILE_OFFSET) AS offsets FROM %s"
+      ),
+      target
+    )
+  )
+  stopifnot(as.double(answer$rows[[1]]) == expected_rows)
+  stopifnot(as.double(answer$position_sum[[1]]) == expected_position_sum)
+  stopifnot(as.double(answer$offsets[[1]]) == expected_rows)
+}
+
+measure <- function(mode, target, region_threads, cpus, repetitions = 15L) {
+  affinity <- set_affinity(cpus)
+  sql <- appender_sql(target, region_threads)
+  DBI::dbGetQuery(con, sql)
+  validate_target(target)
+  seconds <- numeric(repetitions)
+  rows <- numeric(repetitions)
+  for (i in seq_len(repetitions)) {
+    answer <- DBI::dbGetQuery(con, sql)
+    seconds[[i]] <- answer$seconds[[1]]
+    rows[[i]] <- answer$rows_written[[1]]
+  }
+  validate_target(target)
+  stopifnot(all(rows == expected_rows))
+  data.frame(
+    mode = mode,
+    region_threads = region_threads,
+    affinity = affinity,
+    repetitions = repetitions,
+    unique_output_rows = expected_rows,
+    median_seconds = stats::median(seconds),
+    median_rows_per_second = expected_rows / stats::median(seconds),
+    stringsAsFactors = FALSE
+  )
+}
+
+serial <- measure("one complete multi-region iterator", "appender_serial", 1L, serial_cpu)
+parallel <- measure("one iterator per primary contig", "appender_parallel", 4L, parallel_cpus)
+results <- rbind(serial, parallel)
+
+delta <- DBI::dbGetQuery(
+  con,
+  paste0(
+    "SELECT count(*) AS n FROM (",
+    "(SELECT * FROM appender_serial EXCEPT ALL SELECT * FROM appender_parallel) ",
+    "UNION ALL ",
+    "(SELECT * FROM appender_parallel EXCEPT ALL SELECT * FROM appender_serial))"
+  )
+)$n[[1]]
+stopifnot(delta == 0)
+
+cpu_model <- sub(
+  "^model name[[:space:]]*:[[:space:]]*", "",
+  grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1]]
+)
+bcftools_version <- system2("bcftools", "--version", stdout = TRUE, stderr = TRUE)
+metadata <- data.frame(
+  item = c(
+    "source revision", "run date", "DuckDB version", "htslib version", "CPU",
+    "serial CPU", "parallel CPUs", "DuckDB threads", "htslib decompression threads per job",
+    "input BCF records", "primary contigs", "requested intervals", "interval width",
+    "interval step", "raw interval-record hits", "unique output records",
+    "overlap work factor", "uncompressed VCF bytes", "BCF bytes", "bcftools version"
+  ),
+  value = c(
+    source_state,
+    as.character(Sys.Date()),
+    as.character(DBI::dbGetQuery(con, "SELECT version() AS version")$version[[1]]),
+    trimws(readLines("third_party/htslib/VERSION", n = 1L)),
+    cpu_model,
+    serial_cpu,
+    parallel_cpus,
+    "1",
+    "0",
+    format(as.double(contig_count) * rows_per_contig, big.mark = ",", scientific = FALSE),
+    as.character(contig_count),
+    as.character(length(regions)),
+    format(interval_width, big.mark = ",", scientific = FALSE),
+    format(interval_step, big.mark = ",", scientific = FALSE),
+    format(raw_interval_hits, big.mark = ",", scientific = FALSE),
+    format(expected_rows, big.mark = ",", scientific = FALSE),
+    sprintf("%.3f", raw_interval_hits / expected_rows),
+    format(file.info(vcf_path)$size, big.mark = ",", scientific = FALSE),
+    format(file.info(bcf_path)$size, big.mark = ",", scientific = FALSE),
+    paste(utils::head(bcftools_version, 2L), collapse = "; ")
+  ),
+  stringsAsFactors = FALSE
+)
+
+knitr::kable(metadata, col.names = c("Property", "Recorded value"))
+```
+
+## Results
+
+The denominator is the 900,000 unique target rows after htslib merges the
+overlapping intervals. Both runs materialize `FILE_OFFSET`, validate the exact
+row count, position checksum, and distinct record offsets, and finish with a
+bidirectional `EXCEPT ALL` comparison of zero rows.
+
+```{r results, echo=FALSE}
+display_results <- results
+display_results$unique_output_rows <- format(
+  display_results$unique_output_rows, big.mark = ",", scientific = FALSE
+)
+display_results$median_seconds <- sprintf("%.3f", display_results$median_seconds)
+display_results$median_rows_per_second <- format(
+  round(display_results$median_rows_per_second), big.mark = ",", scientific = FALSE
+)
+names(display_results) <- c(
+  "Scheduling", "region_threads", "Recorded affinity", "Runs", "Unique rows",
+  "Median seconds", "Median unique rows/s"
+)
+knitr::kable(display_results, align = c("l", "r", "l", "r", "r", "r", "r"))
+```
+
+This is a warm-page-cache local-BCF materialization measurement. It does not
+measure cold storage, remote object-store latency, rich INFO/FORMAT decoding,
+or full `read_bcf(...)` output. The parallel result measures four independent
+contig iterators and four DuckDB appenders; a request confined to one contig
+correctly remains a one-iterator workload.
+
+```{r cleanup, include=FALSE}
+invisible(dbDisconnect(con, shutdown = TRUE))
+invisible(unlink(fixture_dir, recursive = TRUE))
+```
