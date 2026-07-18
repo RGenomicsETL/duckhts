@@ -175,7 +175,6 @@ typedef struct {
     idx_t      n_projected_cols;
     int        count_only;
     uint64_t   count_remaining;
-    unsigned int next_region_idx;
     int        skip_remaining;
     int        skipped_header;
     uint64_t   line_number;
@@ -712,20 +711,12 @@ static int tabix_parse_scan_mode(const char *mode, int *scan_sequential) {
     return 0;
 }
 
-static int tabix_advance_region_iterator(tabix_init_data_t *id, tabix_bind_data_t *bd) {
-    if (!id || !bd || !id->tbx || !bd->regions) return 0;
-
-    if (id->itr) {
-        hts_itr_destroy(id->itr);
-        id->itr = NULL;
-    }
-
-    while (id->next_region_idx < bd->n_regions) {
-        const char *region = bd->regions[id->next_region_idx++];
-        id->itr = tbx_itr_querys(id->tbx, region);
-        if (id->itr) return 1;
-    }
-    return 0;
+static hts_itr_t *tabix_open_region_iterator(tbx_t *tbx, char **regions,
+                                             unsigned int n_regions) {
+    if (!tbx || !regions || n_regions == 0) return NULL;
+    return n_regions == 1
+        ? tbx_itr_querys(tbx, regions[0])
+        : tbx_itr_regarray(tbx, regions, n_regions);
 }
 
 static int tabix_try_get_index_row_count(tbx_t *tbx, uint64_t *out_total) {
@@ -1486,11 +1477,9 @@ static void tabix_init(duckdb_init_info info) {
             tabix_init_data_destroy(id);
             return;
         }
-        if (bd->n_regions > 1) {
-            vcf_emit_warning("Multi-region tabix queries are executed as a chained union of single-region iterators; overlapping regions may return duplicate rows");
-        }
-        id->next_region_idx = 0;
-        if (!tabix_advance_region_iterator(id, bd)) {
+        id->itr = tabix_open_region_iterator(id->tbx, bd->regions,
+                                             bd->n_regions);
+        if (!id->itr) {
             /* Region doesn't match any sequences – return empty result */
             id->finished = true;
         }
@@ -1559,9 +1548,6 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
         }
 
         if (ret < 0) {
-            if (id->itr && tabix_advance_region_iterator(id, bd)) {
-                continue;
-            }
             id->finished = true;
             break;
         }

@@ -172,6 +172,12 @@
 /* Define to 1 if you have the <x86intrin.h> header file. */
 #undef HAVE_X86INTRIN_H
 
+/* Defined to 1 if __builtin_clz works */
+#undef HAVE___BUILTIN_CLZ
+
+/* Defined to 1 if __builtin_prefetch works */
+#undef HAVE___BUILTIN_PREFETCH
+
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
 

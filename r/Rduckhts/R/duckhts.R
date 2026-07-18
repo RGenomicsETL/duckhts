@@ -159,7 +159,8 @@ read_munge_preset_map <- function(con, preset) {
 #' @return Invisibly returns the previous value of `HTS_PATH` (or `NA` if unset).
 #'
 #' @details
-#' Call this before querying remote URLs to allow htslib to locate its plugins.
+#' Call this before the process opens its first HTS file. htslib discovers
+#' dynamic plugins on first file access and does not rescan `HTS_PATH` later.
 #'
 #' @examples
 #' \dontrun{

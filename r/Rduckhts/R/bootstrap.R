@@ -2,6 +2,22 @@
 # Bootstrap: copy extension sources into inst/duckhts_extension/
 # ---------------------------------------------------------------------------
 
+duckhts_duckvep_kernel_source_files <- function() {
+  c(
+    "duckvep_kernel.c",
+    "duckvep_so.c",
+    "duckvep_sweep.c",
+    "duckvep_classify.c",
+    "duckvep_effect.c",
+    "duckvep_sv.c",
+    "duckvep_delta.c",
+    "duckvep_projection.c",
+    "duckvep_codon.c",
+    "duckvep_coding.c",
+    "duckvep_haplotype.c"
+  )
+}
+
 #' Bootstrap the duckhts extension sources into the R package
 #'
 #' Copies extension source files from the parent duckhts repository into
@@ -78,19 +94,7 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
   file.copy(file.path(src_dir, "duckvep", duckvep_files), duckvep_dest)
   duckvep_kernel_headers <- c("duckvep_kernel.h", "duckvep_so.h")
-  duckvep_kernel_sources <- c(
-    "duckvep_kernel.c",
-    "duckvep_so.c",
-    "duckvep_sweep.c",
-    "duckvep_classify.c",
-    "duckvep_effect.c",
-    "duckvep_sv.c",
-    "duckvep_delta.c",
-    "duckvep_projection.c",
-    "duckvep_codon.c",
-    "duckvep_coding.c",
-    "duckvep_haplotype.c"
-  )
+  duckvep_kernel_sources <- duckhts_duckvep_kernel_source_files()
   duckvep_kernel_private_headers <- list.files(
     file.path(src_dir, "duckvep", "kernel", "src"),
     pattern = "[.](h|inc)$"
@@ -274,7 +278,7 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
 
     cfg_status <- system2(
       file.path(htslib_dir, "configure"),
-      c("CFLAGS=-fPIC -O2", "--disable-plugins"),
+      c("CFLAGS=-fPIC -O2 -std=gnu17", "--disable-plugins"),
       stdout = if (verbose) "" else FALSE,
       stderr = if (verbose) "" else FALSE
     )
@@ -344,7 +348,12 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "bcftools_shim.c",
       "score_udf.c",
       "vep_parser.c",
-      file.path("duckvep", "kernel", "src", duckvep_kernel_sources),
+      file.path(
+        "duckvep",
+        "kernel",
+        "src",
+        duckhts_duckvep_kernel_source_files()
+      ),
       file.path("duckvep", "duckvep_variant_tile.c"),
       file.path("duckvep", "duckvep_model.c"),
       file.path("duckvep", "duckvep_annotate.c"),
