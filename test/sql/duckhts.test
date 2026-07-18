@@ -1043,6 +1043,39 @@ SELECT NAME, length(SEQUENCE), length(QUALITY) FROM read_fastq('__WORKING_DIRECT
 ----
 HS25_09827:2:1201:1505:59795#49	100	100
 
+# --- direct parser: multiline sequence/quality, name suffixes, and IUPAC canonicalization ---
+query TTTT
+SELECT NAME, coalesce(DESCRIPTION, '<NULL>'), SEQUENCE, QUALITY
+FROM read_fastq('__WORKING_DIRECTORY__/test/data/fastq_multiline.fq');
+----
+multi	<NULL>	NACGTRYSWKMBDHVNAA	+@ABCDEFGHIJKLMNOP
+plain	<NULL>	ACGTT=RN	!!!!####
+
+query TTII
+SELECT NAME, seq_decode_4bit(SEQUENCE), QUALITY[1], QUALITY[2]
+FROM read_fastq(
+    '__WORKING_DIRECTORY__/test/data/fastq_multiline.fq',
+    sequence_encoding := 'nt16',
+    quality_representation := 'phred'
+);
+----
+multi	NACGTRYSWKMBDHVNAA	10	31
+plain	ACGTT=RN	0	0
+
+query I
+SELECT count(*) FROM read_fastq(
+    '__WORKING_DIRECTORY__/test/data/fastq_multiline.fq',
+    scan_mode := 'sequential'
+);
+----
+2
+
+# --- direct parser surfaces a truncated quality block ---
+statement error
+SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/data/fastq_truncated.fq');
+----
+read_fastq: truncated FASTQ quality block
+
 # --- paired FASTQ (mate_path) ---
 query I
 SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/r2.fq');

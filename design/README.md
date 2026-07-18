@@ -9,7 +9,7 @@ replaced them.
 | [`duckvep.md`](duckvep.md) | Current DuckVEP mental model, ownership, model compilation, sorted execution, consequence authority, and validation contract. |
 | [`duckvep_errata.md`](duckvep_errata.md) | Current ledger of surprising VEP-116 behaviours that DuckVEP deliberately reproduces, with source anchors and executable witnesses. |
 | [`duckhts_parquet_lake.md`](duckhts_parquet_lake.md) | Parquet write-format contract and open DuckLake/native-writer work. |
-| [`fastq_throughput.md`](fastq_throughput.md) | Open FASTQ throughput investigation. |
+| [`fastq_throughput.md`](fastq_throughput.md) | Current direct-reader contract and open FASTQ parsing/QC throughput investigation. |
 | [`packed_state_kernels.md`](packed_state_kernels.md) | Open investigation for richer packed-state classifiers. |
 | [`simd_dispatch_matrix.md`](simd_dispatch_matrix.md) | Current SIMD dispatch contract. |
 | [`better_scans.md`](better_scans.md) | Open scan-planning work. |

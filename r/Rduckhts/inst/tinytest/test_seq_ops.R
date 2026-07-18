@@ -10,6 +10,14 @@ test_seq_ops <- function() {
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
   fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
+  fastq_multiline <- system.file(
+    "extdata", "fastq_multiline.fq", package = "Rduckhts"
+  )
+  fastq_truncated <- system.file(
+    "extdata", "fastq_truncated.fq", package = "Rduckhts"
+  )
+  expect_true(file.exists(fastq_multiline))
+  expect_true(file.exists(fastq_truncated))
   fasta_index_path <- tempfile("duckhts_seq_ops_", fileext = ".fai")
   on.exit(unlink(fasta_index_path), add = TRUE)
   expect_silent(rduckhts_fasta_index(con, fasta_path, index_path = fasta_index_path))
@@ -414,6 +422,40 @@ test_seq_ops <- function() {
     "'%s', sequence_encoding := 'nt16', quality_representation := 'phred')"
   ), fastq_r1))
   expect_equal(fq_count_only$n[1], fq_str_n$n[1])
+
+  # Multiline FASTQ framing, htslib-style /digit name stripping, and direct
+  # nt16/Phred materialization remain identical to the established reader.
+  fq_multiline <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT NAME, DESCRIPTION, SEQUENCE, QUALITY",
+    "FROM read_fastq('%s')"
+  ), fastq_multiline))
+  expect_equal(fq_multiline$NAME, c("multi", "plain"))
+  expect_true(all(is.na(fq_multiline$DESCRIPTION)))
+  expect_equal(
+    fq_multiline$SEQUENCE,
+    c("NACGTRYSWKMBDHVNAA", "ACGTT=RN")
+  )
+  expect_equal(
+    fq_multiline$QUALITY,
+    c("+@ABCDEFGHIJKLMNOP", "!!!!####")
+  )
+
+  fq_multiline_packed <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT seq_decode_4bit(SEQUENCE) AS sequence,",
+    "       QUALITY[1] AS q1, QUALITY[2] AS q2",
+    "FROM read_fastq('%s', sequence_encoding := 'nt16',",
+    "                quality_representation := 'phred')"
+  ), fastq_multiline))
+  expect_equal(
+    fq_multiline_packed$sequence,
+    c("NACGTRYSWKMBDHVNAA", "ACGTT=RN")
+  )
+  expect_equal(fq_multiline_packed$q1, c(10, 0))
+  expect_equal(fq_multiline_packed$q2, c(31, 0))
+
+  expect_error(DBI::dbGetQuery(con, sprintf(
+    "SELECT * FROM read_fastq('%s')", fastq_truncated
+  )), pattern = "truncated FASTQ quality block", fixed = TRUE)
 
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(
