@@ -54,7 +54,7 @@
 <div class="section level2">
 <h2 id="how-it-works">How it works<a class="anchor" aria-label="anchor" href="#how-it-works"></a>
 </h2>
-<p>Following <a href="https://github.com/RGenomicsETL/RBCFTools" class="external-link">RBCFTools</a>, tables are created and returned instead of data frames. <code>VCF</code>/<code>BCF</code>, <code>SAM</code>/<code>BAM</code>/<code>CRAM</code>, <code>FASTA</code>, <code>FASTQ</code>, <code>GFF</code>, <code>GTF</code>, and <code>tabix</code> formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. <a href="https://github.com/samtools/htslib" class="external-link"><code>htslib</code></a> 1.23.1 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted <a href="https://github.com/RGenomicsETL/duckhts" class="external-link"><code>duckhts</code></a> build path.</p>
+<p>Following <a href="https://github.com/RGenomicsETL/RBCFTools" class="external-link">RBCFTools</a>, tables are created and returned instead of data frames. <code>VCF</code>/<code>BCF</code>, <code>SAM</code>/<code>BAM</code>/<code>CRAM</code>, <code>FASTA</code>, <code>FASTQ</code>, <code>GFF</code>, <code>GTF</code>, and <code>tabix</code> formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. <a href="https://github.com/samtools/htslib" class="external-link"><code>htslib</code></a> 1.24 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted <a href="https://github.com/RGenomicsETL/duckhts" class="external-link"><code>duckhts</code></a> build path.</p>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -173,6 +173,9 @@
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r.duckdb.org/" class="external-link">duckdb</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/RGenomicsETL/duckhts" class="external-link">Rduckhts</a></span><span class="op">)</span></span>
 <span></span>
+<span><span class="co"># Set HTS_PATH before htslib's first file access so bundled remote handlers</span></span>
+<span><span class="co"># are discoverable when this build uses dynamic plugins.</span></span>
+<span><span class="fu"><a href="reference/setup_hts_env.html">setup_hts_env</a></span><span class="op">(</span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">fasta_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"ce.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fastq_r1</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -252,9 +255,9 @@
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fastq_multi.html">rduckhts_fastq_multi</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"fq_multi"</span>, <span class="va">fq_files</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL"</span><span class="op">)</span></span>
-<span><span class="co">#&gt;                                        filename n</span></span>
-<span><span class="co">#&gt; 1 /tmp/rduckhts-lib.lys1/Rduckhts/extdata/r2.fq 5</span></span>
-<span><span class="co">#&gt; 2 /tmp/rduckhts-lib.lys1/Rduckhts/extdata/r1.fq 5</span></span></code></pre></div>
+<span><span class="co">#&gt;                                               filename n</span></span>
+<span><span class="co">#&gt; 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5</span></span>
+<span><span class="co">#&gt; 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5</span></span></code></pre></div>
 <p>Per-file parameters are supported via a <code>.params</code> data.frame with a <code>file</code> column and columns matching reader arguments. <code>NA</code> values fall back to the uniform default:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -494,10 +497,10 @@ Show generated function catalog
 <table class="table">
 <colgroup>
 <col width="1%">
-<col width="1%">
 <col width="0%">
-<col width="12%">
-<col width="84%">
+<col width="0%">
+<col width="11%">
+<col width="85%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -512,21 +515,21 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bcf</code></td>
-<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches.</td>
+<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap.</td>
 </tr>
 <tr class="even">
 <td><code>read_bcf_v2</code></td>
 <td>table</td>
 <td>table</td>
 <td></td>
-<td>Experimental clone of read_bcf(…) for non-destructive benchmarking of current-schema scan optimizations. It preserves the read_bcf wide/tidy output schema by default, streams full-file scans by default instead of auto-iterating indexed contigs, accepts the same scan_mode and decode_error_policy (‘null’, ‘warn’, or ‘error’) contract as read_bcf, sets htslib VCF text max_unpack from DuckDB projection pushdown so unprojected INFO/FORMAT text can be skipped earlier, keeps INFO/FORMAT/GT decode buffers and parsed VEP/CSQ records in local scan state across output chunks, repeats VEP-derived values correctly across tidy sample rows, supports v2-only htslib sample pushdown via comma-separated samples/exclude_samples strings or samples_file/exclude_samples_file lists, can bind only requested INFO/FORMAT/VEP fields through include_info/include_format/include_vep and comma-separated info_fields/format_fields/vep_fields controls, rejects format_fields when no samples are selected, treats tidy_format := true with include_format := false as one row per variant because no SAMPLE_ID/FORMAT columns are bound, and counts VCF text rows without parsing when no columns are projected.</td>
+<td>Experimental clone of read_bcf(…) for non-destructive benchmarking of current-schema scan optimizations. It preserves the read_bcf wide/tidy output schema by default, streams full-file scans by default instead of auto-iterating indexed contigs, accepts the same scan_mode and decode_error_policy (‘null’, ‘warn’, or ‘error’) contract as read_bcf, and shares read_bcf’s native deduplicating multi-region iterator. It sets htslib VCF text max_unpack from DuckDB projection pushdown so unprojected INFO/FORMAT text can be skipped earlier, keeps INFO/FORMAT/GT decode buffers and parsed VEP/CSQ records in local scan state across output chunks, repeats VEP-derived values correctly across tidy sample rows, supports v2-only htslib sample pushdown via comma-separated samples/exclude_samples strings or samples_file/exclude_samples_file lists, can bind only requested INFO/FORMAT/VEP fields through include_info/include_format/include_vep and comma-separated info_fields/format_fields/vep_fields controls, rejects format_fields when no samples are selected, treats tidy_format := true with include_format := false as one row per variant because no SAMPLE_ID/FORMAT columns are bound, and counts VCF text rows without parsing when no columns are projected.</td>
 </tr>
 <tr class="odd">
 <td><code>read_bcf_appender</code></td>
 <td>table</td>
 <td>table</td>
 <td></td>
-<td>Experimental side-effecting benchmark helper that reads BCF/VCF with htslib and appends a narrow scalar tidy table through DuckDB’s chunk appender API. The target table is created in the default schema with columns CHROM, POS, REF, ALT, SAMPLE_ID, and FORMAT_GT; set include_file_offset := TRUE to also add FILE_OFFSET. For comma-separated region queries, region_threads &gt; 1 claims regions in parallel and adds duckhts_region_idx so callers can restore requested-region order with ORDER BY duckhts_region_idx, POS. The single-stream (region_threads = 1) path runs inside an internal transaction and surfaces malformed-record errors as DuckDB errors; decode_error_policy controls corrupt BCF FORMAT/GT header-vs-payload mismatches with ‘null’, ‘warn’, or ‘error’. The parallel path shares one DuckDB connection across worker appenders and is best-effort benchmarking only, with no transactional rollback. target_table must be an unqualified SQL identifier. This is intended to compare appender-based materialization against read_bcf(…) query pipelines, not as a full replacement for the typed read_bcf surface.</td>
+<td>Experimental side-effecting benchmark helper that reads BCF/VCF with htslib and appends a narrow scalar tidy table through DuckDB’s chunk appender API. The target table is created in the default schema with columns CHROM, POS, REF, ALT, SAMPLE_ID, and FORMAT_GT; set include_file_offset := TRUE to also add FILE_OFFSET. With region_threads = 1, comma-separated regions use htslib’s native multi-region iterator and emit an overlapping record once. With region_threads &gt; 1, workers claim requested regions independently and add duckhts_region_idx, so an overlapping record is intentionally emitted once per requested region and callers can restore requested-region order with ORDER BY duckhts_region_idx, POS. The single-stream path runs inside an internal transaction and surfaces malformed-record errors as DuckDB errors; decode_error_policy controls corrupt BCF FORMAT/GT header-vs-payload mismatches with ‘null’, ‘warn’, or ‘error’. The parallel path shares one DuckDB connection across worker appenders and is best-effort benchmarking only, with no transactional rollback. target_table must be an unqualified SQL identifier. This is intended to compare appender-based materialization against read_bcf(…) query pipelines, not as a full replacement for the typed read_bcf surface.</td>
 </tr>
 <tr class="even">
 <td><code>read_bam</code></td>
@@ -568,21 +571,21 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_gff</code></td>
-<td>Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
+<td>Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
 <tr class="even">
 <td><code>read_gtf</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_gtf</code></td>
-<td>Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
+<td>Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
 <tr class="odd">
 <td><code>read_tabix</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_tabix</code></td>
-<td>Read generic tabix-indexed text data with optional header handling and type inference. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
+<td>Read generic tabix-indexed text data with optional header handling and type inference. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
 <tr class="even">
 <td><code>fasta_index</code></td>
@@ -1836,10 +1839,10 @@ Show generated function catalog
 <span><span class="op">)</span>, <span class="va">lift_chain</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_src</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_src</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt;   success                                                 index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">lift_dst</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">lift_dst</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt;   success                                                 index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">lifted</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_liftover.html">rduckhts_liftover</a></span><span class="op">(</span></span>
@@ -2213,10 +2216,7 @@ Show generated function catalog
 </h3>
 <p>S3 files can be query when <code>htslib</code> is built with plugins enable. This is not the case on RTools</p>
 <div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Enable htslib plugins for remote access (S3/GCS/HTTP)</span></span>
-<span><span class="fu"><a href="reference/setup_hts_env.html">setup_hts_env</a></span><span class="op">(</span><span class="op">)</span></span>
-<span></span>
-<span><span class="co"># Example S3 URL (1000 Genomes cohort VCF)</span></span>
+<code class="sourceCode R"><span><span class="co"># Example S3 URL (1000 Genomes cohort VCF)</span></span>
 <span><span class="va">s3_base</span> <span class="op">&lt;-</span> <span class="st">"s3://1000genomes-dragen-v3.7.6/data/cohorts/"</span></span>
 <span><span class="va">s3_path</span> <span class="op">&lt;-</span> <span class="st">"gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/"</span></span>
 <span><span class="va">s3_vcf_file</span> <span class="op">&lt;-</span> <span class="st">"3202_samples_cohort_gg_chr22.vcf.gz"</span></span>
@@ -2480,7 +2480,7 @@ Show generated function catalog
 <span><span class="va">index_raw</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index_raw.html">rduckhts_hts_index_raw</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_raw</span>, <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] index_type</span></span>
-<span><span class="co">#&gt; [2] '/tmp/rduckhts-lib.lys1/Rduckhts/extdata/vcf_file.bcf.csi'</span></span>
+<span><span class="co">#&gt; [2] '/usr/local/lib/R/site-library/Rduckhts/extdata/vcf_file.bcf.csi'</span></span>
 <span><span class="co">#&gt; [3] raw</span></span>
 <span><span class="co">#&gt; &lt;0 rows&gt; (or 0-length row.names)</span></span></code></pre></div>
 </div>

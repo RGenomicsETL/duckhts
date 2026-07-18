@@ -63,7 +63,8 @@ uses the bundled plugins directory if available.</p></dd>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Call this before querying remote URLs to allow htslib to locate its plugins.</p>
+    <p>Call this before the process opens its first HTS file. htslib discovers
+dynamic plugins on first file access and does not rescan `HTS_PATH` later.</p>
     </div>
 
     <div class="section level2">

@@ -2,6 +2,19 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- fix `duckhts_build(...)` to obtain the DuckVEP kernel source list from
+  the package’s shared source-list helper; the fallback no longer
+  references a variable local to `duckhts_bootstrap(...)`
+- bundle htslib 1.24 and use its native deduplicating BCF/tabix
+  multi-region iterators in the DBI-visible indexed readers. Repeated or
+  overlapping regions passed to bundled `read_bcf(...)`,
+  `read_bcf_v2(...)`, `read_gff(...)`, `read_gtf(...)`,
+  `read_tabix(...)`, and single-stream `read_bcf_appender(...)` calls
+  now return each matching record once; the explicitly parallel appender
+  retains its documented per-requested-region rows. Build htslib as GNU
+  C17 so GCC 16 does not apply its GNU C23 default to this pre-C23
+  dependency. Add bundled tinytests and a Fedora GCC 16 R-devel package
+  check matching CRAN’s Fedora compiler environment
 - bundle release-matched Ensembl RegulatoryFeature and MotifFeature
   preparation and integrated consequence output for DBI workflows.
   `duckvep_model_load(...)` accepts the compact feature projection,
