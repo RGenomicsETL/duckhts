@@ -20,6 +20,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 knitr::knit_hooks$set(output = function(x, options) {
   x <- gsub(.readme_tempdir, "<tempdir>", x, fixed = TRUE)
   x <- gsub("<tempdir>/[^[:space:]]+", "<tempfile>", x)
+  x <- gsub("[[:blank:]]+(?=\\n|$)", "", x, perl = TRUE)
   .readme_output_hook(x, options)
 })
 ```
