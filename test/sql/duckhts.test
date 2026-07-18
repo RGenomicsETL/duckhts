@@ -557,27 +557,67 @@ SELECT count(*), count(DISTINCT SAMPLE_ID), count(DISTINCT FILE_OFFSET) FROM bcf
 4	2	2
 
 statement ok
-DROP TABLE IF EXISTS bcf_appender_parallel_test;
+DROP TABLE IF EXISTS bcf_appender_serial_regions_test;
 
 query I
-SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_parallel_test', region := '1:3000150-3000151,1:3062915-3062915', tidy_format := true, overwrite := true, region_threads := 2);
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_serial_regions_test', region := '1:3062915-3062915,1:3062918-3062918,1:3062915-3062915,2:3199812-3199812', tidy_format := true, overwrite := true, include_file_offset := true, region_threads := 1);
 ----
-8
+6
+
+statement ok
+DROP TABLE IF EXISTS bcf_appender_parallel_regions_test;
+
+query I
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_parallel_regions_test', region := '1:3062915-3062915,1:3062918-3062918,1:3062915-3062915,2:3199812-3199812', tidy_format := true, overwrite := true, include_file_offset := true, region_threads := 2);
+----
+6
 
 query III
-SELECT count(*), count(DISTINCT duckhts_region_idx), count(*) FILTER (WHERE duckhts_region_idx NOT IN (1, 2)) FROM bcf_appender_parallel_test;
+SELECT
+  (SELECT count(*) FROM bcf_appender_parallel_regions_test),
+  (SELECT count(DISTINCT FILE_OFFSET) FROM bcf_appender_parallel_regions_test),
+  (SELECT count(*) FROM pragma_table_info('bcf_appender_parallel_regions_test') WHERE name = 'duckhts_region_idx');
 ----
-8	2	0
+6	3	0
 
-# The single-stream appender uses the native deduplicating iterator.  The
-# explicit parallel-region path above retains one row per requested region.
+# region_threads changes scheduling, not schema or rows.  The deletion at
+# 1:3062915-3062918 overlaps two disjoint requested intervals; repeated chr1
+# intervals are deduplicated inside one htslib iterator, while chr2 is an
+# independent contig job.
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM bcf_appender_serial_regions_test EXCEPT ALL SELECT * FROM bcf_appender_parallel_regions_test)
+  UNION ALL
+  (SELECT * FROM bcf_appender_parallel_regions_test EXCEPT ALL SELECT * FROM bcf_appender_serial_regions_test)
+);
+----
+0
+
+# The same invariant holds for indexed VCF text through tbx_itr_regarray().
 statement ok
-DROP TABLE IF EXISTS bcf_appender_native_regions_test;
+DROP TABLE IF EXISTS bcf_appender_vcf_serial_test;
 
 query I
-SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_native_regions_test', region := '1:3000150-3000151,1:3000150-3000151', tidy_format := false, overwrite := true, region_threads := 1);
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', 'bcf_appender_vcf_serial_test', region := '1:100-100,1:100-100', tidy_format := true, overwrite := true, region_threads := 1);
 ----
-2
+3
+
+statement ok
+DROP TABLE IF EXISTS bcf_appender_vcf_parallel_test;
+
+query I
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', 'bcf_appender_vcf_parallel_test', region := '1:100-100,1:100-100', tidy_format := true, overwrite := true, region_threads := 2);
+----
+3
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM bcf_appender_vcf_serial_test EXCEPT ALL SELECT * FROM bcf_appender_vcf_parallel_test)
+  UNION ALL
+  (SELECT * FROM bcf_appender_vcf_parallel_test EXCEPT ALL SELECT * FROM bcf_appender_vcf_serial_test)
+);
+----
+0
 
 # --- read_bcf_appender: empty region scan still creates and commits the target ---
 statement ok
@@ -736,6 +776,16 @@ multi_region AS (
 SELECT CASE WHEN (SELECT c FROM single_region) = (SELECT c FROM multi_region) THEN 1 ELSE 0 END;
 ----
 1
+
+# Two reads span both disjoint windows; sam_itr_regarray() emits each once.
+query II
+SELECT count(*), count(DISTINCT FILE_OFFSET)
+FROM read_bam(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:920-940,CHROMOSOME_I:980-1025'
+);
+----
+3	3
 
 # --- read group / sample ---
 query I

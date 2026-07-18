@@ -621,29 +621,57 @@ test_bcf_appender <- function() {
   expect_equal(offset_counts$samples[1], 2)
   expect_equal(offset_counts$offsets[1], 2)
 
+  region_spec <- paste0(
+    "1:3062915-3062915,1:3062918-3062918,",
+    "1:3062915-3062915,2:3199812-3199812"
+  )
+  out_serial_regions <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      paste0(
+        "SELECT rows_written FROM read_bcf_appender(",
+        "%s, 'bcf_appender_serial_regions_test', ",
+        "region := %s, tidy_format := true, overwrite := true, ",
+        "include_file_offset := true, region_threads := 1)"
+      ),
+      quoted_path,
+      DBI::dbQuoteString(con, region_spec)
+    )
+  )
+  expect_equal(out_serial_regions$rows_written[1], 6)
+
   out_parallel <- DBI::dbGetQuery(
     con,
     sprintf(
       paste0(
         "SELECT rows_written FROM read_bcf_appender(",
-        "%s, 'bcf_appender_parallel_test', ",
-        "region := '1:3000150-3000151,1:3062915-3062915', ",
-        "tidy_format := true, overwrite := true, region_threads := 2)"
+        "%s, 'bcf_appender_parallel_regions_test', ",
+        "region := %s, tidy_format := true, overwrite := true, ",
+        "include_file_offset := true, region_threads := 2)"
       ),
-      quoted_path
+      quoted_path,
+      DBI::dbQuoteString(con, region_spec)
     )
   )
-  expect_equal(out_parallel$rows_written[1], 8)
+  expect_equal(out_parallel$rows_written[1], 6)
 
-  parallel_counts <- DBI::dbGetQuery(
+  parallel_schema <- DBI::dbGetQuery(
+    con,
+    "PRAGMA table_info('bcf_appender_parallel_regions_test')"
+  )
+  expect_false("duckhts_region_idx" %in% parallel_schema$name)
+
+  delta <- DBI::dbGetQuery(
     con,
     paste0(
-      "SELECT count(*) AS n, count(DISTINCT duckhts_region_idx) AS regions ",
-      "FROM bcf_appender_parallel_test"
+      "SELECT count(*) AS n FROM (",
+      "(SELECT * FROM bcf_appender_serial_regions_test EXCEPT ALL ",
+      " SELECT * FROM bcf_appender_parallel_regions_test) UNION ALL ",
+      "(SELECT * FROM bcf_appender_parallel_regions_test EXCEPT ALL ",
+      " SELECT * FROM bcf_appender_serial_regions_test))"
     )
   )
-  expect_equal(parallel_counts$n[1], 8)
-  expect_equal(parallel_counts$regions[1], 2)
+  expect_equal(delta$n[1], 0)
 }
 
 test_bcf_string_format_lists()

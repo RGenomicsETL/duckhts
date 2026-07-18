@@ -220,7 +220,7 @@ manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "parallel_empty_contigs.vcf",
   section = "mapping",
   purpose = "Indexed parallel-scan regression with leading empty contigs before live records",
-  contigs = c(paste0("empty", 1:8), "chr1"),
+  contigs = c(paste0("empty", 1:256), "chr1"),
   format_defs = list(
     tag_def("GT", "1", "String", "Genotype")
   ),
