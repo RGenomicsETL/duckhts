@@ -9,12 +9,19 @@
   multi-region iterators in the DBI-visible indexed readers. Repeated or
   overlapping regions passed to bundled `read_bcf(...)`,
   `read_bcf_v2(...)`, `read_gff(...)`, `read_gtf(...)`,
-  `read_tabix(...)`, and single-stream `read_bcf_appender(...)` calls
-  now return each matching record once; the explicitly parallel appender
-  retains its documented per-requested-region rows. Build htslib as GNU
-  C17 so GCC 16 does not apply its GNU C23 default to this pre-C23
-  dependency. Add bundled tinytests and a Fedora GCC 16 R-devel package
-  check matching CRAN’s Fedora compiler environment
+  `read_tabix(...)`, and `read_bcf_appender(...)` calls now return each
+  matching record once. The appender partitions `region_threads` work by
+  primary contig while retaining one native iterator for that contig’s
+  complete interval set, so thread count no longer changes its target
+  schema or row multiset; remove the thread-only `duckhts_region_idx`
+  column and retain opt-in `FILE_OFFSET` for restoring file order.
+  Bundled `read_bam(...)` already uses the equivalent deduplicating
+  alignment iterator. Keep BCF work claiming iterative and bounded to 16
+  workers, with bundled regressions over 256 leading header-only contigs
+  and empty requested contigs. Build htslib as GNU C17 so GCC 16 does
+  not apply its GNU C23 default to this pre-C23 dependency. Add bundled
+  tinytests and a Fedora GCC 16 R-devel package check matching CRAN’s
+  Fedora compiler environment
 - bundle release-matched Ensembl RegulatoryFeature and MotifFeature
   preparation and integrated consequence output for DBI workflows.
   `duckvep_model_load(...)` accepts the compact feature projection,
@@ -346,12 +353,11 @@ CRAN release: 2026-07-10
   adding sample pushdown, INFO/FORMAT/VEP field filters,
   projection-aware VCF unpacking, persistent decode caches, and
   count-only shortcuts for benchmarking
-- bundle the experimental `read_bcf_appender(...)` benchmark helper for
-  DBI users, which appends a narrow tidy table through DuckDB’s chunk
-  appender API; the single-stream path is transactional and surfaces
-  malformed-record errors, while the `region_threads > 1` parallel path
-  is documented as best-effort benchmarking only (no per-record error
-  surfacing or rollback)
+- bundle the initial experimental `read_bcf_appender(...)` benchmark
+  helper for DBI users; at introduction, its single-stream path was
+  transactional while the `region_threads > 1` path was explicitly
+  best-effort and lacked rollback (the current development entry above
+  records its later transactional, thread-invariant contract)
 - bundle the experimental `hts_region_union_query(...)` scalar macro for
   DBI users, which generates a `UNION ALL BY NAME` query string reading
   one HTS file through separate per-region scans; the generated query
