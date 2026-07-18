@@ -2,6 +2,18 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- bundle release-matched Ensembl RegulatoryFeature and MotifFeature
+  preparation and integrated consequence output for DBI workflows.
+  `duckvep_model_load(...)` accepts the compact feature projection,
+  while `duckvep_annotate(...)`, its compact form, and exact structural
+  adapters return typed transcript or regulation/motif rows from one
+  call; cold funcgen metadata remains joinable by feature ordinal. The
+  existing eight-argument model-receipt call remains valid and accepts
+  regulation_features_table as an optional named relation. Bundled model
+  receipts validate, count, and hash feature geometry, exclude the same
+  EMAR rows as VEP 116, and the offline fixture includes exact
+  core/funcgen provenance plus three real MotifFeature rows on
+  `KI270395.1`
 - bundle dedicated `duckvep_annotate_breakend(...)` and
   `duckvep_annotate_breakend_compact(...)` functions. DBI callers
   provide both raw VCF loci in one row and retain raw ALT, bracket
