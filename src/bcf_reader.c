@@ -244,8 +244,6 @@ typedef struct {
     int assigned_contig;       // Which contig this thread is scanning (-1 = all)
     const char* contig_name;   // Name of assigned contig (reference, don't free)
     int needs_next_contig;     // Flag to request next contig assignment
-    unsigned int next_region_idx; // Region cursor for chained region scans
-
     // Tidy format state: tracks which sample we're emitting for current record
     int tidy_current_sample;   // Current sample index in tidy mode (-1 = need to read next record)
     int tidy_record_valid;     // Whether we have a valid record buffered for tidy mode
@@ -582,6 +580,27 @@ static void parse_regions_duckdb(const char *region_str, char ***out_regions, un
     duckdb_free(dup);
     *out_regions = arr;
     *out_count = idx;
+}
+
+/* Open one htslib iterator for the complete requested region set.  HTSlib
+ * 1.24's multi-region iterators merge overlapping chunks and return a record
+ * once even when several requested regions overlap it. */
+static hts_itr_t *bcf_open_region_iterator(hts_idx_t *idx, bcf_hdr_t *hdr,
+                                           tbx_t *tbx, char **regions,
+                                           unsigned int n_regions) {
+    if (!regions || n_regions == 0) return NULL;
+
+    if (idx) {
+        return n_regions == 1
+            ? bcf_itr_querys(idx, hdr, regions[0])
+            : bcf_itr_regarray(idx, hdr, regions, n_regions);
+    }
+    if (tbx) {
+        return n_regions == 1
+            ? tbx_itr_querys(tbx, regions[0])
+            : tbx_itr_regarray(tbx, regions, n_regions);
+    }
+    return NULL;
 }
 
 static void free_string_list_duckdb(char **items, int n_items) {
@@ -2661,27 +2680,8 @@ static void bcf_read_local_init(duckdb_init_info info) {
             return;
         }
 
-        if (bind->n_regions > 1) {
-            vcf_emit_warning("Multi-region BCF/VCF queries are executed as a chained union of single-region iterators; overlapping regions may return duplicate rows");
-        }
-
-        local->next_region_idx = 0;
-        while (local->next_region_idx < bind->n_regions) {
-            const char *query_region = bind->regions[local->next_region_idx++];
-            if (local->idx) {
-                local->itr = bcf_itr_querys(local->idx, local->hdr, query_region);
-            } else if (local->tbx) {
-                local->itr = tbx_itr_querys(local->tbx, query_region);
-            }
-            if (local->itr) break;
-
-            // Avoid hard failure for non-conforming headers.
-            char msg[512];
-            snprintf(msg, sizeof(msg),
-                     "%s: region query returned no iterator; skipping region: %s",
-                     reader_name, query_region);
-            vcf_emit_warning(msg);
-        }
+        local->itr = bcf_open_region_iterator(local->idx, local->hdr, local->tbx,
+                                               bind->regions, bind->n_regions);
 
         if (!local->itr) {
             local->done = 1;
@@ -3353,23 +3353,6 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     // Try to claim next contig
                     if (claim_next_contig(init, global)) {
                         continue;  // Continue reading from new contig
-                    }
-                } else if (bind->n_regions > 0) {
-                    if (init->itr) {
-                        hts_itr_destroy(init->itr);
-                        init->itr = NULL;
-                    }
-                    while (init->next_region_idx < bind->n_regions) {
-                        const char *query_region = bind->regions[init->next_region_idx++];
-                        if (init->idx) {
-                            init->itr = bcf_itr_querys(init->idx, init->hdr, query_region);
-                        } else if (init->tbx) {
-                            init->itr = tbx_itr_querys(init->tbx, query_region);
-                        }
-                        if (init->itr) break;
-                    }
-                    if (init->itr) {
-                        continue;
                     }
                 }
                 init->done = 1;
@@ -4229,63 +4212,47 @@ static int bcf_appender_append_row(duckdb_appender appender, bcf_appender_chunk_
 }
 
 static int bcf_appender_next_record(htsFile *fp, bcf_hdr_t *hdr, bcf1_t *rec,
-                                    tbx_t *tbx, hts_idx_t *idx, hts_itr_t **itr,
-                                    char **regions, unsigned int n_regions,
-                                    unsigned int *next_region_idx, kstring_t *line,
+                                    tbx_t *tbx, hts_itr_t *itr, kstring_t *line,
                                     int want_file_offset,
                                     uint64_t *file_offset, int *has_file_offset,
                                     char *err, size_t err_size) {
-    for (;;) {
-        int ret;
-        if (*itr) {
-            if (tbx) {
-                ret = tbx_itr_next(fp, tbx, *itr, line);
-                if (ret >= 0) {
-                    ret = vcf_parse1(line, hdr, rec);
-                    line->l = 0;
-                }
-            } else {
-                ret = bcf_itr_next(fp, *itr, rec);
+    int ret;
+    if (itr) {
+        if (tbx) {
+            ret = tbx_itr_next(fp, tbx, itr, line);
+            if (ret >= 0) {
+                ret = vcf_parse1(line, hdr, rec);
+                line->l = 0;
             }
         } else {
-            ret = bcf_read(fp, hdr, rec);
+            ret = bcf_itr_next(fp, itr, rec);
         }
+    } else {
+        ret = bcf_read(fp, hdr, rec);
+    }
 
-        if (ret >= 0) {
-            if (want_file_offset) {
-                BGZF *bgzf = hts_get_bgzfp(fp);
-                if (bgzf) {
-                    *file_offset = (uint64_t)bgzf_tell(bgzf);
-                    *has_file_offset = 1;
-                } else {
-                    *file_offset = 0;
-                    *has_file_offset = 0;
-                }
+    if (ret >= 0) {
+        if (want_file_offset) {
+            BGZF *bgzf = hts_get_bgzfp(fp);
+            if (bgzf) {
+                *file_offset = (uint64_t)bgzf_tell(bgzf);
+                *has_file_offset = 1;
             } else {
                 *file_offset = 0;
                 *has_file_offset = 0;
             }
-            return 1;
+        } else {
+            *file_offset = 0;
+            *has_file_offset = 0;
         }
-
-        if (ret < -1) {
-            snprintf(err, err_size, "read_bcf_appender: failed to read or parse BCF/VCF record");
-            return -1;
-        }
-
-        if (n_regions == 0 || *next_region_idx >= n_regions) return 0;
-        if (*itr) {
-            hts_itr_destroy(*itr);
-            *itr = NULL;
-        }
-        while (*next_region_idx < n_regions) {
-            const char *region = regions[(*next_region_idx)++];
-            if (idx) *itr = bcf_itr_querys(idx, hdr, region);
-            else if (tbx) *itr = tbx_itr_querys(tbx, region);
-            if (*itr) break;
-        }
-        if (!*itr) return 0;
+        return 1;
     }
+
+    if (ret < -1) {
+        snprintf(err, err_size, "read_bcf_appender: failed to read or parse BCF/VCF record");
+        return -1;
+    }
+    return 0;
 }
 
 static int bcf_appender_append_record(duckdb_appender appender,
@@ -4706,15 +4673,10 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
         }
     }
 
-    unsigned int next_region_idx = 0;
     int region_scan_empty = 0;
     if (bind->n_regions > 0) {
-        while (next_region_idx < bind->n_regions) {
-            const char *region = bind->regions[next_region_idx++];
-            if (idx) itr = bcf_itr_querys(idx, hdr, region);
-            else if (tbx) itr = tbx_itr_querys(tbx, region);
-            if (itr) break;
-        }
+        itr = bcf_open_region_iterator(idx, hdr, tbx,
+                                       bind->regions, bind->n_regions);
         // No requested region produced an iterator (absent contig or
         // out-of-range coordinates). Skip the read loop, but still finalize and
         // commit so the empty target table is created/replaced rather than
@@ -4726,9 +4688,7 @@ static int bcf_appender_run(const bcf_appender_bind_t *bind, uint64_t *rows_writ
         for (;;) {
             uint64_t file_offset = 0;
             int has_file_offset = 0;
-            int next_record = bcf_appender_next_record(fp, hdr, rec, tbx, idx, &itr,
-                                                       bind->regions, bind->n_regions,
-                                                       &next_region_idx, &line,
+            int next_record = bcf_appender_next_record(fp, hdr, rec, tbx, itr, &line,
                                                        bind->include_file_offset,
                                                        &file_offset, &has_file_offset,
                                                        err, err_size);

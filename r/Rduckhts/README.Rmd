@@ -33,7 +33,7 @@ knitr::knit_hooks$set(output = function(x, options) {
 
 ## How it works
 
-Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.23.1 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted [`duckhts`](https://github.com/RGenomicsETL/duckhts) build path.
+Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.24 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted [`duckhts`](https://github.com/RGenomicsETL/duckhts) build path.
 
 ## Installation
 
@@ -141,6 +141,9 @@ library(DBI)
 library(duckdb)
 library(Rduckhts)
 
+# Set HTS_PATH before htslib's first file access so bundled remote handlers
+# are discoverable when this build uses dynamic plugins.
+setup_hts_env()
 
 fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
 fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
@@ -789,9 +792,6 @@ head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "ch
 S3 files can be query when `htslib` is built with plugins enable. This is not the case on RTools
 
 ```{r, eval=TRUE}
-# Enable htslib plugins for remote access (S3/GCS/HTTP)
-setup_hts_env()
-
 # Example S3 URL (1000 Genomes cohort VCF)
 s3_base <- "s3://1000genomes-dragen-v3.7.6/data/cohorts/"
 s3_path <- "gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/"

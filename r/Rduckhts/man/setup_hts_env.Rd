@@ -19,7 +19,8 @@ plugins directory. This enables remote file access via libcurl plugins
 (e.g., s3://, gs://, http://) when plugins are available.
 }
 \details{
-Call this before querying remote URLs to allow htslib to locate its plugins.
+Call this before the process opens its first HTS file. htslib discovers
+dynamic plugins on first file access and does not rescan `HTS_PATH` later.
 }
 \examples{
 \dontrun{

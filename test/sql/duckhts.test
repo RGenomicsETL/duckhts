@@ -478,6 +478,38 @@ SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) TH
 ----
 1
 
+# htslib 1.24 native multi-region iterators return an overlapping record once.
+# Exercise both indexed BCF and tabix-indexed VCF text paths.
+query II
+SELECT
+  (SELECT count(*) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/vcf_file.bcf',
+    region := '1:3000150-3000151,1:3000150-3000151')),
+  (SELECT count(*) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz',
+    region := '1:100-100,1:100-100'));
+----
+2	1
+
+query I
+SELECT count(*) FROM read_bcf_v2(
+  '__WORKING_DIRECTORY__/test/data/vcf_file.bcf',
+  region := '1:3000150-3000151,1:3000150-3000151');
+----
+2
+
+# An unknown contig does not discard valid regions in the same request.
+query II
+SELECT
+  (SELECT count(*) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/vcf_file.bcf',
+    region := 'absent_contig:1-10,1:3000150-3000151')),
+  (SELECT count(*) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz',
+    region := 'absent_contig:1-10,1:100-100'));
+----
+2	1
+
 # --- read_bcf preserves phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields ---
 query T
 SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PS=' || coalesce(CAST(FORMAT_PS AS VARCHAR), 'NA'), ',' ORDER BY POS, SAMPLE_ID)
@@ -536,6 +568,16 @@ query III
 SELECT count(*), count(DISTINCT duckhts_region_idx), count(*) FILTER (WHERE duckhts_region_idx NOT IN (1, 2)) FROM bcf_appender_parallel_test;
 ----
 8	2	0
+
+# The single-stream appender uses the native deduplicating iterator.  The
+# explicit parallel-region path above retains one row per requested region.
+statement ok
+DROP TABLE IF EXISTS bcf_appender_native_regions_test;
+
+query I
+SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', 'bcf_appender_native_regions_test', region := '1:3000150-3000151,1:3000150-3000151', tidy_format := false, overwrite := true, region_threads := 1);
+----
+2
 
 # --- read_bcf_appender: empty region scan still creates and commits the target ---
 statement ok
@@ -1209,7 +1251,7 @@ SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz
 4
 
 # --- tabix multi-region query (comma-separated) ---
-query I
+query III
 WITH r1 AS (
   SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190')
 ),
@@ -1219,9 +1261,28 @@ r2 AS (
 mr AS (
   SELECT count(*) AS c FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190,X:2937010-2937500')
 )
-SELECT CASE WHEN (SELECT c FROM mr) = (SELECT c FROM r1) + (SELECT c FROM r2) THEN 1 ELSE 0 END;
+SELECT
+  (SELECT c FROM r1),
+  (SELECT c FROM r2),
+  (SELECT c FROM mr);
 ----
-1
+4	3	5
+
+# Repeated/overlapping tabix regions are deduplicated by the htslib 1.24
+# multi-region iterator shared by the generic, GFF, and GTF projections.
+query III
+SELECT
+  (SELECT count(*) FROM read_tabix(
+    '__WORKING_DIRECTORY__/test/data/gff_file.gff.gz',
+    region := 'X:2934816-2935190,X:2934816-2935190')),
+  (SELECT count(*) FROM read_gff(
+    '__WORKING_DIRECTORY__/test/data/gff_file.gff.gz',
+    region := 'X:2934816-2935190,X:2934816-2935190')),
+  (SELECT count(*) FROM read_gtf(
+    '__WORKING_DIRECTORY__/test/data/gff_file.gff.gz',
+    region := 'X:2934816-2935190,X:2934816-2935190'));
+----
+4	4	4
 
 # ==============================================================
 # read_hts_header & read_hts_index

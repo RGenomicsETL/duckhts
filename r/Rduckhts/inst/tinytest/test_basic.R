@@ -5,6 +5,7 @@ library(tinytest)
 expect_true(requireNamespace("Rduckhts", quietly = TRUE))
 
 # Test basic functions exist
+expect_true(exists("duckhts_build"))
 expect_true(exists("rduckhts_load"))
 expect_true(exists("rduckhts_bcf"))
 expect_true(exists("rduckhts_bam"))
@@ -258,6 +259,18 @@ expect_true(file.exists(system.file(
   "functions.tsv",
   package = "Rduckhts"
 )))
+
+# The installed rebuild path and package bootstrap share one DuckVEP source
+# inventory. Every listed source must be present in the bundled tree.
+duckvep_kernel_sources <- getFromNamespace(
+  "duckhts_duckvep_kernel_source_files",
+  "Rduckhts"
+)()
+expect_true(length(duckvep_kernel_sources) > 0L)
+expect_true(all(file.exists(file.path(
+  system.file("duckhts_extension", "duckvep", "kernel", "src", package = "Rduckhts"),
+  duckvep_kernel_sources
+))))
 
 catalog <- rduckhts_functions()
 expect_true(is.data.frame(catalog))

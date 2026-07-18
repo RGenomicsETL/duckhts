@@ -99,6 +99,14 @@ test_table_creation <- function() {
     index_path = bcf_index_path,
     overwrite = TRUE
   ))
+  expect_silent(rduckhts_bcf(
+    con,
+    "variants_multi_idx",
+    bcf_path,
+    region = "1:3000150-3000151,1:3000150-3000151",
+    index_path = bcf_index_path,
+    overwrite = TRUE
+  ))
   expect_silent(rduckhts_bam(con, "reads", bam_path, overwrite = TRUE))
   expect_silent(rduckhts_bam(
     con,
@@ -136,6 +144,14 @@ test_table_creation <- function() {
     "annotations_idx",
     gff_path,
     region = "X:2934816-2935190",
+    index_path = gff_index_path,
+    overwrite = TRUE
+  ))
+  expect_silent(rduckhts_gff(
+    con,
+    "annotations_multi_idx",
+    gff_path,
+    region = "X:2934816-2935190,X:2934816-2935190",
     index_path = gff_index_path,
     overwrite = TRUE
   ))
@@ -218,15 +234,29 @@ test_table_creation <- function() {
     index_path = gff_index_path,
     overwrite = TRUE
   ))
+  expect_silent(rduckhts_tabix(
+    con,
+    "tabix_multi_idx",
+    gff_path,
+    region = "X:2934816-2935190,X:2934816-2935190",
+    index_path = gff_index_path,
+    overwrite = TRUE
+  ))
   expect_silent(rduckhts_bcf(con, "vep_variants", vep_path, overwrite = TRUE))
   expect_true(DBI::dbExistsTable(con, "variants_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM variants_idx")$n[1] == 2)
+  expect_true(DBI::dbExistsTable(con, "variants_multi_idx"))
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM variants_multi_idx")$n[1] == 2)
   expect_true(DBI::dbExistsTable(con, "reads_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM reads_idx")$n[1] == 2)
   expect_true(DBI::dbExistsTable(con, "tabix_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM tabix_idx")$n[1] == 4)
+  expect_true(DBI::dbExistsTable(con, "tabix_multi_idx"))
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM tabix_multi_idx")$n[1] == 4)
   expect_true(DBI::dbExistsTable(con, "annotations_idx"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM annotations_idx")$n[1] == 4)
+  expect_true(DBI::dbExistsTable(con, "annotations_multi_idx"))
+  expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM annotations_multi_idx")$n[1] == 4)
   expect_true(DBI::dbExistsTable(con, "sequences_region"))
   expect_true(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sequences_region")$n[1] == 1)
   expect_true(DBI::dbGetQuery(con, "SELECT length(SEQUENCE) AS n FROM sequences_region")$n[1] == 10)

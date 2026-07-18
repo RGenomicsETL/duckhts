@@ -40,6 +40,9 @@ fi
 HTSLIB_DIR="${EXT_DIR}/htslib"
 DUCKDB_CAPI_HEADER="${EXT_DIR}/duckdb_capi/duckdb_extension.h"
 CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
+# Keep htslib in a pre-C23 compiler mode.  GCC 16 defaults to GNU C23, whose
+# const-preserving string functions expose warnings in htslib 1.24.
+HTSLIB_CFLAGS="${CFLAGS} -std=gnu17"
 # Keep stricter diagnostics on DuckHTS extension sources without applying them
 # to the vendored htslib build.
 EXT_CFLAGS="${CFLAGS} -Wpedantic"
@@ -306,7 +309,7 @@ fi
     CC="${CC}" \
     AR="${AR}" \
     RANLIB="${RANLIB}" \
-    CFLAGS="${CFLAGS}" \
+    CFLAGS="${HTSLIB_CFLAGS}" \
     CPPFLAGS="${CPPFLAGS}" \
     LDFLAGS="${LDFLAGS}" \
     LIBS="${LIBS}" \

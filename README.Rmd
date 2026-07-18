@@ -27,6 +27,14 @@ knitr::knit_engines$set(sql = knitr::knit_engines$get("duckdb"))
 # CLI flags, so we launch the process directly and register it in duckknit's
 # internal session table.
 options(duckknit.duckdb = "/usr/local/bin/duckdb152")
+if (!requireNamespace("Rduckhts", quietly = TRUE)) {
+  stop("Install the bootstrapped Rduckhts package before rendering README.md")
+}
+Rduckhts::setup_hts_env()
+extension_path <- system.file(
+  "duckhts_extension", "build", "duckhts.duckdb_extension",
+  package = "Rduckhts", mustWork = TRUE
+)
 local({
   ns  <- asNamespace("duckknit")
   cmd <- duckknit:::find_duckdb()
@@ -42,12 +50,16 @@ local({
   unlockBinding(".state", ns)
   ns$.state$last_session <- "readme"
   lockBinding(".state", ns)
-})
-```
 
-```{duckdb, include = FALSE}
-SET allow_extensions_metadata_mismatch=true;
-LOAD 'build/release/duckhts.duckdb_extension';
+  load_sql <- sprintf(
+    "SET allow_extensions_metadata_mismatch=true;\nLOAD '%s';",
+    gsub("'", "''", extension_path, fixed = TRUE)
+  )
+  load_result <- duckknit:::duckknit_exec(proc, load_sql)
+  if (nzchar(trimws(load_result$stderr))) {
+    stop(load_result$stderr, call. = FALSE)
+  }
+})
 ```
 
 # DuckHTS
@@ -80,7 +92,7 @@ cat(paste(readLines("r/Rduckhts/inst/function_catalog/functions.md"), collapse =
 
 </details>
 
-`read_fastq` with `mate_path` requires exact QNAME pairing. `read_bam` supports typed `standard_tags` and `auxiliary_tags` maps. `read_tabix` supports header-aware parsing (`header`, `header_names`) and optional type inference (`auto_detect`, `column_types`). Region lists in comma-separated form are supported by `read_bam`, `read_bcf`, `read_fasta`, `read_gff`, `read_gtf`, and `read_tabix`. `read_bam` multi-region queries are deduplicated by htslib, while `read_bcf`/`read_fasta`/`read_gff`/`read_gtf`/`read_tabix` chain regions and can return duplicates for overlaps.
+`read_fastq` with `mate_path` requires exact QNAME pairing. `read_bam` supports typed `standard_tags` and `auxiliary_tags` maps. `read_tabix` supports header-aware parsing (`header`, `header_names`) and optional type inference (`auto_detect`, `column_types`). Region lists in comma-separated form are supported by `read_bam`, `read_bcf`, `read_fasta`, `read_gff`, `read_gtf`, and `read_tabix`. Indexed `read_bam`, `read_bcf`, `read_gff`, `read_gtf`, and `read_tabix` multi-region queries use htslib iterators that emit a matching record once when requested regions overlap. `read_fasta` retains its separate per-region sequence-row contract.
 
 ## Examples
 
@@ -522,7 +534,12 @@ Remote URLs (S3/GCS/HTTP/S) can work in two htslib build modes:
 1. Dynamic plugin mode (`ENABLE_PLUGINS`): remote handlers are loaded from `HTS_PATH`.
 2. Static-handler mode (plugins disabled): handlers are compiled into `libhts` and `HTS_PATH` is not needed.
 
-Use `HTS_PATH` only when you want dynamic plugin discovery (for example, to point at an external htslib plugin directory).
+Use `HTS_PATH` only when you want dynamic plugin discovery (for example, to point at an external htslib plugin directory). `Rduckhts` users only need to call the public helper before the first HTS file is opened:
+
+```r
+library(Rduckhts)
+setup_hts_env()
+```
 
 Example (works in static-handler mode and plugin mode):
 
@@ -533,13 +550,13 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
 GROUP BY CHROM;
 ```
 
-If you need dynamic plugin mode, set `HTS_PATH` before loading the extension, for example:
+For a direct DuckDB CLI process, set `HTS_PATH` explicitly before its first HTS read, for example:
 
 ```bash
-export HTS_PATH=$(Rscript --quiet -e 'cat(Rduckhts:::duckhts_htslib_plugins_dir(),sep="")')
+export HTS_PATH=$(Rscript --quiet -e 'Rduckhts::setup_hts_env(); cat(Sys.getenv("HTS_PATH"),sep="")')
 ```
 
-If `HTS_PATH` is changed after loading, restart the session and reload the extension.
+If htslib has already opened a file in the process, restart the process after changing `HTS_PATH`; plugin discovery has already occurred.
 
 If you don’t have htslib plugins installed locally, download the prebuilt binaries from the r-universe-binaries GitHub release and point `HTS_PATH` at the extracted htslib/libexec/htslib directory inside the package bundle.
 https://github.com/RGenomicsETL/duckhts/releases/tag/r-universe-binaries
@@ -665,7 +682,7 @@ brew install cmake htslib xz libdeflate
 ./scripts/vendor_htslib.sh
 ```
 
-This downloads and verifies [htslib](https://github.com/samtools/htslib) 1.23.1 into `third_party/htslib/`.
+This downloads and verifies [htslib](https://github.com/samtools/htslib) 1.24 into `third_party/htslib/`.
 
 ### Build
 
@@ -883,7 +900,7 @@ src/
     vcf_types.h
     vep_parser.h
 third_party/
-  htslib/                # Vendored htslib 1.23.1 (built automatically)
+  htslib/                # Vendored htslib 1.24 (built automatically)
 benchmarks/
   benchmark_simd_seq_gc.Rmd  # Scalar-vs-runtime-SIMD benchmark report
 test/

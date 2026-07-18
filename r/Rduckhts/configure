@@ -73,6 +73,12 @@ if [ "${WASM_BUILD}" = "yes" ]; then
   LDFLAGS="${LDFLAGS} ${EM_PORT_FLAGS}"
 fi
 
+# htslib 1.24 targets pre-C23 C.  GCC 16 defaults to GNU C23, where the
+# type-generic string functions preserve const qualifiers and expose warnings
+# in otherwise valid upstream code.  Keep this standard override local to the
+# vendored dependency; DuckHTS sources continue to use R's compiler mode.
+HTSLIB_CFLAGS="${CFLAGS} -std=gnu17"
+
 # Keep stricter diagnostics on DuckHTS extension sources without applying them
 # to the vendored htslib build.
 EXT_CFLAGS="${CFLAGS} -Wpedantic"
@@ -323,7 +329,7 @@ env ${HTSLIB_CONFIGURE_CACHE_VARS} ./configure \
   CC="${CC}" \
   AR="${AR}" \
   RANLIB="${RANLIB}" \
-  CFLAGS="${CFLAGS}" \
+  CFLAGS="${HTSLIB_CFLAGS}" \
   CPPFLAGS="${CPPFLAGS}" \
   LDFLAGS="${LDFLAGS}" \
   LIBS="${HTSLIB_LIBS}" \

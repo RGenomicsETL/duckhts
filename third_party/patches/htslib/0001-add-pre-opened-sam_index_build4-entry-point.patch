@@ -14,7 +14,7 @@ diff --git a/htslib/sam.h b/htslib/sam.h
 index 53d0059..7fb7a7c 100644
 --- a/htslib/sam.h
 +++ b/htslib/sam.h
-@@ -1253,6 +1253,22 @@ int sam_index_build2(const char *fn, const char *fnidx, int min_shift) HTS_RESUL
+@@ -1256,6 +1256,22 @@ int sam_index_build2(const char *fn, const char *fnidx, int min_shift) HTS_RESUL
  HTSLIB_EXPORT
  int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthreads) HTS_RESULT_USED;
  
@@ -41,7 +41,7 @@ diff --git a/sam.c b/sam.c
 index 37d404b..e7b872b 100644
 --- a/sam.c
 +++ b/sam.c
-@@ -1028,11 +1028,22 @@ err:
+@@ -1037,11 +1037,22 @@ err:
  
  int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthreads)
  {
@@ -66,7 +66,7 @@ index 37d404b..e7b872b 100644
      if (nthreads)
          hts_set_threads(fp, nthreads);
  
-@@ -1063,7 +1074,6 @@ int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthre
+@@ -1072,7 +1083,6 @@ int sam_index_build3(const char *fn, const char *fnidx, int min_shift, int nthre
          ret = -3;
          break;
      }
