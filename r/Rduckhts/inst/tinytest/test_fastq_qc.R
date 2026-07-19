@@ -8,8 +8,15 @@ test_fastq_qc <- function() {
   expect_silent(rduckhts_load(con))
 
   fastq <- system.file("extdata", "r1.fq", package = "Rduckhts")
+  long_qname_fastq <- system.file(
+    "extdata", "fastq_long_qname.fq", package = "Rduckhts"
+  )
   expect_true(file.exists(fastq))
+  expect_true(file.exists(long_qname_fastq))
   quoted_fastq <- as.character(DBI::dbQuoteString(con, fastq))
+  quoted_long_qname_fastq <- as.character(
+    DBI::dbQuoteString(con, long_qname_fastq)
+  )
 
   summary <- DBI::dbGetQuery(con, sprintf(paste(
     "WITH q AS (",
@@ -55,6 +62,21 @@ test_fastq_qc <- function() {
   expect_equal(cycles$bases, rep(5, 4))
   expect_equal(cycles$quality_sum, c(169, 194, 193, 184))
 
+  long_qname_summary <- DBI::dbGetQuery(con, sprintf(paste(
+    "WITH q AS (",
+    "SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc",
+    "FROM read_fastq(%s)",
+    ") SELECT qc.reads::INTEGER AS reads, qc.bases::INTEGER AS bases FROM q"
+  ), quoted_long_qname_fastq))
+  expect_equal(long_qname_summary$reads[1], 1L)
+  expect_equal(long_qname_summary$bases[1], 4L)
+  expect_error(
+    DBI::dbGetQuery(
+      con, sprintf("SELECT NAME FROM read_fastq(%s)", quoted_long_qname_fastq)
+    ),
+    "query name exceeds 254 bytes"
+  )
+
   expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
   DBI::dbExecute(con, paste(
     "CREATE TEMP TABLE fastq_qc_scalar AS",
@@ -91,6 +113,13 @@ test_fastq_qc <- function() {
     ") SELECT qc.max_read_length::INTEGER AS n FROM q"
   ))
   expect_equal(explicit_limit$n[1], 129L)
+  single_cycle_limit <- DBI::dbGetQuery(con, paste(
+    "WITH q AS (SELECT duckhts_fastq_qc('A', 'I', 1) AS qc)",
+    "SELECT qc.max_read_length::INTEGER AS n,",
+    "len(qc.cycles)::INTEGER AS cycle_count FROM q"
+  ))
+  expect_equal(single_cycle_limit$n[1], 1L)
+  expect_equal(single_cycle_limit$cycle_count[1], 1L)
   expect_error(
     DBI::dbGetQuery(con, "SELECT duckhts_fastq_qc('AC', 'I')"),
     "equal length"

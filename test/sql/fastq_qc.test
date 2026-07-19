@@ -40,6 +40,24 @@ ORDER BY cycle.cycle;
 33	5	193	2	0	2	1	0	0	76	0	78	39
 100	5	184	4	0	1	0	0	0	145	0	39	0
 
+# The projected text path does not inherit bam1_t's QNAME limit when the
+# query name is neither returned nor needed for mate comparison.
+query II
+WITH summary AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('__WORKING_DIRECTORY__/test/data/fastq_long_qname.fq')
+)
+SELECT qc.reads, qc.bases FROM summary;
+----
+1	4
+
+# Publishing NAME retains the htslib/BAM-compatible query-name contract.
+statement error
+SELECT NAME
+FROM read_fastq('__WORKING_DIRECTORY__/test/data/fastq_long_qname.fq');
+----
+read_fastq: query name exceeds 254 bytes
+
 # NULL sequence/quality pairs are ignored under normal aggregate NULL
 # handling, while zero-length reads remain real reads.
 query III
@@ -60,6 +78,15 @@ WITH summary AS (
 SELECT qc.reads, qc.bases, qc.max_read_length FROM summary;
 ----
 1	129	129
+
+# A sub-128 explicit limit is also the initial allocation bound.
+query III
+WITH summary AS (
+  SELECT duckhts_fastq_qc('A', 'I', 1) AS qc
+)
+SELECT qc.reads, qc.max_read_length, len(qc.cycles) FROM summary;
+----
+1	1	1
 
 statement error
 SELECT duckhts_fastq_qc('AC', 'I');

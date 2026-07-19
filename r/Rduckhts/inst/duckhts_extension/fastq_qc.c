@@ -95,7 +95,9 @@ static int duckhts_fastq_qc_ensure_cycles(duckhts_fastq_qc_state_t *state,
     }
     if (needed > state->max_cycles) return 0;
 
-    new_capacity = state->cycle_capacity ? state->cycle_capacity : 128u;
+    new_capacity = state->cycle_capacity
+        ? state->cycle_capacity
+        : (state->max_cycles < 128u ? state->max_cycles : 128u);
     while (new_capacity < needed) {
         if (new_capacity > state->max_cycles / 2u) {
             new_capacity = state->max_cycles;

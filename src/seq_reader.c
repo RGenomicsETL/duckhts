@@ -330,6 +330,10 @@ static int fastq_extract_qname(const kstring_t *line, kstring_t *name,
     size_t name_len;
 
     if (!line) return -1;
+    /* The BAM QNAME limit is part of the published NAME/PAIR_ID contract,
+     * not FASTQ record framing.  Avoid both the scan and the limit when the
+     * query name is neither returned nor needed to compare mate files. */
+    if (!keep_name) return 0;
     while (end < line->l && !isspace((unsigned char)line->s[end])) end++;
     name_len = end - start;
 
@@ -341,7 +345,6 @@ static int fastq_extract_qname(const kstring_t *line, kstring_t *name,
     }
     if (name_len == 0) name_len = 1; /* bam_set1() publishes "*" */
     if (name_len > BAM_MAX_QNAME_LEN) return -2;
-    if (!keep_name) return 0;
 
     if (ks_resize(name, name_len + 1) < 0) return -1;
     if (end == start) {
