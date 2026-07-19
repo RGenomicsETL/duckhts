@@ -2,6 +2,25 @@
 
 ## Rduckhts 1.4.0.9000-0.1.0 (development)
 
+- fix bundled projected `read_fastq(...)` scans so FASTQ headers longer
+  than the BAM query-name limit remain usable when `NAME` / `PAIR_ID`
+  are not requested and no paired-file comparison needs them;
+  name-producing scans retain the htslib-compatible limit. An explicit
+  bundled `duckhts_fastq_qc(..., max_cycles)` value below 128 now also
+  caps the initial per-group cycle allocation
+- bundle `duckhts_fastq_qc(sequence, quality [, max_cycles])` for DBI
+  workflows that need exact global and per-cycle FASTQ quality
+  statistics without expanding one row per base; the bundled scalar,
+  AVX2, ARM NEON, and wasm SIMD128 implementations share one dispatch
+  contract, and tinytests compare forced scalar with automatic selection
+  over grouped and malformed inputs
+- accelerate bundled `read_fastq(...)` scans by parsing FASTQ directly
+  over htslib transport into projected DBI columns instead of
+  round-tripping through temporary BAM records; multiline records,
+  htslib-style query names, paired/interleaved checks, string and packed
+  nt16/Phred output, quality conversion, and count behavior are
+  retained, while truncated quality blocks now surface as R/DBI errors.
+  Add bundled multiline, packed-output, and truncation tinytests
 - fix `duckhts_build(...)` to obtain the DuckVEP kernel source list from
   the package’s shared source-list helper; the fallback no longer
   references a variable local to `duckhts_bootstrap(...)`

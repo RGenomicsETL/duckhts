@@ -214,6 +214,7 @@
 <span><span class="co">#&gt; 1 seq_base_counts             avx2           FALSE</span></span>
 <span><span class="co">#&gt; 2 bam_nt16_counts             avx2           FALSE</span></span>
 <span><span class="co">#&gt; 3  nt16_gc_counts             avx2           FALSE</span></span>
+<span><span class="co">#&gt; 4        fastq_qc             avx2           FALSE</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_set_backend</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"scalar"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] "scalar"</span></span>
@@ -906,6 +907,33 @@ Show generated function catalog
 <td>Return TRUE when two RegionKeys overlap.</td>
 </tr>
 </tbody>
+</table>
+</div>
+<div class="section level3">
+<h3 id="quality-control">Quality Control<a class="anchor" aria-label="anchor" href="#quality-control"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="3%">
+<col width="2%">
+<col width="1%">
+<col width="1%">
+<col width="90%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>Returns</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody><tr class="odd">
+<td><code>duckhts_fastq_qc</code></td>
+<td>aggregate</td>
+<td>STRUCT</td>
+<td></td>
+<td>Aggregate canonical sequence and Phred+33 quality strings directly into exact read/base/Q20/Q30/Q40, nucleotide, quality-sum, and per-cycle sufficient statistics. The nested cycles list supports mean-quality, nucleotide-content, GC, and read-length curves without expanding one SQL row per base. Rows with any NULL input are ignored. Per-cycle state defaults to at most 1,048,576 cycles; pass a constant max_cycles per aggregate group to choose a larger explicit limit, up to 16,777,216.</td>
+</tr></tbody>
 </table>
 </div>
 <div class="section level3">
@@ -2023,7 +2051,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bcf_index_meta</span></span>
-<span><span class="co">#&gt;   success                                             index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          CSI</span></span>
 <span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span></span>
@@ -2265,7 +2293,7 @@ Show generated function catalog
 <span><span class="co">#&gt; 5    1 HS25_09827:2:1201:1624:69925#49</span></span></code></pre></div>
 </div>
 <div class="section level3">
-<h3 id="fastq-quality-decoding-and-per-position-histograms">FASTQ quality decoding and per-position histograms<a class="anchor" aria-label="anchor" href="#fastq-quality-decoding-and-per-position-histograms"></a>
+<h3 id="fastq-quality-decoding-and-fused-qc">FASTQ quality decoding and fused QC<a class="anchor" aria-label="anchor" href="#fastq-quality-decoding-and-fused-qc"></a>
 </h3>
 <p>FASTQ quality handling has two separate knobs:</p>
 <ul>
@@ -2281,7 +2309,25 @@ Show generated function catalog
 <li>Return either numeric arrays or canonical Phred+33 text.</li>
 </ol>
 <p><code>BAM</code>/<code>CRAM</code> reads skip the text-decoding step because qualities are already stored numerically.</p>
+<p>For ordinary QC, aggregate the sequence and canonical quality strings directly. This returns exact global totals plus a small nested per-cycle relation without generating one SQL row per base.</p>
 <div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">fastq_qc</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>,</span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span></span>
+<span>    <span class="st">"WITH q AS (</span></span>
+<span><span class="st">       SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc</span></span>
+<span><span class="st">       FROM read_fastq('%s')</span></span>
+<span><span class="st">     )</span></span>
+<span><span class="st">     SELECT qc.reads, qc.bases, qc.q30_bases, qc.max_read_length</span></span>
+<span><span class="st">     FROM q"</span>,</span>
+<span>    <span class="va">fastq_r1</span></span>
+<span>  <span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">fastq_qc</span></span>
+<span><span class="co">#&gt;   reads bases q30_bases max_read_length</span></span>
+<span><span class="co">#&gt; 1     5   500       475             100</span></span></code></pre></div>
+<p>Use numeric quality arrays when the query genuinely needs the full per-position histogram:</p>
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">legacy_fastq</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"legacy_phred64.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_detect_quality_encoding.html">rduckhts_detect_quality_encoding</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">legacy_fastq</span><span class="op">)</span></span>
@@ -2332,7 +2378,7 @@ Show generated function catalog
 </h3>
 <p>GFF3 files are read with <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code> / SQL <code>read_gff(...)</code>; GTF files are read with <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code> / SQL <code>read_gtf(...)</code>. <code>strict = TRUE</code> enables GFF3 structural validation. Attribute decoding can be scalar and raw for legacy convenience (<code>attributes_map</code>), grouped and lossless for multi-values (<code>attributes_list</code>, a DuckDB <code>MAP(VARCHAR, VARCHAR[])</code>), or exact parser-style pairs (<code>attributes_pairs</code>, a DuckDB <code>LIST&lt;STRUCT(key, value, idx)&gt;</code>).</p>
 <p>The extension-level GFF3 implementation is benchmarked and audited against <a href="https://github.com/Kuanhao-Chao/gffbase" class="external-link">GFFBase</a> in the DuckHTS repo: <a href="https://github.com/RGenomicsETL/duckhts/blob/develop/benchmarks/benchmark_gffbase_conformance.md" class="external-link uri">https://github.com/RGenomicsETL/duckhts/blob/develop/benchmarks/benchmark_gffbase_conformance.md</a>.</p>
-<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gff_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"gff_file.gff.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_gff.html">rduckhts_gff</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"genes"</span>, <span class="va">gff_path</span>, attributes_map <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT seqname, start, \"end\" FROM genes WHERE feature = 'gene' LIMIT 5"</span><span class="op">)</span></span>
@@ -2367,7 +2413,7 @@ Show generated function catalog
 <h3 id="bamcram">BAM/CRAM<a class="anchor" aria-label="anchor" href="#bamcram"></a>
 </h3>
 <p>When built with htslib codec, <code>CRAM</code> can be opened in addition to <code>BAM</code> files. <code>index_path</code> can also be passed for region scans with non-standard index names.</p>
-<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cram_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.cram"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">ref_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"ce.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -2397,7 +2443,7 @@ Show generated function catalog
 <h3 id="samtags--auxiliary-tags">SAMtags + auxiliary tags<a class="anchor" aria-label="anchor" href="#samtags--auxiliary-tags"></a>
 </h3>
 <p>Standard SAMtags can be exposed as typed columns, and any remaining tags are available via <code>AUXILIARY_TAGS</code>:</p>
-<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">aux_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"aux_tags.sam.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_bam.html">rduckhts_bam</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"aux_reads"</span>, <span class="va">aux_path</span>, standard_tags <span class="op">=</span> <span class="cn">TRUE</span>, auxiliary_tags <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ FROM aux_reads LIMIT 1"</span><span class="op">)</span></span>
@@ -2408,7 +2454,7 @@ Show generated function catalog
 <h3 id="tabix-headers--types">Tabix headers + types<a class="anchor" aria-label="anchor" href="#tabix-headers--types"></a>
 </h3>
 <p>Use <code>header = TRUE</code> to use the first non-meta row as column names, and <code>auto_detect = TRUE</code> / <code>column_types</code> to control column typing:</p>
-<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">tabix_header</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"header_tabix.tsv.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"meta_tabix.tsv.gz"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span></span>
@@ -2435,7 +2481,7 @@ Show generated function catalog
 <h3 id="hts-header-and-index-metadata">HTS header and index metadata<a class="anchor" aria-label="anchor" href="#hts-header-and-index-metadata"></a>
 </h3>
 <p>Use metadata helpers to inspect parsed headers, raw header lines, index summaries, span-oriented index views, and raw index blobs.</p>
-<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">header_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_header.html">rduckhts_hts_header</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">header_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"record_type"</span>, <span class="st">"id"</span>, <span class="st">"number"</span>, <span class="st">"value_type"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   record_type   id number value_type</span></span>
@@ -2488,7 +2534,7 @@ Show generated function catalog
 <h3 id="remote-gtex-tabix-example">Remote GTEx tabix example<a class="anchor" aria-label="anchor" href="#remote-gtex-tabix-example"></a>
 </h3>
 <p>GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this still depends on CORS policy on both the data object and index object.</p>
-<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gtex_url</span> <span class="op">&lt;-</span> <span class="st">"https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"</span> </span>
 <span><span class="fu"><a href="reference/rduckhts_tabix.html">rduckhts_tabix</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"gtex_eqtl"</span>, <span class="va">gtex_url</span>, region <span class="op">=</span> <span class="st">"1:11868-14409"</span>,</span>
 <span>                  header <span class="op">=</span> <span class="cn">TRUE</span>, auto_detect <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -2511,7 +2557,7 @@ Show generated function catalog
 <span><span class="co">#&gt; 3    13550   G   A  SNP rs554008981</span></span>
 <span><span class="co">#&gt; 4    13550   G   A  SNP rs554008981</span></span>
 <span><span class="co">#&gt; 5    13550   G   A  SNP rs554008981</span></span></code></pre></div>
-<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 </div>
 </div>
