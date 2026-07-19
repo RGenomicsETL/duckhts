@@ -35,7 +35,8 @@ and fastp are not the same computation.
 | htslib                              | 1.24, vendored                                                                                            |
 | previous DuckHTS                    | 247e5c8                                                                                                   |
 | direct-parser DuckHTS               | a88fe105056c                                                                                              |
-| fused-QC artifact                   | 895c910; sha256 198b6f28cf31576022d2fbe42d1c49298b5eda6b6d573a45eab469a608546221                          |
+| fused-QC predecessor artifact       | 895c910; sha256 198b6f28cf31576022d2fbe42d1c49298b5eda6b6d573a45eab469a608546221                          |
+| fused-QC reviewed artifact          | e28ae17; sha256 0d34cd8cbc2ef6c51d5c6780a3a1dbe1d08a3f6bc4d3fc112e68b361781aa665                          |
 | fastp                               | 1.3.6-4-gd517536; commit d517536b021bca0916cf33cb456f4e4b8aa24456; -O3; Highway, ISA-L 2.31.0, libdeflate |
 
 The fastp command used `-w 1`, `--disable_adapter_trimming`,
@@ -102,30 +103,32 @@ The DuckHTS formulations are:
   file; the table reports their summed wall time and largest per-process
   RSS.
 
-| engine  | workload        |  seconds | peak_rss_kib |     reads |       bases | threads | cpu | nice | million_reads_per_second | million_bases_per_second | relative_to_fastp |
-|:--------|:----------------|---------:|-------------:|----------:|------------:|--------:|----:|-----:|-------------------------:|-------------------------:|------------------:|
-| DuckHTS | per-base SQL    | 1236.185 |       166360 | 168453484 | 17013801884 |       1 |   2 |    0 |                    0.136 |                   13.763 |             0.146 |
-| DuckHTS | fused aggregate |  215.149 |       169668 | 168453484 | 17013801884 |       1 |   2 |  -10 |                    0.783 |                   79.079 |             0.839 |
-| fastp   | QC, no output   |  180.580 |        45192 | 168453484 | 17013801884 |       1 |   2 |  -10 |                    0.933 |                   94.218 |             1.000 |
+| engine  | workload                  |  seconds | peak_rss_kib |     reads |       bases | threads | cpu | nice | million_reads_per_second | million_bases_per_second | relative_to_fastp |
+|:--------|:--------------------------|---------:|-------------:|----------:|------------:|--------:|----:|-----:|-------------------------:|-------------------------:|------------------:|
+| DuckHTS | per-base SQL              | 1236.185 |       166360 | 168453484 | 17013801884 |       1 |   2 |    0 |                    0.136 |                   13.763 |             0.146 |
+| DuckHTS | fused aggregate (895c910) |  215.149 |       169668 | 168453484 | 17013801884 |       1 |   2 |  -10 |                    0.783 |                   79.079 |             0.839 |
+| DuckHTS | fused aggregate (e28ae17) |  210.723 |       169744 | 168453484 | 17013801884 |       1 |   2 |  -10 |                    0.799 |                   80.740 |             0.857 |
+| fastp   | QC, no output             |  180.580 |        45192 | 168453484 | 17013801884 |       1 |   2 |  -10 |                    0.933 |                   94.218 |             1.000 |
 
-The final fused aggregate reaches 782,962 reads/s and 79.08 million
+The reviewed fused aggregate reaches 799,407 reads/s and 80.74 million
 bases/s while returning all global and per-cycle sufficient statistics.
-It is **19.1% slower than fastp** on the exact-artifact, equal-priority
+It is **16.7% slower than fastp** on the exact-artifact, equal-priority
 one-core gzip comparison. The earlier normal-priority series measured
 1,236.185 seconds for the per-base SQL plan and 216.609 seconds for the
-aggregate (5.71x); the final aggregate’s 215.149 seconds independently
-preserves that conclusion, but the table labels the scheduler difference
-instead of presenting the 5.75x quotient as a strictly paired
-measurement. The result validates the aggregate architecture, not a
-claim that DuckHTS has already won the parser race.
+aggregate (5.71x). On the equal-priority protocol, the review fixes
+changed the fused run from 215.149 to 210.723 seconds, a 2.1% reduction;
+each full-corpus cell is one warmed run, so that small difference is
+directional evidence rather than a stable multiplier. The table labels
+the scheduler difference instead of presenting an unpaired per-base-SQL
+quotient. The result validates the aggregate architecture, not a claim
+that DuckHTS has already won the parser race.
 
 The original reader-only gzip text scan took a 25.686-second median for
 the first file; the same source tree plus fused QC took 25.816 seconds
-in its smoke run. The final exact-artifact aggregate probe took 25.53
-seconds under the paired-QC scheduler protocol. Together these
+in its smoke run. Together with the complete-corpus runs, these
 measurements indicate that gzip decode, line parsing, normalization, and
 DuckDB string materialization dominate here. The eleven exact per-cycle
-updates are not the observed 19.1% gap to fastp. The next reader
+updates are not the observed 16.7% gap to fastp. The next reader
 experiment should target a bounded ordinary-four-line block path with
 multiline fallback, while retaining htslib transport and the current
 error contract.

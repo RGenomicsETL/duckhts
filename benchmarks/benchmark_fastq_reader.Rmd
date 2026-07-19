@@ -43,7 +43,7 @@ provenance <- data.frame(
   item = c(
     "host", "reader/SQL-negative-control pinning", "paired-QC pinning",
     "DuckDB", "htslib", "previous DuckHTS", "direct-parser DuckHTS",
-    "fused-QC artifact", "fastp"
+    "fused-QC predecessor artifact", "fused-QC reviewed artifact", "fastp"
   ),
   value = c(
     "13th Gen Intel Core i5-13500; Linux x86-64",
@@ -54,6 +54,7 @@ provenance <- data.frame(
     "247e5c8",
     "a88fe105056c",
     "895c910; sha256 198b6f28cf31576022d2fbe42d1c49298b5eda6b6d573a45eab469a608546221",
+    "e28ae17; sha256 0d34cd8cbc2ef6c51d5c6780a3a1dbe1d08a3f6bc4d3fc112e68b361781aa665",
     "1.3.6-4-gd517536; commit d517536b021bca0916cf33cb456f4e4b8aa24456; -O3; Highway, ISA-L 2.31.0, libdeflate"
   ),
   stringsAsFactors = FALSE
@@ -137,15 +138,18 @@ The DuckHTS formulations are:
 
 ```{r qc-data}
 qc <- data.frame(
-  engine = c("DuckHTS", "DuckHTS", "fastp"),
-  workload = c("per-base SQL", "fused aggregate", "QC, no output"),
-  seconds = c(1236.185, 215.149, 180.580),
-  peak_rss_kib = c(166360, 169668, 45192),
+  engine = c("DuckHTS", "DuckHTS", "DuckHTS", "fastp"),
+  workload = c(
+    "per-base SQL", "fused aggregate (895c910)",
+    "fused aggregate (e28ae17)", "QC, no output"
+  ),
+  seconds = c(1236.185, 215.149, 210.723, 180.580),
+  peak_rss_kib = c(166360, 169668, 169744, 45192),
   reads = 168453484,
   bases = 17013801884,
   threads = 1,
   cpu = 2,
-  nice = c(0, -10, -10),
+  nice = c(0, -10, -10, -10),
   stringsAsFactors = FALSE
 )
 qc$million_reads_per_second <- qc$reads / qc$seconds / 1e6
@@ -154,23 +158,24 @@ qc$relative_to_fastp <- qc$seconds[qc$engine == "fastp"] / qc$seconds
 knitr::kable(qc, digits = 3)
 ```
 
-The final fused aggregate reaches 782,962 reads/s and 79.08 million bases/s
+The reviewed fused aggregate reaches 799,407 reads/s and 80.74 million bases/s
 while returning all global and per-cycle sufficient statistics. It is
-**19.1% slower than fastp** on the exact-artifact, equal-priority one-core gzip
+**16.7% slower than fastp** on the exact-artifact, equal-priority one-core gzip
 comparison. The earlier normal-priority series measured 1,236.185 seconds for
-the per-base SQL plan and 216.609 seconds for the aggregate (5.71x); the final
-aggregate's 215.149 seconds independently preserves that conclusion, but the
-table labels the scheduler difference instead of presenting the 5.75x quotient
-as a strictly paired measurement. The result validates the aggregate
-architecture, not a claim that DuckHTS has already won the parser race.
+the per-base SQL plan and 216.609 seconds for the aggregate (5.71x). On the
+equal-priority protocol, the review fixes changed the fused run from 215.149 to
+210.723 seconds, a 2.1% reduction; each full-corpus cell is one warmed run, so
+that small difference is directional evidence rather than a stable multiplier.
+The table labels the scheduler difference instead of presenting an unpaired
+per-base-SQL quotient. The result validates the aggregate architecture, not a
+claim that DuckHTS has already won the parser race.
 
 The original reader-only gzip text scan took a 25.686-second median for the
 first file; the same source tree plus fused QC took 25.816 seconds in its smoke
-run. The final exact-artifact aggregate probe took 25.53 seconds under the
-paired-QC scheduler protocol. Together these measurements indicate that gzip
-decode, line parsing, normalization, and DuckDB string materialization dominate
-here. The eleven exact per-cycle updates are not the observed 19.1% gap to
-fastp. The next reader experiment should target a
+run. Together with the complete-corpus runs, these measurements indicate that
+gzip decode, line parsing, normalization, and DuckDB string materialization
+dominate here. The eleven exact per-cycle updates are not the observed 16.7%
+gap to fastp. The next reader experiment should target a
 bounded ordinary-four-line block path with multiline fallback, while retaining
 htslib transport and the current error contract.
 
