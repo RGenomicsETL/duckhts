@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- keep paired-BND result materialization linear in the dominant transcript-row
+  count: transcript and interval-feature evaluators remain separate sorted
+  streams, only the smaller feature stream is ordered by object kind, and a
+  worker-owned merge buffer combines them in variant-major order. Models with
+  no resident regulation features now retain the original transcript-only fast
+  path instead of sorting an already ordered expansion
 - tighten the DuckVEP statistical consequence oracle around VEP 116 terminal-codon
   insertions: the insertion-length-aware endpoint reconstruction is now modeled only for
   empty or `X`-containing local alternate peptides, while concrete local peptides retain

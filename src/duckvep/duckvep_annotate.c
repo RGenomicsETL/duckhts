@@ -49,6 +49,8 @@ typedef struct duckvep_scalar_state {
 	duckvep_consequence_t *results;
 	size_t result_count;
 	size_t result_capacity;
+	duckvep_consequence_t *result_merge;
+	size_t result_merge_capacity;
 	struct duckvep_scalar_state *next_free;
 } duckvep_scalar_state_t;
 
@@ -144,6 +146,23 @@ duckvep_scalar_result_reserve(duckvep_scalar_state_t *state, size_t needed)
 	return 1;
 }
 
+static int
+duckvep_scalar_result_merge_reserve(duckvep_scalar_state_t *state,
+	size_t needed)
+{
+	size_t capacity;
+
+	if (needed <= state->result_merge_capacity)
+		return 1;
+	capacity = duckvep_sql_next_capacity(state->result_merge_capacity,
+	    needed);
+	if (!duckvep_sql_resize((void **)&state->result_merge,
+	    sizeof(*state->result_merge), capacity))
+		return 0;
+	state->result_merge_capacity = capacity;
+	return 1;
+}
+
 static void
 duckvep_scalar_state_destroy(void *pointer)
 {
@@ -178,6 +197,7 @@ duckvep_scalar_state_destroy(void *pointer)
 	free(state->pair_variant_indices);
 	free(state->pair_object_indices);
 	free(state->results);
+	free(state->result_merge);
 	free(state);
 }
 
@@ -752,6 +772,47 @@ duckvep_scalar_bnd_result_compare(const void *left, const void *right)
 	return 0;
 }
 
+/* The transcript and interval-feature evaluators each emit a sorted stream.
+ * Only the smaller interval-feature stream needs sorting by object kind before
+ * the streams are merged. Keeping that stream in worker-owned scratch avoids
+ * sorting the already ordered transcript expansion, which is normally several
+ * orders of magnitude larger. */
+static int
+duckvep_scalar_merge_bnd_results(duckvep_scalar_state_t *state,
+	size_t begin, size_t middle, size_t end, char *error, size_t error_size)
+{
+	size_t left, right, write, feature_count;
+
+	feature_count = end - middle;
+	if (feature_count == 0u)
+		return 1;
+	if (feature_count > 1u)
+		qsort(state->results + middle, feature_count,
+		    sizeof(*state->results), duckvep_scalar_bnd_result_compare);
+	if (middle == begin)
+		return 1;
+	if (!duckvep_scalar_result_merge_reserve(state, feature_count)) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: out of memory merging result streams");
+		return 0;
+	}
+	memcpy(state->result_merge, state->results + middle,
+	    feature_count * sizeof(*state->result_merge));
+	left = middle;
+	right = feature_count;
+	write = end;
+	while (left > begin && right > 0u) {
+		if (duckvep_scalar_bnd_result_compare(&state->results[left - 1u],
+		    &state->result_merge[right - 1u]) > 0)
+			state->results[--write] = state->results[--left];
+		else
+			state->results[--write] = state->result_merge[--right];
+	}
+	while (right > 0u)
+		state->results[--write] = state->result_merge[--right];
+	return 1;
+}
+
 static int
 duckvep_scalar_seed_index(duckvep_scalar_state_t *state,
 	cgranges_t *index, int index_complete, uint16_t seq_region,
@@ -1127,7 +1188,7 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 	duckvep_error_t kernel_error;
 	uint32_t halo_distance;
 	uint32_t search_distance;
-	size_t result_begin, result_count, variant;
+	size_t result_begin, transcript_end, variant;
 
 	if (upstream_distance > UINT32_MAX || downstream_distance > UINT32_MAX) {
 		duckvep_sql_set_error(error, error_size,
@@ -1194,17 +1255,15 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 	    state->entry->model.interval_index_complete, search_distance, 0,
 	    error, error_size))
 		return 0;
+	transcript_end = state->result_count;
 	if (state->entry->model.interval_feature_count != 0u &&
 	    !duckvep_scalar_run_breakend_object_pairs(state, batch, begin, count,
 	    state->entry->model.interval_feature_index,
 	    state->entry->model.interval_feature_index_complete, 0u, 1,
 	    error, error_size))
 		return 0;
-	result_count = state->result_count - result_begin;
-	if (result_count > 1u)
-		qsort(state->results + result_begin, result_count,
-		    sizeof(*state->results), duckvep_scalar_bnd_result_compare);
-	return 1;
+	return duckvep_scalar_merge_bnd_results(state, result_begin,
+	    transcript_end, state->result_count, error, error_size);
 }
 
 static void

@@ -1,5 +1,9 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- speed up bundled paired-BND annotation by preserving the already sorted
+  transcript stream and linearly merging only the much smaller resident
+  regulation-feature stream; transcript-only models no longer sort the full
+  expanded result before returning one list per input event
 - bundled paired-BND annotation now keeps VEP's fixed 5000-base overlap-allele admission
   independent of a caller-selected zero transcript window: an admitted local allele whose
   directional predicate is disabled contributes default `intergenic_variant` beside
