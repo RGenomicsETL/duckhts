@@ -35,7 +35,7 @@ and fastp are not the same computation.
 | htslib                              | 1.24, vendored                                                                                            |
 | previous DuckHTS                    | 247e5c8                                                                                                   |
 | direct-parser DuckHTS               | a88fe105056c                                                                                              |
-| fused-QC artifact                   | worktree-final; sha256 198b6f28cf31576022d2fbe42d1c49298b5eda6b6d573a45eab469a608546221                   |
+| fused-QC artifact                   | 895c910; sha256 198b6f28cf31576022d2fbe42d1c49298b5eda6b6d573a45eab469a608546221                          |
 | fastp                               | 1.3.6-4-gd517536; commit d517536b021bca0916cf33cb456f4e4b8aa24456; -O3; Highway, ISA-L 2.31.0, libdeflate |
 
 The fastp command used `-w 1`, `--disable_adapter_trimming`,
