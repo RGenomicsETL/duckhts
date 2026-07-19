@@ -413,14 +413,16 @@ static void region_add_vep_endpoint_utr(duckvep_region_state_t *st,
     int before_coding;
     int after_coding;
 
-    if (st == NULL || cds_s == 0u || !st->within_cdna ||
-        st->complete_overlap_feature) {
+    if (st == NULL || cds_s == 0u || !st->within_cdna) {
         return;
     }
 
     /* VEP applies its four-comparison overlap test even when a UTR interval is
      * inverted at a CDS/transcript endpoint. Keep that source-compatible state
-     * in one helper for both traversal paths. */
+     * in one helper for both traversal paths. Complete transcript overlap does
+     * not suppress these predicates: an equal-length uploaded span containing
+     * a transcript whose CDS shares both endpoints can therefore report both
+     * otherwise-empty UTRs. */
     before_coding = cds_s > 0u && end1 >= ts && start1 <= cds_s - 1u;
     after_coding = cds_e < UINT32_MAX && end1 >= cds_e + 1u && start1 <= te;
     if (fwd) {

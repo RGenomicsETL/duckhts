@@ -423,7 +423,13 @@ coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 adapter for independent biallelic small variants. Both direction windows default to VEP's
 5,000 bases; one optional distance changes both, while two values configure them separately
 and zero disables the corresponding direction (or both when it is the single symmetric
-value). The adapter copies one DuckDB vector into compact arrays, splits on
+value). These distances extend candidate admission only beyond transcript endpoints; they
+do not cap an allele span or clip an event that overlaps a transcript. Literal alleles up
+to the compact 65,535-byte slice limit retain uploaded, VEP-feature, and minimized-edit
+geometry independently. An ordinary minimized deletion that contains a complete transcript
+therefore reaches the same `transcript_ablation` fact as a symbolic deletion, while an
+equal-length containing span retains VEP's endpoint-UTR comparison behavior. The adapter
+copies one DuckDB vector into compact arrays, splits on
 model/contig/window/order changes, seeds the first candidate set through cgranges, and
 advances independent sorted transcript and regulation/motif sweeps. The SNV point path
 keeps a per-transcript exon rank and advances it monotonically; other transcript spans use
@@ -557,7 +563,7 @@ sequence, and repeat changes retain their typed geometry. A breakend is two loci
 wide interval or symbolic point.
 
 `duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)` accept exact single-locus
-events plus a typed DEL, DUP, tandem-DUP, INV, INS, CNV, or unknown operation and an
+events plus a typed DEL, DUP, tandem-DUP, tandem-repeat (`STR`), INV, INS, CNV, or unknown operation and an
 explicit loss/neutral/gain/unknown copy direction. Span operations use one-based inclusive
 start/end coordinates. An insertion uses `start = end = P` for the interbase site after
 reference base `P`; preparing symbolic VCF therefore removes the left anchor, maps a span
@@ -565,12 +571,21 @@ to `start = POS + 1, end = INFO/END`, and maps an insertion to `P = POS`. The ad
 rejects contradictory operation/direction pairs. This single-locus adapter rejects BND
 because it is not a single-locus event; the dedicated two-locus adapters below handle it.
 
+VEP expands a bounded `<CNV:TR>` from `RN` plus `RUS`/`RUC` or `RB` into literal alleles
+when the result fits its configured structural-size limit. Such an event is then an
+ordinary `VariationFeature` and enters DuckVEP's small-variant path. An oversized or
+unexpanded repeat remains a structural `tandem_repeat`. DuckVEP's `STR` type preserves
+that identity for provenance and later HGVS while reproducing VEP's tandem-duplication
+gain/insertion predicates. Raw repeat units and counts remain columns in the surrounding
+relation; the consequence kernel consumes the prepared literal allele or exact structural
+span, not parser-specific INFO strings.
+
 `duckvep_annotate_breakend(...)` and its compact form accept the local and mate regions and
-raw one-based VCF positions in one row. They query the resident cgranges transcript index
-around both loci, merge and deduplicate the transcript candidates, and call the shared C
-evaluator with explicit variant/transcript pairs. This is intentionally separate from the
-sorted single-locus sweep: neither a wide span nor two independent endpoint calls can
-reproduce VEP 116.
+raw one-based VCF positions in one row. They query the resident cgranges transcript and
+regulatory/motif indexes around both loci, merge and deduplicate each object class, and
+call shared C evaluators with explicit variant/object pairs. This is intentionally
+separate from the sorted single-locus sweep: neither a wide span nor two independent
+endpoint calls can reproduce VEP 116.
 
 The exact VEP state is asymmetric. `BaseVCF4::get_start` moves the local BND `POS` to
 `POS + 1`; `StructuralVariationFeature::_parse_breakends` retains the mate coordinate.
@@ -582,11 +597,39 @@ transcript. DuckVEP returns their consequence-set union once. A transcript reach
 through the mate has a zero region mask and NULL rich region because no local topology
 exists.
 
+VEP's `RegFeat` lane also evaluates both points. A RegulatoryFeature or MotifFeature hit
+by the shifted local point, the verbatim mate point, or both produces one DuckVEP object
+row. The result is asymmetric: a shifted-local hit retains
+`regulatory_region_variant` or `TF_binding_site_variant`; a mate-only hit takes VEP's
+generic HIGH-impact `feature_truncation` chromosome-breakpoint branch without requiring
+deletion or copy-number loss. Once the mate has discovered an object exactly, VEP also
+attaches a shifted local point on the same contig when it is outside but within the fixed
+5000-base structural-feature admission distance. That local allele falls back to
+`intergenic_variant`, so the object-level result is
+`feature_truncation&intergenic_variant`. A close point does not discover an object by
+itself. If both points hit one object exactly, the local base term wins. VEP may
+materialize duplicate identical rows or distinct allele-level rows for one object;
+DuckVEP's public contract is their consequence-set union once per `(event, object)`.
+
 The surrounding DuckDB relation retains event identity, bracket orientation, raw ALT, and
 provenance for HGVS, fusion, and round-trip consumers. Orientation does not change the
 transcript consequence set, so it is not an ignored kernel argument. The C lane preserves
 VEP's fixed 5 kb endpoint admission cap in addition to the configured directional
-upstream/downstream distances. A seeded executable differential covering chromosomes 1,
+upstream/downstream distances. These are independent controls despite sharing the same
+default number. Raising the caller distance to 10 kb may widen upstream/downstream
+transcript terms, but cannot turn an endpoint 5,001 bases from the same transcript or
+interval feature into a `StructuralVariationOverlapAllele`. Interval-feature candidate
+discovery remains exact; the fixed-cap endpoint is attached only after the mate has
+discovered that same object. This does not clamp ordinary transcript predicates: an
+overlap allele created by the mate still reads the shifted local feature, so a 10 kb
+caller window can emit an upstream/downstream term for a local point beyond the fixed
+allele-admission cap. Pure-C, SQL, and R regressions pin 5,000 versus 5,001 bases
+under both a 10 kb caller distance and a zero caller distance. In the latter case an
+admitted local transcript allele has no directional predicate and falls back to
+`intergenic_variant`, which is unioned with a mate-derived `feature_truncation`. Randomized
+sweep scenes include zero, 1, 50, 100, 4,999, 5,000, 5,001, 10,000, and 65,535-base
+windows rather than treating 5 kb as a maximum allocation size. A seeded executable
+differential covering chromosomes 1,
 2, 7, 21, and X, all four bracket orientations, same- and cross-chromosome pairs, and
 transcript/exon/intron/CDS/flank endpoint states matched all 91,428 transcript pairs from
 1,004 generated events.
@@ -608,21 +651,23 @@ resumable output cursor as transcript output. `sequence_variant`, the forty-firs
 term, has no VEP overlap predicate and is retained as registry metadata rather than emitted
 to hide an incomplete model.
 
-Raw BND ALT parsing, inserted-sequence payloads, imprecise confidence intervals, and STR
-repeat-unit/count preparation remain outside the consequence kernel. The BND statistical
-differential is now part of the executable-VEP harness; broader chromosome, species, and
-real fusion corpora remain continuing evidence rather than a second implementation.
-STR records whose repeat unit and count expand to an ordinary small edit should enter the
-existing small-variant path once per allele; oversized or underspecified repeats still
-need a typed structural input. This work is tracked at
+Raw BND ALT parsing and repeat-unit/count expansion remain outside the consequence kernel.
+VEP 116 stores `CIPOS`/`CIEND` and structural inserted-sequence payloads, but its registered
+41-term consequence predicates use nominal `POS`/`END` and its structural
+`inframe_insertion` branch explicitly has no inserted-sequence implementation. Those
+fields therefore remain required provenance and future HGVS/round-trip inputs, not missing
+consequence facts. The BND statistical differential is part of the executable-VEP harness;
+broader chromosome, species, and real fusion corpora remain continuing evidence rather
+than a second implementation. Remaining structural follow-up is tracked at
 https://github.com/RGenomicsETL/duckhts/issues/98.
 
 Callers such as Sniffles and cuteSV may provide `CIPOS`/`CIEND`, mate identity, inserted
-sequence, copy number, and several records for one event. The current exact-span API must
-not silently collapse those facts to nominal `POS`/`END`: an upstream preparation relation
-either proves exact geometry and calls the existing C lane, or carries uncertainty into a
-future typed result. Likewise, ambiguous placement between paralogous loci is source
-evidence for downstream SQL; choosing one locus is not a consequence-kernel inference.
+sequence, copy number, and several records for one event. For strict VEP-116 consequence
+parity, an upstream relation may annotate the nominal `POS`/`END` while retaining every
+confidence interval and payload beside the result. It must not relabel the nominal span as
+experimentally exact, discard those fields, or reuse it as HGVS/fusion geometry. Likewise,
+ambiguous placement between paralogous loci is source evidence for downstream SQL; choosing
+one locus is not a consequence-kernel inference.
 
 ## HGVS
 
@@ -685,16 +730,26 @@ belong as ignored arguments in the consequence-kernel API.
 - `make duckvep-corpus-differential` records the union of emitted variant/transcript or
   variant/core-feature pairs, including mismatches, misses, extras, and unresolved rows.
 - The corpus runner's small-event mode samples SNVs, MNVs, insertion-like alleles, and
-  deletion-like alleles independently by length-change bin. Structural mode either reads
+  deletion-like alleles independently by length-change bin. It can split multiallelic ALT
+  rows without rewriting genotypes, stratify by raw allele length through greater-than-
+  10-kb representations, checksum the complete source, and emit a source-eligibility
+  receipt separately from executable-VEP agreement. Structural mode either reads
   a symbolic VCF or generates seeded DEL/DUP/tandem-DUP/INV/CNV/INS events from real model
   geometry at transcript, exon, intron, splice, UTR, CDS, start-codon, and stop-codon
-  states. Independent seeds can run concurrently against one read-only attached model.
-- A held-out small-event run with seed `20260716` executed 100,000 trials per randomized C
-  property (170 tests; 204,521 assertions) and compared 100,268 generated/fixed alleles
-  with executable VEP 116. All 100,268 transcript pairs were exact. Its generated set
-  contained SNVs, MNVs, insertions, deletions, and delins; duplicate rejection deliberately
-  makes the accepted shape counts non-uniform rather than resampling a cosmetically balanced
-  result.
+  states. Breakend mode generates both local-anchor-removed and verbatim-mate points at
+  RegulatoryFeature and MotifFeature starts, midpoints, and ends when `--regulatory` is
+  enabled, in addition to transcript-derived points. Independent seeds can run
+  concurrently against one read-only attached model.
+- A held-out pure-C run with seed `20260719` executed 100,000 trials per randomized
+  property (175 tests; 204,759 assertions) and passed under the ordinary,
+  AddressSanitizer, and UndefinedBehaviorSanitizer targets. It found and minimized a rare
+  terminal-codon oracle error after 93,064 generated frame-changing cases; the pinned VEP
+  source showed that the production kernel was correct, and the corrected oracle retained
+  both concrete-local-peptide and endpoint-reconstruction coverage. The independent
+  executable-VEP run with seed `20260716` compared 100,268 generated/fixed alleles and all
+  100,268 transcript pairs were exact. Its generated set contained SNVs, MNVs, insertions,
+  deletions, and delins; duplicate rejection deliberately makes the accepted shape counts
+  non-uniform rather than resampling a cosmetically balanced result.
 - The current eight-seed GRCh38 structural campaign generated 40,375 events on chromosomes
   1, 2, 6, 11, 17, 21, 22, and X and compared 2,140,911 emitted transcript pairs with the
   executable indexed VEP 116 cache. Every pair was resolved and exact, with no missing or

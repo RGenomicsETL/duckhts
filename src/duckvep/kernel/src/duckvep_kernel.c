@@ -288,7 +288,9 @@ enum {
     DVW_MODEL_PEPTIDE_EDIT_LAYOUT = 73u,
     DVW_ANN_PAIR_COLUMNS     = 74u,
     DVW_ANN_PAIR_ORDER       = 75u,
-    DVW_MODEL_INTERVAL_FEATURE_LAYOUT = 76u
+    DVW_MODEL_INTERVAL_FEATURE_LAYOUT = 76u,
+    DVW_ANN_FEATURE_PAIR_COLUMNS = 77u,
+    DVW_ANN_FEATURE_PAIR_ORDER = 78u
 };
 
 duckvep_status_t duckvep_model_open_with_interval_features(
@@ -1485,8 +1487,10 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     int has_partial_terminal_codon;
     int breakend;
     int breakend_local_close = 0;
+    int breakend_local_in_directional_window = 0;
     int breakend_mate_close = 0;
     int breakend_mate_admits = 0;
+    int breakend_local_defaults_intergenic = 0;
 
     if (c->status != DUCKVEP_OK) return 0;
 
@@ -1502,15 +1506,20 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         breakend_mate_close = event.has_mate &&
             breakend_endpoint_close_to_transcript(
                 tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1);
-        local_admits = breakend_local_close &&
+        breakend_local_in_directional_window =
             breakend_endpoint_in_directional_window(
                 tx, (size_t)tx_idx, event.chrom_id, event.feature_start1,
                 c->options);
+        local_admits = breakend_local_close &&
+            breakend_local_in_directional_window;
         breakend_mate_admits = breakend_mate_close &&
             breakend_endpoint_in_directional_window(
                 tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1,
                 c->options);
         if (!local_admits && !breakend_mate_admits) return 1;
+        breakend_local_defaults_intergenic = breakend_local_close &&
+            !breakend_local_in_directional_window &&
+            breakend_mate_admits;
     }
     pos = event.start1;
     topology_start1 = event.feature_start1;
@@ -1533,14 +1542,18 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
-    if (breakend && !breakend_local_close) {
+    if (breakend && !breakend_local_in_directional_window) {
         duckvep_region_state_t region;
         duckvep_splice_state_t splice;
 
         /* A transcript discovered only through the mate still receives a
          * StructuralVariationOverlapAllele. Ordinary predicates keep the
-         * local feature, which cannot map here; only the mate-aware truncation
-         * predicate can add a non-default term. */
+         * local feature, but it has no configured topology here; only the
+         * mate-aware truncation predicate can add a non-default term. A local
+         * point outside the fixed 5000-base allele-admission range is not
+         * sufficient to take this branch when it remains inside the caller's
+         * wider directional window: predicates on the mate allele still read
+         * that local feature and can emit upstream/downstream. */
         memset(&region, 0, sizeof region);
         memset(&splice, 0, sizeof splice);
         duckvep_effect_ctx_fill_classified(
@@ -1670,6 +1683,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                    : event.feature_start1 - tx->end1[tx_idx];
         if (dist > c->options->upstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
+            breakend_local_defaults_intergenic = breakend_local_close;
             ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM);
             ectx.region &= ~(uint32_t)DUCKVEP_REGION_UPSTREAM;
             ectx.region_state.region_mask &=
@@ -1680,6 +1694,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                    : tx->start1[tx_idx] - event.feature_end1;
         if (dist > c->options->downstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
+            breakend_local_defaults_intergenic = breakend_local_close;
             ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM);
             ectx.region &= ~(uint32_t)DUCKVEP_REGION_DOWNSTREAM;
             ectx.region_state.region_mask &=
@@ -1751,6 +1766,15 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     cmask = kind == DUCKVEP_KIND_SV
         ? duckvep_effect_eval_structural(ectx.pre_bits)
         : duckvep_effect_eval(ectx.pre_bits);
+    /* StructuralVariationOverlap evaluates every endpoint admitted by its
+     * fixed 5000-base rule as a separate overlap allele. If the shifted local
+     * endpoint is admitted but its directional predicate was disabled by the
+     * caller's narrower upstream/downstream window, that local allele falls
+     * back to intergenic even when the mate allele independently contributes
+     * feature_truncation. The public row is the union of those allele rows. */
+    if (breakend_local_defaults_intergenic) {
+        cmask |= DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+    }
     /* BaseVariationFeatureOverlapAllele::get_all_OverlapConsequences assigns
      * VEP 116's default intergenic consequence when a real overlap allele has
      * exhausted its predicate list without a match. Preserve the transcript
@@ -1816,7 +1840,8 @@ static int annotate_interval_feature(uint32_t variant_idx,
     feature_kind = features->kind[feature_idx];
     consequence_mask = duckvep_effect_eval_interval_feature(
         (duckvep_interval_feature_kind_t)feature_kind,
-        &c->events[variant_idx], features->start1[feature_idx],
+        &c->events[variant_idx], features->chrom_id[feature_idx],
+        features->start1[feature_idx],
         features->end1[feature_idx]);
     /* The sweep uses a coarse outer interval. VEP's minimized/reversed
      * insertion geometry can reject a pair at an interval endpoint. */
@@ -2367,28 +2392,36 @@ duckvep_status_t duckvep_annotate_tile(
     return status;
 }
 
-duckvep_status_t duckvep_annotate_pairs(
-    const duckvep_model_t            *model,
-    const duckvep_variant_batch_t    *variants,
-    const duckvep_candidate_pairs_t  *pairs,
-    const duckvep_options_t          *options,
-    duckvep_workspace_t              *workspace,
-    duckvep_result_builder_t         *results,
-    duckvep_error_t                  *error) {
-
+static duckvep_status_t annotate_explicit_pairs(
+    const duckvep_model_t          *model,
+    const duckvep_variant_batch_t  *variants,
+    const uint32_t                 *pair_variant_idx,
+    const uint32_t                 *pair_object_idx,
+    size_t                          pair_count,
+    int                             interval_features,
+    const duckvep_options_t        *options,
+    duckvep_workspace_t            *workspace,
+    duckvep_result_builder_t       *results,
+    duckvep_error_t                *error) {
     struct annotate_ctx ctx;
     duckvep_event_t *events = NULL;
     duckvep_status_t status;
     size_t event_bytes = 0u;
+    size_t object_count;
     size_t pair;
+    uint32_t columns_where = interval_features
+        ? DVW_ANN_FEATURE_PAIR_COLUMNS : DVW_ANN_PAIR_COLUMNS;
+    uint32_t order_where = interval_features
+        ? DVW_ANN_FEATURE_PAIR_ORDER : DVW_ANN_PAIR_ORDER;
 
     status = validate_result_builder_for_append(results, error);
     if (status != DUCKVEP_OK) return status;
-    if (pairs == NULL ||
-        (pairs->count != 0u &&
-         (pairs->variant_idx == NULL || pairs->tx_idx == NULL))) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_COLUMNS,
-                    "candidate pair view has null required columns");
+    if (pair_count != 0u &&
+        (pair_variant_idx == NULL || pair_object_idx == NULL)) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, columns_where,
+                    interval_features
+                        ? "interval-feature pair view has null required columns"
+                        : "candidate pair view has null required columns");
     }
     if (variants != NULL && variants->count != 0u) {
         if (!size_mul_checked(variants->count, sizeof *events, &event_bytes)) {
@@ -2407,19 +2440,24 @@ duckvep_status_t duckvep_annotate_pairs(
         free(events);
         return status;
     }
-    for (pair = 0u; pair < pairs->count; pair++) {
-        uint32_t variant_idx = pairs->variant_idx[pair];
-        uint32_t tx_idx = pairs->tx_idx[pair];
+    object_count = interval_features
+        ? model->interval_features.feature_count
+        : model->transcripts.transcript_count;
+    for (pair = 0u; pair < pair_count; pair++) {
+        uint32_t variant_idx = pair_variant_idx[pair];
+        uint32_t object_idx = pair_object_idx[pair];
 
         if ((size_t)variant_idx >= variants->count ||
-            (size_t)tx_idx >= model->transcripts.transcript_count ||
+            (size_t)object_idx >= object_count ||
             (pair != 0u &&
-             (variant_idx < pairs->variant_idx[pair - 1u] ||
-              (variant_idx == pairs->variant_idx[pair - 1u] &&
-               tx_idx <= pairs->tx_idx[pair - 1u])))) {
+             (variant_idx < pair_variant_idx[pair - 1u] ||
+              (variant_idx == pair_variant_idx[pair - 1u] &&
+               object_idx <= pair_object_idx[pair - 1u])))) {
             free(events);
-            return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
-                        "candidate pairs are out of range, unsorted, or duplicated");
+            return fail(error, DUCKVEP_ERR_INVALID_ARG, order_where,
+                        interval_features
+                            ? "interval-feature pairs are out of range, unsorted, or duplicated"
+                            : "candidate pairs are out of range, unsorted, or duplicated");
         }
     }
 
@@ -2435,21 +2473,64 @@ duckvep_status_t duckvep_annotate_pairs(
     ctx.results = results;
     ctx.status = DUCKVEP_OK;
     ctx.point_sorted_safe = 0;
-    for (pair = 0u; pair < pairs->count; pair++) {
-        if (!annotate_pair(pairs->variant_idx[pair], pairs->tx_idx[pair],
-                           &ctx)) {
+    for (pair = 0u; pair < pair_count; pair++) {
+        int ok = interval_features
+            ? annotate_interval_feature(pair_variant_idx[pair],
+                                        pair_object_idx[pair], &ctx)
+            : annotate_pair(pair_variant_idx[pair], pair_object_idx[pair],
+                            &ctx);
+        if (!ok) {
             status = ctx.status == DUCKVEP_ERR_RESULT_FULL
                 ? fail(error, DUCKVEP_ERR_RESULT_FULL,
                        DVW_ANN_RESULT_FULL,
                        "result builder capacity exhausted")
-                : fail(error, ctx.status, DVW_ANN_PAIR_ORDER,
-                       "candidate-pair annotation failed");
+                : fail(error, ctx.status, order_where,
+                       interval_features
+                           ? "interval-feature candidate annotation failed"
+                           : "candidate-pair annotation failed");
             free(events);
             return status;
         }
     }
     free(events);
     return DUCKVEP_OK;
+}
+
+duckvep_status_t duckvep_annotate_pairs(
+    const duckvep_model_t            *model,
+    const duckvep_variant_batch_t    *variants,
+    const duckvep_candidate_pairs_t  *pairs,
+    const duckvep_options_t          *options,
+    duckvep_workspace_t              *workspace,
+    duckvep_result_builder_t         *results,
+    duckvep_error_t                  *error) {
+
+    if (pairs == NULL) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_COLUMNS,
+                    "candidate pair view is null");
+    }
+    return annotate_explicit_pairs(
+        model, variants, pairs->variant_idx, pairs->tx_idx, pairs->count, 0,
+        options, workspace, results, error);
+}
+
+duckvep_status_t duckvep_annotate_interval_feature_pairs(
+    const duckvep_model_t                  *model,
+    const duckvep_variant_batch_t          *variants,
+    const duckvep_interval_feature_pairs_t *pairs,
+    const duckvep_options_t                *options,
+    duckvep_workspace_t                    *workspace,
+    duckvep_result_builder_t               *results,
+    duckvep_error_t                        *error) {
+
+    if (pairs == NULL) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG,
+                    DVW_ANN_FEATURE_PAIR_COLUMNS,
+                    "interval-feature pair view is null");
+    }
+    return annotate_explicit_pairs(
+        model, variants, pairs->variant_idx, pairs->feature_idx, pairs->count,
+        1, options, workspace, results, error);
 }
 
 /* Model preparation is deliberately kept after the annotation functions. It

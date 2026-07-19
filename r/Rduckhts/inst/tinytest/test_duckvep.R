@@ -474,6 +474,51 @@ expect_identical(
   )
 )
 
+breakend_regulation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.regulation_feature_index, a.consequence, a.overlap_object",
+    "FROM unnest(duckvep_annotate_breakend(",
+    "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT,",
+    "0::UINTEGER, 8::UBIGINT, 0::UBIGINT)) u(a)",
+    "WHERE a.regulation_feature_index IS NOT NULL",
+    "ORDER BY a.regulation_feature_index"
+  )
+)
+expect_equal(breakend_regulation$regulation_feature_index, c(0, 1))
+expect_identical(
+  breakend_regulation$consequence,
+  c(
+    "regulatory_region_variant",
+    "feature_truncation&intergenic_variant"
+  )
+)
+expect_identical(
+  breakend_regulation$overlap_object,
+  c("regulatory_region", "transcription_factor_binding_site")
+)
+
+breakend_mixed_vectors <- dbGetQuery(
+  con,
+  paste(
+    "WITH events(ord, local_position, mate_position) AS (VALUES",
+    "(1, 1::UBIGINT, 8::UBIGINT), (2, 2::UBIGINT, 9::UBIGINT))",
+    "SELECT ord, count(*)::INTEGER result_count,",
+    "count(*) FILTER (WHERE a.transcript_index IS NOT NULL)::INTEGER",
+    "transcript_count,",
+    "count(*) FILTER (WHERE a.regulation_feature_index IS NOT NULL)::INTEGER",
+    "regulation_count FROM events,",
+    "LATERAL unnest(duckvep_annotate_breakend_compact(",
+    "'r-ensembl-mirna', 0::UINTEGER, local_position,",
+    "0::UINTEGER, mate_position, 0::UBIGINT)) u(a)",
+    "GROUP BY ord ORDER BY ord"
+  )
+)
+expect_equal(breakend_mixed_vectors$ord, c(1, 2))
+expect_equal(breakend_mixed_vectors$result_count, c(4, 4))
+expect_equal(breakend_mixed_vectors$transcript_count, c(2, 2))
+expect_equal(breakend_mixed_vectors$regulation_count, c(2, 2))
+
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
 
@@ -537,6 +582,56 @@ partial_tail_deletion <- dbGetQuery(
 expect_identical(partial_tail_deletion$consequence, "inframe_deletion")
 expect_identical(partial_tail_deletion$status, "supported")
 expect_true(is.na(partial_tail_deletion$reason))
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_complete_span_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 108::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "3::UBIGINT transcript_flags, 100::UBIGINT cds_start,",
+    "108::UBIGINT cds_end, 'ATGAAATAA'::BLOB cds_sequence,",
+    "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence,",
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_complete_span_exons AS SELECT",
+    "0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+    "108::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "9::UBIGINT exon_cdna_end, 0::TINYINT phase,",
+    "0::TINYINT end_phase"
+  )
+)
+complete_span_queries <- c(
+  "SELECT seq_region FROM duckvep_r_regions ORDER BY seq_region",
+  "SELECT * FROM duckvep_r_complete_span_transcripts",
+  "SELECT * FROM duckvep_r_complete_span_exons"
+)
+expect_true(load_model("r-complete-span", complete_span_queries)$loaded)
+complete_span_annotations <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, reference, alternate) AS (VALUES",
+    "(1, repeat('A', 11), repeat('A', 5) || 'C' || repeat('A', 5)),",
+    "(2, repeat('A', 11), 'A'))",
+    "SELECT ord, a.consequence, a.status FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-complete-span', 1::UINTEGER, 99::UBIGINT,",
+    "reference, alternate, 0::UBIGINT)) u(a) ORDER BY ord"
+  )
+)
+expect_identical(
+  complete_span_annotations$consequence,
+  c(
+    "5_prime_UTR_variant&3_prime_UTR_variant&coding_transcript_variant",
+    "transcript_ablation"
+  )
+)
+expect_true(all(complete_span_annotations$status == "supported"))
 
 noncoding_boundary_queries <- queries
 noncoding_boundary_queries[2] <- paste(
@@ -636,6 +731,21 @@ structural_duplication <- dbGetQuery(
 expect_equal(structural_duplication$consequence_mask, 67108864)
 expect_equal(structural_duplication$status_code, 0)
 
+structural_tandem_repeat <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status",
+    "FROM unnest(duckvep_annotate_sv(",
+    "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
+    "'STR', 'UNKNOWN', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(
+  structural_tandem_repeat$consequence,
+  "transcript_amplification"
+)
+expect_identical(structural_tandem_repeat$status, "supported")
+
 breakend <- dbGetQuery(
   con,
   paste(
@@ -669,12 +779,59 @@ mate_only_breakend <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.region FROM unnest(duckvep_annotate_breakend(",
-    "'r-test', 1::UINTEGER, 300::UBIGINT,",
+    "'r-test', 1::UINTEGER, 5250::UBIGINT,",
     "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
   )
 )
 expect_identical(mate_only_breakend$consequence, "feature_truncation")
 expect_true(is.na(mate_only_breakend$region))
+
+# VEP's configurable transcript window and its fixed structural-breakend
+# allele-admission cap both default to 5000, but are not the same setting. A
+# wider 10000-base caller window does not create a local endpoint allele at
+# 5001, but ordinary predicates on the mate allele still inspect that local
+# feature and retain the wider directional term.
+breakend_admission_cap <- dbGetQuery(
+  con,
+  paste(
+    "WITH events(ord, local_position) AS (VALUES",
+    "(1, 5249::UBIGINT), (2, 5250::UBIGINT))",
+    "SELECT ord, a.consequence, a.region FROM events,",
+    "LATERAL unnest(duckvep_annotate_breakend(",
+    "'r-test', 1::UINTEGER, local_position,",
+    "1::UINTEGER, 124::UBIGINT, 10000::UBIGINT)) u(a)",
+    "ORDER BY ord"
+  )
+)
+expect_equal(breakend_admission_cap$ord, c(1, 2))
+expect_identical(
+  breakend_admission_cap$consequence,
+  rep("feature_truncation&downstream_gene_variant", 2)
+)
+expect_identical(breakend_admission_cap$region, rep("downstream", 2))
+
+# The fixed StructuralVariationOverlap endpoint admission is independent of
+# the caller-managed directional window in the other direction too. With a
+# zero transcript window, the exactly-5000 local allele contributes VEP's
+# default intergenic term and the mate allele contributes feature_truncation.
+breakend_zero_window <- dbGetQuery(
+  con,
+  paste(
+    "WITH events(ord, local_position) AS (VALUES",
+    "(1, 5249::UBIGINT), (2, 5250::UBIGINT))",
+    "SELECT ord, a.consequence, a.region FROM events,",
+    "LATERAL unnest(duckvep_annotate_breakend(",
+    "'r-test', 1::UINTEGER, local_position,",
+    "1::UINTEGER, 124::UBIGINT, 0::UBIGINT)) u(a)",
+    "ORDER BY ord"
+  )
+)
+expect_equal(breakend_zero_window$ord, c(1, 2))
+expect_identical(
+  breakend_zero_window$consequence,
+  c("feature_truncation&intergenic_variant", "feature_truncation")
+)
+expect_true(all(is.na(breakend_zero_window$region)))
 
 expect_error(
   dbGetQuery(
@@ -1420,6 +1577,12 @@ expect_true(
   dbGetQuery(
     con,
     "SELECT duckvep_model_drop('r-partial-cds-end') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-complete-span') AS dropped"
   )$dropped
 )
 expect_true(

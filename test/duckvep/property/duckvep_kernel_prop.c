@@ -390,12 +390,14 @@ static enum theft_alloc_res kprop_scene_alloc(struct theft *t, void *env, void *
      * transcripts within [base, base+span] keeps overlaps dense (non-vacuous),
      * while letting transcript length reach the full span gives long transcripts
      * that stay active across many variants (active-set pressure). */
-    static const uint32_t halos[5] = {0u, 1u, 50u, 100u, 5000u};
+    static const uint32_t halos[9] = {
+        0u, 1u, 50u, 100u, 4999u, 5000u, 5001u, 10000u, 65535u
+    };
     uint32_t base = (uint32_t)kprop_bounded(t, 0xFFFF0000u) + 1u;
-    uint32_t span = (uint32_t)kprop_bounded(t, 5000u) + 1u;
+    uint32_t span = (uint32_t)kprop_bounded(t, 20000u) + 1u;
     (void)env;
     if (s == NULL) return THEFT_ALLOC_ERROR;
-    s->halo = halos[kprop_bounded(t, 5u)];
+    s->halo = halos[kprop_bounded(t, 9u)];
 
     for (i = 0; i < nv; i++) {
         vr[i].chrom = (uint16_t)kprop_bounded(t, KPROP_NCHROM);
@@ -2963,11 +2965,11 @@ TEST interval_feature_consequences_known_scene(void) {
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_TF_BINDING_SITE),
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION),
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
 
     event.kind = (uint8_t)DUCKVEP_KIND_SV;
     event.feature_start1 = 90u;
@@ -2979,13 +2981,13 @@ TEST interval_feature_consequences_known_scene(void) {
     ASSERT_EQ(expected,
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
     expected = DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION_ABLATION) |
                DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION);
     ASSERT_EQ(expected,
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
 
     event.sv_type = (uint8_t)DUCKVEP_SV_DUPLICATION;
     event.copy_change = (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
@@ -2994,13 +2996,23 @@ TEST interval_feature_consequences_known_scene(void) {
     ASSERT_EQ(expected,
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
     expected = DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION_AMPLIFICATION) |
                DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION);
     ASSERT_EQ(expected,
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
+
+    /* VEP retains an oversized/unexpanded CNV:TR as a distinct structural
+     * tandem-repeat class, but its regulatory consequence predicates are the
+     * same gain predicates as a tandem duplication. */
+    event.sv_type = (uint8_t)DUCKVEP_SV_TANDEM_REPEAT;
+    event.copy_change = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+    ASSERT_EQ(expected,
+              duckvep_effect_eval_interval_feature(
+                  DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
+                  &event, 0u, 100u, 120u));
 
     /* A partial deletion overlaps but does not contain the feature, so VEP's
      * feature_ablation predicate remains false. */
@@ -3011,28 +3023,28 @@ TEST interval_feature_consequences_known_scene(void) {
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_TF_BINDING_SITE),
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
 
     ASSERT(duckvep_event_prepare_small(
         120u, insertion_ref, 1u, insertion_alt, 2u, &event));
     ASSERT_EQ(0u, duckvep_effect_eval_interval_feature(
         DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
-        &event, 100u, 120u));
+        &event, 0u, 100u, 120u));
     ASSERT(duckvep_event_prepare_small(
         110u, insertion_ref, 1u, insertion_alt, 2u, &event));
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION),
               duckvep_effect_eval_interval_feature(
                   DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
-                  &event, 100u, 120u));
+                  &event, 0u, 100u, 120u));
 
     event.feature_start1 = 200u;
     event.feature_end1 = 200u;
     ASSERT_EQ(0u, duckvep_effect_eval_interval_feature(
         DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE,
-        &event, 100u, 120u));
+        &event, 0u, 100u, 120u));
     ASSERT_EQ(0u, duckvep_effect_eval_interval_feature(
         (duckvep_interval_feature_kind_t)0,
-        &event, 100u, 120u));
+        &event, 0u, 100u, 120u));
     PASS();
 }
 
@@ -3212,7 +3224,8 @@ static int interval_feature_bruteforce_observations(
                 continue;
             mask = duckvep_effect_eval_interval_feature(
                 (duckvep_interval_feature_kind_t)features->kind[feature],
-                &event, features->start1[feature], features->end1[feature]);
+                &event, features->chrom_id[feature],
+                features->start1[feature], features->end1[feature]);
             if (mask == 0u) continue;
             if (count >= capacity) return 0;
             observed[count].variant_idx = (uint32_t)variant;
@@ -3250,6 +3263,149 @@ static int interval_feature_run_matches_bruteforce(
             return 0;
     }
     return 1;
+}
+
+static int interval_feature_breakend_pairs_match_bruteforce(
+    const duckvep_variant_batch_t *source,
+    const duckvep_interval_feature_model_t *features) {
+    duckvep_transcript_model_t transcripts;
+    duckvep_exon_model_t exons;
+    duckvep_variant_batch_t variants;
+    duckvep_interval_feature_pairs_t pairs;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[KPROP_MAX_PAIRS];
+    struct interval_feature_observation expected[KPROP_MAX_PAIRS];
+    duckvep_result_builder_t results;
+    duckvep_error_t error;
+    uint32_t ends[KPROP_MAX_VARIANTS];
+    uint16_t mate_chrom[KPROP_MAX_VARIANTS];
+    uint32_t mate_pos[KPROP_MAX_VARIANTS];
+    uint8_t kinds[KPROP_MAX_VARIANTS];
+    uint8_t sv_types[KPROP_MAX_VARIANTS];
+    uint8_t copy_changes[KPROP_MAX_VARIANTS];
+    uint32_t pair_variant[KPROP_MAX_PAIRS];
+    uint32_t pair_feature[KPROP_MAX_PAIRS];
+    size_t pair_count = 0u;
+    size_t expected_count = 0u;
+    size_t variant;
+    int ok = 0;
+
+    if (source->count > KPROP_MAX_VARIANTS ||
+        features->feature_count > KPROP_MAX_TX)
+        return 0;
+    memset(&transcripts, 0, sizeof transcripts);
+    memset(&exons, 0, sizeof exons);
+    memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    variants = *source;
+    variants.end1 = ends;
+    variants.mate_chrom_id = mate_chrom;
+    variants.mate_pos1 = mate_pos;
+    variants.ref_offset = NULL;
+    variants.ref_length = NULL;
+    variants.alt_offset = NULL;
+    variants.alt_length = NULL;
+    variants.allele_bytes = NULL;
+    variants.allele_bytes_len = 0u;
+    variants.variant_kind = kinds;
+    variants.sv_type = sv_types;
+    variants.copy_change = copy_changes;
+
+    for (variant = 0u; variant < variants.count; variant++) {
+        size_t mate_feature = features->feature_count == 0u
+            ? 0u : (variant * 5u + 1u) % features->feature_count;
+        size_t feature;
+
+        if (variants.pos1[variant] == UINT32_MAX) goto done;
+        ends[variant] = variants.pos1[variant];
+        kinds[variant] = (uint8_t)DUCKVEP_KIND_SV;
+        sv_types[variant] = (uint8_t)DUCKVEP_SV_BREAKEND;
+        copy_changes[variant] = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+        if (features->feature_count != 0u) {
+            mate_chrom[variant] = features->chrom_id[mate_feature];
+            mate_pos[variant] = variant % 3u == 0u
+                ? features->start1[mate_feature]
+                : (variant % 3u == 1u
+                    ? features->end1[mate_feature]
+                    : features->end1[mate_feature] == UINT32_MAX
+                        ? features->end1[mate_feature]
+                        : features->end1[mate_feature] + 1u);
+        } else {
+            mate_chrom[variant] = variants.chrom_id[variant];
+            mate_pos[variant] = variants.pos1[variant];
+        }
+        for (feature = 0u; feature < features->feature_count; feature++) {
+            uint32_t local_point = variants.pos1[variant] + 1u;
+            int local_hit = features->chrom_id[feature] ==
+                    variants.chrom_id[variant] &&
+                local_point >= features->start1[feature] &&
+                local_point <= features->end1[feature];
+            int mate_hit = features->chrom_id[feature] == mate_chrom[variant] &&
+                mate_pos[variant] >= features->start1[feature] &&
+                mate_pos[variant] <= features->end1[feature];
+            int local_close = features->chrom_id[feature] ==
+                    variants.chrom_id[variant] &&
+                (local_point < features->start1[feature]
+                    ? features->start1[feature] - local_point <=
+                        DUCKVEP_BREAKEND_ALLELE_DISTANCE
+                    : local_point > features->end1[feature]
+                        ? local_point - features->end1[feature] <=
+                            DUCKVEP_BREAKEND_ALLELE_DISTANCE
+                        : 1);
+
+            if (pair_count >= KPROP_MAX_PAIRS) goto done;
+            pair_variant[pair_count] = (uint32_t)variant;
+            pair_feature[pair_count] = (uint32_t)feature;
+            pair_count++;
+            if (local_hit || mate_hit) {
+                if (expected_count >= KPROP_MAX_PAIRS) goto done;
+                expected[expected_count].variant_idx = (uint32_t)variant;
+                expected[expected_count].feature_idx = (uint32_t)feature;
+                expected[expected_count].consequence_mask = local_hit
+                    ? (features->kind[feature] ==
+                            (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION
+                        ? DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION)
+                        : DUCKVEP_SO(DUCKVEP_SO_TF_BINDING_SITE))
+                    : DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+                        (local_close
+                            ? DUCKVEP_SO(DUCKVEP_SO_INTERGENIC)
+                            : UINT64_C(0));
+                expected_count++;
+            }
+        }
+    }
+
+    pairs.variant_idx = pair_variant;
+    pairs.feature_idx = pair_feature;
+    pairs.count = pair_count;
+    if (duckvep_model_open_with_interval_features(
+            &transcripts, &exons, NULL, features, &model, &error) !=
+        DUCKVEP_OK) goto done;
+    if (duckvep_options_open(NULL, &options, &error) != DUCKVEP_OK)
+        goto done;
+    if (duckvep_workspace_open(model, &workspace, &error) != DUCKVEP_OK)
+        goto done;
+    duckvep_result_builder_init(&results, rows, KPROP_MAX_PAIRS);
+    if (duckvep_annotate_interval_feature_pairs(
+            model, &variants, &pairs, options, workspace, &results, &error) !=
+        DUCKVEP_OK || results.count != expected_count)
+        goto done;
+    for (variant = 0u; variant < expected_count; variant++) {
+        if (rows[variant].variant_idx != expected[variant].variant_idx ||
+            rows[variant].interval_feature_idx !=
+                expected[variant].feature_idx ||
+            rows[variant].consequence_mask !=
+                expected[variant].consequence_mask)
+            goto done;
+    }
+    ok = 1;
+done:
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    return ok;
 }
 
 static enum theft_trial_res prop_interval_feature_cursor_matches_bruteforce(
@@ -3312,18 +3468,23 @@ static enum theft_trial_res prop_interval_feature_cursor_matches_bruteforce(
     structural.copy_change = copy_changes;
     for (index = 0u; index < structural.count; index++) {
         structural_kinds[index] = (uint8_t)DUCKVEP_KIND_SV;
-        if (index % 3u == 0u) {
+        if (index % 4u == 0u) {
             structural_types[index] = (uint8_t)DUCKVEP_SV_DELETION;
             copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_LOSS;
-        } else if (index % 3u == 1u) {
+        } else if (index % 4u == 1u) {
             structural_types[index] = (uint8_t)DUCKVEP_SV_DUPLICATION;
             copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
+        } else if (index % 4u == 2u) {
+            structural_types[index] = (uint8_t)DUCKVEP_SV_TANDEM_REPEAT;
+            copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
         } else {
             structural_types[index] = (uint8_t)DUCKVEP_SV_INVERSION;
             copy_changes[index] = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
         }
     }
     if (!interval_feature_run_matches_bruteforce(&structural, &features))
+        return THEFT_TRIAL_FAIL;
+    if (!interval_feature_breakend_pairs_match_bruteforce(&small, &features))
         return THEFT_TRIAL_FAIL;
     return THEFT_TRIAL_PASS;
 }
@@ -3332,7 +3493,7 @@ TEST interval_feature_cursor_matches_bruteforce_for_random_events(void) {
     struct theft_run_config config;
 
     memset(&config, 0, sizeof config);
-    config.name = "regulation cursor + one-row resume == brute-force feature evaluator";
+    config.name = "regulation sweep/BND pairs == independent feature oracles";
     config.prop1 = prop_interval_feature_cursor_matches_bruteforce;
     config.type_info[0] = &kprop_allele_sweep_scene_info;
     config.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
@@ -3815,6 +3976,10 @@ TEST sv_metadata_validity_matrix_known(void) {
                                      DUCKVEP_COPY_CHANGE_NEUTRAL));
     ASSERT(duckvep_sv_metadata_valid(DUCKVEP_SV_BREAKEND,
                                      DUCKVEP_COPY_CHANGE_UNKNOWN));
+    ASSERT(duckvep_sv_metadata_valid(DUCKVEP_SV_TANDEM_REPEAT,
+                                     DUCKVEP_COPY_CHANGE_UNKNOWN));
+    ASSERT(duckvep_sv_metadata_valid(DUCKVEP_SV_TANDEM_REPEAT,
+                                     DUCKVEP_COPY_CHANGE_GAIN));
 
     ASSERT(!duckvep_sv_metadata_valid(DUCKVEP_SV_NONE,
                                       DUCKVEP_COPY_CHANGE_UNKNOWN));
@@ -3827,6 +3992,8 @@ TEST sv_metadata_validity_matrix_known(void) {
     ASSERT(!duckvep_sv_metadata_valid(DUCKVEP_SV_INVERSION,
                                       DUCKVEP_COPY_CHANGE_GAIN));
     ASSERT(!duckvep_sv_metadata_valid(DUCKVEP_SV_BREAKEND,
+                                      DUCKVEP_COPY_CHANGE_LOSS));
+    ASSERT(!duckvep_sv_metadata_valid(DUCKVEP_SV_TANDEM_REPEAT,
                                       DUCKVEP_COPY_CHANGE_LOSS));
     ASSERT(!duckvep_sv_metadata_valid((duckvep_sv_type_t)255,
                                       DUCKVEP_COPY_CHANGE_UNKNOWN));
@@ -3871,8 +4038,25 @@ TEST sv_predicate_facts_known(void) {
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) != 0u);
     ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_AMPLIFICATION)) != 0u);
 
+    /* Structural tandem repeats remain distinguishable in the event ABI but
+     * VEP maps them to the tandem-duplication gain/insertion facts. */
     memset(&region, 0, sizeof region);
     memset(&ctx, 0, sizeof ctx);
+    event.sv_type = (uint8_t)DUCKVEP_SV_TANDEM_REPEAT;
+    event.copy_change = (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+    region.complete_overlap_feature = 1u;
+    sv = duckvep_sv_effect_fill(NULL, NULL, 0u, 0, &event, &region);
+    ASSERT(sv.copy_number_gain);
+    ASSERT(sv.insertion);
+    ASSERT(sv.feature_amplification);
+    ASSERT(!sv.deletion);
+    duckvep_effect_ctx_apply_sv(&ctx, &sv);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) != 0u);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_AMPLIFICATION)) != 0u);
+
+    memset(&region, 0, sizeof region);
+    memset(&ctx, 0, sizeof ctx);
+    event.sv_type = (uint8_t)DUCKVEP_SV_CNV;
     event.copy_change = (uint8_t)DUCKVEP_COPY_CHANGE_LOSS;
     region.within_cdna = 1u;
     region.partial_overlap_feature = 1u;
@@ -5850,6 +6034,346 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     PASS();
 }
 
+/* VariationEffect::feature_ablation is not structural-only. A literal allele
+ * whose normalized deletion fact contains the complete transcript must enter
+ * the same tier-1 transcript_ablation rule as a symbolic deletion. */
+TEST ordinary_complete_feature_deletion_is_ablation_known_scene(void) {
+    duckvep_effect_ctx_t ctx;
+    duckvep_event_t event;
+
+    memset(&ctx, 0, sizeof ctx);
+    memset(&event, 0, sizeof event);
+    ctx.region_state.complete_overlap_feature = 1u;
+    event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
+    event.ref_diff_length = 7u;
+    event.alt_diff_length = 1u;
+
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_ABLATION)) != 0u);
+    duckvep_effect_ctx_finalize(&ctx);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_TRANSCRIPT_ABLATION),
+              duckvep_effect_eval(ctx.pre_bits));
+    PASS();
+}
+
+/* BaseVariationFeatureOverlapAllele::coding_unknown returns false for complete
+ * transcript overlap before peptide predicates are considered. An explicit
+ * unknown fact from a sequence delta must therefore also be suppressed. */
+TEST complete_feature_overlap_suppresses_explicit_coding_unknown_known_scene(void) {
+    duckvep_effect_ctx_t ctx;
+    duckvep_sequence_delta_t delta;
+
+    memset(&ctx, 0, sizeof ctx);
+    memset(&delta, 0, sizeof delta);
+    ctx.region_state.complete_overlap_feature = 1u;
+    ctx.pre_bits = DUCKVEP_PRE(DUCKVEP_PRE_CODING) |
+                   DUCKVEP_PRE(DUCKVEP_PRE_CDS) |
+                   DUCKVEP_PRE(DUCKVEP_PRE_UTR5) |
+                   DUCKVEP_PRE(DUCKVEP_PRE_UTR3);
+    delta.valid = 1u;
+    delta.coding_unknown = 1u;
+
+    duckvep_effect_ctx_apply_delta(&ctx, &delta);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN)) != 0u);
+    duckvep_effect_ctx_finalize(&ctx);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN)) == 0u);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+              DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR),
+              duckvep_effect_eval(ctx.pre_bits));
+    PASS();
+}
+
+/* VEP runs its four-comparison UTR overlap predicate on empty endpoint
+ * intervals. For an equal-length uploaded span containing a one-exon coding
+ * transcript whose CDS equals the transcript, both strands consequently emit
+ * both UTR terms. Complete overlap also makes coding_unknown false. */
+TEST annotate_complete_equal_length_span_keeps_empty_endpoint_utrs_known_scene(void) {
+    static const uint16_t tchrom[2] = {0u, 1u};
+    static const uint32_t tstart[2] = {1000u, 2000u};
+    static const uint32_t tend[2] = {1008u, 2008u};
+    static const int8_t tstrand[2] = {1, -1};
+    static const uint64_t tflags[2] = {0u, 0u};
+    static const uint32_t texoff[2] = {0u, 1u};
+    static const uint16_t texcnt[2] = {1u, 1u};
+    static const uint32_t tcds_s[2] = {1000u, 2000u};
+    static const uint32_t tcds_e[2] = {1008u, 2008u};
+    static const uint32_t estart[2] = {1000u, 2000u};
+    static const uint32_t eend[2] = {1008u, 2008u};
+    static const uint32_t ecdna_s[2] = {1u, 1u};
+    static const uint32_t ecdna_e[2] = {9u, 9u};
+    static const int8_t ephase[2] = {0, 0};
+    static const uint16_t vchrom[2] = {0u, 1u};
+    static const uint32_t vpos[2] = {999u, 1999u};
+    static const uint32_t vend[2] = {1009u, 2009u};
+    static const uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV
+    };
+    static const uint8_t abytes[] =
+        "AAAAAAAAAAA" "AAAAACAAAAA"
+        "CCCCCCCCCCC" "CCCCCGCCCCC";
+    static const uint32_t roff[2] = {0u, 22u};
+    static const uint32_t aoff[2] = {11u, 33u};
+    static const uint16_t alen[2] = {11u, 11u};
+    static const uint64_t expected =
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+        DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR);
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_variant_batch_t variants;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t builder;
+    duckvep_error_t error;
+    size_t i;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = tstrand; tx.flags = tflags; tx.exon_offset = texoff;
+    tx.exon_count = texcnt; tx.cds_start1 = tcds_s;
+    tx.cds_end1 = tcds_e; tx.transcript_count = 2u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 2u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
+    variants.variant_kind = vkind; variants.allele_bytes = abytes;
+    variants.allele_bytes_len = sizeof abytes - 1u;
+    variants.ref_offset = roff; variants.alt_offset = aoff;
+    variants.ref_length = alen; variants.alt_length = alen;
+    variants.count = 2u;
+
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_model_open(&tx, &exons, NULL, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_options_open(NULL, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_workspace_open(model, &workspace, &error));
+    duckvep_result_builder_init(&builder, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &variants, options, workspace,
+                                    &builder, &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&builder));
+    for (i = 0u; i < 2u; i++) {
+        ASSERT_EQ_FMT((uint32_t)i, rows[i].variant_idx, "%u");
+        ASSERT_EQ(expected, rows[i].consequence_mask);
+    }
+
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    PASS();
+}
+
+struct kprop_complete_overlap {
+    int8_t strand;
+    uint16_t transcript_length;
+    uint16_t left_padding;
+    uint16_t right_padding;
+};
+
+static enum theft_alloc_res kprop_complete_overlap_alloc(
+    struct theft *t, void *env, void **instance) {
+    struct kprop_complete_overlap *s;
+    uint8_t long_side;
+    (void)env;
+
+    s = (struct kprop_complete_overlap *)calloc(1u, sizeof *s);
+    if (s == NULL) return THEFT_ALLOC_ERROR;
+    s->strand = theft_random_bits(t, 1) == 0u ? 1 : -1;
+    s->transcript_length = (uint16_t)(3u * (1u + kprop_bounded(t, 100u)));
+    s->left_padding = (uint16_t)(1u + kprop_bounded(t, 64u));
+    s->right_padding = (uint16_t)kprop_bounded(t, 65u);
+    if (kprop_bounded(t, 8u) == 0u) {
+        long_side = (uint8_t)theft_random_bits(t, 1);
+        if (long_side == 0u) {
+            s->left_padding = (uint16_t)(5001u + kprop_bounded(t, 1000u));
+        } else {
+            s->right_padding = (uint16_t)(5001u + kprop_bounded(t, 1000u));
+        }
+    }
+    *instance = s;
+    return THEFT_ALLOC_OK;
+}
+
+static void kprop_complete_overlap_free(void *instance, void *env) {
+    (void)env;
+    free(instance);
+}
+
+static struct theft_type_info kprop_complete_overlap_info = {
+    .alloc = kprop_complete_overlap_alloc,
+    .free = kprop_complete_overlap_free,
+};
+
+static struct {
+    uint32_t forward;
+    uint32_t reverse;
+    uint32_t right_endpoint;
+    uint32_t over_5000;
+} g_complete_overlap_cov;
+
+static enum theft_trial_res prop_complete_literal_spans_match_vep_source_semantics(
+    struct theft *t, void *arg1) {
+    const struct kprop_complete_overlap *s =
+        (const struct kprop_complete_overlap *)arg1;
+    const uint32_t transcript_start = 10000u;
+    const uint32_t transcript_end =
+        transcript_start + (uint32_t)s->transcript_length - 1u;
+    const uint32_t raw_start = transcript_start - (uint32_t)s->left_padding;
+    const size_t raw_length = (size_t)s->left_padding +
+        (size_t)s->transcript_length + (size_t)s->right_padding;
+    const uint32_t raw_end = raw_start + (uint32_t)raw_length - 1u;
+    uint16_t tchrom[1] = {0u};
+    uint32_t tstart[1] = {transcript_start};
+    uint32_t tend[1] = {transcript_end};
+    int8_t tstrand[1] = {s->strand};
+    uint64_t tflags[1] = {0u};
+    uint32_t texoff[1] = {0u};
+    uint16_t texcnt[1] = {1u};
+    uint32_t tcds_s[1] = {transcript_start};
+    uint32_t tcds_e[1] = {transcript_end};
+    uint32_t estart[1] = {transcript_start};
+    uint32_t eend[1] = {transcript_end};
+    uint32_t ecdna_s[1] = {1u};
+    uint32_t ecdna_e[1] = {(uint32_t)s->transcript_length};
+    int8_t ephase[1] = {0};
+    uint16_t vchrom[2] = {0u, 0u};
+    uint32_t vpos[2] = {raw_start, raw_start};
+    uint32_t vend[2] = {raw_end, raw_end};
+    uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_DEL
+    };
+    uint32_t roff[2];
+    uint32_t aoff[2];
+    uint16_t rlen[2];
+    uint16_t alen[2];
+    uint8_t *alleles = NULL;
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_variant_batch_t variants;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t builder;
+    duckvep_error_t error;
+    enum theft_trial_res result = THEFT_TRIAL_PASS;
+    uint64_t expected_span_mask;
+    (void)t;
+
+    alleles = (uint8_t *)malloc(raw_length * 3u + 1u);
+    if (alleles == NULL) return THEFT_TRIAL_ERROR;
+    memset(alleles, 'A', raw_length * 3u + 1u);
+    /* Keep the equal-length event a genuine MNV after shared-edge trimming,
+     * while independently varying uploaded padding outside the transcript. */
+    alleles[raw_length + (size_t)s->left_padding] = (uint8_t)'C';
+    alleles[raw_length + (size_t)s->left_padding +
+            (size_t)s->transcript_length - 1u] = (uint8_t)'G';
+    roff[0] = 0u;
+    aoff[0] = (uint32_t)raw_length;
+    roff[1] = (uint32_t)(raw_length * 2u);
+    aoff[1] = (uint32_t)(raw_length * 3u);
+    rlen[0] = rlen[1] = (uint16_t)raw_length;
+    alen[0] = (uint16_t)raw_length;
+    alen[1] = 1u;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = tstrand; tx.flags = tflags; tx.exon_offset = texoff;
+    tx.exon_count = texcnt; tx.cds_start1 = tcds_s;
+    tx.cds_end1 = tcds_e; tx.transcript_count = 1u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 1u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
+    variants.variant_kind = vkind; variants.allele_bytes = alleles;
+    variants.allele_bytes_len = raw_length * 3u + 1u;
+    variants.ref_offset = roff; variants.alt_offset = aoff;
+    variants.ref_length = rlen; variants.alt_length = alen;
+    variants.count = 2u;
+
+    /* The uploaded feature always extends left of the transcript, satisfying
+     * VEP's inverted pre-CDS interval comparison. It satisfies the inverted
+     * post-CDS interval only when it also extends right of the transcript. */
+    expected_span_mask = s->strand > 0
+        ? DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR)
+        : DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR);
+    if (s->right_padding > 0u) {
+        expected_span_mask |= s->strand > 0
+            ? DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR)
+            : DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR);
+    }
+
+    if (duckvep_model_open(&tx, &exons, NULL, &model, &error) != DUCKVEP_OK) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    if (duckvep_options_open(NULL, &options, &error) != DUCKVEP_OK) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    if (duckvep_workspace_open(model, &workspace, &error) != DUCKVEP_OK) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    duckvep_result_builder_init(&builder, rows, 2u);
+    if (duckvep_annotate_tile(model, &variants, options, workspace,
+                              &builder, &error) != DUCKVEP_OK ||
+        duckvep_result_builder_count(&builder) != 2u ||
+        rows[0].variant_idx != 0u ||
+        rows[0].consequence_mask != expected_span_mask ||
+        rows[1].variant_idx != 1u ||
+        rows[1].consequence_mask !=
+            DUCKVEP_SO(DUCKVEP_SO_TRANSCRIPT_ABLATION)) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    if (s->strand > 0) g_complete_overlap_cov.forward++;
+    else g_complete_overlap_cov.reverse++;
+    if (s->right_padding == 0u) g_complete_overlap_cov.right_endpoint++;
+    if (raw_length > 5000u) g_complete_overlap_cov.over_5000++;
+
+done:
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    free(alleles);
+    return result;
+}
+
+TEST complete_literal_spans_match_vep_source_semantics_for_any_scene(void) {
+    struct theft_run_config cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.name = "complete literal spans == VEP complete-overlap source semantics";
+    cfg.prop1 = prop_complete_literal_spans_match_vep_source_semantics;
+    cfg.type_info[0] = &kprop_complete_overlap_info;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    memset(&g_complete_overlap_cov, 0, sizeof g_complete_overlap_cov);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    ASSERT(g_complete_overlap_cov.forward > 0u);
+    ASSERT(g_complete_overlap_cov.reverse > 0u);
+    ASSERT(g_complete_overlap_cov.right_endpoint > 0u);
+    ASSERT(g_complete_overlap_cov.over_5000 > 0u);
+    fprintf(stderr,
+            "[complete-overlap coverage] forward=%u reverse=%u "
+            "right_endpoint=%u over_5000=%u\n",
+            g_complete_overlap_cov.forward, g_complete_overlap_cov.reverse,
+            g_complete_overlap_cov.right_endpoint,
+            g_complete_overlap_cov.over_5000);
+    PASS();
+}
+
 /* Deterministic SO-mapping anchor: a 2-exon coding transcript on chr0 (exons
  * [1000,1300] & [1700,2000], CDS [1100,1900]) and a single-exon non-coding
  * transcript on chr1 ([1000,1300]). Each variant lands in exactly one structural
@@ -6228,6 +6752,305 @@ TEST annotate_breakend_pairs_keep_local_topology_and_mate_truncation(void) {
                   duckvep_annotate_pairs(model, &missing_mate, &one_pair,
                                          options, workspace, &results, &error));
     }
+
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    PASS();
+}
+
+/* RegFeat::annotate_InputBuffer evaluates the local VEP-shifted BND point and
+ * every raw mate point. Candidate discovery may conservatively include a
+ * feature at the same numeric position on a different contig; the kernel must
+ * reject it and deduplicate a feature hit by both endpoints. A local hit keeps
+ * the ordinary regulatory/motif term; a mate-only hit takes VEP's exceptional
+ * feature_truncation chromosome-breakpoint branch. If that mate-only object's
+ * local point is outside but no farther than VEP's 5000-base structural-feature
+ * admission distance, the same object also receives intergenic_variant. If
+ * both points hit the same object, the local term wins. */
+TEST annotate_breakend_interval_feature_pairs_use_both_endpoints(void) {
+    static const uint16_t feature_chrom[4] = {0u, 0u, 1u, 1u};
+    static const uint32_t feature_start[4] = {100u, 200u, 100u, 400u};
+    static const uint32_t feature_end[4] = {120u, 220u, 120u, 450u};
+    static const uint8_t feature_kind[4] = {
+        DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
+        DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE,
+        DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
+        DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE
+    };
+    static const uint16_t chrom[3] = {0u, 0u, 0u};
+    static const uint32_t pos[3] = {99u, 130u, 199u};
+    static const uint32_t end[3] = {99u, 130u, 199u};
+    static const uint16_t mate_chrom[3] = {1u, 0u, 0u};
+    static const uint32_t mate_pos[3] = {430u, 110u, 210u};
+    static const uint8_t kind[3] = {
+        DUCKVEP_KIND_SV, DUCKVEP_KIND_SV, DUCKVEP_KIND_SV
+    };
+    static const uint8_t sv_type[3] = {
+        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND
+    };
+    static const uint8_t copy_change[3] = {
+        DUCKVEP_COPY_CHANGE_UNKNOWN, DUCKVEP_COPY_CHANGE_UNKNOWN,
+        DUCKVEP_COPY_CHANGE_UNKNOWN
+    };
+    static const uint32_t pair_variant[5] = {0u, 0u, 0u, 1u, 2u};
+    static const uint32_t pair_feature[5] = {0u, 2u, 3u, 0u, 1u};
+    static const uint32_t expected_variant[4] = {0u, 0u, 1u, 2u};
+    static const uint32_t expected_feature[4] = {0u, 3u, 0u, 1u};
+    static const uint64_t expected_mask[4] = {
+        DUCKVEP_SO(DUCKVEP_SO_REGULATORY_REGION),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+            DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+        DUCKVEP_SO(DUCKVEP_SO_TF_BINDING_SITE)
+    };
+    duckvep_transcript_model_t transcripts;
+    duckvep_exon_model_t exons;
+    duckvep_interval_feature_model_t features;
+    duckvep_variant_batch_t variants;
+    duckvep_interval_feature_pairs_t pairs;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[5];
+    duckvep_result_builder_t results;
+    duckvep_error_t error;
+    size_t row;
+
+    memset(&transcripts, 0, sizeof transcripts);
+    memset(&exons, 0, sizeof exons);
+    memset(&features, 0, sizeof features);
+    memset(&variants, 0, sizeof variants);
+    memset(&pairs, 0, sizeof pairs);
+    memset(&error, 0, sizeof error);
+    features.chrom_id = feature_chrom;
+    features.start1 = feature_start;
+    features.end1 = feature_end;
+    features.kind = feature_kind;
+    features.feature_count = 4u;
+    variants.chrom_id = chrom;
+    variants.pos1 = pos;
+    variants.end1 = end;
+    variants.mate_chrom_id = mate_chrom;
+    variants.mate_pos1 = mate_pos;
+    variants.variant_kind = kind;
+    variants.sv_type = sv_type;
+    variants.copy_change = copy_change;
+    variants.count = 3u;
+    pairs.variant_idx = pair_variant;
+    pairs.feature_idx = pair_feature;
+    pairs.count = 5u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open_with_interval_features(
+        &transcripts, &exons, NULL, &features, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_workspace_open(model, &workspace, &error));
+    duckvep_result_builder_init(&results, rows, 5u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_interval_feature_pairs(
+        model, &variants, &pairs, options, workspace, &results, &error));
+    ASSERT_EQ(4u, duckvep_result_builder_count(&results));
+    for (row = 0u; row < 4u; row++) {
+        ASSERT_EQ(expected_variant[row], rows[row].variant_idx);
+        ASSERT_EQ(expected_feature[row], rows[row].interval_feature_idx);
+        ASSERT_EQ(expected_mask[row], rows[row].consequence_mask);
+        ASSERT_EQ(UINT32_MAX, rows[row].gene_idx);
+    }
+    {
+        static const uint32_t duplicate_variant[2] = {0u, 0u};
+        static const uint32_t duplicate_feature[2] = {0u, 0u};
+        duckvep_interval_feature_pairs_t bad = pairs;
+
+        bad.variant_idx = duplicate_variant;
+        bad.feature_idx = duplicate_feature;
+        bad.count = 2u;
+        duckvep_result_builder_reset(&results);
+        ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG,
+                  duckvep_annotate_interval_feature_pairs(
+                      model, &variants, &bad, options, workspace, &results,
+                      &error));
+    }
+
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    PASS();
+}
+
+/* VEP exposes a configurable transcript-direction distance, whose default is
+ * 5000, and separately hardcodes StructuralVariationOverlap allele admission
+ * to MAX_DISTANCE_FROM_TRANSCRIPT (also 5000). A wider caller window must not
+ * widen that structural-allele cap, but ordinary predicates on a mate-created
+ * allele still inspect the local feature and may emit a directional term past
+ * the fixed cap. Exercise both transcripts and interval features exactly at
+ * 5000 and one base beyond under deliberately 10000- and zero-base caller
+ * windows. */
+TEST annotate_breakend_fixed_admission_is_not_configurable_window(void) {
+    static const uint16_t transcript_chrom[1] = {0u};
+    static const uint32_t transcript_start[1] = {100u};
+    static const uint32_t transcript_end[1] = {250u};
+    static const int8_t transcript_strand[1] = {1};
+    static const uint64_t transcript_flags[1] = {0u};
+    static const uint32_t exon_offset[1] = {0u};
+    static const uint16_t exon_count[1] = {2u};
+    static const uint32_t cds_start[1] = {0u};
+    static const uint32_t cds_end[1] = {0u};
+    static const uint32_t exon_start[2] = {100u, 200u};
+    static const uint32_t exon_end[2] = {150u, 250u};
+    static const uint16_t feature_chrom[1] = {0u};
+    static const uint32_t feature_start[1] = {1000u};
+    static const uint32_t feature_end[1] = {1020u};
+    static const uint8_t feature_kind[1] = {
+        DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION
+    };
+    /* The kernel shifts raw local BND POS by one. The resulting local points
+     * are transcript_end + {5000,5001} and feature_end + {5000,5001}. */
+    static const uint16_t chrom[4] = {0u, 0u, 0u, 0u};
+    static const uint32_t pos[4] = {5249u, 5250u, 6019u, 6020u};
+    static const uint32_t end[4] = {5249u, 5250u, 6019u, 6020u};
+    static const uint16_t mate_chrom[4] = {0u, 0u, 0u, 0u};
+    static const uint32_t mate_pos[4] = {124u, 124u, 1010u, 1010u};
+    static const uint8_t kind[4] = {
+        DUCKVEP_KIND_SV, DUCKVEP_KIND_SV,
+        DUCKVEP_KIND_SV, DUCKVEP_KIND_SV
+    };
+    static const uint8_t sv_type[4] = {
+        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND,
+        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND
+    };
+    static const uint8_t copy_change[4] = {
+        DUCKVEP_COPY_CHANGE_UNKNOWN, DUCKVEP_COPY_CHANGE_UNKNOWN,
+        DUCKVEP_COPY_CHANGE_UNKNOWN, DUCKVEP_COPY_CHANGE_UNKNOWN
+    };
+    static const uint32_t transcript_variant[2] = {0u, 1u};
+    static const uint32_t transcript_index[2] = {0u, 0u};
+    static const uint32_t feature_variant[2] = {2u, 3u};
+    static const uint32_t feature_index[2] = {0u, 0u};
+    duckvep_transcript_model_t transcripts;
+    duckvep_exon_model_t exons;
+    duckvep_interval_feature_model_t features;
+    duckvep_variant_batch_t variants;
+    duckvep_candidate_pairs_t transcript_pairs;
+    duckvep_interval_feature_pairs_t feature_pairs;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t results;
+    duckvep_options_init_t init;
+    duckvep_error_t error;
+
+    memset(&transcripts, 0, sizeof transcripts);
+    memset(&exons, 0, sizeof exons);
+    memset(&features, 0, sizeof features);
+    memset(&variants, 0, sizeof variants);
+    memset(&transcript_pairs, 0, sizeof transcript_pairs);
+    memset(&feature_pairs, 0, sizeof feature_pairs);
+    memset(&init, 0, sizeof init);
+    memset(&error, 0, sizeof error);
+    transcripts.chrom_id = transcript_chrom;
+    transcripts.start1 = transcript_start;
+    transcripts.end1 = transcript_end;
+    transcripts.strand = transcript_strand;
+    transcripts.flags = transcript_flags;
+    transcripts.exon_offset = exon_offset;
+    transcripts.exon_count = exon_count;
+    transcripts.cds_start1 = cds_start;
+    transcripts.cds_end1 = cds_end;
+    transcripts.transcript_count = 1u;
+    exons.start1 = exon_start;
+    exons.end1 = exon_end;
+    exons.exon_count = 2u;
+    features.chrom_id = feature_chrom;
+    features.start1 = feature_start;
+    features.end1 = feature_end;
+    features.kind = feature_kind;
+    features.feature_count = 1u;
+    variants.chrom_id = chrom;
+    variants.pos1 = pos;
+    variants.end1 = end;
+    variants.mate_chrom_id = mate_chrom;
+    variants.mate_pos1 = mate_pos;
+    variants.variant_kind = kind;
+    variants.sv_type = sv_type;
+    variants.copy_change = copy_change;
+    variants.count = 4u;
+    transcript_pairs.variant_idx = transcript_variant;
+    transcript_pairs.tx_idx = transcript_index;
+    transcript_pairs.count = 2u;
+    feature_pairs.variant_idx = feature_variant;
+    feature_pairs.feature_idx = feature_index;
+    feature_pairs.count = 2u;
+    init.distances_are_explicit = 1u;
+    init.upstream_dist = 10000u;
+    init.downstream_dist = 10000u;
+    init.halo = 10000u;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open_with_interval_features(
+        &transcripts, &exons, NULL, &features, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_workspace_open(model, &workspace, &error));
+
+    duckvep_result_builder_init(&results, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_pairs(model, &variants, &transcript_pairs,
+                                     options, workspace, &results, &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE),
+              rows[0].consequence_mask);
+    ASSERT_EQ(DUCKVEP_REGION_DOWNSTREAM, rows[0].region_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE),
+              rows[1].consequence_mask);
+    ASSERT_EQ(DUCKVEP_REGION_DOWNSTREAM, rows[1].region_mask);
+
+    duckvep_result_builder_reset(&results);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_interval_feature_pairs(
+        model, &variants, &feature_pairs, options, workspace, &results,
+        &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+              rows[0].consequence_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+              rows[1].consequence_mask);
+
+    /* Narrowing the caller-managed directional window to zero must not remove
+     * an endpoint that StructuralVariationOverlap admitted through its fixed
+     * 5000-base rule. The local overlap allele now has no directional
+     * predicate and therefore contributes VEP's default intergenic term; the
+     * mate overlap allele independently contributes feature_truncation. */
+    duckvep_options_close(options);
+    options = NULL;
+    init.upstream_dist = 0u;
+    init.downstream_dist = 0u;
+    init.halo = 0u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &options, &error));
+    duckvep_result_builder_reset(&results);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_pairs(model, &variants, &transcript_pairs,
+                                     options, workspace, &results, &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+              rows[0].consequence_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+              rows[1].consequence_mask);
+
+    /* The interval-feature endpoint rule is the same fixed constant and does
+     * not consult the transcript directional option. */
+    duckvep_result_builder_reset(&results);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_interval_feature_pairs(
+        model, &variants, &feature_pairs, options, workspace, &results,
+        &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+              rows[0].consequence_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+              rows[1].consequence_mask);
 
     duckvep_workspace_close(workspace);
     duckvep_options_close(options);
@@ -14572,6 +15395,39 @@ TEST coding_context_delta_terminal_combinations_known_scene(void) {
                !delta.inframe_insertion);
     }
 
+    {
+        static const uint8_t concrete_stop_cds[] = {
+            'A','T','G', 'G','C','A', 'T','G','G', 'A','G','T'
+        };
+        static const uint8_t inserted_at[] = { 'A', 'T' };
+
+        /* Held-out seed 20260719: the insertion length reaches the original
+         * CDS endpoint, and retranslating that endpoint still yields '*'.
+         * VEP does not consult its CIL fallback because the codon-local
+         * alternate peptide is the concrete value "*" with no X.
+         * ref_eq_alt_sequence is false for local W versus local *, so
+         * stop_gained remains true
+         * and stop_retained does not suppress the frameshift. */
+        edit.cds_start = 9u;
+        edit.ref = NULL;
+        edit.ref_len = 0u;
+        edit.alt = inserted_at;
+        edit.alt_len = sizeof inserted_at;
+        edit.variant_strand = 1;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      concrete_stop_cds, sizeof concrete_stop_cds,
+                      &edit_set, -1, DUCKVEP_CODON_TABLE_STANDARD,
+                      alt_cds, sizeof alt_cds, ref_pep, sizeof ref_pep,
+                      alt_pep, sizeof alt_pep, &ctx));
+        ctx.insertion_length_reaches_terminal_stop = 1u;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.stop_gained && delta.frameshift &&
+               !delta.stop_retained && !delta.stop_lost &&
+               !delta.inframe_insertion && !delta.protein_altering);
+    }
+
     PASS();
 }
 
@@ -17325,6 +18181,31 @@ static int kprop_vep_local_peptides(
     return 1;
 }
 
+/* VariationEffect.pm::stop_retained only reaches
+ * _ins_del_stop_altered_cil when the codon-local alternate peptide is absent,
+ * empty, or contains X. A concrete peptide, including the literal value "*",
+ * stays on ref_eq_alt_sequence even when insertion length reaches the original
+ * terminal codon. Return -1 only when the local view cannot be reconstructed. */
+static int kprop_vep_stop_retained_uses_cil(
+    const duckvep_coding_context_t *ctx) {
+    uint8_t ref_local[32];
+    uint8_t alt_local[32];
+    size_t ref_local_len;
+    size_t alt_local_len;
+    size_t i;
+
+    if (!kprop_vep_local_peptides(
+            ctx, ref_local, &ref_local_len, alt_local, &alt_local_len)) {
+        return -1;
+    }
+    (void)ref_local_len;
+    if (alt_local_len == 0u) return 1;
+    for (i = 0u; i < alt_local_len; i++) {
+        if (alt_local[i] == (uint8_t)'X') return 1;
+    }
+    return 0;
+}
+
 static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct theft *t, void *arg1) {
     const struct kprop_coding *s = (const struct kprop_coding *)arg1;
     duckvep_model_t *model = NULL;
@@ -17510,12 +18391,19 @@ static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct
             fsctx.alt_cds_len >= fsctx.ref_cds_len) {
             char codon[3];
             char endpoint_aa;
+            int stop_retained_uses_cil;
 
             memcpy(codon, fsctx.alt_cds + fsctx.ref_cds_len - 3u,
                    sizeof codon);
             endpoint_aa = duckvep_translate_codon(
                 codon, DUCKVEP_CODON_TABLE_STANDARD);
-            if (endpoint_aa == '*') {
+            stop_retained_uses_cil =
+                kprop_vep_stop_retained_uses_cil(&fsctx);
+            if (stop_retained_uses_cil < 0) {
+                tr = THEFT_TRIAL_FAIL;
+                goto done;
+            }
+            if (endpoint_aa == '*' && stop_retained_uses_cil != 0) {
                 uint8_t ref_local[32];
                 uint8_t alt_local[32];
                 size_t ref_local_len;
@@ -17566,18 +18454,23 @@ static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct
                         (uint8_t)DUCKVEP_SEQUENCE_RESOLVED) {
                     fprintf(stderr,
                             "[terminal CIL mismatch] kind=%u strand=%d "
+                            "genomic=%u-%u raw_ref=%.*s raw_alt=%.*s "
                             "cds_start=%u ref_len=%u alt_len=%u ref_cds=%zu "
                             "alt_cds=%zu local_ref=%.*s local_alt=%.*s "
                             "inframe=%d "
-                            "ref_pep=%.*s alt_pep=%.*s want=%" PRIu64
+                            "cds=%.*s ref_pep=%.*s alt_pep=%.*s want=%" PRIu64
                             " got=%" PRIu64 " status=%u\n",
                             (unsigned)s->vkind, (int)s->strand,
+                            s->vpos, s->vend,
+                            (int)s->rlen, s->abytes + s->roff,
+                            (int)s->alen, s->abytes + s->aoff,
                             fsctx.single_edit_cds_start,
                             fsctx.single_edit_ref_len,
                             fsctx.single_edit_alt_len,
                             fsctx.ref_cds_len, fsctx.alt_cds_len,
                             (int)ref_local_len, ref_local,
                             (int)alt_local_len, alt_local, inframe,
+                            (int)s->cds_lenv, s->cds,
                             (int)fsctx.ref_peptide_len, fsctx.ref_peptide,
                             (int)fsctx.alt_peptide_len, fsctx.alt_peptide, want,
                             rows[0].consequence_mask,
@@ -18901,10 +19794,16 @@ int main(int argc, char **argv) {
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
     RUN_TEST(generated_effect_lookup_matches_rule_interpreter);
     RUN_TEST(event_length_delta_pre_bits_follow_trimmed_alleles);
+    RUN_TEST(ordinary_complete_feature_deletion_is_ablation_known_scene);
+    RUN_TEST(complete_feature_overlap_suppresses_explicit_coding_unknown_known_scene);
+    RUN_TEST(annotate_complete_equal_length_span_keeps_empty_endpoint_utrs_known_scene);
+    RUN_TEST(complete_literal_spans_match_vep_source_semantics_for_any_scene);
     RUN_TEST(annotate_structural_known_scene);
     RUN_TEST(annotate_padded_small_variants_use_differing_region_topology);
     RUN_TEST(annotate_sv_cnv_known_scene);
     RUN_TEST(annotate_breakend_pairs_keep_local_topology_and_mate_truncation);
+    RUN_TEST(annotate_breakend_interval_feature_pairs_use_both_endpoints);
+    RUN_TEST(annotate_breakend_fixed_admission_is_not_configurable_window);
     RUN_TEST(annotate_sv_insertion_at_noncoding_exon_entrance);
     RUN_TEST(annotate_complete_neutral_sv_uses_transcript_fallbacks);
     RUN_TEST(annotate_region_mask_truthful_known_scene);

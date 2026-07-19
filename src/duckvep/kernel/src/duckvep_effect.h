@@ -183,6 +183,7 @@ void duckvep_effect_ctx_apply_sv(
 uint64_t duckvep_effect_eval_interval_feature(
     duckvep_interval_feature_kind_t feature_kind,
     const duckvep_event_t          *event,
+    uint16_t                        feature_chrom_id,
     uint32_t                        feature_start1,
     uint32_t                        feature_end1);
 

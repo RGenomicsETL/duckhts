@@ -1,6 +1,34 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- match VEP 116 for complete transcript overlap by ordinary long literal
+  alleles: a normalized deletion now enters the same tier-1
+  `transcript_ablation` predicate as a symbolic deletion, while an equal-length
+  uploaded span keeps VEP's four-comparison predicates on otherwise-empty UTR
+  intervals and suppresses `coding_sequence_variant` even when sequence
+  evaluation independently produced an unknown-coding fact. Add fixed C, SQL,
+  and R witnesses plus checksum-pinned HPRC pangenome long-allele differential
+  coverage; the configured 5,000-base upstream/downstream distance affects only
+  candidate admission outside transcripts, not these overlapping states
+- keep paired-BND result materialization linear in the dominant transcript-row
+  count: transcript and interval-feature evaluators remain separate sorted
+  streams, only the smaller feature stream is ordered by object kind, and a
+  worker-owned merge buffer combines them in variant-major order. Models with
+  no resident regulation features now retain the original transcript-only fast
+  path instead of sorting an already ordered expansion
+- tighten the DuckVEP statistical consequence oracle around VEP 116 terminal-codon
+  insertions: the insertion-length-aware endpoint reconstruction is now modeled only for
+  empty or `X`-containing local alternate peptides, while concrete local peptides retain
+  VEP's `ref_eq_alt_sequence` path. A held-out reverse-strand regression discovered after
+  93,064 generated cases now pins the resulting
+  `frameshift_variant&stop_gained` state
+- keep VEP's fixed 5000-base BND overlap-allele admission independent of the
+  caller-selected transcript window in both directions: with a zero directional distance,
+  an admitted local allele whose upstream/downstream predicate is disabled now contributes
+  default `intergenic_variant` beside mate-derived `feature_truncation`. Add C, SQL, R, and
+  executable-VEP regressions at zero, intermediate, default, and wider distances so the
+  shared 5000-base default cannot hide this allele-row union
+- close the remaining typed VEP-116 structural consequence inputs without inventing semantics for unused payloads: `duckvep_annotate_sv(...)` and its compact form now accept structural tandem repeats as `STR`/`TANDEM_REPEAT`/`CNV:TR`, preserve that event identity, and reproduce VEP's tandem-duplication gain/insertion predicates; bounded repeats expanded to literal alleles continue through the small-variant path. Paired-BND annotation now queries resident RegulatoryFeature and MotifFeature indexes at both the shifted local point and verbatim mate point and reproduces VEP's asymmetric feature semantics: local exact hits keep the base regulatory/motif term, mate-only exact hits use generic HIGH-impact `feature_truncation`, a same-contig shifted local point outside but within VEP's fixed 5000-base admission distance adds `intergenic_variant` to that mate-discovered object, and the local base term wins when both points hit one object exactly. Mixed transcript/regulation BND batches are restored to variant-major order before DuckDB list materialization, preserving one result list per input event. The executable oracle collapses byte-identical object rows, unions distinct allele-level consequences per object, and rejects conflicting non-consequence state. Add one shared explicit event/object-pair kernel path, SQL/R mixed-vector regressions, randomized all-feature BND/STR oracles, and executable-VEP breakend generation that targets feature starts, midpoints, and ends in raw-local, verbatim-mate, both-exact, mate-exact/local-close, exact-5000, and beyond-5000 forms. Fixed C/SQL/R regressions use a 10000-base caller window to prove it cannot widen VEP's separate fixed structural-allele cap; randomized sweep windows span 0 through 65535 bases instead of stopping at the shared default. Bump the standalone kernel ABI to 0.15.0. Exact VEP 116 source audit confirms that `CIPOS`/`CIEND` and structural inserted sequence do not alter its registered 41-term consequence predicates, so they remain relational provenance and future HGVS/round-trip inputs rather than ignored hot-kernel parameters
 - keep unprojected FASTQ query names outside the BAM publishing limit: direct `read_fastq(...)` scans now accept long headers when `NAME` / `PAIR_ID` are neither returned nor needed for paired-file comparison, while name-producing scans retain the htslib-compatible limit. Also make an explicit `duckhts_fastq_qc(..., max_cycles)` value below 128 cap the aggregate's initial per-group cycle allocation instead of allocating the default 128-entry growth quantum
 - add `duckhts_fastq_qc(sequence, quality [, max_cycles])`, a bounded aggregate over canonical FASTQ strings that emits exact global read/base/Q20/Q30/Q40/base-composition totals and compact per-cycle sufficient statistics without relationally expanding every base. The shared scalar kernel is the correctness oracle; AVX2, ARM NEON, and wasm SIMD128 slots use the existing per-kernel dispatch and preserve exact scalar results. Add SQL/R aggregate regressions, seeded standalone SIMD contracts, target-compilation checks, and a pinned one-core HG001 exome comparison against current fastp
 - accelerate `read_fastq(...)` by parsing FASTQ records directly over htslib transport into only the projected DuckDB columns, removing the temporary `bam1_t` round trip while preserving multiline sequence/quality framing, htslib-style query names, paired/interleaved checks, string and packed nt16/Phred output, quality-encoding conversion, and count shortcuts. Truncated sequence or quality blocks now raise precise DuckDB errors instead of being mistaken for clean EOF. Add SQL/R multiline, packed-output, and truncation regressions plus a pinned one-core before/after benchmark and a separately labelled current-fastp QC comparison

@@ -33,6 +33,22 @@ The tests have three independent jobs:
 - `make test-duckvep-differential` generates boundary, splice, codon, and allele-shape
   witnesses, runs both engines on the same GFF and FASTA, and compares the exact SO term
   set for every `(variant, transcript)` pair.
+- `--event-mode breakend --regulatory` adds source-derived RegulatoryFeature and
+  MotifFeature start/mid/end points in both raw local (`point - 1`, before VEP anchor
+  removal) and verbatim mate forms, plus same-object pairs whose local and mate points
+  both hit one feature and pairs whose mate hits while the shifted local point is one
+  base before it. It also generates shifted local points exactly 5,000 and 5,001 bases
+  after a mate-discovered object, proving that VEP's fixed structural-allele admission
+  cap is distinct from the caller-configurable transcript distance. This makes
+  local-only, mate-only, both-exact, mate-exact/local-close, exact-cap, and beyond-cap
+  states deterministic instead of relying on transcript-derived endpoints to hit a core
+  interval by chance. Exact duplicate VEP object rows are collapsed and distinct
+  allele-level consequence rows are unioned per `(event, object)` before pair
+  denominators; conflicting status, reason, or NMD state fails the run.
+- Run the same generated breakend corpus with `--distance 0`, `--distance 137`, the
+  default `--distance 5000`, and `--distance 10000` before closing a BND semantic change.
+  The non-default campaigns prevent the equal numeric defaults from becoming one hidden
+  implementation authority.
 - `make test-duckvep-state-exploration` runs every C property 100,000 times, then adds
   20,000 deterministic alleles concentrated around transcript boundaries and distributed
   across the transcript, and compares all of them with executable VEP 116. The generated
@@ -48,14 +64,21 @@ DUCKVEP_PROP_TRIALS=1000000 \
   make test-duckvep-state-exploration
 ```
 
-A held-out run with seed `20260716` raised both layers to 100,000 randomized cases. The
-pure-C layer passed 170 tests and 204,521 assertions. The executable differential wrote
-100,268 variants (268 fixed witnesses plus 100,000 generated alleles) and matched all
-100,268 VEP-116 transcript pairs, with no unresolved, missing, or extra rows. The generated
-alleles included 384 SNVs, 33,032 MNVs, 30,328 insertions, 1,442 deletions, and 34,814
-delins. These are measured counts for that seed, not an assertion that the accepted cases
-are uniformly distributed: duplicate rejection exhausts the small SNV/deletion state space
-sooner than the longer-allele spaces.
+A held-out pure-C run with seed `20260719` raised every randomized property to 100,000
+cases. The ordinary, AddressSanitizer, and UndefinedBehaviorSanitizer targets each passed
+175 tests and 204,759 assertions. That seed exposed an over-broad statistical oracle after
+93,064 generated frame-changing cases: VEP's insertion-length-aware terminal-codon
+reconstruction is a fallback only for an empty or `X`-containing local alternate peptide.
+The minimized concrete-`*` scene now has a fixed regression, while the corrected random
+oracle still observed 49 genuine fallback cases and 1,877 stop-gained frame changes.
+
+The independent executable differential with seed `20260716` wrote 100,268 variants (268
+fixed witnesses plus 100,000 generated alleles) and matched all 100,268 VEP-116 transcript
+pairs, with no unresolved, missing, or extra rows. The generated alleles included 384 SNVs,
+33,032 MNVs, 30,328 insertions, 1,442 deletions, and 34,814 delins. These are measured counts
+for that seed, not an assertion that the accepted cases are uniformly distributed:
+duplicate rejection exhausts the small SNV/deletion state space sooner than the
+longer-allele spaces.
 
 For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_sequence_regions`, `duckvep_transcripts`, `duckvep_exons`, and

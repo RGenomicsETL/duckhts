@@ -94,9 +94,55 @@ op <- add_option(
   default = 10000L,
   help = "deterministic limit per allele type and length bin; 0 keeps all [%default]"
 )
+op <- add_option(
+  op,
+  "--max-allele-length",
+  dest = "max_allele_length",
+  type = "integer",
+  default = 50L,
+  help = paste(
+    "maximum literal REF or ALT length in the small-event lane;",
+    "the compact kernel limit is 65535 [%default]"
+  )
+)
+op <- add_option(
+  op,
+  "--split-multiallelic",
+  dest = "split_multiallelic",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "compare each ALT from a multiallelic record independently; genotype",
+    "fields are not used or rewritten [default: %default]"
+  )
+)
+op <- add_option(
+  op,
+  "--stratify-raw-allele-length",
+  dest = "stratify_raw_allele_length",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "also partition deterministic small-event sampling by the larger raw",
+    "REF/ALT length (1, 2..50, 51..1000, 1001..10000, >10000);",
+    "this preserves long uploaded representations independently of the",
+    "minimized edit-length bin [default: %default]"
+  )
+)
 op <- add_option(op, "--seed", type = "integer", default = 1L)
 op <- add_option(op, "--chrom", default = "")
 op <- add_option(op, "--distance", type = "integer", default = 5000L)
+op <- add_option(
+  op,
+  "--max-sv-size",
+  dest = "max_sv_size",
+  type = "double",
+  default = 10000000,
+  help = paste(
+    "VEP --max_sv_size for structural-mode records; make the oracle's",
+    "default 10 Mb skip explicit and raise it for larger exact spans [%default]"
+  )
+)
 op <- add_option(
   op,
   "--regulatory",
@@ -112,6 +158,46 @@ op <- add_option(
   "--annotations-out",
   dest = "annotations_out",
   default = ""
+)
+op <- add_option(
+  op,
+  "--eligibility-out",
+  dest = "eligibility_out",
+  default = "",
+  help = "optional CSV receipt for input allele classes and exclusions [%default]"
+)
+op <- add_option(
+  op,
+  "--source-audit-only",
+  dest = "source_audit_only",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "scan the complete small-event source, write --eligibility-out, and stop",
+    "before FASTA/VEP annotation; this records source support without",
+    "claiming executable conformance [default: %default]"
+  )
+)
+op <- add_option(
+  op,
+  "--source-url",
+  dest = "source_url",
+  default = "",
+  help = "published URL from which --vcf was obtained [%default]"
+)
+op <- add_option(
+  op,
+  "--source-version",
+  dest = "source_version",
+  default = "",
+  help = "release, object version, or accession identifying --vcf [%default]"
+)
+op <- add_option(
+  op,
+  "--source-checksum",
+  dest = "source_checksum",
+  default = "",
+  help = "expected checksum as md5:HEX or sha256:HEX [%default]"
 )
 op <- add_option(op, "--sample-vcf", dest = "sample_vcf", default = "")
 op <- add_option(
@@ -130,6 +216,18 @@ op <- add_option(
   )
 )
 op <- add_option(op, "--fork", default = as.character(max(1L, min(8L, ncores))))
+op <- add_option(
+  op,
+  "--vep-buffer-size",
+  dest = "vep_buffer_size",
+  type = "integer",
+  default = 5000L,
+  help = paste(
+    "VEP input buffer size for small and structural modes; breakend mode",
+    "remains isolated at one because neighboring BNDs change VEP semantics",
+    "[%default]"
+  )
+)
 op <- add_option(
   op,
   "--vep-prefix",
@@ -160,8 +258,11 @@ if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
   die("--event-mode must be small, structural, or breakend")
 }
 if (
-  !requireNamespace("blit", quietly = TRUE) ||
-    utils::packageVersion("blit") < "0.2.0.9000"
+  !isTRUE(opt$source_audit_only) &&
+    (
+      !requireNamespace("blit", quietly = TRUE) ||
+        utils::packageVersion("blit") < "0.2.0.9000"
+    )
 ) {
   die(
     "the current WangLabCSU/blit checkout is required ",
@@ -170,15 +271,21 @@ if (
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
 fasta_index <- paste0(opt$fasta, ".fai")
-required_files <- c(opt$fasta, fasta_index, opt$extension)
+required_files <- opt$extension
+if (!isTRUE(opt$source_audit_only)) {
+  required_files <- c(opt$fasta, fasta_index, required_files)
+}
 external_model_database <- !nzchar(opt$model_sql) &&
   !identical(opt$database, ":memory:")
 if (external_model_database) {
   required_files <- c(required_files, opt$database)
 }
-if (identical(oracle_mode, "gff")) {
+if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
-} else if (!dir.exists(opt$cache_dir)) {
+} else if (
+  !isTRUE(opt$source_audit_only) &&
+    !dir.exists(opt$cache_dir)
+) {
   die("VEP cache root does not exist: {opt$cache_dir}")
 }
 missing_files <- required_files[!file.exists(required_files)]
@@ -186,20 +293,65 @@ if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
 }
 
-fasta_index_lines <- readLines(fasta_index, warn = FALSE)
-fasta_chroms <- sub("\t.*$", "", fasta_index_lines)
+fasta_chroms <- if (isTRUE(opt$source_audit_only)) {
+  character()
+} else {
+  sub("\t.*$", "", readLines(fasta_index, warn = FALSE))
+}
 if (
-  length(fasta_chroms) == 0L ||
-    any(!nzchar(fasta_chroms)) ||
-    anyDuplicated(fasta_chroms)
+  !isTRUE(opt$source_audit_only) &&
+    (
+      length(fasta_chroms) == 0L ||
+        any(!nzchar(fasta_chroms)) ||
+        anyDuplicated(fasta_chroms)
+    )
 ) {
   die("FASTA index has missing or duplicate sequence names: {fasta_index}")
 }
 if (opt$sample_per_shape < 0L) {
   die("--sample-per-shape must be non-negative")
 }
+if (opt$max_allele_length < 1L || opt$max_allele_length > 65535L) {
+  die("--max-allele-length must be between 1 and 65535")
+}
 if (opt$distance < 0L) {
   die("--distance must be non-negative")
+}
+if (opt$vep_buffer_size < 1L) {
+  die("--vep-buffer-size must be positive")
+}
+if (
+  !is.finite(opt$max_sv_size) ||
+    opt$max_sv_size < 1 ||
+    opt$max_sv_size > 4294967295 ||
+    opt$max_sv_size != floor(opt$max_sv_size)
+) {
+  die("--max-sv-size must be an integer between 1 and 4294967295")
+}
+if (
+  isTRUE(opt$source_audit_only) &&
+    (
+      !identical(opt$event_mode, "small") ||
+        !nzchar(opt$eligibility_out)
+    )
+) {
+  die("--source-audit-only requires small mode and --eligibility-out")
+}
+if (
+  !identical(opt$event_mode, "small") &&
+    (
+      isTRUE(opt$split_multiallelic) ||
+        isTRUE(opt$stratify_raw_allele_length) ||
+        nzchar(opt$eligibility_out)
+    )
+) {
+  die(
+    "--split-multiallelic, --stratify-raw-allele-length, and ",
+    "--eligibility-out apply only to --event-mode small"
+  )
+}
+if (nzchar(opt$source_version) && !nzchar(opt$source_url)) {
+  die("--source-version requires --source-url")
 }
 if (isTRUE(opt$regulatory) && identical(oracle_mode, "gff")) {
   die("--regulatory requires the indexed VEP cache, not the GFF oracle")
@@ -214,6 +366,9 @@ nmd_state_plugin <- file.path(
   "DuckVEPNMDState.pm"
 )
 if (nzchar(opt$nmd_plugin_dir)) {
+  if (isTRUE(opt$source_audit_only)) {
+    die("--source-audit-only does not execute the NMD plugin")
+  }
   if (!identical(opt$event_mode, "small")) {
     die("structural and breakend differentials do not compare NMD plugin output")
   }
@@ -512,6 +667,55 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
   die("VCF does not exist: {source_vcf}")
 }
 
+if (!nzchar(source_vcf) && any(nzchar(c(opt$source_url, opt$source_checksum)))) {
+  die("source provenance options require --vcf")
+}
+source_sha256 <- ""
+verified_source_checksum <- ""
+source_bytes <- NA_real_
+if (nzchar(source_vcf)) {
+  source_vcf <- normalizePath(source_vcf)
+  source_bytes <- unname(file.info(source_vcf)$size)
+  sha_line <- system2("sha256sum", source_vcf, stdout = TRUE, stderr = FALSE)
+  if (length(sha_line) != 1L) {
+    die("cannot checksum {source_vcf}")
+  }
+  source_sha256 <- tolower(
+    strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
+  )
+  if (!grepl("^[0-9a-f]{64}$", source_sha256)) {
+    die("sha256sum returned an invalid digest for {source_vcf}")
+  }
+  if (nzchar(opt$source_checksum)) {
+    checksum_parts <- strsplit(opt$source_checksum, ":", fixed = TRUE)[[1L]]
+    if (length(checksum_parts) != 2L) {
+      die("--source-checksum must be md5:HEX or sha256:HEX")
+    }
+    checksum_algorithm <- tolower(checksum_parts[[1L]])
+    expected_checksum <- tolower(checksum_parts[[2L]])
+    actual_checksum <- switch(
+      checksum_algorithm,
+      md5 = tolower(unname(tools::md5sum(source_vcf))),
+      sha256 = source_sha256,
+      die("--source-checksum algorithm must be md5 or sha256")
+    )
+    expected_width <- if (identical(checksum_algorithm, "md5")) 32L else 64L
+    if (
+      nchar(expected_checksum) != expected_width ||
+        !grepl("^[0-9a-f]+$", expected_checksum)
+    ) {
+      die("--source-checksum has an invalid {checksum_algorithm} digest")
+    }
+    if (!identical(actual_checksum, expected_checksum)) {
+      die(
+        "source checksum mismatch: expected {expected_checksum}, ",
+        "found {actual_checksum}"
+      )
+    }
+    verified_source_checksum <- paste(checksum_algorithm, actual_checksum, sep = ":")
+  }
+}
+
 chrom_filter <- ""
 chroms <- trimws(strsplit(opt$chrom, ",", fixed = TRUE)[[1L]])
 chroms <- chroms[nzchar(chroms)]
@@ -526,10 +730,42 @@ if (length(chroms) != 0L) {
     "AND r.name IN ({paste(vapply(chroms, sql_q, character(1)), collapse = ', ')})"
   )
 }
+small_source_sql <- ""
+if (identical(opt$event_mode, "small")) {
+  small_source_sql <- if (isTRUE(opt$split_multiallelic)) {
+    glue(
+      "SELECT
+         v.CHROM AS chrom,
+         v.POS::UBIGINT AS position,
+         v.REF AS reference,
+         a.alternate AS alternate
+       FROM read_bcf({sql_q(source_vcf)}, scan_mode := 'sequential') v
+       CROSS JOIN UNNEST(v.ALT) WITH ORDINALITY AS a(alternate, alt_index)
+       WHERE a.alternate IS NOT NULL
+         {chrom_filter}"
+    )
+  } else {
+    glue(
+      "SELECT
+         CHROM AS chrom,
+         POS::UBIGINT AS position,
+         REF AS reference,
+         ALT[1] AS alternate
+       FROM read_bcf({sql_q(source_vcf)}, scan_mode := 'sequential')
+       WHERE len(ALT) = 1
+         {chrom_filter}"
+    )
+  }
+}
 sample_filter <- if (opt$sample_per_shape == 0L) {
   ""
 } else {
   glue("WHERE sample_rank <= {opt$sample_per_shape}")
+}
+small_sample_partition <- if (isTRUE(opt$stratify_raw_allele_length)) {
+  "var_type, length_bin, raw_allele_length_bin"
+} else {
+  "var_type, length_bin"
 }
 generated_filter <- if (opt$sample_per_shape == 0L) {
   ""
@@ -593,6 +829,112 @@ regulation_span_geometries <- if (isTRUE(opt$regulatory)) {
      WHERE f.feature_start > 1 AND f.feature_end > f.feature_start
        AND f.feature_end <= {model_sequence_length_sql}
        {generated_chrom_filter}"
+  )
+} else {
+  ""
+}
+
+# BND regulation observes two different point transforms: VEP removes the local
+# VCF anchor (POS + 1), while the mate coordinate is used verbatim. Generate
+# both raw representations at feature starts, midpoints, and ends so a seeded
+# campaign cannot appear exact merely because transcript-derived endpoints
+# happened not to land in a RegulatoryFeature or MotifFeature.
+regulation_breakend_geometries <- if (isTRUE(opt$regulatory)) {
+  glue(
+    "UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_', endpoint_role, '_', point_name
+       ) AS event_state,
+       f.regulation_feature_index AS transcript_index,
+       f.seq_region, r.name AS chrom,
+       CAST(feature_position + position_shift AS UINTEGER) AS position
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     CROSS JOIN LATERAL (VALUES
+       ('start', f.feature_start),
+       ('mid', (f.feature_start + f.feature_end) // 2),
+       ('end', f.feature_end)
+     ) feature_points(point_name, feature_position)
+     CROSS JOIN (VALUES
+       ('local', -1),
+       ('mate', 0)
+     ) endpoint_roles(endpoint_role, position_shift)
+     WHERE feature_position + position_shift > 0
+       AND feature_position + position_shift < 4294967295
+       {generated_chrom_filter}"
+  )
+} else {
+  ""
+}
+
+# Force the two same-chromosome states that shuffled endpoints do not guarantee:
+# both transformed endpoint points lie in the same object, or the mate lies in
+# the object while the transformed local point is one base before it. The first
+# state retains the local base term. The second exposes StructuralVariationOverlap's
+# fixed 5000-base endpoint admission and yields the object-level union of
+# intergenic_variant with feature_truncation.
+regulation_breakend_both_pairs <- if (isTRUE(opt$regulatory)) {
+  both_pair_limit <- if (opt$sample_per_shape == 0L) {
+    ""
+  } else {
+    glue(
+      "QUALIFY row_number() OVER (
+         PARTITION BY f.feature_kind, f.seq_region
+         ORDER BY hash(f.regulation_feature_index, {opt$seed}, 73)
+       ) <= {opt$sample_per_shape}"
+    )
+  }
+  glue(
+    "UNION ALL
+     SELECT
+       'intra' AS pair_class,
+       concat(
+         CASE selected.feature_kind
+           WHEN 1 THEN 'regulatory' ELSE 'motif'
+         END,
+         state.local_suffix
+       ) AS local_state,
+       concat(
+         CASE selected.feature_kind
+           WHEN 1 THEN 'regulatory' ELSE 'motif'
+         END,
+         state.mate_suffix
+       ) AS mate_state,
+       selected.regulation_feature_index AS local_transcript_index,
+       selected.regulation_feature_index AS mate_transcript_index,
+       selected.seq_region, selected.chrom,
+       CAST(
+         CAST(
+           CASE state.local_anchor
+             WHEN 'start' THEN selected.feature_start
+             ELSE selected.feature_end
+           END AS BIGINT
+         ) + state.local_raw_shift AS UINTEGER
+       ) AS position,
+       selected.seq_region AS mate_seq_region,
+       selected.chrom AS mate_chrom,
+       CAST(
+         (selected.feature_start + selected.feature_end) // 2 AS UINTEGER
+       )
+         AS mate_position
+     FROM (
+       SELECT f.*, r.name AS chrom
+       FROM duckvep_regulation_features f
+       JOIN duckvep_sequence_regions r USING (seq_region)
+       WHERE f.feature_start > 2
+         AND CAST(f.feature_end AS UBIGINT) + 5001 <=
+             {model_sequence_length_sql}
+         {generated_chrom_filter}
+       {both_pair_limit}
+     ) selected
+     CROSS JOIN (VALUES
+       ('_both_local_start', '_both_mate_mid', 'start', -1::BIGINT),
+       ('_mate_only_close_local_before', '_mate_exact_mid', 'start', -2::BIGINT),
+       ('_mate_only_exact_cap_after', '_mate_exact_mid', 'end', 4999::BIGINT),
+       ('_mate_only_beyond_cap_after', '_mate_exact_mid', 'end', 5000::BIGINT)
+     ) state(local_suffix, mate_suffix, local_anchor, local_raw_shift)"
   )
 } else {
   ""
@@ -890,6 +1232,7 @@ if (generate_breakend) {
                 (exon_end + next_exon_start) // 2
          FROM exons
          WHERE next_exon_start IS NOT NULL AND next_exon_start > exon_end + 1
+         {regulation_breakend_geometries}
        ), distinct_geometries AS (
          SELECT DISTINCT event_state, transcript_index, seq_region, chrom, position
          FROM endpoint_geometries
@@ -953,6 +1296,7 @@ if (generate_breakend) {
            ON m.seq_region = c.mate_seq_region
           AND m.endpoint_rank = 1 + ((l.endpoint_rank - 1) % m.endpoint_count)
          WHERE c.mate_seq_region <> l.seq_region
+         {regulation_breakend_both_pairs}
        ), oriented_pairs AS (
          SELECT p.*, orientation
          FROM endpoint_pairs p
@@ -1031,10 +1375,18 @@ structural_source_sql <- if (generate_structural) {
        CAST(regexp_extract(ALT[1], '([A-Za-z0-9_.-]+):([0-9]+)', 2) AS UBIGINT)
          AS mate_position,
        CASE
-         WHEN ALT[1] LIKE 'N]%]%' THEN 'N]M]'
-         WHEN ALT[1] LIKE 'N[%[%' THEN 'N[M['
-         WHEN ALT[1] LIKE ']%]%N' THEN ']M]N'
-         WHEN ALT[1] LIKE '[%[%N' THEN '[M[N'
+         WHEN regexp_full_match(
+           ALT[1], '[^\\[\\]]+\\][^\\[\\]]+:[0-9]+\\]'
+         ) THEN 'N]M]'
+         WHEN regexp_full_match(
+           ALT[1], '[^\\[\\]]+\\[[^\\[\\]]+:[0-9]+\\['
+         ) THEN 'N[M['
+         WHEN regexp_full_match(
+           ALT[1], '\\][^\\[\\]]+:[0-9]+\\][^\\[\\]]+'
+         ) THEN ']M]N'
+         WHEN regexp_full_match(
+           ALT[1], '\\[[^\\[\\]]+:[0-9]+\\[[^\\[\\]]+'
+         ) THEN '[M[N'
          ELSE 'source'
        END AS orientation
      FROM read_bcf({sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential')
@@ -1052,18 +1404,16 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
     "CREATE OR REPLACE TEMP TABLE duckvep_sample AS
      WITH alleles AS (
        SELECT DISTINCT
-         CHROM AS chrom,
-         POS::UBIGINT AS position,
-         REF AS reference,
-         ALT[1] AS alternate
-       FROM read_bcf({sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential')
-       WHERE len(ALT) = 1
-         AND REF <> ALT[1]
-         AND length(REF) BETWEEN 1 AND 50
-         AND length(ALT[1]) BETWEEN 1 AND 50
-         AND regexp_full_match(REF, '[ACGT]+')
-         AND regexp_full_match(ALT[1], '[ACGT]+')
-         {chrom_filter}
+         chrom,
+         position,
+         reference,
+         alternate
+       FROM ({small_source_sql}) source
+       WHERE reference <> alternate
+         AND length(reference) BETWEEN 1 AND {opt$max_allele_length}
+         AND length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+         AND regexp_full_match(upper(reference), '[ACGTN]+')
+         AND regexp_full_match(upper(alternate), '[ACGTN]+')
      ), shaped AS (
        SELECT *,
          CASE
@@ -1081,12 +1431,22 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
            WHEN abs(length_change) = 1 THEN concat(if(length_change > 0, '+', '-'), '1')
            WHEN abs(length_change) <= 3 THEN concat(if(length_change > 0, '+', '-'), '2..3')
            WHEN abs(length_change) <= 10 THEN concat(if(length_change > 0, '+', '-'), '4..10')
-           ELSE concat(if(length_change > 0, '+', '-'), '11..50')
-         END AS length_bin
+           WHEN abs(length_change) <= 50 THEN concat(if(length_change > 0, '+', '-'), '11..50')
+           WHEN abs(length_change) <= 1000 THEN concat(if(length_change > 0, '+', '-'), '51..1000')
+           WHEN abs(length_change) <= 10000 THEN concat(if(length_change > 0, '+', '-'), '1001..10000')
+           ELSE concat(if(length_change > 0, '+', '-'), '>10000')
+         END AS length_bin,
+         CASE
+           WHEN greatest(length(reference), length(alternate)) = 1 THEN '1'
+           WHEN greatest(length(reference), length(alternate)) <= 50 THEN '2..50'
+           WHEN greatest(length(reference), length(alternate)) <= 1000 THEN '51..1000'
+           WHEN greatest(length(reference), length(alternate)) <= 10000 THEN '1001..10000'
+           ELSE '>10000'
+         END AS raw_allele_length_bin
        FROM shaped
      ), ranked AS (
        SELECT *, row_number() OVER (
-         PARTITION BY var_type, length_bin
+         PARTITION BY {small_sample_partition}
          ORDER BY hash(chrom, position, reference, alternate, {opt$seed})
        ) AS sample_rank
        FROM binned
@@ -1233,8 +1593,144 @@ if (identical(opt$event_mode, "breakend")) {
     "SELECT count(DISTINCT variant_id) AS n FROM duckvep_sample"
   )$n[[1L]]
 }
+if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
+  split_predicate <- if (isTRUE(opt$split_multiallelic)) {
+    "TRUE"
+  } else {
+    "alt_count = 1"
+  }
+  eligibility <- dbGetQuery(
+    con,
+    glue(
+      "WITH records AS (
+         SELECT CHROM AS chrom, POS::UBIGINT AS position,
+                REF AS reference, ALT AS alternate_list
+         FROM read_bcf({sql_q(source_vcf)}, scan_mode := 'sequential')
+         WHERE TRUE {chrom_filter}
+       ), record_counts AS (
+         SELECT
+           count(*)::UBIGINT AS source_records,
+           count(*) FILTER (
+             WHERE alternate_list IS NULL OR len(alternate_list) = 0
+           )::UBIGINT AS records_without_alt,
+           count(*) FILTER (
+             WHERE len(alternate_list) > 1
+           )::UBIGINT AS multiallelic_records
+         FROM records
+       ), alleles AS (
+         SELECT r.chrom, r.position, r.reference, a.alternate,
+                len(r.alternate_list) AS alt_count
+         FROM records r
+         CROSS JOIN UNNEST(r.alternate_list) AS a(alternate)
+         WHERE a.alternate IS NOT NULL
+       ), classified AS (
+         SELECT *,
+           reference = alternate AS ref_equal,
+           regexp_full_match(alternate, '<[^>]+>') AS symbolic,
+           regexp_matches(alternate, '[\\[\\]]') AS breakend,
+           alternate = '*' AS spanning_deletion,
+           regexp_full_match(upper(reference), '[ACGTN]+') AND
+             regexp_full_match(upper(alternate), '[ACGTN]+') AS literal_acgtn
+         FROM alleles
+       ), allele_counts AS (
+         SELECT
+           count(*)::UBIGINT AS source_alt_alleles,
+           count(*) FILTER (WHERE alt_count > 1)::UBIGINT
+             AS multiallelic_alt_alleles,
+           count(*) FILTER (WHERE ref_equal)::UBIGINT AS ref_equal_alleles,
+           count(*) FILTER (WHERE symbolic)::UBIGINT AS symbolic_alleles,
+           count(*) FILTER (WHERE breakend)::UBIGINT AS breakend_alleles,
+           count(*) FILTER (WHERE spanning_deletion)::UBIGINT
+             AS spanning_deletion_alleles,
+           count(*) FILTER (WHERE literal_acgtn)::UBIGINT
+             AS literal_acgtn_alleles,
+           count(*) FILTER (
+             WHERE NOT symbolic AND NOT breakend AND NOT spanning_deletion AND
+                   NOT literal_acgtn
+           )::UBIGINT AS other_alleles,
+           count(*) FILTER (
+             WHERE literal_acgtn AND NOT ref_equal AND
+                   (length(reference) > {opt$max_allele_length} OR
+                    length(alternate) > {opt$max_allele_length})
+           )::UBIGINT AS literal_over_requested_limit,
+           count(*) FILTER (
+             WHERE literal_acgtn AND NOT ref_equal AND
+                   (length(reference) > 65535 OR length(alternate) > 65535)
+           )::UBIGINT AS literal_over_kernel_limit,
+           max(length(reference)) FILTER (WHERE literal_acgtn)::UBIGINT
+             AS max_literal_ref_length,
+           max(length(alternate)) FILTER (WHERE literal_acgtn)::UBIGINT
+             AS max_literal_alt_length
+         FROM classified
+       ), eligible_pre_model AS (
+         SELECT * FROM classified
+         WHERE {split_predicate}
+           AND NOT ref_equal
+           AND literal_acgtn
+           AND length(reference) BETWEEN 1 AND {opt$max_allele_length}
+           AND length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+       ), eligible_model AS (
+         SELECT e.*
+         FROM eligible_pre_model e
+         JOIN duckvep_sequence_regions r ON r.name = e.chrom
+       ), eligible_distinct AS (
+         SELECT DISTINCT chrom, position, reference, alternate
+         FROM eligible_model
+       )
+       SELECT
+         rc.*,
+         ac.*,
+         {if (isTRUE(opt$split_multiallelic)) '0' else 'ac.multiallelic_alt_alleles'}::UBIGINT
+           AS multiallelic_alt_alleles_excluded,
+         (SELECT count(*) FROM eligible_pre_model)::UBIGINT
+           AS eligible_rows_before_model,
+         ((SELECT count(*) FROM eligible_pre_model) -
+          (SELECT count(*) FROM eligible_model))::UBIGINT
+           AS eligible_rows_outside_model_contigs,
+         (SELECT count(*) FROM eligible_model)::UBIGINT AS eligible_model_rows,
+         (SELECT count(*) FROM eligible_distinct)::UBIGINT
+           AS eligible_distinct_alleles,
+         ((SELECT count(*) FROM eligible_model) -
+          (SELECT count(*) FROM eligible_distinct))::UBIGINT
+           AS duplicate_eligible_rows_removed
+       FROM record_counts rc CROSS JOIN allele_counts ac"
+    )
+  )
+  eligibility <- cbind(
+    data.frame(
+      run_date = as.character(Sys.Date()),
+      corpus = opt$corpus,
+      event_mode = opt$event_mode,
+      source_path = source_vcf,
+      source_url = opt$source_url,
+      source_version = opt$source_version,
+      source_sha256 = source_sha256,
+      verified_source_checksum = verified_source_checksum,
+      source_bytes = source_bytes,
+      max_allele_length = opt$max_allele_length,
+      split_multiallelic = isTRUE(opt$split_multiallelic),
+      stratify_raw_allele_length = isTRUE(opt$stratify_raw_allele_length),
+      sample_per_shape = opt$sample_per_shape,
+      selected_events = sample_count,
+      stringsAsFactors = FALSE
+    ),
+    eligibility
+  )
+  dir.create(dirname(opt$eligibility_out), recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(eligibility, opt$eligibility_out, row.names = FALSE, na = "")
+}
+if (isTRUE(opt$source_audit_only)) {
+  invisible(dbGetQuery(
+    con,
+    glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
+  ))
+  cat(glue("source records audited: {eligibility$source_records[[1L]]}"), "\n")
+  cat(glue("eligible distinct alleles: {eligibility$eligible_distinct_alleles[[1L]]}"), "\n")
+  cat(glue("eligibility receipt: {opt$eligibility_out}"), "\n")
+  quit(save = "no", status = 0L)
+}
 if (sample_count == 0) {
-  die("the sampler found no supported {opt$event_mode} events in model regions")
+  die("the sampler found no eligible {opt$event_mode} events in model regions")
 }
 
 sample_vcf <- opt$sample_vcf
@@ -1576,9 +2072,47 @@ if (identical(opt$event_mode, "breakend")) {
     "breakend_buffer_size=1",
     "input_order=fasta_index"
   )
+} else {
+  oracle_details <- c(
+    oracle_details,
+    glue("vep_buffer_size={opt$vep_buffer_size}")
+  )
+}
+if (identical(opt$event_mode, "structural")) {
+  oracle_details <- c(
+    oracle_details,
+    glue("max_sv_size={format(opt$max_sv_size, scientific = FALSE)}")
+  )
 }
 if (isTRUE(opt$regulatory)) {
   oracle_details <- c(oracle_details, "regulatory=true")
+}
+if (nzchar(source_sha256)) {
+  oracle_details <- c(
+    oracle_details,
+    glue("source_sha256={source_sha256}"),
+    glue("source_bytes={format(source_bytes, scientific = FALSE, trim = TRUE)}")
+  )
+}
+if (nzchar(opt$source_url)) {
+  oracle_details <- c(oracle_details, glue("source_url={opt$source_url}"))
+}
+if (nzchar(opt$source_version)) {
+  oracle_details <- c(
+    oracle_details,
+    glue("source_version={opt$source_version}")
+  )
+}
+if (identical(opt$event_mode, "small")) {
+  oracle_details <- c(
+    oracle_details,
+    glue("max_allele_length={opt$max_allele_length}"),
+    glue("split_multiallelic={tolower(isTRUE(opt$split_multiallelic))}"),
+    glue(
+      "stratify_raw_allele_length=",
+      "{tolower(isTRUE(opt$stratify_raw_allele_length))}"
+    )
+  )
 }
 oracle_build <- paste(
   c(
@@ -1617,7 +2151,20 @@ if (identical(opt$event_mode, "breakend")) {
   # the executable oracle's transcript set.
   vep_args <- c(vep_args, "--buffer_size", "1")
 } else {
-  vep_args <- c(vep_args, "--fork", opt$fork)
+  vep_args <- c(
+    vep_args,
+    "--buffer_size",
+    as.character(opt$vep_buffer_size),
+    "--fork",
+    opt$fork
+  )
+}
+if (identical(opt$event_mode, "structural")) {
+  vep_args <- c(
+    vep_args,
+    "--max_sv_size",
+    format(opt$max_sv_size, scientific = FALSE)
+  )
 }
 if (isTRUE(opt$regulatory)) {
   vep_args <- c(vep_args, "--regulatory")
@@ -1775,6 +2322,81 @@ if (isTRUE(opt$regulatory)) {
   ))
 }
 
+# InputBuffer::get_overlapping_vfs can construct the same structural overlap
+# more than once. Each overlap also carries every endpoint no farther than 5000
+# bases from the object. VEP therefore emits both byte-identical rows and
+# distinct allele-level consequence rows for one (variant, object). The public
+# conformance unit is the unioned consequence set for that pair, just as it is
+# for transcript BNDs. Non-consequence state must still agree before unioning.
+vep_state_conflicts <- dbGetQuery(
+  con,
+  "SELECT variant_id, tx
+   FROM vep_annotation
+   GROUP BY variant_id, tx
+   HAVING count(DISTINCT (status, reason, nmd_prediction)) > 1
+   LIMIT 1"
+)
+if (nrow(vep_state_conflicts) != 0L) {
+  die(
+    "VEP emitted conflicting non-consequence state for (",
+    "{vep_state_conflicts$variant_id[1]}, {vep_state_conflicts$tx[1]})"
+  )
+}
+vep_duplicate_rows <- dbGetQuery(
+  con,
+  "SELECT count(*) - count(DISTINCT (
+     variant_id, tx, consequence, impact, status, reason, nmd_prediction
+   )) AS duplicate_rows
+   FROM vep_annotation"
+)$duplicate_rows[[1L]]
+vep_distinct_object_rows_merged <- dbGetQuery(
+  con,
+  "SELECT count(DISTINCT (
+     variant_id, tx, consequence, impact, status, reason, nmd_prediction
+   )) - count(DISTINCT (variant_id, tx)) AS merged_rows
+   FROM vep_annotation"
+)$merged_rows[[1L]]
+invisible(dbExecute(
+  con,
+  "CREATE OR REPLACE TEMP TABLE vep_annotation AS
+   WITH exploded AS (
+     SELECT
+       variant_id, tx,
+       unnest(string_split(consequence, '&')) AS consequence_term,
+       CASE impact
+         WHEN 'HIGH' THEN 4
+         WHEN 'MODERATE' THEN 3
+         WHEN 'LOW' THEN 2
+         WHEN 'MODIFIER' THEN 1
+         ELSE 0
+       END AS impact_rank,
+       status, reason, nmd_prediction
+     FROM vep_annotation
+   )
+   SELECT
+     variant_id,
+     tx,
+     coalesce(
+       list_aggregate(
+         list_sort(list_distinct(list(consequence_term))),
+         'string_agg', '&'
+       ),
+       ''
+     ) AS consequence,
+     CASE max(impact_rank)
+       WHEN 4 THEN 'HIGH'
+       WHEN 3 THEN 'MODERATE'
+       WHEN 2 THEN 'LOW'
+       WHEN 1 THEN 'MODIFIER'
+       ELSE ''
+     END AS impact,
+     any_value(status) AS status,
+     any_value(reason) AS reason,
+     any_value(nmd_prediction) AS nmd_prediction
+   FROM exploded
+   GROUP BY variant_id, tx"
+))
+
 run_date <- as.character(Sys.Date())
 invisible(dbExecute(
   con,
@@ -1851,7 +2473,19 @@ cat(
   "\n",
   sep = ""
 )
+cat(glue("VEP duplicate object rows collapsed: {vep_duplicate_rows}"), "\n", sep = "")
+cat(
+  glue(
+    "VEP distinct allele-level object rows unioned: ",
+    "{vep_distinct_object_rows_merged}"
+  ),
+  "\n",
+  sep = ""
+)
 cat(glue("annotations: {opt$annotations_out}"), "\n", sep = "")
+if (nzchar(opt$eligibility_out)) {
+  cat(glue("eligibility receipt: {opt$eligibility_out}"), "\n", sep = "")
+}
 
 report <- file.path(
   root,
