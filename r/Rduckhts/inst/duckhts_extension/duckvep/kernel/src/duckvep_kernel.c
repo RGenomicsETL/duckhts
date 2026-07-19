@@ -1487,8 +1487,10 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     int has_partial_terminal_codon;
     int breakend;
     int breakend_local_close = 0;
+    int breakend_local_in_directional_window = 0;
     int breakend_mate_close = 0;
     int breakend_mate_admits = 0;
+    int breakend_local_defaults_intergenic = 0;
 
     if (c->status != DUCKVEP_OK) return 0;
 
@@ -1504,15 +1506,20 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         breakend_mate_close = event.has_mate &&
             breakend_endpoint_close_to_transcript(
                 tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1);
-        local_admits = breakend_local_close &&
+        breakend_local_in_directional_window =
             breakend_endpoint_in_directional_window(
                 tx, (size_t)tx_idx, event.chrom_id, event.feature_start1,
                 c->options);
+        local_admits = breakend_local_close &&
+            breakend_local_in_directional_window;
         breakend_mate_admits = breakend_mate_close &&
             breakend_endpoint_in_directional_window(
                 tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1,
                 c->options);
         if (!local_admits && !breakend_mate_admits) return 1;
+        breakend_local_defaults_intergenic = breakend_local_close &&
+            !breakend_local_in_directional_window &&
+            breakend_mate_admits;
     }
     pos = event.start1;
     topology_start1 = event.feature_start1;
@@ -1535,14 +1542,18 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     fwd = tx->strand[tx_idx] >= 0;
     kind = (duckvep_variant_kind_t)event.kind;
 
-    if (breakend && !breakend_local_close) {
+    if (breakend && !breakend_local_in_directional_window) {
         duckvep_region_state_t region;
         duckvep_splice_state_t splice;
 
         /* A transcript discovered only through the mate still receives a
          * StructuralVariationOverlapAllele. Ordinary predicates keep the
-         * local feature, which cannot map here; only the mate-aware truncation
-         * predicate can add a non-default term. */
+         * local feature, but it has no configured topology here; only the
+         * mate-aware truncation predicate can add a non-default term. A local
+         * point outside the fixed 5000-base allele-admission range is not
+         * sufficient to take this branch when it remains inside the caller's
+         * wider directional window: predicates on the mate allele still read
+         * that local feature and can emit upstream/downstream. */
         memset(&region, 0, sizeof region);
         memset(&splice, 0, sizeof splice);
         duckvep_effect_ctx_fill_classified(
@@ -1672,6 +1683,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                    : event.feature_start1 - tx->end1[tx_idx];
         if (dist > c->options->upstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
+            breakend_local_defaults_intergenic = breakend_local_close;
             ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM);
             ectx.region &= ~(uint32_t)DUCKVEP_REGION_UPSTREAM;
             ectx.region_state.region_mask &=
@@ -1682,6 +1694,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                    : tx->start1[tx_idx] - event.feature_end1;
         if (dist > c->options->downstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
+            breakend_local_defaults_intergenic = breakend_local_close;
             ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM);
             ectx.region &= ~(uint32_t)DUCKVEP_REGION_DOWNSTREAM;
             ectx.region_state.region_mask &=
@@ -1753,6 +1766,15 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     cmask = kind == DUCKVEP_KIND_SV
         ? duckvep_effect_eval_structural(ectx.pre_bits)
         : duckvep_effect_eval(ectx.pre_bits);
+    /* StructuralVariationOverlap evaluates every endpoint admitted by its
+     * fixed 5000-base rule as a separate overlap allele. If the shifted local
+     * endpoint is admitted but its directional predicate was disabled by the
+     * caller's narrower upstream/downstream window, that local allele falls
+     * back to intergenic even when the mate allele independently contributes
+     * feature_truncation. The public row is the union of those allele rows. */
+    if (breakend_local_defaults_intergenic) {
+        cmask |= DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+    }
     /* BaseVariationFeatureOverlapAllele::get_all_OverlapConsequences assigns
      * VEP 116's default intergenic consequence when a real overlap allele has
      * exhausted its predicate list without a match. Preserve the transcript

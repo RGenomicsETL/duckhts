@@ -44,6 +44,23 @@ outside a transcript can create an internal overlap allele whose predicate list 
 to `intergenic_variant`. The four VCF bracket orientations do not alter these transcript
 consequence sets.
 
+The fixed overlap-allele admission and the caller's directional window are independent.
+For example, with `--distance 0`, a shifted local point that is outside a transcript but
+within the fixed 5000-base admission range still creates a local overlap allele. Its
+disabled upstream/downstream predicate leaves an empty predicate set, so that allele
+defaults to `intergenic_variant`; an intragenic mate independently contributes
+`feature_truncation`. VEP therefore returns
+`feature_truncation&intergenic_variant`. At 5001 bases the local allele does not exist and
+the same mate contributes only `feature_truncation`. Testing only the shared 5000-base
+default hides this state.
+
+The converse is equally non-obvious. If the mate creates the overlap object, predicates
+on that mate allele still receive the local `StructuralVariationFeature`. A caller window
+wider than 5000 bases can therefore emit a local upstream/downstream term even when the
+local endpoint is too far away to create its own overlap allele. The fixed cap controls
+allele construction; it does not clip the coordinates seen by ordinary predicates on an
+allele constructed for the other endpoint.
+
 Raw VEP output may contain two allele rows for one BND/transcript. DuckVEP supplies both
 loci to one event, performs two cgranges candidate queries, evaluates ordinary topology
 once from the local feature, applies mate-aware truncation, and emits the union once per

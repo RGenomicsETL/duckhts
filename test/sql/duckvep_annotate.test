@@ -579,11 +579,11 @@ query TTI
 SELECT annotation.consequence, coalesce(annotation.region, '-'),
        compact.region_mask
 FROM unnest(duckvep_annotate_breakend(
-  'structural', 1::UINTEGER, 300::UBIGINT,
+  'structural', 1::UINTEGER, 5250::UBIGINT,
   1::UINTEGER, 170::UBIGINT, 0::UBIGINT
 )) AS u(annotation),
 unnest(duckvep_annotate_breakend_compact(
-  'structural', 1::UINTEGER, 300::UBIGINT,
+  'structural', 1::UINTEGER, 5250::UBIGINT,
   1::UINTEGER, 170::UBIGINT, 0::UBIGINT
 )) AS c(compact);
 ----
@@ -645,10 +645,11 @@ ORDER BY ord;
 2	3	1	2
 
 # The public adapter keeps VEP's two equal-looking 5000-base rules separate.
-# A caller-selected 10000-base transcript window admits directional terms only
-# while the local BND endpoint is also within StructuralVariationOverlap's
-# fixed 5000-base allele cap. The regulatory/motif cap is the same fixed VEP
-# constant and is independent of the caller-selected transcript window.
+# A caller-selected 10000-base transcript window allows ordinary predicates on
+# a mate-created overlap allele to inspect the local BND feature even past
+# StructuralVariationOverlap's fixed 5000-base allele cap. The cap still decides
+# which endpoint alleles exist; it does not clamp the separate directional
+# predicate. Regulatory/motif endpoint admission remains independently fixed.
 query ITT
 WITH events(ord, local_position) AS (
   VALUES
@@ -664,6 +665,27 @@ LATERAL unnest(duckvep_annotate_breakend(
 ORDER BY ord;
 ----
 1	feature_truncation&downstream_gene_variant	downstream
+2	feature_truncation&downstream_gene_variant	downstream
+
+# The fixed structural-overlap endpoint rule also survives a caller distance
+# of zero. At exactly 5000 bases the local overlap allele loses its disabled
+# downstream predicate and falls back to intergenic_variant, while the mate
+# allele contributes feature_truncation. At 5001 bases no local allele exists.
+query ITT
+WITH events(ord, local_position) AS (
+  VALUES
+    (1, 5249::UBIGINT),
+    (2, 5250::UBIGINT)
+)
+SELECT ord, annotation.consequence, coalesce(annotation.region, '-')
+FROM events,
+LATERAL unnest(duckvep_annotate_breakend(
+  'structural', 1::UINTEGER, local_position,
+  1::UINTEGER, 124::UBIGINT, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	feature_truncation&intergenic_variant	-
 2	feature_truncation	-
 
 query IT

@@ -729,7 +729,7 @@ mate_only_breakend <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.region FROM unnest(duckvep_annotate_breakend(",
-    "'r-test', 1::UINTEGER, 300::UBIGINT,",
+    "'r-test', 1::UINTEGER, 5250::UBIGINT,",
     "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
   )
 )
@@ -738,7 +738,9 @@ expect_true(is.na(mate_only_breakend$region))
 
 # VEP's configurable transcript window and its fixed structural-breakend
 # allele-admission cap both default to 5000, but are not the same setting. A
-# wider 10000-base caller window must not admit the local endpoint at 5001.
+# wider 10000-base caller window does not create a local endpoint allele at
+# 5001, but ordinary predicates on the mate allele still inspect that local
+# feature and retain the wider directional term.
 breakend_admission_cap <- dbGetQuery(
   con,
   paste(
@@ -754,10 +756,32 @@ breakend_admission_cap <- dbGetQuery(
 expect_equal(breakend_admission_cap$ord, c(1, 2))
 expect_identical(
   breakend_admission_cap$consequence,
-  c("feature_truncation&downstream_gene_variant", "feature_truncation")
+  rep("feature_truncation&downstream_gene_variant", 2)
 )
-expect_identical(breakend_admission_cap$region[[1]], "downstream")
-expect_true(is.na(breakend_admission_cap$region[[2]]))
+expect_identical(breakend_admission_cap$region, rep("downstream", 2))
+
+# The fixed StructuralVariationOverlap endpoint admission is independent of
+# the caller-managed directional window in the other direction too. With a
+# zero transcript window, the exactly-5000 local allele contributes VEP's
+# default intergenic term and the mate allele contributes feature_truncation.
+breakend_zero_window <- dbGetQuery(
+  con,
+  paste(
+    "WITH events(ord, local_position) AS (VALUES",
+    "(1, 5249::UBIGINT), (2, 5250::UBIGINT))",
+    "SELECT ord, a.consequence, a.region FROM events,",
+    "LATERAL unnest(duckvep_annotate_breakend(",
+    "'r-test', 1::UINTEGER, local_position,",
+    "1::UINTEGER, 124::UBIGINT, 0::UBIGINT)) u(a)",
+    "ORDER BY ord"
+  )
+)
+expect_equal(breakend_zero_window$ord, c(1, 2))
+expect_identical(
+  breakend_zero_window$consequence,
+  c("feature_truncation&intergenic_variant", "feature_truncation")
+)
+expect_true(all(is.na(breakend_zero_window$region)))
 
 expect_error(
   dbGetQuery(

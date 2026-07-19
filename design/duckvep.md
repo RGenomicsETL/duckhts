@@ -614,9 +614,15 @@ default number. Raising the caller distance to 10 kb may widen upstream/downstre
 transcript terms, but cannot turn an endpoint 5,001 bases from the same transcript or
 interval feature into a `StructuralVariationOverlapAllele`. Interval-feature candidate
 discovery remains exact; the fixed-cap endpoint is attached only after the mate has
-discovered that same object. Pure-C, SQL, and R regressions pin 5,000 versus 5,001 bases
-under a 10 kb caller distance, and randomized sweep scenes include windows on both sides
-of 5 kb rather than treating it as a maximum allocation size. A seeded executable
+discovered that same object. This does not clamp ordinary transcript predicates: an
+overlap allele created by the mate still reads the shifted local feature, so a 10 kb
+caller window can emit an upstream/downstream term for a local point beyond the fixed
+allele-admission cap. Pure-C, SQL, and R regressions pin 5,000 versus 5,001 bases
+under both a 10 kb caller distance and a zero caller distance. In the latter case an
+admitted local transcript allele has no directional predicate and falls back to
+`intergenic_variant`, which is unioned with a mate-derived `feature_truncation`. Randomized
+sweep scenes include zero, 1, 50, 100, 4,999, 5,000, 5,001, 10,000, and 65,535-base
+windows rather than treating 5 kb as a maximum allocation size. A seeded executable
 differential covering chromosomes 1,
 2, 7, 21, and X, all four bracket orientations, same- and cross-chromosome pairs, and
 transcript/exon/intron/CDS/flank endpoint states matched all 91,428 transcript pairs from

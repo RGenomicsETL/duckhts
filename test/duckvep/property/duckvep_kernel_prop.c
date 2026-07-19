@@ -6540,9 +6540,11 @@ TEST annotate_breakend_interval_feature_pairs_use_both_endpoints(void) {
 /* VEP exposes a configurable transcript-direction distance, whose default is
  * 5000, and separately hardcodes StructuralVariationOverlap allele admission
  * to MAX_DISTANCE_FROM_TRANSCRIPT (also 5000). A wider caller window must not
- * widen that structural-allele cap. Exercise both transcripts and interval
- * features exactly at 5000 and one base beyond while the caller window is
- * deliberately 10000. */
+ * widen that structural-allele cap, but ordinary predicates on a mate-created
+ * allele still inspect the local feature and may emit a directional term past
+ * the fixed cap. Exercise both transcripts and interval features exactly at
+ * 5000 and one base beyond under deliberately 10000- and zero-base caller
+ * windows. */
 TEST annotate_breakend_fixed_admission_is_not_configurable_window(void) {
     static const uint16_t transcript_chrom[1] = {0u};
     static const uint32_t transcript_start[1] = {100u};
@@ -6659,10 +6661,46 @@ TEST annotate_breakend_fixed_admission_is_not_configurable_window(void) {
               DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE),
               rows[0].consequence_mask);
     ASSERT_EQ(DUCKVEP_REGION_DOWNSTREAM, rows[0].region_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE),
+              rows[1].consequence_mask);
+    ASSERT_EQ(DUCKVEP_REGION_DOWNSTREAM, rows[1].region_mask);
+
+    duckvep_result_builder_reset(&results);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_interval_feature_pairs(
+        model, &variants, &feature_pairs, options, workspace, &results,
+        &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+              rows[0].consequence_mask);
     ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
               rows[1].consequence_mask);
-    ASSERT_EQ(0u, rows[1].region_mask);
 
+    /* Narrowing the caller-managed directional window to zero must not remove
+     * an endpoint that StructuralVariationOverlap admitted through its fixed
+     * 5000-base rule. The local overlap allele now has no directional
+     * predicate and therefore contributes VEP's default intergenic term; the
+     * mate overlap allele independently contributes feature_truncation. */
+    duckvep_options_close(options);
+    options = NULL;
+    init.upstream_dist = 0u;
+    init.downstream_dist = 0u;
+    init.halo = 0u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &options, &error));
+    duckvep_result_builder_reset(&results);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_pairs(model, &variants, &transcript_pairs,
+                                     options, workspace, &results, &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&results));
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
+              DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+              rows[0].consequence_mask);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+              rows[1].consequence_mask);
+
+    /* The interval-feature endpoint rule is the same fixed constant and does
+     * not consult the transcript directional option. */
     duckvep_result_builder_reset(&results);
     ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_interval_feature_pairs(
         model, &variants, &feature_pairs, options, workspace, &results,
