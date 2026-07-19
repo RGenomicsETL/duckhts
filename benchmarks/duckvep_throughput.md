@@ -96,6 +96,10 @@ insertion order; they remain only as historical measurements.
 | 2026-07-16 | 9c97cb07 | ensembl116_grch38_final_giab_sites_hash40            | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 0                   | 1,174,245      |     15 |       0.117 |          0.118 |       0.131 |              855568 |         1168.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 9,951,229              |
 | 2026-07-16 | f3796ae9 | ensembl116_grch38_final_giab_sites_hash40            | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 0                   | 1,174,245      |     31 |       0.130 |          0.132 |       0.141 |              764826 |         1307.5 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,895,795              |
 | 2026-07-16 | f3796ae9 | ensembl116_grch38_final_giab_sites_hash40_regulation | compact     |       1 | 100,957    | 644,427     | 5,068,416 | 1,383,580           | 1,179,329      |     31 |       0.138 |          0.139 |       0.148 |              726309 |         1376.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 8,484,381              |
+| 2026-07-19 | e7c3623d | ensembl116_grch38_final_breakend_200k                | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 18,766,240     |     15 |       2.690 |          2.712 |       3.829 |               73746 |        13560.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 6,919,705              |
+| 2026-07-19 | e7c3623d | ensembl116_grch38_final_breakend_regulation_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 1,383,580           | 18,877,120     |     15 |       2.753 |          2.770 |       2.783 |               72202 |        13850.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 6,814,845              |
+| 2026-07-19 | f97101e1 | ensembl116_grch38_final_breakend_200k                | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 18,766,240     |     15 |       3.056 |          3.105 |       4.435 |               64412 |        15525.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 6,043,878              |
+| 2026-07-19 | f97101e1 | ensembl116_grch38_final_breakend_regulation_200k     | compact     |       1 | 200,000    | 644,427     | 5,068,416 | 1,383,580           | 18,877,120     |     15 |       3.307 |          3.348 |       3.370 |               59737 |        16740.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 5,638,327              |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -120,16 +124,26 @@ interval-lookup microbenchmark.
 
 ## Paired breakends
 
-| revision | paired_events | consequence_rows | rows_per_event | median_seconds | paired_events_per_second | consequence_rows_per_second |
-|:---------|:--------------|:-----------------|---------------:|---------------:|:-------------------------|:----------------------------|
-| 360619ed | 200,000       | 18,766,240       |          93.83 |           2.71 | 73,801                   | 6,924,812                   |
+| lane                           | revision | paired_events | consequence_rows | rows_per_event | median_seconds | paired_events_per_second | consequence_rows_per_second |
+|:-------------------------------|:---------|:--------------|:-----------------|---------------:|---------------:|:-------------------------|:----------------------------|
+| transcript baseline            | 360619ed | 200,000       | 18,766,240       |          93.83 |          2.710 | 73,801                   | 6,924,812                   |
+| rejected full-result sort      | f97101e1 | 200,000       | 18,766,240       |          93.83 |          3.105 | 64,412                   | 6,043,878                   |
+| linear transcript stream       | e7c3623d | 200,000       | 18,766,240       |          93.83 |          2.712 | 73,746                   | 6,919,705                   |
+| linear transcript + regulation | e7c3623d | 200,000       | 18,877,120       |          94.39 |          2.770 | 72,202                   | 6,814,845                   |
 
 This measurement used the complete receipt-hashed GRCh38 model, compact
 output, one DuckDB thread pinned with `taskset -c 2`, 15 timed passes,
 and a 10,000-event warmup. Model loading and staging were outside the
-timed region. The site-rate headline alone would be misleading: every
-paired event produced an average of 93.83 transcript consequence rows,
-and the checksum covered every emitted mask.
+timed region. The site-rate headline alone would be misleading: the
+transcript-only workload emits 93.83 rows per event, and the checksum
+covers every emitted mask. The `f97101e1` intermediate sorted all 18.8
+million already variant-major transcript rows and was rejected. The
+current adapter instead sorts only the smaller feature stream and merges
+the two sorted streams linearly. Its transcript-only 2.712-second median
+is within 0.1% of the identical-checksum 2.710-second baseline. Loading
+1,383,580 regulation/motif intervals and emitting 110,880 additional
+rows raises the median to 2.770 seconds (2.1%) while preserving 6.81
+million output rows/s.
 
 ## Validated CDS projection cache
 
