@@ -67,6 +67,94 @@ isolated executable VEP 116 with no disagreement, extra row, or missing row. Sou
 are VEP 116 `InputBuffer::interval_tree` and `BaseVCF4::get_start`, plus Ensembl Variation
 116 `StructuralVariationFeature::_parse_breakends` and `StructuralVariationOverlap`.
 
+## BND regulatory and motif overlap observes both endpoint points
+
+The transcript asymmetry above does not mean regulation is local-only. VEP 116's
+`AnnotationSource` fetches RegulatoryFeature and MotifFeature candidates around the local
+and alternative breakend coordinates. `RegFeat::annotate_InputBuffer` then asks the input
+buffer for overlapping variation features; that helper tests the shifted local point and
+every mate point. Either point can therefore create a regulatory or motif overlap.
+
+A BND has neither VEP's ordinary deletion predicate nor its copy-number-gain predicate,
+but the result still depends on which endpoint found the feature. A shifted-local hit
+retains the ordinary `regulatory_region_variant` or `TF_binding_site_variant` term.
+`VariationEffect::feature_truncation` first checks `chromosome_breakpoint`; a mate-only
+overlap reaches that branch and becomes generic HIGH-impact `feature_truncation` without
+consulting deletion or copy loss.
+
+There is a second, less obvious state. Once either endpoint discovers a feature exactly,
+`StructuralVariationOverlap::_close_to_feature` admits the other endpoint when it is on
+the same contig and no farther than 5000 bases from that feature. If the mate is inside
+but the shifted local point is merely close, VEP emits two rows for the same stable
+feature: local `intergenic_variant` and mate `feature_truncation`. DuckVEP's public unit
+is their union, `feature_truncation&intergenic_variant`. This does not mean that a feature
+5000 bases away is independently discoverable; one endpoint must still overlap it
+exactly before the close endpoint is attached to that object.
+
+This fixed value is not VEP's caller-configurable `--distance`, even though both default
+to 5000. The former is compiled into
+`StructuralVariationOverlap::_close_to_feature`; the latter controls directional
+upstream/downstream transcript reach. DuckVEP therefore tests a 10,000-base caller window
+with structural endpoints exactly 5,000 and 5,001 bases from the object. The first may
+join the mate-discovered object; the second must not. Statistical sweep scenes also use
+4,999, 5,000, 5,001, 10,000, and 65,535-base windows so the implementation is not trained
+only on the shared default value.
+
+If local and mate points both lie inside the same feature, the local base term wins. VEP
+116 may emit several identical rows for that `(event, feature)` because
+`InputBuffer::get_overlapping_vfs` can return the same StructuralVariationFeature through
+both points. The executable witness at local raw `21:45553052`, shifted local
+`21:45553053`, and mate `21:45553063` emits repeated
+`regulatory_region_variant` for `ENSR21_5DP9TR`, but emits local
+`intergenic_variant` plus mate `feature_truncation` for the nested motif
+`ENSM00000587576`, whose exact interval starts at `21:45553055`. DuckVEP unions distinct
+allele rows and returns each object once. It also rechecks contig plus point overlap, so a
+matching numeric coordinate on the wrong contig is not an overlap.
+
+Source anchors: VEP 116 `AnnotationSource.pm::get_all_features_by_InputBuffer`,
+`AnnotationType/RegFeat.pm::annotate_InputBuffer`, and
+`InputBuffer.pm::get_overlapping_vfs`; Ensembl Variation 116
+`StructuralVariationOverlap::_close_to_feature` and
+`Utils/VariationEffect.pm::{feature_truncation,within_regulatory_feature,within_motif_feature}`.
+
+## Bounded tandem repeats change VEP object class; structural repeats mimic tandem duplication
+
+For `<CNV:TR>`, VEP's VCF parser reads `RN` with `RUS`/`RUC` or `RB` and expands the repeat
+to literal REF/ALT sequence when the resulting allele fits `max_sv_size`. The expanded
+record becomes an ordinary `VariationFeature`; its consequence follows small-variant
+normalization, sequence projection, and translation. An oversized or unexpanded record
+remains a `StructuralVariationFeature` with structural class `tandem_repeat`.
+
+That structural identity is observable metadata but not a distinct set of VEP consequence
+predicates. `tandem_repeat` implies copy-number gain and insertion in
+`VariationEffect.pm`, while the `duplication` predicate explicitly excludes tandem
+repeats. The resulting transcript and interval-feature consequence terms are nevertheless
+the same as a tandem duplication for the registered VEP-116 terms. DuckVEP therefore keeps
+`STR` distinct in its event ABI but maps it to the same gain/insertion fact algebra; callers
+retain repeat units and counts for provenance and HGVS.
+
+Source anchors: VEP 116 `Parser/VCF.pm::_expand_tandem_repeat_allele_string` and Ensembl
+Variation 116 `VariationEffect.pm::tandem_repeat`, `copy_number_gain`, `insertion`, and
+`duplication`.
+
+## Structural confidence and inserted-sequence payloads do not alter VEP 116 consequence terms
+
+VEP's parser preserves `CIPOS`/`CIEND` as inner/outer structural coordinates, but its
+release-116 candidate searches and registered `VariationEffect` predicates consume the
+nominal start/end coordinates. Likewise, the structural branch of `inframe_insertion`
+contains an explicit upstream TODO and returns false because it does not inspect inserted
+sequence. These fields are still important evidence; they simply are not inputs to the
+41-term consequence state machine being reproduced.
+
+DuckVEP may therefore annotate nominal coordinates for strict VEP-116 consequence parity
+while the surrounding relation retains confidence intervals and inserted sequence. It
+must not promote the nominal span to exact experimental geometry, discard the payload, or
+reuse it as HGVS, fusion, or round-trip geometry. Adding ignored payload parameters to the
+hot consequence ABI would falsely imply semantics that VEP 116 does not have.
+
+Source anchors: VEP 116 `Parser/VCF.pm` structural INFO handling and Ensembl Variation 116
+`VariationEffect.pm::inframe_insertion` plus structural overlap predicates.
+
 ## Terminal-stop fallbacks bypass Translation SeqEdits
 
 VEP applies supported Ensembl Translation SeqEdits to the reference peptide returned by
@@ -571,6 +659,23 @@ Source authority: Ensembl VEP 116, commit
 `57ea5c52340acc1f156267f810ad162e26597082`. Preserve these cases as fixed witnesses and
 also measure them through deterministic random differentials with held-out seeds. A
 targeted witness alone is not evidence that the surrounding state space improved.
+
+The "consider insertion length" endpoint reconstruction is itself only a fallback.
+`VariationEffect.pm::stop_retained` first asks whether the codon-local alternate peptide
+is defined, non-empty, and contains no `X`. When it is, VEP calls
+`ref_eq_alt_sequence` and does not consult `_ins_del_stop_altered_cil`, even if the
+inserted length reaches the original CDS endpoint. A reverse-strand insertion can
+therefore leave a stop at that original endpoint but expose the concrete local peptide
+`*`; when the local reference peptide is `W`, VEP emits
+`frameshift_variant&stop_gained` rather than `stop_retained_variant`. The held-out
+statistical seed `20260719` found this distinction after 93,064 generated cases. Keep the
+fixed `ATGGCATGGAGT`, CDS-position-9 `AT` insertion scene and the randomized oracle:
+terminal-coordinate reconstruction applies only when the local alternate peptide is
+empty or contains `X`.
+
+Source anchors: Ensembl Variation 116
+`VariationEffect.pm::stop_retained`, `::ref_eq_alt_sequence`,
+`::_ins_del_stop_altered_cil`, `::stop_gained`, and `::frameshift`.
 
 ## Lengthening edits use two different peptide views
 

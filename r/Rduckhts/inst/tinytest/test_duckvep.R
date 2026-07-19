@@ -474,6 +474,51 @@ expect_identical(
   )
 )
 
+breakend_regulation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.regulation_feature_index, a.consequence, a.overlap_object",
+    "FROM unnest(duckvep_annotate_breakend(",
+    "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT,",
+    "0::UINTEGER, 8::UBIGINT, 0::UBIGINT)) u(a)",
+    "WHERE a.regulation_feature_index IS NOT NULL",
+    "ORDER BY a.regulation_feature_index"
+  )
+)
+expect_equal(breakend_regulation$regulation_feature_index, c(0, 1))
+expect_identical(
+  breakend_regulation$consequence,
+  c(
+    "regulatory_region_variant",
+    "feature_truncation&intergenic_variant"
+  )
+)
+expect_identical(
+  breakend_regulation$overlap_object,
+  c("regulatory_region", "transcription_factor_binding_site")
+)
+
+breakend_mixed_vectors <- dbGetQuery(
+  con,
+  paste(
+    "WITH events(ord, local_position, mate_position) AS (VALUES",
+    "(1, 1::UBIGINT, 8::UBIGINT), (2, 2::UBIGINT, 9::UBIGINT))",
+    "SELECT ord, count(*)::INTEGER result_count,",
+    "count(*) FILTER (WHERE a.transcript_index IS NOT NULL)::INTEGER",
+    "transcript_count,",
+    "count(*) FILTER (WHERE a.regulation_feature_index IS NOT NULL)::INTEGER",
+    "regulation_count FROM events,",
+    "LATERAL unnest(duckvep_annotate_breakend_compact(",
+    "'r-ensembl-mirna', 0::UINTEGER, local_position,",
+    "0::UINTEGER, mate_position, 0::UBIGINT)) u(a)",
+    "GROUP BY ord ORDER BY ord"
+  )
+)
+expect_equal(breakend_mixed_vectors$ord, c(1, 2))
+expect_equal(breakend_mixed_vectors$result_count, c(4, 4))
+expect_equal(breakend_mixed_vectors$transcript_count, c(2, 2))
+expect_equal(breakend_mixed_vectors$regulation_count, c(2, 2))
+
 loaded <- load_model("r-test", queries)
 expect_true(loaded$loaded)
 
@@ -636,6 +681,21 @@ structural_duplication <- dbGetQuery(
 expect_equal(structural_duplication$consequence_mask, 67108864)
 expect_equal(structural_duplication$status_code, 0)
 
+structural_tandem_repeat <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.consequence, a.status",
+    "FROM unnest(duckvep_annotate_sv(",
+    "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
+    "'STR', 'UNKNOWN', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(
+  structural_tandem_repeat$consequence,
+  "transcript_amplification"
+)
+expect_identical(structural_tandem_repeat$status, "supported")
+
 breakend <- dbGetQuery(
   con,
   paste(
@@ -675,6 +735,29 @@ mate_only_breakend <- dbGetQuery(
 )
 expect_identical(mate_only_breakend$consequence, "feature_truncation")
 expect_true(is.na(mate_only_breakend$region))
+
+# VEP's configurable transcript window and its fixed structural-breakend
+# allele-admission cap both default to 5000, but are not the same setting. A
+# wider 10000-base caller window must not admit the local endpoint at 5001.
+breakend_admission_cap <- dbGetQuery(
+  con,
+  paste(
+    "WITH events(ord, local_position) AS (VALUES",
+    "(1, 5249::UBIGINT), (2, 5250::UBIGINT))",
+    "SELECT ord, a.consequence, a.region FROM events,",
+    "LATERAL unnest(duckvep_annotate_breakend(",
+    "'r-test', 1::UINTEGER, local_position,",
+    "1::UINTEGER, 124::UBIGINT, 10000::UBIGINT)) u(a)",
+    "ORDER BY ord"
+  )
+)
+expect_equal(breakend_admission_cap$ord, c(1, 2))
+expect_identical(
+  breakend_admission_cap$consequence,
+  c("feature_truncation&downstream_gene_variant", "feature_truncation")
+)
+expect_identical(breakend_admission_cap$region[[1]], "downstream")
+expect_true(is.na(breakend_admission_cap$region[[2]]))
 
 expect_error(
   dbGetQuery(

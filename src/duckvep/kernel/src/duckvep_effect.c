@@ -466,9 +466,29 @@ void duckvep_effect_ctx_apply_sv(
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);
 }
 
+static int duckvep_breakend_point_close_to_interval(
+    uint16_t point_chrom_id,
+    uint32_t point_pos1,
+    uint16_t feature_chrom_id,
+    uint32_t feature_start1,
+    uint32_t feature_end1) {
+
+    if (point_chrom_id != feature_chrom_id || point_pos1 == 0u) return 0;
+    if (point_pos1 < feature_start1) {
+        return feature_start1 - point_pos1 <=
+            DUCKVEP_BREAKEND_ALLELE_DISTANCE;
+    }
+    if (point_pos1 > feature_end1) {
+        return point_pos1 - feature_end1 <=
+            DUCKVEP_BREAKEND_ALLELE_DISTANCE;
+    }
+    return 1;
+}
+
 uint64_t duckvep_effect_eval_interval_feature(
     duckvep_interval_feature_kind_t feature_kind,
     const duckvep_event_t          *event,
+    uint16_t                        feature_chrom_id,
     uint32_t                        feature_start1,
     uint32_t                        feature_end1) {
 
@@ -485,15 +505,59 @@ uint64_t duckvep_effect_eval_interval_feature(
         return 0u;
     }
 
+    /* RegFeat::annotate_InputBuffer discovers a feature when either exact BND
+     * point overlaps it, then StructuralVariationOverlap admits every endpoint
+     * no farther than MAX_DISTANCE_FROM_TRANSCRIPT (5000 bases) from that same
+     * feature. The local point has already undergone BaseVCF4 anchor removal;
+     * the mate coordinate remains verbatim.
+     *
+     * VariationEffect's ordinary within-feature predicate reads the local
+     * StructuralVariationFeature for every overlap allele. Therefore a local
+     * exact hit wins even when the mate also hits. With a mate-only exact hit,
+     * the mate allele contributes feature_truncation; a local endpoint in the
+     * 5000-base admission halo but outside the feature contributes VEP's
+     * intergenic fallback to the same object-level consequence set. */
+    if (event->kind == (uint8_t)DUCKVEP_KIND_SV &&
+        event->sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
+        int local_within = feature_chrom_id == event->chrom_id &&
+            event->feature_start1 >= feature_start1 &&
+            event->feature_start1 <= feature_end1;
+        int mate_within = event->has_mate &&
+            feature_chrom_id == event->mate_chrom_id &&
+            event->mate_pos1 >= feature_start1 &&
+            event->mate_pos1 <= feature_end1;
+
+        if (local_within) {
+            pre = feature_kind == DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE
+                ? DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_TFBS)
+                : DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_REGULATORY_REGION);
+            return duckvep_effect_eval(pre);
+        }
+        if (mate_within) {
+            uint64_t mask = duckvep_effect_eval(
+                DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_TRUNCATION));
+
+            if (duckvep_breakend_point_close_to_interval(
+                    event->chrom_id, event->feature_start1,
+                    feature_chrom_id, feature_start1, feature_end1)) {
+                mask |= DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+            }
+            return mask;
+        }
+        return 0u;
+    } else {
+        if (feature_chrom_id != event->chrom_id) return 0u;
+        within = event->feature_end1 >= feature_start1 &&
+                 event->feature_start1 <= feature_end1;
+        complete_overlap = event->feature_start1 <= feature_start1 &&
+                           event->feature_end1 >= feature_end1;
+    }
+
     /* These are the executable VariationEffect::within_feature and
      * complete_overlap_feature comparisons. Keeping the insertion's reversed
      * feature interval is intentional: an insertion exactly outside a feature
      * must not acquire its consequence from an arbitrary anchor base. */
-    within = event->feature_end1 >= feature_start1 &&
-             event->feature_start1 <= feature_end1;
     if (!within) return 0u;
-    complete_overlap = event->feature_start1 <= feature_start1 &&
-                       event->feature_end1 >= feature_end1;
 
     if (event->kind == (uint8_t)DUCKVEP_KIND_SV) {
         deletion = event->sv_type == (uint8_t)DUCKVEP_SV_DELETION ||
@@ -501,6 +565,7 @@ uint64_t duckvep_effect_eval_interval_feature(
         copy_number_gain =
             event->sv_type == (uint8_t)DUCKVEP_SV_DUPLICATION ||
             event->sv_type == (uint8_t)DUCKVEP_SV_TANDEM_DUPLICATION ||
+            event->sv_type == (uint8_t)DUCKVEP_SV_TANDEM_REPEAT ||
             event->copy_change == (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
     } else {
         deletion = event->ref_diff_length > event->alt_diff_length;

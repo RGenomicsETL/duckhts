@@ -598,6 +598,112 @@ regulation_span_geometries <- if (isTRUE(opt$regulatory)) {
   ""
 }
 
+# BND regulation observes two different point transforms: VEP removes the local
+# VCF anchor (POS + 1), while the mate coordinate is used verbatim. Generate
+# both raw representations at feature starts, midpoints, and ends so a seeded
+# campaign cannot appear exact merely because transcript-derived endpoints
+# happened not to land in a RegulatoryFeature or MotifFeature.
+regulation_breakend_geometries <- if (isTRUE(opt$regulatory)) {
+  glue(
+    "UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_', endpoint_role, '_', point_name
+       ) AS event_state,
+       f.regulation_feature_index AS transcript_index,
+       f.seq_region, r.name AS chrom,
+       CAST(feature_position + position_shift AS UINTEGER) AS position
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     CROSS JOIN LATERAL (VALUES
+       ('start', f.feature_start),
+       ('mid', (f.feature_start + f.feature_end) // 2),
+       ('end', f.feature_end)
+     ) feature_points(point_name, feature_position)
+     CROSS JOIN (VALUES
+       ('local', -1),
+       ('mate', 0)
+     ) endpoint_roles(endpoint_role, position_shift)
+     WHERE feature_position + position_shift > 0
+       AND feature_position + position_shift < 4294967295
+       {generated_chrom_filter}"
+  )
+} else {
+  ""
+}
+
+# Force the two same-chromosome states that shuffled endpoints do not guarantee:
+# both transformed endpoint points lie in the same object, or the mate lies in
+# the object while the transformed local point is one base before it. The first
+# state retains the local base term. The second exposes StructuralVariationOverlap's
+# fixed 5000-base endpoint admission and yields the object-level union of
+# intergenic_variant with feature_truncation.
+regulation_breakend_both_pairs <- if (isTRUE(opt$regulatory)) {
+  both_pair_limit <- if (opt$sample_per_shape == 0L) {
+    ""
+  } else {
+    glue(
+      "QUALIFY row_number() OVER (
+         PARTITION BY f.feature_kind, f.seq_region
+         ORDER BY hash(f.regulation_feature_index, {opt$seed}, 73)
+       ) <= {opt$sample_per_shape}"
+    )
+  }
+  glue(
+    "UNION ALL
+     SELECT
+       'intra' AS pair_class,
+       concat(
+         CASE selected.feature_kind
+           WHEN 1 THEN 'regulatory' ELSE 'motif'
+         END,
+         state.local_suffix
+       ) AS local_state,
+       concat(
+         CASE selected.feature_kind
+           WHEN 1 THEN 'regulatory' ELSE 'motif'
+         END,
+         state.mate_suffix
+       ) AS mate_state,
+       selected.regulation_feature_index AS local_transcript_index,
+       selected.regulation_feature_index AS mate_transcript_index,
+       selected.seq_region, selected.chrom,
+       CAST(
+         CAST(
+           CASE state.local_anchor
+             WHEN 'start' THEN selected.feature_start
+             ELSE selected.feature_end
+           END AS BIGINT
+         ) + state.local_raw_shift AS UINTEGER
+       ) AS position,
+       selected.seq_region AS mate_seq_region,
+       selected.chrom AS mate_chrom,
+       CAST(
+         (selected.feature_start + selected.feature_end) // 2 AS UINTEGER
+       )
+         AS mate_position
+     FROM (
+       SELECT f.*, r.name AS chrom
+       FROM duckvep_regulation_features f
+       JOIN duckvep_sequence_regions r USING (seq_region)
+       WHERE f.feature_start > 2
+         AND CAST(f.feature_end AS UBIGINT) + 5001 <=
+             {model_sequence_length_sql}
+         {generated_chrom_filter}
+       {both_pair_limit}
+     ) selected
+     CROSS JOIN (VALUES
+       ('_both_local_start', '_both_mate_mid', 'start', -1::BIGINT),
+       ('_mate_only_close_local_before', '_mate_exact_mid', 'start', -2::BIGINT),
+       ('_mate_only_exact_cap_after', '_mate_exact_mid', 'end', 4999::BIGINT),
+       ('_mate_only_beyond_cap_after', '_mate_exact_mid', 'end', 5000::BIGINT)
+     ) state(local_suffix, mate_suffix, local_anchor, local_raw_shift)"
+  )
+} else {
+  ""
+}
+
 if (generate_structural) {
   invisible(dbExecute(
     con,
@@ -890,6 +996,7 @@ if (generate_breakend) {
                 (exon_end + next_exon_start) // 2
          FROM exons
          WHERE next_exon_start IS NOT NULL AND next_exon_start > exon_end + 1
+         {regulation_breakend_geometries}
        ), distinct_geometries AS (
          SELECT DISTINCT event_state, transcript_index, seq_region, chrom, position
          FROM endpoint_geometries
@@ -953,6 +1060,7 @@ if (generate_breakend) {
            ON m.seq_region = c.mate_seq_region
           AND m.endpoint_rank = 1 + ((l.endpoint_rank - 1) % m.endpoint_count)
          WHERE c.mate_seq_region <> l.seq_region
+         {regulation_breakend_both_pairs}
        ), oriented_pairs AS (
          SELECT p.*, orientation
          FROM endpoint_pairs p
@@ -1775,6 +1883,81 @@ if (isTRUE(opt$regulatory)) {
   ))
 }
 
+# InputBuffer::get_overlapping_vfs can construct the same structural overlap
+# more than once. Each overlap also carries every endpoint no farther than 5000
+# bases from the object. VEP therefore emits both byte-identical rows and
+# distinct allele-level consequence rows for one (variant, object). The public
+# conformance unit is the unioned consequence set for that pair, just as it is
+# for transcript BNDs. Non-consequence state must still agree before unioning.
+vep_state_conflicts <- dbGetQuery(
+  con,
+  "SELECT variant_id, tx
+   FROM vep_annotation
+   GROUP BY variant_id, tx
+   HAVING count(DISTINCT (status, reason, nmd_prediction)) > 1
+   LIMIT 1"
+)
+if (nrow(vep_state_conflicts) != 0L) {
+  die(
+    "VEP emitted conflicting non-consequence state for (",
+    "{vep_state_conflicts$variant_id[1]}, {vep_state_conflicts$tx[1]})"
+  )
+}
+vep_duplicate_rows <- dbGetQuery(
+  con,
+  "SELECT count(*) - count(DISTINCT (
+     variant_id, tx, consequence, impact, status, reason, nmd_prediction
+   )) AS duplicate_rows
+   FROM vep_annotation"
+)$duplicate_rows[[1L]]
+vep_distinct_object_rows_merged <- dbGetQuery(
+  con,
+  "SELECT count(DISTINCT (
+     variant_id, tx, consequence, impact, status, reason, nmd_prediction
+   )) - count(DISTINCT (variant_id, tx)) AS merged_rows
+   FROM vep_annotation"
+)$merged_rows[[1L]]
+invisible(dbExecute(
+  con,
+  "CREATE OR REPLACE TEMP TABLE vep_annotation AS
+   WITH exploded AS (
+     SELECT
+       variant_id, tx,
+       unnest(string_split(consequence, '&')) AS consequence_term,
+       CASE impact
+         WHEN 'HIGH' THEN 4
+         WHEN 'MODERATE' THEN 3
+         WHEN 'LOW' THEN 2
+         WHEN 'MODIFIER' THEN 1
+         ELSE 0
+       END AS impact_rank,
+       status, reason, nmd_prediction
+     FROM vep_annotation
+   )
+   SELECT
+     variant_id,
+     tx,
+     coalesce(
+       list_aggregate(
+         list_sort(list_distinct(list(consequence_term))),
+         'string_agg', '&'
+       ),
+       ''
+     ) AS consequence,
+     CASE max(impact_rank)
+       WHEN 4 THEN 'HIGH'
+       WHEN 3 THEN 'MODERATE'
+       WHEN 2 THEN 'LOW'
+       WHEN 1 THEN 'MODIFIER'
+       ELSE ''
+     END AS impact,
+     any_value(status) AS status,
+     any_value(reason) AS reason,
+     any_value(nmd_prediction) AS nmd_prediction
+   FROM exploded
+   GROUP BY variant_id, tx"
+))
+
 run_date <- as.character(Sys.Date())
 invisible(dbExecute(
   con,
@@ -1847,6 +2030,15 @@ cat(
   glue(
     "VEP {oracle_mode} annotation: ",
     "{sprintf('%.3f', vep_time[['elapsed']])} s"
+  ),
+  "\n",
+  sep = ""
+)
+cat(glue("VEP duplicate object rows collapsed: {vep_duplicate_rows}"), "\n", sep = "")
+cat(
+  glue(
+    "VEP distinct allele-level object rows unioned: ",
+    "{vep_distinct_object_rows_merged}"
   ),
   "\n",
   sep = ""

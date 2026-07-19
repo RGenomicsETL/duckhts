@@ -44,7 +44,7 @@ typedef struct duckvep_scalar_state {
 	size_t variant_capacity;
 	size_t allele_capacity;
 	uint32_t *pair_variant_indices;
-	uint32_t *pair_transcript_indices;
+	uint32_t *pair_object_indices;
 	size_t pair_capacity;
 	duckvep_consequence_t *results;
 	size_t result_count;
@@ -92,8 +92,8 @@ duckvep_scalar_pair_reserve(duckvep_scalar_state_t *state, size_t needed)
 	capacity = duckvep_sql_next_capacity(state->pair_capacity, needed);
 	if (!duckvep_sql_resize((void **)&state->pair_variant_indices,
 	    sizeof(*state->pair_variant_indices), capacity) ||
-	    !duckvep_sql_resize((void **)&state->pair_transcript_indices,
-	    sizeof(*state->pair_transcript_indices), capacity))
+	    !duckvep_sql_resize((void **)&state->pair_object_indices,
+	    sizeof(*state->pair_object_indices), capacity))
 		return 0;
 	state->pair_capacity = capacity;
 	return 1;
@@ -176,7 +176,7 @@ duckvep_scalar_state_destroy(void *pointer)
 	free(state->transcript_coverage_complete);
 	free(state->allele_bytes);
 	free(state->pair_variant_indices);
-	free(state->pair_transcript_indices);
+	free(state->pair_object_indices);
 	free(state->results);
 	free(state);
 }
@@ -370,6 +370,10 @@ duckvep_scalar_sv_type(const duckdb_string_t *value, uint8_t *result)
 	else if (duckvep_scalar_ascii_equals(value, "TDUP") ||
 	    duckvep_scalar_ascii_equals(value, "TANDEM_DUPLICATION"))
 		*result = (uint8_t)DUCKVEP_SV_TANDEM_DUPLICATION;
+	else if (duckvep_scalar_ascii_equals(value, "STR") ||
+	    duckvep_scalar_ascii_equals(value, "TANDEM_REPEAT") ||
+	    duckvep_scalar_ascii_equals(value, "CNV:TR"))
+		*result = (uint8_t)DUCKVEP_SV_TANDEM_REPEAT;
 	else if (duckvep_scalar_ascii_equals(value, "INV") ||
 	    duckvep_scalar_ascii_equals(value, "INVERSION"))
 		*result = (uint8_t)DUCKVEP_SV_INVERSION;
@@ -718,6 +722,36 @@ duckvep_scalar_u32_compare(const void *left, const void *right)
 	return a < b ? -1 : a > b;
 }
 
+/* DuckDB list materialization consumes one contiguous run per input variant.
+ * Transcript and regulation-feature pair evaluators each preserve variant
+ * order, but appending those two streams does not. Keep the adapter result
+ * contract explicit after both evaluators have run. Object kind and ordinal
+ * make the within-variant order deterministic without changing semantics. */
+static int
+duckvep_scalar_bnd_result_compare(const void *left, const void *right)
+{
+	const duckvep_consequence_t *a, *b;
+	uint32_t a_object, b_object;
+
+	a = (const duckvep_consequence_t *)left;
+	b = (const duckvep_consequence_t *)right;
+	if (a->variant_idx != b->variant_idx)
+		return a->variant_idx < b->variant_idx ? -1 : 1;
+	if (a->overlap_object_kind != b->overlap_object_kind)
+		return a->overlap_object_kind < b->overlap_object_kind ? -1 : 1;
+	a_object = a->overlap_object_kind ==
+	    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT ?
+	    a->tx_idx : a->interval_feature_idx;
+	b_object = b->overlap_object_kind ==
+	    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT ?
+	    b->tx_idx : b->interval_feature_idx;
+	if (a_object != b_object)
+		return a_object < b_object ? -1 : 1;
+	if (a->consequence_mask != b->consequence_mask)
+		return a->consequence_mask < b->consequence_mask ? -1 : 1;
+	return 0;
+}
+
 static int
 duckvep_scalar_seed_index(duckvep_scalar_state_t *state,
 	cgranges_t *index, int index_complete, uint16_t seq_region,
@@ -940,19 +974,20 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 
 static int
 duckvep_scalar_append_endpoint_candidates(duckvep_scalar_state_t *state,
-	uint16_t seq_region, uint32_t position, uint32_t halo_distance,
+	cgranges_t *index, int index_complete, uint16_t seq_region,
+	uint32_t position, uint32_t halo_distance, int interval_features,
 	size_t *candidate_count, char *error, size_t error_size)
 {
-	duckvep_owned_model_t *model;
 	int32_t query_start, query_end;
 	int64_t hit_count, hit;
 	char region_name[16];
 
-	model = &state->entry->model;
-	if (!model->interval_index_complete || position > (uint32_t)INT32_MAX ||
+	if (!index_complete || position > (uint32_t)INT32_MAX ||
 	    halo_distance > (uint32_t)INT32_MAX ||
 	    position > (uint32_t)INT32_MAX - halo_distance) {
 		duckvep_sql_set_error(error, error_size,
+		    interval_features ?
+		    "duckvep_annotate_breakend: resident regulation-feature index cannot represent an endpoint" :
 		    "duckvep_annotate_breakend: resident transcript index cannot represent an endpoint");
 		return 0;
 	}
@@ -961,19 +996,124 @@ duckvep_scalar_append_endpoint_candidates(duckvep_scalar_state_t *state,
 	query_end = (int32_t)(position + halo_distance);
 	(void)snprintf(region_name, sizeof(region_name), "%u",
 	    (unsigned)seq_region);
-	hit_count = cr_overlap(model->interval_index, region_name, query_start,
+	hit_count = cr_overlap(index, region_name, query_start,
 	    query_end, &state->interval_hits, &state->interval_hit_capacity);
 	if (hit_count < 0 || (uint64_t)hit_count > SIZE_MAX - *candidate_count ||
 	    !duckvep_scalar_seed_reserve(state,
 	    *candidate_count + (size_t)hit_count)) {
 		duckvep_sql_set_error(error, error_size,
+		    interval_features ?
+		    "duckvep_annotate_breakend: could not collect endpoint regulation features" :
 		    "duckvep_annotate_breakend: could not collect endpoint transcripts");
 		return 0;
 	}
 	for (hit = 0; hit < hit_count; hit++)
 		state->seed_transcripts[(*candidate_count)++] =
-		    (uint32_t)cr_label(model->interval_index,
+		    (uint32_t)cr_label(index,
 		    state->interval_hits[hit]);
+	return 1;
+}
+
+/* Candidate discovery remains an adapter concern because cgranges indexes the
+ * resident DuckDB-owned model. Exact transcript or interval-feature semantics
+ * remain in the kernel. Both object kinds share ordering, deduplication,
+ * allocation, and result-index rebasing here so BND support cannot drift into
+ * two subtly different join implementations. */
+static int
+duckvep_scalar_run_breakend_object_pairs(duckvep_scalar_state_t *state,
+	const duckvep_variant_batch_t *batch, size_t begin, size_t count,
+	cgranges_t *index, int index_complete, uint32_t search_distance,
+	int interval_features, char *error, size_t error_size)
+{
+	duckvep_variant_batch_t slice;
+	duckvep_candidate_pairs_t transcript_pairs;
+	duckvep_interval_feature_pairs_t feature_pairs;
+	duckvep_error_t kernel_error;
+	duckvep_result_builder_t builder;
+	duckvep_status_t status;
+	size_t pair_count, variant, old_count, result;
+
+	pair_count = 0u;
+	for (variant = 0u; variant < count; variant++) {
+		size_t candidate_count = 0u;
+		size_t candidate, unique_count;
+		uint32_t local_point = batch->pos1[begin + variant] + 1u;
+
+		if (!duckvep_scalar_append_endpoint_candidates(state, index,
+		    index_complete, batch->chrom_id[begin + variant], local_point,
+		    search_distance, interval_features, &candidate_count, error,
+		    error_size) ||
+		    !duckvep_scalar_append_endpoint_candidates(state, index,
+		    index_complete, batch->mate_chrom_id[begin + variant],
+		    batch->mate_pos1[begin + variant], search_distance,
+		    interval_features, &candidate_count, error, error_size))
+			return 0;
+		if (candidate_count > 1u)
+			qsort(state->seed_transcripts, candidate_count,
+			    sizeof(*state->seed_transcripts),
+			    duckvep_scalar_u32_compare);
+		unique_count = 0u;
+		for (candidate = 0u; candidate < candidate_count; candidate++) {
+			if (candidate == 0u || state->seed_transcripts[candidate] !=
+			    state->seed_transcripts[candidate - 1u])
+				state->seed_transcripts[unique_count++] =
+				    state->seed_transcripts[candidate];
+		}
+		if (unique_count > SIZE_MAX - pair_count ||
+		    !duckvep_scalar_pair_reserve(state, pair_count + unique_count)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_breakend: out of memory collecting candidate pairs");
+			return 0;
+		}
+		for (candidate = 0u; candidate < unique_count; candidate++) {
+			state->pair_variant_indices[pair_count] = (uint32_t)variant;
+			state->pair_object_indices[pair_count] =
+			    state->seed_transcripts[candidate];
+			pair_count++;
+		}
+	}
+	if (pair_count == 0u)
+		return 1;
+	old_count = state->result_count;
+	if (pair_count > SIZE_MAX - old_count ||
+	    !duckvep_scalar_result_reserve(state, old_count + pair_count)) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate_breakend: out of memory growing results");
+		return 0;
+	}
+	slice = duckvep_scalar_batch_slice(batch, begin, count);
+	duckvep_result_builder_init(&builder, state->results + old_count,
+	    state->result_capacity - old_count);
+	memset(&kernel_error, 0, sizeof(kernel_error));
+	if (interval_features) {
+		feature_pairs.variant_idx = state->pair_variant_indices;
+		feature_pairs.feature_idx = state->pair_object_indices;
+		feature_pairs.count = pair_count;
+		status = duckvep_annotate_interval_feature_pairs(
+		    state->entry->model.kernel, &slice, &feature_pairs,
+		    state->options, state->workspace, &builder, &kernel_error);
+	} else {
+		transcript_pairs.variant_idx = state->pair_variant_indices;
+		transcript_pairs.tx_idx = state->pair_object_indices;
+		transcript_pairs.count = pair_count;
+		status = duckvep_annotate_pairs(state->entry->model.kernel, &slice,
+		    &transcript_pairs, state->options, state->workspace, &builder,
+		    &kernel_error);
+	}
+	if (status != DUCKVEP_OK) {
+		(void)snprintf(error, error_size, "duckvep_annotate_breakend: %s",
+		    kernel_error.message);
+		return 0;
+	}
+	for (result = 0u; result < builder.count; result++) {
+		duckvep_consequence_t *row = &state->results[old_count + result];
+		row->variant_idx += (uint32_t)begin;
+		if (row->overlap_object_kind ==
+		    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
+			row->gene_idx =
+			    state->entry->model.gene_indices[row->tx_idx];
+	}
+	state->result_count = old_count + builder.count;
 	return 1;
 }
 
@@ -983,15 +1123,11 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 	uint64_t upstream_distance, uint64_t downstream_distance,
 	char *error, size_t error_size)
 {
-	duckvep_variant_batch_t slice;
-	duckvep_candidate_pairs_t pairs;
 	duckvep_options_init_t options_init;
 	duckvep_error_t kernel_error;
-	duckvep_result_builder_t builder;
-	duckvep_status_t status;
 	uint32_t halo_distance;
 	uint32_t search_distance;
-	size_t pair_count, variant, old_count, result;
+	size_t result_begin, result_count, variant;
 
 	if (upstream_distance > UINT32_MAX || downstream_distance > UINT32_MAX) {
 		duckvep_sql_set_error(error, error_size,
@@ -1052,76 +1188,22 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 		state->have_options_distances = 1;
 	}
 
-	pair_count = 0u;
-	for (variant = 0u; variant < count; variant++) {
-		size_t candidate_count = 0u;
-		size_t candidate, unique_count;
-		uint32_t local_point = batch->pos1[begin + variant] + 1u;
-
-		if (!duckvep_scalar_append_endpoint_candidates(state,
-		    batch->chrom_id[begin + variant], local_point,
-		    search_distance, &candidate_count, error, error_size) ||
-		    !duckvep_scalar_append_endpoint_candidates(state,
-		    batch->mate_chrom_id[begin + variant],
-		    batch->mate_pos1[begin + variant], search_distance,
-		    &candidate_count, error, error_size))
-			return 0;
-		if (candidate_count > 1u)
-			qsort(state->seed_transcripts, candidate_count,
-			    sizeof(*state->seed_transcripts),
-			    duckvep_scalar_u32_compare);
-		unique_count = 0u;
-		for (candidate = 0u; candidate < candidate_count; candidate++) {
-			if (candidate == 0u || state->seed_transcripts[candidate] !=
-			    state->seed_transcripts[candidate - 1u])
-				state->seed_transcripts[unique_count++] =
-				    state->seed_transcripts[candidate];
-		}
-		if (unique_count > SIZE_MAX - pair_count ||
-		    !duckvep_scalar_pair_reserve(state, pair_count + unique_count)) {
-			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_breakend: out of memory collecting candidate pairs");
-			return 0;
-		}
-		for (candidate = 0u; candidate < unique_count; candidate++) {
-			state->pair_variant_indices[pair_count] = (uint32_t)variant;
-			state->pair_transcript_indices[pair_count] =
-			    state->seed_transcripts[candidate];
-			pair_count++;
-		}
-	}
-	if (pair_count == 0u)
-		return 1;
-	old_count = state->result_count;
-	if (pair_count > SIZE_MAX - old_count ||
-	    !duckvep_scalar_result_reserve(state, old_count + pair_count)) {
-		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_breakend: out of memory growing results");
+	result_begin = state->result_count;
+	if (!duckvep_scalar_run_breakend_object_pairs(state, batch, begin, count,
+	    state->entry->model.interval_index,
+	    state->entry->model.interval_index_complete, search_distance, 0,
+	    error, error_size))
 		return 0;
-	}
-	slice = duckvep_scalar_batch_slice(batch, begin, count);
-	pairs.variant_idx = state->pair_variant_indices;
-	pairs.tx_idx = state->pair_transcript_indices;
-	pairs.count = pair_count;
-	duckvep_result_builder_init(&builder, state->results + old_count,
-	    state->result_capacity - old_count);
-	memset(&kernel_error, 0, sizeof(kernel_error));
-	status = duckvep_annotate_pairs(state->entry->model.kernel, &slice,
-	    &pairs, state->options, state->workspace, &builder, &kernel_error);
-	if (status != DUCKVEP_OK) {
-		(void)snprintf(error, error_size, "duckvep_annotate_breakend: %s",
-		    kernel_error.message);
+	if (state->entry->model.interval_feature_count != 0u &&
+	    !duckvep_scalar_run_breakend_object_pairs(state, batch, begin, count,
+	    state->entry->model.interval_feature_index,
+	    state->entry->model.interval_feature_index_complete, 0u, 1,
+	    error, error_size))
 		return 0;
-	}
-	for (result = 0u; result < builder.count; result++) {
-		duckvep_consequence_t *row = &state->results[old_count + result];
-		row->variant_idx += (uint32_t)begin;
-		if (row->overlap_object_kind ==
-		    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
-			row->gene_idx =
-			    state->entry->model.gene_indices[row->tx_idx];
-	}
-	state->result_count = old_count + builder.count;
+	result_count = state->result_count - result_begin;
+	if (result_count > 1u)
+		qsort(state->results + result_begin, result_count,
+		    sizeof(*state->results), duckvep_scalar_bnd_result_compare);
 	return 1;
 }
 

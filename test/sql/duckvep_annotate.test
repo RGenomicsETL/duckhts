@@ -510,7 +510,8 @@ WITH events(ord, start1, end1, structural_type, copy_change) AS (
     (1, 90::UBIGINT, 260::UBIGINT, 'DEL', 'LOSS'),
     (2, 90::UBIGINT, 260::UBIGINT, 'DUP', 'GAIN'),
     (3, 110::UBIGINT, 230::UBIGINT, 'CNV', 'LOSS'),
-    (4, 110::UBIGINT, 230::UBIGINT, 'CNV', 'GAIN')
+    (4, 110::UBIGINT, 230::UBIGINT, 'CNV', 'GAIN'),
+    (5, 90::UBIGINT, 260::UBIGINT, 'STR', 'UNKNOWN')
 )
 SELECT structural_type, copy_change, annotation.consequence, annotation.status
 FROM events,
@@ -524,6 +525,7 @@ DEL	LOSS	transcript_ablation	supported
 DUP	GAIN	transcript_amplification	supported
 CNV	LOSS	start_lost&feature_truncation&start_retained_variant&coding_sequence_variant&5_prime_UTR_variant&intron_variant	supported
 CNV	GAIN	start_lost&feature_elongation&start_retained_variant&coding_sequence_variant&5_prime_UTR_variant&intron_variant	supported
+STR	UNKNOWN	transcript_amplification	supported
 
 query IIIII
 SELECT annotation.consequence_mask, annotation.region_mask,
@@ -586,6 +588,101 @@ unnest(duckvep_annotate_breakend_compact(
 )) AS c(compact);
 ----
 feature_truncation	-	0
+
+# RegulatoryFeature and MotifFeature candidates are collected at both BND
+# endpoints. The local coordinate follows VEP's anchor removal (POS + 1), the
+# mate coordinate remains verbatim, and a feature hit by both endpoints emits
+# once. A local hit keeps the ordinary object term; a mate-only hit takes VEP's
+# generic feature_truncation chromosome-breakpoint branch. For a mate-only hit,
+# VEP also retains intergenic_variant when the local point is outside but within
+# its fixed 5000-base structural-feature admission distance. When both endpoints
+# hit one object, the local term wins.
+query IIII
+WITH events(ord, local_position, mate_position) AS (
+  VALUES
+    (1, 999::UBIGINT, 300::UBIGINT),
+    (2, 300::UBIGINT, 1010::UBIGINT),
+    (3, 999::UBIGINT, 1010::UBIGINT)
+)
+SELECT ord, annotation.regulation_feature_index,
+       annotation.consequence_mask, annotation.overlap_object_code
+FROM events,
+LATERAL unnest(duckvep_annotate_breakend_compact(
+  'fixture', 1::UINTEGER, local_position,
+  1::UINTEGER, mate_position, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.regulation_feature_index IS NOT NULL
+ORDER BY ord, annotation.regulation_feature_index;
+----
+1	0	549755813888	1
+1	1	68719476736	2
+2	0	8858370048	1
+2	1	8858370048	2
+3	0	549755813888	1
+3	1	68719476736	2
+
+# Transcript and regulation-feature pair evaluators produce separate sorted
+# streams. A vector containing several BNDs must still materialize one complete
+# result list per input event rather than concatenating those streams globally.
+query IIII
+WITH events(ord, local_position, mate_position) AS (
+  VALUES
+    (1, 159::UBIGINT, 1010::UBIGINT),
+    (2, 124::UBIGINT, 1011::UBIGINT)
+)
+SELECT ord, count(*)::INTEGER,
+       count(*) FILTER (WHERE annotation.transcript_index IS NOT NULL)::INTEGER,
+       count(*) FILTER (WHERE annotation.regulation_feature_index IS NOT NULL)::INTEGER
+FROM events,
+LATERAL unnest(duckvep_annotate_breakend_compact(
+  'fixture', 1::UINTEGER, local_position,
+  1::UINTEGER, mate_position, 0::UBIGINT
+)) AS u(annotation)
+GROUP BY ord
+ORDER BY ord;
+----
+1	3	1	2
+2	3	1	2
+
+# The public adapter keeps VEP's two equal-looking 5000-base rules separate.
+# A caller-selected 10000-base transcript window admits directional terms only
+# while the local BND endpoint is also within StructuralVariationOverlap's
+# fixed 5000-base allele cap. The regulatory/motif cap is the same fixed VEP
+# constant and is independent of the caller-selected transcript window.
+query ITT
+WITH events(ord, local_position) AS (
+  VALUES
+    (1, 5249::UBIGINT), -- shifted point is 5000 after transcript end 250
+    (2, 5250::UBIGINT)  -- shifted point is 5001 after transcript end 250
+)
+SELECT ord, annotation.consequence, coalesce(annotation.region, '-')
+FROM events,
+LATERAL unnest(duckvep_annotate_breakend(
+  'structural', 1::UINTEGER, local_position,
+  1::UINTEGER, 124::UBIGINT, 10000::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	feature_truncation&downstream_gene_variant	downstream
+2	feature_truncation	-
+
+query IT
+WITH events(ord, local_position) AS (
+  VALUES
+    (1, 6019::UBIGINT), -- shifted point is 5000 after feature end 1020
+    (2, 6020::UBIGINT)  -- shifted point is 5001 after feature end 1020
+)
+SELECT ord, annotation.consequence
+FROM events,
+LATERAL unnest(duckvep_annotate_breakend(
+  'fixture', 1::UINTEGER, local_position,
+  1::UINTEGER, 1010::UBIGINT, 10000::UBIGINT
+)) AS u(annotation)
+WHERE annotation.regulation_feature_index = 0
+ORDER BY ord;
+----
+1	feature_truncation&intergenic_variant
+2	feature_truncation
 
 statement error
 SELECT duckvep_annotate_sv(

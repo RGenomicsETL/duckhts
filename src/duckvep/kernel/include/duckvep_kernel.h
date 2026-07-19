@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 14
+#define DUCKVEP_KERNEL_VERSION_MINOR 15
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -101,7 +101,13 @@ typedef enum duckvep_sv_type {
     DUCKVEP_SV_TANDEM_DUPLICATION,
     DUCKVEP_SV_INVERSION,
     DUCKVEP_SV_CNV,
-    DUCKVEP_SV_BREAKEND
+    DUCKVEP_SV_BREAKEND,
+    /* An unexpanded/oversized symbolic tandem repeat. VEP retains this as a
+     * StructuralVariationFeature with tandem-repeat identity, while its
+     * consequence predicates are the same gain/insertion predicates used by
+     * a tandem duplication. Bounded repeats expanded to literal alleles enter
+     * the ordinary small-variant path instead. */
+    DUCKVEP_SV_TANDEM_REPEAT
 } duckvep_sv_type_t;
 
 typedef enum duckvep_copy_change {
@@ -196,6 +202,16 @@ typedef struct duckvep_candidate_pairs {
     const uint32_t *tx_idx;        /* [count] */
     size_t          count;
 } duckvep_candidate_pairs_t;
+
+/* Explicit event/interval-feature candidates. This is the two-locus BND join
+ * point for regulatory and motif features: the caller discovers candidates at
+ * the local VEP-shifted point and the mate point, deduplicates them, then the
+ * kernel remains the sole authority for exact overlap and consequence terms. */
+typedef struct duckvep_interval_feature_pairs {
+    const uint32_t *variant_idx;   /* [count] */
+    const uint32_t *feature_idx;   /* [count] */
+    size_t          count;
+} duckvep_interval_feature_pairs_t;
 
 typedef struct duckvep_transcript_model {
     const uint16_t *chrom_id;      /* [transcript_count]                       */
@@ -558,6 +574,19 @@ duckvep_status_t duckvep_annotate_pairs(
     duckvep_workspace_t              *workspace,
     duckvep_result_builder_t         *results,
     duckvep_error_t                  *error);
+
+/* Evaluate an explicit, ordered set of event/regulatory-or-motif candidates.
+ * Pairs must be unique and sorted by (variant_idx, feature_idx). Unlike the
+ * sorted one-locus sweep this accepts BND events and evaluates both the local
+ * VEP-shifted point and the raw mate point against each feature. */
+duckvep_status_t duckvep_annotate_interval_feature_pairs(
+    const duckvep_model_t                  *model,
+    const duckvep_variant_batch_t          *variants,
+    const duckvep_interval_feature_pairs_t *pairs,
+    const duckvep_options_t                *options,
+    duckvep_workspace_t                    *workspace,
+    duckvep_result_builder_t               *results,
+    duckvep_error_t                        *error);
 
 #ifdef __cplusplus
 }
