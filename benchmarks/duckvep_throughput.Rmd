@@ -238,6 +238,17 @@ breakend <- rbind(
   ]
 )
 if (nrow(breakend) == 4L) {
+  breakend_baseline_median <- breakend$median_seconds[[1L]]
+  breakend_current_median <- breakend$median_seconds[[3L]]
+  breakend_regulation_median <- breakend$median_seconds[[4L]]
+  breakend_current_change <- 100 * (
+    breakend_current_median / breakend_baseline_median - 1
+  )
+  breakend_regulation_change <- 100 * (
+    breakend_regulation_median / breakend_current_median - 1
+  )
+  breakend_regulation_rows_per_second <-
+    breakend$annotated_rows[[4L]] / breakend_regulation_median
   breakend_table <- data.frame(
     lane = c(
       "transcript baseline",
@@ -284,10 +295,18 @@ headline alone would be misleading: the transcript-only workload emits 93.83
 rows per event, and the checksum covers every emitted mask. The `f97101e1`
 intermediate sorted all 18.8 million already variant-major transcript rows and
 was rejected. The current adapter instead sorts only the smaller feature stream
-and merges the two sorted streams linearly. Its transcript-only 2.712-second
-median is within 0.1% of the identical-checksum 2.710-second baseline. Loading
-1,383,580 regulation/motif intervals and emitting 110,880 additional rows raises
-the median to 2.770 seconds (2.1%) while preserving 6.81 million output rows/s.
+and merges the two sorted streams linearly. At the current recorded revision,
+the transcript-only median is
+`r sprintf("%.3f", breakend_current_median)` seconds versus
+`r sprintf("%.3f", breakend_baseline_median)` seconds for the
+identical-checksum baseline (`r sprintf("%+.1f%%", breakend_current_change)`).
+Loading 1,383,580 regulation/motif intervals and emitting 110,880 additional
+rows gives a `r sprintf("%.3f", breakend_regulation_median)`-second median
+(`r sprintf("%+.1f%%", breakend_regulation_change)` relative to the current
+transcript-only lane) and
+`r sprintf("%.2f", breakend_regulation_rows_per_second / 1e6)` million output
+rows/s. This current-head change is recorded rather than dismissed as noise and
+must be explained or removed before release.
 
 ## Validated CDS projection cache
 
