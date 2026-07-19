@@ -117,6 +117,7 @@ test_seq_ops <- function() {
   expect_true(all(c("kernel", "selected_backend", "selected_capability", "requested_backend", "scalar_fallback") %in% names(kernel_info)))
   expect_true("seq_base_counts" %in% kernel_info$kernel)
   expect_true("nt16_gc_counts" %in% kernel_info$kernel)
+  expect_true("fastq_qc" %in% kernel_info$kernel)
   # nt16 seq_gc_content kernel: forced scalar and auto agree on a 64-code
   # sequence long enough to exercise a concrete backend's vector loop
   expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
@@ -144,9 +145,9 @@ test_seq_ops <- function() {
     expect_identical(rduckhts_simd_set_backend(con, backend), backend)
     concrete_info <- rduckhts_simd_kernel_info(con)
     concrete_rows <- concrete_info[concrete_info$kernel %in% c(
-      "seq_base_counts", "bam_nt16_counts", "nt16_gc_counts"
+      "seq_base_counts", "bam_nt16_counts", "nt16_gc_counts", "fastq_qc"
     ), ]
-    expect_equal(nrow(concrete_rows), 3L, info = backend)
+    expect_equal(nrow(concrete_rows), 4L, info = backend)
     expect_true(all(concrete_rows$selected_backend == backend), info = backend)
     expect_false(any(concrete_rows$scalar_fallback), info = backend)
     gc_nt16_concrete <- DBI::dbGetQuery(con,

@@ -816,7 +816,7 @@ pairs <- dbGetQuery(con, "SELECT * FROM paired_reads WHERE MATE = 1 LIMIT 5")
 pairs
 ```
 
-### FASTQ quality decoding and per-position histograms
+### FASTQ quality decoding and fused QC
 
 FASTQ quality handling has two separate knobs:
 
@@ -830,6 +830,28 @@ The flow is:
 3. Return either numeric arrays or canonical Phred+33 text.
 
 `BAM`/`CRAM` reads skip the text-decoding step because qualities are already stored numerically.
+
+For ordinary QC, aggregate the sequence and canonical quality strings directly. This returns
+exact global totals plus a small nested per-cycle relation without generating one SQL row per
+base.
+
+```{r}
+fastq_qc <- dbGetQuery(
+  con,
+  sprintf(
+    "WITH q AS (
+       SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+       FROM read_fastq('%s')
+     )
+     SELECT qc.reads, qc.bases, qc.q30_bases, qc.max_read_length
+     FROM q",
+    fastq_r1
+  )
+)
+fastq_qc
+```
+
+Use numeric quality arrays when the query genuinely needs the full per-position histogram:
 
 ```{r}
 legacy_fastq <- system.file("extdata", "legacy_phred64.fq", package = "Rduckhts")

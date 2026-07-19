@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 
 #include "duckhts_simd_internal.h"
 
@@ -104,6 +105,56 @@ static void duckhts_nt16_gc_counts_scalar(const uint8_t *codes, size_t n,
     out->called = called;
 }
 
+static void duckhts_fastq_qc_scalar(const char *sequence, const char *quality,
+                                    size_t len,
+                                    duckhts_simd_fastq_cycle_t *cycles,
+                                    duckhts_simd_fastq_read_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!sequence || !quality || !cycles) return;
+
+    for (size_t i = 0; i < len; i++) {
+        duckhts_simd_fastq_cycle_t *cycle = &cycles[i];
+        unsigned char base = (unsigned char)sequence[i] & 0xDFu;
+        unsigned char ascii_quality = (unsigned char)quality[i];
+        uint64_t is_a = base == (unsigned char)'A';
+        uint64_t is_c = base == (unsigned char)'C';
+        uint64_t is_g = base == (unsigned char)'G';
+        uint64_t is_t = base == (unsigned char)'T';
+        uint64_t is_n = base == (unsigned char)'N';
+        uint64_t is_other = (is_a | is_c | is_g | is_t | is_n) ^ 1u;
+        uint64_t phred;
+
+        if (ascii_quality < (unsigned char)'!' || ascii_quality > (unsigned char)'~') {
+            out->invalid_quality = 1;
+            return;
+        }
+        phred = (uint64_t)(ascii_quality - (unsigned char)'!');
+
+        out->q20 += ascii_quality >= (unsigned char)'5';
+        out->q30 += ascii_quality >= (unsigned char)'?';
+        out->q40 += ascii_quality >= (unsigned char)'I';
+        out->quality_sum += phred;
+        out->a += is_a;
+        out->c += is_c;
+        out->g += is_g;
+        out->t += is_t;
+        out->n += is_n;
+        out->other += is_other;
+
+        cycle->quality_sum += phred;
+        cycle->a += is_a;
+        cycle->c += is_c;
+        cycle->g += is_g;
+        cycle->t += is_t;
+        cycle->n += is_n;
+        cycle->other += is_other;
+        cycle->a_quality_sum += phred * is_a;
+        cycle->c_quality_sum += phred * is_c;
+        cycle->g_quality_sum += phred * is_g;
+        cycle->t_quality_sum += phred * is_t;
+    }
+}
+
 void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder) {
     duckhts_simd_builder_consider_base_counts(builder,
                                               DUCKHTS_SIMD_CAP_SCALAR,
@@ -120,4 +171,9 @@ void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder) {
                                                  "scalar",
                                                  1000,
                                                  duckhts_nt16_gc_counts_scalar);
+    duckhts_simd_builder_consider_fastq_qc(builder,
+                                           DUCKHTS_SIMD_CAP_SCALAR,
+                                           "scalar",
+                                           1000,
+                                           duckhts_fastq_qc_scalar);
 }

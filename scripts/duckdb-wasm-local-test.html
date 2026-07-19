@@ -194,7 +194,7 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
         "SELECT kernel, selected_backend, selected_capability, scalar_fallback " +
         "FROM duckhts_simd_kernel_info() ORDER BY kernel");
       const krows = kt.toArray();
-      const expected = ["bam_nt16_counts", "nt16_gc_counts", "seq_base_counts"];
+      const expected = ["bam_nt16_counts", "fastq_qc", "nt16_gc_counts", "seq_base_counts"];
       if (krows.length !== expected.length) {
         throw new Error(`expected ${expected.length} SIMD kernel rows, got ${krows.length}`);
       }
@@ -251,6 +251,21 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
       log(`  packed BAM scalar=${scalarBam} wasm=${simdBam}`);
       if (scalarBam !== simdBam) {
         throw new Error(`packed BAM mismatch: scalar=${scalarBam} wasm=${simdBam}`);
+      }
+
+      const fastqDigestSql =
+        "WITH reads AS (" +
+        "SELECT substr(repeat('ACGTNMRWSYKVHDBXacgtn', 7), 1, 1 + i % 129) AS sequence, " +
+        "substr(repeat('!5?I~', 26), 1, 1 + i % 129) AS quality " +
+        "FROM range(0, 4096) AS r(i)) " +
+        "SELECT duckhts_fastq_qc(sequence, quality)::VARCHAR AS digest FROM reads";
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('scalar')");
+      const scalarFastq = String((await conn.query(fastqDigestSql)).toArray()[0].digest);
+      await conn.query("SELECT backend FROM duckhts_simd_set_backend('wasm_simd128')");
+      const simdFastq = String((await conn.query(fastqDigestSql)).toArray()[0].digest);
+      log(`  FASTQ aggregate scalar/wasm bytes=${scalarFastq.length}/${simdFastq.length}`);
+      if (scalarFastq !== simdFastq) {
+        throw new Error("FASTQ aggregate scalar/wasm mismatch");
       }
       log("  SIMD assertions passed");
     }

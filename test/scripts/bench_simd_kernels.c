@@ -25,16 +25,17 @@ typedef struct backend {
     duckhts_base_counts_fn base_counts;
     duckhts_bam_nt16_counts_fn bam_nt16_counts;
     duckhts_nt16_gc_counts_fn nt16_gc_counts;
+    duckhts_fastq_qc_fn fastq_qc;
 } backend_t;
 
 static int always_true(void) { return 1; }
 
 static backend_t backends[] = {
-    {"scalar", always_true, always_true, NULL, NULL, NULL},
-    {"avx2", duckhts_simd_avx2_compiled, duckhts_simd_avx2_cpu_supported, NULL, NULL, NULL},
-    {"neon", duckhts_simd_neon_compiled, duckhts_simd_neon_cpu_supported, NULL, NULL, NULL},
+    {"scalar", always_true, always_true, NULL, NULL, NULL, NULL},
+    {"avx2", duckhts_simd_avx2_compiled, duckhts_simd_avx2_cpu_supported, NULL, NULL, NULL, NULL},
+    {"neon", duckhts_simd_neon_compiled, duckhts_simd_neon_cpu_supported, NULL, NULL, NULL, NULL},
     {"wasm_simd128", duckhts_simd_wasm_simd128_compiled,
-     duckhts_simd_wasm_simd128_cpu_supported, NULL, NULL, NULL}
+     duckhts_simd_wasm_simd128_cpu_supported, NULL, NULL, NULL, NULL}
 };
 
 static int registration_errors;
@@ -90,6 +91,20 @@ void duckhts_simd_builder_consider_nt16_gc_counts(duckhts_simd_builder_t *builde
     if (slot == NULL) return;
     if (slot->nt16_gc_counts != NULL) registration_errors++;
     slot->nt16_gc_counts = fn;
+}
+
+void duckhts_simd_builder_consider_fastq_qc(duckhts_simd_builder_t *builder,
+                                            duckhts_simd_cap_t cap,
+                                            const char *backend,
+                                            int priority,
+                                            duckhts_fastq_qc_fn fn) {
+    backend_t *slot = find_backend(backend);
+    (void)builder;
+    (void)cap;
+    (void)priority;
+    if (slot == NULL) return;
+    if (slot->fastq_qc != NULL) registration_errors++;
+    slot->fastq_qc = fn;
 }
 
 static void capture_backends(void) {
@@ -172,6 +187,130 @@ static int packed_equal(const duckhts_simd_bam_nt16_counts_t *a,
 static int gc_equal(const duckhts_simd_base_counts_t *a,
                     const duckhts_simd_base_counts_t *b) {
     return a->gc == b->gc && a->called == b->called && a->invalid == b->invalid;
+}
+
+static int fastq_read_equal(const duckhts_simd_fastq_read_t *a,
+                            const duckhts_simd_fastq_read_t *b) {
+    return a->q20 == b->q20 && a->q30 == b->q30 && a->q40 == b->q40 &&
+           a->quality_sum == b->quality_sum &&
+           a->a == b->a && a->c == b->c && a->g == b->g &&
+           a->t == b->t && a->n == b->n && a->other == b->other &&
+           a->invalid_quality == b->invalid_quality;
+}
+
+static void fastq_oracle(const char *sequence, const char *quality, size_t n,
+                         duckhts_simd_fastq_cycle_t *cycles,
+                         duckhts_simd_fastq_read_t *out) {
+    size_t i;
+
+    memset(out, 0, sizeof(*out));
+    memset(cycles, 0, (n == 0 ? 1u : n) * sizeof(*cycles));
+    for (i = 0; i < n; i++) {
+        unsigned char base = (unsigned char)sequence[i] & UINT8_C(0xDF);
+        unsigned char ascii_quality = (unsigned char)quality[i];
+        uint64_t phred;
+
+        if (ascii_quality < (unsigned char)'!' || ascii_quality > (unsigned char)'~') {
+            out->invalid_quality = 1;
+            return;
+        }
+        phred = (uint64_t)(ascii_quality - (unsigned char)'!');
+        out->q20 += ascii_quality >= (unsigned char)'5';
+        out->q30 += ascii_quality >= (unsigned char)'?';
+        out->q40 += ascii_quality >= (unsigned char)'I';
+        out->quality_sum += phred;
+        cycles[i].quality_sum = phred;
+        switch (base) {
+        case 'A':
+            out->a++;
+            cycles[i].a = 1;
+            cycles[i].a_quality_sum = phred;
+            break;
+        case 'C':
+            out->c++;
+            cycles[i].c = 1;
+            cycles[i].c_quality_sum = phred;
+            break;
+        case 'G':
+            out->g++;
+            cycles[i].g = 1;
+            cycles[i].g_quality_sum = phred;
+            break;
+        case 'T':
+            out->t++;
+            cycles[i].t = 1;
+            cycles[i].t_quality_sum = phred;
+            break;
+        case 'N':
+            out->n++;
+            cycles[i].n = 1;
+            break;
+        default:
+            out->other++;
+            cycles[i].other = 1;
+            break;
+        }
+    }
+}
+
+static int check_fastq_case(const char *sequence, const char *quality, size_t n,
+                            size_t offset, uint64_t case_no, const char *shape) {
+    duckhts_simd_fastq_cycle_t *want_cycles;
+    duckhts_simd_fastq_cycle_t *got_cycles;
+    duckhts_simd_fastq_read_t want;
+    size_t allocated = n == 0 ? 1u : n;
+    size_t backend_index;
+
+    want_cycles = (duckhts_simd_fastq_cycle_t *)calloc(allocated, sizeof(*want_cycles));
+    got_cycles = (duckhts_simd_fastq_cycle_t *)calloc(allocated, sizeof(*got_cycles));
+    if (want_cycles == NULL || got_cycles == NULL) {
+        fprintf(stderr, "simd-contract: FASTQ oracle allocation failed\n");
+        free(want_cycles);
+        free(got_cycles);
+        return 1;
+    }
+    fastq_oracle(sequence, quality, n, want_cycles, &want);
+
+    for (backend_index = 0; backend_index < ARRAY_LEN(backends); backend_index++) {
+        backend_t *backend = &backends[backend_index];
+        duckhts_simd_fastq_read_t got;
+        if (!backend_runnable(backend)) continue;
+        if (backend->fastq_qc == NULL) {
+            fprintf(stderr, "simd-contract: missing kernel=fastq_qc backend=%s\n",
+                    backend->name);
+            free(want_cycles);
+            free(got_cycles);
+            return 1;
+        }
+        memset(got_cycles, 0, allocated * sizeof(*got_cycles));
+        memset(&got, 0xa5, sizeof(got));
+        backend->fastq_qc(sequence, quality, n, got_cycles, &got);
+        if (want.invalid_quality) {
+            if (!got.invalid_quality) {
+                fprintf(stderr,
+                        "simd-contract: missed invalid quality kernel=fastq_qc backend=%s "
+                        "seed=%" PRIx64 " case=%" PRIu64 " shape=%s len=%zu offset=%zu\n",
+                        backend->name, TEST_SEED, case_no, shape, n, offset);
+                free(want_cycles);
+                free(got_cycles);
+                return 1;
+            }
+            continue;
+        }
+        if (!fastq_read_equal(&want, &got) ||
+            memcmp(want_cycles, got_cycles, n * sizeof(*want_cycles)) != 0) {
+            fprintf(stderr,
+                    "simd-contract: mismatch kernel=fastq_qc backend=%s seed=%" PRIx64
+                    " case=%" PRIu64 " shape=%s len=%zu offset=%zu\n",
+                    backend->name, TEST_SEED, case_no, shape, n, offset);
+            free(want_cycles);
+            free(got_cycles);
+            return 1;
+        }
+    }
+    free(want_cycles);
+    free(got_cycles);
+    return 0;
 }
 
 static void dump_bytes(const uint8_t *p, size_t n) {
@@ -276,7 +415,8 @@ static int check_null_and_empty(void) {
         duckhts_simd_base_counts_t unpacked;
         backend_t *backend = &backends[i];
         if (!backend_runnable(backend)) continue;
-        if (backend->bam_nt16_counts == NULL || backend->nt16_gc_counts == NULL) {
+        if (backend->bam_nt16_counts == NULL || backend->nt16_gc_counts == NULL ||
+            backend->fastq_qc == NULL) {
             fprintf(stderr, "simd-contract: incomplete nt16 registrar backend=%s\n", backend->name);
             return 1;
         }
@@ -324,6 +464,8 @@ static int run_contract_tests(void) {
     };
     static const size_t offsets[] = {0, 1, 3, 7, 15, 31};
     uint8_t storage[8192 + 64];
+    char sequence_storage[8192 + 64];
+    char quality_storage[8192 + 64];
     uint64_t state = TEST_SEED;
     uint64_t case_no = 0;
     size_t li;
@@ -352,6 +494,37 @@ static int run_contract_tests(void) {
             if ((n & 1u) != 0) p[bytes - 1u] = (uint8_t)((p[bytes - 1u] & 0xf0u) | 0x0eu);
             if (check_packed_case(p, (int32_t)n, offsets[oi], case_no++, "boundary") != 0)
                 return 1;
+        }
+    }
+
+    /* FASTQ cycles exercise every SIMD tail, unaligned inputs, lower-case
+     * sequence, ambiguity bytes, all printable Phred+33 qualities, and
+     * invalid quality bytes on both sides of the printable range. */
+    for (li = 0; li < ARRAY_LEN(lengths); li++) {
+        size_t n = lengths[li];
+        for (oi = 0; oi < ARRAY_LEN(offsets); oi++) {
+            static const char bases[] = "ACGTNacgtnMRWSYKVHDBX";
+            char *sequence = sequence_storage + offsets[oi];
+            char *quality = quality_storage + offsets[oi];
+            memset(sequence_storage, 0xcd, sizeof(sequence_storage));
+            memset(quality_storage, 0xcd, sizeof(quality_storage));
+            for (i = 0; i < n; i++) {
+                sequence[i] = bases[i % (ARRAY_LEN(bases) - 1u)];
+                quality[i] = (char)('!' + (int)(i % 94u));
+            }
+            if (check_fastq_case(sequence, quality, n, offsets[oi], case_no++,
+                                 "cycle-tail-valid") != 0) return 1;
+            if (n != 0) {
+                size_t pos = n > 32u ? 32u : n - 1u;
+                char saved = quality[pos];
+                quality[pos] = ' ';
+                if (check_fastq_case(sequence, quality, n, offsets[oi], case_no++,
+                                     "quality-below-phred33") != 0) return 1;
+                quality[pos] = (char)UINT8_C(255);
+                if (check_fastq_case(sequence, quality, n, offsets[oi], case_no++,
+                                     "quality-above-printable") != 0) return 1;
+                quality[pos] = saved;
+            }
         }
     }
 
@@ -404,6 +577,21 @@ static int run_contract_tests(void) {
             p[j] = pool[rng_next(&state) % ARRAY_LEN(pool)];
         }
         if (check_unpacked_case(p, n, offset, case_no++, "fuzz") != 0) return 1;
+
+        {
+            static const unsigned char bases[] = {
+                'A', 'C', 'G', 'T', 'N', 'a', 'c', 'g', 't', 'n',
+                'M', 'R', 'W', 'S', 'Y', 'K', 'V', 'H', 'D', 'B', 'X', 0xff
+            };
+            char *sequence = sequence_storage + offset;
+            char *quality = quality_storage + offset;
+            for (j = 0; j < n; j++) {
+                sequence[j] = (char)bases[rng_next(&state) % ARRAY_LEN(bases)];
+                quality[j] = (char)('!' + (int)(rng_next(&state) % 94u));
+            }
+            if (check_fastq_case(sequence, quality, n, offset, case_no++,
+                                 "fuzz") != 0) return 1;
+        }
     }
 
     printf("simd kernel contracts: OK (%" PRIu64 " cases, seed=%" PRIx64 ")\n",

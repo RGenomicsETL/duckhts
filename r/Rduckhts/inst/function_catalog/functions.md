@@ -102,6 +102,12 @@ This section is generated from `functions.yaml`.
 | `are_overlapping_region_regionkey` | scalar | BOOLEAN |  | Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval. |
 | `are_overlapping_regionkeys` | scalar | BOOLEAN |  | Return TRUE when two RegionKeys overlap. |
 
+### Quality Control
+
+| Function | Kind | Returns | R helper | Description |
+| --- | --- | --- | --- | --- |
+| `duckhts_fastq_qc` | aggregate | STRUCT |  | Aggregate canonical sequence and Phred+33 quality strings directly into exact read/base/Q20/Q30/Q40, nucleotide, quality-sum, and per-cycle sufficient statistics. The nested cycles list supports mean-quality, nucleotide-content, GC, and read-length curves without expanding one SQL row per base. Rows with any NULL input are ignored. Per-cycle state defaults to at most 1,048,576 cycles; pass a constant max_cycles per aggregate group to choose a larger explicit limit, up to 16,777,216. |
+
 ### Metadata
 
 | Function | Kind | Returns | R helper | Description |

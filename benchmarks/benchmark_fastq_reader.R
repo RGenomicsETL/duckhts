@@ -51,7 +51,7 @@ read_exome_manifest <- function(manifest_path, input_dir) {
   observed_size <- as.double(file.info(manifest$path)$size)
   stopifnot(identical(observed_size, as.double(manifest$compressed_bytes)))
   observed_sha <- vapply(manifest$path, sha256, character(1))
-  stopifnot(identical(observed_sha, manifest$sha256))
+  stopifnot(identical(unname(observed_sha), manifest$sha256))
   manifest
 }
 
@@ -410,7 +410,6 @@ mode_fastp_exome <- function(args) {
       quality_t = before$quality_curves$T,
       quality_c = before$quality_curves$C,
       quality_g = before$quality_curves$G,
-      quality_n = before$quality_curves$N,
       content_a = before$content_curves$A,
       content_t = before$content_curves$T,
       content_c = before$content_curves$C,
@@ -498,13 +497,197 @@ mode_duckhts_exome <- function(args) {
   write.csv(run, run_csv, row.names = FALSE, quote = TRUE)
 }
 
+mode_duckhts_qc_exome <- function(args) {
+  stopifnot(length(args) == 10L)
+  manifest <- read_exome_manifest(args[[2]], args[[3]])
+  extension <- normalizePath(args[[4]])
+  run_csv <- args[[5]]
+  metric_csv <- args[[6]]
+  cycle_csv <- args[[7]]
+  cpu <- args[[8]]
+  revision <- args[[9]]
+  build <- args[[10]]
+  set_affinity(cpu)
+  invisible(lapply(manifest$path, warm_file))
+
+  scans <- vapply(seq_len(nrow(manifest)), function(i) {
+    sprintf(
+      paste0(
+        "SELECT %s::VARCHAR AS file_id, %d::UTINYINT AS read_end, ",
+        "SEQUENCE, QUALITY FROM read_fastq(%s)"
+      ),
+      sql_string(manifest$file_id[[i]]), manifest$read_end[[i]],
+      sql_string(normalizePath(manifest$path[[i]]))
+    )
+  }, character(1))
+  query <- sprintf(paste0(
+    "WITH reads AS (%s), summaries AS (",
+    "SELECT file_id, read_end, duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc ",
+    "FROM reads GROUP BY file_id, read_end) ",
+    "SELECT file_id, read_end, qc.reads, qc.bases, qc.q20_bases, ",
+    "qc.q30_bases, qc.q40_bases, qc.quality_sum, qc.a_bases, ",
+    "qc.c_bases, qc.g_bases, qc.t_bases, qc.n_bases, qc.other_bases, ",
+    "qc.max_read_length, cycle.cycle, cycle.bases AS cycle_bases, ",
+    "cycle.quality_sum AS cycle_quality_sum, ",
+    "cycle.a_bases AS cycle_a_bases, cycle.c_bases AS cycle_c_bases, ",
+    "cycle.g_bases AS cycle_g_bases, cycle.t_bases AS cycle_t_bases, ",
+    "cycle.n_bases AS cycle_n_bases, cycle.other_bases AS cycle_other_bases, ",
+    "cycle.a_quality_sum, cycle.c_quality_sum, cycle.g_quality_sum, ",
+    "cycle.t_quality_sum ",
+    "FROM summaries, UNNEST(qc.cycles) AS u(cycle) ",
+    "ORDER BY file_id, cycle"
+  ), paste(scans, collapse = " UNION ALL "))
+
+  con <- open_duckhts(extension)
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  start <- proc.time()[["elapsed"]]
+  flat <- dbGetQuery(con, query)
+  elapsed <- proc.time()[["elapsed"]] - start
+  stopifnot(nrow(flat) > 0L, all(flat$other_bases == 0),
+            all(flat$cycle_other_bases == 0))
+
+  first_cycle <- !duplicated(flat$file_id)
+  metrics <- flat[first_cycle, c(
+    "file_id", "read_end", "reads", "bases", "q20_bases",
+    "q30_bases", "q40_bases", "max_read_length"
+  )]
+  names(metrics)[names(metrics) == "reads"] <- "total_reads"
+  names(metrics)[names(metrics) == "bases"] <- "total_bases"
+  names(metrics)[names(metrics) == "max_read_length"] <- "total_cycles"
+  metrics$mean_length <- metrics$total_bases / metrics$total_reads
+  metrics$gc_rate <- (flat$c_bases[first_cycle] + flat$g_bases[first_cycle]) /
+    metrics$total_bases
+
+  cycles <- data.frame(
+    file_id = flat$file_id,
+    read_end = flat$read_end,
+    cycle = flat$cycle,
+    total_bases = flat$cycle_bases,
+    quality_sum = flat$cycle_quality_sum,
+    a_bases = flat$cycle_a_bases,
+    c_bases = flat$cycle_c_bases,
+    g_bases = flat$cycle_g_bases,
+    t_bases = flat$cycle_t_bases,
+    n_bases = flat$cycle_n_bases,
+    other_bases = flat$cycle_other_bases,
+    a_quality_sum = flat$a_quality_sum,
+    c_quality_sum = flat$c_quality_sum,
+    g_quality_sum = flat$g_quality_sum,
+    t_quality_sum = flat$t_quality_sum,
+    stringsAsFactors = FALSE
+  )
+  stopifnot(all(
+    vapply(seq_len(nrow(metrics)), function(i) {
+      rows <- cycles$file_id == metrics$file_id[[i]]
+      sum(cycles$total_bases[rows]) == metrics$total_bases[[i]] &&
+        cycles$total_bases[rows][[1]] == metrics$total_reads[[i]]
+    }, logical(1))
+  ))
+
+  write.csv(metrics, metric_csv, row.names = FALSE, quote = TRUE)
+  write.csv(cycles, cycle_csv, row.names = FALSE, quote = TRUE)
+  total_reads <- sum(metrics$total_reads)
+  total_bases <- sum(metrics$total_bases)
+  run <- data.frame(
+    engine = "DuckHTS", build = build, source_revision = revision,
+    artifact_sha256 = sha256(extension), workload = "fused_fastq_qc",
+    file_id = "all-eight-files", repetition = 1L,
+    elapsed_seconds = elapsed, max_rss_kib = peak_rss_kib(),
+    input_reads = total_reads, input_bases = total_bases,
+    input_bytes = sum(manifest$compressed_bytes),
+    result_checksum = total_reads + total_bases + sum(metrics$q30_bases),
+    configured_threads = 1L, cpu_affinity = cpu,
+    stringsAsFactors = FALSE
+  )
+  write.csv(run, run_csv, row.names = FALSE, quote = TRUE)
+}
+
+mode_compare_qc_exome <- function(args) {
+  stopifnot(length(args) == 6L)
+  fastp_metrics <- read.csv(args[[2]], stringsAsFactors = FALSE)
+  fastp_cycles <- read.csv(args[[3]], stringsAsFactors = FALSE)
+  duckhts_metrics <- read.csv(args[[4]], stringsAsFactors = FALSE)
+  duckhts_cycles <- read.csv(args[[5]], stringsAsFactors = FALSE)
+  output_csv <- args[[6]]
+  keys <- c("file_id", "read_end")
+  cycle_keys <- c(keys, "cycle")
+
+  metrics <- merge(
+    duckhts_metrics, fastp_metrics, by = keys,
+    suffixes = c(".duckhts", ".fastp")
+  )
+  stopifnot(nrow(metrics) == nrow(duckhts_metrics),
+            nrow(metrics) == nrow(fastp_metrics))
+  exact_fields <- c(
+    "total_reads", "total_bases", "q20_bases", "q30_bases",
+    "q40_bases", "total_cycles", "mean_length"
+  )
+  exact_differences <- vapply(exact_fields, function(field) {
+    max(abs(
+      metrics[[paste0(field, ".duckhts")]] -
+        metrics[[paste0(field, ".fastp")]]
+    ))
+  }, numeric(1))
+  stopifnot(all(exact_differences == 0))
+
+  cycles <- merge(duckhts_cycles, fastp_cycles, by = cycle_keys)
+  stopifnot(nrow(cycles) == nrow(duckhts_cycles),
+            nrow(cycles) == nrow(fastp_cycles))
+  ratio <- function(numerator, denominator) {
+    ifelse(denominator == 0, 0, numerator / denominator)
+  }
+  cycles$quality_mean.duckhts <- ratio(
+    cycles$quality_sum, cycles$total_bases
+  )
+  for (base in c("a", "c", "g", "t")) {
+    cycles[[paste0("quality_", base, ".duckhts")]] <- ratio(
+      cycles[[paste0(base, "_quality_sum")]],
+      cycles[[paste0(base, "_bases")]]
+    )
+    cycles[[paste0("content_", base, ".duckhts")]] <- ratio(
+      cycles[[paste0(base, "_bases")]], cycles$total_bases
+    )
+  }
+  cycles$content_n.duckhts <- ratio(cycles$n_bases, cycles$total_bases)
+  cycles$content_gc.duckhts <- ratio(
+    cycles$c_bases + cycles$g_bases, cycles$total_bases
+  )
+
+  quality_fields <- c("quality_mean", "quality_a", "quality_c", "quality_g", "quality_t")
+  content_fields <- c("content_a", "content_c", "content_g", "content_t", "content_n", "content_gc")
+  max_curve_difference <- function(fields) {
+    max(vapply(fields, function(field) {
+      max(abs(cycles[[paste0(field, ".duckhts")]] - cycles[[field]]),
+          na.rm = TRUE)
+    }, numeric(1)))
+  }
+  comparison <- data.frame(
+    field_family = c(
+      "global integer totals", "global GC fraction",
+      "per-cycle mean-quality curves",
+      "per-cycle nucleotide-content curves"
+    ),
+    maximum_absolute_difference = c(
+      max(exact_differences),
+      max(abs(metrics$gc_rate.duckhts - metrics$gc_rate.fastp)),
+      max_curve_difference(quality_fields),
+      max_curve_difference(content_fields)
+    ),
+    compared_rows = c(nrow(metrics), nrow(metrics), nrow(cycles), nrow(cycles)),
+    stringsAsFactors = FALSE
+  )
+  write.csv(comparison, output_csv, row.names = FALSE, quote = TRUE)
+}
+
 usage <- paste(
   "modes:",
   "synthetic BASELINE CURRENT FASTP FASTP_LIB OUT_CSV FIXTURE_DIR REPS CPU REV;",
   "gzip BASELINE CURRENT MANIFEST INPUT_DIR OUT_CSV REPS CPU REV;",
   "fastp-exome MANIFEST INPUT_DIR FASTP FASTP_LIB REPORT_DIR RUN_CSV",
   "METRIC_CSV CYCLE_CSV REPS CPU;",
-  "duckhts-exome MANIFEST INPUT_DIR EXT RUN_CSV CYCLE_CSV CPU REV BUILD"
+  "duckhts-exome MANIFEST INPUT_DIR EXT RUN_CSV CYCLE_CSV CPU REV BUILD;",
+  "duckhts-qc-exome MANIFEST INPUT_DIR EXT RUN_CSV METRIC_CSV CYCLE_CSV CPU REV BUILD;",
+  "compare-qc-exome FASTP_METRIC FASTP_CYCLE DUCKHTS_METRIC DUCKHTS_CYCLE OUT_CSV"
 )
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -517,5 +700,7 @@ switch(
   "gzip" = mode_gzip(args),
   "fastp-exome" = mode_fastp_exome(args),
   "duckhts-exome" = mode_duckhts_exome(args),
+  "duckhts-qc-exome" = mode_duckhts_qc_exome(args),
+  "compare-qc-exome" = mode_compare_qc_exome(args),
   stop(usage)
 )

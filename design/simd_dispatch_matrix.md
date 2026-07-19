@@ -29,10 +29,12 @@ A dash means that an explicit request for that backend uses scalar for the missi
 | `seq_base_counts` | yes | yes | yes | yes | yes |
 | `bam_nt16_counts` | yes | yes | — | yes | yes |
 | `nt16_gc_counts` | yes | yes | — | yes | yes |
+| `fastq_qc` | yes | yes | — | yes | yes |
 
-AVX-512 currently accelerates only `seq_base_counts`; `auto` may select AVX2 for the nt16 slots
-on a capable x86 host. The DuckDB-Wasm target opts into SIMD128 and requires all three slots;
-webR is a separate toolchain and remains scalar unless its package build enables SIMD128.
+AVX-512 currently accelerates only `seq_base_counts`; `auto` may select AVX2 for the nt16 and
+FASTQ-QC slots on a capable x86 host. The DuckDB-Wasm target opts into SIMD128 and requires all
+four slots; webR is a separate toolchain and remains scalar unless its package build enables
+SIMD128.
 Unknown or untested architectures remain scalar until they have compiler gates, runtime
 probes, implementations, and conformance coverage.
 

@@ -224,6 +224,7 @@ rduckhts_simd_kernel_info(con)[, c("kernel", "selected_backend", "scalar_fallbac
 #> 1 seq_base_counts             avx2           FALSE
 #> 2 bam_nt16_counts             avx2           FALSE
 #> 3  nt16_gc_counts             avx2           FALSE
+#> 4        fastq_qc             avx2           FALSE
 
 rduckhts_simd_set_backend(con, "scalar")
 #> [1] "scalar"
@@ -406,6 +407,12 @@ This section is generated from `functions.yaml`.
 | `are_overlapping_regions`          | scalar | BOOLEAN                                                                                                                                      |          | Return TRUE when two explicit 0-based half-open intervals overlap on the same canonical chromosome.                                                                                                                                                                                                                                                                                                                          |
 | `are_overlapping_region_regionkey` | scalar | BOOLEAN                                                                                                                                      |          | Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval.                                                                                                                                                                                                                                                                                                                                      |
 | `are_overlapping_regionkeys`       | scalar | BOOLEAN                                                                                                                                      |          | Return TRUE when two RegionKeys overlap.                                                                                                                                                                                                                                                                                                                                                                                     |
+
+### Quality Control
+
+| Function           | Kind      | Returns | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|--------------------|-----------|---------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_fastq_qc` | aggregate | STRUCT  |          | Aggregate canonical sequence and Phred+33 quality strings directly into exact read/base/Q20/Q30/Q40, nucleotide, quality-sum, and per-cycle sufficient statistics. The nested cycles list supports mean-quality, nucleotide-content, GC, and read-length curves without expanding one SQL row per base. Rows with any NULL input are ignored. Per-cycle state defaults to at most 1,048,576 cycles; pass a constant max_cycles per aggregate group to choose a larger explicit limit, up to 16,777,216. |
 
 ### Metadata
 
@@ -1084,7 +1091,7 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                             index_path index_format
+#>   success                                              index_path index_format
 #> 1    TRUE <tempfile>          CSI
 
 tabix_meta <- rduckhts_tabix_index(
@@ -1334,7 +1341,7 @@ pairs
 #> 5    1 HS25_09827:2:1201:1624:69925#49
 ```
 
-### FASTQ quality decoding and per-position histograms
+### FASTQ quality decoding and fused QC
 
 FASTQ quality handling has two separate knobs:
 
@@ -1353,6 +1360,31 @@ The flow is:
 
 `BAM`/`CRAM` reads skip the text-decoding step because qualities are
 already stored numerically.
+
+For ordinary QC, aggregate the sequence and canonical quality strings
+directly. This returns exact global totals plus a small nested per-cycle
+relation without generating one SQL row per base.
+
+``` r
+fastq_qc <- dbGetQuery(
+  con,
+  sprintf(
+    "WITH q AS (
+       SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+       FROM read_fastq('%s')
+     )
+     SELECT qc.reads, qc.bases, qc.q30_bases, qc.max_read_length
+     FROM q",
+    fastq_r1
+  )
+)
+fastq_qc
+#>   reads bases q30_bases max_read_length
+#> 1     5   500       475             100
+```
+
+Use numeric quality arrays when the query genuinely needs the full
+per-position histogram:
 
 ``` r
 legacy_fastq <- system.file("extdata", "legacy_phred64.fq", package = "Rduckhts")

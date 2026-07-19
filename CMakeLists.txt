@@ -86,6 +86,7 @@ set(EXTENSION_SOURCES
         src/bcftools_norm_udf.c
         src/munge_udf.c
         src/seq_reader.c
+        src/fastq_qc.c
         src/interval_udf.c
         src/kmer_udf.c
         src/tabix_reader.c

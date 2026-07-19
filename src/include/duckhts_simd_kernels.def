@@ -11,3 +11,4 @@
 DUCKHTS_SIMD_KERNEL(SEQ_BASE_COUNTS, base_counts, BASE_COUNTS, "seq_base_counts")
 DUCKHTS_SIMD_KERNEL(BAM_NT16_COUNTS, bam_nt16_counts, BAM_NT16_COUNTS, "bam_nt16_counts")
 DUCKHTS_SIMD_KERNEL(NT16_GC_COUNTS, nt16_gc_counts, NT16_GC_COUNTS, "nt16_gc_counts")
+DUCKHTS_SIMD_KERNEL(FASTQ_QC, fastq_qc, FASTQ_QC, "fastq_qc")
