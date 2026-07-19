@@ -1,5 +1,10 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundled DuckVEP now gives ordinary long literal deletions the same complete-
+  transcript `transcript_ablation` semantics as symbolic deletions. Equal-length
+  containing alleles also preserve VEP 116's otherwise-empty endpoint UTR terms
+  without leaking an internal unknown-coding fact into
+  `coding_sequence_variant`; bundled DBI tests pin both public results
 - speed up bundled paired-BND annotation by preserving the already sorted
   transcript stream and linearly merging only the much smaller resident
   regulation-feature stream; transcript-only models no longer sort the full

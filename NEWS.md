@@ -1,6 +1,15 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- match VEP 116 for complete transcript overlap by ordinary long literal
+  alleles: a normalized deletion now enters the same tier-1
+  `transcript_ablation` predicate as a symbolic deletion, while an equal-length
+  uploaded span keeps VEP's four-comparison predicates on otherwise-empty UTR
+  intervals and suppresses `coding_sequence_variant` even when sequence
+  evaluation independently produced an unknown-coding fact. Add fixed C, SQL,
+  and R witnesses plus checksum-pinned HPRC pangenome long-allele differential
+  coverage; the configured 5,000-base upstream/downstream distance affects only
+  candidate admission outside transcripts, not these overlapping states
 - keep paired-BND result materialization linear in the dominant transcript-row
   count: transcript and interval-feature evaluators remain separate sorted
   streams, only the smaller feature stream is ordered by object kind, and a

@@ -143,6 +143,65 @@ FROM unnest(duckvep_annotate(
 ----
 protein_altering_variant&incomplete_terminal_codon_variant	supported	-
 
+# A long literal allele remains an ordinary VariationFeature in VEP. Complete
+# transcript overlap plus its normalized deletion fact still has tier-1
+# feature_ablation semantics. Equal-length containing spans keep VEP's empty
+# endpoint-UTR predicates and suppress coding_unknown.
+statement ok
+CREATE TABLE duckvep_complete_span_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  100::UBIGINT transcript_start,
+  108::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  3::UBIGINT transcript_flags,
+  100::UBIGINT cds_start,
+  108::UBIGINT cds_end,
+  'ATGAAATAA'::BLOB cds_sequence,
+  1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence,
+  ''::BLOB post_cds_sequence;
+
+statement ok
+CREATE TABLE duckvep_complete_span_exons AS
+SELECT
+  0::UINTEGER transcript_index,
+  100::UBIGINT exon_start,
+  108::UBIGINT exon_end,
+  1::UBIGINT exon_cdna_start,
+  9::UBIGINT exon_cdna_end,
+  0::TINYINT phase,
+  0::TINYINT end_phase;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'complete-span',
+  'SELECT seq_region FROM duckvep_test_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_complete_span_transcripts',
+  'SELECT * FROM duckvep_complete_span_exons'
+);
+----
+1
+
+query ITT
+WITH variants(ord, reference, alternate) AS (
+  VALUES
+    (1, repeat('A', 11), repeat('A', 5) || 'C' || repeat('A', 5)),
+    (2, repeat('A', 11), 'A')
+)
+SELECT ord, annotation.consequence, annotation.status
+FROM variants,
+LATERAL unnest(duckvep_annotate(
+  'complete-span', 1::UINTEGER, 99::UBIGINT,
+  reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	5_prime_UTR_variant&3_prime_UTR_variant&coding_transcript_variant	supported
+2	transcript_ablation	supported
+
 # VEP does not suppress inframe_insertion when partial_codon is true, and its
 # X-bearing peptide also keeps coding_sequence_variant.
 query TTT

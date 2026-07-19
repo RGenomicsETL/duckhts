@@ -423,7 +423,13 @@ coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 adapter for independent biallelic small variants. Both direction windows default to VEP's
 5,000 bases; one optional distance changes both, while two values configure them separately
 and zero disables the corresponding direction (or both when it is the single symmetric
-value). The adapter copies one DuckDB vector into compact arrays, splits on
+value). These distances extend candidate admission only beyond transcript endpoints; they
+do not cap an allele span or clip an event that overlaps a transcript. Literal alleles up
+to the compact 65,535-byte slice limit retain uploaded, VEP-feature, and minimized-edit
+geometry independently. An ordinary minimized deletion that contains a complete transcript
+therefore reaches the same `transcript_ablation` fact as a symbolic deletion, while an
+equal-length containing span retains VEP's endpoint-UTR comparison behavior. The adapter
+copies one DuckDB vector into compact arrays, splits on
 model/contig/window/order changes, seeds the first candidate set through cgranges, and
 advances independent sorted transcript and regulation/motif sweeps. The SNV point path
 keeps a per-transcript exon rank and advances it monotonically; other transcript spans use
@@ -724,7 +730,10 @@ belong as ignored arguments in the consequence-kernel API.
 - `make duckvep-corpus-differential` records the union of emitted variant/transcript or
   variant/core-feature pairs, including mismatches, misses, extras, and unresolved rows.
 - The corpus runner's small-event mode samples SNVs, MNVs, insertion-like alleles, and
-  deletion-like alleles independently by length-change bin. Structural mode either reads
+  deletion-like alleles independently by length-change bin. It can split multiallelic ALT
+  rows without rewriting genotypes, stratify by raw allele length through greater-than-
+  10-kb representations, checksum the complete source, and emit a source-eligibility
+  receipt separately from executable-VEP agreement. Structural mode either reads
   a symbolic VCF or generates seeded DEL/DUP/tandem-DUP/INV/CNV/INS events from real model
   geometry at transcript, exon, intron, splice, UTR, CDS, start-codon, and stop-codon
   states. Breakend mode generates both local-anchor-removed and verbatim-mate points at

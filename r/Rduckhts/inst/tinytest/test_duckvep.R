@@ -583,6 +583,56 @@ expect_identical(partial_tail_deletion$consequence, "inframe_deletion")
 expect_identical(partial_tail_deletion$status, "supported")
 expect_true(is.na(partial_tail_deletion$reason))
 
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_complete_span_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 108::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "3::UBIGINT transcript_flags, 100::UBIGINT cds_start,",
+    "108::UBIGINT cds_end, 'ATGAAATAA'::BLOB cds_sequence,",
+    "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence,",
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_complete_span_exons AS SELECT",
+    "0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+    "108::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "9::UBIGINT exon_cdna_end, 0::TINYINT phase,",
+    "0::TINYINT end_phase"
+  )
+)
+complete_span_queries <- c(
+  "SELECT seq_region FROM duckvep_r_regions ORDER BY seq_region",
+  "SELECT * FROM duckvep_r_complete_span_transcripts",
+  "SELECT * FROM duckvep_r_complete_span_exons"
+)
+expect_true(load_model("r-complete-span", complete_span_queries)$loaded)
+complete_span_annotations <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, reference, alternate) AS (VALUES",
+    "(1, repeat('A', 11), repeat('A', 5) || 'C' || repeat('A', 5)),",
+    "(2, repeat('A', 11), 'A'))",
+    "SELECT ord, a.consequence, a.status FROM variants,",
+    "LATERAL unnest(duckvep_annotate(",
+    "'r-complete-span', 1::UINTEGER, 99::UBIGINT,",
+    "reference, alternate, 0::UBIGINT)) u(a) ORDER BY ord"
+  )
+)
+expect_identical(
+  complete_span_annotations$consequence,
+  c(
+    "5_prime_UTR_variant&3_prime_UTR_variant&coding_transcript_variant",
+    "transcript_ablation"
+  )
+)
+expect_true(all(complete_span_annotations$status == "supported"))
+
 noncoding_boundary_queries <- queries
 noncoding_boundary_queries[2] <- paste(
   "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
@@ -1527,6 +1577,12 @@ expect_true(
   dbGetQuery(
     con,
     "SELECT duckvep_model_drop('r-partial-cds-end') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-complete-span') AS dropped"
   )$dropped
 )
 expect_true(

@@ -6034,6 +6034,346 @@ TEST event_length_delta_pre_bits_follow_trimmed_alleles(void) {
     PASS();
 }
 
+/* VariationEffect::feature_ablation is not structural-only. A literal allele
+ * whose normalized deletion fact contains the complete transcript must enter
+ * the same tier-1 transcript_ablation rule as a symbolic deletion. */
+TEST ordinary_complete_feature_deletion_is_ablation_known_scene(void) {
+    duckvep_effect_ctx_t ctx;
+    duckvep_event_t event;
+
+    memset(&ctx, 0, sizeof ctx);
+    memset(&event, 0, sizeof event);
+    ctx.region_state.complete_overlap_feature = 1u;
+    event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
+    event.ref_diff_length = 7u;
+    event.alt_diff_length = 1u;
+
+    duckvep_effect_ctx_apply_event(NULL, &ctx, &event);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_ABLATION)) != 0u);
+    duckvep_effect_ctx_finalize(&ctx);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_TRANSCRIPT_ABLATION),
+              duckvep_effect_eval(ctx.pre_bits));
+    PASS();
+}
+
+/* BaseVariationFeatureOverlapAllele::coding_unknown returns false for complete
+ * transcript overlap before peptide predicates are considered. An explicit
+ * unknown fact from a sequence delta must therefore also be suppressed. */
+TEST complete_feature_overlap_suppresses_explicit_coding_unknown_known_scene(void) {
+    duckvep_effect_ctx_t ctx;
+    duckvep_sequence_delta_t delta;
+
+    memset(&ctx, 0, sizeof ctx);
+    memset(&delta, 0, sizeof delta);
+    ctx.region_state.complete_overlap_feature = 1u;
+    ctx.pre_bits = DUCKVEP_PRE(DUCKVEP_PRE_CODING) |
+                   DUCKVEP_PRE(DUCKVEP_PRE_CDS) |
+                   DUCKVEP_PRE(DUCKVEP_PRE_UTR5) |
+                   DUCKVEP_PRE(DUCKVEP_PRE_UTR3);
+    delta.valid = 1u;
+    delta.coding_unknown = 1u;
+
+    duckvep_effect_ctx_apply_delta(&ctx, &delta);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN)) != 0u);
+    duckvep_effect_ctx_finalize(&ctx);
+    ASSERT((ctx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN)) == 0u);
+    ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+              DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR),
+              duckvep_effect_eval(ctx.pre_bits));
+    PASS();
+}
+
+/* VEP runs its four-comparison UTR overlap predicate on empty endpoint
+ * intervals. For an equal-length uploaded span containing a one-exon coding
+ * transcript whose CDS equals the transcript, both strands consequently emit
+ * both UTR terms. Complete overlap also makes coding_unknown false. */
+TEST annotate_complete_equal_length_span_keeps_empty_endpoint_utrs_known_scene(void) {
+    static const uint16_t tchrom[2] = {0u, 1u};
+    static const uint32_t tstart[2] = {1000u, 2000u};
+    static const uint32_t tend[2] = {1008u, 2008u};
+    static const int8_t tstrand[2] = {1, -1};
+    static const uint64_t tflags[2] = {0u, 0u};
+    static const uint32_t texoff[2] = {0u, 1u};
+    static const uint16_t texcnt[2] = {1u, 1u};
+    static const uint32_t tcds_s[2] = {1000u, 2000u};
+    static const uint32_t tcds_e[2] = {1008u, 2008u};
+    static const uint32_t estart[2] = {1000u, 2000u};
+    static const uint32_t eend[2] = {1008u, 2008u};
+    static const uint32_t ecdna_s[2] = {1u, 1u};
+    static const uint32_t ecdna_e[2] = {9u, 9u};
+    static const int8_t ephase[2] = {0, 0};
+    static const uint16_t vchrom[2] = {0u, 1u};
+    static const uint32_t vpos[2] = {999u, 1999u};
+    static const uint32_t vend[2] = {1009u, 2009u};
+    static const uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV
+    };
+    static const uint8_t abytes[] =
+        "AAAAAAAAAAA" "AAAAACAAAAA"
+        "CCCCCCCCCCC" "CCCCCGCCCCC";
+    static const uint32_t roff[2] = {0u, 22u};
+    static const uint32_t aoff[2] = {11u, 33u};
+    static const uint16_t alen[2] = {11u, 11u};
+    static const uint64_t expected =
+        DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+        DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR);
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_variant_batch_t variants;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t builder;
+    duckvep_error_t error;
+    size_t i;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = tstrand; tx.flags = tflags; tx.exon_offset = texoff;
+    tx.exon_count = texcnt; tx.cds_start1 = tcds_s;
+    tx.cds_end1 = tcds_e; tx.transcript_count = 2u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 2u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
+    variants.variant_kind = vkind; variants.allele_bytes = abytes;
+    variants.allele_bytes_len = sizeof abytes - 1u;
+    variants.ref_offset = roff; variants.alt_offset = aoff;
+    variants.ref_length = alen; variants.alt_length = alen;
+    variants.count = 2u;
+
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_model_open(&tx, &exons, NULL, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_options_open(NULL, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_workspace_open(model, &workspace, &error));
+    duckvep_result_builder_init(&builder, rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &variants, options, workspace,
+                                    &builder, &error));
+    ASSERT_EQ(2u, duckvep_result_builder_count(&builder));
+    for (i = 0u; i < 2u; i++) {
+        ASSERT_EQ_FMT((uint32_t)i, rows[i].variant_idx, "%u");
+        ASSERT_EQ(expected, rows[i].consequence_mask);
+    }
+
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    PASS();
+}
+
+struct kprop_complete_overlap {
+    int8_t strand;
+    uint16_t transcript_length;
+    uint16_t left_padding;
+    uint16_t right_padding;
+};
+
+static enum theft_alloc_res kprop_complete_overlap_alloc(
+    struct theft *t, void *env, void **instance) {
+    struct kprop_complete_overlap *s;
+    uint8_t long_side;
+    (void)env;
+
+    s = (struct kprop_complete_overlap *)calloc(1u, sizeof *s);
+    if (s == NULL) return THEFT_ALLOC_ERROR;
+    s->strand = theft_random_bits(t, 1) == 0u ? 1 : -1;
+    s->transcript_length = (uint16_t)(3u * (1u + kprop_bounded(t, 100u)));
+    s->left_padding = (uint16_t)(1u + kprop_bounded(t, 64u));
+    s->right_padding = (uint16_t)kprop_bounded(t, 65u);
+    if (kprop_bounded(t, 8u) == 0u) {
+        long_side = (uint8_t)theft_random_bits(t, 1);
+        if (long_side == 0u) {
+            s->left_padding = (uint16_t)(5001u + kprop_bounded(t, 1000u));
+        } else {
+            s->right_padding = (uint16_t)(5001u + kprop_bounded(t, 1000u));
+        }
+    }
+    *instance = s;
+    return THEFT_ALLOC_OK;
+}
+
+static void kprop_complete_overlap_free(void *instance, void *env) {
+    (void)env;
+    free(instance);
+}
+
+static struct theft_type_info kprop_complete_overlap_info = {
+    .alloc = kprop_complete_overlap_alloc,
+    .free = kprop_complete_overlap_free,
+};
+
+static struct {
+    uint32_t forward;
+    uint32_t reverse;
+    uint32_t right_endpoint;
+    uint32_t over_5000;
+} g_complete_overlap_cov;
+
+static enum theft_trial_res prop_complete_literal_spans_match_vep_source_semantics(
+    struct theft *t, void *arg1) {
+    const struct kprop_complete_overlap *s =
+        (const struct kprop_complete_overlap *)arg1;
+    const uint32_t transcript_start = 10000u;
+    const uint32_t transcript_end =
+        transcript_start + (uint32_t)s->transcript_length - 1u;
+    const uint32_t raw_start = transcript_start - (uint32_t)s->left_padding;
+    const size_t raw_length = (size_t)s->left_padding +
+        (size_t)s->transcript_length + (size_t)s->right_padding;
+    const uint32_t raw_end = raw_start + (uint32_t)raw_length - 1u;
+    uint16_t tchrom[1] = {0u};
+    uint32_t tstart[1] = {transcript_start};
+    uint32_t tend[1] = {transcript_end};
+    int8_t tstrand[1] = {s->strand};
+    uint64_t tflags[1] = {0u};
+    uint32_t texoff[1] = {0u};
+    uint16_t texcnt[1] = {1u};
+    uint32_t tcds_s[1] = {transcript_start};
+    uint32_t tcds_e[1] = {transcript_end};
+    uint32_t estart[1] = {transcript_start};
+    uint32_t eend[1] = {transcript_end};
+    uint32_t ecdna_s[1] = {1u};
+    uint32_t ecdna_e[1] = {(uint32_t)s->transcript_length};
+    int8_t ephase[1] = {0};
+    uint16_t vchrom[2] = {0u, 0u};
+    uint32_t vpos[2] = {raw_start, raw_start};
+    uint32_t vend[2] = {raw_end, raw_end};
+    uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_DEL
+    };
+    uint32_t roff[2];
+    uint32_t aoff[2];
+    uint16_t rlen[2];
+    uint16_t alen[2];
+    uint8_t *alleles = NULL;
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_variant_batch_t variants;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_consequence_t rows[2];
+    duckvep_result_builder_t builder;
+    duckvep_error_t error;
+    enum theft_trial_res result = THEFT_TRIAL_PASS;
+    uint64_t expected_span_mask;
+    (void)t;
+
+    alleles = (uint8_t *)malloc(raw_length * 3u + 1u);
+    if (alleles == NULL) return THEFT_TRIAL_ERROR;
+    memset(alleles, 'A', raw_length * 3u + 1u);
+    /* Keep the equal-length event a genuine MNV after shared-edge trimming,
+     * while independently varying uploaded padding outside the transcript. */
+    alleles[raw_length + (size_t)s->left_padding] = (uint8_t)'C';
+    alleles[raw_length + (size_t)s->left_padding +
+            (size_t)s->transcript_length - 1u] = (uint8_t)'G';
+    roff[0] = 0u;
+    aoff[0] = (uint32_t)raw_length;
+    roff[1] = (uint32_t)(raw_length * 2u);
+    aoff[1] = (uint32_t)(raw_length * 3u);
+    rlen[0] = rlen[1] = (uint16_t)raw_length;
+    alen[0] = (uint16_t)raw_length;
+    alen[1] = 1u;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = tstrand; tx.flags = tflags; tx.exon_offset = texoff;
+    tx.exon_count = texcnt; tx.cds_start1 = tcds_s;
+    tx.cds_end1 = tcds_e; tx.transcript_count = 1u;
+    exons.start1 = estart; exons.end1 = eend;
+    exons.cdna_start1 = ecdna_s; exons.cdna_end1 = ecdna_e;
+    exons.phase = ephase; exons.end_phase = ephase; exons.exon_count = 1u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
+    variants.variant_kind = vkind; variants.allele_bytes = alleles;
+    variants.allele_bytes_len = raw_length * 3u + 1u;
+    variants.ref_offset = roff; variants.alt_offset = aoff;
+    variants.ref_length = rlen; variants.alt_length = alen;
+    variants.count = 2u;
+
+    /* The uploaded feature always extends left of the transcript, satisfying
+     * VEP's inverted pre-CDS interval comparison. It satisfies the inverted
+     * post-CDS interval only when it also extends right of the transcript. */
+    expected_span_mask = s->strand > 0
+        ? DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR)
+        : DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR);
+    if (s->right_padding > 0u) {
+        expected_span_mask |= s->strand > 0
+            ? DUCKVEP_SO(DUCKVEP_SO_3_PRIME_UTR)
+            : DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR);
+    }
+
+    if (duckvep_model_open(&tx, &exons, NULL, &model, &error) != DUCKVEP_OK) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    if (duckvep_options_open(NULL, &options, &error) != DUCKVEP_OK) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    if (duckvep_workspace_open(model, &workspace, &error) != DUCKVEP_OK) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    duckvep_result_builder_init(&builder, rows, 2u);
+    if (duckvep_annotate_tile(model, &variants, options, workspace,
+                              &builder, &error) != DUCKVEP_OK ||
+        duckvep_result_builder_count(&builder) != 2u ||
+        rows[0].variant_idx != 0u ||
+        rows[0].consequence_mask != expected_span_mask ||
+        rows[1].variant_idx != 1u ||
+        rows[1].consequence_mask !=
+            DUCKVEP_SO(DUCKVEP_SO_TRANSCRIPT_ABLATION)) {
+        result = THEFT_TRIAL_FAIL;
+        goto done;
+    }
+    if (s->strand > 0) g_complete_overlap_cov.forward++;
+    else g_complete_overlap_cov.reverse++;
+    if (s->right_padding == 0u) g_complete_overlap_cov.right_endpoint++;
+    if (raw_length > 5000u) g_complete_overlap_cov.over_5000++;
+
+done:
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
+    duckvep_model_close(model);
+    free(alleles);
+    return result;
+}
+
+TEST complete_literal_spans_match_vep_source_semantics_for_any_scene(void) {
+    struct theft_run_config cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.name = "complete literal spans == VEP complete-overlap source semantics";
+    cfg.prop1 = prop_complete_literal_spans_match_vep_source_semantics;
+    cfg.type_info[0] = &kprop_complete_overlap_info;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    memset(&g_complete_overlap_cov, 0, sizeof g_complete_overlap_cov);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    ASSERT(g_complete_overlap_cov.forward > 0u);
+    ASSERT(g_complete_overlap_cov.reverse > 0u);
+    ASSERT(g_complete_overlap_cov.right_endpoint > 0u);
+    ASSERT(g_complete_overlap_cov.over_5000 > 0u);
+    fprintf(stderr,
+            "[complete-overlap coverage] forward=%u reverse=%u "
+            "right_endpoint=%u over_5000=%u\n",
+            g_complete_overlap_cov.forward, g_complete_overlap_cov.reverse,
+            g_complete_overlap_cov.right_endpoint,
+            g_complete_overlap_cov.over_5000);
+    PASS();
+}
+
 /* Deterministic SO-mapping anchor: a 2-exon coding transcript on chr0 (exons
  * [1000,1300] & [1700,2000], CDS [1100,1900]) and a single-exon non-coding
  * transcript on chr1 ([1000,1300]). Each variant lands in exactly one structural
@@ -19454,6 +19794,10 @@ int main(int argc, char **argv) {
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
     RUN_TEST(generated_effect_lookup_matches_rule_interpreter);
     RUN_TEST(event_length_delta_pre_bits_follow_trimmed_alleles);
+    RUN_TEST(ordinary_complete_feature_deletion_is_ablation_known_scene);
+    RUN_TEST(complete_feature_overlap_suppresses_explicit_coding_unknown_known_scene);
+    RUN_TEST(annotate_complete_equal_length_span_keeps_empty_endpoint_utrs_known_scene);
+    RUN_TEST(complete_literal_spans_match_vep_source_semantics_for_any_scene);
     RUN_TEST(annotate_structural_known_scene);
     RUN_TEST(annotate_padded_small_variants_use_differing_region_topology);
     RUN_TEST(annotate_sv_cnv_known_scene);

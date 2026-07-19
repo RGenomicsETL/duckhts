@@ -448,6 +448,56 @@ VEP has separate start-codon predicates that may still emit `start_lost` or
 `start_retained_variant` without the ordinary peptide path. The executable witnesses and
 held-out differentials are the authority for the precise boundary.
 
+## Ordinary literal deletions can ablate a complete transcript
+
+VEP's `feature_ablation` predicate is not restricted to
+`StructuralVariationFeatureOverlapAllele`. An ordinary VCF allele containing
+only literal A/C/G/T bases remains a `VariationFeature` even when it is tens of
+kilobases long. For length-changing alleles, the VCF parser removes the anchor
+and `Parser::post_process_vfs` minimizes common allele edges; the resulting
+ordinary deletion predicate is then combined with complete transcript overlap.
+If both are true, the tier-1 result is `transcript_ablation`.
+
+This state is common enough in graph/pangenome VCFs to matter. Treating all long
+alleles as structural would change parser identity and other predicates, while
+restricting ablation to the typed SV adapter loses the correct consequence.
+DuckVEP therefore derives one normalized deletion fact for ordinary alleles and
+sets the shared feature-ablation fact when that allele's VEP feature span
+contains the complete transcript. Symbolic DEL/CNV loss continues through the
+structural fact producer; the generated SO rule remains the single consumer.
+
+Source anchors: VEP 116 `Parser/VCF.pm::create_VariationFeatures`,
+`Parser.pm::post_process_vfs` / `::minimise`, and Ensembl Variation 116
+`VariationEffect.pm::deletion` / `::feature_ablation`. Fixed tests must include
+an ordinary shortened delins, not only a symbolic `<DEL>` record.
+
+## Complete equal-length spans can expose both empty UTR predicates
+
+VEP's `within_5_prime_utr` and `within_3_prime_utr` predicates call a generic
+four-comparison overlap helper after requiring a cDNA mapping. They do not first
+prove that the UTR interval contains a reference base. When a transcript and
+its CDS share an endpoint, the corresponding UTR interval is inverted; an
+equal-length uploaded feature containing the complete transcript can still
+satisfy the overlap comparisons on both sides.
+
+The HPRC long-literal witness at chromosome 22 position 22,919,681 has a
+3,060-base REF and ALT and contains the 46-base `ENST00000390330` transcript,
+whose transcript and CDS endpoints coincide. VEP 116 emits exactly
+`3_prime_UTR_variant&5_prime_UTR_variant`. It emits neither
+`coding_sequence_variant` nor a biological claim that UTR bases exist.
+`VariationEffect::coding_unknown` is unconditionally false for complete feature
+overlap, so an unknown-coding fact produced by the sequence view must not leak
+back into the consequence set.
+
+DuckVEP preserves this state in the shared span classifier on both transcript
+strands, then makes complete-overlap suppression authoritative during effect
+finalization. Do not replace the four comparisons with a non-empty-interval
+test, and do not let an independently computed peptide/X state reintroduce
+`coding_sequence_variant` afterward.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::within_5_prime_utr`,
+`::within_3_prime_utr`, `::coding_unknown`, and the shared `overlap` helper.
+
 ## Retained feature bases participate in peptide predicates
 
 When an equal-length uploaded feature maps wholly into CDS, VEP 116 uses every codon

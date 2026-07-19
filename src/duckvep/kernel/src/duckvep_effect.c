@@ -409,6 +409,16 @@ void duckvep_effect_ctx_apply_event(
             ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELETION);
         }
     }
+    /* VariationEffect::feature_ablation is shared by ordinary
+     * VariationFeatureOverlapAlleles and structural overlap alleles. The
+     * predicate is exactly complete transcript overlap plus the normalized
+     * deletion fact; it is not restricted to symbolic/SV input. This matters
+     * for long literal alleles from pangenome call sets whose shortened ALT
+     * contains an entire transcript. */
+    if (ctx->region_state.complete_overlap_feature &&
+        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FEATURE_ABLATION);
+    }
 }
 
 void duckvep_effect_ctx_apply_delta(
@@ -619,10 +629,16 @@ void duckvep_effect_ctx_finalize(duckvep_effect_ctx_t *ctx) {
      * fallback. Usually a resolved DELTA suppresses coding_unknown, but VEP can
      * set both explicitly (for example an in-frame insertion whose local peptide
      * ends in X); duckvep_effect_ctx_apply_delta preserves that fact above. */
-    if (coding && ctx->protein_coding &&
-        ctx->region_state.complete_overlap_feature &&
-        (pre & DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u) {
-        pre |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_TRANSCRIPT);
+    if (ctx->region_state.complete_overlap_feature) {
+        /* This predicate is false before VEP inspects any peptide state. A
+         * sequence delta may independently contain X/coding-unknown facts, but
+         * it must not reintroduce the term after complete overlap has been
+         * established. */
+        pre &= ~DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN);
+        if (coding && ctx->protein_coding &&
+            (pre & DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT)) == 0u) {
+            pre |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_TRANSCRIPT);
+        }
     } else if ((pre & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) != 0u &&
                (pre & DUCKVEP_PRE(DUCKVEP_PRE_DELTA)) == 0u &&
                ((pre & DUCKVEP_PRE(DUCKVEP_PRE_SV)) == 0u ||
