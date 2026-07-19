@@ -37,6 +37,14 @@ typedef void (*duckhts_nt16_gc_counts_fn)(const uint8_t *codes, size_t n,
 
 #define DUCKHTS_SIMD_FN_NT16_GC_COUNTS duckhts_nt16_gc_counts_fn
 
+typedef void (*duckhts_fastq_qc_fn)(const char *sequence,
+                                    const char *quality,
+                                    size_t len,
+                                    duckhts_simd_fastq_cycle_t *cycles,
+                                    duckhts_simd_fastq_read_t *out);
+
+#define DUCKHTS_SIMD_FN_FASTQ_QC duckhts_fastq_qc_fn
+
 typedef enum {
 #define DUCKHTS_SIMD_KERNEL(id, field, sig, name) DUCKHTS_KERNEL_##id,
 #include "duckhts_simd_kernels.def"
@@ -82,6 +90,12 @@ void duckhts_simd_nt16_gc_counts_with_table(const duckhts_simd_dispatch_table_t 
                                             const uint8_t *codes,
                                             size_t n,
                                             duckhts_simd_base_counts_t *out);
+void duckhts_simd_fastq_qc_read_with_table(const duckhts_simd_dispatch_table_t *table,
+                                           const char *sequence,
+                                           const char *quality,
+                                           size_t len,
+                                           duckhts_simd_fastq_cycle_t *cycles,
+                                           duckhts_simd_fastq_read_t *out);
 
 void duckhts_simd_builder_consider_base_counts(duckhts_simd_builder_t *builder,
                                                duckhts_simd_cap_t cap,
@@ -98,6 +112,11 @@ void duckhts_simd_builder_consider_nt16_gc_counts(duckhts_simd_builder_t *builde
                                                   const char *backend,
                                                   int priority,
                                                   duckhts_nt16_gc_counts_fn fn);
+void duckhts_simd_builder_consider_fastq_qc(duckhts_simd_builder_t *builder,
+                                            duckhts_simd_cap_t cap,
+                                            const char *backend,
+                                            int priority,
+                                            duckhts_fastq_qc_fn fn);
 
 void duckhts_simd_scalar_register(duckhts_simd_builder_t *builder);
 void duckhts_simd_avx2_register(duckhts_simd_builder_t *builder);

@@ -10,6 +10,14 @@ test_seq_ops <- function() {
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
   fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
+  fastq_multiline <- system.file(
+    "extdata", "fastq_multiline.fq", package = "Rduckhts"
+  )
+  fastq_truncated <- system.file(
+    "extdata", "fastq_truncated.fq", package = "Rduckhts"
+  )
+  expect_true(file.exists(fastq_multiline))
+  expect_true(file.exists(fastq_truncated))
   fasta_index_path <- tempfile("duckhts_seq_ops_", fileext = ".fai")
   on.exit(unlink(fasta_index_path), add = TRUE)
   expect_silent(rduckhts_fasta_index(con, fasta_path, index_path = fasta_index_path))
@@ -109,6 +117,7 @@ test_seq_ops <- function() {
   expect_true(all(c("kernel", "selected_backend", "selected_capability", "requested_backend", "scalar_fallback") %in% names(kernel_info)))
   expect_true("seq_base_counts" %in% kernel_info$kernel)
   expect_true("nt16_gc_counts" %in% kernel_info$kernel)
+  expect_true("fastq_qc" %in% kernel_info$kernel)
   # nt16 seq_gc_content kernel: forced scalar and auto agree on a 64-code
   # sequence long enough to exercise a concrete backend's vector loop
   expect_identical(rduckhts_simd_set_backend(con, "scalar"), "scalar")
@@ -136,9 +145,9 @@ test_seq_ops <- function() {
     expect_identical(rduckhts_simd_set_backend(con, backend), backend)
     concrete_info <- rduckhts_simd_kernel_info(con)
     concrete_rows <- concrete_info[concrete_info$kernel %in% c(
-      "seq_base_counts", "bam_nt16_counts", "nt16_gc_counts"
+      "seq_base_counts", "bam_nt16_counts", "nt16_gc_counts", "fastq_qc"
     ), ]
-    expect_equal(nrow(concrete_rows), 3L, info = backend)
+    expect_equal(nrow(concrete_rows), 4L, info = backend)
     expect_true(all(concrete_rows$selected_backend == backend), info = backend)
     expect_false(any(concrete_rows$scalar_fallback), info = backend)
     gc_nt16_concrete <- DBI::dbGetQuery(con,
@@ -414,6 +423,40 @@ test_seq_ops <- function() {
     "'%s', sequence_encoding := 'nt16', quality_representation := 'phred')"
   ), fastq_r1))
   expect_equal(fq_count_only$n[1], fq_str_n$n[1])
+
+  # Multiline FASTQ framing, htslib-style /digit name stripping, and direct
+  # nt16/Phred materialization remain identical to the established reader.
+  fq_multiline <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT NAME, DESCRIPTION, SEQUENCE, QUALITY",
+    "FROM read_fastq('%s')"
+  ), fastq_multiline))
+  expect_equal(fq_multiline$NAME, c("multi", "plain"))
+  expect_true(all(is.na(fq_multiline$DESCRIPTION)))
+  expect_equal(
+    fq_multiline$SEQUENCE,
+    c("NACGTRYSWKMBDHVNAA", "ACGTT=RN")
+  )
+  expect_equal(
+    fq_multiline$QUALITY,
+    c("+@ABCDEFGHIJKLMNOP", "!!!!####")
+  )
+
+  fq_multiline_packed <- DBI::dbGetQuery(con, sprintf(paste(
+    "SELECT seq_decode_4bit(SEQUENCE) AS sequence,",
+    "       QUALITY[1] AS q1, QUALITY[2] AS q2",
+    "FROM read_fastq('%s', sequence_encoding := 'nt16',",
+    "                quality_representation := 'phred')"
+  ), fastq_multiline))
+  expect_equal(
+    fq_multiline_packed$sequence,
+    c("NACGTRYSWKMBDHVNAA", "ACGTT=RN")
+  )
+  expect_equal(fq_multiline_packed$q1, c(10, 0))
+  expect_equal(fq_multiline_packed$q2, c(31, 0))
+
+  expect_error(DBI::dbGetQuery(con, sprintf(
+    "SELECT * FROM read_fastq('%s')", fastq_truncated
+  )), pattern = "truncated FASTQ quality block", fixed = TRUE)
 
   # direct SQL: invalid encoding errors
   expect_error(DBI::dbGetQuery(con, sprintf(

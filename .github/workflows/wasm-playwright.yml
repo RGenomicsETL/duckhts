@@ -2,8 +2,8 @@ name: Wasm Playwright smoke test
 
 # Builds the duckdb-wasm extension via the same Docker path as the local
 # `make wasm-playwright-test` and drives the browser harness headlessly with
-# Playwright, asserting the SIMD dispatch kernels resolve on wasm (scalar
-# fallback) and that the extension loads and runs in a real browser.
+# Playwright, asserting every complete SIMD dispatch kernel resolves to native
+# wasm SIMD128 without scalar fallback and that the extension runs in a browser.
 on:
   pull_request:
   workflow_dispatch:

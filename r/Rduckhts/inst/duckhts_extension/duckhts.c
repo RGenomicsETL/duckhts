@@ -28,6 +28,8 @@ extern void register_read_pileup_function(duckdb_connection connection);
 extern void register_read_fasta_function(duckdb_connection connection);
 extern void register_read_fastq_function(duckdb_connection connection);
 extern void register_fasta_index_function(duckdb_connection connection);
+/* fastq_qc.c */
+extern void register_duckhts_fastq_qc_function(duckdb_connection connection);
 /* interval_udf.c */
 extern void register_read_bed_function(duckdb_connection connection);
 extern void register_fasta_nuc_function(duckdb_connection connection);
@@ -137,6 +139,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_bcftools_norm_functions(connection);
     register_read_fasta_function(connection);
     register_read_fastq_function(connection);
+    register_duckhts_fastq_qc_function(connection);
     register_fasta_index_function(connection);
     register_read_bed_function(connection);
     register_fasta_nuc_function(connection);

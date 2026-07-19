@@ -624,6 +624,19 @@
       ]
     },
     {
+      "name": "duckhts_fastq_qc",
+      "kind": "aggregate",
+      "category": "Quality Control",
+      "signature": "duckhts_fastq_qc(sequence, quality [, max_cycles])",
+      "returns": "STRUCT",
+      "r_wrapper": "",
+      "description": "Aggregate canonical sequence and Phred+33 quality strings directly into exact read/base/Q20/Q30/Q40, nucleotide, quality-sum, and per-cycle sufficient statistics. The nested cycles list supports mean-quality, nucleotide-content, GC, and read-length curves without expanding one SQL row per base. Rows with any NULL input are ignored. Per-cycle state defaults to at most 1,048,576 cycles; pass a constant max_cycles per aggregate group to choose a larger explicit limit, up to 16,777,216.",
+      "examples": [
+        "SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz');",
+        "WITH q AS (SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz')) SELECT cycle.* FROM q, UNNEST(qc.cycles) AS u(cycle);"
+      ]
+    },
+    {
       "name": "detect_quality_encoding",
       "kind": "table",
       "category": "Metadata",

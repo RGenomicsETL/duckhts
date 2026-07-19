@@ -154,6 +154,12 @@ This section is generated from `functions.yaml`.
 | `are_overlapping_region_regionkey` | scalar | BOOLEAN                                                                                                                                      |          | Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval.                                                                                                                                                                                                                                                                                                                                      |
 | `are_overlapping_regionkeys`       | scalar | BOOLEAN                                                                                                                                      |          | Return TRUE when two RegionKeys overlap.                                                                                                                                                                                                                                                                                                                                                                                     |
 
+### Quality Control
+
+| Function           | Kind      | Returns | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|--------------------|-----------|---------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_fastq_qc` | aggregate | STRUCT  |          | Aggregate canonical sequence and Phred+33 quality strings directly into exact read/base/Q20/Q30/Q40, nucleotide, quality-sum, and per-cycle sufficient statistics. The nested cycles list supports mean-quality, nucleotide-content, GC, and read-length curves without expanding one SQL row per base. Rows with any NULL input are ignored. Per-cycle state defaults to at most 1,048,576 cycles; pass a constant max_cycles per aggregate group to choose a larger explicit limit, up to 16,777,216. |
+
 ### Metadata
 
 | Function                    | Kind        | Returns | R helper                           | Description                                                                                                                                                                                                                                                                |
@@ -901,6 +907,7 @@ FROM duckhts_simd_kernel_info();
     │ seq_base_counts │ avx2             │ false           │
     │ bam_nt16_counts │ avx2             │ false           │
     │ nt16_gc_counts  │ avx2             │ false           │
+    │ fastq_qc        │ avx2             │ false           │
     └─────────────────┴──────────────────┴─────────────────┘
 
 ``` sql
@@ -977,7 +984,7 @@ LIMIT 2;
     │ HS25_09827:2:1201:1505:59795#49 │      2 │ [1, 1, 4, 4, 1, 1, 1, 4, 1, 1, 4, 4] │ AAGGAAAGAAGG │
     └─────────────────────────────────┴────────┴──────────────────────────────────────┴──────────────┘
 
-### FASTQ quality decoding and per-position histograms
+### FASTQ quality decoding and fused QC
 
 `read_fastq()` separates input interpretation from output
 representation:
@@ -1000,6 +1007,57 @@ This makes the flow explicit:
 
 For BAM/CRAM, qualities are already stored as numeric values, so there
 is no FASTQ text-encoding ambiguity on input.
+
+Use `duckhts_fastq_qc(...)` for global and per-cycle quality-control
+reductions. It consumes the projected sequence and canonical quality
+strings in one bounded aggregate instead of creating one SQL row per
+base. Expand only the compact cycle result when plotting or joining
+per-cycle statistics.
+
+``` sql
+WITH q AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('test/data/r1.fq')
+)
+SELECT
+  qc.reads,
+  qc.bases,
+  qc.q30_bases,
+  qc.max_read_length
+FROM q;
+```
+
+    ┌────────┬────────┬───────────┬─────────────────┐
+    │ reads  │ bases  │ q30_bases │ max_read_length │
+    │ uint64 │ uint64 │  uint64   │     uint32      │
+    ├────────┼────────┼───────────┼─────────────────┤
+    │      5 │    500 │       475 │             100 │
+    └────────┴────────┴───────────┴─────────────────┘
+
+``` sql
+WITH q AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('test/data/r1.fq')
+)
+SELECT cycle.cycle, cycle.bases, cycle.quality_sum
+FROM q, UNNEST(qc.cycles) AS u(cycle)
+ORDER BY cycle.cycle
+LIMIT 5;
+```
+
+    ┌────────┬────────┬─────────────┐
+    │ cycle  │ bases  │ quality_sum │
+    │ uint32 │ uint64 │   uint64    │
+    ├────────┼────────┼─────────────┤
+    │      1 │      5 │         169 │
+    │      2 │      5 │         160 │
+    │      3 │      5 │         166 │
+    │      4 │      5 │         177 │
+    │      5 │      5 │         185 │
+    └────────┴────────┴─────────────┘
+
+Use numeric quality arrays when the query genuinely needs the full
+quality histogram:
 
 ``` sql
 SELECT *

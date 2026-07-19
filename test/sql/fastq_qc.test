@@ -1,0 +1,147 @@
+# name: test/sql/fastq_qc.test
+# description: FASTQ byte aggregate and SIMD backend conformance
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+# The aggregate consumes the reader's canonical sequence and Phred+33 strings
+# directly. No nt16/Phred lists or per-base SQL rows are materialized.
+query IIIIIIIIIIIIII
+WITH summary AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq')
+)
+SELECT qc.reads, qc.bases, qc.q20_bases, qc.q30_bases, qc.q40_bases,
+       qc.quality_sum, qc.a_bases, qc.c_bases, qc.g_bases, qc.t_bases,
+       qc.n_bases, qc.other_bases, qc.max_read_length, len(qc.cycles)
+FROM summary;
+----
+5	500	499	475	67	18425	152	98	94	156	0	0	100	100
+
+query IIIIIIIIIIIII
+WITH summary AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq')
+)
+SELECT cycle.cycle, cycle.bases, cycle.quality_sum,
+       cycle.a_bases, cycle.c_bases, cycle.g_bases, cycle.t_bases,
+       cycle.n_bases, cycle.other_bases,
+       cycle.a_quality_sum, cycle.c_quality_sum,
+       cycle.g_quality_sum, cycle.t_quality_sum
+FROM summary, UNNEST(qc.cycles) AS u(cycle)
+WHERE cycle.cycle IN (1, 32, 33, 100)
+ORDER BY cycle.cycle;
+----
+1	5	169	1	1	2	1	0	0	33	34	68	34
+32	5	194	1	2	1	1	0	0	39	78	39	38
+33	5	193	2	0	2	1	0	0	76	0	78	39
+100	5	184	4	0	1	0	0	0	145	0	39	0
+
+# The projected text path does not inherit bam1_t's QNAME limit when the
+# query name is neither returned nor needed for mate comparison.
+query II
+WITH summary AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('__WORKING_DIRECTORY__/test/data/fastq_long_qname.fq')
+)
+SELECT qc.reads, qc.bases FROM summary;
+----
+1	4
+
+# Publishing NAME retains the htslib/BAM-compatible query-name contract.
+statement error
+SELECT NAME
+FROM read_fastq('__WORKING_DIRECTORY__/test/data/fastq_long_qname.fq');
+----
+read_fastq: query name exceeds 254 bytes
+
+# NULL sequence/quality pairs are ignored under normal aggregate NULL
+# handling, while zero-length reads remain real reads.
+query III
+WITH reads(sequence, quality) AS (
+  VALUES ('A', 'I'), (NULL, 'I'), ('A', NULL), ('', '')
+), summary AS (
+  SELECT duckhts_fastq_qc(sequence, quality) AS qc FROM reads
+)
+SELECT qc.reads, qc.bases, len(qc.cycles) FROM summary;
+----
+2	1	1
+
+# The explicit overload makes unusually long per-cycle state a caller choice.
+query III
+WITH summary AS (
+  SELECT duckhts_fastq_qc(repeat('A', 129), repeat('I', 129), 129) AS qc
+)
+SELECT qc.reads, qc.bases, qc.max_read_length FROM summary;
+----
+1	129	129
+
+# A sub-128 explicit limit is also the initial allocation bound.
+query III
+WITH summary AS (
+  SELECT duckhts_fastq_qc('A', 'I', 1) AS qc
+)
+SELECT qc.reads, qc.max_read_length, len(qc.cycles) FROM summary;
+----
+1	1	1
+
+statement error
+SELECT duckhts_fastq_qc('AC', 'I');
+----
+duckhts_fastq_qc requires sequence and quality strings of equal length
+
+statement error
+SELECT duckhts_fastq_qc(repeat('A', 129), repeat('I', 129), 128);
+----
+duckhts_fastq_qc read length exceeds max_cycles
+
+statement error
+SELECT duckhts_fastq_qc(sequence, quality, max_cycles)
+FROM (VALUES ('A', 'I', 4::UINTEGER), ('A', 'I', 5::UINTEGER))
+  AS reads(sequence, quality, max_cycles);
+----
+duckhts_fastq_qc max_cycles must be constant within each aggregate group
+
+statement error
+SELECT duckhts_fastq_qc('A', chr(32));
+----
+duckhts_fastq_qc quality must be canonical printable Phred+33 text
+
+# Deterministic multi-group state combination and all vector tails must be
+# identical between the scalar oracle and the process's automatic backend.
+statement ok
+SELECT backend FROM duckhts_simd_set_backend('scalar')
+
+statement ok
+CREATE TEMP TABLE fastq_qc_scalar AS
+WITH reads AS (
+  SELECT i % 7 AS grp,
+         substr(repeat('ACGTNMRWSYKVHDBXacgtn', 7), 1, 1 + i % 129) AS sequence,
+         substr(repeat('!5?I~', 26), 1, 1 + i % 129) AS quality
+  FROM range(0, 20000) AS r(i)
+)
+SELECT grp, duckhts_fastq_qc(sequence, quality) AS qc
+FROM reads GROUP BY grp
+
+statement ok
+SELECT backend FROM duckhts_simd_set_backend('auto')
+
+query I
+WITH reads AS (
+  SELECT i % 7 AS grp,
+         substr(repeat('ACGTNMRWSYKVHDBXacgtn', 7), 1, 1 + i % 129) AS sequence,
+         substr(repeat('!5?I~', 26), 1, 1 + i % 129) AS quality
+  FROM range(0, 20000) AS r(i)
+), automatic AS (
+  SELECT grp, duckhts_fastq_qc(sequence, quality) AS qc
+  FROM reads GROUP BY grp
+)
+SELECT count(*)
+FROM fastq_qc_scalar AS scalar
+FULL OUTER JOIN automatic USING (grp)
+WHERE scalar.qc IS DISTINCT FROM automatic.qc;
+----
+0

@@ -417,7 +417,7 @@ FROM read_fastq('test/data/interleaved.fq', interleaved := true)
 LIMIT 2;
 ```
 
-### FASTQ quality decoding and per-position histograms
+### FASTQ quality decoding and fused QC
 
 `read_fastq()` separates input interpretation from output representation:
 
@@ -432,6 +432,35 @@ This makes the flow explicit:
 3. Output is either raw numeric quality arrays (`phred`) or canonical Phred+33 text (`string`).
 
 For BAM/CRAM, qualities are already stored as numeric values, so there is no FASTQ text-encoding ambiguity on input.
+
+Use `duckhts_fastq_qc(...)` for global and per-cycle quality-control reductions. It consumes
+the projected sequence and canonical quality strings in one bounded aggregate instead of
+creating one SQL row per base. Expand only the compact cycle result when plotting or joining
+per-cycle statistics.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+WITH q AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('test/data/r1.fq')
+)
+SELECT
+  qc.reads,
+  qc.bases,
+  qc.q30_bases,
+  qc.max_read_length
+FROM q;
+
+WITH q AS (
+  SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc
+  FROM read_fastq('test/data/r1.fq')
+)
+SELECT cycle.cycle, cycle.bases, cycle.quality_sum
+FROM q, UNNEST(qc.cycles) AS u(cycle)
+ORDER BY cycle.cycle
+LIMIT 5;
+```
+
+Use numeric quality arrays when the query genuinely needs the full quality histogram:
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT *
