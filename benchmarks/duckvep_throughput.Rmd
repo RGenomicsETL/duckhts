@@ -132,7 +132,7 @@ set.
 
 ## Independent-event HGVS materialization
 
-```{r hgvs-throughput}
+```{r hgvs-throughput, results='asis'}
 hgvs_runs <- history[
   history$output_mode %in% c("rich", "hgvs") & history$threads == 1L,
   ,
@@ -169,6 +169,25 @@ if (nrow(hgvs_runs)) {
       "variants", "annotated_rows", "median_seconds", "variants_per_second",
       "checksum_kind"
     )]
+    comparison_group <- paste(
+      comparable$host,
+      comparable$workload,
+      comparable$variants,
+      comparable$threads,
+      comparable$cpu_affinity,
+      sep = "\034"
+    )
+    rich_seconds <- setNames(
+      comparable$median_seconds[comparable$output_mode == "rich"],
+      comparison_group[comparable$output_mode == "rich"]
+    )
+    hgvs_table$output_rows_per_second <- round(
+      comparable$annotated_rows / comparable$median_seconds
+    )
+    hgvs_table$elapsed_vs_rich <- round(
+      comparable$median_seconds / unname(rich_seconds[comparison_group]),
+      2L
+    )
     hgvs_table$variants <- format(
       hgvs_table$variants,
       big.mark = ",",
@@ -180,10 +199,77 @@ if (nrow(hgvs_runs)) {
       scientific = FALSE
     )
     hgvs_table$variants_per_second <- round(hgvs_table$variants_per_second)
-    knitr::kable(hgvs_table, row.names = FALSE)
+    hgvs_table$output_rows_per_second <- format(
+      hgvs_table$output_rows_per_second,
+      big.mark = ",",
+      scientific = FALSE
+    )
+    cat(knitr::kable(hgvs_table, row.names = FALSE), sep = "\n")
+    cat("\n\n")
+
+    current_hgvs <- comparable[comparable$output_mode == "hgvs", , drop = FALSE]
+    if (nrow(current_hgvs) == 1L) {
+      same_workload <- hgvs_runs$output_mode == "hgvs" &
+        hgvs_runs$source_revision != comparison_revision &
+        hgvs_runs$host == current_hgvs$host &
+        hgvs_runs$workload == current_hgvs$workload &
+        hgvs_runs$variants == current_hgvs$variants &
+        hgvs_runs$threads == current_hgvs$threads &
+        hgvs_runs$cpu_affinity == current_hgvs$cpu_affinity
+      previous_revision <- nearest_tested_ancestor(
+        hgvs_runs$source_revision[same_workload]
+      )
+      previous_hgvs <- hgvs_runs[
+        same_workload & hgvs_runs$source_revision == previous_revision,
+        ,
+        drop = FALSE
+      ]
+      if (nrow(previous_hgvs) == 1L) {
+        change <- data.frame(
+          baseline_revision = previous_hgvs$revision,
+          current_revision = current_hgvs$revision,
+          input_variants = format(
+            current_hgvs$variants,
+            big.mark = ",",
+            scientific = FALSE
+          ),
+          output_rows = format(
+            current_hgvs$annotated_rows,
+            big.mark = ",",
+            scientific = FALSE
+          ),
+          baseline_seconds = previous_hgvs$median_seconds,
+          current_seconds = current_hgvs$median_seconds,
+          speedup = round(
+            previous_hgvs$median_seconds / current_hgvs$median_seconds,
+            2L
+          ),
+          current_input_variants_per_second = round(
+            current_hgvs$variants_per_second
+          ),
+          current_output_rows_per_second = format(
+            round(current_hgvs$annotated_rows / current_hgvs$median_seconds),
+            big.mark = ",",
+            scientific = FALSE
+          )
+        )
+        cat(knitr::kable(change, row.names = FALSE), sep = "\n")
+        cat("\n")
+      }
+    }
   }
 }
 ```
+
+[Ferro-hgvs v0.9.0](https://github.com/fulcrumgenomics/ferro-hgvs/tree/278e2c11134e3b49067d0c334f650c7c29db9cbe)
+reports 5.1 million patterns/s for parsing already rendered HGVS and
+a 77,000 patterns/s full-population normalization peak on an Apple M2 Max. Those
+are useful independent reference points but not the operation timed here:
+DuckVEP begins with genomic alleles, discovers every overlapping transcript,
+computes consequences, shifts and renders transcript/protein HGVS, and emits
+28.78 transcript rows per input in this workload. The table therefore reports
+both input alleles/s and expanded transcript-HGVS rows/s; it does not present a
+direct cross-machine speed ranking.
 
 The HGVS row materializes transcript/protein strings and status fields and
 checks their total byte count. Compare it only with the rich consequence row at

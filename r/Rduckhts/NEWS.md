@@ -33,7 +33,9 @@
   sequence, and renders through a reusable worker buffer. The bundled consequence sidecar
   shortcut remains fail-closed for length-changing splice overlaps: without a positive
   frameshift fact, those edits run the complete peptide delta so their VEP-compatible
-  frameshift HGVSp is retained
+  frameshift HGVSp is retained. A pinned one-thread mixed-coding run generates 5,756,720
+  transcript-HGVS rows from 200,000 alleles in 4.579 seconds, down from 32.106 seconds for
+  the previous bundled path; the matched bundled rich lane takes 2.067 seconds
 - bundled DuckVEP now gives ordinary long literal deletions the same complete-
   transcript `transcript_ablation` semantics as symbolic deletions. Equal-length
   containing alleles also preserve VEP 116's otherwise-empty endpoint UTR terms

@@ -107,6 +107,8 @@ insertion order; they remain only as historical measurements.
 | 2026-07-20 | 0714235a | ensembl116_grch38_final_coding_mixed_200k            | rich        |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 5,756,720      |      9 |       2.031 |          2.038 |       2.047 |               98135 |        10190.0 | 13th Gen Intel(R) Core(TM) i5-13500 |            2 | 2,824,691              |
 | 2026-07-20 | 25328813 | ensembl116_grch38_final_coding_mixed_200k            | rich        |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 5,756,720      |      9 |       2.024 |          2.033 |       2.046 |               98377 |        10165.0 | 13th Gen Intel(R) Core(TM) i5-13500 |            2 | 2,831,638              |
 | 2026-07-20 | 25328813 | ensembl116_grch38_final_coding_mixed_200k            | hgvs        |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 5,756,720      |      9 |      32.047 |         32.106 |      32.204 |                6229 |       160530.0 | 13th Gen Intel(R) Core(TM) i5-13500 |            2 | 179,304                |
+| 2026-07-20 | 7dae50cd | ensembl116_grch38_final_coding_mixed_200k            | rich        |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 5,756,720      |      9 |       2.045 |          2.067 |       2.081 |               96759 |        10335.0 | 13th Gen Intel(R) Core(TM) i5-13500 |            2 | 2,785,060              |
+| 2026-07-20 | 7dae50cd | ensembl116_grch38_final_coding_mixed_200k            | hgvs        |       1 | 200,000    | 644,427     | 5,068,416 | 0                   | 5,756,720      |      9 |       4.565 |          4.579 |       4.610 |               43678 |        22895.0 | 13th Gen Intel(R) Core(TM) i5-13500 |            2 | 1,257,200              |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -118,10 +120,26 @@ pinned run, while a range records a scheduler-visible CPU set.
 
 ## Independent-event HGVS materialization
 
-| revision | workload                                  | output_mode | threads | cpu_affinity | variants | annotated_rows | median_seconds | variants_per_second | checksum_kind          |
-|:---------|:------------------------------------------|:------------|--------:|-------------:|:---------|:---------------|---------------:|--------------------:|:-----------------------|
-| 25328813 | ensembl116_grch38_final_coding_mixed_200k | rich        |       1 |            2 | 200,000  | 5,756,720      |          2.033 |               98377 | consequence_text_bytes |
-| 25328813 | ensembl116_grch38_final_coding_mixed_200k | hgvs        |       1 |            2 | 200,000  | 5,756,720      |         32.106 |                6229 | hgvs_text_status_bytes |
+| revision | workload                                  | output_mode | threads | cpu_affinity | variants | annotated_rows | median_seconds | variants_per_second | checksum_kind          | output_rows_per_second | elapsed_vs_rich |
+|:---------|:------------------------------------------|:------------|--------:|-------------:|:---------|:---------------|---------------:|--------------------:|:-----------------------|:-----------------------|----------------:|
+| 7dae50cd | ensembl116_grch38_final_coding_mixed_200k | rich        |       1 |            2 | 200,000  | 5,756,720      |          2.067 |               96759 | consequence_text_bytes | 2,785,060              |            1.00 |
+| 7dae50cd | ensembl116_grch38_final_coding_mixed_200k | hgvs        |       1 |            2 | 200,000  | 5,756,720      |          4.579 |               43678 | hgvs_text_status_bytes | 1,257,200              |            2.22 |
+
+| baseline_revision | current_revision | input_variants | output_rows | baseline_seconds | current_seconds | speedup | current_input_variants_per_second | current_output_rows_per_second |
+|:------------------|:-----------------|:---------------|:------------|-----------------:|----------------:|--------:|----------------------------------:|:-------------------------------|
+| 25328813          | 7dae50cd         | 200,000        | 5,756,720   |           32.106 |           4.579 |    7.01 |                             43678 | 1,257,200                      |
+
+[Ferro-hgvs
+v0.9.0](https://github.com/fulcrumgenomics/ferro-hgvs/tree/278e2c11134e3b49067d0c334f650c7c29db9cbe)
+reports 5.1 million patterns/s for parsing already rendered HGVS and a
+77,000 patterns/s full-population normalization peak on an Apple M2 Max.
+Those are useful independent reference points but not the operation
+timed here: DuckVEP begins with genomic alleles, discovers every
+overlapping transcript, computes consequences, shifts and renders
+transcript/protein HGVS, and emits 28.78 transcript rows per input in
+this workload. The table therefore reports both input alleles/s and
+expanded transcript-HGVS rows/s; it does not present a direct
+cross-machine speed ranking.
 
 The HGVS row materializes transcript/protein strings and status fields
 and checks their total byte count. Compare it only with the rich

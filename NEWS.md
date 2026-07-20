@@ -64,9 +64,13 @@
   render `p.Gly180AspfsTer36` and `p.Ala359PhefsTer8` despite lacking a consequence-side
   frameshift term. The production throughput driver accepts `chrom` as the sequence-region
   name column used by the final staged Ensembl model, so the HGVS workload is reproducible
-  from that canonical staging relation rather than requiring a benchmark-only alias. The
-  sequence-pool first-stop cache extends the public standalone model view and advances the
-  kernel ABI to 0.17.0
+  from that canonical staging relation rather than requiring a benchmark-only alias. On
+  the pinned one-thread, 200,000-allele mixed-coding workload, cumulative HGVS execution
+  falls from 32.106 to 4.579 seconds: 43,678 input alleles/s and 1,257,200 generated
+  transcript-HGVS rows/s. The matched rich lane is 2.067 seconds, reducing the incremental
+  HGVS tax from 15.79-fold to 2.22-fold while preserving the same 5,756,720 output rows and
+  byte checksum. The sequence-pool first-stop cache extends the public standalone model
+  view and advances the kernel ABI to 0.17.0
 - match VEP 116 for complete transcript overlap by ordinary long literal
   alleles: a normalized deletion now enters the same tier-1
   `transcript_ablation` predicate as a symbolic deletion, while an equal-length

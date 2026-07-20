@@ -37,8 +37,8 @@ assembly-specific frontier.
 
 | revision | corpus                     | model        | metric | exact         | match | both_absent | discordant |
 |:---------|:---------------------------|:-------------|:-------|:--------------|------:|------------:|-----------:|
-| 0714235a | clinvar_chr21_hgvs_seed113 | differential | HGVSC  | 56,998/56,998 | 44871 |       12127 |          0 |
-| 0714235a | clinvar_chr21_hgvs_seed113 | differential | HGVSP  | 56,998/56,998 | 20782 |       36216 |          0 |
+| 7dae50cd | clinvar_chr21_hgvs_seed113 | differential | HGVSC  | 56,998/56,998 | 44871 |       12127 |          0 |
+| 7dae50cd | clinvar_chr21_hgvs_seed113 | differential | HGVSP  | 56,998/56,998 | 20782 |       36216 |          0 |
 
 This is exact string agreement for independent transcript events with
 VEP 116 invoked using `--hgvs`. A comparison is exact when both engines
@@ -270,6 +270,7 @@ duplicate count. A failed suite does not append rows.
 | 2026-07-19 | 5778e2b         | 0x000000000135276f |                 44 | 4,300,500  | 4,300,500  |      0 |          0 |         176 | 204,772          |                27.995 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-19 | f97101e         | 0x000000000135276f |                 44 | 4,300,500  | 4,300,500  |      0 |          0 |         176 | 204,781          |                28.512 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-20 | 0714235a        | 0x0000000001352770 |                 49 | 4,800,500  | 4,800,500  |      0 |          0 |         204 | 206,671          |                27.745 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-20 | 7dae50cd        | 0x0000000001352770 |                 49 | 4,800,500  | 4,800,500  |      0 |          0 |         206 | 206,710          |                27.654 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                 | trials  | passed  | failed | skipped | duplicates |
 |:-----------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
