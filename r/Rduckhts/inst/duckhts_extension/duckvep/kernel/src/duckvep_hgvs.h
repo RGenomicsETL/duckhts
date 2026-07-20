@@ -283,7 +283,9 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_base(
  * n.12_13insAC) into a caller-owned buffer. The transcript stable identifier
  * is deliberately a relational projection outside the kernel. `required_out`
  * receives the byte count excluding NUL, including when capacity is zero or
- * truncation occurs. */
+ * truncation occurs. A missing or undersized output buffer returns
+ * DUCKVEP_HGVS_BUFFER_TOO_SMALL; callers may reserve required_out + 1 bytes
+ * and retry. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_render_basic(
     const duckvep_hgvs_dna_fact_t *fact,
     char                           *buffer,
@@ -325,7 +327,9 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_base(
  * p.(Arg97ProfsTer23)).  Ensembl's default three-letter amino-acid form is
  * intentional; protein identifiers remain a relational projection outside
  * the kernel. Facts built by the general interpreter borrow their coding
- * context; proven single-residue facts are self-contained. */
+ * context; proven single-residue facts are self-contained. A missing or
+ * undersized output buffer returns DUCKVEP_HGVS_BUFFER_TOO_SMALL and reports
+ * the required byte count excluding NUL. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_render(
     const duckvep_hgvs_protein_fact_t *fact,
     int                                predicted,

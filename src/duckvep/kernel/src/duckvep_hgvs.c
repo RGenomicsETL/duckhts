@@ -1433,6 +1433,25 @@ static int hgvs_writer_coordinate(
     return 1;
 }
 
+static duckvep_hgvs_status_t hgvs_writer_finish(
+    hgvs_writer_t *writer,
+    size_t        *required_out) {
+
+    if (writer == NULL || required_out == NULL) {
+        return DUCKVEP_HGVS_INVALID_ARG;
+    }
+    if (writer->buffer != NULL && writer->capacity > 0u) {
+        size_t terminator = writer->required < writer->capacity
+            ? writer->required : writer->capacity - 1u;
+        writer->buffer[terminator] = '\0';
+    }
+    *required_out = writer->required;
+    if (writer->buffer == NULL || writer->required >= writer->capacity) {
+        return DUCKVEP_HGVS_BUFFER_TOO_SMALL;
+    }
+    return DUCKVEP_HGVS_OK;
+}
+
 static int hgvs_coordinate_equal(
     const duckvep_hgvs_coordinate_t *left,
     const duckvep_hgvs_coordinate_t *right) {
@@ -1567,13 +1586,7 @@ duckvep_hgvs_status_t duckvep_hgvs_dna_render_basic(
         default:
             return DUCKVEP_HGVS_INVALID_ARG;
     }
-    if (writer.buffer != NULL && writer.capacity > 0u) {
-        size_t terminator = writer.required < writer.capacity
-            ? writer.required : writer.capacity - 1u;
-        writer.buffer[terminator] = '\0';
-    }
-    *required_out = writer.required;
-    return DUCKVEP_HGVS_OK;
+    return hgvs_writer_finish(&writer, required_out);
 }
 
 static int hgvs_protein_full_window(
@@ -2665,11 +2678,5 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_render(
     if (predicted && !hgvs_writer_char(&writer, ')')) {
         return DUCKVEP_HGVS_OUT_OF_RANGE;
     }
-    if (writer.buffer != NULL && writer.capacity > 0u) {
-        size_t terminator = writer.required < writer.capacity
-            ? writer.required : writer.capacity - 1u;
-        writer.buffer[terminator] = '\0';
-    }
-    *required_out = writer.required;
-    return DUCKVEP_HGVS_OK;
+    return hgvs_writer_finish(&writer, required_out);
 }

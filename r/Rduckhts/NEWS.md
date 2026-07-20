@@ -1,12 +1,18 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- fix bundled cumulative HGVS output for strings larger than the native
+  renderer's initial scratch capacity. The bundled adapter retries with the
+  reported exact capacity instead of exposing truncated text, retains a failed
+  UTF-8 assignment as NULL, and rejects an invalid internal text slice. A DBI
+  regression exercises a transcript HGVS string longer than 1,400 bytes
 - speed up the bundled DuckVEP consequence and cumulative HGVS paths by reusing one
   classification pass and compact prepared facts. Bundled annotation now preserves
   deterministic `annotation_index` values across DuckDB vector and disjoint ordered
   partition starts. The resident model remains immutable and shared: a pinned four-core
   dense GRCh38 run at the default 5,000-base transcript distance produced the same
-  26,518,787-row fingerprint as one core, improved from 245,302 to 822,094 input
-  alleles/s, and added about 7.4 MiB peak RSS rather than copying the model per worker.
+  26,518,787-row multiset fingerprint as one core and improved from 245,535 to 818,191
+  input alleles/s. GNU `time -v` observed about 7.0 MiB additional process peak RSS and no
+  model-sized step; this is a process observation, not allocation attribution.
   Tests also cover zero-, 10,000-, and 50,000-base transcript distances so the bundled
   behavior is not specialized to the default distance
 - bundle `duckvep_annotate_hgvs(...)` for DBI workflows that need compact independent-event
@@ -60,6 +66,9 @@
   mate-derived `feature_truncation`. Add bundled DBI regressions at zero and wider caller
   distances
 - bundled DuckVEP exact structural annotation now accepts `STR`/`TANDEM_REPEAT`/`CNV:TR` spans and preserves structural tandem-repeat identity while matching VEP 116's tandem-duplication consequence predicates. Bundled paired-BND annotation now returns RegulatoryFeature and MotifFeature rows found at either endpoint, once per feature, in addition to transcript consequences; local exact hits keep the base object term, mate-only exact hits use VEP's generic HIGH-impact `feature_truncation`, and a shifted local point on the same contig but outside and within 5000 bases adds `intergenic_variant` to that mate-discovered object. The local base term wins when both points hit one object exactly, and mixed transcript/regulation batches preserve one result list per input event. A caller-selected transcript distance above 5000 does not widen VEP's separate fixed structural-breakend allele-admission cap. Add DBI tinytests for these surfaces and update generated function documentation
+  Structural adapters consume nominal `POS`/`END` geometry, matching VEP 116's registered
+  consequence predicates; callers retain `CIPOS`/`CIEND`, inserted sequence, and raw repeat
+  metadata beside the result for provenance, later HGVS, and round-trip rendering
 - fix bundled projected `read_fastq(...)` scans so FASTQ headers longer than the BAM query-name limit remain usable when `NAME` / `PAIR_ID` are not requested and no paired-file comparison needs them; name-producing scans retain the htslib-compatible limit. An explicit bundled `duckhts_fastq_qc(..., max_cycles)` value below 128 now also caps the initial per-group cycle allocation
 - bundle `duckhts_fastq_qc(sequence, quality [, max_cycles])` for DBI workflows that need exact global and per-cycle FASTQ quality statistics without expanding one row per base; the bundled scalar, AVX2, ARM NEON, and wasm SIMD128 implementations share one dispatch contract, and tinytests compare forced scalar with automatic selection over grouped and malformed inputs
 - accelerate bundled `read_fastq(...)` scans by parsing FASTQ directly over htslib transport into projected DBI columns instead of round-tripping through temporary BAM records; multiline records, htslib-style query names, paired/interleaved checks, string and packed nt16/Phred output, quality conversion, and count behavior are retained, while truncated quality blocks now surface as R/DBI errors. Add bundled multiline, packed-output, and truncation tinytests

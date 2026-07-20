@@ -12,6 +12,54 @@ append-only by source revision, corpus, and resident model. Independent
 frozen distributions and seeds are kept separate so a fix cannot improve
 its own hand-picked witnesses and hide a regression elsewhere.
 
+Official Ensembl variation release VCFs provide a second, precomputed
+oracle lane: their CSQ projection can be compared in ordinary CI without
+starting Perl VEP. Pinned release shards are fast regression evidence
+for known alleles; executable-VEP and generated-corpus lanes remain
+necessary for novel allele states, option-dependent semantics, phased
+combinations, and sampled structural geometry. Matching full models
+belong in receipt-hashed external artifacts (for example a versioned
+Zenodo record), not in git or the network-free extension build step.
+
+## Declared conformance closure
+
+The independent-event consequence engine is closed as a semantic
+implementation campaign for the declared model and event surfaces:
+admitted Ensembl transcript, mature-miRNA, RegulatoryFeature, and
+MotifFeature objects; independent literal small alleles; exact typed
+DEL, DUP, tandem-DUP, INV, INS, and CNV events; structural tandem
+repeats (`STR`); paired breakends; supported BioPerl codon tables and
+exceptional Ensembl peptide edits; and the separately declared VEP
+NMD-plugin result. DEL/DUP/tandem-DUP/INV/INS/CNV and BND have generated
+executable-VEP differentials. Structural `STR` has source-derived
+VEP-116 semantics plus fixed SQL/R and randomized C coverage; raw repeat
+reconstruction is a separate input-preparation operation. The evidence
+spans GRCh38, GRCh37, and *P. falciparum*, executable witnesses,
+indexed-cache corpora, generated state exploration, sanitizer runs, and
+pure-C oracle properties.
+
+“Closed” means future consequence changes are routine engineering behind
+these regression gates. VEP 116 parses `CIPOS`/`CIEND` into inner/outer
+structural coordinates, but its registered consequence predicates use
+nominal `POS`/`END`; DuckVEP therefore annotates that nominal span while
+the surrounding relation preserves the uncertainty metadata. The
+checked-in 12-record GRCh38 confidence witness records this directly:
+nominal and `IMPRECISE;CIPOS;CIEND` forms of CNV, DEL, DUP, tandem DUP,
+INV, and INS produced 466/466 exact transcript pairs, and both engines
+had equal nominal/imprecise consequence multisets for all six event-kind
+pairs. VEP can also expand a bounded `<CNV:TR>` from `RN`, `RUS`, and
+`RUC` or `RB` into a literal allele before consequence calculation.
+Implementing that lossless expansion and mapping VEP’s finite supported
+symbolic vocabulary into the typed event API are narrower input-
+preparation tasks, not missing consequence predicates. VEP itself
+rejects unrecognised types such as CPX, so this closure does not promise
+arbitrary symbolic parsing. Untested species/releases and phased
+multi-record haplotypes remain outside the closure. Haplotype grouping
+and combined consequence attribution are the next semantic vertical and
+require their own executable oracle and performance campaign. Any newly
+observed fixed-event mismatch reopens this contract rather than being
+relabelled as unsupported.
+
 ## Latest tested revision per corpus
 
 | revision | corpus                            | model                      | assembly       | species               | oracle_source | oracle    |  pairs | exact         | unresolved | resolved_disagreements | resolved_error_upper_95 |
@@ -39,6 +87,8 @@ assembly-specific frontier.
 |:---------|:---------------------------|:-------------|:-------|:--------------|------:|------------:|-----------:|
 | 7dae50cd | clinvar_chr21_hgvs_seed113 | differential | HGVSC  | 56,998/56,998 | 44871 |       12127 |          0 |
 | 7dae50cd | clinvar_chr21_hgvs_seed113 | differential | HGVSP  | 56,998/56,998 | 20782 |       36216 |          0 |
+| e25c1513 | witnesses                  | differential | HGVSC  | 268/268       |   262 |           6 |          0 |
+| e25c1513 | witnesses                  | differential | HGVSP  | 268/268       |   134 |         134 |          0 |
 
 This is exact string agreement for independent transcript events with
 VEP 116 invoked using `--hgvs`. A comparison is exact when both engines
@@ -83,12 +133,15 @@ rule; the ledger records `breakend_buffer_size=1` and the artifact hash.
 The GIAB run checks ordinary alleles against transcript and core funcgen
 objects. The generated structural run deliberately crosses, contains,
 exactly matches, and partially overlaps RegulatoryFeature and
-MotifFeature intervals under DEL, DUP, TDUP, INV, INS, CNV, and unknown
-exact-span operations. The resident model contains only VEP-admitted
-core funcgen objects: VEP 116 removes `epigenetically_modified_region`
-rows before constructing RegulatoryFeature overlap objects, so DuckVEP
-excludes them during deterministic model preparation rather than
-filtering output after candidate traversal.
+MotifFeature intervals under DEL, DUP, TDUP, INV, INS, and CNV
+operations. Structural `STR` is covered separately by the source-derived
+VEP-116 rule, fixed SQL/R adapter tests, and randomized C oracles; this
+generated executable-VEP run does not reconstruct raw repeat metadata.
+The resident model contains only VEP-admitted core funcgen objects: VEP
+116 removes `epigenetically_modified_region` rows before constructing
+RegulatoryFeature overlap objects, so DuckVEP excludes them during
+deterministic model preparation rather than filtering output after
+candidate traversal.
 
 ## Prepared model receipts
 
@@ -174,6 +227,8 @@ recorded.
 | 2026-07-19 | f97101e1        | breakend_regulation_chr21_22_seed20260719_distance_10000 | breakend_distance_10000    |   29304 |       29304 |          0 |      29304 |                   0 | 100.00%    | 0.01%                   |
 | 2026-07-19 | f97101e1        | breakend_regulation_chr21_22_seed20260719_distance_137   | breakend_distance_137      |   24970 |       24970 |          0 |      24970 |                   0 | 100.00%    | 0.01%                   |
 | 2026-07-19 | f97101e1        | breakend_regulation_chr21_22_seed20260719_distance_5000  | breakend_distance_5000     |   29304 |       29304 |          0 |      29304 |                   0 | 100.00%    | 0.01%                   |
+| 2026-07-20 | e25c1513        | sv_confidence_grch38                                     | differential               |     466 |         466 |          0 |        466 |                   0 | 100.00%    | 0.79%                   |
+| 2026-07-20 | e25c1513        | witnesses                                                | differential               |     268 |         268 |          0 |        268 |                   0 | 100.00%    | 1.37%                   |
 
 ## Randomized executable-VEP state exploration
 
@@ -236,6 +291,14 @@ narrower `VE` plus CSQ projection used by the bulk oracle lane. It is a
 storage comparison, not a claim that the Parquet projection can
 reproduce the original VCF byte-for-byte.
 
+The consequence projection is also the natural CI payload: retain
+deterministic shards with source URL, Ensembl release/species/assembly,
+artifact digest, row cardinalities, and CSQ schema. A scheduled
+full-release job may pair the complete projection with a published
+receipt-hashed DuckDB model. Neither form broadens the supported
+consequence contract; it only makes a large known-variant regression
+cheap to replay.
+
 | revision | release | assembly | chromosome | projection  | columns | records    | ALT_alleles | CSQ_entries | source_MiB | parquet_MiB | parquet_of_source | elapsed_seconds | records_per_second |
 |:---------|--------:|:---------|:-----------|:------------|--------:|:-----------|:------------|:------------|:-----------|:------------|:------------------|:----------------|:-------------------|
 | 55c55238 |     116 | GRCh38   | 22         | full_typed  |      51 | 14,920,904 | 17,767,586  | 30,199,106  | 265.6      | 219.8       | 82.7%             | 55.2            | 270,179            |
@@ -271,6 +334,7 @@ duplicate count. A failed suite does not append rows.
 | 2026-07-19 | f97101e         | 0x000000000135276f |                 44 | 4,300,500  | 4,300,500  |      0 |          0 |         176 | 204,781          |                28.512 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-20 | 0714235a        | 0x0000000001352770 |                 49 | 4,800,500  | 4,800,500  |      0 |          0 |         204 | 206,671          |                27.745 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-20 | 7dae50cd        | 0x0000000001352770 |                 49 | 4,800,500  | 4,800,500  |      0 |          0 |         206 | 206,710          |                27.654 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-07-20 | e25c1513        | 0x0000000001352770 |                 51 | 5,000,500  | 5,000,500  |      0 |          0 |         209 | 208,879          |                40.954 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                 | trials  | passed  | failed | skipped | duplicates |
 |:-----------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
@@ -304,6 +368,7 @@ duplicate count. A failed suite does not append rows.
 | HGVSp fact replay == independently translated edited CDS               | 100,000 | 100,000 | 0      | 0       | 0          |
 | HGVSp frameshift fact == independently extended translation            | 100,000 | 100,000 | 0      | 0       | 0          |
 | multi-edit CDS haplotype apply == left-to-right rebuild oracle         | 100,000 | 100,000 | 0      | 0       | 0          |
+| optimized sorted annotation == forced generalized full rows            | 100,000 | 100,000 | 0      | 0       | 0          |
 | phased SNV set == equivalent MNV coding facts                          | 100,000 | 100,000 | 0      | 0       | 0          |
 | region mask structural invariants                                      | 100,000 | 100,000 | 0      | 0       | 0          |
 | regulation sweep/BND pairs == independent feature oracles              | 100,000 | 100,000 | 0      | 0       | 0          |
@@ -313,6 +378,7 @@ duplicate count. A failed suite does not append rows.
 | sequence delta scratch MNV == single-codon oracle                      | 100,000 | 100,000 | 0      | 0       | 0          |
 | sequence delta scratch two-codon MNV window == codon-window oracle     | 100,000 | 100,000 | 0      | 0       | 0          |
 | sequence-backed SNV codon edit == codon-slice edit oracle              | 100,000 | 100,000 | 0      | 0       | 0          |
+| simple indel route == generalized CodingContext                        | 100,000 | 100,000 | 0      | 0       | 0          |
 | sorted point cursor classifier == exhaustive exon/gap scans            | 100,000 | 100,000 | 0      | 0       | 0          |
 | sorted span cursor classifier == exhaustive exon/gap scans             | 100,000 | 100,000 | 0      | 0       | 0          |
 | sweep candidate set == brute-force candidate set                       | 100,000 | 100,000 | 0      | 0       | 0          |
@@ -335,7 +401,8 @@ suite-level pass count.
 
 | randomized distribution            | observed states                                                                                                                                                                                                                                                                           |
 |:-----------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| allele sweep coverage              | del= 813,008; indel= 812,569; ins= 813,825; interbase= 904,384; mnv= 812,049; prefix=2,845,268; suffix=2,248,699; tail=2,685,993                                                                                                                                                          |
+| allele sweep coverage              | del= 813,008; indel= 812,569; ins= 813,825; interbase= 904,384; mnv= 812,049; prefix= 2,845,268; suffix= 2,248,699; tail= 2,685,993                                                                                                                                                       |
+| annotation-shortcut coverage       | coding_tx= 639,882; cursor_splits= 100,000; far= 4,982,056; generalized=12,352,759; mirna_tx= 319,742; nmd_rows= 2,285,567; simple= 1,712,270                                                                                                                                             |
 | cds-edit-builder coverage          | body= 41,556; del= 20,205; fwd= 49,840; indel= 19,910; ins= 20,131; mnv= 19,827; rev= 50,160; snv= 19,927; start= 29,211; stop= 29,233                                                                                                                                                    |
 | cds-edit-set coverage              | body= 41,556; cap0= 100,000; del= 20,205; fwd= 49,840; indel= 19,910; ins= 20,131; mnv= 19,827; rev= 50,160; snv= 19,927; start= 29,211; stop= 29,233                                                                                                                                     |
 | cds-edit-set-mnv coverage          | body= 33,260; capfail= 100,000; fwd= 50,090; multi= 100,000; rev= 49,910; start= 33,200; stop= 33,540                                                                                                                                                                                     |
@@ -367,6 +434,7 @@ suite-level pass count.
 | inframe_insertion coverage         | forward= 50,036; reverse= 49,964                                                                                                                                                                                                                                                          |
 | mnv coverage                       | len2= 50,100; len3= 49,900                                                                                                                                                                                                                                                                |
 | non-boundary insertion coverage    | forward= 49,958; inframe_insertion= 49,935; protein_altering= 50,065; reverse= 50,042                                                                                                                                                                                                     |
+| simple-indel equivalence coverage  | del= 11,467; delins= 5,686; fallback= 38,985; fast= 21,261; frameshift= 18,907; fwd= 10,460; inframe_del= 1,895; inframe_ins= 459; ins= 4,108; rev= 10,801                                                                                                                                |
 | start-codon coverage               | co_stop_gained= 4,221; co_synonymous= 24,341; lost_and_retained= 1,568; start_lost= 100,000; start_retained= 1,568; synonymous= 24,341                                                                                                                                                    |
 | variant-coding-context coverage    | capfail= 400,000; del= 20,205; fwd= 49,840; indel= 19,910; ins= 20,131; mnv= 19,827; pep_diff= 86,560; pep_same= 13,440; rev= 50,160; snv= 19,927                                                                                                                                         |
 

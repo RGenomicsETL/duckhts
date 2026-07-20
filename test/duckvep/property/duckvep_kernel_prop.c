@@ -5415,7 +5415,7 @@ TEST hgvs_dna_facts_orient_reverse_alleles_once(void) {
                       &fact, rendered, sizeof rendered, &required));
         ASSERT_EQ(0, strcmp("c.2_3delinsC", rendered));
         ASSERT_EQ(strlen(rendered), required);
-        ASSERT_EQ(DUCKVEP_HGVS_OK,
+        ASSERT_EQ(DUCKVEP_HGVS_BUFFER_TOO_SMALL,
                   duckvep_hgvs_dna_render_basic(
                       &fact, small, sizeof small, &required));
         ASSERT_EQ(0, strcmp("c.2_3", small));
@@ -5473,6 +5473,47 @@ TEST hgvs_basic_renderer_known_coordinate_forms(void) {
     ASSERT_EQ(DUCKVEP_HGVS_INVALID_ARG,
               duckvep_hgvs_dna_render_basic(
                   &fact, rendered, sizeof rendered, &required));
+    PASS();
+}
+
+TEST hgvs_dna_renderer_reports_long_output_before_retry(void) {
+    enum { ALTERNATE_LENGTH = 1405, EXPECTED_PREFIX_LENGTH = 10 };
+    uint8_t alternate[ALTERNATE_LENGTH];
+    duckvep_hgvs_dna_fact_t fact;
+    char small[256];
+    char rendered[ALTERNATE_LENGTH + EXPECTED_PREFIX_LENGTH + 1u];
+    size_t required;
+    size_t i;
+
+    memset(alternate, 'A', sizeof alternate);
+    memset(&fact, 0, sizeof fact);
+    fact.first.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C;
+    fact.first.base = 10;
+    fact.last.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C;
+    fact.last.base = 11;
+    fact.alt = alternate;
+    fact.alt_length = ALTERNATE_LENGTH;
+    fact.transcript_strand = (int8_t)1;
+    fact.numbering = (uint8_t)DUCKVEP_HGVS_NUMBERING_C;
+    fact.shape = (uint8_t)DUCKVEP_HGVS_DNA_INSERTION;
+
+    ASSERT_EQ(DUCKVEP_HGVS_BUFFER_TOO_SMALL,
+              duckvep_hgvs_dna_render_basic(
+                  &fact, small, sizeof small, &required));
+    ASSERT_EQ((size_t)(EXPECTED_PREFIX_LENGTH + ALTERNATE_LENGTH), required);
+    ASSERT_EQ(sizeof small - 1u, strlen(small));
+    ASSERT_EQ(DUCKVEP_HGVS_BUFFER_TOO_SMALL,
+              duckvep_hgvs_dna_render_basic(
+                  &fact, NULL, 0u, &required));
+    ASSERT_EQ((size_t)(EXPECTED_PREFIX_LENGTH + ALTERNATE_LENGTH), required);
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_dna_render_basic(
+                  &fact, rendered, sizeof rendered, &required));
+    ASSERT_EQ(0, memcmp(rendered, "c.10_11ins", EXPECTED_PREFIX_LENGTH));
+    for (i = EXPECTED_PREFIX_LENGTH; i < required; i++) {
+        ASSERT_EQ('A', rendered[i]);
+    }
+    ASSERT_EQ('\0', rendered[required]);
     PASS();
 }
 
@@ -6412,6 +6453,7 @@ static int kprop_hgvs_protein_render_scene(
 TEST hgvs_single_residue_sidecar_matches_core_shapes(void) {
     duckvep_hgvs_protein_fact_t fact;
     char rendered[64];
+    char small[8];
     size_t required = 0u;
     uint32_t valid =
         (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_PREDICATES_VALID;
@@ -6419,6 +6461,11 @@ TEST hgvs_single_residue_sidecar_matches_core_shapes(void) {
     ASSERT_EQ(DUCKVEP_HGVS_OK,
               duckvep_hgvs_protein_fact_build_single_residue(
                   2u, (uint8_t)'E', (uint8_t)'D', valid, &fact));
+    ASSERT_EQ(DUCKVEP_HGVS_BUFFER_TOO_SMALL,
+              duckvep_hgvs_protein_render(
+                  &fact, 0, small, sizeof small, &required));
+    ASSERT_EQ(strlen("p.Glu2Asp"), required);
+    ASSERT_EQ(0, strcmp("p.Glu2A", small));
     ASSERT_EQ(DUCKVEP_HGVS_OK,
               duckvep_hgvs_protein_render(
                   &fact, 0, rendered, sizeof rendered, &required));
@@ -6612,7 +6659,7 @@ TEST hgvs_protein_facts_render_core_vep_shapes(void) {
     ASSERT_EQ(DUCKVEP_HGVS_PROTEIN_EXTENSION, shape);
     ASSERT_EQ(0, strcmp("p.Ter3GlnextTer2", rendered));
 
-    ASSERT(kprop_hgvs_protein_render_scene(
+    ASSERT(!kprop_hgvs_protein_render_scene(
         cds, sizeof cds, 6u, a, 1u, c, 1u, NULL, 0u, 0,
         small, sizeof small, &shape, &required));
     ASSERT_EQ(0, strcmp("p.Glu2A", small));
@@ -23450,6 +23497,7 @@ int main(int argc, char **argv) {
     RUN_TEST(hgvs_protein_mapper_endpoints_define_applicability);
     RUN_TEST(hgvs_dna_facts_orient_reverse_alleles_once);
     RUN_TEST(hgvs_basic_renderer_known_coordinate_forms);
+    RUN_TEST(hgvs_dna_renderer_reports_long_output_before_retry);
     RUN_TEST(hgvs_shift_reproduces_vep_short_region_overlap);
     RUN_TEST(hgvs_large_duplication_uses_lookup_beyond_shift_slice);
     RUN_TEST(hgvs_genomic_shift_matches_reference_oracle_for_any_indel);

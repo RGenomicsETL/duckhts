@@ -194,6 +194,46 @@ resident model. Independent frozen distributions and seeds are kept separate so
 a fix cannot improve its own hand-picked witnesses and hide a regression
 elsewhere.
 
+Official Ensembl variation release VCFs provide a second, precomputed oracle lane:
+their CSQ projection can be compared in ordinary CI without starting Perl VEP. Pinned
+release shards are fast regression evidence for known alleles; executable-VEP and
+generated-corpus lanes remain necessary for novel allele states, option-dependent
+semantics, phased combinations, and sampled structural geometry. Matching full models
+belong in receipt-hashed external artifacts (for example a versioned Zenodo record), not
+in git or the network-free extension build step.
+
+## Declared conformance closure
+
+The independent-event consequence engine is closed as a semantic implementation campaign
+for the declared model and event surfaces: admitted Ensembl transcript, mature-miRNA,
+RegulatoryFeature, and MotifFeature objects; independent literal small alleles; exact typed
+DEL, DUP, tandem-DUP, INV, INS, and CNV events; structural tandem repeats (`STR`); paired
+breakends; supported BioPerl codon tables and exceptional Ensembl peptide edits; and the
+separately declared VEP NMD-plugin result. DEL/DUP/tandem-DUP/INV/INS/CNV and BND have
+generated executable-VEP differentials. Structural `STR` has source-derived VEP-116
+semantics plus fixed SQL/R and randomized C coverage; raw repeat reconstruction is a
+separate input-preparation operation. The evidence spans GRCh38, GRCh37, and
+*P. falciparum*, executable witnesses, indexed-cache corpora, generated state exploration,
+sanitizer runs, and pure-C oracle properties.
+
+“Closed” means future consequence changes are routine engineering behind these regression
+gates. VEP 116 parses `CIPOS`/`CIEND` into inner/outer structural coordinates, but its
+registered consequence predicates use nominal `POS`/`END`; DuckVEP therefore annotates
+that nominal span while the surrounding relation preserves the uncertainty metadata.
+The checked-in 12-record GRCh38 confidence witness records this directly: nominal and
+`IMPRECISE;CIPOS;CIEND` forms of CNV, DEL, DUP, tandem DUP, INV, and INS produced 466/466
+exact transcript pairs, and both engines had equal nominal/imprecise consequence
+multisets for all six event-kind pairs.
+VEP can also expand a bounded `<CNV:TR>` from `RN`, `RUS`, and `RUC` or `RB` into a literal
+allele before consequence calculation. Implementing that lossless expansion and mapping
+VEP's finite supported symbolic vocabulary into the typed event API are narrower input-
+preparation tasks, not missing consequence predicates. VEP itself rejects unrecognised
+types such as CPX, so this closure does not promise arbitrary symbolic parsing. Untested
+species/releases and phased multi-record haplotypes remain outside the closure. Haplotype
+grouping and combined consequence attribution are the next semantic vertical and require
+their own executable oracle and performance campaign. Any newly observed fixed-event
+mismatch reopens this contract rather than being relabelled as unsupported.
+
 ## Latest tested revision per corpus
 
 ```{r latest}
@@ -399,7 +439,9 @@ if (nrow(regulation_runs)) {
 The GIAB run checks ordinary alleles against transcript and core funcgen objects.
 The generated structural run deliberately crosses, contains, exactly matches,
 and partially overlaps RegulatoryFeature and MotifFeature intervals under DEL,
-DUP, TDUP, INV, INS, CNV, and unknown exact-span operations. The resident model
+DUP, TDUP, INV, INS, and CNV operations. Structural `STR` is covered separately by
+the source-derived VEP-116 rule, fixed SQL/R adapter tests, and randomized C oracles;
+this generated executable-VEP run does not reconstruct raw repeat metadata. The resident model
 contains only VEP-admitted core funcgen objects: VEP 116 removes
 `epigenetically_modified_region` rows before constructing RegulatoryFeature
 overlap objects, so DuckVEP excludes them during deterministic model preparation
@@ -575,6 +617,12 @@ The official release consequence VCF is already BGZF-compressed. This table meas
 complete typed DuckHTS reader projection and the narrower `VE` plus CSQ projection used by
 the bulk oracle lane. It is a storage comparison, not a claim that the Parquet projection
 can reproduce the original VCF byte-for-byte.
+
+The consequence projection is also the natural CI payload: retain deterministic shards
+with source URL, Ensembl release/species/assembly, artifact digest, row cardinalities, and
+CSQ schema. A scheduled full-release job may pair the complete projection with a published
+receipt-hashed DuckDB model. Neither form broadens the supported consequence contract; it
+only makes a large known-variant regression cheap to replay.
 
 ```{r release-parquet}
 last_storage <- release_parquet[nrow(release_parquet), , drop = FALSE]

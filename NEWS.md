@@ -1,20 +1,36 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- fix cumulative HGVS rendering for transcript or protein strings larger than
+  the worker's initial scratch buffer. Renderers now report the exact required
+  capacity and return `BUFFER_TOO_SMALL` before the adapter retries; the adapter
+  also preserves DuckDB's checked UTF-8 rejection and validates every HGVS text-
+  arena slice before materialization. Pure-C, SQL, and R regressions include a
+  1,405-base inserted sequence matching the long-allele class found by the full
+  ClinVar run
+- preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
+  VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
+  nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and
+  DuckVEP matched all 466 transcript pairs, and each engine produced identical nominal and
+  imprecise consequence multisets for all six event kinds. This pins the intentional
+  nominal-`POS`/`END` consequence contract while retaining confidence intervals as source
+  evidence
 - accelerate the shared DuckVEP consequence/HGVS execution path without adding a
   second biological authority: pack splice facts, use generated SO-impact masks,
   prepare normalized codons once, and let the cumulative HGVS adapter observe the
   consequence pass instead of replaying transcript classification. Stable active-set
   compaction now preserves `annotation_index` across DuckDB vector and disjoint ordered
   partition starts. The dense-region benchmark driver records arbitrary transcript
-  distances, explicit ordered input partitions, full public-row fingerprints, corpus
+  distances, explicit ordered input partitions, full public-row multiset fingerprints, corpus
   receipts, and composition. On 517,097 annotation-dense GRCh38 alleles, one pinned
-  i5-13500 P core emits 26,518,787 compact rows in 2.108 seconds at the 5,000-base
-  distance (245,302 alleles/s); four pinned P cores and four disjoint ordered partitions
-  take 0.629 seconds (822,094 alleles/s) with the same fingerprint. Peak RSS rises only
-  from 5,446,068 to 5,453,660 KiB because workers share the immutable resident model.
-  Zero-, 10,000-, and 50,000-base runs retain exact one/four-worker fingerprints; the
-  50,000-base case emits 88,784,213 rows with an 8.4 MiB four-worker RSS premium. The
+  i5-13500 P core emits 26,518,787 compact rows in 2.106 seconds at the 5,000-base
+  distance (245,535 alleles/s); four pinned P cores and four disjoint ordered partitions
+  take 0.632 seconds (818,191 alleles/s) with the same row-multiset fingerprint. Source
+  ownership keeps the resident model immutable and shared; GNU `time -v` observed process
+  peak RSS rising from 5,446,084 to 5,453,280 KiB, without a model-sized step, but that
+  process measurement is not allocation attribution. Zero-, 10,000-, and 50,000-base
+  runs retain exact one/four-worker row-multiset fingerprints; the
+  50,000-base case emits 88,784,213 rows with an 8.2 MiB four-worker RSS premium. The
   fixed VEP breakend overlap-allele admission distance remains separate from the
   caller-configurable transcript search distance
 - add `duckvep_annotate_hgvs(...)`, a cumulative independent-event surface that returns

@@ -45,6 +45,20 @@ to `intergenic_variant`. The four VCF bracket orientations do not alter these tr
 consequence sets.
 
 The fixed overlap-allele admission and the caller's directional window are independent.
+The fixed 5 kb rule does not discover a transcript by itself. VEP's transcript annotation
+source must first fetch the transcript through an overlapping endpoint or the configured
+upstream/downstream window; only then can `StructuralVariationOverlap::_close_to_feature`
+attach another endpoint to that already-created transcript overlap object. An executable
+VEP 116 witness with both BND endpoints outside `ENST00000624595`, but no farther than
+5,000 bases from its transcript endpoints, emits no transcript row at `--distance 0` and
+does emit the downstream transcript row at `--distance 5000` and `--distance 10000`.
+Consequently DuckVEP limits BND transcript candidate discovery by the configured caller
+distance (and by exact overlap), while retaining 5,000 as the separate post-discovery
+overlap-allele admission test. Treating either number as an alias for the other changes
+the zero- and wider-distance results.
+
+Once a transcript has been discovered through the mate or another eligible locus, the
+fixed overlap-allele rule becomes observable.
 For example, with `--distance 0`, a shifted local point that is outside a transcript but
 within the fixed 5000-base admission range still creates a local overlap allele. Its
 disabled upstream/downstream predicate leaves an empty predicate set, so that allele
@@ -142,6 +156,11 @@ record becomes an ordinary `VariationFeature`; its consequence follows small-var
 normalization, sequence projection, and translation. An oversized or unexpanded record
 remains a `StructuralVariationFeature` with structural class `tandem_repeat`.
 
+The parser explicitly ignores `CIRUC` and `CIRB` when constructing the alternate allele.
+Its default `max_sv_size` is 5,000 bases, but that allocation guard is unrelated to both
+the configurable transcript-distance default and the separate fixed 5,000-base BND
+overlap-allele admission predicate. Equal numbers here represent three different controls.
+
 That structural identity is observable metadata but not a distinct set of VEP consequence
 predicates. `tandem_repeat` implies copy-number gain and insertion in
 `VariationEffect.pm`, while the `duplication` predicate explicitly excludes tandem
@@ -153,6 +172,24 @@ retain repeat units and counts for provenance and HGVS.
 Source anchors: VEP 116 `Parser/VCF.pm::_expand_tandem_repeat_allele_string` and Ensembl
 Variation 116 `VariationEffect.pm::tandem_repeat`, `copy_number_gain`, `insertion`, and
 `duplication`.
+
+## Symbolic VCF support is a finite parser vocabulary, not arbitrary ALT interpretation
+
+VEP 116 maps a declared set of symbolic forms to structural classes: insertion and
+mobile-element insertion/deletion subtypes, deletion, duplication, tandem duplication,
+copy-number alleles, inversion, tandem repeat, and breakend. `Parser::get_SO_term` looks
+the normalized abbreviation up in `%SO_TERMS`; an unrecognised kind such as CPX has no
+term, is reported as unsupported, and is skipped. VEP does not infer general compound
+geometry from an arbitrary angle-bracketed string.
+
+Consequently DuckVEP input preparation should map the finite VEP vocabulary plus explicit
+producer conventions into typed events and preserve the raw record beside them. The
+public `UNKNOWN` operation is a generic typed fallback for already-prepared geometry, not
+a compatibility claim that VEP accepts every symbolic ALT. Unsupported raw syntax must
+remain explicit rather than being silently coerced to a known operation.
+
+Source anchors: VEP 116 `Parser.pm::get_SO_term`, Ensembl Variation 116
+`Utils/Config.pm::%SO_TERMS`, and `Parser/VCF.pm::create_StructuralVariationFeatures`.
 
 ## Structural confidence and inserted-sequence payloads do not alter VEP 116 consequence terms
 

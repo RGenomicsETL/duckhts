@@ -126,6 +126,23 @@ ORDER BY ord, annotation.transcript_index;
 1	0	c.5T>C	p.Val2Ala	0	supported	-	supported	-
 1	1	n.78A>G	-	0	supported	-	not_applicable	-
 
+# A transcript HGVS string larger than the adapter's initial render scratch
+# must trigger an exact-size retry. The 1,406-base ALT matches the scale of a
+# real full-ClinVar insertion that previously exposed a truncated scratch read.
+query III
+WITH variant(position, reference, alternate) AS (
+  SELECT 124::UBIGINT, 'T', 'G' || repeat('A', 1405)
+)
+SELECT count(*)::INTEGER,
+       count_if(annotation.transcript_hgvs_status = 'supported')::INTEGER,
+       (min(length(annotation.transcript_hgvs)) > 1400)::INTEGER
+FROM variant,
+LATERAL unnest(duckvep_annotate_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation);
+----
+2	2	1
+
 # VEP-116 HGVS shifting is transcript-strand-relative and capped at its
 # hard-coded 1000-base search. On a sequence region shorter than 2,000 bases,
 # VEP's first-1,000 and last-1,000 reference slices overlap; its executable

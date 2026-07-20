@@ -139,8 +139,9 @@ op <- add_option(
   type = "double",
   default = 10000000,
   help = paste(
-    "VEP --max_sv_size for structural-mode records; make the oracle's",
-    "default 10 Mb skip explicit and raise it for larger exact spans [%default]"
+    "VEP --max_sv_size for structural-mode records; the runner passes 10 Mb",
+    "by default so exact spans are not silently skipped, and records the value",
+    "in the oracle receipt. This is not VEP's own 5 kb default [%default]"
   )
 )
 op <- add_option(
@@ -1544,8 +1545,29 @@ if (generate_breakend) {
   ))
 }
 
+source_bcf_columns <- character()
+if (
+  identical(opt$event_mode, "structural") &&
+    !generate_structural && nzchar(source_vcf)
+) {
+  source_bcf_columns <- dbGetQuery(
+    con,
+    glue(
+      "DESCRIBE SELECT * FROM read_bcf(
+         {sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential'
+       )"
+    )
+  )$column_name
+}
+source_optional_column <- function(name, missing_sql) {
+  if (name %in% source_bcf_columns) name else missing_sql
+}
+
 structural_source_sql <- if (generate_structural) {
-  "SELECT * FROM duckvep_generated_structural_source"
+  paste(
+    "SELECT *, NULL::INTEGER[] AS cipos, NULL::INTEGER[] AS ciend,",
+    "false AS imprecise FROM duckvep_generated_structural_source"
+  )
 } else if (generate_breakend) {
   "SELECT * FROM duckvep_generated_breakend_source"
 } else if (identical(opt$event_mode, "structural")) {
@@ -1558,6 +1580,11 @@ structural_source_sql <- if (generate_structural) {
        REF AS reference,
        ALT[1] AS alternate,
        upper(INFO_SVTYPE) AS source_svtype,
+       {source_optional_column('INFO_CIPOS', 'NULL::INTEGER[]')} AS cipos,
+       {source_optional_column('INFO_CIEND', 'NULL::INTEGER[]')} AS ciend,
+       coalesce(
+         {source_optional_column('INFO_IMPRECISE', 'false')}, false
+       ) AS imprecise,
        CASE
          WHEN upper(ALT[1]) = '<DUP:TANDEM>' THEN 'TDUP'
          WHEN upper(INFO_SVTYPE) = 'DEL' THEN 'DEL'
@@ -1775,7 +1802,7 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        CASE
          WHEN source_id LIKE 'duckvep-generated:%' THEN source_id
          ELSE concat(
-           'duckvep-sv:', chrom, ':', raw_position, ':', raw_end, ':',
+           'duckvep-sv:', source_id, ':', chrom, ':', raw_position, ':', raw_end, ':',
            structural_type, ':', alternate
          )
        END AS variant_id,
@@ -1791,6 +1818,9 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        structural_type,
        copy_change,
        source_svtype,
+       cipos,
+       ciend,
+       imprecise,
        var_type,
        length_bin
      FROM ranked
@@ -1966,6 +1996,14 @@ if (!identical(opt$event_mode, "small")) {
     "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Structural variant type\">"
   )
 }
+if (identical(opt$event_mode, "structural")) {
+  vcf_header <- c(
+    vcf_header,
+    "##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description=\"Imprecise structural variation\">",
+    "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS\">",
+    "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END\">"
+  )
+}
 writeLines(
   c(vcf_header, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"),
   vc
@@ -2010,6 +2048,7 @@ sample_vcf_query <- if (identical(opt$event_mode, "small")) {
 } else {
   paste(
     "SELECT v.chrom, v.raw_position AS position, v.raw_end, v.source_svtype,",
+    "v.cipos, v.ciend, v.imprecise,",
     "v.variant_id, v.reference, v.alternate FROM duckvep_sample v",
     "JOIN duckvep_oracle_sequence_order o USING (chrom)",
     "ORDER BY o.fasta_order, v.event_start, v.event_end, v.structural_type"
@@ -2029,7 +2068,36 @@ repeat {
   } else if (identical(opt$event_mode, "breakend")) {
     rep("SVTYPE=BND", nrow(chunk))
   } else {
-    paste0("END=", chunk$raw_end, ";SVTYPE=", chunk$source_svtype)
+    vapply(
+      seq_len(nrow(chunk)),
+      function(index) {
+        fields <- c(
+          paste0("END=", chunk$raw_end[[index]]),
+          paste0("SVTYPE=", chunk$source_svtype[[index]])
+        )
+        if (isTRUE(chunk$imprecise[[index]])) {
+          fields <- c(fields, "IMPRECISE")
+        }
+        cipos <- chunk$cipos[[index]]
+        if (length(cipos) != 0L && !all(is.na(cipos))) {
+          cipos_text <- ifelse(is.na(cipos), ".", as.character(cipos))
+          fields <- c(
+            fields,
+            paste0("CIPOS=", paste(cipos_text, collapse = ","))
+          )
+        }
+        ciend <- chunk$ciend[[index]]
+        if (length(ciend) != 0L && !all(is.na(ciend))) {
+          ciend_text <- ifelse(is.na(ciend), ".", as.character(ciend))
+          fields <- c(
+            fields,
+            paste0("CIEND=", paste(ciend_text, collapse = ","))
+          )
+        }
+        paste(fields, collapse = ";")
+      },
+      character(1L)
+    )
   }
   writeLines(
     paste(

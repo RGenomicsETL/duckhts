@@ -20,6 +20,24 @@ resources <- read.csv(
   check.names = FALSE
 )
 resources$revision <- substr(resources$source_revision, 1, 8)
+dense_threading <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_dense_threading.csv"),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(
+    source_revision = "character",
+    xor_hash = "character",
+    sum_hash = "character"
+  )
+)
+dense_threading$revision <- substr(dense_threading$source_revision, 1, 8)
+stopifnot(
+  length(unique(dense_threading$rss_measurement)) == 1L,
+  identical(
+    unique(dense_threading$rss_measurement),
+    "GNU /usr/bin/time -v process maximum resident set size"
+  )
+)
 
 nearest_tested_ancestor <- function(revisions) {
   revisions <- unique(revisions[nzchar(revisions)])
@@ -91,10 +109,11 @@ scan preserving insertion order; they remain only as historical measurements.
 
 ```{r runs}
 table <- history[, c(
-  "run_date", "revision", "workload", "output_mode", "threads", "variants",
-  "transcripts", "exons", "regulation_features", "annotated_rows", "passes", "min_seconds",
-  "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant",
-  "cpu", "cpu_affinity"
+  "run_date", "revision", "workload", "output_mode", "threads",
+  "input_partitions", "transcript_distance", "variants", "transcripts", "exons",
+  "regulation_features", "annotated_rows", "passes", "min_seconds",
+  "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant", "cpu",
+  "cpu_affinity"
 )]
 table$output_rows_per_second <- round(
   table$annotated_rows / table$median_seconds
@@ -129,6 +148,146 @@ separate measurements and should not be compared as if only the engine changed.
 `cpu_affinity` is read from the benchmark process itself; a single integer
 records an externally pinned run, while a range records a scheduler-visible CPU
 set.
+
+## Annotation-dense transcript distance and ordered parallel partitions
+
+```{r dense-threading}
+dense_keys <- paste(
+  dense_threading$xor_hash,
+  dense_threading$sum_hash,
+  sep = ":"
+)
+fingerprints_per_distance <- vapply(
+  split(dense_keys, dense_threading$transcript_distance),
+  function(keys) length(unique(keys)),
+  integer(1L)
+)
+stopifnot(all(fingerprints_per_distance == 1L))
+
+single_seconds <- setNames(
+  dense_threading$median_seconds[dense_threading$threads == 1L],
+  dense_threading$transcript_distance[dense_threading$threads == 1L]
+)
+single_rss <- setNames(
+  dense_threading$maximum_rss_kib[dense_threading$threads == 1L],
+  dense_threading$transcript_distance[dense_threading$threads == 1L]
+)
+dense_table <- data.frame(
+  revision = dense_threading$revision,
+  transcript_distance = format(
+    dense_threading$transcript_distance,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  threads = dense_threading$threads,
+  ordered_partitions = dense_threading$input_partitions,
+  input_alleles = format(
+    dense_threading$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    dense_threading$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  median_seconds = dense_threading$median_seconds,
+  input_alleles_per_second = format(
+    round(dense_threading$variants / dense_threading$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(dense_threading$annotated_rows / dense_threading$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  speedup = round(
+    unname(single_seconds[as.character(dense_threading$transcript_distance)]) /
+      dense_threading$median_seconds,
+    2L
+  ),
+  peak_RSS_GiB = round(dense_threading$maximum_rss_kib / 1024^2, 3L),
+  RSS_above_one_thread_MiB = round(
+    (
+      dense_threading$maximum_rss_kib -
+        unname(single_rss[as.character(dense_threading$transcript_distance)])
+    ) / 1024,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(dense_table, row.names = FALSE)
+```
+
+This is the release-116 GRCh38 model with all 644,427 admitted transcripts,
+5,068,416 exon memberships, and 1,383,580 regulation/motif intervals. The
+517,097 ClinVar alleles were selected from 318 annotation-dense genomic tiles,
+not diluted with transcript-sparse whole-genome positions. The largest REF and
+ALT alleles are 9,974 and 9,971 bases. Each row is the median of five complete
+passes after a 100,000-allele warmup. Model loading and corpus staging are
+outside the timed pass; compact list production, `unnest`, and final aggregation
+are included.
+
+One-thread runs are pinned to physical P core 2. Four-thread runs are pinned to
+physical P cores 2, 4, 6, and 8 and explicitly split the already ordered input
+into four disjoint coordinate ranges. Merely setting DuckDB `threads = 4` does
+not split one scalar-function branch. Each concurrent scalar callback borrows an
+exclusive mutable workspace from the shared immutable model; a partition is not
+permanently bound to one workspace. `input_variant_index` is the global input
+ordinal, while `annotation_index` is the one-based position inside each variant's
+result list. Consumers that require a canonical materialized row order use
+`ORDER BY input_variant_index, annotation_index` after the parallel union.
+
+The one- and four-partition runs have identical XOR and sum fingerprints over
+every `(input_variant_index, annotation_index, public row)` at each tested
+distance. These commutative fingerprints prove row-multiset and per-input-list
+equality, not global emission order. The 50,000-base case emits 88,784,213 rows
+and still scales from `r format(round(517097 / 4.161), big.mark = ",")` to
+`r format(round(517097 / 1.342), big.mark = ",")` input alleles/s. Peak RSS is
+GNU `/usr/bin/time -v` maximum resident set size for the complete one-process
+R/DuckDB invocation, including model load, warmup, and all five passes. Across
+the matrix, the largest observed four-thread premium over its one-thread pair is
+`r sprintf("%.2f MiB", max(dense_table$RSS_above_one_thread_MiB))`. Source
+ownership establishes that callbacks share the immutable model; the RSS result
+shows no model-sized process increase for these four-branch runs but is not
+allocation attribution. Wider transcript distance increases candidate pairs and
+output cardinality, not model ownership. These observations apply to the tested
+0, 5,000, 10,000, and 50,000-base configurations; arbitrary partition counts
+still require measurement.
+
+The benchmark source accepts every transcript distance from zero through
+`UINT32_MAX`; no classifier or sweep buffer is sized for a 5,000-base special
+case. VEP's separate fixed 5,000-base paired-breakend close-to-feature rule is a
+biological compatibility predicate applied after transcript discovery and must
+not be confused with the configurable transcript-distance search.
+
+## Routine optimization backlog
+
+The declared fixed-event consequence contract no longer depends on another
+semantic rewrite. Future speed work should preserve the conformance and
+full-row-fingerprint gates while attacking measured costs in this order:
+
+1. write compact SoA fields directly into DuckDB result vectors, avoiding the
+   compact-list-to-`unnest` materialization round trip;
+2. make the common coding-SNV route leaner while retaining one generated effect
+   composition authority;
+3. reuse genomic-to-transcript, exon, splice-window, and coding projection facts
+   that are currently rediscovered by adjacent predicates;
+4. separate HGVS fact production from string rendering and reuse one normalized
+   shift result across HGVSc/HGVSn/HGVSp;
+5. expose a persistent sorted table-function sweep so one logical input stream
+   does not reseed at every DuckDB vector edge; and
+6. make disjoint ordered partitions a first-class planner surface, keeping
+   stable identifiers numeric and joining presentation strings late.
+
+Exploratory local profiling suggested low branch-miss and cache-miss rates in the
+candidate sweep and a small candidate-discovery share of dense runtime. That profile
+is not retained as a checked comparable benchmark, so it is an avenue-selection hint,
+not a quantitative claim. Broad SIMD work is therefore not the first optimization
+target. Each item above needs an adjacent exact-revision comparison on the same model,
+corpus, transcript distance, output denominator, core affinity, and fingerprint before
+it can be called an improvement.
 
 ## Independent-event HGVS materialization
 
@@ -423,8 +582,8 @@ if (nrow(breakend) == 6L) {
       "rejected full-result sort",
       "pre-literal transcript A/B",
       "pre-literal transcript + regulation A/B",
-      "current transcript A/B",
-      "current transcript + regulation A/B"
+      "post-literal transcript A/B",
+      "post-literal transcript + regulation A/B"
     ),
     revision = breakend$revision,
     paired_events = format(
@@ -461,13 +620,15 @@ if (nrow(breakend) == 6L) {
 This measurement used the complete receipt-hashed GRCh38 model, compact output,
 one DuckDB thread, 15 timed passes, and a 10,000-event warmup. Model loading and
 staging were outside the timed region. The historical baseline and rejected-sort
-rows used `taskset -c 2`; the direct pre-literal/current A/B rows were rebuilt
-from their exact revisions and run consecutively with `taskset -c 4`. The
+rows used `taskset -c 2`; the direct pre-literal/post-literal A/B rows were rebuilt
+from their exact revisions and run consecutively with `taskset -c 4`. Here
+"post-literal" is revision `r substr(comparison_revision, 1L, 8L)`, not the report's
+current source; source `e25c151` has not rerun this identical BND workload. The
 site-rate headline alone would be misleading: the transcript-only workload emits
 93.83 rows per event, and the checksum covers every emitted mask. The
 `f97101e1` intermediate sorted all 18.8 million already variant-major transcript
-rows and was rejected. The current adapter instead sorts only the smaller
-feature stream and merges the two sorted streams linearly.
+rows and was rejected. The accepted comparison revision instead sorts only the
+smaller feature stream and merges the two sorted streams linearly.
 
 The direct transcript-only A/B is
 `r sprintf("%.3f", breakend_current_median)` seconds versus
@@ -477,12 +638,12 @@ regulation A/B is `r sprintf("%.3f", breakend_regulation_median)` versus
 `r sprintf("%.3f", breakend_pre_literal_regulation_median)` seconds
 (`r sprintf("%+.1f%%", breakend_regulation_change)`). Loading 1,383,580
 regulation/motif intervals and emitting 110,880 additional rows costs
-`r sprintf("%+.1f%%", breakend_regulation_overhead)` relative to the current
+`r sprintf("%+.1f%%", breakend_regulation_overhead)` relative to the post-literal
 transcript-only lane and preserves
 `r sprintf("%.2f", breakend_regulation_rows_per_second / 1e6)` million output
 rows/s.
 
-An earlier current-head run pinned to CPU 2 reported a 3.386-second median while
+An earlier run of the comparison revision pinned to CPU 2 reported a 3.386-second median while
 its fastest pass still completed in 2.712 seconds. Host inspection found three
 long-running unpinned CPU-bound workers, and a clean CPU-4 rerun returned to the
 2.6-second range. That contaminated row is not retained in the ledger. The

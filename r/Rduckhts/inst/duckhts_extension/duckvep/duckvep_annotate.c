@@ -2336,8 +2336,13 @@ static void
 duckvep_scalar_assign_ascii_valid(duckdb_vector vector, uint64_t *validity,
 	idx_t row, const char *text, size_t length)
 {
-	duckvep_scalar_assign_ascii(vector, row, text, length);
+	/* The checked DuckDB assignment marks invalid UTF-8 NULL.  Establish the
+	 * initially valid state before assigning so a rejection remains NULL;
+	 * restoring validity afterwards would expose an uninitialized string_t.
+	 * This ordering also works with the DuckDB 1.2 stable extension API, which
+	 * predates the explicit unsafe string-assignment entry point. */
 	duckvep_scalar_set_valid(validity, row);
+	duckvep_scalar_assign_ascii(vector, row, text, length);
 }
 
 static int
@@ -2925,6 +2930,18 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 				const char *reason;
 
 				hgvs = &state->hgvs_results[source];
+				if ((hgvs->transcript_length != 0u &&
+				    (hgvs->transcript_offset > state->hgvs_text_size ||
+				    hgvs->transcript_length > state->hgvs_text_size -
+				    hgvs->transcript_offset)) ||
+				    (hgvs->protein_length != 0u &&
+				    (hgvs->protein_offset > state->hgvs_text_size ||
+				    hgvs->protein_length > state->hgvs_text_size -
+				    hgvs->protein_offset))) {
+					duckvep_sql_set_error(error, error_size,
+					    "duckvep_annotate_hgvs: rendered HGVS slice exceeds the vector text arena");
+					return 0;
+				}
 				if (hgvs->transcript_reason ==
 				    DUCKVEP_HGVS_ADAPTER_NONE &&
 				    hgvs->transcript_length != 0u) {
