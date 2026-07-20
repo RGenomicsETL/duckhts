@@ -7,7 +7,13 @@
   also preserves DuckDB's checked UTF-8 rejection and validates every HGVS text-
   arena slice before materialization. Pure-C, SQL, and R regressions include a
   1,405-base inserted sequence matching the long-allele class found by the full
-  ClinVar run
+  ClinVar run. At the exact fixed revision, pinned one-core complete-corpus runs
+  process 4,438,467 literal ClinVar alleles at 391,848/s compact, 174,984/s rich,
+  and 90,594/s with cumulative HGVS (126,733,707 rows), while 4,095,611 GIAB
+  HG002 alleles run at 921,190/s, 447,266/s, and 244,222/s respectively
+  (47,629,345 rows). The checked rendered report records five passes, the
+  5,000-base transcript distance, CPU affinity, input and output denominators,
+  and the absence of resident regulation/motif features
 - preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
   VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
   nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and

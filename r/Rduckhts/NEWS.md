@@ -4,7 +4,11 @@
   renderer's initial scratch capacity. The bundled adapter retries with the
   reported exact capacity instead of exposing truncated text, retains a failed
   UTF-8 assignment as NULL, and rejects an invalid internal text slice. A DBI
-  regression exercises a transcript HGVS string longer than 1,400 bytes
+  regression exercises a transcript HGVS string longer than 1,400 bytes. Pinned
+  one-core full-corpus DBI-path benchmarks at the fixed revision process
+  4,438,467 ClinVar literal alleles at 391,848/s compact, 174,984/s rich, and
+  90,594/s with cumulative HGVS; the corresponding 4,095,611-allele GIAB HG002
+  rates are 921,190/s, 447,266/s, and 244,222/s
 - speed up the bundled DuckVEP consequence and cumulative HGVS paths by reusing one
   classification pass and compact prepared facts. Bundled annotation now preserves
   deterministic `annotation_index` values across DuckDB vector and disjoint ordered

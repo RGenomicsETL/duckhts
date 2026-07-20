@@ -117,6 +117,12 @@ insertion order; they remain only as historical measurements.
 | 2026-07-20 | e25c1513 | ensembl116_grch38_clinvar_annotation_dense_v2        | compact     |       4 |                4 |               10000 | 517,097    | 644,427     | 5,068,416 | 1,383,580           | 34,248,323     |      5 |       0.713 |          0.719 |       0.758 |              719189 |         1390.5 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 47,633,273             |
 | 2026-07-20 | e25c1513 | ensembl116_grch38_clinvar_annotation_dense_v2        | compact     |       1 |                1 |               50000 | 517,097    | 644,427     | 5,068,416 | 1,383,580           | 88,784,213     |      5 |       4.130 |          4.161 |       4.185 |              124272 |         8046.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 21,337,230             |
 | 2026-07-20 | e25c1513 | ensembl116_grch38_clinvar_annotation_dense_v2        | compact     |       4 |                4 |               50000 | 517,097    | 644,427     | 5,068,416 | 1,383,580           | 88,784,213     |      5 |       1.326 |          1.342 |       1.436 |              385318 |         2595.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 66,158,132             |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal      | compact     |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      11.317 |         11.327 |      11.370 |              391848 |         2552.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 11,188,638             |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal      | rich        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      25.287 |         25.365 |      25.415 |              174984 |         5714.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 4,996,401              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal      | hgvs        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      48.625 |         48.993 |      51.699 |               90594 |        11038.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,586,772              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal     | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       3.592 |          4.446 |       6.477 |              921190 |         1085.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 10,712,853             |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal     | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       9.147 |          9.157 |       9.244 |              447266 |         2235.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 5,201,414              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal     | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |      16.701 |         16.770 |      17.858 |              244222 |         4094.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,840,152              |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -214,6 +220,47 @@ Broad SIMD work is therefore not the first optimization target. Each
 item above needs an adjacent exact-revision comparison on the same
 model, corpus, transcript distance, output denominator, core affinity,
 and fingerprint before it can be called an improvement.
+
+## Full ClinVar and GIAB literal-allele throughput
+
+| revision | corpus             | output  | input_alleles | output_rows | rows_per_allele | median_seconds | alleles_per_second | output_rows_per_second | elapsed_vs_compact | projected_700M_allele_hours |
+|:---------|:-------------------|:--------|:--------------|:------------|----------------:|---------------:|:-------------------|:-----------------------|-------------------:|----------------------------:|
+| 33a15026 | ClinVar 2026-07-06 | compact | 4,438,467     | 126,733,707 |           28.55 |         11.327 | 391,848            | 11,188,638             |               1.00 |                        0.50 |
+| 33a15026 | ClinVar 2026-07-06 | rich    | 4,438,467     | 126,733,707 |           28.55 |         25.365 | 174,984            | 4,996,401              |               2.24 |                        1.11 |
+| 33a15026 | ClinVar 2026-07-06 | hgvs    | 4,438,467     | 126,733,707 |           28.55 |         48.993 | 90,594             | 2,586,772              |               4.33 |                        2.15 |
+| 33a15026 | GIAB HG002 v4.2.1  | compact | 4,095,611     | 47,629,345  |           11.63 |          4.446 | 921,190            | 10,712,853             |               1.00 |                        0.21 |
+| 33a15026 | GIAB HG002 v4.2.1  | rich    | 4,095,611     | 47,629,345  |           11.63 |          9.157 | 447,266            | 5,201,414              |               2.06 |                        0.43 |
+| 33a15026 | GIAB HG002 v4.2.1  | hgvs    | 4,095,611     | 47,629,345  |           11.63 |         16.770 | 244,222            | 2,840,152              |               3.77 |                        0.80 |
+
+These are full prepared literal-allele relations, not annotation-density
+samples. The ClinVar 2026-07-06 source contains 4,439,617 records and
+4,438,515 source ALTs; 4,438,467 literal, model-addressable alleles
+enter the benchmark (4,134,694 SNVs and 303,773 non-SNVs). The longest
+retained REF and ALT are 9,983 and 9,971 bases. The GIAB HG002 GRCh38
+v4.2.1 benchmark source contains 4,048,342 records and 4,096,123 source
+ALTs; 4,095,611 literal, model-addressable alleles enter the benchmark
+(3,463,000 SNVs and 632,611 non-SNVs). Its longest retained REF and ALT
+are 9,704 and 3,686 bases.
+
+Every row uses the complete Ensembl 116 GRCh38 transcript model, a
+5,000-base transcript distance, one ordered input partition, one thread
+pinned to CPU 2, a 100,000-allele warmup, and five complete timed
+passes. Model loading, VCF staging, and the untimed corpus receipt are
+excluded. Regulatory and motif features are not loaded in these rows.
+The timed query includes candidate discovery, consequence calculation,
+list materialization, `unnest`, and the mode-specific checksum
+aggregation.
+
+The 126,733,707 ClinVar rows are 28.55 transcript rows per input allele;
+the 47,629,345 GIAB rows are 11.63 per allele. Consequently, the same
+HGVS engine reports 90,594 input alleles/s on ClinVar and 244,222/s on
+GIAB while sustaining 2.59 and 2.84 million expanded rows/s
+respectively. At those measured rates, 700 million input alleles project
+to 2.15 or 0.80 single-core hours; that range is an input-density
+sensitivity, not a gnomAD runtime claim. The full ClinVar HGVS pass also
+supplied the 1,406-base-ALT regression that found the former
+scratch-buffer over-read; all five recorded HGVS passes complete after
+the exact-size retry fix.
 
 ## Independent-event HGVS materialization
 

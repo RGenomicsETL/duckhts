@@ -289,11 +289,124 @@ target. Each item above needs an adjacent exact-revision comparison on the same 
 corpus, transcript distance, output denominator, core affinity, and fingerprint before
 it can be called an improvement.
 
+## Full ClinVar and GIAB literal-allele throughput
+
+```{r full-literal-corpora}
+full_workload_labels <- c(
+  ensembl116_grch38_clinvar_20260706_full_literal =
+    "ClinVar 2026-07-06",
+  ensembl116_grch38_giab_hg002_v4_2_1_full_literal =
+    "GIAB HG002 v4.2.1"
+)
+full_runs <- history[
+  history$workload %in% names(full_workload_labels) &
+    history$output_mode %in% c("compact", "rich", "hgvs") &
+    history$threads == 1L &
+    history$input_partitions == 1L &
+    history$transcript_distance == 5000,
+  ,
+  drop = FALSE
+]
+full_revision <- nearest_tested_ancestor(full_runs$source_revision)
+full_current <- full_runs[
+  full_runs$source_revision == full_revision,
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(full_current) == 6L,
+  all(vapply(
+    split(full_current$output_mode, full_current$workload),
+    function(x) setequal(x, c("compact", "rich", "hgvs")),
+    logical(1L)
+  ))
+)
+mode_order <- c("compact", "rich", "hgvs")
+full_current <- full_current[order(
+  match(full_current$workload, names(full_workload_labels)),
+  match(full_current$output_mode, mode_order)
+), , drop = FALSE]
+compact_seconds <- setNames(
+  full_current$median_seconds[full_current$output_mode == "compact"],
+  full_current$workload[full_current$output_mode == "compact"]
+)
+full_table <- data.frame(
+  revision = full_current$revision,
+  corpus = unname(full_workload_labels[full_current$workload]),
+  output = full_current$output_mode,
+  input_alleles = format(
+    full_current$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    full_current$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  rows_per_allele = round(
+    full_current$annotated_rows / full_current$variants,
+    2L
+  ),
+  median_seconds = full_current$median_seconds,
+  alleles_per_second = format(
+    round(full_current$variants_per_second),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(full_current$annotated_rows / full_current$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  elapsed_vs_compact = round(
+    full_current$median_seconds /
+      unname(compact_seconds[full_current$workload]),
+    2L
+  ),
+  projected_700M_allele_hours = round(
+    700e6 / full_current$variants_per_second / 3600,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(full_table, row.names = FALSE)
+```
+
+These are full prepared literal-allele relations, not annotation-density samples.
+The ClinVar 2026-07-06 source contains 4,439,617 records and 4,438,515 source
+ALTs; 4,438,467 literal, model-addressable alleles enter the benchmark
+(4,134,694 SNVs and 303,773 non-SNVs). The longest retained REF and ALT are
+9,983 and 9,971 bases. The GIAB HG002 GRCh38 v4.2.1 benchmark source contains
+4,048,342 records and 4,096,123 source ALTs; 4,095,611 literal,
+model-addressable alleles enter the benchmark (3,463,000 SNVs and 632,611
+non-SNVs). Its longest retained REF and ALT are 9,704 and 3,686 bases.
+
+Every row uses the complete Ensembl 116 GRCh38 transcript model, a 5,000-base
+transcript distance, one ordered input partition, one thread pinned to CPU 2,
+a 100,000-allele warmup, and five complete timed passes. Model loading, VCF
+staging, and the untimed corpus receipt are excluded. Regulatory and motif
+features are not loaded in these rows. The timed query includes candidate
+discovery, consequence calculation, list materialization, `unnest`, and the
+mode-specific checksum aggregation.
+
+The 126,733,707 ClinVar rows are 28.55 transcript rows per input allele; the
+47,629,345 GIAB rows are 11.63 per allele. Consequently, the same HGVS engine
+reports 90,594 input alleles/s on ClinVar and 244,222/s on GIAB while sustaining
+2.59 and 2.84 million expanded rows/s respectively. At those measured rates,
+700 million input alleles project to 2.15 or 0.80 single-core hours; that range
+is an input-density sensitivity, not a gnomAD runtime claim. The full ClinVar
+HGVS pass also supplied the 1,406-base-ALT regression that found the former
+scratch-buffer over-read; all five recorded HGVS passes complete after the
+exact-size retry fix.
+
 ## Independent-event HGVS materialization
 
 ```{r hgvs-throughput, results='asis'}
 hgvs_runs <- history[
-  history$output_mode %in% c("rich", "hgvs") & history$threads == 1L,
+  history$output_mode %in% c("rich", "hgvs") &
+    history$workload == "ensembl116_grch38_final_coding_mixed_200k" &
+    history$threads == 1L,
   ,
   drop = FALSE
 ]
