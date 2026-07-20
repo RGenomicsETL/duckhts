@@ -1121,23 +1121,72 @@ and dozens-of-sources behavior before considering a custom physical format.
 
 ### G. HGVS as a sibling consumer
 
-The current event and projection state was designed so consequence and HGVS can
-consume the same lossless edit facts. A public DNA/protein HGVS renderer is not yet
-part of this port. It must preserve VEP 116's distinct genomic `g./m.` and
-transcript `c./n.` 3-prime-shift routines, accession/version provenance, strand,
-and unresolved reasons. It must not recover biology by parsing SO strings or alter
-the uploaded event used for consequence prediction.
+The shared lower-level authorities are implemented: one prepared event defines semantic
+allele geometry, and one CDS edit-set authority drives sequence replay. Consequence uses
+those lower-level facts directly. Independent-event DNA/protein HGVS wraps them in
+`duckvep_transcript_edit_t`, an HGVS-facing carrier that additionally records VEP's
+endpoint-clipped transcript-slice coordinates. This wider carrier is not constructed in
+the consequence hot path, and the phased executor does not exist yet; the future phased
+executor must consume the same prepared CDS edit set rather than acquire another
+allele-trimming or coordinate authority. Typed `c.`/`n.` facts, VEP's genomic-reference
+transcript 3-prime shift, typed `p.` facts, and allocation-free renderers have deterministic
+and randomized pure-C coverage.
+
+`duckvep_annotate_hgvs(...)` is the cumulative public adapter. It returns the compact
+consequence row plus DNA/protein suffixes and structured status/reason fields from the same
+candidate pass. `duckvep_model_load(...)` may bind an existing indexed FASTA using an exact
+sequence-region ordinal/name/length projection; the loader validates it, and worker-local
+faidx handles supply reusable genomic reference windows. The published model pins open read
+descriptors for the validated FASTA, `.fai`, and optional `.gzi`. Linux workers reopen those
+descriptors through `/proc/self/fd`; Windows workers use the resolved source while a
+deny-write handle remains open. Other POSIX workers open the resolved source independently
+and compare its identity around lazy open rather than sharing `/dev/fd` seek state. External
+replacement or in-place mutation is outside the immutable-model contract on those systems
+and fails when the identity change is observed. Contained sorted requests reuse a
+bounded forward-read-ahead window. Versioned transcript/protein identifiers remain cold
+relational columns joined by transcript ordinal.
+
+The adapter derives two borrowed views from one bounded faidx fetch. The first is exactly
+VEP 116's constrained +/-1000 `_genomic_shift` slice. The second additionally covers the
+complete uploaded REF, shifted endpoint-clipped feature sequence, and both adjacent copied
+sources for duplication recognition. Passing the wider lookup view into `perform_shift`
+would let retained VCF padding change HGVSc placement; limiting duplication recognition to
+the shift view would misrender copied insertions longer than 1000 bases as ordinary `ins`.
+
+This is still not a complete VEP-HGVS promise. Fixed executable witnesses cover
+position-one right anchors and endpoint-clipped transcript slices, while a strict GRCh38
+chromosome-21 ClinVar run found zero HGVSc/HGVSp differences across 56,998 transcript
+pairs. That closes the exercised independent-event distribution, not genomic `g./m.`,
+RefSeq RNA-edit-aware transcript shifting, structural/BND HGVS, cross-species/assembly
+coverage, or compound/phased HGVS. The renderer must not recover biology by parsing SO
+strings or alter the uploaded event used for consequence prediction.
+
+The pinned ferro-hgvs v0.9.0 source at
+https://github.com/fulcrumgenomics/ferro-hgvs/tree/278e2c11134e3b49067d0c334f650c7c29db9cbe
+is a secondary specification oracle and corpus-design reference. It is deliberately
+not linked into the C/CRAN/Wasm implementation and cannot replace executable VEP 116
+where VEP preserves historically odd output. The differential matrix is therefore
+three-way: VEP output compatibility, ferro-hgvs normalization/parsing where its
+contract applies, and independent apply-then-diff sequence replay.
 
 ## 17. The next recommended vertical
 
-With the declared VEP-116 consequence predicates closed, the next coherent vertical
-is the phased executor and VEP Haplosaurus differential tracked in
+With the declared VEP-116 consequence predicates closed, the dependency order is:
+
+1. close executable-VEP differential and cumulative performance evidence for the published
+   independent-event `c.`/`n.`/`p.` HGVS surface, then add a bcftools `--local-csq`
+   projection over the same transcript-edit facts;
+2. use that local projection for VariantStory/Talos parity without pretending Talos's
+   explicit `--local-csq` calls require haplotype execution;
+3. drive the same edit IR from the phased executor and compare it with VEP
+   Haplosaurus and haplotype-aware bcftools csq; and
+4. render haplotype HGVS from the completed alternate transcript/CDS/protein state.
+
+The phased executor remains tracked in
 https://github.com/RGenomicsETL/duckhts/issues/92. Independent small variants,
-exact single-locus SVs, and paired BND now share one event/projection/fact authority;
-the existing linear multi-edit CDS builder is ready to be driven by a stream that
-owns genotype grouping and transcript lifetime. HGVS follows as a sibling renderer
-over the same projected edits and completed alternate peptides, not as another
-consequence classifier.
+exact single-locus SVs, and paired BND already share one event/projection/fact
+authority; the existing linear multi-edit CDS builder is ready to be driven by a
+stream that owns genotype grouping and transcript lifetime.
 
 Start with an explicit input relation containing model, event identity, sample,
 GT-derived haplotype lane, phase set/policy, and sorted genomic coordinates. Project
@@ -1151,9 +1200,14 @@ Validation must compare complete CDS/protein haplotypes and attributed consequen
 sets to the pinned Haplosaurus executable across same-codon substitutions, open and
 restored frameshifts, overlapping edits, multiple samples, ploidies, phase sets,
 transcript strands, and chunk splits. Fresh randomized edit sets remain the anti-
-overfitting lane. Performance must report input records, projected edits, active
-carrier states, unique haplotype leaves, translated bases, output haplotypes, and
-memory high-water marks for both pre-sorted input and DuckDB sort plus execution.
+overfitting lane. Randomized families must publish observed state counters as well as
+trial totals so a passing seed cannot hide absent edit shapes or interactions.
+Performance is cumulative and separately records compact consequences, HGVS numeric
+facts, rendered HGVS bytes, bcftools-local projection, and phased execution. The
+phased lane reports input records and ALT alleles, projected edits, active carrier
+states, unique haplotype leaves, translated bases, output haplotypes, thread/core
+pinning, and memory high-water marks for both pre-sorted input and DuckDB sort plus
+execution.
 
 The existing GIAB, coding SNV, non-SNV, mixed, structural, and BND workloads remain
 controls while that executor is added. The current mixed lane's 135,044 alleles/s

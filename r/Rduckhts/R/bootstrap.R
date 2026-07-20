@@ -12,6 +12,8 @@ duckhts_duckvep_kernel_source_files <- function() {
     "duckvep_sv.c",
     "duckvep_delta.c",
     "duckvep_projection.c",
+    "duckvep_transcript_edit.c",
+    "duckvep_hgvs.c",
     "duckvep_codon.c",
     "duckvep_coding.c",
     "duckvep_haplotype.c"

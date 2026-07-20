@@ -99,6 +99,8 @@ set(EXTENSION_SOURCES
         src/duckvep/kernel/src/duckvep_sv.c
         src/duckvep/kernel/src/duckvep_delta.c
         src/duckvep/kernel/src/duckvep_projection.c
+        src/duckvep/kernel/src/duckvep_transcript_edit.c
+        src/duckvep/kernel/src/duckvep_hgvs.c
         src/duckvep/kernel/src/duckvep_codon.c
         src/duckvep/kernel/src/duckvep_coding.c
         src/duckvep/kernel/src/duckvep_haplotype.c

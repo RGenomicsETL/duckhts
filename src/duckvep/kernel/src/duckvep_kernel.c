@@ -1479,6 +1479,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     duckvep_sequence_delta_t delta;
     duckvep_nmd_result_t nmd;
     uint64_t cmask;
+    uint32_t consequence_flags;
     duckvep_consequence_t *row;
     uint16_t projection_exon_rank = UINT16_MAX;
     uint32_t projection_exon_hint = UINT32_MAX;
@@ -1800,9 +1801,21 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     row->overlap_object_kind =
         (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
     row->consequence_mask = cmask;
-    if (cds_delta_attempted && !delta.valid) {
-        row->flags |= (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED;
+    consequence_flags = duckvep_sequence_delta_consequence_flags(
+        &delta, cds_delta_attempted);
+    /* delta.start_lost describes the reconstructed sequence. VEP's predicate
+     * additionally requires its unshifted complete feature interval to
+     * overlap the start codon, and caches that result before HGVS-only
+     * placement. Keep the sidecar at predicate level rather than leaking the
+     * broader sequence fact into HGVSp. */
+    if ((consequence_flags &
+         (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_START_LOST) != 0u &&
+        !duckvep_project_feature_overlaps_start_codon_unshifted(
+            tx, &c->model->exons, (size_t)tx_idx, &event)) {
+        consequence_flags &=
+            ~(uint32_t)DUCKVEP_CONSEQUENCE_FLAG_START_LOST;
     }
+    row->flags = consequence_flags;
     row->region_mask = ectx.region;
     row->impact = (uint8_t)duckvep_so_impact(cmask);
     row->sequence_status = cds_delta_attempted
