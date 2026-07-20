@@ -173,9 +173,6 @@ if (isTRUE(opt$regulatory) && !production) {
 if (identical(opt$output, "hgvs") && !identical(opt$event_mode, "small")) {
   die("--output hgvs currently requires --event-mode small")
 }
-if (identical(opt$output, "hgvs") && isTRUE(opt$regulatory)) {
-  die("--output hgvs cannot be combined with --regulatory")
-}
 if (identical(opt$output, "hgvs") && !nzchar(opt$reference_fasta)) {
   if (production) {
     die("--output hgvs with --database requires --reference-fasta")

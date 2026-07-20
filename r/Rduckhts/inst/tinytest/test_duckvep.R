@@ -933,6 +933,21 @@ expect_identical(
   )
 )
 
+hgvs_regulation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.regulation_feature_index, a.overlap_object_code,",
+    "a.transcript_hgvs, a.protein_hgvs, a.transcript_hgvs_status,",
+    "a.protein_hgvs_status FROM unnest(duckvep_annotate_hgvs(",
+    "'r-ensembl-mirna', 0::UINTEGER, 3::UBIGINT,",
+    "'G', 'A', 0::UBIGINT)) u(a)",
+    "WHERE a.regulation_feature_index IS NOT NULL"
+  )
+)
+expect_equal(hgvs_regulation$regulation_feature_index, 0)
+expect_equal(hgvs_regulation$overlap_object_code, 1)
+expect_true(all(is.na(hgvs_regulation[, 3:6])))
+
 breakend_regulation <- dbGetQuery(
   con,
   paste(

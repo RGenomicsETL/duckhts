@@ -13,7 +13,11 @@
   HG002 alleles run at 921,190/s, 447,266/s, and 244,222/s respectively
   (47,629,345 rows). The checked rendered report records five passes, the
   5,000-base transcript distance, CPU affinity, input and output denominators,
-  and the absence of resident regulation/motif features
+  and the absence of resident regulation/motif features. The throughput driver
+  now also permits the cumulative HGVS surface to load the resident
+  regulation/motif relation: interval-feature rows pass through the same
+  consequence sweep with NULL HGVS fields, as pinned by SQL and R regressions,
+  rather than requiring a second annotation scan
 - preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
   VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
   nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and

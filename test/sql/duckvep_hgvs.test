@@ -57,6 +57,13 @@ SELECT * FROM (VALUES
 ) t(transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,
     phase, end_phase);
 
+statement ok
+CREATE TABLE duckvep_hgvs_regulation AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 1::UINTEGER, 3::UINTEGER, 3::UINTEGER, 1::UTINYINT)
+) t(regulation_feature_index, seq_region, feature_start, feature_end,
+    feature_kind);
+
 # A reference-enabled model needs an explicit compact-ordinal to FASTA-name
 # relation. Loading validates the existing index and never creates one.
 statement error
@@ -97,10 +104,29 @@ SELECT loaded FROM duckvep_model_load(
   'SELECT * FROM duckvep_hgvs_regions ORDER BY seq_region',
   'SELECT * FROM duckvep_hgvs_transcripts ORDER BY seq_region, transcript_start, transcript_index',
   'SELECT * FROM duckvep_hgvs_exons ORDER BY transcript_index, exon_cdna_start',
+  interval_feature_query := 'SELECT * FROM duckvep_hgvs_regulation ORDER BY seq_region, feature_start, regulation_feature_index',
   reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
 );
 ----
 1
+
+# The cumulative surface preserves regulation/motif rows from the same
+# consequence sweep. HGVS fields are NULL because these are not transcript
+# edit failures and must not require a second production annotation pass.
+query IIIIIII
+SELECT annotation.regulation_feature_index,
+       annotation.overlap_object_code,
+       (annotation.transcript_index IS NULL)::INTEGER,
+       (annotation.transcript_hgvs IS NULL)::INTEGER,
+       (annotation.protein_hgvs IS NULL)::INTEGER,
+       (annotation.transcript_hgvs_status IS NULL)::INTEGER,
+       (annotation.protein_hgvs_status IS NULL)::INTEGER
+FROM unnest(duckvep_annotate_hgvs(
+  'hgvs-reference', 1::UINTEGER, 3::UBIGINT, 'G', 'A', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.regulation_feature_index IS NOT NULL;
+----
+0	1	1	1	1	1	1
 
 # The cumulative surface keeps every compact consequence field and appends
 # transcript/protein HGVS. Transcript stable IDs remain a relational join.

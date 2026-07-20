@@ -8,7 +8,9 @@
   one-core full-corpus DBI-path benchmarks at the fixed revision process
   4,438,467 ClinVar literal alleles at 391,848/s compact, 174,984/s rich, and
   90,594/s with cumulative HGVS; the corresponding 4,095,611-allele GIAB HG002
-  rates are 921,190/s, 447,266/s, and 244,222/s
+  rates are 921,190/s, 447,266/s, and 244,222/s. Cumulative annotation preserves
+  resident regulatory/motif rows from the same sweep with NULL HGVS fields;
+  bundled DBI coverage prevents production callers from needing a second scan
 - speed up the bundled DuckVEP consequence and cumulative HGVS paths by reusing one
   classification pass and compact prepared facts. Bundled annotation now preserves
   deterministic `annotation_index` values across DuckDB vector and disjoint ordered
