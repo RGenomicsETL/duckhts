@@ -934,7 +934,10 @@ duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
                 break;
             }
         }
-        if (!duplication_found) {
+        /* The shared transcript edit already projected the original two
+         * insertion flanks. Re-project only when the HGVS-only shift moved
+         * them; a duplication names its copied source span above. */
+        if (!duplication_found && shift != 0u) {
             status = hgvs_project_genomic_pair(
                 transcripts, exons, edit->tx_idx, shifted_low1,
                 shifted_high1, edit->transcript_strand,
@@ -950,7 +953,9 @@ duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
                     ? DUCKVEP_HGVS_NOT_APPLICABLE : status;
             }
         }
-    } else {
+    } else if (shift != 0u) {
+        /* Zero shift retains the coordinates built from the shared transcript
+         * edit. Only moved deletion endpoints need another exon lookup. */
         status = hgvs_project_genomic_pair(
             transcripts, exons, edit->tx_idx, shifted_low1, shifted_high1,
             edit->transcript_strand, &result.first, &result.last);
@@ -1659,9 +1664,10 @@ static void hgvs_protein_stop_distance(
     uint32_t                       *distance_out,
     uint8_t                        *known_out) {
 
-    size_t length;
-    size_t i;
+    size_t edited_cds_length;
+    size_t stop_position0;
     size_t reference_length;
+    int found;
 
     if (distance_out != NULL) *distance_out = 0u;
     if (known_out != NULL) *known_out = 0u;
@@ -1669,24 +1675,27 @@ static void hgvs_protein_stop_distance(
         variant_position1 == 0u) {
         return;
     }
-    length = hgvs_protein_extended_alt_length(context);
+    edited_cds_length = hgvs_protein_vep_alt_cds_length(context);
+    if (context->post_cds_complete == 0u ||
+        (context->post_cds_length != 0u &&
+         context->post_cds_bases == NULL) ||
+        duckvep_coding_context_first_alt_stop(
+            context, edited_cds_length, context->post_cds_bases,
+            context->post_cds_length, &stop_position0, &found) !=
+                DUCKVEP_CODING_CONTEXT_OK ||
+        !found) {
+        return;
+    }
     reference_length = hgvs_protein_reference_length(context);
-    for (i = 0u; i < length; i++) {
-        uint8_t residue;
-        int64_t distance;
-        if (hgvs_protein_extended_alt_base(context, i, &residue) !=
-                DUCKVEP_HGVS_OK) {
-            return;
-        }
-        if (residue != (uint8_t)'*') continue;
-        distance = frameshift
-            ? (int64_t)i + 1 - ((int64_t)variant_position1 - 1)
-            : (int64_t)i - (int64_t)reference_length;
+    {
+        int64_t distance = frameshift
+            ? (int64_t)stop_position0 + 1 -
+                  ((int64_t)variant_position1 - 1)
+            : (int64_t)stop_position0 - (int64_t)reference_length;
         if (distance > 0 && (uint64_t)distance <= UINT32_MAX) {
             *distance_out = (uint32_t)distance;
             *known_out = 1u;
         }
-        return;
     }
 }
 
@@ -2302,6 +2311,49 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
     return DUCKVEP_HGVS_OK;
 }
 
+duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build_single_residue(
+    uint32_t                     position1,
+    uint8_t                      reference,
+    uint8_t                      alternate,
+    uint32_t                     consequence_flags,
+    duckvep_hgvs_protein_fact_t *out) {
+
+    duckvep_hgvs_protein_fact_t fact;
+
+    if (out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
+    memset(out, 0, sizeof *out);
+    if (position1 == 0u || reference == 0u || alternate == 0u ||
+        (consequence_flags & (uint32_t)
+             DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_PREDICATES_VALID) == 0u ||
+        (consequence_flags & ((uint32_t)DUCKVEP_CONSEQUENCE_FLAG_FRAMESHIFT |
+                              (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_STOP_LOST)) !=
+            0u) {
+        return DUCKVEP_HGVS_NOT_APPLICABLE;
+    }
+    memset(&fact, 0, sizeof fact);
+    fact.first_position1 = position1;
+    fact.last_position1 = position1;
+    fact.reference_first = reference;
+    fact.reference_last = reference;
+    fact.alternate_first = alternate;
+    if ((consequence_flags &
+         (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_START_LOST) != 0u) {
+        fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_START_LOST;
+        fact.ref_length = 1u;
+        fact.start_lost_flanking = 1u;
+    } else if (reference == alternate) {
+        /* The renderer's zero-length equality form uses the cached residue and
+         * does not require a peptide-window pointer. */
+        fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_EQUAL;
+    } else {
+        fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_SUBSTITUTION;
+        fact.ref_length = 1u;
+        fact.alt_length = 1u;
+    }
+    *out = fact;
+    return DUCKVEP_HGVS_OK;
+}
+
 static const char *hgvs_protein_residue_name(uint8_t residue) {
     switch ((char)residue) {
         case 'A': return "Ala";
@@ -2402,7 +2454,7 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_render(
 
     if (required_out != NULL) *required_out = 0u;
     if (buffer != NULL && capacity > 0u) buffer[0] = '\0';
-    if (fact == NULL || required_out == NULL || fact->context == NULL ||
+    if (fact == NULL || required_out == NULL ||
         (buffer == NULL && capacity != 0u) || predicted < 0 || predicted > 1 ||
         ((fact->first_position1 == 0u || fact->last_position1 == 0u) &&
          !((fact->shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_INSERTION &&

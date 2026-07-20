@@ -697,11 +697,16 @@ is added.
 
 The implemented internal layer makes that ownership explicit:
 
+- `duckvep_model_open(...)` owns the canonical prepared transcript, exon, and sequence
+  views used by both consequence and HGVS. It derives the first complete reference stop
+  once per coding transcript, or validates a supplied immutable cache, so per-row HGVSp
+  does not rescan an unchanged CDS;
 - consequence evaluation and HGVS both consume the same prepared allele and CDS edit-set
   helpers; the hot consequence path does not construct a wider formatting object;
 - `duckvep_transcript_edit_t` is an HGVS-facing carrier built from that prepared allele and
-  one transcript. It adds VEP's endpoint-clipped transcript-slice coordinates without
-  trimming, reinterpreting, or clamping the semantic allele;
+  one transcript. Projection first adds VEP's endpoint-clipped transcript-slice
+  coordinates without trimming, reinterpreting, or clamping the semantic allele; CDS
+  projection is attached lazily only when reference validation or protein replay needs it;
 - typed transcript-coordinate facts distinguish coding `c.` from non-coding `n.` edits,
   preserve insertion and range geometry, and render into caller-owned bounded buffers;
 - VEP-compatible transcript 3-prime shifting consumes VEP's exact constrained +/-1000
@@ -709,7 +714,10 @@ The implemented internal layer makes that ownership explicit:
   lookup use a separately bounded wider view. Neither creates a second allele authority or
   changes the shift bytes; and
 - typed protein facts describe equality, substitution, deletion, insertion, delins,
-  duplication, frameshift, start loss, and extension before any string is allocated.
+  duplication, frameshift, start loss, and extension before any string is allocated. A
+  single CDS edit is exposed as a virtual alternate sequence, and first-stop scans traverse
+  unchanged reference spans plus the edit payload rather than materializing the full
+  alternate CDS.
 
 `duckvep_annotate_hgvs(...)` exposes those mechanics as a cumulative SQL result: the first
 16 fields are the compact consequence row, followed by transcript/protein suffixes,
@@ -720,7 +728,15 @@ an existing indexed FASTA through an exact sequence-region ordinal/name/length r
 the loader validates the index without creating or modifying it, while each annotation
 worker owns its faidx handle and reusable reference-window storage. One bounded fetch
 supplies distinct borrowed views for shifting and lookup. The adapter performs
-one candidate sweep and renders into DuckDB-owned output vectors.
+one candidate sweep and renders into DuckDB-owned output vectors. One worker-owned scratch
+buffer handles transcript and protein strings in a single render pass; it grows and retries
+only when a result does not fit.
+
+Consequence predicate flags are reusable evidence, not a closed-world serialization of the
+later HGVS replay. Positive frameshift evidence can complete a length-changing delta, and
+absence of frameshift is conclusive for a length-preserving CDS edit. A length-changing
+splice-overlapping edit without that positive flag must run the complete delta evaluator;
+otherwise VEP-compatible frameshifts can be misrendered as premature stops or delins.
 
 This implemented surface is not yet a full VEP-HGVS compatibility claim. It covers
 independent literal small variants and returns explicit unresolved reasons when reference,

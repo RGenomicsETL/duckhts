@@ -253,9 +253,20 @@ typedef struct duckvep_coding_context {
     uint8_t cds_changed;
     uint8_t pre_cds_complete;
     uint8_t post_cds_complete;
+    uint8_t ref_first_stop_known;
+    uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
+
+/* The compact consequence sidecar is a closed-world authority for cached
+ * start/stop-lost predicates, but frameshift is positive evidence only.  A
+ * length-changing splice-overlapping edit may acquire a frameshift during the
+ * complete HGVS replay even when the consequence-side flag is absent. */
+DUCKVEP_INTERNAL_API int
+duckvep_sequence_delta_consequence_flags_complete_for_hgvs(
+    const duckvep_coding_context_t *context,
+    uint32_t                        flags);
 
 /* VEP's codon-rounded peptide strings for one projected CDS edit. The window
  * borrows `duckvep_coding_context_t`; consumers read residues through
@@ -308,6 +319,21 @@ DUCKVEP_INTERNAL_API char duckvep_coding_context_cds_base(
     const duckvep_coding_context_t *ctx,
     int                             alternate,
     size_t                          position0);
+
+/* Scan one alternate CDS prefix followed by a caller-owned transcript suffix
+ * and report the first translated stop. This is the sequential authority for
+ * consumers that need a stop position without materializing the complete
+ * alternate peptide. Ambiguous N codons translate to X and do not stop the
+ * scan. `stop_position0` is a zero-based peptide coordinate when `found` is
+ * set. */
+DUCKVEP_INTERNAL_API duckvep_coding_context_status_t
+duckvep_coding_context_first_alt_stop(
+    const duckvep_coding_context_t *ctx,
+    size_t                          cds_prefix_length,
+    const uint8_t                  *suffix,
+    size_t                          suffix_length,
+    size_t                         *stop_position0,
+    int                            *found);
 
 typedef enum duckvep_variant_coding_context_status {
     DUCKVEP_VARIANT_CODING_CONTEXT_OK = 0,

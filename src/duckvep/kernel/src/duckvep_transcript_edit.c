@@ -63,9 +63,13 @@ static duckvep_transcript_edit_status_t transcript_edit_project_pair(
     status = duckvep_project_transcript_coordinate(
         transcripts, exons, tx_idx, genomic_first1, &genomic_first);
     if (status != DUCKVEP_TRANSCRIPT_EDIT_OK) return status;
-    status = duckvep_project_transcript_coordinate(
-        transcripts, exons, tx_idx, genomic_last1, &genomic_last);
-    if (status != DUCKVEP_TRANSCRIPT_EDIT_OK) return status;
+    if (genomic_first1 == genomic_last1) {
+        genomic_last = genomic_first;
+    } else {
+        status = duckvep_project_transcript_coordinate(
+            transcripts, exons, tx_idx, genomic_last1, &genomic_last);
+        if (status != DUCKVEP_TRANSCRIPT_EDIT_OK) return status;
+    }
     if (strand > 0) {
         *first_out = genomic_first;
         *last_out = genomic_last;
@@ -168,16 +172,13 @@ duckvep_transcript_edit_status_t duckvep_project_transcript_coordinate(
     return DUCKVEP_TRANSCRIPT_EDIT_OK;
 }
 
-duckvep_transcript_edit_status_t duckvep_transcript_edit_build_prepared(
+duckvep_transcript_edit_status_t duckvep_transcript_edit_project_prepared(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
-    const duckvep_sequence_pool_t    *seq,
     const duckvep_variant_batch_t    *variants,
     uint32_t                          variant_idx,
     size_t                            tx_idx,
     const duckvep_event_t            *event,
-    duckvep_haplotype_edit_t         *cds_scratch,
-    size_t                            cds_scratch_cap,
     duckvep_transcript_edit_t        *out) {
 
     duckvep_transcript_edit_t result;
@@ -292,16 +293,68 @@ duckvep_transcript_edit_status_t duckvep_transcript_edit_build_prepared(
         feature_last_pos1 = result.event.feature_end1 > transcript_end1
             ? transcript_end1 : result.event.feature_end1;
     }
-    status = transcript_edit_project_pair(
-        transcripts, exons, tx_idx, feature_first_pos1, feature_last_pos1,
-        strand, &result.feature_first, &result.feature_last);
-    if (status != DUCKVEP_TRANSCRIPT_EDIT_OK) return status;
+    if (feature_first_pos1 == first_pos1 && feature_last_pos1 == last_pos1) {
+        result.feature_first = result.first;
+        result.feature_last = result.last;
+    } else {
+        status = transcript_edit_project_pair(
+            transcripts, exons, tx_idx, feature_first_pos1, feature_last_pos1,
+            strand, &result.feature_first, &result.feature_last);
+        if (status != DUCKVEP_TRANSCRIPT_EDIT_OK) return status;
+    }
 
-    result.cds_status = (uint8_t)duckvep_variant_cds_edit_set_build_prepared(
-        transcripts, exons, seq, variants, variant_idx, tx_idx, strand,
-        &result.event, UINT32_MAX, cds_scratch, cds_scratch_cap,
-        &result.cds_edits);
     *out = result;
+    return DUCKVEP_TRANSCRIPT_EDIT_OK;
+}
+
+duckvep_cds_edit_status_t duckvep_transcript_edit_cds_fill_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *variants,
+    duckvep_haplotype_edit_t         *cds_scratch,
+    size_t                            cds_scratch_cap,
+    duckvep_transcript_edit_t        *edit) {
+
+    duckvep_cds_edit_status_t status;
+    uint32_t cds_exon_hint;
+
+    if (edit == NULL || edit->tx_idx >=
+            (transcripts != NULL ? transcripts->transcript_count : 0u) ||
+        variants == NULL || (size_t)edit->variant_idx >= variants->count) {
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    }
+    cds_exon_hint = edit->first.exonic && edit->last.exonic &&
+            edit->first.exon_idx == edit->last.exon_idx
+        ? edit->first.exon_idx : UINT32_MAX;
+    status = duckvep_variant_cds_edit_set_build_prepared(
+        transcripts, exons, seq, variants, edit->variant_idx, edit->tx_idx,
+        edit->transcript_strand, &edit->event, cds_exon_hint, cds_scratch,
+        cds_scratch_cap, &edit->cds_edits);
+    edit->cds_status = (uint8_t)status;
+    edit->cds_built = 1u;
+    return status;
+}
+
+duckvep_transcript_edit_status_t duckvep_transcript_edit_build_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *variants,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    duckvep_haplotype_edit_t         *cds_scratch,
+    size_t                            cds_scratch_cap,
+    duckvep_transcript_edit_t        *out) {
+
+    duckvep_transcript_edit_status_t status;
+
+    status = duckvep_transcript_edit_project_prepared(
+        transcripts, exons, variants, variant_idx, tx_idx, event, out);
+    if (status != DUCKVEP_TRANSCRIPT_EDIT_OK) return status;
+    (void)duckvep_transcript_edit_cds_fill_prepared(
+        transcripts, exons, seq, variants, cds_scratch, cds_scratch_cap, out);
     return DUCKVEP_TRANSCRIPT_EDIT_OK;
 }
 

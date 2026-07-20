@@ -1140,11 +1140,22 @@ sidecar cannot erase a separately reconstructed frameshift but does clear start 
 loss. The public SQL regression pins the shifted 5-prime-UTR insertion and its exact
 HGVSc/HGVSp.
 
+This distinction is also a performance invariant. It is safe to synthesize the HGVS delta
+from a valid sidecar when CDS length is unchanged, or when the sidecar positively records
+frameshift. It is not safe to treat an absent frameshift bit as complete negative evidence
+for a length-changing splice overlap. A strict chromosome-21 ClinVar differential exposed
+three such rows: `21:44288343 AGG>A` on `ENST00000291582` and `ENST00000966178` must render
+`p.Gly180AspfsTer36`, and `21:46117558 GCAGCCCAGCAGCCC>G` on `ENST00000984854` must render
+`p.Ala359PhefsTer8`. Skipping the complete delta misrendered them as `p.Gly180Ter` and
+`p.Ala359_His363delinsTer`. The centralized completeness predicate now admits the shortcut
+only for an unchanged CDS length or positive frameshift evidence.
+
 Source anchors: the separate VEP 116 consequence and `hgvs_protein` call paths,
 `VariationEffect::start_lost`, `VariationEffect::stop_lost`, their `_predicate_cache`,
 `Mapper::map_insert`, and DuckVEP
 `duckvep_sequence_delta_consequence_flags` /
-`duckvep_sequence_delta_apply_consequence_flags`.
+`duckvep_sequence_delta_apply_consequence_flags` /
+`duckvep_sequence_delta_consequence_flags_complete_for_hgvs`.
 
 ## DNA duplication projects the copied source before requiring insertion flanks
 

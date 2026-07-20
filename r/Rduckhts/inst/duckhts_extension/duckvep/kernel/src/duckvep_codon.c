@@ -53,6 +53,53 @@ const char *duckvep_codon_table_amino_acids(duckvep_codon_table_t table) {
         ? AA_TABLES[(unsigned int)table] : NULL;
 }
 
+int duckvep_cds_first_stop_position1(
+    const uint8_t         *cds,
+    size_t                 cds_length,
+    duckvep_codon_table_t  table,
+    uint32_t              *position1_out) {
+
+    const char *amino_acids;
+    size_t codon_count;
+    size_t i;
+
+    if (position1_out != NULL) *position1_out = 0u;
+    if (position1_out == NULL || (cds_length != 0u && cds == NULL)) return 0;
+    amino_acids = duckvep_codon_table_amino_acids(table);
+    if (amino_acids == NULL) return 0;
+    codon_count = cds_length / 3u;
+    for (i = 0u; i < codon_count; i++) {
+        uint8_t code = 0u;
+        uint32_t j;
+        int has_n = 0;
+
+        for (j = 0u; j < 3u; j++) {
+            char base = duckvep_dna_normalize(
+                (char)cds[i * 3u + (size_t)j], 1);
+            int base_code;
+
+            if (base == '\0') return 0;
+            if (base == 'N') {
+                has_n = 1;
+                base_code = 0;
+            } else {
+                base_code = duckvep_dna_codon_code(base);
+                if (base_code < 0) return 0;
+            }
+            code = (uint8_t)((code << 2u) | (uint8_t)base_code);
+        }
+        if (!has_n && amino_acids[code] == '*') {
+            if (i >= (size_t)UINT32_MAX) return 0;
+            *position1_out = (uint32_t)i + 1u;
+            return 1;
+        }
+    }
+    for (i = codon_count * 3u; i < cds_length; i++) {
+        if (duckvep_dna_normalize((char)cds[i], 1) == '\0') return 0;
+    }
+    return 1;
+}
+
 char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table) {
     const char *tab;
     int b1, b2, b3, idx;

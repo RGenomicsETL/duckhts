@@ -52,11 +52,21 @@
   genomic HGVS, RefSeq RNA edits, exact structural/BND HGVS, or phased/compound HGVS;
   ferro-hgvs v0.9.0 is a pinned independent
   specification/corpus oracle, not a C/CRAN/Wasm dependency or replacement for VEP 116
-  behavior. The production throughput driver accepts `chrom` as the sequence-region name
-  column used by the final staged Ensembl model, so the HGVS workload is reproducible from
-  that canonical staging relation rather than requiring a benchmark-only alias. The
-  additional stable consequence-predicate flag assignments advance the
-  standalone kernel ABI to 0.16.0
+  behavior. HGVS execution now consumes the kernel-prepared transcript, exon, and sequence
+  views as its canonical model; derives and validates each reference CDS first-stop once at
+  model open; projects the transcript edit before lazily attaching CDS edits; scans a
+  virtual single-edit CDS without rebuilding the complete alternate sequence; and renders
+  through one reusable worker buffer with retry only when the result exceeds its capacity.
+  Consequence sidecars remain a cache rather than a second coding authority: an absent
+  frameshift bit is conclusive only for length-preserving CDS edits, while length-changing
+  splice overlaps run the full peptide delta unless the sidecar positively proves a
+  frameshift. Exact VEP regressions include the ClinVar splice-overlapping deletions that
+  render `p.Gly180AspfsTer36` and `p.Ala359PhefsTer8` despite lacking a consequence-side
+  frameshift term. The production throughput driver accepts `chrom` as the sequence-region
+  name column used by the final staged Ensembl model, so the HGVS workload is reproducible
+  from that canonical staging relation rather than requiring a benchmark-only alias. The
+  sequence-pool first-stop cache extends the public standalone model view and advances the
+  kernel ABI to 0.17.0
 - match VEP 116 for complete transcript overlap by ordinary long literal
   alleles: a normalized deletion now enters the same tier-1
   `transcript_ablation` predicate as a symbolic deletion, while an equal-length

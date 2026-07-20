@@ -27,7 +27,13 @@
   not change the shift and copied sources longer than 1000 bases still render as `dup`.
   Endpoint-overlapping transcript edits retain VEP's clipped transcript-slice coordinates,
   and protein replay reproduces VEP's one/two-base alternate-CDS trimming assignment bug
-  before appending the 3-prime UTR
+  before appending the 3-prime UTR. Bundled HGVS execution now reuses the kernel-prepared
+  model, derives each reference first stop once, defers CDS projection until protein HGVS
+  needs it, scans a virtual single-edit CDS instead of rebuilding the complete alternate
+  sequence, and renders through a reusable worker buffer. The bundled consequence sidecar
+  shortcut remains fail-closed for length-changing splice overlaps: without a positive
+  frameshift fact, those edits run the complete peptide delta so their VEP-compatible
+  frameshift HGVSp is retained
 - bundled DuckVEP now gives ordinary long literal deletions the same complete-
   transcript `transcript_ablation` semantics as symbolic deletions. Equal-length
   containing alleles also preserve VEP 116's otherwise-empty endpoint UTR terms

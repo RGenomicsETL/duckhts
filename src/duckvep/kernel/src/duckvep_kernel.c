@@ -12,6 +12,7 @@
  * general edit-set semantics remain late, separate layers.
  */
 #include "duckvep_kernel.h"
+#include "duckvep_model_internal.h"
 
 #include "duckvep_classify.h"
 #include "duckvep_codon.h"
@@ -74,6 +75,7 @@ struct duckvep_model {
     uint32_t                  *cds_cdna_end1;
     uint32_t                  *cds_start_exon_index;
     uint8_t                   *cds_phase_offset;
+    uint32_t                  *first_stop_position1;
     uint8_t                   *point_ordered;
     uint8_t                   *has_frameshift_intron;
     size_t                     max_transcripts_per_chrom;
@@ -783,6 +785,19 @@ duckvep_status_t duckvep_model_open_with_interval_features(
                                     "prepared CDS contains a non-ACGTN base");
                     }
                 }
+                if (seq->first_stop_position1 != NULL) {
+                    uint32_t first_stop_position1 = 0u;
+
+                    if (!duckvep_cds_first_stop_position1(
+                            seq->cds_bytes + (size_t)off, (size_t)len,
+                            (duckvep_codon_table_t)seq->codon_table[t],
+                            &first_stop_position1) ||
+                        seq->first_stop_position1[t] != first_stop_position1) {
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_SEQ_CONTRACT,
+                                    "prepared CDS first-stop cache is inconsistent");
+                    }
+                }
             } else {
                 if (pre_len != 0u || post_len != 0u) {
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
@@ -796,6 +811,12 @@ duckvep_status_t duckvep_model_open_with_interval_features(
                     return fail(error, DUCKVEP_ERR_MODEL_INVALID,
                                 DVW_MODEL_SEQ_CONTRACT,
                                 "non-coding transcript has an invalid codon-table value");
+                }
+                if (seq->first_stop_position1 != NULL &&
+                    seq->first_stop_position1[t] != 0u) {
+                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_SEQ_CONTRACT,
+                                "non-coding transcript has a CDS first-stop cache");
                 }
             }
             if ((size_t)len > max_cds_len) max_cds_len = (size_t)len;
@@ -819,8 +840,40 @@ duckvep_status_t duckvep_model_open_with_interval_features(
     if (interval_features != NULL)
         m->interval_features = *interval_features;
     if (seq != NULL) {
+        size_t t;
+
         m->seq = *seq;
         m->has_seq = 1;
+        if (seq->transcript_count != 0u) {
+            m->first_stop_position1 = (uint32_t *)calloc(
+                seq->transcript_count, sizeof *m->first_stop_position1);
+            if (m->first_stop_position1 == NULL) {
+                duckvep_model_close(m);
+                return fail(error, DUCKVEP_ERR_INTERNAL, DVW_MODEL_OOM,
+                            "model first-stop cache alloc failed");
+            }
+            if (seq->first_stop_position1 != NULL) {
+                memcpy(m->first_stop_position1, seq->first_stop_position1,
+                       seq->transcript_count *
+                           sizeof *m->first_stop_position1);
+            } else {
+                for (t = 0u; t < seq->transcript_count; t++) {
+                    uint64_t offset = seq->cds_offset[t];
+                    size_t length = (size_t)seq->cds_length[t];
+
+                    if (length != 0u && !duckvep_cds_first_stop_position1(
+                            seq->cds_bytes + (size_t)offset, length,
+                            (duckvep_codon_table_t)seq->codon_table[t],
+                            &m->first_stop_position1[t])) {
+                        duckvep_model_close(m);
+                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                    DVW_MODEL_SEQ_CONTRACT,
+                                    "prepared CDS cannot derive first-stop cache");
+                    }
+                }
+            }
+            m->seq.first_stop_position1 = m->first_stop_position1;
+        }
     }
     *out_model = m;
     return DUCKVEP_OK;
@@ -839,6 +892,7 @@ duckvep_status_t duckvep_model_open(
 
 void duckvep_model_close(duckvep_model_t *model) {
     if (model != NULL) {
+        free(model->first_stop_position1);
         free(model->has_frameshift_intron);
         free(model->point_ordered);
         free(model->cds_phase_offset);
@@ -847,6 +901,21 @@ void duckvep_model_close(duckvep_model_t *model) {
         free(model->cds_cdna_start1);
         free(model);
     }
+}
+
+DUCKVEP_INTERNAL_API const duckvep_transcript_model_t *
+duckvep_model_prepared_transcripts(const duckvep_model_t *model) {
+    return model != NULL ? &model->transcripts : NULL;
+}
+
+DUCKVEP_INTERNAL_API const duckvep_exon_model_t *
+duckvep_model_prepared_exons(const duckvep_model_t *model) {
+    return model != NULL ? &model->exons : NULL;
+}
+
+DUCKVEP_INTERNAL_API const duckvep_sequence_pool_t *
+duckvep_model_prepared_sequences(const duckvep_model_t *model) {
+    return model != NULL && model->has_seq ? &model->seq : NULL;
 }
 
 /* ----------------------------------------------------------------- options --

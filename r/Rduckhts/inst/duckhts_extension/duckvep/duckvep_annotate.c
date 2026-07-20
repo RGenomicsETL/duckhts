@@ -20,6 +20,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <string.h>
 
 #define DUCKVEP_REFERENCE_READ_AHEAD 65536u
+#define DUCKVEP_HGVS_INITIAL_RENDER_CAPACITY 256u
 
 typedef enum duckvep_hgvs_adapter_reason {
 	DUCKVEP_HGVS_ADAPTER_NONE = 0,
@@ -1187,20 +1188,27 @@ duckvep_scalar_hgvs_store_dna(duckvep_scalar_state_t *state,
 	duckvep_hgvs_status_t status;
 	size_t required;
 
-	required = 0;
-	status = duckvep_hgvs_dna_render_basic(fact, NULL, 0, &required);
-	if (status != DUCKVEP_HGVS_OK) {
-		result->transcript_reason = duckvep_scalar_hgvs_reason(status);
-		return 1;
-	}
-	if (required == SIZE_MAX ||
-	    !duckvep_scalar_hgvs_render_reserve(state, required + 1u)) {
+	if (state->hgvs_render_capacity == 0u &&
+	    !duckvep_scalar_hgvs_render_reserve(state,
+	    DUCKVEP_HGVS_INITIAL_RENDER_CAPACITY)) {
 		duckvep_sql_set_error(error, error_size,
 		    "duckvep_annotate_hgvs: out of memory rendering transcript HGVS");
 		return 0;
 	}
+	required = 0u;
 	status = duckvep_hgvs_dna_render_basic(fact,
 	    state->hgvs_render_scratch, state->hgvs_render_capacity, &required);
+	if (status == DUCKVEP_HGVS_BUFFER_TOO_SMALL) {
+		if (required == SIZE_MAX ||
+		    !duckvep_scalar_hgvs_render_reserve(state, required + 1u)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_hgvs: out of memory rendering transcript HGVS");
+			return 0;
+		}
+		status = duckvep_hgvs_dna_render_basic(fact,
+		    state->hgvs_render_scratch, state->hgvs_render_capacity,
+		    &required);
+	}
 	if (status != DUCKVEP_HGVS_OK) {
 		result->transcript_reason = duckvep_scalar_hgvs_reason(status);
 		return 1;
@@ -1225,20 +1233,27 @@ duckvep_scalar_hgvs_store_protein(duckvep_scalar_state_t *state,
 	duckvep_hgvs_status_t status;
 	size_t required;
 
-	required = 0;
-	status = duckvep_hgvs_protein_render(fact, 0, NULL, 0, &required);
-	if (status != DUCKVEP_HGVS_OK) {
-		result->protein_reason = duckvep_scalar_hgvs_reason(status);
-		return 1;
-	}
-	if (required == SIZE_MAX ||
-	    !duckvep_scalar_hgvs_render_reserve(state, required + 1u)) {
+	if (state->hgvs_render_capacity == 0u &&
+	    !duckvep_scalar_hgvs_render_reserve(state,
+	    DUCKVEP_HGVS_INITIAL_RENDER_CAPACITY)) {
 		duckvep_sql_set_error(error, error_size,
 		    "duckvep_annotate_hgvs: out of memory rendering protein HGVS");
 		return 0;
 	}
+	required = 0u;
 	status = duckvep_hgvs_protein_render(fact, 0,
 	    state->hgvs_render_scratch, state->hgvs_render_capacity, &required);
+	if (status == DUCKVEP_HGVS_BUFFER_TOO_SMALL) {
+		if (required == SIZE_MAX ||
+		    !duckvep_scalar_hgvs_render_reserve(state, required + 1u)) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate_hgvs: out of memory rendering protein HGVS");
+			return 0;
+		}
+		status = duckvep_hgvs_protein_render(fact, 0,
+		    state->hgvs_render_scratch, state->hgvs_render_capacity,
+		    &required);
+	}
 	if (status != DUCKVEP_HGVS_OK) {
 		result->protein_reason = duckvep_scalar_hgvs_reason(status);
 		return 1;
@@ -1445,6 +1460,9 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
 				continue;
 			tx_idx = consequence->tx_idx;
+			consequence_predicates_valid =
+			    (consequence->flags & (uint32_t)
+			        DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_PREDICATES_VALID) != 0u;
 			hgvs_result->transcript_reason =
 			    DUCKVEP_HGVS_ADAPTER_INVALID_PROJECTION;
 			hgvs_result->protein_reason =
@@ -1456,10 +1474,9 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 				    hgvs_result);
 				continue;
 			}
-			edit_status = duckvep_transcript_edit_build_prepared(
-			    &model->transcripts, &model->exons, &model->sequences,
-			    batch, (uint32_t)variant, tx_idx, &event,
-			    scratch->edits, scratch->edits_cap, &transcript_edit);
+			edit_status = duckvep_transcript_edit_project_prepared(
+			    &model->transcripts, &model->exons, batch,
+			    (uint32_t)variant, tx_idx, &event, &transcript_edit);
 			if (edit_status != DUCKVEP_TRANSCRIPT_EDIT_OK) {
 				duckvep_scalar_hgvs_set_transcript_failure(
 				    model, &event, tx_idx,
@@ -1467,6 +1484,15 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 				    &event, &model->transcripts, tx_idx), hgvs_result);
 				continue;
 			}
+			/* Without an indexed genomic reference, the shared CDS projection
+			 * is the reference authority for a coding row. Build that optional
+			 * extension now; reference-backed HGVS defers it until HGVSp needs
+			 * sequence mutation. */
+			if (lookup_reference_ptr == NULL)
+				(void)duckvep_transcript_edit_cds_fill_prepared(
+				    &model->transcripts, &model->exons, &model->sequences,
+				    batch, scratch->edits, scratch->edits_cap,
+				    &transcript_edit);
 			/* The shared CDS projection is the first reference authority for
 			 * sequence-backed coding rows.  HGVSc may still be valid when an
 			 * edit is merely outside or non-contiguous in CDS, but a proven
@@ -1558,6 +1584,36 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 				continue;
 			}
 
+			/* A sequence-valid equal-length feature whose consequence sidecar
+			 * names one peptide residue has already completed the exact codon
+			 * interpretation required by HGVSp. Reuse it for equality,
+			 * substitution, stop-gained/retained, and one-residue start-lost.
+			 * Stop-loss needs the transcript tail and all length-changing or
+			 * multi-residue operations still use the general edit interpreter. */
+			if (consequence_predicates_valid && consequence->protein_pos > 0 &&
+			    consequence->aa_ref != 0u && consequence->aa_alt != 0u &&
+			    transcript_edit.feature_ref_length ==
+			        transcript_edit.feature_alt_length &&
+			    (event.kind == (uint8_t)DUCKVEP_KIND_SNV ||
+			     event.kind == (uint8_t)DUCKVEP_KIND_MNV)) {
+				hgvs_status =
+				    duckvep_hgvs_protein_fact_build_single_residue(
+				        (uint32_t)consequence->protein_pos,
+				        consequence->aa_ref, consequence->aa_alt,
+				        consequence->flags, &protein_fact);
+				if (hgvs_status == DUCKVEP_HGVS_OK) {
+					if (!duckvep_scalar_hgvs_store_protein(state,
+					    &protein_fact, hgvs_result, error, error_size))
+						return 0;
+					continue;
+				}
+				if (hgvs_status != DUCKVEP_HGVS_NOT_APPLICABLE) {
+					hgvs_result->protein_reason =
+					    duckvep_scalar_hgvs_reason(hgvs_status);
+					continue;
+				}
+			}
+
 			delta_ready = 0;
 			if ((dna_fact.ref_length == 0u) !=
 			    (dna_fact.alt_length == 0u)) {
@@ -1634,6 +1690,11 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 					    DUCKVEP_VARIANT_CODING_CONTEXT_OK;
 					delta_ready = 1;
 				} else {
+					if (!transcript_edit.cds_built)
+						(void)duckvep_transcript_edit_cds_fill_prepared(
+						    &model->transcripts, &model->exons,
+						    &model->sequences, batch, scratch->edits,
+						    scratch->edits_cap, &transcript_edit);
 					if ((duckvep_cds_edit_status_t)
 					    transcript_edit.cds_status !=
 					    DUCKVEP_CDS_EDIT_OK) {
@@ -1660,6 +1721,19 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 				    duckvep_scalar_hgvs_context_reason(context_status);
 				continue;
 			}
+			if (!delta_ready &&
+			    duckvep_sequence_delta_consequence_flags_complete_for_hgvs(
+			        &context, consequence->flags)) {
+				/* The consequence pass has already evaluated the predicates
+				 * consumed by HGVSp. An absent frameshift flag is conclusive only
+				 * when CDS length is unchanged; length-changing splice overlaps
+				 * must still run the complete delta evaluator. */
+				memset(&delta, 0, sizeof delta);
+				delta.valid = 1u;
+				duckvep_sequence_delta_apply_consequence_flags(
+				    consequence->flags, &delta);
+				delta_ready = 1;
+			}
 			if (!delta_ready) {
 				delta_status = duckvep_coding_context_delta_fill(&context,
 				    model->transcript_flags[tx_idx], &delta);
@@ -1680,9 +1754,9 @@ duckvep_scalar_build_hgvs_range(duckvep_scalar_state_t *state,
 			 * consequence row flags. The emitted SO mask is not reversible:
 			 * executable VEP witnesses omit frameshift_variant while
 			 * hgvs_protein still follows the raw frameshift predicate. */
-			consequence_predicates_valid =
-			    duckvep_sequence_delta_apply_consequence_flags(
-			        consequence->flags, &delta);
+			if (consequence_predicates_valid)
+				duckvep_sequence_delta_apply_consequence_flags(
+				    consequence->flags, &delta);
 			/* VEP caches start_lost against the unshifted complete feature
 			 * before HGVS-only placement. A consequence row outside the CDS may
 			 * have no valid sequence sidecar at all, so the original mapper

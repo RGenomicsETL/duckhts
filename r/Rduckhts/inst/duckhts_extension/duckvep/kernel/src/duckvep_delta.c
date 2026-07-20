@@ -70,6 +70,19 @@ int duckvep_sequence_delta_apply_consequence_flags(
     return 1;
 }
 
+int duckvep_sequence_delta_consequence_flags_complete_for_hgvs(
+    const duckvep_coding_context_t *context,
+    uint32_t                        flags) {
+
+    if (context == NULL ||
+        (flags & (uint32_t)
+            DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_PREDICATES_VALID) == 0u) {
+        return 0;
+    }
+    return context->length_diff == 0 ||
+        (flags & (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_FRAMESHIFT) != 0u;
+}
+
 static char delta_norm_base(char c) {
     return duckvep_dna_normalize(c, 1);
 }
@@ -1831,9 +1844,20 @@ static duckvep_coding_context_status_t delta_coding_context_open_single_edit(
 
     if (edit_validated) {
         /* The variant edit builder has already checked every REF/ALT base,
-         * orientation, and reference match. Its single length-changing edit
-         * is necessarily different; do not scan both alleles a second time. */
+         * orientation, and reference match. A length-changing edit is
+         * necessarily different. For an equal-length edit, compare only the
+         * alternate payload with the borrowed CDS; this remains O(edit bytes)
+         * and avoids translating or comparing the complete transcript. */
         changed = (uint8_t)(edit->ref_len != edit->alt_len);
+        for (i = 0u; !changed && i < (size_t)edit->alt_len; i++) {
+            char alternate = delta_feature_allele_base(
+                edit->alt, (size_t)edit->alt_len, i, allele_orientation);
+            char reference = delta_norm_base((char)ref_cds[start0 + i]);
+            if (alternate == '\0' || reference == '\0') {
+                return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+            }
+            if (alternate != reference) changed = 1u;
+        }
     } else {
         for (i = 0u; i < (size_t)edit->ref_len; i++) {
             char expected = delta_feature_allele_base(
@@ -2189,6 +2213,11 @@ static duckvep_variant_coding_context_status_t delta_model_context_enrich(
     ctx->insertion_length_reaches_terminal_stop =
         delta_insertion_length_reaches_terminal_stop(
             transcripts, tx_idx, event);
+    if (seq->first_stop_position1 != NULL) {
+        ctx->ref_first_stop_known = 1u;
+        ctx->ref_first_stop_position1 =
+            seq->first_stop_position1[tx_idx];
+    }
     delta_context_borrow_peptide_edits(seq, tx_idx, ctx);
     ctx->pre_cds_complete = 0u;
     if (seq->flanks_complete != 0u) {
@@ -2281,9 +2310,7 @@ delta_model_coding_context_build(
         return DUCKVEP_VARIANT_CODING_CONTEXT_INVALID_ARG;
     }
     memset(&result, 0, sizeof result);
-    if (prefer_virtual_single_edit && edit_set->count == 1u &&
-        edit_set->edits[0].ref_len != edit_set->edits[0].alt_len &&
-        edit_set->edits[0].cds_start > 3u) {
+    if (prefer_virtual_single_edit && edit_set->count == 1u) {
         cst = delta_coding_context_open_single_edit(
             ref_cds, ref_cds_len, &edit_set->edits[0], transcript_strand,
             (duckvep_codon_table_t)seq->codon_table[tx_idx],
@@ -2519,6 +2546,239 @@ char duckvep_coding_context_cds_base(
     size_t                          position0) {
 
     return delta_context_cds_base(ctx, alternate != 0, position0);
+}
+
+typedef struct delta_first_stop_scan {
+    const char *amino_acids;
+    size_t      codon_position0;
+    size_t      stop_position0;
+    uint8_t     code;
+    uint8_t     phase;
+    uint8_t     has_n;
+} delta_first_stop_scan_t;
+
+/* Return -1 for an invalid base, zero to continue, and one at the first stop. */
+static int delta_first_stop_scan_base(
+    delta_first_stop_scan_t *scan,
+    char                     raw_base) {
+
+    char base;
+    static const uint8_t normalized_code[8] = {
+        0u, 2u, 0u, 1u, 0u, 0u, 0u, 3u
+    };
+
+    if (scan == NULL || scan->amino_acids == NULL) return -1;
+    base = delta_norm_base(raw_base);
+    if (base == '\0') return -1;
+    if (base == 'N') scan->has_n = 1u;
+    scan->code = (uint8_t)((scan->code << 2u) |
+        normalized_code[(unsigned char)base & 7u]);
+    scan->phase++;
+    if (scan->phase != 3u) return 0;
+    if (!scan->has_n && scan->amino_acids[scan->code] == '*') {
+        scan->stop_position0 = scan->codon_position0;
+        return 1;
+    }
+    scan->codon_position0++;
+    scan->code = 0u;
+    scan->phase = 0u;
+    scan->has_n = 0u;
+    return 0;
+}
+
+static int delta_first_stop_scan_bytes(
+    delta_first_stop_scan_t *scan,
+    const uint8_t           *bytes,
+    size_t                   length) {
+
+    static const uint8_t normalized_code[8] = {
+        0u, 2u, 0u, 1u, 0u, 0u, 0u, 3u
+    };
+    size_t i;
+    int status;
+
+    if (scan == NULL || scan->amino_acids == NULL ||
+        (length != 0u && bytes == NULL)) {
+        return -1;
+    }
+    i = 0u;
+    /* Complete a codon carried across the previous borrowed segment before
+     * entering the aligned three-byte loop. */
+    while (i < length && scan->phase != 0u) {
+        status = delta_first_stop_scan_base(scan, (char)bytes[i]);
+        if (status != 0) return status;
+        i++;
+    }
+    /* Most stop searches traverse long unchanged CDS runs. Decode one complete
+     * codon per iteration instead of mutating the scan state for every base. */
+    while (length - i >= 3u) {
+        char b0 = delta_norm_base((char)bytes[i]);
+        char b1 = delta_norm_base((char)bytes[i + 1u]);
+        char b2 = delta_norm_base((char)bytes[i + 2u]);
+        uint8_t code;
+
+        if (b0 == '\0' || b1 == '\0' || b2 == '\0') return -1;
+        if (b0 != 'N' && b1 != 'N' && b2 != 'N') {
+            code = (uint8_t)(
+                (normalized_code[(unsigned char)b0 & 7u] << 4u) |
+                (normalized_code[(unsigned char)b1 & 7u] << 2u) |
+                 normalized_code[(unsigned char)b2 & 7u]);
+            if (scan->amino_acids[code] == '*') {
+                scan->stop_position0 = scan->codon_position0;
+                return 1;
+            }
+        }
+        scan->codon_position0++;
+        i += 3u;
+    }
+    while (i < length) {
+        status = delta_first_stop_scan_base(scan, (char)bytes[i]);
+        if (status != 0) return status;
+        i++;
+    }
+    return 0;
+}
+
+duckvep_coding_context_status_t duckvep_coding_context_first_alt_stop(
+    const duckvep_coding_context_t *ctx,
+    size_t                          cds_prefix_length,
+    const uint8_t                  *suffix,
+    size_t                          suffix_length,
+    size_t                         *stop_position0,
+    int                            *found) {
+
+    const char *amino_acids;
+    delta_first_stop_scan_t scan;
+    size_t complete_length;
+    size_t cds_scan_length;
+    size_t suffix_scan_length;
+    size_t i;
+    int status;
+
+    if (stop_position0 != NULL) *stop_position0 = 0u;
+    if (found != NULL) *found = 0;
+    if (ctx == NULL || stop_position0 == NULL || found == NULL ||
+        cds_prefix_length > ctx->alt_cds_len ||
+        (suffix_length != 0u && suffix == NULL)) {
+        return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
+    }
+    if (cds_prefix_length > SIZE_MAX - suffix_length) {
+        return DUCKVEP_CODING_CONTEXT_OUT_OF_RANGE;
+    }
+    amino_acids = duckvep_codon_table_amino_acids(
+        (duckvep_codon_table_t)ctx->codon_table);
+    if (amino_acids == NULL) {
+        return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
+    }
+    complete_length = ((cds_prefix_length + suffix_length) / 3u) * 3u;
+    cds_scan_length = cds_prefix_length < complete_length
+        ? cds_prefix_length : complete_length;
+    suffix_scan_length = complete_length - cds_scan_length;
+    memset(&scan, 0, sizeof scan);
+    scan.amino_acids = amino_acids;
+
+    if (!ctx->virtual_single_edit) {
+        if (cds_scan_length != 0u && ctx->alt_cds == NULL) {
+            return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
+        }
+        status = delta_first_stop_scan_bytes(
+            &scan, ctx->alt_cds, cds_scan_length);
+        if (status < 0) return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+        if (status > 0) goto stop_found;
+    } else {
+        size_t edit_start0;
+        size_t ref_edit_end0;
+        size_t alt_edit_end0;
+        size_t scan_start0 = 0u;
+        size_t prefix_end;
+        size_t allele_end;
+        int8_t allele_orientation;
+
+        if (!ctx->has_single_edit || ctx->single_edit_cds_start == 0u ||
+            (ctx->single_edit_alt_len != 0u &&
+             ctx->single_edit_alt == NULL)) {
+            return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
+        }
+        edit_start0 = (size_t)ctx->single_edit_cds_start - 1u;
+        if (edit_start0 > ctx->ref_cds_len ||
+            (size_t)ctx->single_edit_ref_len >
+                ctx->ref_cds_len - edit_start0) {
+            return DUCKVEP_CODING_CONTEXT_OUT_OF_RANGE;
+        }
+        ref_edit_end0 = edit_start0 +
+            (size_t)ctx->single_edit_ref_len;
+        alt_edit_end0 = edit_start0 +
+            (size_t)ctx->single_edit_alt_len;
+        if (ctx->alt_cds_len !=
+                ctx->ref_cds_len - (size_t)ctx->single_edit_ref_len +
+                    (size_t)ctx->single_edit_alt_len) {
+            return DUCKVEP_CODING_CONTEXT_OUT_OF_RANGE;
+        }
+        if (ctx->ref_first_stop_known && cds_scan_length != 0u) {
+            size_t edit_codon_start0 = (edit_start0 / 3u) * 3u;
+
+            if (ctx->ref_first_stop_position1 != 0u) {
+                size_t reference_stop0 =
+                    (size_t)ctx->ref_first_stop_position1 - 1u;
+                size_t reference_stop_cds0 = reference_stop0 * 3u;
+
+                if (reference_stop_cds0 < edit_codon_start0 &&
+                    reference_stop_cds0 < cds_scan_length) {
+                    *stop_position0 = reference_stop0;
+                    *found = 1;
+                    return DUCKVEP_CODING_CONTEXT_OK;
+                }
+            }
+            if (edit_codon_start0 < cds_scan_length) {
+                scan_start0 = edit_codon_start0;
+                scan.codon_position0 = edit_codon_start0 / 3u;
+            }
+        }
+        prefix_end = edit_start0 < cds_scan_length
+            ? edit_start0 : cds_scan_length;
+        status = delta_first_stop_scan_bytes(
+            &scan, ctx->ref_cds + scan_start0,
+            prefix_end - scan_start0);
+        if (status < 0) return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+        if (status > 0) goto stop_found;
+
+        allele_end = alt_edit_end0 < cds_scan_length
+            ? alt_edit_end0 : cds_scan_length;
+        allele_orientation =
+            ctx->single_edit_variant_strand == ctx->transcript_strand
+                ? (int8_t)1 : (int8_t)-1;
+        for (i = prefix_end; i < allele_end; i++) {
+            char base = delta_feature_allele_base(
+                ctx->single_edit_alt,
+                (size_t)ctx->single_edit_alt_len,
+                i - edit_start0, allele_orientation);
+            status = delta_first_stop_scan_base(&scan, base);
+            if (status < 0) return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+            if (status > 0) goto stop_found;
+        }
+        if (cds_scan_length > alt_edit_end0) {
+            size_t reference_start = ref_edit_end0;
+            size_t reference_length = cds_scan_length - alt_edit_end0;
+
+            if (reference_start > ctx->ref_cds_len ||
+                reference_length > ctx->ref_cds_len - reference_start) {
+                return DUCKVEP_CODING_CONTEXT_OUT_OF_RANGE;
+            }
+            status = delta_first_stop_scan_bytes(
+                &scan, ctx->ref_cds + reference_start, reference_length);
+            if (status < 0) return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+            if (status > 0) goto stop_found;
+        }
+    }
+    status = delta_first_stop_scan_bytes(
+        &scan, suffix, suffix_scan_length);
+    if (status < 0) return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+    if (status == 0) return DUCKVEP_CODING_CONTEXT_OK;
+
+stop_found:
+    *stop_position0 = scan.stop_position0;
+    *found = 1;
+    return DUCKVEP_CODING_CONTEXT_OK;
 }
 
 static uint8_t delta_context_raw_peptide_base(
@@ -3800,6 +4060,55 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
         delta->valid = 1u;
         delta_partial_codon_finalize(delta);
         return DUCKVEP_CONTEXT_DELTA_OK;
+    }
+    if (ctx->virtual_single_edit) {
+        size_t edit_start0;
+        size_t edit_length;
+
+        if (!ctx->has_single_edit || ctx->single_edit_cds_start == 0u ||
+            ctx->single_edit_ref_len != ctx->single_edit_alt_len ||
+            ctx->cds_changed == 0u) {
+            return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+        }
+        edit_start0 = (size_t)ctx->single_edit_cds_start - 1u;
+        edit_length = (size_t)ctx->single_edit_ref_len;
+        if (edit_start0 > ctx->ref_cds_len ||
+            edit_length > ctx->ref_cds_len - edit_start0) {
+            return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+        }
+        while (prefix < edit_length) {
+            char rb = delta_context_cds_base(
+                ctx, 0, edit_start0 + prefix);
+            char ab = delta_context_cds_base(
+                ctx, 1, edit_start0 + prefix);
+            if (rb == '\0' || ab == '\0') {
+                return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+            }
+            if (rb != ab) break;
+            prefix++;
+        }
+        if (prefix == edit_length) {
+            return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+        }
+        while (suffix < edit_length - prefix) {
+            size_t offset = edit_length - 1u - suffix;
+            char rb = delta_context_cds_base(
+                ctx, 0, edit_start0 + offset);
+            char ab = delta_context_cds_base(
+                ctx, 1, edit_start0 + offset);
+            if (rb == '\0' || ab == '\0') {
+                return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+            }
+            if (rb != ab) break;
+            suffix++;
+        }
+        change_end = edit_start0 + edit_length - suffix;
+        codon_start = edit_start0 + prefix;
+        lo_codon = codon_start / 3u;
+        hi_codon = (change_end - 1u) / 3u;
+        return delta_context_substitution_window(
+            ctx, lo_codon, hi_codon, tx_flags,
+            DELTA_SUBSTITUTION_EDIT_WINDOW, delta);
     }
     if (ctx->ref_cds_len == 0u || ctx->ref_cds_len != ctx->alt_cds_len ||
         ctx->cds_changed == 0u) {

@@ -1125,12 +1125,29 @@ The shared lower-level authorities are implemented: one prepared event defines s
 allele geometry, and one CDS edit-set authority drives sequence replay. Consequence uses
 those lower-level facts directly. Independent-event DNA/protein HGVS wraps them in
 `duckvep_transcript_edit_t`, an HGVS-facing carrier that additionally records VEP's
-endpoint-clipped transcript-slice coordinates. This wider carrier is not constructed in
-the consequence hot path, and the phased executor does not exist yet; the future phased
+endpoint-clipped transcript-slice coordinates. Transcript projection and CDS attachment
+are separate stages: the adapter builds the former for HGVSc and attaches the latter lazily
+for no-FASTA reference validation or HGVSp. This wider carrier is not constructed in the
+consequence hot path, and the phased executor does not exist yet; the future phased
 executor must consume the same prepared CDS edit set rather than acquire another
 allele-trimming or coordinate authority. Typed `c.`/`n.` facts, VEP's genomic-reference
 transcript 3-prime shift, typed `p.` facts, and allocation-free renderers have deterministic
 and randomized pure-C coverage.
+
+The kernel-opened model is the canonical prepared model exposed internally to the SQL
+adapter. It derives or validates one immutable first-stop coordinate for each coding CDS.
+The coding context exposes a single edit as a virtual alternate CDS, scans unchanged spans
+and the edited payload codon-by-codon, and borrows the cached reference stop when the edit
+cannot affect it. Transcript and protein strings share one worker-owned render buffer and
+normally need one render call. These are execution choices beneath the typed edit/fact
+contracts; neither HGVS nor the adapter gains a second transcript or sequence authority.
+
+The consequence predicate sidecar is only complete enough to skip a later delta when CDS
+length is unchanged or it positively records frameshift. A missing frameshift bit on a
+length-changing splice overlap is not negative evidence: the full delta must run. This
+condition is centralized in
+`duckvep_sequence_delta_consequence_flags_complete_for_hgvs(...)` so future local-CSQ and
+phased consumers cannot repeat the closed-world mistake.
 
 `duckvep_annotate_hgvs(...)` is the cumulative public adapter. It returns the compact
 consequence row plus DNA/protein suffixes and structured status/reason fields from the same
