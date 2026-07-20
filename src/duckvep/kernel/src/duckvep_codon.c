@@ -42,6 +42,61 @@ static int base2bit(char c) {
     return duckvep_dna_codon_code(c);
 }
 
+static char translate_codon_with_table(const char *codon3,
+                                       const char *amino_acids) {
+    int b1, b2, b3, idx;
+
+    if (codon3 == NULL || amino_acids == NULL) return 'X';
+    b1 = base2bit(codon3[0]);
+    b2 = base2bit(codon3[1]);
+    b3 = base2bit(codon3[2]);
+    if (b1 < 0 || b2 < 0 || b3 < 0) return 'X';
+    idx = (b1 << 4) | (b2 << 2) | b3;
+    return amino_acids[idx];
+}
+
+static duckvep_codon_result_t codon_change_from_amino_acids(
+    char aa_ref,
+    char aa_alt) {
+
+    duckvep_codon_result_t r;
+
+    r.aa_ref = aa_ref;
+    r.aa_alt = aa_alt;
+    if (r.aa_ref == 'X' || r.aa_alt == 'X') {
+        r.change = DUCKVEP_CODON_INVALID;
+    } else if (r.aa_ref == r.aa_alt) {
+        r.change = DUCKVEP_CODON_SYNONYMOUS;
+    } else if (r.aa_alt == '*') {
+        r.change = DUCKVEP_CODON_STOP_GAINED;
+    } else if (r.aa_ref == '*') {
+        r.change = DUCKVEP_CODON_STOP_LOST;
+    } else {
+        r.change = DUCKVEP_CODON_MISSENSE;
+    }
+    return r;
+}
+
+static int prepared_codon_index(const char *codon3, uint8_t *index_out) {
+    static const uint8_t code[8] = {0u, 2u, 0u, 1u, 0u, 0u, 0u, 3u};
+    unsigned char b0;
+    unsigned char b1;
+    unsigned char b2;
+
+    if (codon3 == NULL || index_out == NULL) return 0;
+    b0 = (unsigned char)codon3[0];
+    b1 = (unsigned char)codon3[1];
+    b2 = (unsigned char)codon3[2];
+    if (b0 == (unsigned char)'N' || b1 == (unsigned char)'N' ||
+        b2 == (unsigned char)'N') {
+        return 0;
+    }
+    *index_out = (uint8_t)((code[b0 & 7u] << 4u) |
+                           (code[b1 & 7u] << 2u) |
+                           code[b2 & 7u]);
+    return 1;
+}
+
 int duckvep_codon_table_supported(duckvep_codon_table_t table) {
     unsigned int id = (unsigned int)table;
     return id < sizeof AA_TABLES / sizeof AA_TABLES[0] &&
@@ -101,33 +156,35 @@ int duckvep_cds_first_stop_position1(
 }
 
 char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table) {
-    const char *tab;
-    int b1, b2, b3, idx;
-    if (codon3 == NULL || !duckvep_codon_table_supported(table)) return 'X';
-    b1 = base2bit(codon3[0]);
-    b2 = base2bit(codon3[1]);
-    b3 = base2bit(codon3[2]);
-    if (b1 < 0 || b2 < 0 || b3 < 0) return 'X';
-    idx = (b1 << 4) | (b2 << 2) | b3;
-    tab = duckvep_codon_table_amino_acids(table);
-    return tab[idx];
+    return translate_codon_with_table(
+        codon3, duckvep_codon_table_amino_acids(table));
 }
 
 duckvep_codon_result_t duckvep_codon_change(const char *ref3, const char *alt3,
                                             duckvep_codon_table_t table) {
-    duckvep_codon_result_t r;
-    r.aa_ref = duckvep_translate_codon(ref3, table);
-    r.aa_alt = duckvep_translate_codon(alt3, table);
-    if (r.aa_ref == 'X' || r.aa_alt == 'X') {
-        r.change = DUCKVEP_CODON_INVALID;
-    } else if (r.aa_ref == r.aa_alt) {
-        r.change = DUCKVEP_CODON_SYNONYMOUS;
-    } else if (r.aa_alt == '*') {
-        r.change = DUCKVEP_CODON_STOP_GAINED;
-    } else if (r.aa_ref == '*') {
-        r.change = DUCKVEP_CODON_STOP_LOST;
-    } else {
-        r.change = DUCKVEP_CODON_MISSENSE;
+    const char *amino_acids = duckvep_codon_table_amino_acids(table);
+
+    return codon_change_from_amino_acids(
+        translate_codon_with_table(ref3, amino_acids),
+        translate_codon_with_table(alt3, amino_acids));
+}
+
+duckvep_codon_result_t duckvep_codon_change_prepared(
+    const char *ref3,
+    const char *alt3,
+    duckvep_codon_table_t table) {
+
+    const char *amino_acids = duckvep_codon_table_amino_acids(table);
+    uint8_t ref_index;
+    uint8_t alt_index;
+    char aa_ref = 'X';
+    char aa_alt = 'X';
+
+    if (amino_acids != NULL) {
+        if (prepared_codon_index(ref3, &ref_index))
+            aa_ref = amino_acids[ref_index];
+        if (prepared_codon_index(alt3, &alt_index))
+            aa_alt = amino_acids[alt_index];
     }
-    return r;
+    return codon_change_from_amino_acids(aa_ref, aa_alt);
 }

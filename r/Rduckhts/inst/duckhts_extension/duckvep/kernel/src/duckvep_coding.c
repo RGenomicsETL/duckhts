@@ -109,7 +109,8 @@ duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     if (seq_ref != ref_tx) return fail_result(out, DUCKVEP_CODING_SNV_REF_MISMATCH);
 
     out->alt_codon[projection->codon_offset] = alt_tx;
-    cr = duckvep_codon_change(out->ref_codon, out->alt_codon, table);
+    cr = duckvep_codon_change_prepared(
+        out->ref_codon, out->alt_codon, table);
     out->aa_ref = cr.aa_ref;
     out->aa_alt = cr.aa_alt;
     out->change = cr.change;

@@ -75,6 +75,15 @@ char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table);
 duckvep_codon_result_t duckvep_codon_change(const char *ref3, const char *alt3,
                                             duckvep_codon_table_t table);
 
+/* Equivalent classifier for transcript-oriented codons already normalized to
+ * uppercase A/C/G/T/N by the validated model/edit path. N remains invalid; the
+ * caller must not pass any other byte. This avoids repeating six general ASCII
+ * normalization operations in the coding-SNV hot loop. */
+duckvep_codon_result_t duckvep_codon_change_prepared(
+    const char *ref3,
+    const char *alt3,
+    duckvep_codon_table_t table);
+
 #ifdef __cplusplus
 }
 #endif

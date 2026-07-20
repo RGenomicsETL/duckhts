@@ -77,6 +77,19 @@ for my $r (@rows) {
         $r->{so_enum}, $r->{SO_term}, $impact_c{$r->{impact}}, $r->{rank}, $r->{tier});
 }
 $text .= "};\n\n";
+$text .= "/* Maximum impact is a hot numeric-output projection. Generate one\n" .
+         " * mask per non-default impact from the same pinned metadata so the\n" .
+         " * runtime does not rescan every set SO bit. */\n";
+for my $impact (qw(HIGH MODERATE LOW)) {
+    my @impact_rows = grep { $_->{impact} eq $impact } @rows;
+    my $name = lc $impact;
+    $text .= "static const uint64_t k_so_impact_${name}_mask =\n";
+    for my $i (0 .. $#impact_rows) {
+        my $suffix = $i == $#impact_rows ? ";\n" : " |\n";
+        $text .= "    DUCKVEP_SO($impact_rows[$i]->{so_enum})$suffix";
+    }
+}
+$text .= "\n";
 $text .= "static const duckvep_so_bit_t k_so_render_order[DUCKVEP_SO_BIT_COUNT] = {\n";
 for my $r (sort { $a->{rank} <=> $b->{rank} } @rows) {
     $text .= "    $r->{so_enum},\n";

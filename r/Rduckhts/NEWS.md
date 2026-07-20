@@ -1,5 +1,14 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- speed up the bundled DuckVEP consequence and cumulative HGVS paths by reusing one
+  classification pass and compact prepared facts. Bundled annotation now preserves
+  deterministic `annotation_index` values across DuckDB vector and disjoint ordered
+  partition starts. The resident model remains immutable and shared: a pinned four-core
+  dense GRCh38 run at the default 5,000-base transcript distance produced the same
+  26,518,787-row fingerprint as one core, improved from 245,302 to 822,094 input
+  alleles/s, and added about 7.4 MiB peak RSS rather than copying the model per worker.
+  Tests also cover zero-, 10,000-, and 50,000-base transcript distances so the bundled
+  behavior is not specialized to the default distance
 - bundle `duckvep_annotate_hgvs(...)` for DBI workflows that need compact independent-event
   consequence rows together with transcript `c.`/`n.` and default-VEP protein `p.` HGVS
   suffixes, the applied 3-prime shift, and explicit supported/unresolved/not-applicable

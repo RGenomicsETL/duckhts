@@ -747,6 +747,32 @@ ORDER BY ord;
 1	feature_truncation&intergenic_variant	-
 2	feature_truncation	-
 
+# The fixed 5000-base StructuralVariationOverlap test does not independently
+# discover a transcript that the caller's directional source window excluded.
+# Executable indexed-cache VEP 116 returns only intergenic alleles when both BND
+# points are outside an isolated transcript under --distance 0, then two
+# duplicate downstream transcript alleles at --distance 5000 and 10000. The
+# public DuckVEP row union therefore has no transcript at zero and one stable
+# downstream row at either wider setting.
+query IITTTT
+WITH distances(distance) AS (
+  VALUES (0::UBIGINT), (5000::UBIGINT), (10000::UBIGINT)
+)
+SELECT distance,
+       coalesce(annotation.transcript_index::BIGINT, -1),
+       annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-'), coalesce(annotation.region, '-')
+FROM distances,
+LATERAL unnest(duckvep_annotate_breakend(
+  'structural', 1::UINTEGER, 5249::UBIGINT,
+  1::UINTEGER, 5250::UBIGINT, distance
+)) AS u(annotation)
+ORDER BY distance;
+----
+0	-1	sequence_variant	unresolved	no_feature_in_loaded_model	-
+5000	0	downstream_gene_variant	supported	-	downstream
+10000	0	downstream_gene_variant	supported	-	downstream
+
 query IT
 WITH events(ord, local_position) AS (
   VALUES

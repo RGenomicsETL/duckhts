@@ -65,6 +65,52 @@ static duckvep_hgvs_status_t hgvs_feature_is_inversion(
     return DUCKVEP_HGVS_OK;
 }
 
+static duckvep_hgvs_status_t hgvs_coordinate_from_cdna_bounds(
+    const duckvep_transcript_coordinate_t *coordinate,
+    int                                     coding,
+    uint32_t                                coding_start_cdna,
+    uint32_t                                coding_end_cdna,
+    duckvep_hgvs_coordinate_t              *out) {
+
+    duckvep_hgvs_coordinate_t result;
+
+    if (coordinate == NULL || out == NULL ||
+        coordinate->cdna_anchor1 == 0u ||
+        (coordinate->exonic != 0u && coordinate->intron_offset != 0)) {
+        return DUCKVEP_HGVS_INVALID_ARG;
+    }
+    memset(&result, 0, sizeof result);
+    result.intron_offset = coordinate->intron_offset;
+    if (!coding) {
+        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_N;
+        result.base = (int64_t)coordinate->cdna_anchor1;
+        *out = result;
+        return DUCKVEP_HGVS_OK;
+    }
+    if (coding_start_cdna == 0u || coding_end_cdna < coding_start_cdna) {
+        return DUCKVEP_HGVS_INVALID_PROJECTION;
+    }
+    if (coordinate->cdna_anchor1 > coding_end_cdna) {
+        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C_STAR;
+        result.base = (int64_t)coordinate->cdna_anchor1 -
+                      (int64_t)coding_end_cdna;
+    } else if (coordinate->cdna_anchor1 == coding_end_cdna &&
+               coordinate->intron_offset != 0) {
+        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C_STAR;
+        result.base = 0;
+    } else {
+        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C;
+        result.base = coordinate->cdna_anchor1 >= coding_start_cdna
+            ? (int64_t)coordinate->cdna_anchor1 -
+              (int64_t)coding_start_cdna + 1
+            : (int64_t)coordinate->cdna_anchor1 -
+              (int64_t)coding_start_cdna;
+        if (result.base == 0) return DUCKVEP_HGVS_INVALID_PROJECTION;
+    }
+    *out = result;
+    return DUCKVEP_HGVS_OK;
+}
+
 duckvep_hgvs_status_t duckvep_hgvs_coordinate_from_transcript(
     const duckvep_transcript_model_t      *transcripts,
     const duckvep_exon_model_t            *exons,
@@ -72,7 +118,6 @@ duckvep_hgvs_status_t duckvep_hgvs_coordinate_from_transcript(
     const duckvep_transcript_coordinate_t *coordinate,
     duckvep_hgvs_coordinate_t             *out) {
 
-    duckvep_hgvs_coordinate_t result;
     uint32_t coding_start_cdna;
     uint32_t coding_end_cdna;
     int coding;
@@ -88,46 +133,18 @@ duckvep_hgvs_status_t duckvep_hgvs_coordinate_from_transcript(
     }
     coding = transcripts->cds_start1[tx_idx] != 0u ||
              transcripts->cds_end1[tx_idx] != 0u;
-    if (!coding) {
-        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_N;
-        result.base = (int64_t)coordinate->cdna_anchor1;
-        result.intron_offset = coordinate->intron_offset;
-        *out = result;
-        return DUCKVEP_HGVS_OK;
-    }
     if (transcripts->cds_start1[tx_idx] == 0u ||
-        transcripts->cds_end1[tx_idx] == 0u ||
-        !duckvep_project_coding_cdna_bounds(
+        transcripts->cds_end1[tx_idx] == 0u) {
+        if (coding) return DUCKVEP_HGVS_INVALID_PROJECTION;
+        coding_start_cdna = 0u;
+        coding_end_cdna = 0u;
+    } else if (!duckvep_project_coding_cdna_bounds(
             transcripts, exons, tx_idx, &coding_start_cdna,
             &coding_end_cdna, NULL, NULL)) {
         return DUCKVEP_HGVS_INVALID_PROJECTION;
     }
-
-    result.intron_offset = coordinate->intron_offset;
-    if (coordinate->cdna_anchor1 > coding_end_cdna) {
-        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C_STAR;
-        result.base = (int64_t)coordinate->cdna_anchor1 -
-                      (int64_t)coding_end_cdna;
-    } else if (coordinate->cdna_anchor1 == coding_end_cdna &&
-               coordinate->intron_offset != 0) {
-        /* TranscriptVariationAllele::_get_cDNA_position turns an intronic
-         * offset anchored on the final CDS base into VEP's `*N` form. Keep
-         * base zero so the later renderer can reproduce its signed oddities. */
-        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C_STAR;
-        result.base = 0;
-    } else {
-        result.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C;
-        if (coordinate->cdna_anchor1 >= coding_start_cdna) {
-            result.base = (int64_t)coordinate->cdna_anchor1 -
-                          (int64_t)coding_start_cdna + 1;
-        } else {
-            result.base = (int64_t)coordinate->cdna_anchor1 -
-                          (int64_t)coding_start_cdna;
-        }
-        if (result.base == 0) return DUCKVEP_HGVS_INVALID_PROJECTION;
-    }
-    *out = result;
-    return DUCKVEP_HGVS_OK;
+    return hgvs_coordinate_from_cdna_bounds(
+        coordinate, coding, coding_start_cdna, coding_end_cdna, out);
 }
 
 duckvep_hgvs_status_t duckvep_hgvs_dna_fact_build(
@@ -137,8 +154,12 @@ duckvep_hgvs_status_t duckvep_hgvs_dna_fact_build(
     duckvep_hgvs_dna_fact_t          *out) {
 
     duckvep_hgvs_dna_fact_t result;
-    duckvep_coding_projection_t coding_projection;
     duckvep_hgvs_status_t status;
+    uint32_t coding_start_cdna;
+    uint32_t coding_end_cdna;
+    uint32_t cds_pos;
+    uint8_t phase_offset;
+    int coding;
 
     if (out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
     memset(out, 0, sizeof *out);
@@ -154,11 +175,26 @@ duckvep_hgvs_status_t duckvep_hgvs_dna_fact_build(
         return DUCKVEP_HGVS_INVALID_ARG;
     }
     memset(&result, 0, sizeof result);
-    status = duckvep_hgvs_coordinate_from_transcript(
-        transcripts, exons, edit->tx_idx, &edit->first, &result.first);
+    coding = transcripts->cds_start1[edit->tx_idx] != 0u ||
+             transcripts->cds_end1[edit->tx_idx] != 0u;
+    coding_start_cdna = 0u;
+    coding_end_cdna = 0u;
+    phase_offset = 0u;
+    if (coding &&
+        (transcripts->cds_start1[edit->tx_idx] == 0u ||
+         transcripts->cds_end1[edit->tx_idx] == 0u ||
+         !duckvep_project_coding_cdna_bounds(
+             transcripts, exons, edit->tx_idx, &coding_start_cdna,
+             &coding_end_cdna, NULL, &phase_offset))) {
+        return DUCKVEP_HGVS_INVALID_PROJECTION;
+    }
+    status = hgvs_coordinate_from_cdna_bounds(
+        &edit->first, coding, coding_start_cdna, coding_end_cdna,
+        &result.first);
     if (status != DUCKVEP_HGVS_OK) return status;
-    status = duckvep_hgvs_coordinate_from_transcript(
-        transcripts, exons, edit->tx_idx, &edit->last, &result.last);
+    status = hgvs_coordinate_from_cdna_bounds(
+        &edit->last, coding, coding_start_cdna, coding_end_cdna,
+        &result.last);
     if (status != DUCKVEP_HGVS_OK) return status;
 
     /* TranscriptVariationAllele::hgvs_transcript bypasses
@@ -172,12 +208,13 @@ duckvep_hgvs_status_t duckvep_hgvs_dna_fact_build(
         edit->feature_last.exonic != 0u &&
         edit->feature_first.genomic_pos1 != 0u &&
         edit->feature_first.genomic_pos1 ==
-            edit->feature_last.genomic_pos1 &&
-        duckvep_project_coding_base(
-            transcripts, exons, edit->tx_idx,
-            edit->feature_first.genomic_pos1, &coding_projection)) {
+            edit->feature_last.genomic_pos1 && coding &&
+        edit->feature_first.cdna_anchor1 >= coding_start_cdna &&
+        edit->feature_first.cdna_anchor1 <= coding_end_cdna) {
+        cds_pos = edit->feature_first.cdna_anchor1 - coding_start_cdna + 1u +
+            (uint32_t)phase_offset;
         result.first.kind = (uint8_t)DUCKVEP_HGVS_COORDINATE_C;
-        result.first.base = (int64_t)coding_projection.cds_pos;
+        result.first.base = (int64_t)cds_pos;
         result.first.intron_offset = 0;
         result.last = result.first;
     }

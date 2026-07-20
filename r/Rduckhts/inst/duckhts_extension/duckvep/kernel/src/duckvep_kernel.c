@@ -15,6 +15,7 @@
 #include "duckvep_model_internal.h"
 
 #include "duckvep_classify.h"
+#include "duckvep_annotation_internal.h"
 #include "duckvep_codon.h"
 #include "duckvep_delta.h"
 #include "duckvep_effect.h"
@@ -976,11 +977,14 @@ void duckvep_options_close(duckvep_options_t *options) {
 
 /* --------------------------------------------------------------- workspace --
  * Per-worker scratch. The point active set and current-span candidate slice are
- * each sized to the largest prepared contig transcript run. The delta scratch is
- * sized once from the model's maximum CDS length plus the maximum uint16_t small-
- * variant payload, enough for current single-variant MNV, shortening deletion, and
- * lengthening insertion CodingContext builds. Broader haplotype/grouped edit-set
- * paths will widen this policy explicitly when they are wired into production. */
+ * each sized to the largest prepared contig transcript run. Independent exon
+ * cursors keep raw-position SNVs monotone even when a neighboring non-SNV's
+ * trimmed differing-region start moves backward within the same DuckDB vector.
+ * The delta scratch is sized once from the model's maximum CDS length plus the
+ * maximum uint16_t small-variant payload, enough for current single-variant MNV,
+ * shortening deletion, and lengthening insertion CodingContext builds. Broader
+ * haplotype/grouped edit-set paths will widen this policy explicitly when they
+ * are wired into production. */
 struct duckvep_workspace {
     const duckvep_model_t    *model;
     uint32_t                *active;
@@ -988,16 +992,20 @@ struct duckvep_workspace {
     uint32_t                *interval_feature_active;
     uint32_t                *interval_feature_candidates;
     uint16_t                *point_exon_rank;
+    uint16_t                *span_exon_rank;
     size_t                   point_exon_count;
     size_t                   active_cap;
     size_t                   interval_feature_active_cap;
     uint16_t                 point_last_chrom;
     uint32_t                 point_last_pos;
-    uint32_t                 point_last_feature_start;
     int                      point_run_active;
+    uint16_t                 span_last_chrom;
+    uint32_t                 span_last_feature_start;
+    int                      span_run_active;
     duckvep_delta_scratch_t                 delta_scratch;
     duckvep_workspace_delta_route_stats_t   delta_route_stats;
     int                                     delta_route_stats_enabled;
+    int                                     force_generalized_annotation;
 };
 
 static void workspace_point_cursor_reset(duckvep_workspace_t *workspace) {
@@ -1006,18 +1014,39 @@ static void workspace_point_cursor_reset(duckvep_workspace_t *workspace) {
            workspace->point_exon_count * sizeof *workspace->point_exon_rank);
 }
 
-static int workspace_point_run_begin(
+static void workspace_span_cursor_reset(duckvep_workspace_t *workspace) {
+    if (workspace == NULL || workspace->span_exon_rank == NULL) return;
+    memset(workspace->span_exon_rank, 0xff,
+           workspace->point_exon_count * sizeof *workspace->span_exon_rank);
+}
+
+DUCKVEP_INTERNAL_API void duckvep_workspace_force_generalized_annotation(
+    duckvep_workspace_t *workspace,
+    int                   enabled) {
+
+    if (workspace == NULL) return;
+    workspace->force_generalized_annotation = enabled != 0;
+    workspace_point_cursor_reset(workspace);
+    workspace_span_cursor_reset(workspace);
+    workspace->point_run_active = 0;
+    workspace->span_run_active = 0;
+}
+
+static int workspace_sorted_runs_begin(
     duckvep_workspace_t           *workspace,
     const duckvep_variant_batch_t *variants,
-    const duckvep_event_t         *events) {
+    const duckvep_event_t         *events,
+    int                           *span_monotonic_out) {
 
     uint16_t first_chrom;
     uint32_t first_pos;
     uint32_t first_feature_start;
-    int monotonic = 1;
+    int point_monotonic = 1;
+    int span_monotonic = 1;
     size_t i;
     size_t last;
 
+    if (span_monotonic_out != NULL) *span_monotonic_out = 1;
     if (workspace == NULL || variants == NULL || variants->count == 0u) return 1;
     first_chrom = variants->chrom_id[0];
     first_pos = events != NULL ? events[0].start1 : variants->pos1[0];
@@ -1034,28 +1063,43 @@ static int workspace_point_run_begin(
             ? events[i].feature_start1 : variants->pos1[i];
         if (variants->chrom_id[i] < variants->chrom_id[i - 1u] ||
             (variants->chrom_id[i] == variants->chrom_id[i - 1u] &&
-             (current_pos < previous_pos ||
-              current_feature_start < previous_feature_start))) {
-            monotonic = 0;
-            break;
-        }
+             current_pos < previous_pos))
+            point_monotonic = 0;
+        if (variants->chrom_id[i] < variants->chrom_id[i - 1u] ||
+            (variants->chrom_id[i] == variants->chrom_id[i - 1u] &&
+             current_feature_start < previous_feature_start))
+            span_monotonic = 0;
     }
     if (workspace->point_run_active &&
         (first_chrom < workspace->point_last_chrom ||
          (first_chrom == workspace->point_last_chrom &&
-          (first_pos < workspace->point_last_pos ||
-           first_feature_start < workspace->point_last_feature_start)))) {
+          first_pos < workspace->point_last_pos))) {
         workspace_point_cursor_reset(workspace);
     }
-    if (!monotonic) workspace_point_cursor_reset(workspace);
+    if (!point_monotonic) workspace_point_cursor_reset(workspace);
+    if (workspace->span_run_active &&
+        (first_chrom < workspace->span_last_chrom ||
+         (first_chrom == workspace->span_last_chrom &&
+          first_feature_start < workspace->span_last_feature_start))) {
+        workspace_span_cursor_reset(workspace);
+    }
+    if (!span_monotonic) workspace_span_cursor_reset(workspace);
     last = variants->count - 1u;
     workspace->point_last_chrom = variants->chrom_id[last];
     workspace->point_last_pos = events != NULL
         ? events[last].start1 : variants->pos1[last];
-    workspace->point_last_feature_start = events != NULL
-        ? events[last].feature_start1 : variants->pos1[last];
     workspace->point_run_active = 1;
-    return monotonic;
+    workspace->span_last_chrom = variants->chrom_id[last];
+    workspace->span_last_feature_start = events != NULL
+        ? events[last].feature_start1 : variants->pos1[last];
+    workspace->span_run_active = 1;
+    /* Mode 1 is the minimum-instruction monotone cursor. Mode 2 repairs only
+     * the normalized-coordinate rewinds observed in this input vector. Both
+     * modes retain cursor traversal; the scans above reset stale state between
+     * independent runs. */
+    if (span_monotonic_out != NULL)
+        *span_monotonic_out = span_monotonic ? 1 : 2;
+    return point_monotonic ? 1 : 2;
 }
 
 static int size_add_checked(size_t a, size_t b, size_t *out) {
@@ -1175,17 +1219,19 @@ duckvep_status_t duckvep_workspace_open(
         interval_feature_cap, sizeof *w->interval_feature_candidates);
     if (model->transcripts.transcript_count > 0u) {
         w->point_exon_rank = (uint16_t *)malloc(point_bytes);
+        w->span_exon_rank = (uint16_t *)malloc(point_bytes);
     }
     if (w->active == NULL || w->candidates == NULL ||
         w->interval_feature_active == NULL ||
         w->interval_feature_candidates == NULL ||
         (model->transcripts.transcript_count > 0u &&
-         w->point_exon_rank == NULL)) {
+         (w->point_exon_rank == NULL || w->span_exon_rank == NULL))) {
         free(w->active);
         free(w->candidates);
         free(w->interval_feature_active);
         free(w->interval_feature_candidates);
         free(w->point_exon_rank);
+        free(w->span_exon_rank);
         free(w);
         return fail(error, DUCKVEP_ERR_INTERNAL, DVW_WS_OOM,
                     "workspace sweep scratch alloc failed");
@@ -1197,12 +1243,14 @@ duckvep_status_t duckvep_workspace_open(
         free(w->interval_feature_active);
         free(w->interval_feature_candidates);
         free(w->point_exon_rank);
+        free(w->span_exon_rank);
         free(w);
         return st;
     }
     w->model = model;
     w->point_exon_count = model->transcripts.transcript_count;
     workspace_point_cursor_reset(w);
+    workspace_span_cursor_reset(w);
     w->active_cap = cap;
     w->interval_feature_active_cap = interval_feature_cap;
     *out_workspace = w;
@@ -1216,6 +1264,7 @@ void duckvep_workspace_close(duckvep_workspace_t *workspace) {
         free(workspace->interval_feature_active);
         free(workspace->interval_feature_candidates);
         free(workspace->point_exon_rank);
+        free(workspace->span_exon_rank);
         workspace_delta_scratch_free(&workspace->delta_scratch);
         free(workspace);
     }
@@ -1267,9 +1316,40 @@ struct annotate_ctx {
     duckvep_delta_scratch_t       *delta_scratch;
     duckvep_workspace_delta_route_stats_t *delta_route_stats;
     duckvep_result_builder_t      *results;
+    duckvep_annotation_observer_fn observer;
+    void                          *observer_context;
     duckvep_status_t               status; /* first non-OK halts emission */
     int                            point_sorted_safe;
+    int                            span_sorted_safe;
+    /* Event normalization and feature-allele slicing are properties of the
+     * uploaded allele, not of each overlapping transcript. Dense loci often
+     * emit dozens of transcript rows per allele, so prepare these facts once
+     * and reuse them until candidate traversal advances to the next variant. */
+    uint32_t                       prepared_variant_idx;
+    duckvep_event_t                prepared_event;
+    const uint8_t                 *prepared_feature_ref;
+    const uint8_t                 *prepared_feature_alt;
+    uint16_t                       prepared_feature_ref_length;
+    uint16_t                       prepared_feature_alt_length;
+    int                            prepared_have_feature_alleles;
 };
+
+static void annotate_ctx_prepare_variant(
+    struct annotate_ctx *ctx,
+    uint32_t             variant_idx) {
+
+    if (ctx == NULL || ctx->prepared_variant_idx == variant_idx) return;
+    ctx->prepared_variant_idx = variant_idx;
+    ctx->prepared_event = ctx->events[variant_idx];
+    ctx->prepared_feature_ref = NULL;
+    ctx->prepared_feature_alt = NULL;
+    ctx->prepared_feature_ref_length = 0u;
+    ctx->prepared_feature_alt_length = 0u;
+    ctx->prepared_have_feature_alleles = duckvep_event_feature_alleles(
+        ctx->variants, variant_idx, &ctx->prepared_event,
+        &ctx->prepared_feature_ref, &ctx->prepared_feature_ref_length,
+        &ctx->prepared_feature_alt, &ctx->prepared_feature_alt_length);
+}
 
 static int insertion_placement_uses_right_flank(
     const duckvep_transcript_model_t *transcripts,
@@ -1522,6 +1602,178 @@ static int breakend_endpoint_in_directional_window(
     return 1;
 }
 
+/* A one-base event far outside the outermost splice reach can only emit the
+ * strand-relative upstream/downstream term for this transcript. Keep the SO
+ * rule program authoritative, but avoid constructing the full region, splice,
+ * sequence, and observer state for ordinary rich/compact output. HGVS keeps
+ * the generalized path because its observer consumes the complete trace. */
+static int annotate_far_directional_snv(
+    struct annotate_ctx       *c,
+    uint32_t                   variant_idx,
+    uint32_t                   tx_idx,
+    const duckvep_event_t     *event,
+    int                       *handled) {
+
+    const duckvep_transcript_model_t *tx = &c->model->transcripts;
+    duckvep_consequence_t *row;
+    uint32_t pos;
+    uint32_t distance;
+    uint32_t allowed;
+    uint32_t region;
+    uint64_t pre;
+    uint64_t cmask;
+    int upstream;
+
+    *handled = 0;
+    if (c->observer != NULL || c->workspace->force_generalized_annotation ||
+        event == NULL || event->kind != (uint8_t)DUCKVEP_KIND_SNV ||
+        event->feature_start1 != event->feature_end1 ||
+        c->model->point_ordered[tx_idx] == 0u) {
+        return 1;
+    }
+    pos = event->feature_start1;
+    if (pos >= tx->start1[tx_idx] && pos <= tx->end1[tx_idx]) return 1;
+    if (!duckvep_point_outside_splice_reach(
+            tx, &c->model->exons, (size_t)tx_idx, pos,
+            c->options->splice_region_exonic,
+            c->options->splice_region_intronic)) {
+        return 1;
+    }
+
+    *handled = 1;
+    if (c->delta_route_stats != NULL) {
+        c->delta_route_stats->far_directional_snv++;
+    }
+    upstream = tx->strand[tx_idx] >= 0
+        ? pos < tx->start1[tx_idx]
+        : pos > tx->end1[tx_idx];
+    if (pos < tx->start1[tx_idx]) {
+        distance = tx->start1[tx_idx] - pos;
+    } else {
+        distance = pos - tx->end1[tx_idx];
+    }
+    allowed = upstream ? c->options->upstream_dist
+                       : c->options->downstream_dist;
+    if (distance > allowed) return 1;
+
+    region = upstream ? (uint32_t)DUCKVEP_REGION_UPSTREAM
+                      : (uint32_t)DUCKVEP_REGION_DOWNSTREAM;
+    pre = upstream ? DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM)
+                   : DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM);
+    pre |= tx->cds_start1[tx_idx] != 0u
+        ? DUCKVEP_PRE(DUCKVEP_PRE_CODING)
+        : DUCKVEP_PRE(DUCKVEP_PRE_NONCODING);
+    cmask = duckvep_effect_eval(pre);
+    if (cmask == 0u) cmask = DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+
+    if (c->results->count >= c->results->capacity) {
+        c->status = DUCKVEP_ERR_RESULT_FULL;
+        return 0;
+    }
+    row = &c->results->rows[c->results->count++];
+    memset(row, 0, sizeof *row);
+    row->variant_idx = variant_idx;
+    row->tx_idx = tx_idx;
+    row->overlap_object_kind =
+        (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
+    row->consequence_mask = cmask;
+    row->region_mask = region;
+    row->impact = (uint8_t)duckvep_so_impact(cmask);
+    row->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_NOT_APPLICABLE;
+    row->nmd_prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
+    row->cdna_pos = -1;
+    row->cds_pos = -1;
+    row->protein_pos = -1;
+    return 1;
+}
+
+/* A sorted SNV strictly inside a transcript but outside CDS and every exact
+ * splice predicate has no sequence, structural, insertion/deletion, or NMD
+ * prediction work left.  Finalize the already-classified topology through the
+ * generated VEP rule program and emit the compact kernel row directly.  Keep
+ * miRNA and frameshift-intron transcripts on the generalized path because
+ * their VEP predicates consult additional event or mapper state. */
+static int annotate_simple_point_snv_classified(
+    struct annotate_ctx       *c,
+    uint32_t                   variant_idx,
+    uint32_t                   tx_idx,
+    const duckvep_event_t     *event,
+    const duckvep_region_state_t *region_state,
+    const duckvep_splice_state_t *splice,
+    int                       *handled) {
+
+    const duckvep_transcript_model_t *tx = &c->model->transcripts;
+    duckvep_consequence_t *row;
+    uint64_t pre;
+    uint64_t cmask;
+    int coding;
+    int noncoding_exon;
+
+    *handled = 0;
+    if (c->observer != NULL || event == NULL || region_state == NULL ||
+        splice == NULL ||
+        event->kind != (uint8_t)DUCKVEP_KIND_SNV ||
+        !region_state->within_feature || region_state->overlaps_cds ||
+        region_state->within_frameshift_intron || splice->any ||
+        (tx->flags[tx_idx] & (uint64_t)DUCKVEP_TX_BIOTYPE_MIRNA) != 0u) {
+        return 1;
+    }
+    *handled = 1;
+    if (c->delta_route_stats != NULL) {
+        c->delta_route_stats->simple_point_snv++;
+    }
+
+    /* This is the scalar projection of effect_ctx_set_topology + finalize for
+     * an ordinary within-transcript SNV with no CDS, splice, miRNA, structural,
+     * or length-change facts. The generated rule evaluator remains the SO
+     * authority; the optimized-vs-generalized property compares every emitted
+     * row over arbitrary sorted scenes. */
+    coding = tx->cds_start1[tx_idx] != 0u;
+    pre = coding ? DUCKVEP_PRE(DUCKVEP_PRE_CODING)
+                 : DUCKVEP_PRE(DUCKVEP_PRE_NONCODING);
+    if (region_state->overlaps_utr5)
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_UTR5);
+    if (region_state->overlaps_utr3)
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_UTR3);
+    if (!coding && region_state->overlaps_exon)
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_EXON);
+    if (region_state->overlaps_intron)
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_INTRON);
+    if (splice->intronic)
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_INTRON);
+    if ((tx->flags[tx_idx] & (uint64_t)DUCKVEP_TX_BIOTYPE_NMD) != 0u)
+        pre |= DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NMD_TRANSCRIPT);
+    if (!coding) {
+        noncoding_exon = region_state->overlaps_exon &&
+            !region_state->complete_overlap_feature;
+        pre |= noncoding_exon
+            ? DUCKVEP_PRE(DUCKVEP_PRE_NONCODING_EXON)
+            : DUCKVEP_PRE(DUCKVEP_PRE_WITHIN_NONCODING_GENE);
+    }
+    cmask = duckvep_effect_eval(pre);
+    if (cmask == 0u) cmask = DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+
+    if (c->results->count >= c->results->capacity) {
+        c->status = DUCKVEP_ERR_RESULT_FULL;
+        return 0;
+    }
+    row = &c->results->rows[c->results->count++];
+    memset(row, 0, sizeof *row);
+    row->variant_idx = variant_idx;
+    row->tx_idx = tx_idx;
+    row->overlap_object_kind =
+        (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
+    row->consequence_mask = cmask;
+    row->region_mask = region_state->region_mask;
+    row->impact = (uint8_t)duckvep_so_impact(cmask);
+    row->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_NOT_APPLICABLE;
+    row->nmd_prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
+    row->cdna_pos = -1;
+    row->cds_pos = -1;
+    row->protein_pos = -1;
+    return 1;
+}
+
 /* The VEP-shaped per-candidate decision: fill the cheap facts (effect ctx),
  * escalate to the sequence delta ONLY for the CDS bucket (lazy), then evaluate the
  * static rule table. No biological special-casing lives here — every SO decision is
@@ -1543,9 +1795,11 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     int fwd;
     uint32_t dist;
     duckvep_variant_kind_t kind;
-    duckvep_event_t event;
+    const duckvep_event_t *event;
     duckvep_effect_ctx_t ectx;
     duckvep_sequence_delta_t delta;
+    duckvep_coding_context_t coding_context;
+    duckvep_variant_coding_context_status_t coding_context_status;
     duckvep_nmd_result_t nmd;
     uint64_t cmask;
     uint32_t consequence_flags;
@@ -1565,52 +1819,62 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     if (c->status != DUCKVEP_OK) return 0;
 
     tx = &c->model->transcripts;
-    event = c->events[variant_idx];
-    breakend = event.kind == (uint8_t)DUCKVEP_KIND_SV &&
-        event.sv_type == (uint8_t)DUCKVEP_SV_BREAKEND;
+    annotate_ctx_prepare_variant(c, variant_idx);
+    event = &c->prepared_event;
+    breakend = event->kind == (uint8_t)DUCKVEP_KIND_SV &&
+        event->sv_type == (uint8_t)DUCKVEP_SV_BREAKEND;
     if (breakend) {
         int local_admits;
 
         breakend_local_close = breakend_endpoint_close_to_transcript(
-            tx, (size_t)tx_idx, event.chrom_id, event.feature_start1);
-        breakend_mate_close = event.has_mate &&
+            tx, (size_t)tx_idx, event->chrom_id, event->feature_start1);
+        breakend_mate_close = event->has_mate &&
             breakend_endpoint_close_to_transcript(
-                tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1);
+                tx, (size_t)tx_idx, event->mate_chrom_id, event->mate_pos1);
         breakend_local_in_directional_window =
             breakend_endpoint_in_directional_window(
-                tx, (size_t)tx_idx, event.chrom_id, event.feature_start1,
+                tx, (size_t)tx_idx, event->chrom_id, event->feature_start1,
                 c->options);
         local_admits = breakend_local_close &&
             breakend_local_in_directional_window;
         breakend_mate_admits = breakend_mate_close &&
             breakend_endpoint_in_directional_window(
-                tx, (size_t)tx_idx, event.mate_chrom_id, event.mate_pos1,
+                tx, (size_t)tx_idx, event->mate_chrom_id, event->mate_pos1,
                 c->options);
         if (!local_admits && !breakend_mate_admits) return 1;
         breakend_local_defaults_intergenic = breakend_local_close &&
             !breakend_local_in_directional_window &&
             breakend_mate_admits;
     }
-    pos = event.start1;
-    topology_start1 = event.feature_start1;
-    topology_end1 = event.feature_end1;
-    have_feature_alleles = duckvep_event_feature_alleles(
-        c->variants, variant_idx, &event,
-        &feature_ref, &feature_ref_length,
-        &feature_alt, &feature_alt_length);
-    if (event.interbase) {
+    pos = event->start1;
+    topology_start1 = event->feature_start1;
+    topology_end1 = event->feature_end1;
+    have_feature_alleles = c->prepared_have_feature_alleles;
+    feature_ref = c->prepared_feature_ref;
+    feature_alt = c->prepared_feature_alt;
+    feature_ref_length = c->prepared_feature_ref_length;
+    feature_alt_length = c->prepared_feature_alt_length;
+    if (event->interbase) {
         /* Region placement for an insertion is transcript-relative, while its
          * splice geometry remains VEP's reversed feature interval P+1,P. */
-        topology_start1 = event.start1;
-        topology_end1 = event.start1;
+        topology_start1 = event->start1;
+        topology_end1 = event->start1;
         if (insertion_placement_uses_right_flank(
-                tx, &c->model->exons, (size_t)tx_idx, &event)) {
-            topology_start1 = duckvep_event_right_flank1(&event);
+                tx, &c->model->exons, (size_t)tx_idx, event)) {
+            topology_start1 = duckvep_event_right_flank1(event);
             topology_end1 = topology_start1;
         }
     }
     fwd = tx->strand[tx_idx] >= 0;
-    kind = (duckvep_variant_kind_t)event.kind;
+    kind = (duckvep_variant_kind_t)event->kind;
+
+    {
+        int handled;
+        int ok = annotate_far_directional_snv(
+            c, variant_idx, tx_idx, event, &handled);
+
+        if (!ok || handled) return ok;
+    }
 
     if (breakend && !breakend_local_in_directional_window) {
         duckvep_region_state_t region;
@@ -1628,30 +1892,46 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         memset(&splice, 0, sizeof splice);
         duckvep_effect_ctx_fill_classified(
             tx, variant_idx, (size_t)tx_idx,
-            event.feature_start1, event.feature_end1,
+            event->feature_start1, event->feature_end1,
             &region, &splice, &ectx);
     } else if (kind == DUCKVEP_KIND_SNV && c->point_sorted_safe &&
         c->model->point_ordered[tx_idx] &&
-        event.feature_start1 == event.feature_end1 &&
+        event->feature_start1 == event->feature_end1 &&
         (!have_feature_alleles ||
          (feature_ref_length == 1u && feature_alt_length == 1u))) {
-        duckvep_effect_ctx_fill_point_sorted(
-            tx, &c->model->exons, variant_idx, (size_t)tx_idx,
-            event.feature_start1,
+        duckvep_region_state_t region;
+        duckvep_splice_state_t splice;
+
+        duckvep_classify_point_sorted(
+            tx, &c->model->exons, (size_t)tx_idx,
+            event->feature_start1,
             c->options->splice_region_exonic,
             c->options->splice_region_intronic,
-            &c->workspace->point_exon_rank[tx_idx], &ectx);
+            (uint8_t)(c->point_sorted_safe == 2),
+            &c->workspace->point_exon_rank[tx_idx], &region, &splice);
         projection_exon_rank = c->workspace->point_exon_rank[tx_idx];
+        {
+            int handled;
+            int ok = annotate_simple_point_snv_classified(
+                c, variant_idx, tx_idx, event, &region, &splice, &handled);
+
+            if (!ok || handled) return ok;
+        }
+        duckvep_effect_ctx_fill_classified(
+            tx, variant_idx, (size_t)tx_idx,
+            event->feature_start1, event->feature_end1,
+            &region, &splice, &ectx);
     } else if (kind != DUCKVEP_KIND_SV && have_feature_alleles) {
-        int sorted_span = c->point_sorted_safe &&
+        int sorted_span = c->span_sorted_safe &&
             c->model->point_ordered[tx_idx];
-        uint16_t sorted_rank = c->workspace->point_exon_rank[tx_idx];
-        uint16_t *rank_io = event.interbase
-            ? &sorted_rank : &c->workspace->point_exon_rank[tx_idx];
+        uint16_t sorted_rank = c->workspace->span_exon_rank[tx_idx];
+        uint16_t *rank_io = event->interbase
+            ? &sorted_rank : &c->workspace->span_exon_rank[tx_idx];
         duckvep_region_state_t region = sorted_span
             ? duckvep_region_classify_span_sorted(
                 tx, &c->model->exons, (size_t)tx_idx,
                 topology_start1, topology_end1, 0u, 0u,
+                (uint8_t)(c->span_sorted_safe == 2),
                 rank_io)
             : duckvep_region_classify_span(
                 tx, &c->model->exons, (size_t)tx_idx,
@@ -1661,19 +1941,19 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
             projection_exon_rank = sorted_rank;
         }
         insertion_apply_region_boundaries(
-            tx, &c->model->exons, (size_t)tx_idx, &event,
+            tx, &c->model->exons, (size_t)tx_idx, event,
             sorted_span, sorted_rank, &region);
         duckvep_splice_state_t splice = sorted_span
             ? duckvep_splice_classify_differing_regions_sorted_with_windows(
                 tx, &c->model->exons, (size_t)tx_idx,
-                event.feature_start1,
+                event->feature_start1,
                 feature_ref, feature_ref_length,
                 feature_alt, feature_alt_length,
                 c->options->splice_region_exonic,
                 c->options->splice_region_intronic, sorted_rank)
             : duckvep_splice_classify_differing_regions_with_windows(
                 tx, &c->model->exons, (size_t)tx_idx,
-                event.feature_start1,
+                event->feature_start1,
                 feature_ref, feature_ref_length,
                 feature_alt, feature_alt_length,
                 c->options->splice_region_exonic,
@@ -1681,18 +1961,18 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         duckvep_effect_ctx_fill_classified(
             tx, variant_idx, (size_t)tx_idx,
             topology_start1, topology_end1, &region, &splice, &ectx);
-    } else if (kind == DUCKVEP_KIND_SV && event.interbase) {
+    } else if (kind == DUCKVEP_KIND_SV && event->interbase) {
         duckvep_region_state_t region = duckvep_region_classify_span(
             tx, &c->model->exons, (size_t)tx_idx,
             topology_start1, topology_end1, 0u, 0u);
         duckvep_splice_state_t splice;
 
         insertion_apply_region_boundaries(
-            tx, &c->model->exons, (size_t)tx_idx, &event,
+            tx, &c->model->exons, (size_t)tx_idx, event,
             0, UINT16_MAX, &region);
         splice = duckvep_splice_classify_span_with_windows(
             tx, &c->model->exons, (size_t)tx_idx,
-            event.feature_start1, event.feature_end1, event.interbase,
+            event->feature_start1, event->feature_end1, event->interbase,
             c->options->splice_region_exonic,
             c->options->splice_region_intronic);
         duckvep_effect_ctx_fill_classified(
@@ -1702,20 +1982,29 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         duckvep_effect_ctx_fill_geometry(
             tx, &c->model->exons, variant_idx, (size_t)tx_idx,
             topology_start1, topology_end1,
-            event.feature_start1, event.feature_end1,
-            event.interbase,
+            event->feature_start1, event->feature_end1,
+            event->interbase,
             c->options->splice_region_exonic,
             c->options->splice_region_intronic, &ectx);
     }
+    if (c->delta_route_stats != NULL) {
+        c->delta_route_stats->generalized_pair++;
+    }
     if (ectx.splice.splice_polypyrimidine &&
         event_overlaps_vep_stretched_exon(c->model, (size_t)tx_idx,
-                                          &event)) {
+                                          event)) {
         duckvep_effect_ctx_apply_exon_gate(&ectx, 1);
     }
-    has_partial_terminal_codon = c->model->has_seq &&
-        duckvep_transcript_has_partial_terminal_codon(
-            &c->model->seq, (size_t)tx_idx);
-    duckvep_effect_ctx_apply_event(tx, &ectx, &event);
+    has_partial_terminal_codon = 0;
+    if (c->model->has_seq && ectx.region_state.overlaps_cds &&
+        ectx.region_state.overlaps_utr3 && have_feature_alleles &&
+        feature_ref_length == feature_alt_length &&
+        (tx->flags[tx_idx] & (uint64_t)DUCKVEP_TX_CDS_END_NF) == 0u) {
+        has_partial_terminal_codon =
+            duckvep_transcript_has_partial_terminal_codon(
+                &c->model->seq, (size_t)tx_idx);
+    }
+    duckvep_effect_ctx_apply_event(tx, &ectx, event);
     if (kind == DUCKVEP_KIND_SV) {
         uint32_t translateable_cds_length =
             c->model->has_seq && c->model->seq.cds_length != NULL
@@ -1723,7 +2012,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         duckvep_sv_effect_t sv = duckvep_sv_effect_fill(
             tx, &c->model->exons, (size_t)tx_idx,
             translateable_cds_length,
-            &event, &ectx.region_state);
+            event, &ectx.region_state);
         duckvep_effect_ctx_apply_sv(&ectx, &sv);
     }
 
@@ -1749,8 +2038,8 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     /* The symmetric sweep halo admits candidates up to max(up,down); enforce the
      * directional up/downstream window here so an asymmetric config is honored. */
     if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM)) {
-        dist = fwd ? tx->start1[tx_idx] - event.feature_end1
-                   : event.feature_start1 - tx->end1[tx_idx];
+        dist = fwd ? tx->start1[tx_idx] - event->feature_end1
+                   : event->feature_start1 - tx->end1[tx_idx];
         if (dist > c->options->upstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
             breakend_local_defaults_intergenic = breakend_local_close;
@@ -1760,8 +2049,8 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                 ~(uint32_t)DUCKVEP_REGION_UPSTREAM;
         }
     } else if (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM)) {
-        dist = fwd ? event.feature_start1 - tx->end1[tx_idx]
-                   : tx->start1[tx_idx] - event.feature_end1;
+        dist = fwd ? event->feature_start1 - tx->end1[tx_idx]
+                   : tx->start1[tx_idx] - event->feature_end1;
         if (dist > c->options->downstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
             breakend_local_defaults_intergenic = breakend_local_close;
@@ -1772,51 +2061,70 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         }
     }
 
-    /* Only the CDS bucket needs a sequence delta. The dispatcher takes borrowed
-     * model views directly; the annotation sweep does not classify coding effects. */
-    memset(&delta, 0, sizeof delta);
-    if (kind != DUCKVEP_KIND_SV &&
-        (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) &&
-        !feature_mapping_blocks_peptide) {
-        const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
+    /* Reuse the sorted transcript exon cursor for every later projection, not
+     * only CDS mutation. HGVS consumes the same absolute hint for contained
+     * exon/UTR edits, while its projector independently verifies that the
+     * complete uploaded feature span still fits the exon. */
+    if (kind != DUCKVEP_KIND_SV && projection_exon_rank != UINT16_MAX &&
+        (c->observer != NULL ||
+         (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) != 0u)) {
         size_t hinted_exon;
 
-        if (projection_exon_rank != UINT16_MAX &&
-            sorted_exon_index_at_rank(
+        if (sorted_exon_index_at_rank(
                 tx, (size_t)tx_idx, projection_exon_rank, &hinted_exon) &&
             hinted_exon <= UINT32_MAX) {
             uint32_t exon_start = c->model->exons.start1[hinted_exon];
             uint32_t exon_end = c->model->exons.end1[hinted_exon];
             int contained;
 
-            if (event.interbase) {
-                uint32_t right1 = duckvep_event_right_flank1(&event);
-                contained = event.insertion_boundary0 >= exon_start &&
+            if (event->interbase) {
+                uint32_t right1 = duckvep_event_right_flank1(event);
+                contained = event->insertion_boundary0 >= exon_start &&
                             right1 <= exon_end;
-            } else if (event.ref_diff_length == 0u) {
+            } else if (event->ref_diff_length == 0u) {
                 contained = 0;
             } else {
-                uint64_t semantic_end = (uint64_t)event.start1 +
-                    (uint64_t)event.ref_diff_length - 1u;
-                contained = event.start1 >= exon_start &&
+                uint64_t semantic_end = (uint64_t)event->start1 +
+                    (uint64_t)event->ref_diff_length - 1u;
+                contained = event->start1 >= exon_start &&
                             semantic_end <= (uint64_t)exon_end;
             }
             if (contained) projection_exon_hint = (uint32_t)hinted_exon;
         }
+    }
+
+    /* Only the CDS bucket needs a sequence delta. The dispatcher takes borrowed
+     * model views directly; the annotation sweep does not classify coding effects. */
+    memset(&delta, 0, sizeof delta);
+    if (c->observer != NULL) {
+        memset(&coding_context, 0, sizeof coding_context);
+        coding_context_status =
+            DUCKVEP_VARIANT_CODING_CONTEXT_UNSUPPORTED_KIND;
+    }
+    if (kind != DUCKVEP_KIND_SV &&
+        (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) &&
+        !feature_mapping_blocks_peptide) {
+        const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
         cds_delta_attempted = 1;
         duckvep_sequence_delta_route_t route = DUCKVEP_DELTA_ROUTE_DIRECT;
-        duckvep_sequence_delta_fill_for_annotation_trace(kind, tx, &c->model->exons,
-                                                         seq, c->variants, variant_idx,
-                                                         (size_t)tx_idx, pos,
-                                                         tx->strand[tx_idx],
-                                                         c->delta_scratch,
-                                                         &event,
-                                                         ectx.region,
-                                                         projection_exon_hint,
-                                                         c->delta_route_stats != NULL ? &route : NULL,
-                                                         &delta);
+        if (c->observer != NULL) {
+            duckvep_sequence_delta_fill_for_annotation_observed(
+                kind, tx, &c->model->exons, seq, c->variants, variant_idx,
+                (size_t)tx_idx, pos, tx->strand[tx_idx], c->delta_scratch,
+                event, ectx.region, projection_exon_hint,
+                c->delta_route_stats != NULL ? &route : NULL, &delta,
+                &coding_context, &coding_context_status);
+        } else {
+            duckvep_sequence_delta_fill_for_annotation_trace(
+                kind, tx, &c->model->exons, seq, c->variants, variant_idx,
+                (size_t)tx_idx, pos, tx->strand[tx_idx], c->delta_scratch,
+                event, ectx.region, projection_exon_hint,
+                c->delta_route_stats != NULL ? &route : NULL, &delta);
+        }
         if (c->delta_route_stats != NULL) {
-            if (route == DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT) {
+            if (route == DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL) {
+                c->delta_route_stats->simple_indel++;
+            } else if (route == DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT) {
                 c->delta_route_stats->substitution_context++;
             } else if (route == DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT) {
                 c->delta_route_stats->boundary_context++;
@@ -1854,7 +2162,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     nmd.prediction = (uint8_t)DUCKVEP_NMD_NOT_APPLICABLE;
     nmd.escape_reasons = 0u;
     if ((cmask & DUCKVEP_NMD_ELIGIBLE_SO_MASK) != 0u) {
-        duckvep_nmd_predict(tx, &c->model->exons, (size_t)tx_idx, &event,
+        duckvep_nmd_predict(tx, &c->model->exons, (size_t)tx_idx, event,
                             cmask, cds_delta_attempted ? &delta : NULL, &nmd);
     }
 
@@ -1880,7 +2188,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     if ((consequence_flags &
          (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_START_LOST) != 0u &&
         !duckvep_project_feature_overlaps_start_codon_unshifted(
-            tx, &c->model->exons, (size_t)tx_idx, &event)) {
+            tx, &c->model->exons, (size_t)tx_idx, event)) {
         consequence_flags &=
             ~(uint32_t)DUCKVEP_CONSEQUENCE_FLAG_START_LOST;
     }
@@ -1902,6 +2210,24 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         row->cdna_pos = -1;
         row->cds_pos = -1;
         row->protein_pos = -1;
+    }
+    if (c->observer != NULL) {
+        duckvep_annotation_trace_t trace;
+
+        memset(&trace, 0, sizeof trace);
+        trace.event = event;
+        trace.delta = cds_delta_attempted ? &delta : NULL;
+        trace.coding_context =
+            coding_context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK
+                ? &coding_context : NULL;
+        trace.projection_exon_hint = projection_exon_hint;
+        trace.cds_delta_attempted = (uint8_t)cds_delta_attempted;
+        trace.coding_context_valid = (uint8_t)(
+            coding_context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK);
+        if (!c->observer(c->observer_context, c->variants, row, &trace)) {
+            c->status = DUCKVEP_ERR_INTERNAL;
+            return 0;
+        }
     }
     return 1;
 }
@@ -1948,6 +2274,11 @@ static int annotate_interval_feature(uint32_t variant_idx,
     row->cdna_pos = -1;
     row->cds_pos = -1;
     row->protein_pos = -1;
+    if (c->observer != NULL &&
+        !c->observer(c->observer_context, c->variants, row, NULL)) {
+        c->status = DUCKVEP_ERR_INTERNAL;
+        return 0;
+    }
     return 1;
 }
 
@@ -2134,6 +2465,9 @@ struct duckvep_annotate_cursor {
     int                            have_slice;
     int                            done;
     int                            point_sorted_safe;
+    int                            span_sorted_safe;
+    duckvep_annotation_observer_fn observer;
+    void                          *observer_context;
     duckvep_event_t                events[];
 };
 
@@ -2237,8 +2571,12 @@ duckvep_status_t duckvep_annotate_cursor_open(
     cursor->variants = &cursor->variants_view;
     cursor->options = options;
     cursor->workspace = workspace;
-    cursor->point_sorted_safe = workspace_point_run_begin(
-        workspace, variants, cursor->events);
+    cursor->point_sorted_safe = workspace_sorted_runs_begin(
+        workspace, variants, cursor->events, &cursor->span_sorted_safe);
+    if (workspace->force_generalized_annotation) {
+        cursor->point_sorted_safe = 0;
+        cursor->span_sorted_safe = 0;
+    }
     duckvep_sweep_cursor_init(&cursor->transcript_sweep, cursor->variants,
                               &model->transcripts, options->halo,
                               workspace->active, workspace->active_cap,
@@ -2276,6 +2614,16 @@ int duckvep_annotate_cursor_done(const duckvep_annotate_cursor_t *cursor) {
 
 void duckvep_annotate_cursor_close(duckvep_annotate_cursor_t *cursor) {
     free(cursor);
+}
+
+void duckvep_annotate_cursor_set_observer(
+    duckvep_annotate_cursor_t      *cursor,
+    duckvep_annotation_observer_fn  observer,
+    void                           *observer_context) {
+
+    if (cursor == NULL) return;
+    cursor->observer = observer;
+    cursor->observer_context = observer_context;
 }
 
 duckvep_status_t duckvep_annotate_cursor_seed(
@@ -2357,8 +2705,12 @@ static duckvep_status_t annotate_cursor_fill(
                               ? &cursor->workspace->delta_route_stats
                               : NULL;
     ctx.results = results;
+    ctx.observer = cursor->observer;
+    ctx.observer_context = cursor->observer_context;
     ctx.status = DUCKVEP_OK;
     ctx.point_sorted_safe = cursor->point_sorted_safe;
+    ctx.span_sorted_safe = cursor->span_sorted_safe;
+    ctx.prepared_variant_idx = UINT32_MAX;
 
     for (;;) {
         if (!cursor->have_slice) {
@@ -2404,7 +2756,9 @@ static duckvep_status_t annotate_cursor_fill(
         }
 
         while (cursor->tx_pos < cursor->tx_count) {
-            if (!annotate_pair(cursor->variant_idx, cursor->tx_indices[cursor->tx_pos], &ctx)) {
+            if (!annotate_pair(
+                    cursor->variant_idx,
+                    cursor->tx_indices[cursor->tx_pos], &ctx)) {
                 if (ctx.status == DUCKVEP_ERR_RESULT_FULL) {
                     return fail(error, DUCKVEP_ERR_RESULT_FULL, DVW_ANN_RESULT_FULL,
                                 "result builder capacity exhausted; cursor paused");
@@ -2544,6 +2898,7 @@ static duckvep_status_t annotate_explicit_pairs(
     }
 
     workspace_point_cursor_reset(workspace);
+    workspace_span_cursor_reset(workspace);
     ctx.model = model;
     ctx.variants = variants;
     ctx.events = events;
@@ -2553,8 +2908,12 @@ static duckvep_status_t annotate_explicit_pairs(
     ctx.delta_route_stats = workspace->delta_route_stats_enabled
                               ? &workspace->delta_route_stats : NULL;
     ctx.results = results;
+    ctx.observer = NULL;
+    ctx.observer_context = NULL;
     ctx.status = DUCKVEP_OK;
     ctx.point_sorted_safe = 0;
+    ctx.span_sorted_safe = 0;
+    ctx.prepared_variant_idx = UINT32_MAX;
     for (pair = 0u; pair < pair_count; pair++) {
         int ok = interval_features
             ? annotate_interval_feature(pair_variant_idx[pair],

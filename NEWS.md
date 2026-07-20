@@ -1,6 +1,22 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- accelerate the shared DuckVEP consequence/HGVS execution path without adding a
+  second biological authority: pack splice facts, use generated SO-impact masks,
+  prepare normalized codons once, and let the cumulative HGVS adapter observe the
+  consequence pass instead of replaying transcript classification. Stable active-set
+  compaction now preserves `annotation_index` across DuckDB vector and disjoint ordered
+  partition starts. The dense-region benchmark driver records arbitrary transcript
+  distances, explicit ordered input partitions, full public-row fingerprints, corpus
+  receipts, and composition. On 517,097 annotation-dense GRCh38 alleles, one pinned
+  i5-13500 P core emits 26,518,787 compact rows in 2.108 seconds at the 5,000-base
+  distance (245,302 alleles/s); four pinned P cores and four disjoint ordered partitions
+  take 0.629 seconds (822,094 alleles/s) with the same fingerprint. Peak RSS rises only
+  from 5,446,068 to 5,453,660 KiB because workers share the immutable resident model.
+  Zero-, 10,000-, and 50,000-base runs retain exact one/four-worker fingerprints; the
+  50,000-base case emits 88,784,213 rows with an 8.4 MiB four-worker RSS premium. The
+  fixed VEP breakend overlap-allele admission distance remains separate from the
+  caller-configurable transcript search distance
 - add `duckvep_annotate_hgvs(...)`, a cumulative independent-event surface that returns
   the compact consequence row together with transcript `c.`/`n.` and default-VEP protein
   `p.` HGVS suffixes, structured status/reason fields, and the applied transcript-direction

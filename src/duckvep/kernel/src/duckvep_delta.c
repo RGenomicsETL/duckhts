@@ -4877,7 +4877,7 @@ static void sequence_delta_fill_mnv(
     }
 
     table = (duckvep_codon_table_t)seq->codon_table[tx_idx];
-    cr = duckvep_codon_change(ref_codon, alt_codon, table);
+    cr = duckvep_codon_change_prepared(ref_codon, alt_codon, table);
     if (cr.change & DUCKVEP_CODON_INVALID) return;
     aa_ref = (char)delta_sequence_reference_peptide_base(
         seq, tx_idx, first.protein_pos, (uint8_t)cr.aa_ref,
@@ -4987,7 +4987,7 @@ static void sequence_delta_fill_mnv_cross_codon(
     if (codon_start[1] - codon_start[0] != 3u) return;
 
     for (j = 0u; j < 2u; j++) {
-        duckvep_codon_result_t cr = duckvep_codon_change(
+        duckvep_codon_result_t cr = duckvep_codon_change_prepared(
             ref_codon[j], alt_codon[j], table);
         if (cr.change & DUCKVEP_CODON_INVALID) return;
         if (cr.aa_ref == '*' || cr.aa_alt == '*') return;
@@ -5125,6 +5125,258 @@ static void sequence_delta_fill_indel_frameshift(
     delta->valid = 1u;
 }
 
+/* Read one alternate-CDS byte from a single projected edit without building a
+ * CodingContext. `position0` addresses the complete alternate CDS. */
+static char delta_simple_edit_alt_cds_base(
+    const uint8_t                  *ref_cds,
+    size_t                          ref_cds_len,
+    const duckvep_haplotype_edit_t *edit,
+    int8_t                          transcript_strand,
+    size_t                          position0) {
+
+    size_t start0;
+    size_t ref_position;
+    int8_t orientation;
+
+    if (ref_cds == NULL || edit == NULL || edit->cds_start == 0u ||
+        (edit->alt_len != 0u && edit->alt == NULL)) {
+        return '\0';
+    }
+    start0 = (size_t)edit->cds_start - 1u;
+    if (position0 < start0) {
+        return position0 < ref_cds_len
+            ? delta_norm_base((char)ref_cds[position0]) : '\0';
+    }
+    if (position0 - start0 < (size_t)edit->alt_len) {
+        orientation = edit->variant_strand == transcript_strand
+            ? (int8_t)1 : (int8_t)-1;
+        return delta_feature_allele_base(
+            edit->alt, (size_t)edit->alt_len, position0 - start0,
+            orientation);
+    }
+    ref_position = position0 - (size_t)edit->alt_len +
+                   (size_t)edit->ref_len;
+    return ref_position < ref_cds_len
+        ? delta_norm_base((char)ref_cds[ref_position]) : '\0';
+}
+
+/* Scan the exact codon-rounded VEP peptide window for a single edit. This is
+ * deliberately narrower than CodingContext: it proves only whether the
+ * reference and alternate windows are unambiguous and contain a stop. */
+static int delta_simple_indel_stop_scan(
+    const uint8_t                  *ref_cds,
+    size_t                          ref_cds_len,
+    const duckvep_haplotype_edit_t *edit,
+    int8_t                          transcript_strand,
+    duckvep_codon_table_t           table,
+    int                            *ref_has_stop,
+    int                            *alt_has_stop) {
+
+    size_t start0;
+    size_t alt_cds_len;
+    size_t peptide_offset;
+    size_t nt_offset;
+    size_t ref_nt_length;
+    size_t alt_nt_length;
+    size_t i;
+    int64_t length_diff;
+
+    if (ref_has_stop != NULL) *ref_has_stop = 0;
+    if (alt_has_stop != NULL) *alt_has_stop = 0;
+    if (ref_cds == NULL || edit == NULL || ref_has_stop == NULL ||
+        alt_has_stop == NULL || edit->cds_start == 0u ||
+        !duckvep_codon_table_supported(table)) {
+        return 0;
+    }
+    start0 = (size_t)edit->cds_start - 1u;
+    if (start0 > ref_cds_len ||
+        (size_t)edit->ref_len > ref_cds_len - start0 ||
+        (size_t)edit->alt_len >
+            SIZE_MAX - (ref_cds_len - (size_t)edit->ref_len)) {
+        return 0;
+    }
+    alt_cds_len = ref_cds_len - (size_t)edit->ref_len +
+                  (size_t)edit->alt_len;
+    length_diff = (int64_t)edit->alt_len - (int64_t)edit->ref_len;
+    peptide_offset = start0 / 3u;
+    nt_offset = peptide_offset * 3u;
+    if (edit->ref_len != 0u) {
+        size_t last0 = start0 + (size_t)edit->ref_len - 1u;
+        ref_nt_length = (last0 / 3u + 1u) * 3u - nt_offset;
+    } else if (edit->cds_start > 1u) {
+        size_t last0 = (size_t)edit->cds_start - 2u;
+        size_t last_codon = last0 / 3u;
+        ref_nt_length = last_codon >= peptide_offset
+            ? (last_codon - peptide_offset + 1u) * 3u : 0u;
+    } else {
+        ref_nt_length = 0u;
+    }
+    if (ref_nt_length > ref_cds_len - nt_offset) {
+        ref_nt_length = ref_cds_len - nt_offset;
+    }
+    if (length_diff < 0) {
+        uint64_t decrease = (uint64_t)(-(length_diff + 1)) + 1u;
+        if (decrease > (uint64_t)ref_nt_length) return 0;
+        alt_nt_length = ref_nt_length - (size_t)decrease;
+    } else {
+        if ((uint64_t)length_diff > (uint64_t)SIZE_MAX - ref_nt_length) {
+            return 0;
+        }
+        alt_nt_length = ref_nt_length + (size_t)length_diff;
+    }
+    if (nt_offset > alt_cds_len) return 0;
+    if (alt_nt_length > alt_cds_len - nt_offset) {
+        alt_nt_length = alt_cds_len - nt_offset;
+    }
+
+    for (i = 0u; i < ref_nt_length; i++) {
+        char base = delta_norm_base((char)ref_cds[nt_offset + i]);
+        if (base != 'A' && base != 'C' && base != 'G' && base != 'T') {
+            return 0;
+        }
+    }
+    for (i = 0u; i < alt_nt_length; i++) {
+        char base = delta_simple_edit_alt_cds_base(
+            ref_cds, ref_cds_len, edit, transcript_strand, nt_offset + i);
+        if (base != 'A' && base != 'C' && base != 'G' && base != 'T') {
+            return 0;
+        }
+    }
+    for (i = 0u; i + 3u <= ref_nt_length; i += 3u) {
+        char codon[4];
+        codon[0] = (char)ref_cds[nt_offset + i];
+        codon[1] = (char)ref_cds[nt_offset + i + 1u];
+        codon[2] = (char)ref_cds[nt_offset + i + 2u];
+        codon[3] = '\0';
+        if (duckvep_translate_codon(codon, table) == '*') *ref_has_stop = 1;
+    }
+    for (i = 0u; i + 3u <= alt_nt_length; i += 3u) {
+        char codon[4];
+        codon[0] = delta_simple_edit_alt_cds_base(
+            ref_cds, ref_cds_len, edit, transcript_strand, nt_offset + i);
+        codon[1] = delta_simple_edit_alt_cds_base(
+            ref_cds, ref_cds_len, edit, transcript_strand, nt_offset + i + 1u);
+        codon[2] = delta_simple_edit_alt_cds_base(
+            ref_cds, ref_cds_len, edit, transcript_strand, nt_offset + i + 2u);
+        codon[3] = '\0';
+        if (duckvep_translate_codon(codon, table) == '*') *alt_has_stop = 1;
+    }
+    return 1;
+}
+
+/* Equivalence-proven fast path for ordinary CDS-body indels. It deliberately
+ * excludes start/terminal-CDS interactions, translation SeqEdits, ambiguous
+ * local sequence, non-codon-aligned in-frame edits, and insertion spans that
+ * could reach the terminal stop under VEP's CIL predicate. Those states retain
+ * the generalized CodingContext authority. */
+static int sequence_delta_try_simple_indel(
+    duckvep_variant_kind_t            kind,
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    int8_t                            strand,
+    duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          exon_hint,
+    duckvep_sequence_delta_t         *delta) {
+
+    const uint8_t *cds_seq;
+    size_t cds_len;
+    duckvep_event_t event_storage;
+    const duckvep_event_t *event;
+    duckvep_haplotype_edit_t edit;
+    duckvep_cds_edit_status_t edit_status;
+    int64_t length_diff;
+    uint64_t edit_end;
+    int ref_has_stop;
+    int alt_has_stop;
+    int frameshift;
+    int inframe_insertion;
+    int inframe_deletion;
+
+    if (delta == NULL || transcripts == NULL || seq == NULL ||
+        scratch == NULL || scratch->edits == NULL ||
+        scratch->edits_cap < 1u ||
+        seq->codon_table == NULL ||
+        (kind != DUCKVEP_KIND_INS && kind != DUCKVEP_KIND_DEL &&
+         kind != DUCKVEP_KIND_INDEL) ||
+        tx_idx >= transcripts->transcript_count ||
+        !delta_cds_slice(seq, tx_idx, &cds_seq, &cds_len) ||
+        cds_len < 12u || cds_len > UINT32_MAX) {
+        return 0;
+    }
+    event = prepared_event;
+    if (event == NULL) {
+        if (v == NULL || (size_t)variant_idx >= v->count) return 0;
+        duckvep_event_load(v, variant_idx, &event_storage);
+        event = &event_storage;
+    }
+    if (seq->peptide_edit_offset != NULL &&
+        seq->peptide_edit_offset[tx_idx] !=
+            seq->peptide_edit_offset[tx_idx + 1u]) {
+        return 0;
+    }
+    edit_status = duckvep_variant_cds_edit_build_event(
+        transcripts, exons, seq, v, variant_idx, tx_idx, strand,
+        event, exon_hint, &edit);
+    if (edit_status != DUCKVEP_CDS_EDIT_OK || edit.cds_start == 0u ||
+        edit.ref_len == edit.alt_len) {
+        return 0;
+    }
+    length_diff = (int64_t)edit.alt_len - (int64_t)edit.ref_len;
+    frameshift = (length_diff % 3) != 0;
+    inframe_insertion = kind == DUCKVEP_KIND_INS && edit.ref_len == 0u &&
+        edit.alt_len != 0u && (edit.alt_len % 3u) == 0u &&
+        edit.cds_start > 1u && ((edit.cds_start - 1u) % 3u) == 0u;
+    inframe_deletion = kind == DUCKVEP_KIND_DEL && edit.alt_len == 0u &&
+        edit.ref_len != 0u && (edit.ref_len % 3u) == 0u &&
+        ((edit.cds_start - 1u) % 3u) == 0u;
+    if (!frameshift && !inframe_insertion && !inframe_deletion) return 0;
+
+    edit_end = edit.ref_len == 0u
+        ? (uint64_t)edit.cds_start
+        : (uint64_t)edit.cds_start + (uint64_t)edit.ref_len - 1u;
+    if (edit.cds_start <= 3u || edit_end > (uint64_t)cds_len - 3u) {
+        return 0;
+    }
+    if (edit.ref_len == 0u &&
+        (uint64_t)edit.cds_start + (uint64_t)edit.alt_len >=
+            (uint64_t)cds_len - 2u) {
+        return 0;
+    }
+    if (!delta_simple_indel_stop_scan(
+            cds_seq, cds_len, &edit, strand,
+            (duckvep_codon_table_t)seq->codon_table[tx_idx],
+            &ref_has_stop, &alt_has_stop) || ref_has_stop) {
+        return 0;
+    }
+    if (!frameshift && alt_has_stop) return 0;
+
+    memset(delta, 0, sizeof *delta);
+    delta->cdna_pos = -1;
+    delta->cds_pos = -1;
+    delta->protein_pos = (int32_t)(
+        ((uint64_t)edit.cds_start - 1u) / 3u + 1u);
+    delta->frameshift = (uint8_t)frameshift;
+    delta->stop_gained = (uint8_t)(frameshift && alt_has_stop);
+    delta->inframe_insertion = (uint8_t)inframe_insertion;
+    delta->inframe_deletion = (uint8_t)inframe_deletion;
+    delta->valid = 1u;
+    delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
+    if (!event->interbase && event->ref_diff_length != 0u &&
+        event->feature_start1 == event->start1 &&
+        (uint64_t)event->start1 + (uint64_t)event->ref_diff_length - 1u ==
+            (uint64_t)event->feature_end1) {
+        delta->nmd_early_cds_fact = edit_end <= 101u
+            ? (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101
+            : (uint8_t)DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101;
+    }
+    return 1;
+}
+
 static void delta_capture_single_edit_nmd_fact(
     const duckvep_coding_context_t *ctx,
     const duckvep_event_t          *event,
@@ -5169,10 +5421,16 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
     duckvep_delta_scratch_t          *scratch,
     const duckvep_event_t            *prepared_event,
     uint32_t                          exon_hint,
-    duckvep_sequence_delta_t         *delta) {
+    duckvep_sequence_delta_t         *delta,
+    duckvep_coding_context_t         *context_out,
+    duckvep_variant_coding_context_status_t *context_status_out) {
 
     if (delta == NULL) return;
     memset(delta, 0, sizeof *delta);
+    if (context_out != NULL) memset(context_out, 0, sizeof *context_out);
+    if (context_status_out != NULL) {
+        *context_status_out = DUCKVEP_VARIANT_CODING_CONTEXT_UNSUPPORTED_KIND;
+    }
     delta->sequence_status = delta_transcript_has_sequence(seq, tx_idx)
         ? (uint8_t)DUCKVEP_SEQUENCE_UNSUPPORTED_EDIT
         : (uint8_t)DUCKVEP_SEQUENCE_MISSING;
@@ -5183,7 +5441,8 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
         break;
     case DUCKVEP_KIND_MNV:
         if (scratch != NULL) {
-            duckvep_coding_context_t ctx;
+            duckvep_coding_context_t local_context;
+            duckvep_coding_context_t *context;
             duckvep_variant_coding_context_status_t context_status;
             duckvep_context_delta_status_t delta_status;
             uint64_t tx_flags = 0u;
@@ -5197,20 +5456,22 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
                 tx_idx < transcripts->transcript_count) {
                 tx_flags = transcripts->flags[tx_idx];
             }
+            context = context_out != NULL ? context_out : &local_context;
             context_status = duckvep_variant_coding_context_build_prepared(
                 transcripts, exons, seq, v, variant_idx, tx_idx, strand,
                 prepared_event, exon_hint, scratch->edits, scratch->edits_cap,
                 scratch->alt_cds, scratch->alt_cds_cap,
                 scratch->ref_peptide, scratch->ref_peptide_cap,
-                scratch->alt_peptide, scratch->alt_peptide_cap, &ctx);
+                scratch->alt_peptide, scratch->alt_peptide_cap, context);
+            if (context_status_out != NULL) *context_status_out = context_status;
             delta->sequence_status = delta_sequence_status_from_context(context_status);
             if (context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
-                delta_status = duckvep_coding_context_delta_fill(&ctx, tx_flags, delta);
+                delta_status = duckvep_coding_context_delta_fill(context, tx_flags, delta);
                 if (delta_status != DUCKVEP_CONTEXT_DELTA_OK) {
                     delta->sequence_status =
                         delta_sequence_status_from_delta(delta_status);
                 } else {
-                    delta_capture_single_edit_nmd_fact(&ctx, prepared_event, delta);
+                    delta_capture_single_edit_nmd_fact(context, prepared_event, delta);
                 }
             }
         } else {
@@ -5227,7 +5488,8 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
     case DUCKVEP_KIND_DEL:
     case DUCKVEP_KIND_INDEL:
         if (scratch != NULL) {
-            duckvep_coding_context_t ctx;
+            duckvep_coding_context_t local_context;
+            duckvep_coding_context_t *context;
             duckvep_variant_coding_context_status_t context_status;
             duckvep_context_delta_status_t delta_status;
             uint64_t tx_flags = 0u;
@@ -5235,20 +5497,22 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
                 tx_idx < transcripts->transcript_count) {
                 tx_flags = transcripts->flags[tx_idx];
             }
+            context = context_out != NULL ? context_out : &local_context;
             context_status = duckvep_variant_coding_context_build_prepared(
                 transcripts, exons, seq, v, variant_idx, tx_idx, strand,
                 prepared_event, exon_hint, scratch->edits, scratch->edits_cap,
                 scratch->alt_cds, scratch->alt_cds_cap,
                 scratch->ref_peptide, scratch->ref_peptide_cap,
-                scratch->alt_peptide, scratch->alt_peptide_cap, &ctx);
+                scratch->alt_peptide, scratch->alt_peptide_cap, context);
+            if (context_status_out != NULL) *context_status_out = context_status;
             delta->sequence_status = delta_sequence_status_from_context(context_status);
             if (context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
-                delta_status = duckvep_coding_context_delta_fill(&ctx, tx_flags, delta);
+                delta_status = duckvep_coding_context_delta_fill(context, tx_flags, delta);
                 if (delta_status != DUCKVEP_CONTEXT_DELTA_OK) {
                     delta->sequence_status =
                         delta_sequence_status_from_delta(delta_status);
                 } else {
-                    delta_capture_single_edit_nmd_fact(&ctx, prepared_event, delta);
+                    delta_capture_single_edit_nmd_fact(context, prepared_event, delta);
                 }
             }
         } else {
@@ -5283,7 +5547,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_with_scratch(
 
     duckvep_sequence_delta_fill_with_scratch_event(
         kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
-        scratch, NULL, UINT32_MAX, delta);
+        scratch, NULL, UINT32_MAX, delta, NULL, NULL);
 }
 
 DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill(
@@ -5303,7 +5567,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill(
                                              delta);
 }
 
-DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
+DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
     duckvep_variant_kind_t            kind,
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -5318,12 +5582,33 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     uint32_t                          classified_region_mask,
     uint32_t                          exon_hint,
     duckvep_sequence_delta_route_t   *route,
-    duckvep_sequence_delta_t         *delta) {
+    duckvep_sequence_delta_t         *delta,
+    duckvep_coding_context_t         *context_out,
+    duckvep_variant_coding_context_status_t *context_status_out) {
 
     int wholly_cds;
 
     if (route != NULL) *route = DUCKVEP_DELTA_ROUTE_DIRECT;
     if (delta == NULL) return;
+    if (context_out != NULL) memset(context_out, 0, sizeof *context_out);
+    if (context_status_out != NULL) {
+        *context_status_out = DUCKVEP_VARIANT_CODING_CONTEXT_UNSUPPORTED_KIND;
+    }
+
+    /* A one-base substitution cannot enter either length-changing mapper-gap
+     * predicate or the uploaded multi-base substitution context. Route it to
+     * the same SNV delta authority immediately. Dense coding regions otherwise
+     * repeat three impossible-shape probes for every transcript consequence. */
+    if (kind == DUCKVEP_KIND_SNV && v != NULL &&
+        v->ref_length != NULL && v->alt_length != NULL &&
+        variant_idx < v->count && v->ref_length[variant_idx] == 1u &&
+        v->alt_length[variant_idx] == 1u) {
+        memset(delta, 0, sizeof *delta);
+        sequence_delta_fill_snv(
+            transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
+            prepared_event, exon_hint, delta);
+        return;
+    }
 
     /* Annotation has already classified the uploaded feature span. A CDS-only
      * span cannot cross a cDNA gap or either CDS/UTR boundary, so do not repeat
@@ -5350,12 +5635,22 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
         return;
     }
 
-    if (duckvep_feature_substitution_context_fill(
+    {
+        duckvep_feature_substitution_result_t feature_result;
+
+        feature_result = duckvep_feature_substitution_context_fill(
             transcripts, exons, seq, v, variant_idx, tx_idx, strand,
-            scratch, prepared_event, exon_hint, NULL, delta) !=
-        DUCKVEP_FEATURE_SUBSTITUTION_NOT_APPLICABLE) {
-        if (route != NULL) *route = DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT;
-        return;
+            scratch, prepared_event, exon_hint,
+            context_out, delta);
+        if (feature_result != DUCKVEP_FEATURE_SUBSTITUTION_NOT_APPLICABLE) {
+            if (route != NULL) *route = DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT;
+            if (feature_result == DUCKVEP_FEATURE_SUBSTITUTION_CONTEXT_READY) {
+                if (context_status_out != NULL) {
+                    *context_status_out = DUCKVEP_VARIANT_CODING_CONTEXT_OK;
+                }
+            }
+            return;
+        }
     }
 
     /* SNV (and any non-coding-editable kind, or a call with no edit-set scratch) takes the
@@ -5364,7 +5659,18 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
                             kind != DUCKVEP_KIND_INS && kind != DUCKVEP_KIND_INDEL)) {
         duckvep_sequence_delta_fill_with_scratch_event(
             kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
-            NULL, prepared_event, exon_hint, delta);
+            NULL, prepared_event, exon_hint, delta, NULL, NULL);
+        return;
+    }
+
+    /* Rich/compact consequence projection does not consume CodingContext.
+     * Resolve the equivalence-proven ordinary indel subset directly and retain
+     * the generalized interpreter for HGVS observers and every excluded state. */
+    if (context_out == NULL &&
+        sequence_delta_try_simple_indel(
+            kind, transcripts, exons, seq, v, variant_idx, tx_idx, strand,
+            scratch, prepared_event, exon_hint, delta)) {
+        if (route != NULL) *route = DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL;
         return;
     }
 
@@ -5380,7 +5686,31 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     }
     duckvep_sequence_delta_fill_with_scratch_event(
         kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
-        scratch, prepared_event, exon_hint, delta);
+        scratch, prepared_event, exon_hint, delta,
+        context_out, context_status_out);
+}
+
+DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
+    duckvep_variant_kind_t            kind,
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    int8_t                            strand,
+    duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          classified_region_mask,
+    uint32_t                          exon_hint,
+    duckvep_sequence_delta_route_t   *route,
+    duckvep_sequence_delta_t         *delta) {
+
+    duckvep_sequence_delta_fill_for_annotation_observed(
+        kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
+        scratch, prepared_event, classified_region_mask, exon_hint, route,
+        delta, NULL, NULL);
 }
 
 DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation(

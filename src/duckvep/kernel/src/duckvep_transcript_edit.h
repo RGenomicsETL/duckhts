@@ -106,6 +106,21 @@ duckvep_transcript_edit_project_prepared(
     const duckvep_event_t            *event,
     duckvep_transcript_edit_t        *out);
 
+/* Sorted-annotation form. `exon_hint` is an absolute model exon index already
+ * proved by the consequence classifier to contain the edit. The projector
+ * uses it only when both semantic and uploaded feature coordinates fit that
+ * exon; all other shapes retain the exhaustive transcript-coordinate path. */
+DUCKVEP_INTERNAL_API duckvep_transcript_edit_status_t
+duckvep_transcript_edit_project_prepared_hint(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_variant_batch_t    *variants,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                          exon_hint,
+    duckvep_transcript_edit_t        *out);
+
 /* Attach the CDS edit-set extension to an already projected transcript edit.
  * The caller-owned scratch remains borrowed through edit->cds_edits until it
  * is reused. The returned status is also stored in edit->cds_status. */

@@ -363,6 +363,7 @@ typedef enum duckvep_context_delta_status {
 
 typedef enum duckvep_sequence_delta_route {
     DUCKVEP_DELTA_ROUTE_DIRECT = 0,
+    DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL,
     DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT,
     DUCKVEP_DELTA_ROUTE_DEL_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INS_CONTEXT,
@@ -660,5 +661,31 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     uint32_t                          exon_hint,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta);
+
+/* Synchronous traced form used by consumers that must reuse the exact coding
+ * interpretation before worker scratch is recycled. `context_out` borrows the
+ * supplied scratch and is valid only until the next delta build on that
+ * workspace. A successful context is reported independently of whether the
+ * consequence delta is valid, because HGVS and later phased edit-set consumers
+ * may still need the translated state. Ordinary annotation calls the wrapper
+ * above and pays no trace-copy cost. */
+DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
+    duckvep_variant_kind_t            kind,
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    int8_t                            strand,
+    duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          classified_region_mask,
+    uint32_t                          exon_hint,
+    duckvep_sequence_delta_route_t   *route,
+    duckvep_sequence_delta_t         *delta,
+    duckvep_coding_context_t         *context_out,
+    duckvep_variant_coding_context_status_t *context_status_out);
 
 #endif /* DUCKVEP_DELTA_H */
