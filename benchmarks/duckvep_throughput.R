@@ -56,6 +56,13 @@ op <- add_option(
 op <- add_option(op, "--output", default = "rich")
 op <- add_option(
   op,
+  "--reference-fasta",
+  dest = "reference_fasta",
+  default = "",
+  help = "indexed FASTA required by --output hgvs [%default]"
+)
+op <- add_option(
+  op,
   "--regulatory",
   action = "store_true",
   default = FALSE,
@@ -93,8 +100,8 @@ if (opt$passes < 1L) {
 if (opt$threads < 1L) {
   die("--threads must be positive")
 }
-if (!opt$output %in% c("rich", "compact")) {
-  die("--output must be rich or compact")
+if (!opt$output %in% c("rich", "compact", "hgvs")) {
+  die("--output must be rich, compact, or hgvs")
 }
 if (!opt$event_mode %in% c("small", "breakend")) {
   die("--event-mode must be small or breakend")
@@ -103,7 +110,29 @@ production <- nzchar(opt$database)
 if (isTRUE(opt$regulatory) && !production) {
   die("--regulatory requires a production --database")
 }
-inputs <- c(opt$extension, if (production) opt$database else opt$model_sql)
+if (identical(opt$output, "hgvs") && !identical(opt$event_mode, "small")) {
+  die("--output hgvs currently requires --event-mode small")
+}
+if (identical(opt$output, "hgvs") && isTRUE(opt$regulatory)) {
+  die("--output hgvs cannot be combined with --regulatory")
+}
+if (identical(opt$output, "hgvs") && !nzchar(opt$reference_fasta)) {
+  if (production) {
+    die("--output hgvs with --database requires --reference-fasta")
+  }
+  opt$reference_fasta <- file.path(
+    root,
+    "test",
+    "data",
+    "duckvep",
+    "minimal.fa"
+  )
+}
+inputs <- c(
+  opt$extension,
+  if (production) opt$database else opt$model_sql,
+  if (nzchar(opt$reference_fasta)) opt$reference_fasta
+)
 missing <- inputs[!file.exists(inputs)]
 if (length(missing) != 0L) {
   die("missing input(s):\n{paste(missing, collapse = '\n')}")
@@ -158,20 +187,44 @@ if (production) {
     con,
     "SELECT column_name FROM duckdb_columns() WHERE table_name = 'bench_regions'"
   )$column_name
+  region_name_column <- if ("seq_region_name" %in% region_columns) {
+    "seq_region_name"
+  } else if ("name" %in% region_columns) {
+    "name"
+  } else {
+    ""
+  }
   transcript_columns <- dbGetQuery(
     con,
     "SELECT column_name FROM duckdb_columns() WHERE table_name = 'bench_transcripts'"
   )$column_name
   complete_coverage <- "sequence_length" %in% region_columns
+  if (
+    identical(opt$output, "hgvs") &&
+      (!complete_coverage || !nzchar(region_name_column))
+  ) {
+    die(
+      "--output hgvs requires sequence_length and seq_region_name or name ",
+      "in bench_regions"
+    )
+  }
   complete_flanks <- all(
     c("pre_cds_sequence", "post_cds_sequence") %in% transcript_columns
   )
   load_queries <- c(
-    paste(
-      "SELECT seq_region",
-      if (complete_coverage) ", sequence_length" else "",
-      "FROM bench_regions ORDER BY seq_region"
-    ),
+    if (identical(opt$output, "hgvs")) {
+      paste(
+        "SELECT seq_region, sequence_length,",
+        region_name_column,
+        "AS seq_region_name FROM bench_regions ORDER BY seq_region"
+      )
+    } else {
+      paste(
+        "SELECT seq_region",
+        if (complete_coverage) ", sequence_length" else "",
+        "FROM bench_regions ORDER BY seq_region"
+      )
+    },
     paste(
       "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
       "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
@@ -249,10 +302,19 @@ if (production) {
   region_count <- 1
   transcript_count <- 1
   exon_count <- 2
-  complete_coverage <- FALSE
-  complete_flanks <- TRUE
+  complete_coverage <- identical(opt$output, "hgvs")
+  complete_flanks <- FALSE
   load_queries <- c(
-    "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region",
+    if (identical(opt$output, "hgvs")) {
+      paste(
+        "SELECT seq_region,",
+        "CASE seq_region WHEN 0 THEN 1 ELSE 260 END::UBIGINT AS sequence_length,",
+        "name AS seq_region_name",
+        "FROM duckvep_sequence_regions ORDER BY seq_region"
+      )
+    } else {
+      "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region"
+    },
     paste(
       "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
       "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
@@ -289,6 +351,12 @@ if (!is.null(interval_feature_query)) {
   load_options <- c(
     load_options,
     glue("interval_feature_query := {sql_q(interval_feature_query)}")
+  )
+}
+if (nzchar(opt$reference_fasta)) {
+  load_options <- c(
+    load_options,
+    glue("reference_fasta := {sql_q(normalizePath(opt$reference_fasta))}")
   )
 }
 if (complete_coverage) {
@@ -340,11 +408,22 @@ annotation_query <- function(n) {
     }
   } else if (opt$output == "compact") {
     "duckvep_annotate_compact"
+  } else if (opt$output == "hgvs") {
+    "duckvep_annotate_hgvs"
   } else {
     "duckvep_annotate"
   }
   checksum <- if (opt$output == "compact") {
     "CAST(sum(annotation.consequence_mask) AS VARCHAR)"
+  } else if (opt$output == "hgvs") {
+    paste(
+      "CAST(sum(",
+      "length(coalesce(annotation.transcript_hgvs, '')) +",
+      "length(coalesce(annotation.protein_hgvs, '')) +",
+      "length(annotation.transcript_hgvs_status) +",
+      "length(annotation.protein_hgvs_status)",
+      ") AS VARCHAR)"
+    )
   } else {
     "CAST(sum(length(annotation.consequence)) AS VARCHAR)"
   }
@@ -431,6 +510,16 @@ cpu <- if (file.exists("/proc/cpuinfo")) {
 } else {
   Sys.info()[["machine"]]
 }
+cpu_affinity <- if (file.exists("/proc/self/status")) {
+  line <- grep(
+    "^Cpus_allowed_list[[:space:]]*:",
+    readLines("/proc/self/status"),
+    value = TRUE
+  )
+  if (length(line)) trimws(sub("^[^:]+:", "", line[[1L]])) else "unknown"
+} else {
+  "unknown"
+}
 
 median_seconds <- stats::median(elapsed)
 row <- data.frame(
@@ -460,10 +549,13 @@ row <- data.frame(
   annotated_rows = as.integer(check$annotated_rows[[1L]]),
   checksum_kind = if (opt$output == "compact") {
     "consequence_mask_sum"
+  } else if (opt$output == "hgvs") {
+    "hgvs_text_status_bytes"
   } else {
     "consequence_text_bytes"
   },
   checksum_value = check$checksum[[1L]],
+  cpu_affinity = cpu_affinity,
   stringsAsFactors = FALSE
 )
 
@@ -483,12 +575,15 @@ if (nzchar(opt$history)) {
     if (!identical(names(old), names(row))) {
       die("history schema does not match: {opt$history}")
     }
+    same_affinity <- !is.na(old$cpu_affinity) &
+      old$cpu_affinity == row$cpu_affinity
     same <- old$source_revision == row$source_revision &
       old$host == row$host &
       old$workload == row$workload &
       old$output_mode == row$output_mode &
       old$threads == row$threads &
-      old$variants == row$variants
+      old$variants == row$variants &
+      same_affinity
     rows <- rbind(old[!same, , drop = FALSE], row)
   }
   rows <- rows[

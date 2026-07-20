@@ -330,7 +330,8 @@ load_model <- function(
   transcript_coverage_complete = FALSE,
   mature_mirna_query = NULL,
   peptide_edit_query = NULL,
-  interval_feature_query = NULL
+  interval_feature_query = NULL,
+  reference_fasta = NULL
 ) {
   arguments <- paste(
     vapply(
@@ -370,6 +371,16 @@ load_model <- function(
       sep = ", "
     )
   }
+  if (!is.null(reference_fasta)) {
+    arguments <- paste(
+      arguments,
+      paste0(
+        "reference_fasta := ",
+        as.character(dbQuoteString(con, reference_fasta))
+      ),
+      sep = ", "
+    )
+  }
   if (transcript_coverage_complete) {
     arguments <- paste(
       arguments,
@@ -386,6 +397,413 @@ load_model <- function(
     )
   )
 }
+
+hgvs_reference <- system.file(
+  "extdata",
+  "fixture_ref.fa",
+  package = "Rduckhts",
+  mustWork = TRUE
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_regions AS SELECT",
+    "1::UINTEGER seq_region, 50000::UBIGINT sequence_length,",
+    "'11'::VARCHAR seq_region_name"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 150::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "0::UBIGINT transcript_flags, NULL::UBIGINT cds_start,",
+    "NULL::UBIGINT cds_end, NULL::BLOB cds_sequence,",
+    "NULL::UTINYINT codon_table, NULL::BLOB pre_cds_sequence,",
+    "NULL::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_exons AS SELECT",
+    "0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+    "150::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "51::UBIGINT exon_cdna_end, -1::TINYINT phase,",
+    "-1::TINYINT end_phase"
+  )
+)
+expect_true(
+  load_model(
+    "r-hgvs",
+    c(
+      "SELECT * FROM duckvep_r_hgvs_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = hgvs_reference
+  )$loaded
+)
+hgvs_annotation <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 124::UBIGINT, 'A', 'G'),",
+    "(2, 124::UBIGINT, 'A', 'AC'))",
+    "SELECT ord, a.transcript_hgvs, a.hgvs_shift,",
+    "a.transcript_hgvs_status, a.protein_hgvs_status",
+    "FROM variants, LATERAL unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) AS u(a) ORDER BY ord"
+  )
+)
+expect_identical(hgvs_annotation$transcript_hgvs, c("n.25A>G", "n.25_26insC"))
+expect_equal(hgvs_annotation$hgvs_shift, c(0, 0))
+expect_identical(
+  hgvs_annotation$transcript_hgvs_status,
+  c("supported", "supported")
+)
+expect_identical(
+  hgvs_annotation$protein_hgvs_status,
+  c("not_applicable", "not_applicable")
+)
+
+# A BGZF reference exercises the retained .gzi descriptor and worker-local
+# compressed-reference handle through the public DBI surface.
+compressed_reference <- tempfile("duckvep-reference-", fileext = ".fa.gz")
+compressed_index <- paste0(compressed_reference, ".fai")
+compressed_gzi <- paste0(compressed_reference, ".gzi")
+expect_true(
+  rduckhts_bgzip(
+    con,
+    hgvs_reference,
+    output_path = compressed_reference,
+    threads = 1L,
+    keep = TRUE,
+    overwrite = TRUE
+  )$success
+)
+expect_true(
+  rduckhts_fasta_index(
+    con,
+    compressed_reference,
+    index_path = compressed_index
+  )$success
+)
+expect_true(file.exists(compressed_gzi))
+expect_true(
+  load_model(
+    "r-hgvs-bgzf",
+    c(
+      "SELECT * FROM duckvep_r_hgvs_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = compressed_reference
+  )$loaded
+)
+compressed_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs, a.transcript_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-bgzf', 1::UINTEGER, 124::UBIGINT,",
+    "'A', 'G', 0::UBIGINT)) u(a)"
+  )
+)
+expect_identical(compressed_annotation$transcript_hgvs, "n.25A>G")
+expect_identical(compressed_annotation$transcript_hgvs_status, "supported")
+
+# A named model pins the reference files validated at load. Worker-local faidx
+# handles must not silently reopen replacement content.
+identity_reference <- tempfile("duckvep-reference-", fileext = ".fa")
+identity_index <- paste0(identity_reference, ".fai")
+expect_true(file.copy(hgvs_reference, identity_reference))
+expect_true(file.copy(paste0(hgvs_reference, ".fai"), identity_index))
+expect_true(
+  load_model(
+    "r-hgvs-reference-identity",
+    c(
+      "SELECT * FROM duckvep_r_hgvs_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = identity_reference
+  )$loaded
+)
+identity_connection <- try(
+  file(identity_reference, open = "r+b"),
+  silent = TRUE
+)
+identity_query <- paste(
+  "SELECT a.transcript_hgvs_status FROM unnest(duckvep_annotate_hgvs(",
+  "'r-hgvs-reference-identity', 1::UINTEGER, 124::UBIGINT,",
+  "'A', 'G', 0::UBIGINT)) u(a)"
+)
+if (inherits(identity_connection, "try-error")) {
+  # Windows retains deny-write handles and the still-pinned source remains usable.
+  expect_identical(.Platform$OS.type, "windows")
+  expect_identical(
+    dbGetQuery(con, identity_query)$transcript_hgvs_status,
+    "supported"
+  )
+} else {
+  seek(identity_connection, where = 4L, origin = "start")
+  writeBin(charToRaw("C"), identity_connection)
+  close(identity_connection)
+  expect_error(
+    dbGetQuery(con, identity_query),
+    pattern = "reference FASTA or index changed after model load"
+  )
+}
+
+# Linux path replacement cannot redirect a later worker open. Windows keeps a
+# deny-write/delete handle on the final resolved path. Other POSIX systems use
+# an independently opened resolved path and reject an observed replacement.
+replacement_reference <- tempfile("duckvep-reference-replacement-", fileext = ".fa")
+replacement_index <- paste0(replacement_reference, ".fai")
+replacement_reference_moved <- paste0(replacement_reference, ".loaded")
+replacement_index_moved <- paste0(replacement_index, ".loaded")
+expect_true(file.copy(hgvs_reference, replacement_reference))
+expect_true(file.copy(paste0(hgvs_reference, ".fai"), replacement_index))
+expect_true(
+  load_model(
+    "r-hgvs-reference-replacement",
+    c(
+      "SELECT * FROM duckvep_r_hgvs_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = replacement_reference
+  )$loaded
+)
+replacement_moved <- file.rename(
+  replacement_reference,
+  replacement_reference_moved
+)
+if (.Platform$OS.type == "windows") {
+  expect_false(replacement_moved)
+} else {
+  expect_true(replacement_moved)
+  expect_true(file.rename(replacement_index, replacement_index_moved))
+  expect_true(file.copy(replacement_reference_moved, replacement_reference))
+  expect_true(file.copy(replacement_index_moved, replacement_index))
+  replacement_connection <- file(replacement_reference, open = "r+b")
+  # fixture_ref.fa position 124 is byte offset 128 after its header/newline.
+  seek(replacement_connection, where = 128L, origin = "start")
+  writeBin(charToRaw("C"), replacement_connection)
+  close(replacement_connection)
+  replacement_query <- paste(
+    "SELECT a.transcript_hgvs, a.transcript_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-reference-replacement', 1::UINTEGER, 124::UBIGINT,",
+    "'A', 'G', 0::UBIGINT)) u(a)"
+  )
+  if (identical(Sys.info()[["sysname"]], "Linux")) {
+    replacement_annotation <- dbGetQuery(con, replacement_query)
+    expect_identical(replacement_annotation$transcript_hgvs, "n.25A>G")
+    expect_identical(
+      replacement_annotation$transcript_hgvs_status,
+      "supported"
+    )
+  } else {
+    expect_error(
+      dbGetQuery(con, replacement_query),
+      pattern = "reference FASTA or index changed after model load"
+    )
+  }
+}
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_coding_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 150::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "3::UBIGINT transcript_flags, 100::UBIGINT cds_start,",
+    "150::UBIGINT cds_end, repeat('A', 51)::BLOB cds_sequence,",
+    "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence,",
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_coding_exons AS SELECT",
+    "0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+    "150::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "51::UBIGINT exon_cdna_end, 0::TINYINT phase,",
+    "0::TINYINT end_phase"
+  )
+)
+expect_true(
+  load_model(
+    "r-hgvs-coding",
+    c(
+      "SELECT * FROM duckvep_r_hgvs_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_coding_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_coding_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = hgvs_reference
+  )$loaded
+)
+hgvs_coding <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs, a.protein_hgvs,",
+    "a.transcript_hgvs_status, a.protein_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-coding', 1::UINTEGER, 124::UBIGINT,",
+    "'A', 'G', 0::UBIGINT",
+    ")) AS u(a)"
+  )
+)
+expect_identical(hgvs_coding$transcript_hgvs, "c.25A>G")
+expect_identical(hgvs_coding$protein_hgvs, "p.Lys9Glu")
+expect_identical(hgvs_coding$transcript_hgvs_status, "supported")
+expect_identical(hgvs_coding$protein_hgvs_status, "supported")
+
+hgvs_directional <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position) AS (VALUES",
+    "(1, 90::UBIGINT), (2, 151::UBIGINT))",
+    "SELECT ord, a.transcript_hgvs, a.transcript_hgvs_status,",
+    "a.transcript_hgvs_reason",
+    "FROM variants, LATERAL unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs', 1::UINTEGER, position, 'A', 'C', 5000::UBIGINT",
+    ")) AS u(a) ORDER BY ord"
+  )
+)
+expect_true(all(is.na(hgvs_directional$transcript_hgvs)))
+expect_identical(
+  hgvs_directional$transcript_hgvs_status,
+  c("not_applicable", "not_applicable")
+)
+expect_true(all(is.na(hgvs_directional$transcript_hgvs_reason)))
+
+hgvs_terminal_insertion <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs, a.transcript_hgvs_status,",
+    "a.transcript_hgvs_reason, a.protein_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs', 1::UINTEGER, 50000::UBIGINT, 'A', 'AC', 50000::UBIGINT",
+    ")) AS u(a) WHERE a.transcript_index = 0"
+  )
+)
+expect_true(is.na(hgvs_terminal_insertion$transcript_hgvs))
+expect_identical(
+  hgvs_terminal_insertion$transcript_hgvs_status,
+  "not_applicable"
+)
+expect_true(is.na(hgvs_terminal_insertion$transcript_hgvs_reason))
+expect_identical(hgvs_terminal_insertion$protein_hgvs_status, "not_applicable")
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_phase_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start, 209::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "16::UBIGINT transcript_flags, 100::UBIGINT cds_start,",
+    "209::UBIGINT cds_end, NULL::BLOB cds_sequence,",
+    "NULL::UTINYINT codon_table, NULL::BLOB pre_cds_sequence,",
+    "NULL::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_hgvs_phase_exons AS SELECT * FROM (VALUES",
+    "(0::UINTEGER, 100::UBIGINT, 109::UBIGINT, 1::UBIGINT,",
+    "10::UBIGINT, 2::TINYINT, 0::TINYINT),",
+    "(0::UINTEGER, 200::UBIGINT, 209::UBIGINT, 11::UBIGINT,",
+    "20::UBIGINT, 0::TINYINT, 0::TINYINT)",
+    ") t(transcript_index, exon_start, exon_end, exon_cdna_start,",
+    "exon_cdna_end, phase, end_phase)"
+  )
+)
+expect_true(
+  load_model(
+    "r-hgvs-phase",
+    c(
+      "SELECT * FROM duckvep_r_hgvs_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_phase_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_hgvs_phase_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = hgvs_reference
+  )$loaded
+)
+hgvs_phase <- dbGetQuery(
+  con,
+  paste(
+    "WITH variants(ord, position, reference, alternate) AS (VALUES",
+    "(1, 100::UBIGINT, 'A', 'G'),",
+    "(2, 100::UBIGINT, 'AA', 'AG'))",
+    "SELECT ord, a.transcript_hgvs, a.transcript_hgvs_status",
+    "FROM variants, LATERAL unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-phase', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
+    ")) AS u(a) ORDER BY ord"
+  )
+)
+expect_identical(hgvs_phase$transcript_hgvs, c("c.3A>G", "c.2A>G"))
+expect_identical(
+  hgvs_phase$transcript_hgvs_status,
+  c("supported", "supported")
+)
+hgvs_protein_gap <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs_status, a.protein_hgvs_status,",
+    "a.protein_hgvs_reason FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-phase', 1::UINTEGER, 109::UBIGINT, 'AAA', 'CCC', 0::UBIGINT",
+    ")) AS u(a)"
+  )
+)
+expect_identical(hgvs_protein_gap$transcript_hgvs_status, "supported")
+expect_identical(hgvs_protein_gap$protein_hgvs_status, "not_applicable")
+expect_true(is.na(hgvs_protein_gap$protein_hgvs_reason))
 
 ensembl_mirna_queries <- c(
   paste(
@@ -426,6 +844,33 @@ expect_true(
     mature_mirna_query = ensembl_mirna_query,
     interval_feature_query = ensembl_regulation_query
   )$loaded
+)
+hgvs_retained_ref_without_fasta <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs_status, a.transcript_hgvs_reason,",
+    "a.protein_hgvs_status, a.protein_hgvs_reason",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT,",
+    "'CT', 'CG', 0::UBIGINT)) u(a)",
+    "WHERE a.transcript_index = 0"
+  )
+)
+expect_identical(
+  hgvs_retained_ref_without_fasta$transcript_hgvs_status,
+  "unresolved"
+)
+expect_identical(
+  hgvs_retained_ref_without_fasta$transcript_hgvs_reason,
+  "missing_reference"
+)
+expect_identical(
+  hgvs_retained_ref_without_fasta$protein_hgvs_status,
+  "unresolved"
+)
+expect_identical(
+  hgvs_retained_ref_without_fasta$protein_hgvs_reason,
+  "missing_reference"
 )
 ensembl_mirna_annotation <- dbGetQuery(
   con,

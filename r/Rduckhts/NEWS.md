@@ -1,5 +1,33 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundle `duckvep_annotate_hgvs(...)` for DBI workflows that need compact independent-event
+  consequence rows together with transcript `c.`/`n.` and default-VEP protein `p.` HGVS
+  suffixes, the applied 3-prime shift, and explicit supported/unresolved/not-applicable
+  states. Bundled `duckvep_model_load(...)` can bind an existing indexed reference FASTA
+  through an exact ordinal/name/length relation; it does not create an index and retains
+  open read descriptors for the validated FASTA, `.fai`, and optional `.gzi`. Linux workers
+  reopen those descriptors, Windows keeps a resolved source under deny-write sharing, and
+  other POSIX workers use independent resolved-source handles with identity checks rather
+  than sharing `/dev/fd` seek state. Annotation
+  workers own separate faidx handles, reuse contained sorted reference windows, and reject
+  detectable in-place source mutation around a fetch. Explicit NULL optional model queries
+  and reference parameters behave like omission. Bundled tests cover reference-backed substitution and
+  insertion rendering through the public DBI surface. Transcript rows admitted only by an
+  upstream/downstream distance report HGVS `not_applicable`, matching VEP's absent HGVSc,
+  rather than an unresolved projection. Literal exonic SNP HGVSc also retains VEP 116's
+  phase-aware CDS-start fast path without shifting intronic SNP, indel, or multi-base
+  feature coordinates. Protein HGVS reports `not_applicable` when the VEP feature has a
+  leading or trailing genomic-to-peptide mapper Gap. Reference failures use VEP's cached
+  complete-feature coding predicate, so a 5-prime-UTR insertion that could shift into CDS
+  remains protein-unresolved rather than falsely not applicable. A bundled model without FASTA now
+  reports `missing_reference` when retained uploaded REF padding or an anchor cannot be
+  checked by the prepared CDS, instead of validating only the minimized differing REF.
+  The bundled reference path keeps VEP's exact +/-1000 shift slice separate from complete
+  uploaded-REF validation and adjacent duplication-source lookup, so retained padding does
+  not change the shift and copied sources longer than 1000 bases still render as `dup`.
+  Endpoint-overlapping transcript edits retain VEP's clipped transcript-slice coordinates,
+  and protein replay reproduces VEP's one/two-base alternate-CDS trimming assignment bug
+  before appending the 3-prime UTR
 - bundled DuckVEP now gives ordinary long literal deletions the same complete-
   transcript `transcript_ablation` semantics as symbolic deletions. Equal-length
   containing alleles also preserve VEP 116's otherwise-empty endpoint UTR terms

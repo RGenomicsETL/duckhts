@@ -33,6 +33,16 @@ still-applicable evidence. The SO and impact tables keep the same runs
 separate so the largest corpus cannot hide a smaller species- or
 assembly-specific frontier.
 
+## Independent-event HGVS differential
+
+    ## No revision-keyed HGVS differential has been recorded.
+
+This is exact string agreement for independent transcript events with
+VEP 116 invoked using `--hgvs`. A comparison is exact when both engines
+emit the same string or both omit that HGVS field. Unresolved, missing,
+extra, and unequal strings remain discordant; none is removed from the
+denominator.
+
 ## Paired-breakend differential
 
 | revision | generated_events | transcript_pairs | exact         | unresolved | extra | missing | resolved_error_upper_95 |
@@ -303,6 +313,17 @@ duplicate count. A failed suite does not append rows.
 | variant CDS edit-set builder splits MNV diff islands                   | 100,000 | 100,000 | 0      | 0       | 0          |
 | variant coding context == direct CDS splice + full peptide oracles     | 100,000 | 100,000 | 0      | 0       | 0          |
 | VEP feature-span sweep candidates == independent parser oracle         | 100,000 | 100,000 | 0      | 0       | 0          |
+
+Passing the requested number of trials is necessary but does not prove
+that a generator visited the states named by its contract. Randomized
+properties therefore emit distribution counters, and the recorder stores
+each counter as a separate numeric row. The table below is the latest
+complete run’s state distribution; the long-form CSV remains the
+machine-readable authority. Zero is evidence too: it identifies a state
+that the declared seed did not exercise and must not be hidden by the
+suite-level pass count.
+
+    ## No distribution-counter ledger has been recorded for the latest run yet.
 
 ## Individual Sequence Ontology terms
 

@@ -16,9 +16,17 @@ including its codon tables 1, 4, and 11. Evidence for one species or assembly is
 treated as evidence for another.
 
 The kernel emits structured transcript consequences. VEP-compatible CSQ text and HGVS are
-edge projections, not the internal representation. VEP 116 is the behavioral authority;
-pure-C properties and bcftools csq supply independent checks for mechanics and phased edit
-state.
+edge projections, not the internal representation. Prepared-event and CDS-edit facts are
+the shared consequence/HGVS authorities; an HGVS-facing transcript-edit carrier adds
+VEP's clipped transcript-slice state without changing those semantic edits. Allocation-free
+`c.`/`n.`/`p.` fact/render kernels, a worker-owned indexed-FASTA provider, and cumulative
+`duckvep_annotate_hgvs(...)` SQL adapter are implemented for independent literal small
+variants. Strict executable-VEP evidence covers the fixed position-one/right-anchor cases
+and 56,998 chromosome-21 ClinVar transcript pairs with zero HGVSc/HGVSp differences.
+Genomic HGVS, RefSeq RNA-edit shifting, structural/BND HGVS, broader cross-species HGVS
+distributions, and compound/phased HGVS remain open.
+VEP 116 is the behavioral authority; pure-C properties and bcftools csq supply independent
+checks for mechanics and phased edit state.
 
 ## Mental model
 
@@ -411,8 +419,17 @@ coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
   indexes and is immutable after publication.
 - The registry is tied to one DuckDB database. Dropping a model fails while a worker pins
   it.
-- Each worker owns its workspace, exon cursor state, allele pool, result storage, and
-  sequence scratch. Workspaces are pooled only after their call completes.
+- Each worker owns its workspace, exon cursor state, allele pool, result storage, mutable
+  faidx handle, and sequence scratch. The model pins open read descriptors for the validated
+  FASTA, `.fai`, and optional `.gzi`. Linux workers reopen those descriptors through
+  `/proc/self/fd`; Windows workers use the resolved source while the model retains a
+  deny-write handle. Other POSIX systems use independent handles on the resolved source and
+  verify their identities around lazy open, avoiding `/dev/fd` handles whose seek offsets
+  may be shared. External replacement or in-place mutation of a loaded source is outside the
+  immutable-model contract on those systems and fails when the identity change is observed.
+  Contained reference requests reuse the worker
+  window, and bounded forward read-ahead amortizes faidx fetches over coordinate-sorted
+  alleles. Workspaces are pooled only after their call completes.
 - No mutable FASTA handle, interval cursor, genotype iterator, or result builder is shared
   between workers.
 
@@ -678,23 +695,82 @@ pre-CDS/CDS/post-CDS sequence, and the sequence layer can apply one edit or a gr
 set and compare the resulting peptide. Those facts must remain stable while phased work
 is added.
 
+The implemented internal layer makes that ownership explicit:
+
+- consequence evaluation and HGVS both consume the same prepared allele and CDS edit-set
+  helpers; the hot consequence path does not construct a wider formatting object;
+- `duckvep_transcript_edit_t` is an HGVS-facing carrier built from that prepared allele and
+  one transcript. It adds VEP's endpoint-clipped transcript-slice coordinates without
+  trimming, reinterpreting, or clamping the semantic allele;
+- typed transcript-coordinate facts distinguish coding `c.` from non-coding `n.` edits,
+  preserve insertion and range geometry, and render into caller-owned bounded buffers;
+- VEP-compatible transcript 3-prime shifting consumes VEP's exact constrained +/-1000
+  genomic-reference view, while complete uploaded-REF validation and adjacent duplication
+  lookup use a separately bounded wider view. Neither creates a second allele authority or
+  changes the shift bytes; and
+- typed protein facts describe equality, substitution, deletion, insertion, delins,
+  duplication, frameshift, start loss, and extension before any string is allocated.
+
+`duckvep_annotate_hgvs(...)` exposes those mechanics as a cumulative SQL result: the first
+16 fields are the compact consequence row, followed by transcript/protein suffixes,
+transcript-direction shift, and separate structured status/reason fields. Stable versioned
+transcript and translation identifiers remain ordinary prepared-model columns and are
+joined by transcript ordinal rather than copied into every hot result row. A model may bind
+an existing indexed FASTA through an exact sequence-region ordinal/name/length relation;
+the loader validates the index without creating or modifying it, while each annotation
+worker owns its faidx handle and reusable reference-window storage. One bounded fetch
+supplies distinct borrowed views for shifting and lookup. The adapter performs
+one candidate sweep and renders into DuckDB-owned output vectors.
+
+This implemented surface is not yet a full VEP-HGVS compatibility claim. It covers
+independent literal small variants and returns explicit unresolved reasons when reference,
+projection, transcript flank, tail, or protein facts are unavailable. Fixed executable
+VEP witnesses cover position-one right anchoring, endpoint-clipped deletions/delins,
+terminal insertion states, both transcript strands, and VEP's short alternate-CDS trimming
+bug. A strict chromosome-21 ClinVar run compared 56,998 transcript pairs: 20,782 matched
+both HGVSc and HGVSp, 24,089 matched HGVSc with HGVSp absent on both sides, and 12,127 had
+both strings absent, with zero discordant, unresolved, missing, or extra HGVS rows. That is
+evidence for the exercised GRCh38 independent-event distribution, not for untested species,
+assemblies, transcript-source quirks, or other HGVS classes.
+
 The execution split is:
 
 - genomic `g.`/`m.` HGVS is computed once per allele and needs a genomic reference-window
-  provider; it uses VEP 116's genomic `get_3prime_seq_offset` behavior;
-- transcript `c.`/`n.` HGVS is per transcript and uses VEP's separate transcript
-  `perform_shift` path, not the genomic shift routine; and
+  provider; `VariationFeature::get_all_hgvs_genomic` uses
+  `get_3prime_seq_offset`;
+- ordinary Ensembl transcript `c.`/`n.` HGVS is per transcript, but VEP first runs
+  `TranscriptVariationAllele::_genomic_shift` over a forward-reference window in that
+  transcript's strand direction. Its `perform_shift` loop has a hard-coded 1000-base
+  search and retains its own allele-length-dependent loop limit. The shifted genomic
+  event is then projected back to transcript coordinates. Complete uploaded-REF checking
+  and `hgvs_variant_notation` duplication-source comparison are separate consumers of a
+  wider bounded reference lookup and must not widen that exact shift slice;
+- RefSeq transcripts with RNA-edit attributes may reject reuse of that genomic shift and
+  rerun `perform_shift` over the edited transcript sequence. This is a separate model
+  capability, not the default Ensembl path; and
 - protein `p.` HGVS consumes the alternate peptide difference produced by the same edit
   set used for phased consequence classification.
 
 The hot transcript sweep therefore emits or retains numeric projected-edit facts; it does
 not allocate HGVS strings. Rendering is late, after filtering. Before a public phased API
-is fixed, the projected-edit sidecar and external VEP-116 HGVS differential must cover
-both shift routines, both strands, exon/intron/UTR positions, repeat runs, position-one
-right anchors, and compound edits. Apply-then-diff sequence equivalence is an independent
-property oracle. Exact structural HGVS can later consume typed exact events. BND HGVS
+is fixed, the same prepared CDS edit set must become the phased executor's input rather
+than a second trimming or projection authority. External VEP-116 differentials must expand
+from the current Ensembl/GRCh38 independent-event coverage to RefSeq RNA edits, other
+assemblies/species, all shift modes, exact structural events, and compound edits.
+Apply-then-diff sequence equivalence remains an independent property oracle. Exact
+structural HGVS can later consume typed exact events. BND HGVS
 additionally needs the paired relation's mate and orientation facts; imprecise structural
 events remain unsupported until their confidence geometry is represented.
+
+The pinned
+[ferro-hgvs v0.9.0 source](https://github.com/fulcrumgenomics/ferro-hgvs/tree/278e2c11134e3b49067d0c334f650c7c29db9cbe)
+is an independent HGVS-spec oracle and a useful model for structured fuzzing, large ClinVar
+corpora, and hermetic reference fixtures. It is not a DuckHTS dependency and does not
+replace the VEP 116 executable as the compatibility authority: canonical HGVS,
+Mutalyzer/biocommons behavior, and VEP's historical output can legitimately disagree.
+The intended differential therefore has three independent observations: exact VEP-116
+output, ferro-hgvs parsing/normalization where its contract applies, and DuckVEP's
+apply-then-diff sequence replay.
 
 ## Supplementary annotations
 
@@ -722,6 +798,13 @@ belong as ignored arguments in the consequence-kernel API.
   execute the same suite.
 - `make test-duckvep-kernel-statistical` raises randomized targets to an explicit seed and
   trial count.
+- `DUCKVEP_PROPERTY_ARGS='-t hgvs'` and `'-t haplotype'` are diagnostic filters for local
+  iteration. An official history run leaves this argument empty so no favorable family can
+  replace the complete state-machine denominator.
+- Randomized properties emit named distribution counters in addition to pass/fail status.
+  `test/duckvep/conformance/property_history.R` records those counters in a long-form
+  append-only ledger, so a passing run cannot hide that a declared edit shape, strand,
+  terminal state, shift limit, or haplotype interaction received zero observations.
 - The regulation/motif lane compares the complete resumable cursor, at one output row of
   capacity, with a brute-force all-event/all-feature evaluator for randomized small alleles
   and exact structural events. The offline Ensembl fixture independently imports and emits
@@ -775,6 +858,21 @@ belong as ignored arguments in the consequence-kernel API.
   annotation from already coordinate-sorted input, and read-plus-sort-plus-annotation.
   Sorting cost is not hidden, but it is not charged only to DuckVEP either. DuckDB may sort
   once and stream ordered chunks directly into the consequence or phased executor.
+
+HGVS and haplotype performance use cumulative lanes over identical prepared input:
+
+| Lane | Required work |
+| --- | --- |
+| consequence compact | candidate discovery, consequence facts, compact rows |
+| consequence + HGVS facts | the compact lane plus transcript-edit and typed DNA/protein facts, without strings |
+| consequence + rendered HGVS | the preceding lane plus accession lookup and rendered bytes |
+| bcftools local-CSQ projection | independent-event consequences plus its declared local output fields |
+| phased edit sets | genotype grouping, active transcript state, unique alternate leaves, combined translation, and attributed rows |
+
+Every rendered record states input records and ALT alleles, candidate pairs, output rows,
+rendered bytes, thread count and core pinning, model/corpus identity, and source revision.
+Sorting-plus-execution is recorded separately from execution over already ordered input.
+A single independent edit is never relabelled as a haplotype benchmark.
 
 The generated reports are the numeric authority. At the latest tested ancestor for each
 corpus, the declared GRCh38 dbSNP, GIAB, ClinVar coding, and ClinVar cross-chromosome

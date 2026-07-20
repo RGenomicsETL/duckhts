@@ -51,8 +51,9 @@ nearest_tested_ancestor <- function(revisions) {
 }
 ```
 
-This benchmark drives either the rich `duckvep_annotate` result or the numeric
-`duckvep_annotate_compact` result through DuckDB's stable extension API with
+This benchmark drives the rich `duckvep_annotate`, numeric
+`duckvep_annotate_compact`, or independent-event `duckvep_annotate_hgvs` result
+through DuckDB's stable extension API with
 nondecreasing sequence-region and position keys. It records candidate sweep,
 consequence classification, list materialization, `unnest`, and final aggregation
 together. Model loading and input staging are outside the timed pass.
@@ -93,7 +94,7 @@ table <- history[, c(
   "run_date", "revision", "workload", "output_mode", "threads", "variants",
   "transcripts", "exons", "regulation_features", "annotated_rows", "passes", "min_seconds",
   "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant",
-  "cpu"
+  "cpu", "cpu_affinity"
 )]
 table$output_rows_per_second <- round(
   table$annotated_rows / table$median_seconds
@@ -125,6 +126,70 @@ Each pass consumes every staged input and checks output cardinality plus either
 the rendered consequence-byte total or the numeric consequence-mask sum. Rows
 with different workload, output mode, thread count, host, or variant count are
 separate measurements and should not be compared as if only the engine changed.
+`cpu_affinity` is read from the benchmark process itself; a single integer
+records an externally pinned run, while a range records a scheduler-visible CPU
+set.
+
+## Independent-event HGVS materialization
+
+```{r hgvs-throughput}
+hgvs_runs <- history[
+  history$output_mode %in% c("rich", "hgvs") & history$threads == 1L,
+  ,
+  drop = FALSE
+]
+if (nrow(hgvs_runs)) {
+  hgvs_keys <- interaction(
+    hgvs_runs$source_revision,
+    hgvs_runs$host,
+    hgvs_runs$workload,
+    hgvs_runs$variants,
+    ifelse(
+      is.na(hgvs_runs$cpu_affinity),
+      "(unrecorded)",
+      hgvs_runs$cpu_affinity
+    ),
+    drop = TRUE
+  )
+  complete_keys <- names(which(vapply(
+    split(hgvs_runs$output_mode, hgvs_keys),
+    function(x) all(c("rich", "hgvs") %in% x),
+    logical(1L)
+  )))
+  comparable <- hgvs_runs[hgvs_keys %in% complete_keys, , drop = FALSE]
+  if (nrow(comparable)) {
+    comparison_revision <- nearest_tested_ancestor(comparable$source_revision)
+    comparable <- comparable[
+      comparable$source_revision == comparison_revision,
+      ,
+      drop = FALSE
+    ]
+    hgvs_table <- comparable[, c(
+      "revision", "workload", "output_mode", "threads", "cpu_affinity",
+      "variants", "annotated_rows", "median_seconds", "variants_per_second",
+      "checksum_kind"
+    )]
+    hgvs_table$variants <- format(
+      hgvs_table$variants,
+      big.mark = ",",
+      scientific = FALSE
+    )
+    hgvs_table$annotated_rows <- format(
+      hgvs_table$annotated_rows,
+      big.mark = ",",
+      scientific = FALSE
+    )
+    hgvs_table$variants_per_second <- round(hgvs_table$variants_per_second)
+    knitr::kable(hgvs_table, row.names = FALSE)
+  }
+}
+```
+
+The HGVS row materializes transcript/protein strings and status fields and
+checks their total byte count. Compare it only with the rich consequence row at
+the same source revision, host, workload, variant count, thread count, and CPU
+affinity. Model loading, FASTA validation, and input staging remain outside the
+timed pass; lazy per-worker faidx setup occurs during warmup.
 
 ## Core regulation and motif sweep
 
@@ -680,10 +745,11 @@ bytes (`r sprintf("%.3f MiB", 13 * last_resource$transcripts[[1L]] / 1024^2)`),
 plus four allocator records. This deterministic allocation is not retroactively
 included in the older `b204dd49` RSS measurement above.
 
-The production form is run with:
+The production form is run with an externally pinned process when a stable CPU
+comparison is required:
 
 ```sh
-Rscript benchmarks/duckvep_throughput.R \
+taskset -c 2 Rscript benchmarks/duckvep_throughput.R \
   --database /path/to/staged.duckdb \
   --variants-table bench_variants \
   --workload-name ensembl116_grch38_final_giab_sites_hash40 \

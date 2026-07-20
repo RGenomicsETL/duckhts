@@ -1,6 +1,59 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- add `duckvep_annotate_hgvs(...)`, a cumulative independent-event surface that returns
+  the compact consequence row together with transcript `c.`/`n.` and default-VEP protein
+  `p.` HGVS suffixes, structured status/reason fields, and the applied transcript-direction
+  shift without repeating candidate discovery. `duckvep_model_load(...)` can now bind an
+  existing indexed reference FASTA through an exact ordinal/name/length relation; model
+  validation never creates or modifies an index and pins open read descriptors for the
+  validated FASTA, `.fai`, and optional `.gzi`. Linux workers reopen those descriptors,
+  Windows retains a resolved source under deny-write sharing, and other POSIX workers open
+  the resolved source independently with identity checks rather than sharing `/dev/fd` seek
+  state. Each annotation worker owns
+  its mutable faidx handle and a forward-read-ahead reference window reused by contained
+  sorted alleles. External in-place mutation of a loaded source is outside the model
+  contract and is rejected when descriptor metadata or the resolved source identity changes
+  around a fetch. Explicit NULL
+  for an optional model relation or reference is equivalent to omission. One prepared event/CDS edit authority
+  feeds consequence evaluation and the HGVS-facing transcript edit; DNA placement, repeat
+  rotation, and alternate-protein reconstruction then consume that same edit, while bounded
+  allocation-free renderers keep VEP's default unparenthesized HGVSp distinct from its
+  optional prediction display. Deterministic, SQL, R/DBI, and randomized pure-C coverage
+  spans both strands, reference mismatch, missing-reference state, repeat shifting, mixed
+  models in one DuckDB vector, ordinary peptide replay, and extended frameshift translation.
+  Transcript rows admitted only through an upstream/downstream distance now report HGVS
+  `not_applicable`, matching VEP's absent HGVSc, instead of presenting transcript-external
+  edit geometry as an unresolved projection. HGVSc numbering also preserves VEP 116's
+  representation-specific phase asymmetry: a literal exonic SNP uses the phase-aware CDS
+  start, while intronic SNPs, indels, and multi-base features continue through VEP's
+  phase-neutral generic transcript-coordinate path. Protein HGVS now returns
+  `not_applicable` when VEP's first or last genomic-to-peptide mapper item is a Gap, instead
+  of presenting an ordinary CDS-overlap/no-HGVSp state as a reconstruction failure. When
+  transcript HGVS fails reference validation, protein status now uses VEP's cached
+  complete-feature coding predicate rather than the original region label; a 5-prime-UTR
+  insertion that could shift into coding coordinates remains unresolved instead of being
+  mislabeled not applicable.
+  A no-reference model now fails closed as `missing_reference` when retained uploaded REF
+  padding or an anchor cannot be checked by the prepared CDS; it cannot validate only the
+  minimized differing REF and emit supported HGVS for a different uploaded allele. Protein
+  replay also reproduces VEP 116's `_trim_incomplete_codon` assignment bug: edited CDS
+  strings of one or two bases are dropped before appending the 3-prime UTR, while every
+  edited CDS of at least three bases remains wholly untrimmed. Reference-backed HGVS now
+  keeps VEP's exact constrained +/-1000 genomic shift slice separate from the wider lookup
+  view used to validate complete uploaded REF padding and identify adjacent copied sources;
+  retained padding cannot change the shift, and insertions copied from more than 1000
+  adjacent bases retain `dup` syntax instead of silently degrading to `ins`. Statistical runs publish
+  named state-distribution counters so a passing total cannot hide unvisited edit shapes.
+  A strict executable-VEP 116 chromosome-21 ClinVar differential matched all 56,998
+  consequence rows and found zero HGVSc/HGVSp differences: 20,782 pairs matched both
+  strings, 24,089 matched HGVSc with no protein string on either side, and 12,127 had
+  neither string. This closes the exercised independent literal-small-variant matrix, not
+  genomic HGVS, RefSeq RNA edits, exact structural/BND HGVS, or phased/compound HGVS;
+  ferro-hgvs v0.9.0 is a pinned independent
+  specification/corpus oracle, not a C/CRAN/Wasm dependency or replacement for VEP 116
+  behavior. The additional stable consequence-predicate flag assignments advance the
+  standalone kernel ABI to 0.16.0
 - match VEP 116 for complete transcript overlap by ordinary long literal
   alleles: a normalized deletion now enters the same tier-1
   `transcript_ablation` predicate as a symbolic deletion, while an equal-length

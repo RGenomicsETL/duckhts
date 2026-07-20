@@ -196,6 +196,8 @@ DUCKVEP_KERNEL_SOURCES = \
 	src/duckvep/kernel/src/duckvep_sv.c \
 	src/duckvep/kernel/src/duckvep_delta.c \
 	src/duckvep/kernel/src/duckvep_projection.c \
+	src/duckvep/kernel/src/duckvep_transcript_edit.c \
+	src/duckvep/kernel/src/duckvep_hgvs.c \
 	src/duckvep/kernel/src/duckvep_codon.c \
 	src/duckvep/kernel/src/duckvep_coding.c \
 	src/duckvep/kernel/src/duckvep_haplotype.c \
@@ -245,7 +247,7 @@ test-duckvep-kernel: duckvep-generated-check
 		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -o "$$tmp/duckvep_kernel_property"; \
-	"$$tmp/duckvep_kernel_property"
+	"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
 
 test-duckvep-kernel-asan: duckvep-generated-check
 	@set -e; \
@@ -260,7 +262,7 @@ test-duckvep-kernel-asan: duckvep-generated-check
 		"$$tmp"/theft/src/*.c \
 		-pthread -fsanitize=address -o "$$tmp/duckvep_kernel_property"; \
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
-		"$$tmp/duckvep_kernel_property"
+		"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
 
 test-duckvep-kernel-ubsan: duckvep-generated-check
 	@set -e; \
@@ -275,11 +277,15 @@ test-duckvep-kernel-ubsan: duckvep-generated-check
 		"$$tmp"/theft/src/*.c \
 		-pthread -fsanitize=undefined -o "$$tmp/duckvep_kernel_property"; \
 	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-		"$$tmp/duckvep_kernel_property"
+		"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
 
 # Longer deterministic run for rare-state exploration.  Override either value
 # to reproduce or extend a run, for example:
 #   make test-duckvep-kernel-statistical DUCKVEP_PROP_TRIALS=1000000 DUCKVEP_PROP_SEED=17
+# Greatest test-name filtering remains available through
+# DUCKVEP_PROPERTY_ARGS, for example `-t hgvs` or `-t haplotype`.  An official
+# property-history run leaves that argument empty so the ledger covers the
+# complete state machine rather than a favorable subset.
 test-duckvep-kernel-statistical:
 	DUCKVEP_PROP_TRIALS=$${DUCKVEP_PROP_TRIALS:-100000} \
 	DUCKVEP_PROP_SEED=$${DUCKVEP_PROP_SEED:-0xd0c0ffee12345678} \
@@ -299,7 +305,7 @@ test-duckvep-witnesses: release
 test-duckvep-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--extension build/release/duckhts.duckdb_extension \
-		--sample-per-shape 0
+		--sample-per-shape 0 --hgvs
 
 # Reproducible rare-state exploration. The generated VCF, pair-level Parquet, and
 # statistical summaries remain under the ignored results directory so every failure
@@ -320,7 +326,7 @@ test-duckvep-state-exploration: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--corpus state_exploration_seed_$${seed} \
 		--vcf $$vcf --extension build/release/duckhts.duckdb_extension \
-		--sample-per-shape 0 --seed $$seed
+		--sample-per-shape 0 --seed $$seed --hgvs
 
 duckvep-corpus-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
@@ -339,6 +345,9 @@ duckvep-record-conformance: test-duckvep-differential
 	Rscript test/duckvep/conformance/statistical_conformance.R \
 		--annotations test/duckvep/conformance/results/witnesses_annotations.parquet \
 		--history test/duckvep/conformance/data/conformance_history.csv
+	Rscript test/duckvep/conformance/hgvs_history.R \
+		--pairs test/duckvep/conformance/results/witnesses_hgvs_pairs.parquet \
+		--history test/duckvep/conformance/data/hgvs_history.csv
 
 duckvep-record-properties:
 	Rscript test/duckvep/conformance/property_history.R \

@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 15
+#define DUCKVEP_KERNEL_VERSION_MINOR 16
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -313,7 +313,16 @@ typedef enum duckvep_consequence_flag {
      * codon/peptide predicate. The consequence_mask may still contain
      * coding_sequence_variant as the safe
      * fallback; this bit makes that fallback auditable rather than silent. */
-    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0
+    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0,
+    /* Original TranscriptVariationAllele sequence predicates. These are
+     * facts, not a reverse mapping from emitted SO terms: executable VEP
+     * witnesses contain masks that omit a raw predicate still consumed by
+     * hgvs_protein. */
+    DUCKVEP_CONSEQUENCE_FLAG_FRAMESHIFT = 1u << 1,
+    DUCKVEP_CONSEQUENCE_FLAG_START_LOST = 1u << 2,
+    DUCKVEP_CONSEQUENCE_FLAG_STOP_LOST = 1u << 3,
+    DUCKVEP_CONSEQUENCE_FLAG_STOP_RETAINED = 1u << 4,
+    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_PREDICATES_VALID = 1u << 5
 } duckvep_consequence_flag_t;
 
 typedef enum duckvep_sequence_status {

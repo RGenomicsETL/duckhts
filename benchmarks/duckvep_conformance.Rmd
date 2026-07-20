@@ -25,6 +25,27 @@ property_history <- read.csv(
   check.names = FALSE,
   colClasses = c(source_revision = "character", seed = "character")
 )
+property_coverage_history <- read.csv(
+  file.path(
+    root,
+    "test",
+    "duckvep",
+    "conformance",
+    "data",
+    "property_coverage_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character", seed = "character")
+)
+hgvs_history <- read.csv(
+  file.path(
+    root, "test", "duckvep", "conformance", "data", "hgvs_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character", oracle_version = "character")
+)
 release_parquet <- read.csv(
   file.path(
     root, "benchmarks", "data", "duckvep_release_parquet.csv"
@@ -93,6 +114,27 @@ latest_state_runs <- state_overall[
   ,
   drop = FALSE
 ]
+hgvs_runs <- unique(hgvs_history[, c(
+  "source_revision", "corpus", "model", "oracle_version", "oracle_build"
+), drop = FALSE])
+latest_hgvs_run_ids <- NULL
+if (nrow(hgvs_runs)) {
+  groups <- interaction(hgvs_runs$corpus, hgvs_runs$model, drop = TRUE)
+  latest_hgvs_run_ids <- do.call(rbind, lapply(
+    split(hgvs_runs, groups),
+    function(rows) {
+      tested_ancestors <- revision_ancestry[
+        revision_ancestry %in% rows$source_revision
+      ]
+      revision <- if (length(tested_ancestors)) {
+        tested_ancestors[[1L]]
+      } else {
+        rows$source_revision[[nrow(rows)]]
+      }
+      rows[rows$source_revision == revision, , drop = FALSE]
+    }
+  ))
+}
 nmd_history <- history[
   history$stratum_kind == "nmd_prediction",
   ,
@@ -178,6 +220,55 @@ corpus. Expensive corpora do not inherit evidence from a later run of another
 corpus, and a newly tested corpus does not hide older still-applicable evidence.
 The SO and impact tables keep the same runs separate so the largest corpus cannot
 hide a smaller species- or assembly-specific frontier.
+
+## Independent-event HGVS differential
+
+```{r hgvs}
+if (!is.null(latest_hgvs_run_ids) && nrow(latest_hgvs_run_ids)) {
+  hgvs_latest <- merge(
+    latest_hgvs_run_ids,
+    hgvs_history,
+    by = c(
+      "source_revision", "corpus", "model", "oracle_version", "oracle_build"
+    ),
+    all.x = TRUE,
+    sort = FALSE
+  )
+  hgvs_table <- do.call(rbind, lapply(
+    split(hgvs_latest, interaction(hgvs_latest$corpus, hgvs_latest$metric)),
+    function(rows) {
+      exact <- sum(rows$n[rows$comparison %in% c("match", "both_absent")])
+      total <- sum(rows$n)
+      data.frame(
+        revision = short_revision(rows$source_revision[[1L]]),
+        corpus = rows$corpus[[1L]],
+        model = rows$model[[1L]],
+        metric = toupper(rows$metric[[1L]]),
+        exact = paste0(
+          format(exact, big.mark = ","),
+          "/",
+          format(total, big.mark = ",")
+        ),
+        match = sum(rows$n[rows$comparison == "match"]),
+        both_absent = sum(rows$n[rows$comparison == "both_absent"]),
+        discordant = sum(
+          rows$n[!rows$comparison %in% c("match", "both_absent")]
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  ))
+  hgvs_table <- hgvs_table[order(hgvs_table$corpus, hgvs_table$metric), ]
+  knitr::kable(hgvs_table, row.names = FALSE)
+} else {
+  cat("No revision-keyed HGVS differential has been recorded.\n")
+}
+```
+
+This is exact string agreement for independent transcript events with VEP 116
+invoked using `--hgvs`. A comparison is exact when both engines emit the same
+string or both omit that HGVS field. Unresolved, missing, extra, and unequal
+strings remain discordant; none is removed from the denominator.
 
 ## Paired-breakend differential
 
@@ -587,6 +678,47 @@ for (column in c("trials", "passed", "failed", "skipped", "duplicates")) {
   )
 }
 knitr::kable(latest_properties, row.names = FALSE)
+```
+
+Passing the requested number of trials is necessary but does not prove that a
+generator visited the states named by its contract. Randomized properties therefore
+emit distribution counters, and the recorder stores each counter as a separate
+numeric row. The table below is the latest complete run's state distribution; the
+long-form CSV remains the machine-readable authority. Zero is evidence too: it
+identifies a state that the declared seed did not exercise and must not be hidden by
+the suite-level pass count.
+
+```{r property-coverage}
+latest_coverage <- property_coverage_history[
+  property_coverage_history$source_revision == last_property$source_revision &
+    property_coverage_history$seed == last_property$seed &
+    property_coverage_history$configured_trials ==
+      last_property$configured_trials,
+  c("coverage", "metric", "count"),
+  drop = FALSE
+]
+if (nrow(latest_coverage)) {
+  latest_coverage$count <- format(
+    latest_coverage$count,
+    big.mark = ",",
+    scientific = FALSE
+  )
+  latest_coverage$state_count <- paste0(
+    latest_coverage$metric,
+    "=",
+    latest_coverage$count
+  )
+  coverage_table <- aggregate(
+    state_count ~ coverage,
+    data = latest_coverage,
+    FUN = paste,
+    collapse = "; "
+  )
+  names(coverage_table) <- c("randomized distribution", "observed states")
+  knitr::kable(coverage_table, row.names = FALSE)
+} else {
+  cat("No distribution-counter ledger has been recorded for the latest run yet.\n")
+}
 ```
 
 ## Individual Sequence Ontology terms
