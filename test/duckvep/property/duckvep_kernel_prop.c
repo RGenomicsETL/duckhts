@@ -8670,6 +8670,133 @@ TEST padded_snv_rewind_uses_vep_feature_span(void) {
     PASS();
 }
 
+TEST span_cursor_resets_after_nonmonotone_tile_skips_transcript(void) {
+    enum {
+        LONG_PREFIX = 60000,
+        LONG_REF_LENGTH = LONG_PREFIX + 2,
+        LONG_ALT_LENGTH = LONG_PREFIX + 1,
+        FIRST_ALLELE_BYTES = LONG_REF_LENGTH + LONG_ALT_LENGTH + 4
+    };
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {60000u};
+    static const uint32_t tend[1] = {61100u};
+    static const int8_t strand[1] = {1};
+    static const uint64_t flags[1] = {0u};
+    static const uint32_t exoff[1] = {0u};
+    static const uint16_t excnt[1] = {2u};
+    static const uint32_t zero[1] = {0u};
+    static const uint32_t es[2] = {60000u, 61000u};
+    static const uint32_t ee[2] = {60100u, 61100u};
+    static uint8_t first_alleles[FIRST_ALLELE_BYTES];
+    static const uint8_t second_alleles[8] = {
+        'A', 'A', 'C', 'C', 'A', 'A', 'C', 'C'
+    };
+    static const uint16_t chrom[2] = {0u, 0u};
+    static const uint32_t first_pos[2] = {1000u, 10000u};
+    static const uint32_t first_end[2] = {61001u, 10001u};
+    static const uint8_t first_kind[2] = {
+        (uint8_t)DUCKVEP_KIND_INDEL,
+        (uint8_t)DUCKVEP_KIND_MNV
+    };
+    static const uint32_t first_ref_offset[2] = {
+        0u, LONG_REF_LENGTH + LONG_ALT_LENGTH
+    };
+    static const uint32_t first_alt_offset[2] = {
+        LONG_REF_LENGTH, LONG_REF_LENGTH + LONG_ALT_LENGTH + 2u
+    };
+    static const uint16_t first_ref_length[2] = {
+        LONG_REF_LENGTH, 2u
+    };
+    static const uint16_t first_alt_length[2] = {
+        LONG_ALT_LENGTH, 2u
+    };
+    static const uint32_t second_pos[2] = {56000u, 60050u};
+    static const uint32_t second_end[2] = {56001u, 60051u};
+    static const uint8_t second_kind[2] = {
+        (uint8_t)DUCKVEP_KIND_MNV,
+        (uint8_t)DUCKVEP_KIND_MNV
+    };
+    static const uint32_t second_ref_offset[2] = {0u, 4u};
+    static const uint32_t second_alt_offset[2] = {2u, 6u};
+    static const uint16_t second_length[2] = {2u, 2u};
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t ex;
+    duckvep_variant_batch_t first;
+    duckvep_variant_batch_t second;
+    duckvep_options_init_t init;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *opts = NULL;
+    duckvep_workspace_t *reused = NULL;
+    duckvep_workspace_t *fresh = NULL;
+    duckvep_consequence_t first_rows[2];
+    duckvep_consequence_t reused_rows[2];
+    duckvep_consequence_t fresh_rows[2];
+    duckvep_result_builder_t rb;
+    duckvep_error_t err;
+
+    memset(first_alleles, 'A', sizeof first_alleles);
+    first_alleles[LONG_PREFIX] = 'G';
+    first_alleles[LONG_PREFIX + 1u] = 'C';
+    first_alleles[LONG_REF_LENGTH + LONG_PREFIX] = 'T';
+    first_alleles[first_ref_offset[1]] = 'A';
+    first_alleles[first_ref_offset[1] + 1u] = 'A';
+    first_alleles[first_alt_offset[1]] = 'C';
+    first_alleles[first_alt_offset[1] + 1u] = 'C';
+
+    memset(&tx, 0, sizeof tx);
+    memset(&ex, 0, sizeof ex);
+    memset(&first, 0, sizeof first);
+    memset(&second, 0, sizeof second);
+    memset(&init, 0, sizeof init);
+    memset(&err, 0, sizeof err);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend;
+    tx.strand = strand; tx.flags = flags; tx.exon_offset = exoff;
+    tx.exon_count = excnt; tx.cds_start1 = zero; tx.cds_end1 = zero;
+    tx.transcript_count = 1u;
+    ex.start1 = es; ex.end1 = ee; ex.exon_count = 2u;
+
+    first.chrom_id = chrom; first.pos1 = first_pos; first.end1 = first_end;
+    first.variant_kind = first_kind; first.ref_offset = first_ref_offset;
+    first.alt_offset = first_alt_offset; first.ref_length = first_ref_length;
+    first.alt_length = first_alt_length; first.allele_bytes = first_alleles;
+    first.allele_bytes_len = sizeof first_alleles; first.count = 2u;
+
+    second.chrom_id = chrom; second.pos1 = second_pos; second.end1 = second_end;
+    second.variant_kind = second_kind; second.ref_offset = second_ref_offset;
+    second.alt_offset = second_alt_offset; second.ref_length = second_length;
+    second.alt_length = second_length; second.allele_bytes = second_alleles;
+    second.allele_bytes_len = sizeof second_alleles; second.count = 2u;
+
+    init.distances_are_explicit = 1u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &ex, NULL, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &reused, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &fresh, &err));
+
+    duckvep_result_builder_init(&rb, first_rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &first, opts, reused, &rb, &err));
+    ASSERT_EQ(1u, rb.count);
+
+    duckvep_result_builder_init(&rb, reused_rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &second, opts, reused, &rb, &err));
+    ASSERT_EQ(1u, rb.count);
+    duckvep_result_builder_init(&rb, fresh_rows, 2u);
+    ASSERT_EQ(DUCKVEP_OK,
+              duckvep_annotate_tile(model, &second, opts, fresh, &rb, &err));
+    ASSERT_EQ(1u, rb.count);
+    ASSERT(consequence_rows_equal(&reused_rows[0], &fresh_rows[0]));
+    ASSERT_EQ(1u, reused_rows[0].variant_idx);
+    ASSERT_EQ((uint32_t)DUCKVEP_REGION_EXON, reused_rows[0].region_mask);
+
+    duckvep_workspace_close(fresh);
+    duckvep_workspace_close(reused);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
 /* The resumable cursor is a transport primitive: arbitrary output-buffer splits
  * must equal one full annotate_tile call over the same tile. This property uses
  * the same random zero-exon scenes as the composition oracle and varies the chunk
@@ -23476,6 +23603,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_cursor_resumes_known_scene);
     RUN_TEST(sorted_point_cursor_survives_tiles_and_resets_on_rewind);
     RUN_TEST(padded_snv_rewind_uses_vep_feature_span);
+    RUN_TEST(span_cursor_resets_after_nonmonotone_tile_skips_transcript);
     RUN_TEST(annotate_cursor_matches_tile_for_any_output_split);
     RUN_TEST(region_mask_known_scene);
     RUN_TEST(region_mask_short_exon_splice_reach_clamped);

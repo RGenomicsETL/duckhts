@@ -710,6 +710,24 @@ expect_identical(hgvs_coding$protein_hgvs, "p.Lys9Glu")
 expect_identical(hgvs_coding$transcript_hgvs_status, "supported")
 expect_identical(hgvs_coding$protein_hgvs_status, "supported")
 
+# Protein HGVS uses its own exact-size retry after the initial native scratch
+# fills. Exercise that adapter path through DBI with an in-frame insertion.
+hgvs_long_protein <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs, a.protein_hgvs,",
+    "a.transcript_hgvs_status, a.protein_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-coding', 1::UINTEGER, 124::UBIGINT,",
+    "'A', 'A' || repeat('GCT', 100), 0::UBIGINT",
+    ")) AS u(a)"
+  )
+)
+expect_true(nchar(hgvs_long_protein$transcript_hgvs, type = "bytes") > 256L)
+expect_true(nchar(hgvs_long_protein$protein_hgvs, type = "bytes") > 256L)
+expect_identical(hgvs_long_protein$transcript_hgvs_status, "supported")
+expect_identical(hgvs_long_protein$protein_hgvs_status, "supported")
+
 hgvs_directional <- dbGetQuery(
   con,
   paste(

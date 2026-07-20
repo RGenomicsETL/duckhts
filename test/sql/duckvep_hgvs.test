@@ -169,6 +169,22 @@ LATERAL unnest(duckvep_annotate_hgvs(
 ----
 2	2	1
 
+# Protein HGVS has an independent render/retry path. An in-frame insertion
+# whose three-letter amino-acid spelling exceeds the initial native scratch
+# capacity must survive the DuckDB adapter without truncation.
+query ITIT
+SELECT (length(annotation.transcript_hgvs) > 256)::INTEGER,
+       annotation.transcript_hgvs_status,
+       (length(annotation.protein_hgvs) > 256)::INTEGER,
+       annotation.protein_hgvs_status
+FROM unnest(duckvep_annotate_hgvs(
+  'hgvs-reference', 1::UINTEGER, 124::UBIGINT,
+  'T', 'T' || repeat('GCT', 100), 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+1	supported	1	supported
+
 # VEP-116 HGVS shifting is transcript-strand-relative and capped at its
 # hard-coded 1000-base search. On a sequence region shorter than 2,000 bases,
 # VEP's first-1,000 and last-1,000 reference slices overlap; its executable

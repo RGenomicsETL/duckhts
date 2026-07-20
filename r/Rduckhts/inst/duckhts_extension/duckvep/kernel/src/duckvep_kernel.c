@@ -999,9 +999,11 @@ struct duckvep_workspace {
     uint16_t                 point_last_chrom;
     uint32_t                 point_last_pos;
     int                      point_run_active;
+    int                      point_cursor_reset_pending;
     uint16_t                 span_last_chrom;
     uint32_t                 span_last_feature_start;
     int                      span_run_active;
+    int                      span_cursor_reset_pending;
     duckvep_delta_scratch_t                 delta_scratch;
     duckvep_workspace_delta_route_stats_t   delta_route_stats;
     int                                     delta_route_stats_enabled;
@@ -1030,6 +1032,8 @@ DUCKVEP_INTERNAL_API void duckvep_workspace_force_generalized_annotation(
     workspace_span_cursor_reset(workspace);
     workspace->point_run_active = 0;
     workspace->span_run_active = 0;
+    workspace->point_cursor_reset_pending = 0;
+    workspace->span_cursor_reset_pending = 0;
 }
 
 static int workspace_sorted_runs_begin(
@@ -1052,6 +1056,23 @@ static int workspace_sorted_runs_begin(
     first_pos = events != NULL ? events[0].start1 : variants->pos1[0];
     first_feature_start = events != NULL
         ? events[0].feature_start1 : variants->pos1[0];
+
+    /* A non-monotone normalized vector can leave an individual transcript's
+     * cursor ahead of the vector's final coordinate when later variants do not
+     * admit that transcript.  The next vector can still look globally
+     * monotone relative to that final coordinate, so reset before inspecting
+     * it rather than carrying transcript-local stale ranks across the DuckDB
+     * vector edge.  Rewinds within the current vector continue to use mode 2
+     * below and avoid a model-wide reset per event. */
+    if (workspace->point_cursor_reset_pending) {
+        workspace_point_cursor_reset(workspace);
+        workspace->point_cursor_reset_pending = 0;
+    }
+    if (workspace->span_cursor_reset_pending) {
+        workspace_span_cursor_reset(workspace);
+        workspace->span_cursor_reset_pending = 0;
+    }
+
     for (i = 1u; i < variants->count; i++) {
         uint32_t previous_pos = events != NULL
             ? events[i - 1u].start1 : variants->pos1[i - 1u];
@@ -1093,10 +1114,13 @@ static int workspace_sorted_runs_begin(
     workspace->span_last_feature_start = events != NULL
         ? events[last].feature_start1 : variants->pos1[last];
     workspace->span_run_active = 1;
+    workspace->point_cursor_reset_pending = !point_monotonic;
+    workspace->span_cursor_reset_pending = !span_monotonic;
     /* Mode 1 is the minimum-instruction monotone cursor. Mode 2 repairs only
-     * the normalized-coordinate rewinds observed in this input vector. Both
-     * modes retain cursor traversal; the scans above reset stale state between
-     * independent runs. */
+     * the normalized-coordinate rewinds observed in this input vector. A
+     * non-monotone vector also schedules one reset before the next vector so a
+     * transcript skipped after the forward jump cannot retain an ahead rank.
+     * Both modes retain cursor traversal. */
     if (span_monotonic_out != NULL)
         *span_monotonic_out = span_monotonic ? 1 : 2;
     return point_monotonic ? 1 : 2;

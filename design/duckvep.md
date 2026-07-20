@@ -451,8 +451,12 @@ equal-length containing span retains VEP's endpoint-UTR comparison behavior. The
 copies one DuckDB vector into compact arrays, splits on
 model/contig/window/order changes, seeds the first candidate set through cgranges, and
 advances independent sorted transcript and regulation/motif sweeps. The SNV point path
-keeps a per-transcript exon rank and advances it monotonically; other transcript spans use
-the exhaustive classifier. Regulation/motif rows use exact event overlap with no transcript
+keeps a per-transcript exon rank and advances it monotonically; normalized multi-base
+features keep a separate exon rank. A normalized-coordinate rewind within one vector uses
+a rewind-capable seek. If that vector was non-monotone, the workspace resets both rank
+arrays before its next vector: a transcript skipped after an earlier forward jump may still
+hold an ahead rank even when the next vector begins after the prior vector's final event.
+Regulation/motif rows use exact event overlap with no transcript
 flank. Both sweeps share the generic interval-candidate helper, but own separate active
 sets because their cardinalities differ. Transcript fast/exhaustive paths and the complete
 feature sweep are property-checked against independent or brute-force oracles.

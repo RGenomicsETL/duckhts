@@ -413,6 +413,13 @@ not survive arbitrary future vectors. It therefore seeds/restarts a sweep at eac
 DuckDB vector. This is already a real batch path, but it is not yet a whole-file
 stream with explicit carry state.
 
+Worker workspaces can be returned to the pool and reused. Point and normalized-span
+exon ranks therefore have an explicit cross-vector invariant: after a vector whose
+prepared coordinates are non-monotone, both rank arrays are reset before the next
+non-empty vector. Comparing only the next vector's first coordinate with the prior
+vector's final coordinate is insufficient because a transcript skipped after an earlier
+forward jump can retain a rank beyond its next admitted event.
+
 ### Step 2: prepare event geometry once
 
 Opening the annotation cursor validates the whole batch and constructs one compact

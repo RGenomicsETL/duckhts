@@ -11,7 +11,24 @@ root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
 history <- read.csv(
   file.path(root, "benchmarks", "data", "duckvep_throughput.csv"),
   stringsAsFactors = FALSE,
-  check.names = FALSE
+  check.names = FALSE,
+  colClasses = c(
+    source_revision = "character",
+    checksum_value = "character",
+    extension_sha256 = "character",
+    model_database_sha256 = "character",
+    model_logical_sha256 = "character",
+    model_source_manifest_sha256 = "character",
+    model_reference_sha256 = "character",
+    model_region_ordinal_sha256 = "character",
+    variants_database_sha256 = "character",
+    corpus_source_sha256 = "character",
+    reference_fasta_sha256 = "character",
+    reference_fai_sha256 = "character",
+    reference_gzi_sha256 = "character",
+    fingerprint_xor_hash = "character",
+    fingerprint_sum_hash = "character"
+  )
 )
 history$revision <- substr(history$source_revision, 1, 8)
 resources <- read.csv(
@@ -289,7 +306,7 @@ target. Each item above needs an adjacent exact-revision comparison on the same 
 corpus, transcript distance, output denominator, core affinity, and fingerprint before
 it can be called an improvement.
 
-## Full ClinVar and GIAB literal-allele throughput
+## Full-corpus transcript throughput
 
 ```{r full-literal-corpora}
 full_workload_labels <- c(
@@ -399,6 +416,119 @@ is an input-density sensitivity, not a gnomAD runtime claim. The full ClinVar
 HGVS pass also supplied the 1,406-base-ALT regression that found the former
 scratch-buffer over-read; all five recorded HGVS passes complete after the
 exact-size retry fix.
+
+## Full-corpus core VEP model
+
+```{r full-core-vep-corpora}
+core_workload_labels <- c(
+  ensembl116_grch38_clinvar_20260706_full_literal_regulation =
+    "ClinVar 2026-07-06",
+  ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation =
+    "GIAB HG002 v4.2.1"
+)
+core_runs <- history[
+  history$workload %in% names(core_workload_labels) &
+    history$output_mode %in% c("compact", "rich", "hgvs") &
+    history$threads == 1L &
+    history$input_partitions == 1L &
+    history$transcript_distance == 5000,
+  ,
+  drop = FALSE
+]
+core_revision <- nearest_tested_ancestor(core_runs$source_revision)
+core_current <- core_runs[
+  core_runs$source_revision == core_revision,
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(core_current) == 6L,
+  all(core_current$regulation_features == 1383580),
+  all(vapply(
+    split(core_current$output_mode, core_current$workload),
+    function(x) setequal(x, c("compact", "rich", "hgvs")),
+    logical(1L)
+  ))
+)
+core_current <- core_current[order(
+  match(core_current$workload, names(core_workload_labels)),
+  match(core_current$output_mode, mode_order)
+), , drop = FALSE]
+core_compact_seconds <- setNames(
+  core_current$median_seconds[core_current$output_mode == "compact"],
+  core_current$workload[core_current$output_mode == "compact"]
+)
+core_table <- data.frame(
+  revision = core_current$revision,
+  corpus = unname(core_workload_labels[core_current$workload]),
+  output = core_current$output_mode,
+  resident_regulation_motif = format(
+    core_current$regulation_features,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  input_alleles = format(
+    core_current$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    core_current$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  rows_per_allele = round(
+    core_current$annotated_rows / core_current$variants,
+    2L
+  ),
+  median_seconds = core_current$median_seconds,
+  alleles_per_second = format(
+    round(core_current$variants_per_second),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(core_current$annotated_rows / core_current$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  elapsed_vs_compact = round(
+    core_current$median_seconds /
+      unname(core_compact_seconds[core_current$workload]),
+    2L
+  ),
+  projected_700M_allele_hours = round(
+    700e6 / core_current$variants_per_second / 3600,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(core_table, row.names = FALSE)
+```
+
+This is the complete resident core-VEP model used for independent small
+variants: 644,427 transcripts plus 380,818 RegulatoryFeature and 1,002,762
+MotifFeature intervals. It is a production core-consequence workload, not an
+end-to-end product benchmark: VCF/Parquet ingestion and external exact,
+positional, gene, interval, frequency, and clinical-resource joins remain
+separate DuckDB stages.
+
+The core model emits 126,930,027 rows for ClinVar and 47,835,851 for GIAB,
+including 196,320 and 206,506 regulation/motif rows respectively. The pinned
+single-core rates are 382,067 compact, 171,376 rich, and 90,824 cumulative-HGVS
+alleles/s for ClinVar; GIAB reaches 1,116,579, 466,046, and 243,932/s. At the
+measured HGVS rates, 700 million input alleles project to 2.14 or 0.80
+single-core hours before supplementary SQL joins.
+
+`duckvep_annotate_hgvs(...)` preserves interval-feature rows from the same
+candidate sweep and leaves their transcript/protein HGVS fields NULL. The HGVS
+byte checksum is therefore unchanged while output cardinality includes every
+regulatory/motif row; SQL and R regressions pin that pass-through. The earlier
+transcript-only GIAB run ranged from 3.592 to 6.477 seconds across five passes,
+whereas this core-model run ranged from 3.639 to 3.679 seconds. The apparently
+faster compact result is not attributed to loading more intervals; use the
+stable absolute core-model result rather than treating non-adjacent noisy runs
+as an optimization comparison.
 
 ## Independent-event HGVS materialization
 

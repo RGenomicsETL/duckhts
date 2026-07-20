@@ -1,16 +1,23 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- reset bundled DuckVEP exon cursors before a worker workspace is reused after a
+  non-monotone normalized-event vector, preventing a transcript skipped after a
+  forward jump from carrying an ahead exon rank into the next DBI vector
 - fix bundled cumulative HGVS output for strings larger than the native
   renderer's initial scratch capacity. The bundled adapter retries with the
   reported exact capacity instead of exposing truncated text, retains a failed
   UTF-8 assignment as NULL, and rejects an invalid internal text slice. A DBI
-  regression exercises a transcript HGVS string longer than 1,400 bytes. Pinned
+  regression exercises a transcript HGVS string longer than 1,400 bytes and an
+  independently rendered protein HGVS string beyond the initial capacity. Pinned
   one-core full-corpus DBI-path benchmarks at the fixed revision process
   4,438,467 ClinVar literal alleles at 391,848/s compact, 174,984/s rich, and
   90,594/s with cumulative HGVS; the corresponding 4,095,611-allele GIAB HG002
   rates are 921,190/s, 447,266/s, and 244,222/s. Cumulative annotation preserves
   resident regulatory/motif rows from the same sweep with NULL HGVS fields;
-  bundled DBI coverage prevents production callers from needing a second scan
+  bundled DBI coverage prevents production callers from needing a second scan.
+  With all 1,383,580 core RegulatoryFeature/MotifFeature intervals loaded, the
+  full-corpus rates are 382,067/s compact, 171,376/s rich, and 90,824/s HGVS for
+  ClinVar, and 1,116,579/s, 466,046/s, and 243,932/s for GIAB
 - speed up the bundled DuckVEP consequence and cumulative HGVS paths by reusing one
   classification pass and compact prepared facts. Bundled annotation now preserves
   deterministic `annotation_index` values across DuckDB vector and disjoint ordered

@@ -1,13 +1,20 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- reset worker-local point and normalized-span exon ranks before reusing a workspace
+  after a non-monotone prepared-event vector. A later variant can skip a transcript
+  after an earlier forward jump, leaving that transcript's rank ahead even when the
+  next DuckDB vector begins after the prior vector's final coordinate. A deterministic
+  two-vector pure-C regression compares the reused workspace with a fresh workspace
+  and preserves the exon consequence
 - fix cumulative HGVS rendering for transcript or protein strings larger than
   the worker's initial scratch buffer. Renderers now report the exact required
   capacity and return `BUFFER_TOO_SMALL` before the adapter retries; the adapter
   also preserves DuckDB's checked UTF-8 rejection and validates every HGVS text-
   arena slice before materialization. Pure-C, SQL, and R regressions include a
   1,405-base inserted sequence matching the long-allele class found by the full
-  ClinVar run. At the exact fixed revision, pinned one-core complete-corpus runs
+  ClinVar run and independent transcript/protein strings beyond the initial
+  scratch capacity. At the exact fixed revision, pinned one-core complete-corpus runs
   process 4,438,467 literal ClinVar alleles at 391,848/s compact, 174,984/s rich,
   and 90,594/s with cumulative HGVS (126,733,707 rows), while 4,095,611 GIAB
   HG002 alleles run at 921,190/s, 447,266/s, and 244,222/s respectively
@@ -17,7 +24,10 @@
   now also permits the cumulative HGVS surface to load the resident
   regulation/motif relation: interval-feature rows pass through the same
   consequence sweep with NULL HGVS fields, as pinned by SQL and R regressions,
-  rather than requiring a second annotation scan
+  rather than requiring a second annotation scan. With all 1,383,580 resident
+  RegulatoryFeature/MotifFeature intervals loaded, the full-corpus core-VEP
+  rates are 382,067/s compact, 171,376/s rich, and 90,824/s HGVS for ClinVar,
+  and 1,116,579/s, 466,046/s, and 243,932/s for GIAB
 - preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
   VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
   nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and

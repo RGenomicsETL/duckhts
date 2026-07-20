@@ -56,6 +56,13 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--corpus-source",
+  dest = "corpus_source",
+  default = "",
+  help = "optional original VCF/BCF artifact hashed into the receipt [%default]"
+)
+op <- add_option(
+  op,
   "--event-mode",
   dest = "event_mode",
   default = "small",
@@ -195,7 +202,8 @@ inputs <- c(
   opt$extension,
   if (production) opt$database else opt$model_sql,
   if (nzchar(opt$variants_database)) opt$variants_database,
-  if (nzchar(opt$reference_fasta)) opt$reference_fasta
+  if (nzchar(opt$reference_fasta)) opt$reference_fasta,
+  if (nzchar(opt$corpus_source)) opt$corpus_source
 )
 if (nzchar(opt$expected_fingerprint)) {
   inputs <- c(inputs, opt$expected_fingerprint)
@@ -215,6 +223,30 @@ variants_database_sha256 <- if (nzchar(opt$variants_database)) {
 } else {
   ""
 }
+reference_fasta_sha256 <- if (nzchar(opt$reference_fasta)) {
+  sha256_file(normalizePath(opt$reference_fasta))
+} else {
+  ""
+}
+reference_fai_sha256 <- if (
+  nzchar(opt$reference_fasta) && file.exists(paste0(opt$reference_fasta, ".fai"))
+) {
+  sha256_file(normalizePath(paste0(opt$reference_fasta, ".fai")))
+} else {
+  ""
+}
+reference_gzi_sha256 <- if (
+  nzchar(opt$reference_fasta) && file.exists(paste0(opt$reference_fasta, ".gzi"))
+) {
+  sha256_file(normalizePath(paste0(opt$reference_fasta, ".gzi")))
+} else {
+  ""
+}
+corpus_source_sha256 <- if (nzchar(opt$corpus_source)) {
+  sha256_file(normalizePath(opt$corpus_source))
+} else {
+  ""
+}
 
 drv <- duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- if (production) {
@@ -230,10 +262,19 @@ invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 
 variants_catalog <- "duckvep_benchmark_variants"
 corpus_receipt <- NULL
+dense_corpus_receipt <- NULL
 model_logical_sha256 <- ""
 model_assembly <- ""
 model_source_version <- ""
+model_source_manifest_sha256 <- ""
+model_reference_sha256 <- ""
 model_region_ordinal_sha256 <- ""
+receipt_value <- function(receipt, column, default = "") {
+  if (is.null(receipt) || !column %in% names(receipt) || is.na(receipt[[column]][[1L]])) {
+    return(default)
+  }
+  as.character(receipt[[column]][[1L]])
+}
 if (nzchar(opt$variants_database)) {
   if (!production) {
     die("--variants-database requires --database")
@@ -256,14 +297,30 @@ if (production) {
   if ("model_receipt" %in% main_relations) {
     model_receipt <- dbGetQuery(
       con,
-      "SELECT source_version, assembly, model_sha256 FROM model_receipt"
+      "SELECT * FROM model_receipt"
     )
     if (nrow(model_receipt) != 1L) {
       die("model_receipt must contain exactly one row")
     }
-    model_source_version <- as.character(model_receipt$source_version[[1L]])
-    model_assembly <- as.character(model_receipt$assembly[[1L]])
-    model_logical_sha256 <- as.character(model_receipt$model_sha256[[1L]])
+    model_source_version <- receipt_value(model_receipt, "source_version")
+    model_assembly <- receipt_value(model_receipt, "assembly")
+    model_logical_sha256 <- receipt_value(model_receipt, "model_sha256")
+    model_source_manifest_sha256 <- receipt_value(
+      model_receipt,
+      "source_manifest_sha256"
+    )
+    model_reference_sha256 <- receipt_value(model_receipt, "reference_sha256")
+  }
+  if ("model_regions" %in% main_relations) {
+    model_region_ordinal_sha256 <- dbGetQuery(
+      con,
+      "SELECT sha256(string_agg(
+         seq_region::VARCHAR || ':' || seq_region_name || ':' ||
+         sequence_length::VARCHAR,
+         '|' ORDER BY seq_region
+       )) AS digest
+       FROM model_regions"
+    )$digest[[1L]]
   }
 }
 
@@ -281,46 +338,51 @@ if (nzchar(opt$variants_database)) {
     die("dense variant table requires dense_corpus_receipt")
   }
   if (has_dense_receipt) {
-    corpus_receipt <- dbGetQuery(
+    dense_corpus_receipt <- dbGetQuery(
       con,
       glue(
         "SELECT * FROM {identifier_q(variants_catalog)}.main.dense_corpus_receipt"
       )
     )
-    if (nrow(corpus_receipt) != 1L ||
-        corpus_receipt$schema_version[[1L]] != 2L) {
+    if (nrow(dense_corpus_receipt) != 1L ||
+        dense_corpus_receipt$schema_version[[1L]] != 2L) {
       die("dense_corpus_receipt must contain one schema-version-2 row")
     }
+    corpus_receipt <- dense_corpus_receipt
     if (!nzchar(model_logical_sha256)) {
       die("dense corpus requires a model_receipt")
     }
-    model_region_ordinal_sha256 <- dbGetQuery(
-      con,
-      "SELECT sha256(string_agg(
-         seq_region::VARCHAR || ':' || seq_region_name || ':' ||
-         sequence_length::VARCHAR,
-         '|' ORDER BY seq_region
-       )) AS digest
-       FROM model_regions"
-    )$digest[[1L]]
     if (!identical(
-          as.character(corpus_receipt$model_sha256[[1L]]),
+          as.character(dense_corpus_receipt$model_sha256[[1L]]),
           model_logical_sha256
         ) ||
         !identical(
-          as.character(corpus_receipt$assembly[[1L]]),
+          as.character(dense_corpus_receipt$assembly[[1L]]),
           model_assembly
         ) ||
         !identical(
-          as.character(corpus_receipt$model_source_version[[1L]]),
+          as.character(dense_corpus_receipt$model_source_version[[1L]]),
           model_source_version
         ) ||
         !identical(
-          as.character(corpus_receipt$region_ordinal_sha256[[1L]]),
+          as.character(dense_corpus_receipt$region_ordinal_sha256[[1L]]),
           as.character(model_region_ordinal_sha256)
         )) {
       die("dense corpus receipt does not match the benchmark model")
     }
+  } else if ("corpus_receipt" %in% sidecar_relations) {
+    corpus_receipt <- dbGetQuery(
+      con,
+      glue("SELECT * FROM {identifier_q(variants_catalog)}.main.corpus_receipt")
+    )
+    if (nrow(corpus_receipt) != 1L) {
+      die("corpus_receipt must contain exactly one row")
+    }
+  }
+  receipt_source_sha256 <- receipt_value(corpus_receipt, "source_sha256")
+  if (nzchar(corpus_source_sha256) && nzchar(receipt_source_sha256) &&
+      !identical(corpus_source_sha256, receipt_source_sha256)) {
+    die("--corpus-source SHA-256 does not match the staged corpus receipt")
   }
 }
 
@@ -385,12 +447,12 @@ if (production) {
   )$n[[1L]]
   workload <- if (nzchar(opt$workload_name)) {
     opt$workload_name
-  } else if (!is.null(corpus_receipt)) {
+  } else if (!is.null(dense_corpus_receipt)) {
     paste0(
-      "ensembl", corpus_receipt$model_source_version[[1L]], "_",
-      tolower(corpus_receipt$assembly[[1L]]), "_",
-      tolower(corpus_receipt$source_name[[1L]]),
-      "_annotation_dense_v", corpus_receipt$schema_version[[1L]]
+      "ensembl", dense_corpus_receipt$model_source_version[[1L]], "_",
+      tolower(dense_corpus_receipt$assembly[[1L]]), "_",
+      tolower(dense_corpus_receipt$source_name[[1L]]),
+      "_annotation_dense_v", dense_corpus_receipt$schema_version[[1L]]
     )
   } else {
     paste0("production_", opt$variants_table)
@@ -961,6 +1023,9 @@ if (nzchar(opt$composition)) {
   }
 }
 
+fingerprint_schema_version <- ""
+fingerprint_xor_hash <- ""
+fingerprint_sum_hash <- ""
 if (nzchar(opt$fingerprint) || nzchar(opt$expected_fingerprint)) {
   fingerprint_values <- dbGetQuery(con, fingerprint_query(variant_sql))
   if (nrow(fingerprint_values) != 1L ||
@@ -981,6 +1046,9 @@ if (nzchar(opt$fingerprint) || nzchar(opt$expected_fingerprint)) {
     variants_database_sha256 = variants_database_sha256,
     stringsAsFactors = FALSE
   )
+  fingerprint_schema_version <- as.character(fingerprint$schema_version[[1L]])
+  fingerprint_xor_hash <- as.character(fingerprint$xor_hash[[1L]])
+  fingerprint_sum_hash <- as.character(fingerprint$sum_hash[[1L]])
   if (nzchar(opt$expected_fingerprint)) {
     expected <- utils::read.csv(
       opt$expected_fingerprint,
@@ -1010,18 +1078,24 @@ if (nzchar(opt$fingerprint) || nzchar(opt$expected_fingerprint)) {
   }
 }
 
+revision <- suppressWarnings(system2(
+  "git",
+  c("-C", root, "rev-parse", "HEAD"),
+  stdout = TRUE,
+  stderr = FALSE
+))
+revision_status <- attr(revision, "status")
+if (!is.null(revision_status) && revision_status != 0L) {
+  die("cannot determine source revision")
+}
+revision <- trimws(revision[[1L]])
 if (!nzchar(opt$source_revision)) {
-  revision <- suppressWarnings(system2(
-    "git",
-    c("-C", root, "rev-parse", "HEAD"),
-    stdout = TRUE,
-    stderr = FALSE
-  ))
-  revision_status <- attr(revision, "status")
-  if (!is.null(revision_status) && revision_status != 0L) {
-    die("cannot determine source revision")
-  }
-  opt$source_revision <- trimws(revision[[1L]])
+  opt$source_revision <- revision
+} else if (!identical(opt$source_revision, revision)) {
+  die(
+    "--source-revision {opt$source_revision} is not the current checkout ",
+    "revision {revision}"
+  )
 }
 
 declared_version <- sub(
@@ -1107,6 +1181,48 @@ row <- data.frame(
   },
   checksum_value = check$checksum[[1L]],
   cpu_affinity = cpu_affinity,
+  extension_sha256 = extension_sha256,
+  model_database_sha256 = model_database_sha256,
+  model_logical_sha256 = model_logical_sha256,
+  model_source_manifest_sha256 = model_source_manifest_sha256,
+  model_reference_sha256 = model_reference_sha256,
+  model_source_version = model_source_version,
+  model_assembly = model_assembly,
+  model_region_ordinal_sha256 = model_region_ordinal_sha256,
+  variants_database_sha256 = variants_database_sha256,
+  corpus_receipt_schema_version = receipt_value(corpus_receipt, "schema_version"),
+  corpus_source_name = receipt_value(corpus_receipt, "source_name"),
+  corpus_source_record_count = receipt_value(
+    corpus_receipt,
+    "source_record_count"
+  ),
+  corpus_source_alt_count = receipt_value(corpus_receipt, "source_alt_count"),
+  corpus_supported_alt_count = if (
+    nzchar(receipt_value(corpus_receipt, "supported_model_literal_alt_count"))
+  ) {
+    receipt_value(corpus_receipt, "supported_model_literal_alt_count")
+  } else {
+    receipt_value(corpus_receipt, "supported_alt_count")
+  },
+  corpus_max_reference_length = receipt_value(
+    corpus_receipt,
+    "max_reference_length"
+  ),
+  corpus_max_alternate_length = receipt_value(
+    corpus_receipt,
+    "max_alternate_length"
+  ),
+  corpus_source_sha256 = if (nzchar(corpus_source_sha256)) {
+    corpus_source_sha256
+  } else {
+    receipt_value(corpus_receipt, "source_sha256")
+  },
+  reference_fasta_sha256 = reference_fasta_sha256,
+  reference_fai_sha256 = reference_fai_sha256,
+  reference_gzi_sha256 = reference_gzi_sha256,
+  fingerprint_schema_version = fingerprint_schema_version,
+  fingerprint_xor_hash = fingerprint_xor_hash,
+  fingerprint_sum_hash = fingerprint_sum_hash,
   stringsAsFactors = FALSE
 )
 
@@ -1120,7 +1236,20 @@ if (nzchar(opt$history)) {
       check.names = FALSE,
       colClasses = c(
         source_revision = "character",
-        checksum_value = "character"
+        checksum_value = "character",
+        extension_sha256 = "character",
+        model_database_sha256 = "character",
+        model_logical_sha256 = "character",
+        model_source_manifest_sha256 = "character",
+        model_reference_sha256 = "character",
+        model_region_ordinal_sha256 = "character",
+        variants_database_sha256 = "character",
+        corpus_source_sha256 = "character",
+        reference_fasta_sha256 = "character",
+        reference_fai_sha256 = "character",
+        reference_gzi_sha256 = "character",
+        fingerprint_xor_hash = "character",
+        fingerprint_sum_hash = "character"
       )
     )
     if (!identical(names(old), names(row))) {
