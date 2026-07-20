@@ -191,6 +191,8 @@ if (production) {
     "seq_region_name"
   } else if ("name" %in% region_columns) {
     "name"
+  } else if ("chrom" %in% region_columns) {
+    "chrom"
   } else {
     ""
   }
@@ -204,7 +206,8 @@ if (production) {
       (!complete_coverage || !nzchar(region_name_column))
   ) {
     die(
-      "--output hgvs requires sequence_length and seq_region_name or name ",
+      "--output hgvs requires sequence_length and a seq_region_name, name, ",
+      "or chrom column ",
       "in bench_regions"
     )
   }

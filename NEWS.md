@@ -52,7 +52,10 @@
   genomic HGVS, RefSeq RNA edits, exact structural/BND HGVS, or phased/compound HGVS;
   ferro-hgvs v0.9.0 is a pinned independent
   specification/corpus oracle, not a C/CRAN/Wasm dependency or replacement for VEP 116
-  behavior. The additional stable consequence-predicate flag assignments advance the
+  behavior. The production throughput driver accepts `chrom` as the sequence-region name
+  column used by the final staged Ensembl model, so the HGVS workload is reproducible from
+  that canonical staging relation rather than requiring a benchmark-only alias. The
+  additional stable consequence-predicate flag assignments advance the
   standalone kernel ABI to 0.16.0
 - match VEP 116 for complete transcript overlap by ordinary long literal
   alleles: a normalized deletion now enters the same tier-1
