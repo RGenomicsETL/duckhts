@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- let the deterministic DuckVEP corpus stager select every primary-contig tile
+  for full GIAB/ClinVar performance gates, and record a caller-declared corpus
+  name plus the dense-versus-full selection mode in its receipt. The historical
+  density-ranked default remains unchanged
 - extend the unified `duckvep_annotate(...)` relation with `rich := TRUE`.
   The fixed public schema retains the compact SO/region masks, IMPACT/status/
   reason codes, positions, amino-acid bytes, NMD codes, and object ordinals
