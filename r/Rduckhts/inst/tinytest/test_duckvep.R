@@ -511,6 +511,30 @@ expect_identical(
 expect_identical(public_annotation$transcript_hgvs, "n.25A>G")
 expect_true(is.na(public_annotation$protein_hgvs))
 
+public_rich_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.event_index, a.transcript_index, a.consequence, a.impact,",
+    "a.protein_position, a.nmd_prediction, a.duckvep_status,",
+    "a.transcript_hgvs, a.protein_hgvs",
+    "FROM duckvep_annotate('duckvep_r_public_events', 'r-hgvs',",
+    "hgvs := TRUE, upstream_distance := 0, downstream_distance := 0,",
+    "rich := TRUE) a ORDER BY a.event_index, a.transcript_index"
+  )
+)
+expect_equal(public_rich_annotation$event_index, 1)
+expect_equal(public_rich_annotation$transcript_index, 0)
+expect_identical(
+  public_rich_annotation$consequence,
+  "non_coding_transcript_exon_variant"
+)
+expect_identical(public_rich_annotation$impact, "MODIFIER")
+expect_true(is.na(public_rich_annotation$protein_position))
+expect_true(is.na(public_rich_annotation$nmd_prediction))
+expect_identical(public_rich_annotation$duckvep_status, "supported")
+expect_identical(public_rich_annotation$transcript_hgvs, "n.25A>G")
+expect_true(is.na(public_rich_annotation$protein_hgvs))
+
 public_annotation_without_hgvs <- dbGetQuery(
   con,
   paste(

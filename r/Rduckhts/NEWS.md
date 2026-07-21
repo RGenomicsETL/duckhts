@@ -1,5 +1,12 @@
 
 # Rduckhts 1.5.0-0.1.0
+- bundle `duckvep_annotate(..., rich := TRUE)` so DBI workflows can request
+  VEP-facing consequence, IMPACT, region, amino-acid, NMD, overlap-object, and
+  explicit DuckHTS audit text without losing the compact numeric fields.
+  `rich := TRUE, hgvs := TRUE` returns those fields and independent-event HGVS
+  from one fused native pass. Add DBI coverage for the public rich/HGVS schema
+  and expand the rendered root DuckVEP documentation; the package function
+  catalog is regenerated from the public SQL authority
 - make the bundled `duckvep_annotate(...)` relation reject conflicting
   supported symbolic ALT and explicit structural-type values, and treat
   explicit `hgvs := NULL` as the documented `FALSE` default instead of

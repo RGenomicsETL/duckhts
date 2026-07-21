@@ -156,12 +156,105 @@ SELECT regionkey_hex(regionkey('X', 1007, 1807, 1)) AS rkx,
        ) AS overlaps;
 ```
 
-### DuckVEP consequence and HGVS annotation
+### DuckVEP: a resident Ensembl VEP consequence engine
 
-DuckVEP keeps transcript models immutable and resident while variants remain an
-ordinary narrow relation. Production models are prepared from receipted Ensembl
-relations with `duckvep_ensembl_*`; this small deterministic model demonstrates
-the complete load, annotation, SO decoding, and release lifecycle.
+DuckVEP compiles Ensembl release relations into an immutable, shared transcript
+and regulation model. Sorted variant alleles then pass through a native C
+candidate sweep, transcript projection, consequence classifier, sequence editor,
+NMD evaluator, and optional HGVS renderer. Stable transcript/gene identifiers and
+supplementary annotations remain ordinary DuckDB relations and are joined only
+after the compact consequence rows have been filtered.
+
+The implementation targets executable Ensembl VEP 116 semantics rather than a
+new interpretation of the Sequence Ontology rules. The current differential
+ledger covers GRCh38, GRCh37, *P. falciparum*, exact structural variants, paired
+breakends, regulation/motif features, and variant-induced NMD. See the rendered
+[conformance report](benchmarks/duckvep_conformance.md), the
+[throughput report](benchmarks/duckvep_throughput.md), and the implementation
+contract in [design/duckvep.md](design/duckvep.md).
+
+#### Building a receipted model
+
+The model compiler reads ordinary DuckDB relations. Stage the exact Ensembl core
+and funcgen release tables from their MySQL dump files, or attach a read-only
+Ensembl MySQL database through DuckDB's `mysql` extension. The compiler is not a
+downloader: source retrieval and dump-to-table typing are explicit staging steps,
+while the same validation and model receipt apply to either transport.
+
+```{sql eval=FALSE, collapse=FALSE, comment=""}
+-- Reference chunks are zero-based, half-open and sequence-bearing.
+CREATE TABLE grch38_reference_chunks AS
+SELECT chrom, start, "end", seq
+FROM fasta_nuc(
+  'Homo_sapiens.GRCh38.dna.primary_assembly.fa',
+  bin_width := 1048576,
+  include_seq := TRUE
+);
+
+-- ensembl_core and ensembl_funcgen are schemas containing the release-116
+-- tables named in design/duckvep.md.
+CREATE TABLE grch38_regions AS
+SELECT * FROM duckvep_ensembl_regions(
+  'ensembl_core', 'grch38_reference_chunks', 'GRCh38'
+);
+
+CREATE TABLE grch38_transcripts AS
+SELECT * FROM duckvep_ensembl_transcripts(
+  'ensembl_core', 'grch38_reference_chunks', 'GRCh38'
+);
+
+CREATE TABLE grch38_regulation AS
+SELECT * FROM duckvep_ensembl_regulation_features(
+  'ensembl_funcgen', 'grch38_regions'
+);
+
+CREATE TABLE grch38_receipt AS
+SELECT * FROM duckvep_model_receipt(
+  'grch38_regions', 'grch38_transcripts',
+  'Ensembl', '116', 'GRCh38',
+  source_manifest_sha256, reference_sha256,
+  'VEP 116 core transcript selection',
+  regulation_features_table := 'grch38_regulation'
+);
+```
+
+`duckvep_ensembl_transcripts(...)` applies the pinned VEP core-transcript
+selection, reconstructs ranked exon/cDNA/CDS geometry and strand-correct sequence,
+loads the sequence-region genetic code (including mitochondrial code), prepares
+complete transcript flanks, mature-miRNA segments, and supported Ensembl sequence
+edits, and retains MANE/GENCODE/CCDS and stable identifiers as cold relational
+columns. GRCh37 is built from the separate release-116 GRCh37 core schema and is
+intentionally MANE-free. Regulation and motif features are compiled from the
+matching funcgen release, not inferred from transcript overlap.
+
+Publication is separate from compilation. Persist the prepared relations and
+load their sorted hot projections into a named resident model with
+`duckvep_model_load(...)`. `reference_fasta` enables reference validation and
+VEP-compatible three-prime HGVS shifting; `transcript_coverage_complete := TRUE`
+permits a no-transcript hit to become a supported `intergenic_variant`.
+
+#### Canonical event relation and output choices
+
+`duckvep_annotate(...)` consumes one coordinate-ordered row per ALT allele. Its
+canonical columns cover literal small variants, exact span SVs, and paired
+breakends in one relation. Genotypes, phase sets, imprecision intervals, raw ALT,
+and sample metadata stay on the source row and join back by `event_index`.
+
+| `rich` | `hgvs` | Result |
+|:--|:--|:--|
+| `FALSE` | `FALSE` | Compact masks, codes, ordinals, cDNA/CDS/protein positions, amino-acid bytes and NMD codes |
+| `TRUE` | `FALSE` | Compact fields plus Consequence, IMPACT, region, amino-acid, NMD and audit text from the same native pass |
+| `FALSE` | `TRUE` | Compact fields plus independent-event HGVSc/HGVSn/HGVSp |
+| `TRUE` | `TRUE` | Rich consequence and HGVS from one fused candidate-discovery pass |
+
+The transcript window defaults to 5,000 bases in each direction, matching the
+VEP default. It is an explicit API parameter rather than a fixed buffer: either
+direction may be zero or any supported `UINTEGER` distance. Audit columns named
+`duckvep_status` and `duckvep_reason` explain unresolved computation (for example
+missing sequence or a reference mismatch); they are not Ensembl CSQ fields.
+
+This bundled deterministic model demonstrates the load, rich/HGVS annotation,
+SO decoding, and release lifecycle without downloading an Ensembl release.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 CREATE OR REPLACE TABLE readme_duckvep_regions AS
@@ -201,20 +294,48 @@ SELECT * FROM (VALUES
        end_position, structural_type, copy_change,
        mate_seq_region, mate_position);
 
-SELECT a.event_index, a.transcript_index,
-       string_agg(t.consequence, '&' ORDER BY t.severity_rank) AS consequence,
-       a.transcript_hgvs, a.protein_hgvs
+SELECT a.event_index, a.transcript_index, a.consequence, a.impact,
+       a.cdna_position, a.transcript_hgvs, a.protein_hgvs,
+       a.duckvep_status
 FROM duckvep_annotate(
   'readme_duckvep_events', 'readme', hgvs := true,
-  upstream_distance := 0, downstream_distance := 0
+  upstream_distance := 0, downstream_distance := 0, rich := true
 ) AS a
-JOIN duckvep_so_terms() AS t
-  ON (a.consequence_mask & t.consequence_mask) <> 0
-GROUP BY ALL
 ORDER BY a.event_index, a.transcript_index;
 
 SELECT duckvep_model_drop('readme') AS dropped;
 ```
+
+For high-cardinality pipelines, filter compact integer masks/codes first and
+decode selected SO bits with `duckvep_so_terms()` afterward. Join
+`transcript_index`, `gene_index`, and `regulation_feature_index` to the prepared
+model relations for stable IDs and cold metadata. Exact/positional resources such
+as ClinVar or population frequencies, interval resources such as constraint or
+regulatory tracks, and gene/disease resources stay as typed Parquet/DuckLake
+relations; DuckDB can apply exact joins, range prefilters, IEJoin, or a declared
+cgranges index without copying those resources into every resident transcript.
+
+#### Measured performance and FastVEP comparison
+
+On the complete GIAB HG002 v4.2.1 input (4,096,123 ALT alleles; 47,629,345
+annotation rows), the checked public relation benchmark at a 5,000-base window
+records 1,012,262 alleles/s for compact consequence and 241,230 alleles/s with
+HGVS on one pinned physical core. Four pinned physical cores record 3,370,873
+compact alleles/s and 857,361 HGVS alleles/s. Input staging and model load are
+outside this resident-engine measurement; every pass checksum-validates the full
+output denominator. The exact revision, hashes, RSS, core affinity, and workload
+are in [benchmarks/duckvep_throughput.md](benchmarks/duckvep_throughput.md).
+
+The separate end-to-end comparison includes VCF decoding, DuckVEP's explicit
+coordinate sort, annotation, and real uncompressed tabular output. On one pinned
+core DuckVEP completed in 64.54 seconds versus 164.38 seconds for the current
+native-compiled [FastVEP](https://github.com/Huang-lab/fastVEP) checkout
+(2.55-fold wall-time ratio); at four pinned cores the measured times were 32.06
+and 68.09 seconds (2.12-fold). The tools emit different native tab schemas, so the
+report preserves row/byte denominators and separately compares both against VEP
+rather than presenting this as an isolated-kernel speedup. Build flags, source
+commits, rebuilt cache receipt, commands, and output hashes are in
+[benchmarks/benchmark_duckvep_fastvep.md](benchmarks/benchmark_duckvep_fastvep.md).
 
 ### Interval + reference helpers
 
@@ -816,189 +937,6 @@ Then run:
 
 ```bash
 make test_release
-```
-
-## R demo
-
-The R package lives under `r/Rduckhts` and provides helpers to load the extension
-and create [DuckDB](https://duckdb.org/) tables from HTS files. See its README for R-specific usage:
-[r/Rduckhts/README.Rmd](r/Rduckhts/README.Rmd).
-
-```{r eval=TRUE}
-library(DBI)
-library(duckdb)
-
-drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-con <- dbConnect(drv, dbdir = ":memory:")
-ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = FALSE)
-dbExecute(con, sprintf("LOAD '%s'", ext_path))
-
-dbGetQuery(con, "
-  SELECT *
-  FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)
-  LIMIT 5
-")
-
-parquet_path <- tempfile(fileext = ".parquet")
-dbExecute(con, sprintf(
-  "COPY (SELECT * FROM read_bcf('test/data/formatcols.vcf.gz', tidy_format := true)) TO '%s' (FORMAT PARQUET)",
-  parquet_path
-))
-file.exists(parquet_path)
-
-dbGetQuery(con, "
-  SELECT NAME, SEQUENCE, QUALITY, MATE, PAIR_ID
-  FROM read_fastq('test/data/r1.fq', mate_path := 'test/data/r2.fq')
-  LIMIT 5
-")
-
-dbGetQuery(con, "
-  SELECT QNAME, RNAME, POS, READ_GROUP_ID, SAMPLE_ID
-  FROM read_bam('test/data/rg.sam.gz')
-  LIMIT 5
-")
-
-dbGetQuery(con, "
-  SELECT idx, raw
-  FROM read_hts_header('test/data/formatcols.vcf.gz', mode := 'raw')
-  LIMIT 3
-")
-
-dbGetQuery(con, "
-  SELECT seqname, tid, index_type, chunk_beg_vo, chunk_end_vo
-  FROM read_hts_index_spans('test/data/formatcols.vcf.gz')
-  LIMIT 3
-")
-
-dbGetQuery(con, "
-  SELECT index_type, octet_length(raw) AS raw_bytes
-  FROM read_hts_index_raw('test/data/formatcols.vcf.gz')
-")
-```
-
-### SAMtags + auxiliary tags
-
-Standard SAMtags can be surfaced as typed columns and non-standard tags
-captured in a map for ad hoc access:
-
-```{r eval=TRUE}
-dbGetQuery(con, "
-  SELECT RG, NM, map_extract(AUXILIARY_TAGS, 'XZ') AS XZ
-  FROM read_bam('test/data/aux_tags.sam.gz', standard_tags := true, auxiliary_tags := true)
-  LIMIT 1
-")
-```
-
-### GFF/GTF annotation attributes
-
-DuckHTS reads GFF3 with `read_gff(...)`, GTF with `read_gtf(...)`, and generic
-GFF/GTF-like tabix text with `read_tabix(...)`. `read_gff(..., strict := true)`
-performs GFF3 structural validation. Attribute decoding can be scalar and raw
-for legacy convenience (`attributes_map`), grouped and lossless for multi-values
-(`attributes_list` as `MAP(VARCHAR, VARCHAR[])`), or exact parser-style pairs (`attributes_pairs` as
-`LIST<STRUCT(key, value, idx)>`).
-
-The GFF3 implementation is audited against [GFFBase](https://github.com/Kuanhao-Chao/gffbase)
-in [`benchmarks/benchmark_gffbase_conformance.md`](benchmarks/benchmark_gffbase_conformance.md),
-including Rust/Python parser parity checks, local conformance cases, server
-specs, and human-scale GENCODE timing.
-
-```{r eval=TRUE}
-dbGetQuery(con, "
-  SELECT
-    seqname,
-    feature,
-    start,
-    \"end\",
-    list_extract(map_extract_value(attributes_list, 'Dbxref'), 1) AS first_dbxref,
-    list_count(attributes_pairs) AS n_attr_pairs
-  FROM read_gff('test/data/gff_attrs.gff3',
-                strict := true,
-                attributes_list := true,
-                attributes_pairs := true)
-")
-
-dbGetQuery(con, "
-  SELECT p.key, p.value, p.idx
-  FROM read_gff('test/data/gff_attrs.gff3', attributes_pairs := true),
-       UNNEST(attributes_pairs) AS u(p)
-  WHERE p.key IN ('Alias', 'Note')
-  ORDER BY p.key, p.idx
-")
-
-dbGetQuery(con, "
-  SELECT list_extract(map_extract_value(attributes_list, 'note'), 1) AS note
-  FROM read_gtf('test/data/gtf_attrs.gtf', attributes_list := true)
-")
-```
-
-### Tabix text files
-
-```{r eval=TRUE}
-dbGetQuery(con, "
-  SELECT column0, column1
-  FROM read_tabix('test/data/meta_tabix.tsv.gz')
-  LIMIT 2
-")
-
-dbGetQuery(con, "
-  SELECT chrom, pos
-  FROM read_tabix('test/data/header_tabix.tsv.gz', header := true)
-  LIMIT 2
-")
-
-dbGetQuery(con, "
-  SELECT typeof(column1) AS column1_type
-  FROM read_tabix('test/data/meta_tabix.tsv.gz', auto_detect := true)
-  LIMIT 1
-")
-
-dbGetQuery(con, "
-  SELECT pos + 1 AS pos_plus_one
-  FROM read_tabix('test/data/header_tabix.tsv.gz', header := true,
-                  column_types := ['VARCHAR','BIGINT','VARCHAR'])
-  LIMIT 1
-")
-
-dbDisconnect(con, shutdown = TRUE)
-```
-
-## Project Structure
-
-```
-src/
-  duckhts.c              # Extension entry point and SQL registration
-  bcf_reader.c           # VCF/BCF reader (read_bcf)
-  bam_reader.c           # SAM/BAM/CRAM reader (read_bam)
-  seq_reader.c           # FASTA/FASTQ reader (read_fasta, read_fastq)
-  tabix_reader.c         # Tabix/GTF/GFF reader (read_tabix, read_gtf, read_gff)
-  vep_parser.c           # VEP/CSQ annotation parser
-  kmer_udf.c             # Sequence utilities, including SIMD-routed seq_gc_content
-  ......
-  simd/                  # Runtime SIMD dispatch and scalar/AVX/NEON/wasm backends
-    duckhts_simd_dispatch.c
-    duckhts_simd_scalar.c
-    duckhts_simd_avx2.c
-    duckhts_simd_avx512.c
-    duckhts_simd_neon.c
-    duckhts_simd_wasm_simd128.c
-  include/
-    duckhts_simd.h
-    duckhts_simd_internal.h
-    duckhts_simd_kernels.def
-    vcf_types.h
-    vep_parser.h
-third_party/
-  htslib/                # Vendored htslib 1.24 (built automatically)
-benchmarks/
-  benchmark_simd_seq_gc.Rmd  # Scalar-vs-runtime-SIMD benchmark report
-test/
-  sql/                   # SQL logic tests, including SIMD conformance
-duckdb_capi/
-  duckdb.h               # DuckDB C API headers
-  duckdb_extension.h
-r/
-  Rduckhts/              # R package with bundled extension sources
 ```
 
 ## References

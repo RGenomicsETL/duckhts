@@ -190,17 +190,14 @@ if (opt$threads < 1L) {
 if (opt$input_partitions < 1L || opt$input_partitions > 1024L) {
   die("--input-partitions must be from 1 through 1024")
 }
-if (!opt$output %in% c("rich", "compact", "hgvs")) {
-  die("--output must be rich, compact, or hgvs")
+if (!opt$output %in% c("rich", "compact", "hgvs", "rich_hgvs")) {
+  die("--output must be rich, compact, hgvs, or rich_hgvs")
 }
 if (!opt$api_surface %in% c("native", "public")) {
   die("--api-surface must be native or public")
 }
 if (!opt$event_mode %in% c("small", "breakend")) {
   die("--event-mode must be small or breakend")
-}
-if (identical(opt$api_surface, "public") && identical(opt$output, "rich")) {
-  die("--api-surface public exposes compact output with optional HGVS")
 }
 if (identical(opt$api_surface, "public") && opt$input_partitions != 1L) {
   die("--api-surface public uses DuckDB parallelism; set --input-partitions 1")
@@ -209,12 +206,14 @@ production <- nzchar(opt$database)
 if (isTRUE(opt$regulatory) && !production) {
   die("--regulatory requires a production --database")
 }
-if (identical(opt$output, "hgvs") && !identical(opt$event_mode, "small")) {
-  die("--output hgvs currently requires --event-mode small")
+if (opt$output %in% c("hgvs", "rich_hgvs") &&
+    !identical(opt$event_mode, "small")) {
+  die("--output hgvs and rich_hgvs currently require --event-mode small")
 }
-if (identical(opt$output, "hgvs") && !nzchar(opt$reference_fasta)) {
+if (opt$output %in% c("hgvs", "rich_hgvs") &&
+    !nzchar(opt$reference_fasta)) {
   if (production) {
-    die("--output hgvs with --database requires --reference-fasta")
+    die("HGVS output with --database requires --reference-fasta")
   }
   opt$reference_fasta <- file.path(
     root,
@@ -540,11 +539,11 @@ if (production) {
   )$column_name
   complete_coverage <- "sequence_length" %in% region_columns
   if (
-    identical(opt$output, "hgvs") &&
+    opt$output %in% c("hgvs", "rich_hgvs") &&
       (!complete_coverage || !nzchar(region_name_column))
   ) {
     die(
-      "--output hgvs requires sequence_length and a seq_region_name, name, ",
+      "HGVS output requires sequence_length and a seq_region_name, name, ",
       "or chrom column ",
       "in bench_regions"
     )
@@ -553,7 +552,7 @@ if (production) {
     c("pre_cds_sequence", "post_cds_sequence") %in% transcript_columns
   )
   load_queries <- c(
-    if (identical(opt$output, "hgvs")) {
+    if (opt$output %in% c("hgvs", "rich_hgvs")) {
       paste(
         "SELECT seq_region, sequence_length,",
         region_name_column,
@@ -643,10 +642,10 @@ if (production) {
   region_count <- 1
   transcript_count <- 1
   exon_count <- 2
-  complete_coverage <- identical(opt$output, "hgvs")
+  complete_coverage <- opt$output %in% c("hgvs", "rich_hgvs")
   complete_flanks <- FALSE
   load_queries <- c(
-    if (identical(opt$output, "hgvs")) {
+    if (opt$output %in% c("hgvs", "rich_hgvs")) {
       paste(
         "SELECT seq_region,",
         "CASE seq_region WHEN 0 THEN 1 ELSE 260 END::UBIGINT AS sequence_length,",
@@ -809,10 +808,36 @@ annotation_function_name <- function(output_mode) {
     "_duckvep_annotate_small_compact"
   } else if (output_mode == "hgvs") {
     "_duckvep_annotate_small_hgvs"
+  } else if (output_mode == "rich_hgvs") {
+    "_duckvep_annotate_small_rich_hgvs"
   } else {
     "_duckvep_annotate_small_rich"
   }
 }
+
+compact_fields <- c(
+  "transcript_index", "gene_index", "consequence_mask", "region_mask",
+  "impact_code", "status_code", "reason_code", "cdna_position",
+  "cds_position", "protein_position", "reference_amino_acid_code",
+  "alternate_amino_acid_code", "nmd_prediction_code",
+  "nmd_escape_reasons", "regulation_feature_index", "overlap_object_code"
+)
+rich_fields <- c(
+  "transcript_index", "gene_index", "consequence", "impact", "region",
+  "status", "reason", "cdna_position", "cds_position", "protein_position",
+  "reference_amino_acid", "alternate_amino_acid", "nmd_prediction",
+  "nmd_escape_intronless", "nmd_escape_early_cds", "nmd_escape_last_exon",
+  "nmd_escape_penultimate_exon_end", "regulation_feature_index",
+  "overlap_object", "consequence_mask", "region_mask", "impact_code",
+  "status_code", "reason_code", "reference_amino_acid_code",
+  "alternate_amino_acid_code", "nmd_prediction_code", "nmd_escape_reasons",
+  "overlap_object_code"
+)
+hgvs_fields <- c(
+  "transcript_hgvs", "protein_hgvs", "hgvs_shift",
+  "transcript_hgvs_status", "transcript_hgvs_reason",
+  "protein_hgvs_status", "protein_hgvs_reason"
+)
 
 annotation_cte <- function(n, output_mode) {
   n <- as.numeric(n)
@@ -822,26 +847,24 @@ annotation_cte <- function(n, output_mode) {
     } else {
       public_event_table
     }
-    compact_fields <- c(
-      "transcript_index", "gene_index", "consequence_mask", "region_mask",
-      "impact_code", "status_code", "reason_code", "cdna_position",
-      "cds_position", "protein_position", "reference_amino_acid_code",
-      "alternate_amino_acid_code", "nmd_prediction_code",
-      "nmd_escape_reasons", "regulation_feature_index", "overlap_object_code"
+    annotation_fields <- switch(
+      output_mode,
+      compact = compact_fields,
+      hgvs = c(compact_fields, hgvs_fields),
+      rich = rich_fields,
+      rich_hgvs = c(rich_fields, hgvs_fields)
     )
-    annotation_fields <- if (identical(output_mode, "hgvs")) {
-      c(
-        compact_fields, "transcript_hgvs", "protein_hgvs", "hgvs_shift",
-        "transcript_hgvs_status", "transcript_hgvs_reason",
-        "protein_hgvs_status", "protein_hgvs_reason"
+    public_source_field <- function(field) {
+      switch(
+        field,
+        status = "duckvep_status",
+        reason = "duckvep_reason",
+        field
       )
-    } else {
-      compact_fields
     }
     struct_fields <- paste0(
-      annotation_fields,
-      " := a.",
-      annotation_fields,
+      annotation_fields, " := a.",
+      vapply(annotation_fields, public_source_field, character(1L)),
       collapse = ", "
     )
     return(glue(
@@ -852,9 +875,10 @@ annotation_cte <- function(n, output_mode) {
            struct_pack({struct_fields}) AS annotation
          FROM duckvep_annotate(
            {sql_q(event_table)}, {sql_q(model_name)},
-           hgvs := {if (identical(output_mode, 'hgvs')) 'TRUE' else 'FALSE'},
+           hgvs := {if (output_mode %in% c('hgvs', 'rich_hgvs')) 'TRUE' else 'FALSE'},
            upstream_distance := {distance_sql}::UBIGINT,
-           downstream_distance := {distance_sql}::UBIGINT
+           downstream_distance := {distance_sql}::UBIGINT,
+           rich := {if (output_mode %in% c('rich', 'rich_hgvs')) 'TRUE' else 'FALSE'}
          ) AS a
        )"
     ))
@@ -915,8 +939,17 @@ annotation_query <- function(n) {
       "length(annotation.protein_hgvs_status)",
       ") AS VARCHAR)"
     )
-  } else {
+  } else if (opt$output == "rich") {
     "CAST(sum(length(annotation.consequence)) AS VARCHAR)"
+  } else {
+    paste(
+      "CAST(sum(length(annotation.consequence) +",
+      "length(coalesce(annotation.transcript_hgvs, '')) +",
+      "length(coalesce(annotation.protein_hgvs, '')) +",
+      "length(annotation.transcript_hgvs_status) +",
+      "length(annotation.protein_hgvs_status)",
+      ") AS VARCHAR)"
+    )
   }
   glue(
     "{annotation_cte(n, opt$output)}
@@ -956,33 +989,13 @@ fingerprint_query <- function(n) {
       "\"reference\"", "\"alternate\"", "annotation_index"
     )
   }
-  annotation_fields <- if (opt$output == "rich") {
-    c(
-      "transcript_index", "gene_index", "consequence", "impact", "region",
-      "status", "reason", "cdna_position", "cds_position", "protein_position",
-      "reference_amino_acid", "alternate_amino_acid", "nmd_prediction",
-      "nmd_escape_intronless", "nmd_escape_early_cds", "nmd_escape_last_exon",
-      "nmd_escape_penultimate_exon_end", "regulation_feature_index",
-      "overlap_object"
-    )
-  } else {
-    compact_fields <- c(
-      "transcript_index", "gene_index", "consequence_mask", "region_mask",
-      "impact_code", "status_code", "reason_code", "cdna_position",
-      "cds_position", "protein_position", "reference_amino_acid_code",
-      "alternate_amino_acid_code", "nmd_prediction_code",
-      "nmd_escape_reasons", "regulation_feature_index", "overlap_object_code"
-    )
-    if (opt$output == "hgvs") {
-      c(
-        compact_fields, "transcript_hgvs", "protein_hgvs", "hgvs_shift",
-        "transcript_hgvs_status", "transcript_hgvs_reason",
-        "protein_hgvs_status", "protein_hgvs_reason"
-      )
-    } else {
-      compact_fields
-    }
-  }
+  annotation_fields <- switch(
+    opt$output,
+    compact = compact_fields,
+    hgvs = c(compact_fields, hgvs_fields),
+    rich = rich_fields,
+    rich_hgvs = c(rich_fields, hgvs_fields)
+  )
   hash_arguments <- paste(
     c(identity_fields, paste0("annotation.", annotation_fields)),
     collapse = ", "
@@ -1189,7 +1202,7 @@ if (nzchar(opt$fingerprint) || nzchar(opt$expected_fingerprint)) {
     die("full-row fingerprint cardinality differs from timed output")
   }
   fingerprint <- data.frame(
-    schema_version = 2L,
+    schema_version = if (opt$output %in% c("rich", "rich_hgvs")) 3L else 2L,
     workload = workload,
     output_mode = opt$output,
     transcript_distance = as.character(opt$transcript_distance),
@@ -1312,6 +1325,8 @@ row <- data.frame(
     "consequence_mask_sum"
   } else if (opt$output == "hgvs") {
     "hgvs_text_status_bytes"
+  } else if (opt$output == "rich_hgvs") {
+    "consequence_hgvs_text_status_bytes"
   } else {
     "consequence_text_bytes"
   },

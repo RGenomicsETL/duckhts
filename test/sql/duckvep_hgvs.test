@@ -269,6 +269,21 @@ ORDER BY transcript_index;
 1	0	c.5T>C	p.Val2Ala
 1	1	n.78A>G	-
 
+# Rich plus HGVS remains one fused native pass. The public row keeps its compact
+# mask while adding VEP-facing consequence/IMPACT text and the same HGVS strings.
+query IITTTT
+SELECT event_index, transcript_index, consequence, impact,
+       transcript_hgvs, coalesce(protein_hgvs, '-')
+FROM duckvep_annotate(
+  'duckvep_hgvs_public_events', 'hgvs-reference',
+  hgvs := TRUE, upstream_distance := 0, downstream_distance := 0,
+  rich := TRUE
+)
+ORDER BY transcript_index;
+----
+1	0	missense_variant	MODERATE	c.5T>C	p.Val2Ala
+1	1	non_coding_transcript_exon_variant	MODIFIER	n.78A>G	-
+
 # A transcript HGVS string larger than the adapter's initial render scratch
 # must trigger an exact-size retry. The 1,406-base ALT matches the scale of a
 # real full-ClinVar insertion that previously exposed a truncated scratch read.

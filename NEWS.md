@@ -1,6 +1,18 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- extend the unified `duckvep_annotate(...)` relation with `rich := TRUE`.
+  The fixed public schema retains the compact SO/region masks, IMPACT/status/
+  reason codes, positions, amino-acid bytes, NMD codes, and object ordinals
+  while adding VEP-facing consequence, IMPACT, region, amino-acid, NMD, and
+  overlap-object text plus explicitly named `duckvep_status` and
+  `duckvep_reason` audit fields. `rich := TRUE, hgvs := TRUE` fuses candidate
+  discovery, consequence classification, and independent-event HGVSc/HGVSn/
+  HGVSp in one native pass. Add mixed small/SV/BND and rich-plus-HGVS SQL
+  regressions, extend the receipt-bound throughput driver to all four output
+  choices, and replace the root README's synthetic-first DuckVEP overview with
+  the Ensembl relation compiler, canonical event, conformance, performance,
+  supplementary-join, and fair FastVEP comparison contracts
 - make the unified `duckvep_annotate(...)` relation fail when a supported
   symbolic ALT disagrees with an explicit structural type, rather than
   silently reinterpreting the event, and make explicit `hgvs := NULL` follow
