@@ -317,25 +317,154 @@ cgranges index without copying those resources into every resident transcript.
 
 #### Measured performance and FastVEP comparison
 
-On the complete GIAB HG002 v4.2.1 input, 4,095,611 model-addressable literal
-alleles staged from 4,096,123 ALT alleles emit 47,835,851 annotation rows against
-the complete Ensembl 116 GRCh38 model, including all 1,383,580 resident regulatory
-and motif features. At a 5,000-base transcript window, the checked public relation
-records 964,354 compact, 346,030 rich, 238,325 HGVS, and 180,495 fused
-rich-plus-HGVS alleles/s on one pinned physical core. Four pinned physical cores
-record 3,192,214, 1,513,530, 858,619, and 637,846 alleles/s respectively. Input
-staging and model load are outside this resident-engine measurement; every pass
-checksum-validates all 47.84 million output rows, and a separate full-row
-fingerprint proves one-thread/four-thread equality for every output contract. The
-exact revision, hashes, core affinity, and workload are in
+```{r duckvep-readme-benchmark-evidence, include=FALSE}
+format_count <- function(x) {
+  format(round(x), big.mark = ",", scientific = FALSE, trim = TRUE)
+}
+
+surface_history <- read.csv(
+  "benchmarks/data/duckvep_throughput.csv",
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character")
+)
+surface_modes <- c("compact", "rich", "hgvs", "rich_hgvs")
+surface_threads <- c(1L, 4L)
+surface_expected <- as.vector(outer(
+  surface_modes,
+  surface_threads,
+  FUN = function(mode, threads) paste(mode, threads, sep = ":")
+))
+surface_candidates <- surface_history[
+  surface_history$workload ==
+    "ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation" &
+    surface_history$output_mode %in% surface_modes &
+    surface_history$threads %in% surface_threads &
+    surface_history$input_partitions == 1L &
+    surface_history$transcript_distance == 5000L &
+    surface_history$regulation_features == 1383580L,
+  ,
+  drop = FALSE
+]
+surface_groups <- split(surface_candidates, surface_candidates$source_revision)
+surface_complete <- names(Filter(
+  function(x) {
+    nrow(x) == length(surface_expected) &&
+      setequal(
+        paste(x$output_mode, x$threads, sep = ":"),
+        surface_expected
+      )
+  },
+  surface_groups
+))
+surface_complete_in_order <- unique(surface_candidates$source_revision[
+  surface_candidates$source_revision %in% surface_complete
+])
+stopifnot(length(surface_complete_in_order) > 0L)
+surface_revision <- tail(surface_complete_in_order, 1L)
+surface_evidence <- surface_candidates[
+  surface_candidates$source_revision == surface_revision,
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(surface_evidence) == 8L,
+  length(unique(surface_evidence$variants)) == 1L,
+  length(unique(surface_evidence$annotated_rows)) == 1L,
+  length(unique(surface_evidence$corpus_source_alt_count)) == 1L,
+  length(unique(surface_evidence$regulation_features)) == 1L
+)
+surface_rate <- function(mode, threads) {
+  row <- surface_evidence[
+    surface_evidence$output_mode == mode &
+      surface_evidence$threads == threads,
+    ,
+    drop = FALSE
+  ]
+  stopifnot(nrow(row) == 1L)
+  format_count(row$variants_per_second[[1L]])
+}
+
+time_value <- function(lines, label) {
+  match <- grep(paste0("^\\s*", label, ":"), lines, value = TRUE)
+  stopifnot(length(match) == 1L)
+  fields <- strsplit(match, ": ", fixed = TRUE)[[1L]]
+  stopifnot(length(fields) == 2L)
+  trimws(fields[[2L]])
+}
+elapsed_seconds <- function(value) {
+  fields <- as.numeric(strsplit(value, ":", fixed = TRUE)[[1L]])
+  stopifnot(length(fields) %in% c(2L, 3L), !anyNA(fields))
+  if (length(fields) == 2L) {
+    fields[[1L]] * 60 + fields[[2L]]
+  } else {
+    fields[[1L]] * 3600 + fields[[2L]] * 60 + fields[[3L]]
+  }
+}
+read_elapsed <- function(path) {
+  elapsed_seconds(time_value(
+    readLines(path, warn = FALSE),
+    "Elapsed \\(wall clock\\) time \\(h:mm:ss or m:ss\\)"
+  ))
+}
+fast_data <- "benchmarks/data/duckvep_fastvep"
+duck_one <- median(vapply(
+  c(
+    "duckvep_giab_threads1.time",
+    "duckvep_giab_threads1_run2.time",
+    "duckvep_giab_threads1_run3.time"
+  ),
+  function(x) read_elapsed(file.path(fast_data, x)),
+  numeric(1)
+))
+fast_one <- median(vapply(
+  c(
+    "fastvep_giab_threads1.time",
+    "fastvep_giab_threads1_run2.time",
+    "fastvep_giab_threads1_run3.time"
+  ),
+  function(x) read_elapsed(file.path(fast_data, x)),
+  numeric(1)
+))
+duck_four <- median(vapply(
+  c(
+    "duckvep_giab_threads4.time",
+    "duckvep_giab_threads4_run2.time",
+    "duckvep_giab_threads4_run3.time"
+  ),
+  function(x) read_elapsed(file.path(fast_data, x)),
+  numeric(1)
+))
+fast_four <- read_elapsed(file.path(fast_data, "fastvep_giab_threads4.time"))
+```
+
+On the complete GIAB HG002 v4.2.1 input, `r format_count(unique(surface_evidence$variants))`
+model-addressable literal alleles staged from
+`r format_count(unique(surface_evidence$corpus_source_alt_count))` ALT alleles emit
+`r format_count(unique(surface_evidence$annotated_rows))` annotation rows against the
+complete Ensembl 116 GRCh38 model, including all
+`r format_count(unique(surface_evidence$regulation_features))` resident regulatory and
+motif features. At a 5,000-base transcript window, the checked public relation records
+`r surface_rate("compact", 1L)` compact, `r surface_rate("rich", 1L)` rich,
+`r surface_rate("hgvs", 1L)` HGVS, and `r surface_rate("rich_hgvs", 1L)` fused
+rich-plus-HGVS alleles/s on one pinned physical core. Four pinned physical cores record
+`r surface_rate("compact", 4L)`, `r surface_rate("rich", 4L)`,
+`r surface_rate("hgvs", 4L)`, and `r surface_rate("rich_hgvs", 4L)` alleles/s
+respectively. Input staging and model load are outside this resident-engine measurement;
+every pass checksum-validates the complete output relation, and a separate full-row
+fingerprint proves one-thread/four-thread equality for every output contract. The exact
+revision (`r substr(surface_revision, 1L, 8L)`), hashes, core affinity, and workload are in
 [benchmarks/duckvep_throughput.md](benchmarks/duckvep_throughput.md).
 
 The separate end-to-end comparison includes VCF decoding, DuckVEP's explicit
 coordinate sort, annotation, and real uncompressed tabular output. On one pinned
-core DuckVEP completed in 64.54 seconds versus 164.38 seconds for the current
+core DuckVEP completed in `r sprintf("%.2f", duck_one)` seconds versus
+`r sprintf("%.2f", fast_one)` seconds for the current
 native-compiled [FastVEP](https://github.com/Huang-lab/fastVEP) checkout
-(2.55-fold wall-time ratio); at four pinned cores the measured times were 32.06
-and 68.09 seconds (2.12-fold). The tools emit different native tab schemas, so the
+(`r sprintf("%.2f", fast_one / duck_one)`-fold wall-time ratio); at four pinned
+cores the measured times were `r sprintf("%.2f", duck_four)` and
+`r sprintf("%.2f", fast_four)` seconds
+(`r sprintf("%.2f", fast_four / duck_four)`-fold). The tools emit different native tab schemas, so the
 report preserves row/byte denominators and separately compares both against VEP
 rather than presenting this as an isolated-kernel speedup. Build flags, source
 commits, rebuilt cache receipt, commands, and output hashes are in

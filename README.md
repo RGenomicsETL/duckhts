@@ -626,10 +626,10 @@ transcript window, the checked public relation records 964,354 compact,
 on one pinned physical core. Four pinned physical cores record
 3,192,214, 1,513,530, 858,619, and 637,846 alleles/s respectively. Input
 staging and model load are outside this resident-engine measurement;
-every pass checksum-validates all 47.84 million output rows, and a
+every pass checksum-validates the complete output relation, and a
 separate full-row fingerprint proves one-thread/four-thread equality for
-every output contract. The exact revision, hashes, core affinity, and
-workload are in
+every output contract. The exact revision (6c640890), hashes, core
+affinity, and workload are in
 [benchmarks/duckvep_throughput.md](benchmarks/duckvep_throughput.md).
 
 The separate end-to-end comparison includes VCF decoding, DuckVEP’s
