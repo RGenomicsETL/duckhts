@@ -86,8 +86,8 @@ nearest_tested_ancestor <- function(revisions) {
 }
 ```
 
-This benchmark drives the rich `duckvep_annotate`, numeric
-`duckvep_annotate_compact`, or independent-event `duckvep_annotate_hgvs` result
+This benchmark drives the internal rich `_duckvep_annotate_small_rich`, numeric
+`_duckvep_annotate_small_compact`, or independent-event `_duckvep_annotate_small_hgvs` result
 through DuckDB's stable extension API with
 nondecreasing sequence-region and position keys. It records candidate sweep,
 consequence classification, list materialization, `unnest`, and final aggregation
@@ -305,6 +305,118 @@ not a quantitative claim. Broad SIMD work is therefore not the first optimizatio
 target. Each item above needs an adjacent exact-revision comparison on the same model,
 corpus, transcript distance, output denominator, core affinity, and fingerprint before
 it can be called an improvement.
+
+## Public relation API cost and scaling
+
+```{r public-relation-api}
+public_workload <-
+  "ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation"
+native_workload <-
+  "ensembl116_grch38_giab_hg002_v4_2_1_full_literal"
+surface_runs <- history[
+  history$workload %in% c(public_workload, native_workload) &
+    history$output_mode %in% c("compact", "hgvs") &
+    history$threads %in% c(1L, 4L) &
+    history$input_partitions == 1L &
+    history$transcript_distance == 5000,
+  ,
+  drop = FALSE
+]
+surface_revision <- nearest_tested_ancestor(
+  surface_runs$source_revision[surface_runs$workload == public_workload]
+)
+surface_current <- surface_runs[
+  surface_runs$source_revision == surface_revision &
+    (
+      surface_runs$workload == public_workload |
+        surface_runs$threads == 1L
+    ),
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(surface_current) == 6L,
+  setequal(
+    paste(
+      surface_current$workload,
+      surface_current$output_mode,
+      surface_current$threads,
+      sep = ":"
+    ),
+    c(
+      paste(native_workload, "compact", 1L, sep = ":"),
+      paste(native_workload, "hgvs", 1L, sep = ":"),
+      paste(public_workload, "compact", 1L, sep = ":"),
+      paste(public_workload, "compact", 4L, sep = ":"),
+      paste(public_workload, "hgvs", 1L, sep = ":"),
+      paste(public_workload, "hgvs", 4L, sep = ":")
+    )
+  )
+)
+surface_current$api <- ifelse(
+  surface_current$workload == public_workload,
+  "public relation",
+  "private native lane"
+)
+surface_current <- surface_current[order(
+  match(surface_current$output_mode, c("compact", "hgvs")),
+  surface_current$threads,
+  match(surface_current$api, c("private native lane", "public relation"))
+), , drop = FALSE]
+native_one_core <- setNames(
+  surface_current$median_seconds[
+    surface_current$api == "private native lane"
+  ],
+  surface_current$output_mode[
+    surface_current$api == "private native lane"
+  ]
+)
+surface_table <- data.frame(
+  revision = surface_current$revision,
+  api = surface_current$api,
+  output = surface_current$output_mode,
+  threads = surface_current$threads,
+  input_alleles = format(
+    surface_current$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    surface_current$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  median_seconds = surface_current$median_seconds,
+  alleles_per_second = format(
+    round(surface_current$variants_per_second),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(surface_current$annotated_rows / surface_current$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  speedup_vs_one_core_native = round(
+    unname(native_one_core[surface_current$output_mode]) /
+      surface_current$median_seconds,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(surface_table, row.names = FALSE)
+```
+
+This exact-revision comparison uses the complete Ensembl 116 GRCh38 transcript
+model and all 4,095,611 model-addressable literal alleles from GIAB HG002 v4.2.1.
+Every run emits 47,629,345 rows at a 5,000-base transcript distance after a
+100,000-allele warmup and five complete passes. One-thread runs are pinned to CPU
+2; four-thread runs are restricted to CPUs 2, 4, 6, and 8. Input VCF decoding,
+coordinate sorting, canonical event-table staging, and model loading are outside
+the timed pass. The public rows time event validation and family dispatch through
+`duckvep_annotate(...)`, native consequence/HGVS work, fixed-schema row expansion,
+and checksum aggregation. The adjacent private rows quantify the public SQL layer
+without changing model, corpus, consequence semantics, or output denominator.
 
 ## Historical full-corpus transcript-only diagnostic
 
@@ -620,7 +732,7 @@ shows shortened artifact digests for readability and the complete schema-version
 public-row XOR/sum fingerprints; the full SHA-256 values are retained in
 `benchmarks/data/duckvep_throughput.csv`.
 
-`duckvep_annotate_hgvs(...)` preserves interval-feature rows from the same
+`_duckvep_annotate_small_hgvs(...)` preserves interval-feature rows from the same
 candidate sweep and leaves their transcript/protein HGVS fields NULL. The HGVS
 byte checksum is therefore unchanged while output cardinality includes every
 regulatory/motif row; SQL and R regressions pin that pass-through. The earlier

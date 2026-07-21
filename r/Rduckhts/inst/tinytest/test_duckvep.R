@@ -460,7 +460,7 @@ hgvs_annotation <- dbGetQuery(
     "(2, 124::UBIGINT, 'A', 'AC'))",
     "SELECT ord, a.transcript_hgvs, a.hgvs_shift,",
     "a.transcript_hgvs_status, a.protein_hgvs_status",
-    "FROM variants, LATERAL unnest(duckvep_annotate_hgvs(",
+    "FROM variants, LATERAL unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) AS u(a) ORDER BY ord"
   )
@@ -476,13 +476,48 @@ expect_identical(
   c("not_applicable", "not_applicable")
 )
 
+# The public relation macro owns event-family dispatch and optional HGVS. Keep
+# one DBI regression on that surface rather than proving only its private lanes.
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_public_events AS SELECT * FROM (VALUES",
+    "(1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, 'G'::VARCHAR,",
+    "NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT))",
+    "e(event_index, seq_region, position, reference, alternate, end_position,",
+    "structural_type, copy_change, mate_seq_region, mate_position)"
+  )
+)
+public_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.event_index, a.transcript_index,",
+    "string_agg(t.consequence, '&' ORDER BY t.severity_rank) consequence,",
+    "a.transcript_hgvs, a.protein_hgvs",
+    "FROM duckvep_annotate('duckvep_r_public_events', 'r-hgvs',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a",
+    "JOIN duckvep_so_terms() t",
+    "ON (a.consequence_mask & t.consequence_mask) <> 0",
+    "GROUP BY ALL ORDER BY a.event_index, a.transcript_index"
+  )
+)
+expect_equal(public_annotation$event_index, 1)
+expect_equal(public_annotation$transcript_index, 0)
+expect_identical(
+  public_annotation$consequence,
+  "non_coding_transcript_exon_variant"
+)
+expect_identical(public_annotation$transcript_hgvs, "n.25A>G")
+expect_true(is.na(public_annotation$protein_hgvs))
+
 # Output beyond the initial native HGVS scratch capacity must be retried at
 # the reported size rather than exposing a truncated or invalid DuckDB string.
 hgvs_long <- dbGetQuery(
   con,
   paste(
     "SELECT a.transcript_hgvs, a.transcript_hgvs_status",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs', 1::UINTEGER, 124::UBIGINT,",
     "'A', 'C' || repeat('A', 1405), 0::UBIGINT)) AS u(a)"
   )
@@ -534,7 +569,7 @@ compressed_annotation <- dbGetQuery(
   con,
   paste(
     "SELECT a.transcript_hgvs, a.transcript_hgvs_status",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs-bgzf', 1::UINTEGER, 124::UBIGINT,",
     "'A', 'G', 0::UBIGINT)) u(a)"
   )
@@ -570,7 +605,7 @@ identity_connection <- try(
   silent = TRUE
 )
 identity_query <- paste(
-  "SELECT a.transcript_hgvs_status FROM unnest(duckvep_annotate_hgvs(",
+  "SELECT a.transcript_hgvs_status FROM unnest(_duckvep_annotate_small_hgvs(",
   "'r-hgvs-reference-identity', 1::UINTEGER, 124::UBIGINT,",
   "'A', 'G', 0::UBIGINT)) u(a)"
 )
@@ -635,7 +670,7 @@ if (.Platform$OS.type == "windows") {
   close(replacement_connection)
   replacement_query <- paste(
     "SELECT a.transcript_hgvs, a.transcript_hgvs_status",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs-reference-replacement', 1::UINTEGER, 124::UBIGINT,",
     "'A', 'G', 0::UBIGINT)) u(a)"
   )
@@ -699,7 +734,7 @@ hgvs_coding <- dbGetQuery(
   paste(
     "SELECT a.transcript_hgvs, a.protein_hgvs,",
     "a.transcript_hgvs_status, a.protein_hgvs_status",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs-coding', 1::UINTEGER, 124::UBIGINT,",
     "'A', 'G', 0::UBIGINT",
     ")) AS u(a)"
@@ -717,7 +752,7 @@ hgvs_long_protein <- dbGetQuery(
   paste(
     "SELECT a.transcript_hgvs, a.protein_hgvs,",
     "a.transcript_hgvs_status, a.protein_hgvs_status",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs-coding', 1::UINTEGER, 124::UBIGINT,",
     "'A', 'A' || repeat('GCT', 100), 0::UBIGINT",
     ")) AS u(a)"
@@ -735,7 +770,7 @@ hgvs_directional <- dbGetQuery(
     "(1, 90::UBIGINT), (2, 151::UBIGINT))",
     "SELECT ord, a.transcript_hgvs, a.transcript_hgvs_status,",
     "a.transcript_hgvs_reason",
-    "FROM variants, LATERAL unnest(duckvep_annotate_hgvs(",
+    "FROM variants, LATERAL unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs', 1::UINTEGER, position, 'A', 'C', 5000::UBIGINT",
     ")) AS u(a) ORDER BY ord"
   )
@@ -752,7 +787,7 @@ hgvs_terminal_insertion <- dbGetQuery(
   paste(
     "SELECT a.transcript_hgvs, a.transcript_hgvs_status,",
     "a.transcript_hgvs_reason, a.protein_hgvs_status",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs', 1::UINTEGER, 50000::UBIGINT, 'A', 'AC', 50000::UBIGINT",
     ")) AS u(a) WHERE a.transcript_index = 0"
   )
@@ -814,7 +849,7 @@ hgvs_phase <- dbGetQuery(
     "(1, 100::UBIGINT, 'A', 'G'),",
     "(2, 100::UBIGINT, 'AA', 'AG'))",
     "SELECT ord, a.transcript_hgvs, a.transcript_hgvs_status",
-    "FROM variants, LATERAL unnest(duckvep_annotate_hgvs(",
+    "FROM variants, LATERAL unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs-phase', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) AS u(a) ORDER BY ord"
   )
@@ -828,7 +863,7 @@ hgvs_protein_gap <- dbGetQuery(
   con,
   paste(
     "SELECT a.transcript_hgvs_status, a.protein_hgvs_status,",
-    "a.protein_hgvs_reason FROM unnest(duckvep_annotate_hgvs(",
+    "a.protein_hgvs_reason FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-hgvs-phase', 1::UINTEGER, 109::UBIGINT, 'AAA', 'CCC', 0::UBIGINT",
     ")) AS u(a)"
   )
@@ -882,7 +917,7 @@ hgvs_retained_ref_without_fasta <- dbGetQuery(
   paste(
     "SELECT a.transcript_hgvs_status, a.transcript_hgvs_reason,",
     "a.protein_hgvs_status, a.protein_hgvs_reason",
-    "FROM unnest(duckvep_annotate_hgvs(",
+    "FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT,",
     "'CT', 'CG', 0::UBIGINT)) u(a)",
     "WHERE a.transcript_index = 0"
@@ -907,7 +942,7 @@ expect_identical(
 ensembl_mirna_annotation <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence, a.status FROM unnest(_duckvep_annotate_small_rich(",
     "'r-ensembl-mirna', 0::UINTEGER, 2::UBIGINT,",
     "'T', 'C', 0::UBIGINT)) u(a) WHERE a.transcript_index = 1"
   )
@@ -921,10 +956,10 @@ expect_identical(ensembl_mirna_annotation$status, "supported")
 regulation_annotations <- dbGetQuery(
   con,
   paste(
-    "WITH small AS (SELECT a.* FROM unnest(duckvep_annotate(",
+    "WITH small AS (SELECT a.* FROM unnest(_duckvep_annotate_small_rich(",
     "'r-ensembl-mirna', 0::UINTEGER, 3::UBIGINT, 'G', 'A', 0::UBIGINT",
     ")) u(a) WHERE a.regulation_feature_index IS NOT NULL),",
-    "structural AS (SELECT a.* FROM unnest(duckvep_annotate_sv(",
+    "structural AS (SELECT a.* FROM unnest(_duckvep_annotate_structural_rich(",
     "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT, 12::UBIGINT,",
     "'DUP', 'GAIN', 0::UBIGINT)) u(a)",
     "WHERE a.regulation_feature_index IS NOT NULL)",
@@ -956,7 +991,7 @@ hgvs_regulation <- dbGetQuery(
   paste(
     "SELECT a.regulation_feature_index, a.overlap_object_code,",
     "a.transcript_hgvs, a.protein_hgvs, a.transcript_hgvs_status,",
-    "a.protein_hgvs_status FROM unnest(duckvep_annotate_hgvs(",
+    "a.protein_hgvs_status FROM unnest(_duckvep_annotate_small_hgvs(",
     "'r-ensembl-mirna', 0::UINTEGER, 3::UBIGINT,",
     "'G', 'A', 0::UBIGINT)) u(a)",
     "WHERE a.regulation_feature_index IS NOT NULL"
@@ -970,7 +1005,7 @@ breakend_regulation <- dbGetQuery(
   con,
   paste(
     "SELECT a.regulation_feature_index, a.consequence, a.overlap_object",
-    "FROM unnest(duckvep_annotate_breakend(",
+    "FROM unnest(_duckvep_annotate_breakend_rich(",
     "'r-ensembl-mirna', 0::UINTEGER, 1::UBIGINT,",
     "0::UINTEGER, 8::UBIGINT, 0::UBIGINT)) u(a)",
     "WHERE a.regulation_feature_index IS NOT NULL",
@@ -1000,7 +1035,7 @@ breakend_mixed_vectors <- dbGetQuery(
     "transcript_count,",
     "count(*) FILTER (WHERE a.regulation_feature_index IS NOT NULL)::INTEGER",
     "regulation_count FROM events,",
-    "LATERAL unnest(duckvep_annotate_breakend_compact(",
+    "LATERAL unnest(_duckvep_annotate_breakend_compact(",
     "'r-ensembl-mirna', 0::UINTEGER, local_position,",
     "0::UINTEGER, mate_position, 0::UBIGINT)) u(a)",
     "GROUP BY ord ORDER BY ord"
@@ -1053,7 +1088,7 @@ partial_cds_annotation <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.status, a.reason",
-    "FROM unnest(duckvep_annotate(",
+    "FROM unnest(_duckvep_annotate_small_rich(",
     "'r-partial-cds-end', 1::UINTEGER, 106::UBIGINT,",
     "'C', 'CA', 0::UBIGINT)) u(a)"
   )
@@ -1066,7 +1101,7 @@ partial_tail_deletion <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.status, a.reason",
-    "FROM unnest(duckvep_annotate(",
+    "FROM unnest(_duckvep_annotate_small_rich(",
     "'r-partial-cds-end', 1::UINTEGER, 109::UBIGINT,",
     "'GGGT', 'G', 0::UBIGINT)) u(a)"
   )
@@ -1111,7 +1146,7 @@ complete_span_annotations <- dbGetQuery(
     "(1, repeat('A', 11), repeat('A', 5) || 'C' || repeat('A', 5)),",
     "(2, repeat('A', 11), 'A'))",
     "SELECT ord, a.consequence, a.status FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-complete-span', 1::UINTEGER, 99::UBIGINT,",
     "reference, alternate, 0::UBIGINT)) u(a) ORDER BY ord"
   )
@@ -1140,7 +1175,7 @@ expect_true(
 noncoding_boundary <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence, a.status FROM unnest(_duckvep_annotate_small_rich(",
     "'r-noncoding-boundary', 1::UINTEGER, 150::UBIGINT,",
     "'A', 'AT', 0::UBIGINT)) u(a)"
   )
@@ -1166,7 +1201,7 @@ annotation <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.impact, a.status, a.cds_position, a.protein_position",
-    "FROM unnest(duckvep_annotate(",
+    "FROM unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1180,7 +1215,7 @@ expect_equal(annotation$protein_position, 2)
 compact_annotation <- dbGetQuery(
   con,
   paste(
-    "SELECT a.* FROM unnest(duckvep_annotate_compact(",
+    "SELECT a.* FROM unnest(_duckvep_annotate_small_compact(",
     "'r-test', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1203,7 +1238,7 @@ expect_equal(compact_annotation$nmd_escape_reasons, 0)
 structural_deletion <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate_sv(",
+    "SELECT a.consequence, a.status FROM unnest(_duckvep_annotate_structural_rich(",
     "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
     "'DEL', 'LOSS', 0::UBIGINT)) u(a)"
   )
@@ -1215,7 +1250,7 @@ structural_duplication <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence_mask, a.status_code",
-    "FROM unnest(duckvep_annotate_sv_compact(",
+    "FROM unnest(_duckvep_annotate_structural_compact(",
     "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
     "'DUP', 'GAIN', 0::UBIGINT)) u(a)"
   )
@@ -1227,7 +1262,7 @@ structural_tandem_repeat <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.status",
-    "FROM unnest(duckvep_annotate_sv(",
+    "FROM unnest(_duckvep_annotate_structural_rich(",
     "'r-test', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,",
     "'STR', 'UNKNOWN', 0::UBIGINT)) u(a)"
   )
@@ -1242,7 +1277,7 @@ breakend <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence, a.region, a.status",
-    "FROM unnest(duckvep_annotate_breakend(",
+    "FROM unnest(_duckvep_annotate_breakend_rich(",
     "'r-test', 1::UINTEGER, 159::UBIGINT,",
     "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
   )
@@ -1258,7 +1293,7 @@ breakend_compact <- dbGetQuery(
   con,
   paste(
     "SELECT a.consequence_mask, a.region_mask, a.status_code",
-    "FROM unnest(duckvep_annotate_breakend_compact(",
+    "FROM unnest(_duckvep_annotate_breakend_compact(",
     "'r-test', 1::UINTEGER, 159::UBIGINT,",
     "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
   )
@@ -1270,7 +1305,7 @@ expect_equal(breakend_compact$status_code, 0)
 mate_only_breakend <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.region FROM unnest(duckvep_annotate_breakend(",
+    "SELECT a.consequence, a.region FROM unnest(_duckvep_annotate_breakend_rich(",
     "'r-test', 1::UINTEGER, 5250::UBIGINT,",
     "1::UINTEGER, 170::UBIGINT, 0::UBIGINT)) u(a)"
   )
@@ -1289,7 +1324,7 @@ breakend_admission_cap <- dbGetQuery(
     "WITH events(ord, local_position) AS (VALUES",
     "(1, 5249::UBIGINT), (2, 5250::UBIGINT))",
     "SELECT ord, a.consequence, a.region FROM events,",
-    "LATERAL unnest(duckvep_annotate_breakend(",
+    "LATERAL unnest(_duckvep_annotate_breakend_rich(",
     "'r-test', 1::UINTEGER, local_position,",
     "1::UINTEGER, 124::UBIGINT, 10000::UBIGINT)) u(a)",
     "ORDER BY ord"
@@ -1312,7 +1347,7 @@ breakend_zero_window <- dbGetQuery(
     "WITH events(ord, local_position) AS (VALUES",
     "(1, 5249::UBIGINT), (2, 5250::UBIGINT))",
     "SELECT ord, a.consequence, a.region FROM events,",
-    "LATERAL unnest(duckvep_annotate_breakend(",
+    "LATERAL unnest(_duckvep_annotate_breakend_rich(",
     "'r-test', 1::UINTEGER, local_position,",
     "1::UINTEGER, 124::UBIGINT, 0::UBIGINT)) u(a)",
     "ORDER BY ord"
@@ -1329,7 +1364,7 @@ expect_error(
   dbGetQuery(
     con,
     paste(
-      "SELECT duckvep_annotate_sv(",
+      "SELECT _duckvep_annotate_structural_rich(",
       "'r-test', 1::UINTEGER, 100::UBIGINT, 200::UBIGINT,",
       "'DEL', 'GAIN')"
     )
@@ -1341,19 +1376,19 @@ expect_error(
   dbGetQuery(
     con,
     paste(
-      "SELECT duckvep_annotate_sv(",
+      "SELECT _duckvep_annotate_structural_rich(",
       "'r-test', 1::UINTEGER, 100::UBIGINT, 100::UBIGINT,",
       "'BND', 'UNKNOWN')"
     )
   ),
-  pattern = "use duckvep_annotate_breakend with both loci"
+  pattern = "provide both mate coordinates for a breakend"
 )
 
 expect_error(
   dbGetQuery(
     con,
     paste(
-      "SELECT duckvep_annotate_breakend(",
+      "SELECT _duckvep_annotate_breakend_rich(",
       "'r-test', 1::UINTEGER, 0::UBIGINT,",
       "1::UINTEGER, 170::UBIGINT)"
     )
@@ -1364,7 +1399,7 @@ expect_error(
 reference_mismatch <- dbGetQuery(
   con,
   paste(
-    "SELECT a.status, a.reason FROM unnest(duckvep_annotate(",
+    "SELECT a.status, a.reason FROM unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, 124::UBIGINT, 'A', 'C', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1376,7 +1411,7 @@ frameshift <- dbGetQuery(
   con,
   paste(
     "SELECT a.protein_position, a.reference_amino_acid,",
-    "a.alternate_amino_acid FROM unnest(duckvep_annotate(",
+    "a.alternate_amino_acid FROM unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, 124::UBIGINT, 'T', 'TC', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1394,7 +1429,7 @@ boundary_insertions <- dbGetQuery(
     "(3, 240::UBIGINT, 'A', 'AATG'),",
     "(4, 250::UBIGINT, 'C', 'CT'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 1::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1423,7 +1458,7 @@ terminal_stop_edits <- dbGetQuery(
     "(5, 239::UBIGINT, 'AA', 'CA'),",
     "(6, 240::UBIGINT, 'AA', 'TA'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1456,7 +1491,7 @@ feature_window_substitutions <- dbGetQuery(
     "(7, 122::UBIGINT, 'AG', 'AA'),",
     "(8, 122::UBIGINT, 'NG', 'NA'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1493,7 +1528,7 @@ utr5_start_boundary <- dbGetQuery(
     "(3, 119::UBIGINT, 'GATGGT', 'TATGAT'),",
     "(4, 119::UBIGINT, 'GATG', 'GTAA'))",
     "SELECT ord, a.consequence, a.status FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1521,7 +1556,7 @@ length_changing_boundaries <- dbGetQuery(
     "(5, 239::UBIGINT, 'AAAC', 'A'),",
     "(6, 240::UBIGINT, 'AA', 'C'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1566,7 +1601,7 @@ expect_true(load_model("r-no-tail", no_tail_queries)$loaded)
 missing_tail <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.status, a.reason FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence, a.status, a.reason FROM unnest(_duckvep_annotate_small_rich(",
     "'r-no-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1600,7 +1635,7 @@ expect_true(load_model("r-legacy-tail", legacy_queries)$loaded)
 legacy_boundary <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.status, a.reason FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence, a.status, a.reason FROM unnest(_duckvep_annotate_small_rich(",
     "'r-legacy-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1620,7 +1655,7 @@ prepared_events <- dbGetQuery(
     "(2, 1::UBIGINT, 'AC', 'C'),",
     "(3, 1::UBIGINT, 'C', 'AC'))",
     "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-test', 1::UINTEGER, position, reference, alternate, 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1643,7 +1678,7 @@ expect_true(load_model("r-complete", complete_queries, TRUE)$loaded)
 complete_intergenic <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence, a.status FROM unnest(_duckvep_annotate_small_rich(",
     "'r-complete', 1::UINTEGER, 1::UBIGINT, 'A', 'C', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1653,7 +1688,7 @@ expect_identical(complete_intergenic$status, "supported")
 asymmetric_upstream <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence, a.region FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence, a.region FROM unnest(_duckvep_annotate_small_rich(",
     "'r-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',",
     "10::UBIGINT, 0::UBIGINT)) u(a)"
   )
@@ -1664,7 +1699,7 @@ asymmetric_downstream <- dbGetQuery(
   con,
   paste(
     "SELECT a.region_mask, a.status_code",
-    "FROM unnest(duckvep_annotate_compact(",
+    "FROM unnest(_duckvep_annotate_small_compact(",
     "'r-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'C',",
     "0::UBIGINT, 10::UBIGINT)) u(a)"
   )
@@ -1675,7 +1710,7 @@ expect_error(
   dbGetQuery(
     con,
     paste(
-      "SELECT duckvep_annotate(",
+      "SELECT _duckvep_annotate_small_rich(",
       "'r-complete', 1::UINTEGER, 1001::UBIGINT, 'A', 'C', 0::UBIGINT",
       ")"
     )
@@ -1702,7 +1737,7 @@ expect_true(load_model("r-nmd", nmd_queries)$loaded)
 nmd <- dbGetQuery(
   con,
   paste(
-    "SELECT a.consequence FROM unnest(duckvep_annotate(",
+    "SELECT a.consequence FROM unnest(_duckvep_annotate_small_rich(",
     "'r-nmd', 1::UINTEGER, 160::UBIGINT, 'T', 'C', 0::UBIGINT",
     ")) u(a)"
   )
@@ -1755,7 +1790,7 @@ nmd_prediction <- dbGetQuery(
     "SELECT ord, a.nmd_prediction, a.nmd_escape_intronless,",
     "a.nmd_escape_early_cds, a.nmd_escape_last_exon,",
     "a.nmd_escape_penultimate_exon_end FROM variants,",
-    "LATERAL unnest(duckvep_annotate(",
+    "LATERAL unnest(_duckvep_annotate_small_rich(",
     "'r-nmd-prediction', 1::UINTEGER, position, 'C', 'T', 0::UBIGINT",
     ")) u(a) ORDER BY ord"
   )
@@ -1985,7 +2020,7 @@ grch38_coding <- dbGetQuery(
   paste(
     "SELECT a.transcript_index, a.consequence, a.status, a.cds_position,",
     "a.protein_position, a.reference_amino_acid, a.alternate_amino_acid",
-    "FROM unnest(duckvep_annotate(",
+    "FROM unnest(_duckvep_annotate_small_rich(",
     as.character(dbQuoteString(con, grch38_fixture$model)), ",",
     "2::UINTEGER, 32522::UBIGINT, 'C', 'T', 0::UBIGINT)) u(a)"
   )
@@ -2003,7 +2038,7 @@ grch37_coding <- dbGetQuery(
   paste(
     "SELECT a.transcript_index, a.consequence, a.status, a.cds_position,",
     "a.protein_position, a.reference_amino_acid, a.alternate_amino_acid",
-    "FROM unnest(duckvep_annotate(",
+    "FROM unnest(_duckvep_annotate_small_rich(",
     as.character(dbQuoteString(con, grch37_fixture$model)), ",",
     "1::UINTEGER, 9452::UBIGINT, 'T', 'C', 0::UBIGINT)) u(a)"
   )
@@ -2020,7 +2055,7 @@ fixture_mitochondrial <- dbGetQuery(
   con,
   paste(
     "SELECT a.transcript_index, a.consequence, a.status, a.reason",
-    "FROM unnest(duckvep_annotate(",
+    "FROM unnest(_duckvep_annotate_small_rich(",
     as.character(dbQuoteString(con, grch38_fixture$model)), ",",
     "0::UINTEGER, 3307::UBIGINT,",
     "'A', 'C', 0::UBIGINT)) u(a)"
@@ -2038,7 +2073,7 @@ fixture_motifs <- dbGetQuery(
   con,
   paste(
     "SELECT a.regulation_feature_index, a.overlap_object,",
-    "a.consequence, a.status FROM unnest(duckvep_annotate(",
+    "a.consequence, a.status FROM unnest(_duckvep_annotate_small_rich(",
     as.character(dbQuoteString(con, grch38_fixture$model)), ",",
     "1::UINTEGER, 75::UBIGINT, 'A', 'C', 0::UBIGINT)) u(a)",
     "WHERE a.overlap_object = 'transcription_factor_binding_site'",

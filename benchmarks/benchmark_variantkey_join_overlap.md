@@ -63,11 +63,11 @@ benchmark_environment <- data.frame(
   stringsAsFactors = FALSE
 )
 benchmark_environment
-#>              field                                        value
-#> 1  source_revision     ccf6971dac948fb0d6d7bb88a53ff3079a223c77
-#> 2              cpu          13th Gen Intel(R) Core(TM) i5-13500
-#> 3 process_affinity pid 3475186's current affinity list: 0,2,4,6
-#> 4   duckdb_version                                       v1.5.3
+#>              field                                     value
+#> 1  source_revision  61d5d89aa58220842de8c5114f427d4b6580fe9b
+#> 2              cpu       13th Gen Intel(R) Core(TM) i5-13500
+#> 3 process_affinity pid 3554478's current affinity list: 0-19
+#> 4   duckdb_version                                    v1.5.3
 
 source_receipts <- data.frame(
   source = names(real_source_paths),
@@ -183,24 +183,24 @@ reversible_join_results <- rbind(
 )
 reversible_join_results
 #>                       operation threads input_rows result_rows median_seconds
-#> 1   reversible_multicolumn_join       1    1000000       1e+06          0.188
-#> 2   reversible_multicolumn_join       2    1000000       1e+06          0.106
-#> 3   reversible_multicolumn_join       4    1000000       1e+06          0.066
-#> 4     reversible_stored_vk_join       1    1000000       1e+06          0.042
-#> 5     reversible_stored_vk_join       2    1000000       1e+06          0.030
-#> 6     reversible_stored_vk_join       4    1000000       1e+06          0.028
-#> 7 reversible_on_the_fly_vk_join       1    1000000       1e+06          0.087
-#> 8 reversible_on_the_fly_vk_join       2    1000000       1e+06          0.052
+#> 1   reversible_multicolumn_join       1    1000000       1e+06          0.191
+#> 2   reversible_multicolumn_join       2    1000000       1e+06          0.107
+#> 3   reversible_multicolumn_join       4    1000000       1e+06          0.064
+#> 4     reversible_stored_vk_join       1    1000000       1e+06          0.044
+#> 5     reversible_stored_vk_join       2    1000000       1e+06          0.031
+#> 6     reversible_stored_vk_join       4    1000000       1e+06          0.026
+#> 7 reversible_on_the_fly_vk_join       1    1000000       1e+06          0.084
+#> 8 reversible_on_the_fly_vk_join       2    1000000       1e+06          0.051
 #> 9 reversible_on_the_fly_vk_join       4    1000000       1e+06          0.036
 #>   input_rows_per_second result_rows_per_second
-#> 1               5319149                5319149
-#> 2               9433962                9433962
-#> 3              15151515               15151515
-#> 4              23809524               23809524
-#> 5              33333333               33333333
-#> 6              35714286               35714286
-#> 7              11494253               11494253
-#> 8              19230769               19230769
+#> 1               5235602                5235602
+#> 2               9345794                9345794
+#> 3              15625000               15625000
+#> 4              22727273               22727273
+#> 5              32258065               32258065
+#> 6              38461538               38461538
+#> 7              11904762               11904762
+#> 8              19607843               19607843
 #> 9              27777778               27777778
 ```
 
@@ -273,15 +273,15 @@ mixed_join_results
 #> 8 mixed_stored_vk_join_plus_hash_refine       2    1000000       1e+06
 #> 9 mixed_stored_vk_join_plus_hash_refine       4    1000000       1e+06
 #>   median_seconds input_rows_per_second result_rows_per_second
-#> 1          0.191               5235602                5235602
-#> 2          0.108               9259259                9259259
-#> 3          0.062              16129032               16129032
-#> 4          0.040              25000000               25000000
-#> 5          0.030              33333333               33333333
-#> 6          0.024              41666667               41666667
-#> 7          0.135               7407407                7407407
-#> 8          0.080              12500000               12500000
-#> 9          0.053              18867925               18867925
+#> 1          0.189               5291005                5291005
+#> 2          0.111               9009009                9009009
+#> 3          0.069              14492754               14492754
+#> 4          0.041              24390244               24390244
+#> 5          0.035              28571429               28571429
+#> 6          0.029              34482759               34482759
+#> 7          0.140               7142857                7142857
+#> 8          0.083              12048193               12048193
+#> 9          0.054              18518519               18518519
 ```
 
 ## 3. Exact RegionKey span joins
@@ -323,17 +323,17 @@ region_rk <- measure_thread_grid(
 region_join_results <- rbind(region_multicol, region_rk)
 region_join_results
 #>                 operation threads input_rows result_rows median_seconds
-#> 1 region_multicolumn_join       1     250000      250000          0.023
-#> 2 region_multicolumn_join       2     250000      250000          0.015
+#> 1 region_multicolumn_join       1     250000      250000          0.024
+#> 2 region_multicolumn_join       2     250000      250000          0.016
 #> 3 region_multicolumn_join       4     250000      250000          0.016
-#> 4   region_stored_rk_join       1     250000      250000          0.011
+#> 4   region_stored_rk_join       1     250000      250000          0.010
 #> 5   region_stored_rk_join       2     250000      250000          0.008
 #> 6   region_stored_rk_join       4     250000      250000          0.009
 #>   input_rows_per_second result_rows_per_second
-#> 1              10869565               10869565
-#> 2              16666667               16666667
+#> 1              10416667               10416667
+#> 2              15625000               15625000
 #> 3              15625000               15625000
-#> 4              22727273               22727273
+#> 4              25000000               25000000
 #> 5              31250000               31250000
 #> 6              27777778               27777778
 ```
@@ -451,17 +451,17 @@ cgranges_overlap_results
 #>                     operation threads input_rows result_rows median_seconds
 #> 1 cgranges_has_overlap_filter       1     250000      250000          0.025
 #> 2 cgranges_has_overlap_filter       2     250000      250000          0.013
-#> 3 cgranges_has_overlap_filter       4     250000      250000          0.013
+#> 3 cgranges_has_overlap_filter       4     250000      250000          0.012
 #> 4 cgranges_count_overlaps_sum       1     250000      250000          0.028
 #> 5 cgranges_count_overlaps_sum       2     250000      250000          0.015
-#> 6 cgranges_count_overlaps_sum       4     250000      250000          0.015
+#> 6 cgranges_count_overlaps_sum       4     250000      250000          0.014
 #>   input_rows_per_second result_rows_per_second
 #> 1              10000000               10000000
 #> 2              19230769               19230769
-#> 3              19230769               19230769
+#> 3              20833333               20833333
 #> 4               8928571                8928571
 #> 5              16666667               16666667
-#> 6              16666667               16666667
+#> 6              17857143               17857143
 ```
 
 ``` r
@@ -488,18 +488,18 @@ overlap_pair_results
 #> 11                cgranges_count_overlaps_sum       2     250000      250000
 #> 12                cgranges_count_overlaps_sum       4     250000      250000
 #>    median_seconds input_rows_per_second result_rows_per_second
-#> 1           0.109               2293578                2293578
+#> 1           0.110               2272727                2272727
 #> 2           0.061               4098361                4098361
 #> 3           0.043               5813953                5813953
-#> 4           0.108               2314815                2314815
-#> 5           0.061               4098361                4098361
-#> 6           0.043               5813953                5813953
+#> 4           0.109               2293578                2293578
+#> 5           0.060               4166667                4166667
+#> 6           0.040               6250000                6250000
 #> 7           0.126               1984127                1984127
 #> 8           0.077               3246753                3246753
-#> 9           0.049               5102041                5102041
+#> 9           0.052               4807692                4807692
 #> 10          0.028               8928571                8928571
 #> 11          0.015              16666667               16666667
-#> 12          0.015              16666667               16666667
+#> 12          0.014              17857143               17857143
 ```
 
 ## 5. Real supplementary-annotation composition
@@ -740,13 +740,13 @@ staging_results
 #> 6          /root/duckhts/.tmp/variantkey_join_overlap/alphamissense_hg38_variantkey.parquet
 #> 7 /root/duckhts/.tmp/variantkey_join_overlap/clinvarbitration_16792026_grch38_keyed.parquet
 #>       rows     bytes seconds rows_per_second output_mb_per_second
-#> 1  4096123  90299692   6.996       585495.00           12.9073316
-#> 2  4438467  39774942   7.672       578528.02            5.1844294
-#> 3   643528   9958593   0.136      4731823.53           73.2249485
-#> 4    19704    368158   0.474        41569.62            0.7767046
-#> 5 77966138 201658023   2.272     34316081.87           88.7579327
-#> 6 71697556 254370824  12.721      5636157.22           19.9961343
-#> 7  3647840  30075314   0.566      6444947.00           53.1365972
+#> 1  4096123  90299692   6.841        598760.9           13.1997796
+#> 2  4438467  39774942   7.577        585781.6            5.2494314
+#> 3   643528   9958593   0.142       4531887.3           70.1309366
+#> 4    19704    368158   0.480         41050.0            0.7669958
+#> 5 77966138 201658023   2.275      34270829.9           88.6408892
+#> 6 71697556 254365844  13.001       5514772.4           19.5650984
+#> 7  3647840  30075314   0.578       6311141.9           52.0334152
 
 clinvarbitration_profile <- data.frame(
   source = "ClinvArbitration Zenodo 16792026 TSV",
@@ -863,12 +863,12 @@ lane_staging_results
 #> 5 /root/duckhts/.tmp/variantkey_join_overlap/clinvarbitration_16792026_reversible.parquet
 #> 6     /root/duckhts/.tmp/variantkey_join_overlap/clinvarbitration_16792026_hashed.parquet
 #>      rows    bytes seconds rows_per_second output_mb_per_second
-#> 1 4036258 88244417   0.531       7601239.2            166.18534
-#> 2   59865  2091959   0.117        511666.7             17.87999
-#> 3 4399443 27029899   0.275      15997974.5             98.29054
-#> 4   39024  2825872   0.107        364710.3             26.41002
-#> 5 3620269 21214375   0.204      17746416.7            103.99203
-#> 6   27571   599913   0.056        492339.3             10.71273
+#> 1 4036258 88244417   0.534       7558535.6            165.25172
+#> 2   59865  2091959   0.120        498875.0             17.43299
+#> 3 4399443 27029899   0.287      15329069.7             94.18083
+#> 4   39024  2825872   0.106        368150.9             26.65917
+#> 5 3620269 21214375   0.206      17574121.4            102.98240
+#> 6   27571   599913   0.053        520207.5             11.31911
 
 revel_probe_staging <- copy_timed(
   sprintf(
@@ -884,7 +884,7 @@ revel_probe_staging
 #>                                                                    path    rows
 #> 1 /root/duckhts/.tmp/variantkey_join_overlap/revel_probe_hash19.parquet 4103497
 #>     bytes seconds
-#> 1 9371710   0.384
+#> 1 9371710   0.388
 
 row_group_staging_results <- rbind(
   cbind(
@@ -952,8 +952,8 @@ row_group_layouts
 #> 3 /root/duckhts/.tmp/variantkey_join_overlap/clinvar_20260706_reversible_rg1048576.parquet
 #>      rows    bytes seconds row_groups
 #> 1 4399443 27029899      NA         36
-#> 2 4399443 26945479   0.275        135
-#> 3 4399443 27004414   0.371          5
+#> 2 4399443 26945479   0.278        135
+#> 3 4399443 27004414   0.376          5
 ```
 
 ### Exact and positional ClinVar joins
@@ -1084,22 +1084,22 @@ real_exact_results
 #> 11                   real_clinvar_positional_pairs       2    4096123
 #> 12                   real_clinvar_positional_pairs       4    4096123
 #>    result_rows median_seconds input_rows_per_second result_rows_per_second
-#> 1        44561          0.581               7050126               76697.07
-#> 2        44561          0.310              13213300              143745.16
-#> 3        44561          0.183              22383186              243502.73
-#> 4        44561          0.606               6759279               73533.00
-#> 5        44561          0.317              12921524              140570.98
-#> 6        44561          0.209              19598675              213210.53
-#> 7        44561          0.341              12012091              130677.42
-#> 8        44561          0.196              20898587              227352.04
-#> 9        44561          0.109              37579110              408816.51
-#> 10       57488          0.381              10750979              150887.14
-#> 11       57488          0.210              19505348              273752.38
-#> 12       57488          0.128              32000961              449125.00
+#> 1        44561          0.580               7062281               76829.31
+#> 2        44561          0.311              13170814              143282.96
+#> 3        44561          0.188              21787888              237026.60
+#> 4        44561          0.599               6838269               74392.32
+#> 5        44561          0.322              12720879              138388.20
+#> 6        44561          0.192              21333974              232088.54
+#> 7        44561          0.351              11669866              126954.42
+#> 8        44561          0.194              21114036              229695.88
+#> 9        44561          0.116              35311405              384146.55
+#> 10       57488          0.376              10893944              152893.62
+#> 11       57488          0.214              19140762              268635.51
+#> 12       57488          0.135              30341652              425837.04
 ```
 
-The split-lane layout processes 12.01 million GIAB alleles/s on one
-thread and 37.58 million/s on four threads. It is faster than the
+The split-lane layout processes 11.67 million GIAB alleles/s on one
+thread and 35.31 million/s on four threads. It is faster than the
 multicolumn oracle because only the 1.46% GIAB hashed lane and 0.88%
 ClinVar hashed lane carry allele strings into the refinement join.
 
@@ -1138,9 +1138,9 @@ real_clinvarbitration_exact
 #> 2 ClinvArbitration_16792026_exact_split_lanes       2    4096123       40318
 #> 3 ClinvArbitration_16792026_exact_split_lanes       4    4096123       40318
 #>   median_seconds input_rows_per_second result_rows_per_second
-#> 1          0.296              13838253               136209.5
-#> 2          0.151              27126642               267006.6
-#> 3          0.084              48763369               479976.2
+#> 1          0.282              14525259               142971.6
+#> 2          0.160              25600769               251987.5
+#> 3          0.095              43117084               424400.0
 ```
 
 ### Dense pathogenicity-score providers
@@ -1213,18 +1213,294 @@ dense_score_results
 #> 5 AlphaMissense_v2_exact_score_join       2    4036258        9225
 #> 6 AlphaMissense_v2_exact_score_join       4    4036258        9225
 #>   median_seconds input_rows_per_second result_rows_per_second
-#> 1          3.239               1266902            1266902.439
-#> 2          1.698               2416665            2416664.900
-#> 3          0.924               4441014            4441014.069
-#> 4          2.647               1524842               3485.077
-#> 5          1.409               2864626               6547.197
-#> 6          0.777               5194669              11872.587
+#> 1          3.224               1272797            1272796.836
+#> 2          1.697               2418089            2418088.981
+#> 3          0.944               4346925            4346924.788
+#> 4          2.674               1509446               3449.888
+#> 5          1.422               2838437               6487.342
+#> 6          0.789               5115663              11692.015
 ```
 
-The slower AlphaMissense path still processes 1.52 million GIAB
-alleles/s on one thread and 5.19 million/s on four. The provider has
+The slower AlphaMissense path still processes 1.51 million GIAB
+alleles/s on one thread and 5.12 million/s on four. The provider has
 71,697,556 rows and its hot Parquet projection contains only VariantKey,
 score, and class. REVEL’s hot projection has 77,966,138 rows.
+
+### Multiple exact providers in one plan
+
+The previous measurements isolate one provider at a time. This section
+tests whether ordinary DuckDB composition remains efficient when a case
+relation needs several supplementary sources together. The real
+three-provider query keeps the case side to one reversible `UBIGINT` key
+and projects one numeric payload from each provider. The equivalent
+separate-query total is the sum of three medians over the same probe,
+sources, thread count, and process.
+
+Provider key scope remains a semantic contract. ClinVar is unique on
+this hot key, while the prepared ClinvArbitration and AlphaMissense
+files contain a small number of repeated VariantKeys. The raw join
+therefore measures provider records and may return more rows than the
+probe. A production provider must either declare the finer key that
+makes those rows distinct or publish an explicit one-row-per-variant
+aggregation.
+
+``` r
+provider_key_cardinality <- DBI::dbGetQuery(
+  con,
+  sprintf(
+    paste0(
+      "SELECT 'ClinVar' AS provider, count(*)::BIGINT AS rows, ",
+      "count(DISTINCT vk)::BIGINT AS distinct_keys FROM read_parquet(%s) UNION ALL ",
+      "SELECT 'ClinvArbitration', count(*)::BIGINT, count(DISTINCT vk)::BIGINT ",
+      "FROM read_parquet(%s) UNION ALL ",
+      "SELECT 'AlphaMissense', count(*)::BIGINT, count(DISTINCT vk)::BIGINT ",
+      "FROM read_parquet(%s)"
+    ),
+    sql_path(real_clinvar_reversible_path),
+    sql_path(real_clinvarbitration_reversible_path),
+    sql_path(real_alphamissense_path)
+  )
+)
+provider_key_cardinality$duplicate_key_rows <-
+  provider_key_cardinality$rows - provider_key_cardinality$distinct_keys
+provider_key_cardinality
+#>           provider     rows distinct_keys duplicate_key_rows
+#> 1          ClinVar  4399443       4399443                  0
+#> 2 ClinvArbitration  3620269       3620260                  9
+#> 3    AlphaMissense 71697556      71034269             663287
+
+real_multi_provider_sql <- sprintf(
+  paste(
+    "SELECT count(*)::BIGINT AS n,",
+    "count(cv.allele_id)::BIGINT AS clinvar_hits,",
+    "count(ca.allele_id)::BIGINT AS clinvarbitration_hits,",
+    "count(am.am_pathogenicity)::BIGINT AS alphamissense_hits,",
+    "sum(am.am_pathogenicity) AS alphamissense_score_sum",
+    "FROM read_parquet(%s) q",
+    "LEFT JOIN read_parquet(%s) cv USING (vk)",
+    "LEFT JOIN read_parquet(%s) ca USING (vk)",
+    "LEFT JOIN read_parquet(%s) am USING (vk)"
+  ),
+  sql_path(real_case_reversible_path),
+  sql_path(real_clinvar_reversible_path),
+  sql_path(real_clinvarbitration_reversible_path),
+  sql_path(real_alphamissense_path)
+)
+
+real_multi_provider <- measure_thread_grid(
+  "GIAB_three_real_exact_providers_one_plan",
+  alpha_probe_rows,
+  function() DBI::dbGetQuery(con, real_multi_provider_sql)
+)
+
+measure_one_exact_provider <- function(operation, provider_path, payload) {
+  measure_thread_grid(
+    operation,
+    alpha_probe_rows,
+    function() {
+      DBI::dbGetQuery(
+        con,
+        sprintf(
+          paste(
+            "SELECT count(*)::BIGINT AS n, count(p.%s)::BIGINT AS hits",
+            "FROM read_parquet(%s) q",
+            "LEFT JOIN read_parquet(%s) p USING (vk)"
+          ),
+          payload,
+          sql_path(real_case_reversible_path),
+          sql_path(provider_path)
+        )
+      )
+    }
+  )
+}
+
+real_multi_provider_separate <- rbind(
+  measure_one_exact_provider(
+    "GIAB_ClinVar_reversible_left_join",
+    real_clinvar_reversible_path,
+    "allele_id"
+  ),
+  measure_one_exact_provider(
+    "GIAB_ClinvArbitration_reversible_left_join",
+    real_clinvarbitration_reversible_path,
+    "allele_id"
+  ),
+  measure_one_exact_provider(
+    "GIAB_AlphaMissense_left_join",
+    real_alphamissense_path,
+    "am_pathogenicity"
+  )
+)
+
+real_multi_provider_comparison <- aggregate(
+  median_seconds ~ threads,
+  data = real_multi_provider_separate,
+  FUN = sum
+)
+names(real_multi_provider_comparison)[2L] <- "three_separate_seconds"
+real_multi_provider_comparison <- merge(
+  real_multi_provider_comparison,
+  real_multi_provider[, c("threads", "median_seconds")],
+  by = "threads",
+  sort = FALSE
+)
+names(real_multi_provider_comparison)[3L] <- "one_plan_seconds"
+real_multi_provider_comparison$one_plan_input_rows_per_second <-
+  alpha_probe_rows / real_multi_provider_comparison$one_plan_seconds
+real_multi_provider_comparison$speedup_vs_three_separate <-
+  real_multi_provider_comparison$three_separate_seconds /
+    real_multi_provider_comparison$one_plan_seconds
+
+real_multi_provider
+#>                                  operation threads input_rows result_rows
+#> 1 GIAB_three_real_exact_providers_one_plan       1    4036258     4036328
+#> 2 GIAB_three_real_exact_providers_one_plan       2    4036258     4036328
+#> 3 GIAB_three_real_exact_providers_one_plan       4    4036258     4036328
+#>   median_seconds input_rows_per_second result_rows_per_second
+#> 1          3.257               1239256                1239278
+#> 2          1.758               2295937                2295977
+#> 3          0.985               4097724                4097795
+real_multi_provider_separate
+#>                                    operation threads input_rows result_rows
+#> 1          GIAB_ClinVar_reversible_left_join       1    4036258     4036258
+#> 2          GIAB_ClinVar_reversible_left_join       2    4036258     4036258
+#> 3          GIAB_ClinVar_reversible_left_join       4    4036258     4036258
+#> 4 GIAB_ClinvArbitration_reversible_left_join       1    4036258     4036258
+#> 5 GIAB_ClinvArbitration_reversible_left_join       2    4036258     4036258
+#> 6 GIAB_ClinvArbitration_reversible_left_join       4    4036258     4036258
+#> 7               GIAB_AlphaMissense_left_join       1    4036258     4036328
+#> 8               GIAB_AlphaMissense_left_join       2    4036258     4036328
+#> 9               GIAB_AlphaMissense_left_join       4    4036258     4036328
+#>   median_seconds input_rows_per_second result_rows_per_second
+#> 1          0.346              11665486               11665486
+#> 2          0.193              20913254               20913254
+#> 3          0.111              36362685               36362685
+#> 4          0.338              11941592               11941592
+#> 5          0.186              21700312               21700312
+#> 6          0.111              36362685               36362685
+#> 7          2.598               1553602                1553629
+#> 8          1.374               2937597                2937648
+#> 9          0.765               5276154                5276246
+real_multi_provider_comparison
+#>   threads three_separate_seconds one_plan_seconds
+#> 1       1                  3.282            3.257
+#> 2       2                  1.753            1.758
+#> 3       4                  0.987            0.985
+#>   one_plan_input_rows_per_second speedup_vs_three_separate
+#> 1                        1239256                 1.0076758
+#> 2                        2295937                 0.9971559
+#> 3                        4097724                 1.0020305
+
+multi_provider_plan <- DBI::dbGetQuery(
+  con,
+  paste("EXPLAIN", real_multi_provider_sql)
+)
+multi_provider_plan_text <- paste(multi_provider_plan[[2L]], collapse = "\n")
+multi_provider_plan_summary <- data.frame(
+  hash_join_operators = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("HASH_JOIN", multi_provider_plan_text, fixed = TRUE)
+  )),
+  parquet_scans = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("READ_PARQUET", multi_provider_plan_text, fixed = TRUE)
+  )),
+  dynamic_filter_sites = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("Dynamic Filters", multi_provider_plan_text, fixed = TRUE)
+  )),
+  order_operators = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("ORDER_BY", multi_provider_plan_text, fixed = TRUE)
+  )),
+  stringsAsFactors = FALSE
+)
+multi_provider_plan_summary
+#>   hash_join_operators parquet_scans dynamic_filter_sites order_operators
+#> 1                   3             8                    0               0
+```
+
+The real combined plan processes 1.24 million GIAB alleles/s on one
+thread and 4.1 million/s on four. It is 1.01 times faster than issuing
+the three joins separately on one thread because the case relation is
+scanned once and DuckDB can plan the equality joins together.
+
+The following 1/4/12-provider test isolates join-count overhead. It
+reuses the unique real ClinVar numeric lane under independent aliases,
+projects one value per alias, and forces every payload to contribute to
+a checksum. This is a planner and memory stress over real Parquet pages,
+not a biological assertion that twelve sources have ClinVar’s density or
+schema.
+
+``` r
+clinvar_key_check <- provider_key_cardinality[
+  provider_key_cardinality$provider == "ClinVar",
+]
+stopifnot(clinvar_key_check$duplicate_key_rows == 0)
+
+repeated_provider_sql <- function(provider_count) {
+  aliases <- sprintf("p%02d", seq_len(provider_count))
+  joins <- paste(
+    sprintf(
+      "LEFT JOIN read_parquet(%s) %s USING (vk)",
+      sql_path(real_clinvar_reversible_path),
+      aliases
+    ),
+    collapse = "\n"
+  )
+  checksum <- paste(
+    sprintf("coalesce(%s.allele_id, 0)::HUGEINT", aliases),
+    collapse = " + "
+  )
+  sprintf(
+    paste(
+      "SELECT count(*)::BIGINT AS n, sum(%s) AS payload_checksum",
+      "FROM read_parquet(%s) q",
+      "%s"
+    ),
+    checksum,
+    sql_path(real_case_reversible_path),
+    joins
+  )
+}
+
+repeated_provider_counts <- c(1L, 4L, 12L)
+repeated_provider_join_results <- do.call(
+  rbind,
+  lapply(repeated_provider_counts, function(provider_count) {
+    result <- measure_thread_grid(
+      sprintf("GIAB_%02d_unique_exact_provider_joins", provider_count),
+      alpha_probe_rows,
+      function() DBI::dbGetQuery(con, repeated_provider_sql(provider_count))
+    )
+    result$provider_count <- provider_count
+    result
+  })
+)
+stopifnot(all(repeated_provider_join_results$result_rows == alpha_probe_rows))
+repeated_provider_join_results
+#>                             operation threads input_rows result_rows
+#> 1 GIAB_01_unique_exact_provider_joins       1    4036258     4036258
+#> 2 GIAB_01_unique_exact_provider_joins       2    4036258     4036258
+#> 3 GIAB_01_unique_exact_provider_joins       4    4036258     4036258
+#> 4 GIAB_04_unique_exact_provider_joins       1    4036258     4036258
+#> 5 GIAB_04_unique_exact_provider_joins       2    4036258     4036258
+#> 6 GIAB_04_unique_exact_provider_joins       4    4036258     4036258
+#> 7 GIAB_12_unique_exact_provider_joins       1    4036258     4036258
+#> 8 GIAB_12_unique_exact_provider_joins       2    4036258     4036258
+#> 9 GIAB_12_unique_exact_provider_joins       4    4036258     4036258
+#>   median_seconds input_rows_per_second result_rows_per_second provider_count
+#> 1          0.375            10763354.7             10763354.7              1
+#> 2          0.212            19038952.8             19038952.8              1
+#> 3          0.118            34205576.3             34205576.3              1
+#> 4          1.453             2777878.9              2777878.9              4
+#> 5          0.780             5174689.7              5174689.7              4
+#> 6          0.464             8698831.9              8698831.9              4
+#> 7          4.134              976356.6               976356.6             12
+#> 8          2.193             1840518.9              1840518.9             12
+#> 9          1.307             3088185.2              3088185.2             12
+```
 
 ### Row-group zone-map pruning for a local delta
 
@@ -1287,8 +1563,8 @@ row_group_layouts
 #> 3 /root/duckhts/.tmp/variantkey_join_overlap/clinvar_20260706_reversible_rg1048576.parquet
 #>      rows    bytes seconds row_groups candidate_row_groups
 #> 1 4399443 27029899      NA         36                    1
-#> 2 4399443 26945479   0.275        135                    2
-#> 3 4399443 27004414   0.371          5                    1
+#> 2 4399443 26945479   0.278        135                    2
+#> 3 4399443 27004414   0.376          5                    1
 
 row_group_query_results <- do.call(
   rbind,
@@ -1336,22 +1612,22 @@ row_group_query_results
 #> 1  clinvar_local_delta_rg122880       1       6023         240         0.0085
 #> 2  clinvar_local_delta_rg122880       2       6023         240         0.0090
 #> 3  clinvar_local_delta_rg122880       4       6023         240         0.0090
-#> 4   clinvar_local_delta_rg32768       1       6023         240         0.0090
+#> 4   clinvar_local_delta_rg32768       1       6023         240         0.0095
 #> 5   clinvar_local_delta_rg32768       2       6023         240         0.0090
 #> 6   clinvar_local_delta_rg32768       4       6023         240         0.0090
 #> 7 clinvar_local_delta_rg1048576       1       6023         240         0.0200
 #> 8 clinvar_local_delta_rg1048576       2       6023         240         0.0200
-#> 9 clinvar_local_delta_rg1048576       4       6023         240         0.0200
+#> 9 clinvar_local_delta_rg1048576       4       6023         240         0.0210
 #>   input_rows_per_second result_rows_per_second
 #> 1              708588.2               28235.29
 #> 2              669222.2               26666.67
 #> 3              669222.2               26666.67
-#> 4              669222.2               26666.67
+#> 4              634000.0               25263.16
 #> 5              669222.2               26666.67
 #> 6              669222.2               26666.67
 #> 7              301150.0               12000.00
 #> 8              301150.0               12000.00
-#> 9              301150.0               12000.00
+#> 9              286809.5               11428.57
 ```
 
 The default 122,880-row layout admits 1 of 36 provider row groups and
@@ -1417,7 +1693,7 @@ data.frame(
   intervals_per_second = real_regulatory_stats$rows / real_index_seconds
 )
 #>                     operation intervals seconds intervals_per_second
-#> 1 cgranges_build_and_finalize    643528   0.098              6566612
+#> 1 cgranges_build_and_finalize    643528   0.101              6371564
 ```
 
 ``` r
@@ -1565,18 +1841,18 @@ real_interval_results
 #> 11           real_regulatory_cgranges_count_pairs       2    4096123
 #> 12           real_regulatory_cgranges_count_pairs       4    4096123
 #>    result_rows median_seconds input_rows_per_second result_rows_per_second
-#> 1       407430          1.178               3477184               345865.9
-#> 2       407430          0.750               5461497               543240.0
+#> 1       407430          1.184               3459563               344113.2
+#> 2       407430          0.762               5375490               534685.0
 #> 3       407430          0.383              10694838              1063785.9
-#> 4       407430          1.117               3667075               364753.8
-#> 5       407430          0.643               6370331               633639.2
-#> 6       407430          0.411               9966236               991313.9
-#> 7       407430          3.580               1144168               113807.3
-#> 8       407430          1.939               2112493               210123.8
-#> 9       407430          1.078               3799743               377949.9
-#> 10      407430          0.370              11070603              1101162.2
+#> 4       407430          1.110               3690201               367054.1
+#> 5       407430          0.639               6410208               637605.6
+#> 6       407430          0.395              10369932              1031468.4
+#> 7       407430          3.545               1155465               114930.9
+#> 8       407430          1.910               2144567               213314.1
+#> 9       407430          1.096               3737339               371742.7
+#> 10      407430          0.360              11378119              1131750.0
 #> 11      407430          0.191              21445670              2133141.4
-#> 12      407430          0.104              39385798              3917596.2
+#> 12      407430          0.105              39010695              3880285.7
 
 real_interval_speedups <- merge(
   real_interval_results[, c("operation", "threads", "input_rows_per_second")],
@@ -1589,31 +1865,31 @@ real_interval_speedups$speedup_vs_typed_iejoin <-
   real_interval_speedups$input_rows_per_second_typed_baseline
 real_interval_speedups
 #>    threads                                      operation input_rows_per_second
-#> 1        1  real_regulatory_typed_per_contig_iejoin_pairs               3477184
-#> 2        1           real_regulatory_cgranges_count_pairs              11070603
-#> 3        1  real_regulatory_regionkey_bounded_start_pairs               1144168
-#> 4        1 real_regulatory_packed_coordinate_iejoin_pairs               3667075
-#> 5        2 real_regulatory_packed_coordinate_iejoin_pairs               6370331
-#> 6        2  real_regulatory_typed_per_contig_iejoin_pairs               5461497
+#> 1        1  real_regulatory_typed_per_contig_iejoin_pairs               3459563
+#> 2        1           real_regulatory_cgranges_count_pairs              11378119
+#> 3        1  real_regulatory_regionkey_bounded_start_pairs               1155465
+#> 4        1 real_regulatory_packed_coordinate_iejoin_pairs               3690201
+#> 5        2 real_regulatory_packed_coordinate_iejoin_pairs               6410208
+#> 6        2  real_regulatory_typed_per_contig_iejoin_pairs               5375490
 #> 7        2           real_regulatory_cgranges_count_pairs              21445670
-#> 8        2  real_regulatory_regionkey_bounded_start_pairs               2112493
-#> 9        4  real_regulatory_regionkey_bounded_start_pairs               3799743
-#> 10       4 real_regulatory_packed_coordinate_iejoin_pairs               9966236
+#> 8        2  real_regulatory_regionkey_bounded_start_pairs               2144567
+#> 9        4  real_regulatory_regionkey_bounded_start_pairs               3737339
+#> 10       4 real_regulatory_packed_coordinate_iejoin_pairs              10369932
 #> 11       4  real_regulatory_typed_per_contig_iejoin_pairs              10694838
-#> 12       4           real_regulatory_cgranges_count_pairs              39385798
+#> 12       4           real_regulatory_cgranges_count_pairs              39010695
 #>    input_rows_per_second_typed_baseline speedup_vs_typed_iejoin
-#> 1                               3477184               1.0000000
-#> 2                               3477184               3.1837838
-#> 3                               3477184               0.3290503
-#> 4                               3477184               1.0546106
-#> 5                               5461497               1.1664075
-#> 6                               5461497               1.0000000
-#> 7                               5461497               3.9267016
-#> 8                               5461497               0.3867973
-#> 9                              10694838               0.3552876
-#> 10                             10694838               0.9318735
+#> 1                               3459563               1.0000000
+#> 2                               3459563               3.2888889
+#> 3                               3459563               0.3339915
+#> 4                               3459563               1.0666667
+#> 5                               5375490               1.1924883
+#> 6                               5375490               1.0000000
+#> 7                               5375490               3.9895288
+#> 8                               5375490               0.3989529
+#> 9                              10694838               0.3494526
+#> 10                             10694838               0.9696203
 #> 11                             10694838               1.0000000
-#> 12                             10694838               3.6826923
+#> 12                             10694838               3.6476190
 ```
 
 The physical-plan assertion above matters. DuckDB’s [IEJoin
@@ -1621,15 +1897,15 @@ description](https://duckdb.org/2022/05/27/iejoin) explains that a
 double-inequality join sorts both relations on the first condition,
 constructs merged and permutation arrays for the second condition, and
 uses a bitmap to identify matching pairs. DuckDB parallelizes sorted
-blocks and can spool join blocks to disk. The measured 665/728 MiB is
+blocks and can spool join blocks to disk. The measured 665/712 MiB is
 therefore the resident cost of real parallel `IE_JOIN`
 planning/execution over these Parquet relations, not a nested loop
 mislabeled as an interval join. The per-contig `UNION ALL` is
 deliberate: it makes contig equality a static shard filter and leaves
 exactly the two coordinate inequalities for each `IE_JOIN` operator.
 
-For this real source, cgranges is 3.18 times the typed DuckDB interval
-join on one thread and 3.68 times on four threads. The globally bounded
+For this real source, cgranges is 3.29 times the typed DuckDB interval
+join on one thread and 3.65 times on four threads. The globally bounded
 RegionKey range is correct but loses because the single 48,907-base
 source interval widens candidate discovery for every GIAB allele.
 
@@ -1691,9 +1967,9 @@ rbind(gene_transcript_join, gene_distinct_join)
 #> 1          0.016              40268250               26648875
 #> 2          0.010              64429200               42638200
 #> 3          0.008              80536500               53297750
-#> 4          0.012              53691000                1590167
+#> 4          0.011              58572000                1734727
 #> 5          0.008              80536500                2385250
-#> 6          0.006             107382000                3180333
+#> 6          0.007              92041714                2726000
 ```
 
 ### Materialized provider output
@@ -1758,11 +2034,11 @@ materialized_results
 #> 1 /root/duckhts/.tmp/variantkey_join_overlap/giab_clinvar_exact_matches.parquet
 #> 2   /root/duckhts/.tmp/variantkey_join_overlap/giab_regulatory_overlaps.parquet
 #>     rows   bytes seconds rows_per_second input_rows input_rows_per_second
-#> 1  44561  440154   0.238        187231.1    4096123              17210601
-#> 2 407430 2230407   0.551        739437.4    4096123               7433980
+#> 1  44561  439804   0.238        187231.1    4096123              17210601
+#> 2 407430 2230399   0.561        726256.7    4096123               7301467
 #>   output_mb_per_second
-#> 1             1.849387
-#> 2             4.047926
+#> 1             1.847916
+#> 2             3.975756
 ```
 
 ## 6. Isolated peak memory and population-scale projection
@@ -1913,6 +2189,30 @@ isolated_memory <- rbind(
   isolated_duckdb_measure("REVEL 77.97M exact join", revel_join_sql, 4L, rss_cpu_4),
   isolated_duckdb_measure("AlphaMissense 71.70M exact join", alpha_join_sql, 1L, rss_cpu_1),
   isolated_duckdb_measure("AlphaMissense 71.70M exact join", alpha_join_sql, 4L, rss_cpu_4),
+  isolated_duckdb_measure(
+    "GIAB three real exact providers one plan",
+    real_multi_provider_sql,
+    1L,
+    rss_cpu_1
+  ),
+  isolated_duckdb_measure(
+    "GIAB three real exact providers one plan",
+    real_multi_provider_sql,
+    4L,
+    rss_cpu_4
+  ),
+  isolated_duckdb_measure(
+    "GIAB twelve unique exact provider joins",
+    repeated_provider_sql(12L),
+    1L,
+    rss_cpu_1
+  ),
+  isolated_duckdb_measure(
+    "GIAB twelve unique exact provider joins",
+    repeated_provider_sql(12L),
+    4L,
+    rss_cpu_4
+  ),
   isolated_duckdb_measure("AlphaMissense chromosome 1 shard self-join", alpha_chr1_join_sql, 1L, rss_cpu_1),
   isolated_duckdb_measure("AlphaMissense chromosome 1 shard self-join", alpha_chr1_join_sql, 4L, rss_cpu_4),
   isolated_duckdb_measure("regulatory cgranges build and full GIAB probe", real_cgranges_sql, 1L, rss_cpu_1),
@@ -1948,71 +2248,83 @@ isolated_memory$incremental_peak_rss_mib <- pmax(
 )
 isolated_memory
 #>    threads                                     operation repeats peak_rss_mib
-#> 1        1                                      baseline       1     36.04297
-#> 2        1           regulatory DuckDB per-contig IEJoin       1    664.76562
-#> 3        1                      ClinVar split exact join       1    185.25000
-#> 4        1                         cgranges 1M no labels       1    129.20703
-#> 5        1             ClinvArbitration split exact join       1    175.42578
-#> 6        1                    cgranges 1M VARCHAR labels       1    196.70312
-#> 7        1                       REVEL 77.97M exact join       1    183.21484
-#> 8        1               AlphaMissense 71.70M exact join       1    181.33203
-#> 9        1    AlphaMissense chromosome 1 shard self-join       1    307.30469
-#> 10       1 regulatory cgranges build and full GIAB probe       1    145.64062
-#> 11       1                    cgranges 10M BIGINT labels       1   1281.66016
-#> 12       1                     cgranges 1M BIGINT labels       1    144.98438
-#> 13       4                      ClinVar split exact join       1    191.89062
-#> 14       4                                      baseline       1     35.78125
-#> 15       4                       REVEL 77.97M exact join       1    189.70312
-#> 16       4             ClinvArbitration split exact join       1    179.90625
-#> 17       4    AlphaMissense chromosome 1 shard self-join       1    315.09375
-#> 18       4               AlphaMissense 71.70M exact join       1    188.63672
-#> 19       4           regulatory DuckDB per-contig IEJoin       1    711.98438
-#> 20       4            AlphaMissense provider preparation       1   1128.80078
-#> 21       4                    REVEL provider preparation       1   1278.75391
+#> 1        1                                      baseline       1     36.24219
+#> 2        1           regulatory DuckDB per-contig IEJoin       1    664.87109
+#> 3        1                      ClinVar split exact join       1    185.08594
+#> 4        1                         cgranges 1M no labels       1    129.35547
+#> 5        1             ClinvArbitration split exact join       1    175.21875
+#> 6        1                    cgranges 1M VARCHAR labels       1    196.55859
+#> 7        1                       REVEL 77.97M exact join       1    183.00781
+#> 8        1               AlphaMissense 71.70M exact join       1    181.09375
+#> 9        1      GIAB three real exact providers one plan       1    516.50391
+#> 10       1       GIAB twelve unique exact provider joins       1   2449.31641
+#> 11       1    AlphaMissense chromosome 1 shard self-join       1    307.59766
+#> 12       1 regulatory cgranges build and full GIAB probe       1    145.94531
+#> 13       1                    cgranges 10M BIGINT labels       1   1281.78516
+#> 14       1                     cgranges 1M BIGINT labels       1    145.14453
+#> 15       4                      ClinVar split exact join       1    194.12891
+#> 16       4                                      baseline       1     35.62500
+#> 17       4                       REVEL 77.97M exact join       1    189.33984
+#> 18       4             ClinvArbitration split exact join       1    182.17578
+#> 19       4      GIAB three real exact providers one plan       1    527.22656
+#> 20       4               AlphaMissense 71.70M exact join       1    189.22656
+#> 21       4    AlphaMissense chromosome 1 shard self-join       1    315.14062
+#> 22       4       GIAB twelve unique exact provider joins       1   2473.98828
+#> 23       4           regulatory DuckDB per-contig IEJoin       1    729.58594
+#> 24       4            AlphaMissense provider preparation       1   1167.79688
+#> 25       4                    REVEL provider preparation       1   1285.13672
 #>    median_peak_rss_mib median_elapsed_seconds baseline_rss_mib
-#> 1             36.04297                   0.13         36.04297
-#> 2            664.76562                   1.14         36.04297
-#> 3            185.25000                   0.46         36.04297
-#> 4            129.20703                   0.18         36.04297
-#> 5            175.42578                   0.37         36.04297
-#> 6            196.70312                   0.26         36.04297
-#> 7            183.21484                   2.87         36.04297
-#> 8            181.33203                   2.43         36.04297
-#> 9            307.30469                   1.49         36.04297
-#> 10           145.64062                   0.60         36.04297
-#> 11          1281.66016                   1.11         36.04297
-#> 12           144.98438                   0.22         36.04297
-#> 13           191.89062                   0.13         35.78125
-#> 14            35.78125                   0.02         35.78125
-#> 15           189.70312                   0.85         35.78125
-#> 16           179.90625                   0.11         35.78125
-#> 17           315.09375                   0.44         35.78125
-#> 18           188.63672                   0.72         35.78125
-#> 19           711.98438                   0.36         35.78125
-#> 20          1128.80078                  12.77         35.78125
-#> 21          1278.75391                   2.31         35.78125
+#> 1             36.24219                   0.09         36.24219
+#> 2            664.87109                   1.15         36.24219
+#> 3            185.08594                   0.51         36.24219
+#> 4            129.35547                   0.16         36.24219
+#> 5            175.21875                   0.31         36.24219
+#> 6            196.55859                   0.27         36.24219
+#> 7            183.00781                   2.88         36.24219
+#> 8            181.09375                   2.48         36.24219
+#> 9            516.50391                   3.08         36.24219
+#> 10          2449.31641                   4.19         36.24219
+#> 11           307.59766                   1.48         36.24219
+#> 12           145.94531                   0.53         36.24219
+#> 13          1281.78516                   1.12         36.24219
+#> 14           145.14453                   0.17         36.24219
+#> 15           194.12891                   0.13         35.62500
+#> 16            35.62500                   0.02         35.62500
+#> 17           189.33984                   0.85         35.62500
+#> 18           182.17578                   0.12         35.62500
+#> 19           527.22656                   0.94         35.62500
+#> 20           189.22656                   0.72         35.62500
+#> 21           315.14062                   0.44         35.62500
+#> 22          2473.98828                   1.34         35.62500
+#> 23           729.58594                   0.36         35.62500
+#> 24          1167.79688                  12.71         35.62500
+#> 25          1285.13672                   2.33         35.62500
 #>    incremental_peak_rss_mib
 #> 1                   0.00000
-#> 2                 628.72266
-#> 3                 149.20703
-#> 4                  93.16406
-#> 5                 139.38281
-#> 6                 160.66016
-#> 7                 147.17188
-#> 8                 145.28906
-#> 9                 271.26172
-#> 10                109.59766
-#> 11               1245.61719
-#> 12                108.94141
-#> 13                156.10938
-#> 14                  0.00000
-#> 15                153.92188
-#> 16                144.12500
-#> 17                279.31250
-#> 18                152.85547
-#> 19                676.20312
-#> 20               1093.01953
-#> 21               1242.97266
+#> 2                 628.62891
+#> 3                 148.84375
+#> 4                  93.11328
+#> 5                 138.97656
+#> 6                 160.31641
+#> 7                 146.76562
+#> 8                 144.85156
+#> 9                 480.26172
+#> 10               2413.07422
+#> 11                271.35547
+#> 12                109.70312
+#> 13               1245.54297
+#> 14                108.90234
+#> 15                158.50391
+#> 16                  0.00000
+#> 17                153.71484
+#> 18                146.55078
+#> 19                491.60156
+#> 20                153.60156
+#> 21                279.51562
+#> 22               2438.36328
+#> 23                693.96094
+#> 24               1132.17188
+#> 25               1249.51172
 ```
 
 The real 643,528-row regulatory cgranges index uses string labels
@@ -2046,25 +2358,27 @@ cgranges_memory_density$incremental_peak_bytes_per_interval <-
   cgranges_memory_density$incremental_peak_rss_mib * 1024^2 / cgranges_memory_density$intervals
 cgranges_memory_density
 #>                    operation intervals peak_rss_mib incremental_peak_rss_mib
-#> 1      cgranges 1M no labels     1e+06     129.2070                 93.16406
-#> 2  cgranges 1M BIGINT labels     1e+06     144.9844                108.94141
-#> 3 cgranges 1M VARCHAR labels     1e+06     196.7031                160.66016
-#> 4 cgranges 10M BIGINT labels     1e+07    1281.6602               1245.61719
+#> 1      cgranges 1M no labels     1e+06     129.3555                 93.11328
+#> 2  cgranges 1M BIGINT labels     1e+06     145.1445                108.90234
+#> 3 cgranges 1M VARCHAR labels     1e+06     196.5586                160.31641
+#> 4 cgranges 10M BIGINT labels     1e+07    1281.7852               1245.54297
 #>   incremental_peak_bytes_per_interval
-#> 1                             97.6896
-#> 2                            114.2333
-#> 3                            168.4644
-#> 4                            130.6124
+#> 1                            97.63635
+#> 2                           114.19238
+#> 3                           168.10394
+#> 4                           130.60465
 ```
 
 ### Storage and logical time at catalog scale
 
 The provider hot files below intentionally exclude source presentation
 columns. They are serving projections, not replacements for the source
-receipts. Exact providers are scanned one at a time; therefore twelve
-independent annotations have approximately the sum of their elapsed
-times but the maximum of their individual RSS values. Loading twelve
-indexes concurrently is neither required nor the design.
+receipts. Exact providers may share one costed plan when the measured
+RSS is acceptable, as in the real three-provider result above. At larger
+catalog counts the execution macro may instead schedule bounded provider
+groups; twelve independent groups then have approximately the sum of
+their elapsed times but the maximum of their group RSS values. Loading
+twelve indexes concurrently is neither required nor the default design.
 
 ``` r
 provider_storage <- data.frame(
@@ -2104,7 +2418,7 @@ provider_storage
 #> 1 ClinVar reversible exact lane  4399443  27029899                 6.143937
 #> 2  ClinvArbitration exact lanes  3647840  21814288                 5.980056
 #> 3                    REVEL v1.3 77966138 201658023                 2.586482
-#> 4              AlphaMissense v2 71697556 254370824                 3.547831
+#> 4              AlphaMissense v2 71697556 254365844                 3.547762
 
 catalog_scenarios <- data.frame(
   catalog = c("TOPMed Freeze 8 BRAVO", "dbSNP Build 157 live RefSNP"),
@@ -2147,10 +2461,10 @@ logical_time
 #> 3 dbSNP Build 157 live RefSNP       1   1172689405
 #> 4 dbSNP Build 157 live RefSNP       4   1172689405
 #>   twelve_dense_providers_minutes_fast twelve_dense_providers_minutes_slow
-#> 1                            92.53240                           111.37190
-#> 2                            27.16195                            31.77142
-#> 3                           153.81122                           185.12703
-#> 4                            45.14972                            52.81179
+#> 1                            93.47625                           110.85613
+#> 2                            27.58144                            32.45911
+#> 3                           155.38013                           184.26969
+#> 4                            45.84702                            53.95490
 ```
 
 These are deliberately labelled logical-time projections: they linearly
@@ -2158,13 +2472,14 @@ apply the measured REVEL-to-AlphaMissense throughput envelope to twelve
 equally dense providers. They do not claim that all real sources are
 that large, equally compressible, or equally expensive. For a
 705-million-row or 1.17-billion-row query, the execution macro must
-compile chromosome or coordinate-tile tasks so one provider shard is the
-hash-build side and the population relation streams. The measured
-largest AlphaMissense chromosome has 7,183,937 source rows; its isolated
-self-join is the concrete memory denominator for that scheduling model.
-Four chromosome workers may share immutable Parquet pages, but each owns
-its join state, so concurrency must be bounded by measured RSS rather
-than by the number of available source files.
+compile chromosome or coordinate-tile tasks so one bounded group of
+provider shards and query keys supplies join state while the large
+provider relations stream. The measured largest AlphaMissense chromosome
+has 7,183,937 source rows; its isolated self-join is the concrete memory
+denominator for that scheduling model. Four chromosome workers may share
+immutable Parquet pages, but each owns its join state, so concurrency
+must be bounded by measured RSS rather than by the number of available
+source files.
 
 ## Notes
 
@@ -2183,6 +2498,12 @@ than by the number of available source files.
   the ordinal-to-name map in the dataset manifest, Parquet key/value
   metadata, or a companion relation. Official VariantKey/RegionKey
   chromosome codes remain limited to canonical human contigs.
+- Multiple equality joins are valid composition, but provider count
+  alone is not the controlling cost. The provider receipt must declare
+  key scope and uniqueness, the plan must keep the case side narrow, and
+  peak join state must remain within the measured memory budget.
+  Provider-specific rows should be reduced or nested before transcript
+  expansion rather than multiplied across every transcript consequence.
 - RegionKey is more than exact equality: its chromosome/start ordering
   supports binary search, ordered merge, and bounded start-range
   discovery. Arbitrary nested intervals still require a proven look-back

@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
-# duckhts 1.4.0.9000 (development)
+# duckhts 1.5.0
+- replace the separate public small-variant, structural-event, breakend, compact,
+  rich, and HGVS entry points with one pipe-friendly
+  `duckvep_annotate(events_table, model_name, hgvs := false, ...)` relation.
+  The canonical narrow event schema derives and validates each event family,
+  dispatches to private native lanes, and returns one fixed compact schema with
+  nullable HGVS fields. Add `duckvep_so_terms()` as the generated mask-decoding
+  relation, public SQL/R regressions, and rendered root/package README examples
 - extend the rendered VariantKey/RegionKey supplementary-annotation benchmark with
   isolated peak-RSS measurements and real dense exact providers. Official AlphaMissense
   v2 GRCh38 (71,697,556 rows), a receipted REVEL v1.3 GRCh37 projection (77,966,138

@@ -108,6 +108,7 @@ set(EXTENSION_SOURCES
         src/duckvep/duckvep_model.c
         src/duckvep/duckvep_annotate.c
         src/duckvep/duckvep_ensembl.c
+        src/duckvep/duckvep_sql.c
         src/hts_meta_reader.c
         src/quality_encoding.c
         src/quality_encoding_reader.c

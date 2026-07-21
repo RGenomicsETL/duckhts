@@ -19,9 +19,9 @@ The kernel emits structured transcript consequences. VEP-compatible CSQ text and
 edge projections, not the internal representation. Prepared-event and CDS-edit facts are
 the shared consequence/HGVS authorities; an HGVS-facing transcript-edit carrier adds
 VEP's clipped transcript-slice state without changing those semantic edits. Allocation-free
-`c.`/`n.`/`p.` fact/render kernels, a worker-owned indexed-FASTA provider, and cumulative
-`duckvep_annotate_hgvs(...)` SQL adapter are implemented for independent literal small
-variants. Strict executable-VEP evidence covers the fixed position-one/right-anchor cases
+`c.`/`n.`/`p.` fact/render kernels, a worker-owned indexed-FASTA provider, and the
+`duckvep_annotate(..., hgvs := true)` relation path are implemented for independent literal
+small variants. Strict executable-VEP evidence covers the fixed position-one/right-anchor cases
 and 56,998 chromosome-21 ClinVar transcript pairs with zero HGVSc/HGVSp differences.
 Genomic HGVS, RefSeq RNA-edit shifting, structural/BND HGVS, broader cross-species HGVS
 distributions, and compound/phased HGVS remain open.
@@ -118,6 +118,8 @@ facts as consequence prediction; it must not reconstruct biology from rendered S
 
 - `functions.yaml` is the public SQL contract.
 - `src/duckvep/duckvep_ensembl.c` registers the relation-to-model SQL described below.
+- `src/duckvep/duckvep_sql.c` registers the public event-relation dispatcher and generated
+  SO metadata relation.
 - `src/duckvep/duckvep_model.c` validates, owns, publishes, pins, and drops named models.
 - `src/duckvep/duckvep_annotate.c` and `src/duckvep/duckvep_variant_tile.c` adapt DuckDB
   vectors to the pure C batch interface and materialize results.
@@ -445,18 +447,25 @@ coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 
 ## Independent-variant execution
 
-`duckvep_annotate(model, seq_region, position, reference, alternate
-[, distance] | [, upstream_distance, downstream_distance])` is the current stable-C-API
-adapter for independent biallelic small variants. Both direction windows default to VEP's
-5,000 bases; one optional distance changes both, while two values configure them separately
-and zero disables the corresponding direction (or both when it is the single symmetric
-value). These distances extend candidate admission only beyond transcript endpoints; they
-do not cap an allele span or clip an event that overlaps a transcript. Literal alleles up
-to the compact 65,535-byte slice limit retain uploaded, VEP-feature, and minimized-edit
+`duckvep_annotate(events_table, model_name, hgvs := false, upstream_distance := 5000,
+downstream_distance := 5000)` is the public relation surface. `events_table` names a narrow,
+globally coordinate-ordered relation with one row per ALT allele: event identity, model-local
+region ordinal, one-based position, literal REF/ALT, nullable single-locus structural span
+and type/copy direction, and nullable mate coordinates. The macro validates that geometry,
+derives small, exact structural, or paired-breakend family, and dispatches to private native
+lanes with one fixed compact output schema. It never hides an `ORDER BY`; invalid input order
+is rejected by the native sorted-stream checks. Callers retain genotype, confidence interval,
+raw ALT, orientation, and other wide provenance in the source relation and join selected
+results back by `event_index`.
+
+Both direction windows default to VEP's 5,000 bases and zero disables the corresponding
+direction. These distances extend candidate admission only beyond transcript endpoints;
+they do not cap an allele span or clip an event that overlaps a transcript. Literal alleles
+up to the compact 65,535-byte slice limit retain uploaded, VEP-feature, and minimized-edit
 geometry independently. An ordinary minimized deletion that contains a complete transcript
 therefore reaches the same `transcript_ablation` fact as a symbolic deletion, while an
-equal-length containing span retains VEP's endpoint-UTR comparison behavior. The adapter
-copies one DuckDB vector into compact arrays, splits on
+equal-length containing span retains VEP's endpoint-UTR comparison behavior. The private
+native adapter copies one DuckDB vector into compact arrays, splits on
 model/contig/window/order changes, seeds the first candidate set through cgranges, and
 advances independent sorted transcript and regulation/motif sweeps. The SNV point path
 keeps a per-transcript exon rank and advances it monotonically; normalized multi-base
@@ -593,14 +602,14 @@ not one lossy event shape. Deletion, duplication, inversion, CNV, breakend pairs
 sequence, and repeat changes retain their typed geometry. A breakend is two loci, not a
 wide interval or symbolic point.
 
-`duckvep_annotate_sv(...)` and `duckvep_annotate_sv_compact(...)` accept exact single-locus
-events plus a typed DEL, DUP, tandem-DUP, tandem-repeat (`STR`), INV, INS, CNV, or unknown operation and an
-explicit loss/neutral/gain/unknown copy direction. Span operations use one-based inclusive
-start/end coordinates. An insertion uses `start = end = P` for the interbase site after
-reference base `P`; preparing symbolic VCF therefore removes the left anchor, maps a span
-to `start = POS + 1, end = INFO/END`, and maps an insertion to `P = POS`. The adapter
-rejects contradictory operation/direction pairs. This single-locus adapter rejects BND
-because it is not a single-locus event; the dedicated two-locus adapters below handle it.
+The public event relation accepts exact single-locus events plus a typed DEL, DUP,
+tandem-DUP, tandem-repeat (`STR`), INV, INS, CNV, or unknown operation and an explicit
+loss/neutral/gain/unknown copy direction. Span operations use one-based inclusive start/end
+coordinates. An insertion uses `start = end = P` for the interbase site after reference base
+`P`; preparing symbolic VCF therefore removes the left anchor, maps a span to
+`start = POS + 1, end = INFO/END`, and maps an insertion to `P = POS`. The dispatcher rejects
+contradictory operation/direction pairs. A BND row supplies both mate coordinates and never
+pretends that its two loci are one single-locus span.
 
 VEP expands a bounded `<CNV:TR>` from `RN` plus `RUS`/`RUC` or `RB` into literal alleles
 when the result fits its configured structural-size limit. Such an event is then an
@@ -611,8 +620,8 @@ gain/insertion predicates. Raw repeat units and counts remain columns in the sur
 relation; the consequence kernel consumes the prepared literal allele or exact structural
 span, not parser-specific INFO strings.
 
-`duckvep_annotate_breakend(...)` and its compact form accept the local and mate regions and
-raw one-based VCF positions in one row. They query the resident cgranges transcript and
+The paired-breakend native lane accepts the local and mate regions and raw one-based VCF
+positions from that same public event row. It queries the resident cgranges transcript and
 regulatory/motif indexes around both loci, merge and deduplicate each object class, and
 call shared C evaluators with explicit variant/object pairs. This is intentionally
 separate from the sorted single-locus sweep: neither a wide span nor two independent
@@ -733,11 +742,13 @@ The implemented internal layer makes that ownership explicit:
   unchanged reference spans plus the edit payload rather than materializing the full
   alternate CDS.
 
-`duckvep_annotate_hgvs(...)` exposes those mechanics as a cumulative SQL result: the first
-16 fields are the compact consequence row, followed by transcript/protein suffixes,
-transcript-direction shift, and separate structured status/reason fields. Stable versioned
-transcript and translation identifiers remain ordinary prepared-model columns and are
-joined by transcript ordinal rather than copied into every hot result row. A model may bind
+`duckvep_annotate(..., hgvs := true)` exposes those mechanics without changing the public
+schema: the first 16 fields are the compact consequence row, followed by nullable
+transcript/protein suffixes, transcript-direction shift, and separate structured
+status/reason fields. Structural and breakend rows currently leave those HGVS fields NULL.
+Stable versioned transcript and translation identifiers remain ordinary prepared-model
+columns and are joined by transcript ordinal rather than copied into every hot result row.
+A model may bind
 an existing indexed FASTA through an exact sequence-region ordinal/name/length relation;
 the loader validates the index without creating or modifying it, while each annotation
 worker owns its faidx handle and reusable reference-window storage. One bounded fetch
@@ -811,8 +822,8 @@ management, and spill are the first implementation. A custom cache requires a me
 workload that those facilities do not meet.
 
 Variant-level exact and positional joins happen before transcript expansion. The compact
-consequence row already carries transcript and gene ordinals, so gene relations are joined
-after consequence expansion without repeating a gene lookup inside C. Ensembl
+consequence row already carries transcript and gene ordinals, so affected rows are reduced
+to distinct gene ordinals before gene resources are joined and then attached back. Ensembl
 RegulatoryFeature and MotifFeature are core VEP inputs and run in the C consequence kernel.
 Protein domains and genuinely supplementary interval sources use range joins or sorted
 interval streams, followed by the smallest source-specific predicate needed for a joined
@@ -835,13 +846,26 @@ alleles rather than pretending the official human VariantKey contig space is uni
 Position, interval, and gene providers use their own typed keys; they do not inherit exact
 variant semantics merely because all are exposed by one manifest.
 
+FastVEP's `.osa`/`.osa2`, `.osi`, and `.oga` files encode exact-allele, interval, and gene
+provider scopes respectively. DuckHTS closes over those semantics with ordinary typed
+relations rather than reading or creating another cache format. Sorted/partitioned Parquet
+holds the hot projections; provider receipts and cold metadata remain relations; tabular or
+JSON output is rendered after selection. VCF round-trip output remains a separate writer and
+FORMAT-remapping contract.
+
 The generated annotation query selects touched chromosome or coordinate-tile Parquet
-shards, runs one provider at a time, and emits provider identity/release with every result.
-At population scale the query relation streams while one bounded provider shard is the
-join-build side. Several chromosome tasks may run concurrently, but their mutable join
-state is per task even when immutable Parquet pages are shared. The scheduler therefore
-bounds concurrency from measured peak RSS. It must not load a dozen full providers or
-build a whole-dbSNP cgranges index.
+shards and emits provider identity/release with every result. DuckDB may cost several narrow
+exact equality joins in one plan; key count alone is not a reason to serialize them. Every
+provider must declare whether its hot key is unique, one-to-many, or requires a finer key,
+because an accidental duplicate multiplies downstream rows even when the hash join itself is
+fast. Provider matches are reduced or nested before transcript expansion.
+
+At population scale, provider joins run in RSS-bounded groups. The query relation or smaller
+filtered key set is the hash-build side while large provider relations stream with Parquet
+min/max and dynamic Bloom filters where the planner can derive them. Several chromosome tasks
+may run concurrently, but their mutable join state is per task even when immutable Parquet
+pages are shared. The scheduler therefore bounds concurrency from measured peak RSS. It must
+not load a dozen full providers or build a whole-dbSNP cgranges index merely to avoid SQL.
 
 cgranges remains the repeated-query choice for compact interval tracks when its measured
 resident cost is acceptable. The current public registry also owns output coordinates,
@@ -849,7 +873,8 @@ label validity, labels, and one chromosome string per interval; this is material
 than cgranges' 16-byte core interval. Count-only payload elision and chromosome interning
 are valid future optimizations. Exact dbSNP, TOPMed, REVEL, AlphaMissense, ClinVar, and
 frequency sources stay sorted/partitioned Parquet streams. The measured storage, serving
-RSS, interval-index density, and twelve-provider logical-time envelope live in
+RSS, interval-index density, real multi-provider plan, join-count stress, and
+twelve-provider logical-time envelope live in
 `benchmarks/benchmark_variantkey_join_overlap.md`.
 
 The stateful stable-API integration is tracked at

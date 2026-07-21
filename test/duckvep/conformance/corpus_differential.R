@@ -161,7 +161,7 @@ op <- add_option(
   default = FALSE,
   help = paste(
     "also compare independent-event HGVSc/HGVSn and HGVSp suffixes from",
-    "duckvep_annotate_hgvs(...) with VEP --hgvs [default: %default]"
+    "_duckvep_annotate_small_hgvs(...) with VEP --hgvs [default: %default]"
   )
 )
 op <- add_option(op, "--hgvs-out", dest = "hgvs_out", default = "")
@@ -2261,9 +2261,9 @@ gff_for_vep <- if (identical(oracle_mode, "gff")) {
 
 engine_call_sql <- if (identical(opt$event_mode, "small")) {
   annotate_function <- if (isTRUE(opt$hgvs)) {
-    "duckvep_annotate_hgvs"
+    "_duckvep_annotate_small_hgvs"
   } else {
-    "duckvep_annotate"
+    "_duckvep_annotate_small_rich"
   }
   glue(
     "{annotate_function}(
@@ -2273,14 +2273,14 @@ engine_call_sql <- if (identical(opt$event_mode, "small")) {
   )
 } else if (identical(opt$event_mode, "breakend")) {
   glue(
-    "duckvep_annotate_breakend(
+    "_duckvep_annotate_breakend_rich(
        {sql_q(opt$model_name)}, v.seq_region, v.position,
        v.mate_seq_region, v.mate_position, {opt$distance}::UBIGINT
      )"
   )
 } else {
   glue(
-    "duckvep_annotate_sv(
+    "_duckvep_annotate_structural_rich(
        {sql_q(opt$model_name)}, v.seq_region, v.event_start, v.event_end,
        v.structural_type, v.copy_change, {opt$distance}::UBIGINT
      )"

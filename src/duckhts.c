@@ -73,6 +73,7 @@ extern void register_duckhts_cgranges_functions(duckdb_connection connection, du
 /* duckvep resident model and annotation adapter */
 extern void register_duckvep_functions(duckdb_connection connection, duckdb_database database);
 extern bool register_duckvep_ensembl_functions(duckdb_connection connection);
+extern bool register_duckvep_sql_functions(duckdb_connection connection);
 /* variantkey_udf.c */
 extern void register_variantkey_functions(duckdb_connection connection);
 /* simd/duckhts_simd_dispatch.c */
@@ -167,6 +168,9 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_duckhts_cgranges_functions(connection, *access->get_database(info));
     register_duckvep_functions(connection, *access->get_database(info));
     if (!register_duckvep_ensembl_functions(connection)) {
+        return false;
+    }
+    if (!register_duckvep_sql_functions(connection)) {
         return false;
     }
     if (!run_sql_or_fail(connection,

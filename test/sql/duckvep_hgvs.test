@@ -121,7 +121,7 @@ SELECT annotation.regulation_feature_index,
        (annotation.protein_hgvs IS NULL)::INTEGER,
        (annotation.transcript_hgvs_status IS NULL)::INTEGER,
        (annotation.protein_hgvs_status IS NULL)::INTEGER
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 3::UBIGINT, 'G', 'A', 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.regulation_feature_index IS NOT NULL;
@@ -187,7 +187,7 @@ SELECT loaded FROM duckvep_model_load(
 query IIIIIII
 WITH annotations AS (
   SELECT annotation
-  FROM unnest(duckvep_annotate_hgvs(
+  FROM unnest(_duckvep_annotate_small_hgvs(
     'hgvs-dense-resume', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
   )) AS u(annotation)
 )
@@ -239,13 +239,35 @@ SELECT ord,
        annotation.protein_hgvs_status,
        coalesce(annotation.protein_hgvs_reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord, annotation.transcript_index;
 ----
 1	0	c.5T>C	p.Val2Ala	0	supported	-	supported	-
 1	1	n.78A>G	-	0	supported	-	not_applicable	-
+
+# hgvs is a fixed-schema option on the public event-relation surface. The
+# small-event lane remains fused and returns the same two transcript rows.
+statement ok
+CREATE TABLE duckvep_hgvs_public_events AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, 'C'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+query IITT
+SELECT event_index, transcript_index, transcript_hgvs,
+       coalesce(protein_hgvs, '-')
+FROM duckvep_annotate(
+  'duckvep_hgvs_public_events', 'hgvs-reference',
+  hgvs := true, upstream_distance := 0, downstream_distance := 0
+)
+ORDER BY transcript_index;
+----
+1	0	c.5T>C	p.Val2Ala
+1	1	n.78A>G	-
 
 # A transcript HGVS string larger than the adapter's initial render scratch
 # must trigger an exact-size retry. The 1,406-base ALT matches the scale of a
@@ -258,7 +280,7 @@ SELECT count(*)::INTEGER,
        count_if(annotation.transcript_hgvs_status = 'supported')::INTEGER,
        (min(length(annotation.transcript_hgvs)) > 1400)::INTEGER
 FROM variant,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -272,7 +294,7 @@ SELECT (length(annotation.transcript_hgvs) > 256)::INTEGER,
        annotation.transcript_hgvs_status,
        (length(annotation.protein_hgvs) > 256)::INTEGER,
        annotation.protein_hgvs_status
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 124::UBIGINT,
   'T', 'T' || repeat('GCT', 100), 0::UBIGINT
 )) AS u(annotation)
@@ -302,7 +324,7 @@ SELECT ord,
        annotation.protein_hgvs_status,
        coalesce(annotation.protein_hgvs_reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord, annotation.transcript_index;
@@ -339,7 +361,7 @@ SELECT ord,
        coalesce(annotation.transcript_hgvs_reason, '-'),
        annotation.protein_hgvs_status
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-no-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0
@@ -355,7 +377,7 @@ SELECT annotation.transcript_index,
        annotation.transcript_hgvs_status,
        coalesce(annotation.transcript_hgvs_reason, '-'),
        annotation.protein_hgvs_status
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-no-reference', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
 )) AS u(annotation)
 ORDER BY annotation.transcript_index;
@@ -370,7 +392,7 @@ SELECT coalesce(annotation.transcript_hgvs, '-'),
        annotation.transcript_hgvs_status,
        annotation.transcript_hgvs_reason,
        annotation.protein_hgvs_reason
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 124::UBIGINT, 'TAGGT', 'T', 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0;
@@ -391,7 +413,7 @@ SELECT ord,
        annotation.transcript_hgvs_reason,
        annotation.protein_hgvs_reason
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0
@@ -416,7 +438,7 @@ SELECT ord,
        annotation.transcript_hgvs_status,
        annotation.protein_hgvs_status
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0
@@ -433,7 +455,7 @@ SELECT annotation.transcript_hgvs,
        coalesce(annotation.protein_hgvs, '-'),
        annotation.protein_hgvs_status,
        coalesce(annotation.protein_hgvs_reason, '-')
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 239::UBIGINT, 'A', 'AATG', 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0;
@@ -449,7 +471,7 @@ SELECT annotation.transcript_hgvs,
        annotation.protein_hgvs,
        annotation.hgvs_shift,
        annotation.protein_hgvs_status
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 119::UBIGINT,
   'G', 'GAACT', 0::UBIGINT
 )) AS u(annotation)
@@ -466,7 +488,7 @@ SELECT annotation.transcript_hgvs_status,
        annotation.transcript_hgvs_reason,
        annotation.protein_hgvs_status,
        annotation.protein_hgvs_reason
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 119::UBIGINT,
   'A', 'AAACT', 0::UBIGINT
 )) AS u(annotation)
@@ -498,7 +520,7 @@ SELECT annotation.consequence_mask,
        annotation.transcript_hgvs,
        annotation.protein_hgvs,
        annotation.protein_hgvs_status
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-stop-extension', 1::UINTEGER, 238::UBIGINT,
   'TAA', 'CAA', 0::UBIGINT
 )) AS u(annotation);
@@ -531,7 +553,7 @@ SELECT ord,
        annotation.protein_hgvs,
        annotation.hgvs_shift
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   model_name, 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0
@@ -547,7 +569,7 @@ query TTT
 SELECT coalesce(annotation.transcript_hgvs, '-'),
        coalesce(annotation.transcript_hgvs_status, '-'),
        coalesce(annotation.protein_hgvs_status, '-')
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 10::UBIGINT, 'A', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -610,7 +632,7 @@ SELECT ord,
        coalesce(annotation.transcript_hgvs_reason, '-'),
        annotation.protein_hgvs_status
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-position-one', 1::UINTEGER, 1::UBIGINT,
   reference, alternate, 0::UBIGINT
 )) AS u(annotation)
@@ -633,7 +655,7 @@ SELECT ord,
        annotation.transcript_hgvs_status,
        coalesce(annotation.transcript_hgvs_reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, position, reference, alternate, 5000::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0
@@ -650,7 +672,7 @@ SELECT coalesce(annotation.transcript_hgvs, '-'),
        annotation.transcript_hgvs_status,
        coalesce(annotation.transcript_hgvs_reason, '-'),
        annotation.protein_hgvs_status
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-reference', 1::UINTEGER, 260::UBIGINT, 'T', 'TA', 5000::UBIGINT
 )) AS u(annotation)
 WHERE annotation.transcript_index = 0;
@@ -726,7 +748,7 @@ SELECT annotation.transcript_hgvs,
        annotation.transcript_hgvs_status,
        coalesce(annotation.transcript_hgvs_reason, '-')
 FROM variant,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-large-duplication', 0::UINTEGER, pos,
   uploaded_ref, uploaded_alt, 0::UBIGINT
 )) AS u(annotation);
@@ -785,7 +807,7 @@ SELECT ord,
        annotation.transcript_hgvs,
        annotation.transcript_hgvs_status
 FROM variants,
-LATERAL unnest(duckvep_annotate_hgvs(
+LATERAL unnest(_duckvep_annotate_small_hgvs(
   'hgvs-phase', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -800,7 +822,7 @@ query TTT
 SELECT annotation.transcript_hgvs_status,
        annotation.protein_hgvs_status,
        coalesce(annotation.protein_hgvs_reason, '-')
-FROM unnest(duckvep_annotate_hgvs(
+FROM unnest(_duckvep_annotate_small_hgvs(
   'hgvs-phase', 1::UINTEGER, 109::UBIGINT, 'ACG', 'CCC', 0::UBIGINT
 )) AS u(annotation);
 ----

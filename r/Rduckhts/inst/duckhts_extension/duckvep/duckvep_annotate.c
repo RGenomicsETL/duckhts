@@ -688,7 +688,7 @@ duckvep_scalar_prepare_sv_batch(duckvep_scalar_state_t *state,
 	copy_vector = duckdb_data_chunk_get_vector(input, 5);
 	if (!duckvep_scalar_variant_reserve(state, (size_t)rows)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_sv: out of memory");
+		    "duckvep_annotate: out of memory");
 		return 0;
 	}
 	regions = duckdb_vector_get_data(region_vector);
@@ -710,37 +710,37 @@ duckvep_scalar_prepare_sv_batch(duckvep_scalar_state_t *state,
 		    duckvep_validity_is_null(type_validity, row) ||
 		    duckvep_validity_is_null(copy_validity, row)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: event fields cannot be NULL");
+			    "duckvep_annotate: event fields cannot be NULL");
 			return 0;
 		}
 		if (regions[row] > UINT16_MAX || starts[row] == 0u ||
 		    starts[row] > UINT32_MAX || ends[row] < starts[row] ||
 		    ends[row] > UINT32_MAX) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: invalid 1-based inclusive interval");
+			    "duckvep_annotate: invalid 1-based inclusive interval");
 			return 0;
 		}
 		if (!duckvep_scalar_sv_type(&types[row], &sv_type) ||
 		    !duckvep_scalar_copy_change(&copies[row], &copy_change)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: unknown structural type or copy change");
+			    "duckvep_annotate: unknown structural type or copy change");
 			return 0;
 		}
 		if (sv_type == (uint8_t)DUCKVEP_SV_BREAKEND) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: use duckvep_annotate_breakend with both loci");
+			    "duckvep_annotate: provide both mate coordinates for a breakend");
 			return 0;
 		}
 		if (!duckvep_sv_metadata_valid((duckvep_sv_type_t)sv_type,
 		    (duckvep_copy_change_t)copy_change)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: structural type contradicts copy change");
+			    "duckvep_annotate: structural type contradicts copy change");
 			return 0;
 		}
 		if (!duckvep_sv_geometry_valid((duckvep_sv_type_t)sv_type,
 		    (uint32_t)starts[row], (uint32_t)ends[row])) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_sv: invalid structural event geometry");
+			    "duckvep_annotate: invalid structural event geometry");
 			return 0;
 		}
 		state->seq_regions[row] = (uint16_t)regions[row];
@@ -781,7 +781,7 @@ duckvep_scalar_prepare_breakend_batch(duckvep_scalar_state_t *state,
 	mate_position_vector = duckdb_data_chunk_get_vector(input, 4);
 	if (!duckvep_scalar_variant_reserve(state, (size_t)rows)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_breakend: out of memory");
+		    "duckvep_annotate: out of memory");
 		return 0;
 	}
 	regions = duckdb_vector_get_data(region_vector);
@@ -798,14 +798,14 @@ duckvep_scalar_prepare_breakend_batch(duckvep_scalar_state_t *state,
 		    duckvep_validity_is_null(mate_region_validity, row) ||
 		    duckvep_validity_is_null(mate_position_validity, row)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_breakend: both loci are required");
+			    "duckvep_annotate: both loci are required");
 			return 0;
 		}
 		if (regions[row] > UINT16_MAX || mate_regions[row] > UINT16_MAX ||
 		    positions[row] == 0u || positions[row] >= UINT32_MAX ||
 		    mate_positions[row] == 0u || mate_positions[row] > UINT32_MAX) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_breakend: invalid one-based endpoint coordinate");
+			    "duckvep_annotate: invalid one-based endpoint coordinate");
 			return 0;
 		}
 		state->seq_regions[row] = (uint16_t)regions[row];
@@ -910,7 +910,7 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 	    state->workspace_cache == NULL || event == NULL ||
 	    available == NULL || shift_window == NULL || lookup_window == NULL) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: invalid reference-window state");
+		    "duckvep_annotate: invalid reference-window state");
 		return 0;
 	}
 	model = &state->entry->model;
@@ -921,7 +921,7 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 	    &region_index) || model->sequence_names == NULL ||
 	    model->sequence_names[region_index] == NULL) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: sequence-region name is absent from the reference-enabled model");
+		    "duckvep_annotate: sequence-region name is absent from the reference-enabled model");
 		return 0;
 	}
 	sequence_length = model->sequence_lengths[region_index];
@@ -929,7 +929,7 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 	    sequence_length, &shift_start1, &shift_end1);
 	if (hgvs_status != DUCKVEP_HGVS_OK) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: semantic edit has no valid VEP genomic shift interval");
+		    "duckvep_annotate: semantic edit has no valid VEP genomic shift interval");
 		return 0;
 	}
 	hgvs_status = duckvep_hgvs_reference_fetch_interval(event,
@@ -937,13 +937,13 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 	if (hgvs_status != DUCKVEP_HGVS_OK ||
 	    shift_start1 < fetch_start1 || shift_end1 > fetch_end1) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: semantic edit has no valid bounded reference lookup interval");
+		    "duckvep_annotate: semantic edit has no valid bounded reference lookup interval");
 		return 0;
 	}
 	if (cache->reference_fai == NULL) {
 		if (!duckvep_model_reference_identity_matches(model)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: model reference FASTA or index changed after model load");
+			    "duckvep_annotate: model reference FASTA or index changed after model load");
 			return 0;
 		}
 		cache->reference_fai = fai_load3_format(
@@ -952,14 +952,14 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 		    model->reference_gzi_open_path, 0, FAI_FASTA);
 		if (cache->reference_fai == NULL) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: could not open the model reference FASTA/index");
+			    "duckvep_annotate: could not open the model reference FASTA/index");
 			return 0;
 		}
 		if (!duckvep_model_reference_identity_matches(model)) {
 			fai_destroy(cache->reference_fai);
 			cache->reference_fai = NULL;
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: model reference FASTA or index changed while a worker was opening it");
+			    "duckvep_annotate: model reference FASTA or index changed while a worker was opening it");
 			return 0;
 		}
 	}
@@ -972,7 +972,7 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 	    (uint64_t)fetch_end1 > cached_end1) {
 		if (!duckvep_model_reference_identity_matches(model)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: pinned reference FASTA or index changed after model load");
+			    "duckvep_annotate: pinned reference FASTA or index changed after model load");
 			return 0;
 		}
 		cache_fetch_end1 = fetch_end1;
@@ -991,13 +991,13 @@ duckvep_scalar_reference_windows(duckvep_scalar_state_t *state,
 		    (uint64_t)cache_fetch_end1 - (uint64_t)fetch_start1 + 1u) {
 			free(bases);
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: reference FASTA fetch did not return the requested interval");
+			    "duckvep_annotate: reference FASTA fetch did not return the requested interval");
 			return 0;
 		}
 		if (!duckvep_model_reference_identity_matches(model)) {
 			free(bases);
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: pinned reference FASTA or index changed during fetch");
+			    "duckvep_annotate: pinned reference FASTA or index changed during fetch");
 			return 0;
 		}
 		free(cache->reference_bases);
@@ -1193,7 +1193,7 @@ duckvep_scalar_hgvs_store_dna(duckvep_scalar_state_t *state,
 	    !duckvep_scalar_hgvs_render_reserve(state,
 	    DUCKVEP_HGVS_INITIAL_RENDER_CAPACITY)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: out of memory rendering transcript HGVS");
+		    "duckvep_annotate: out of memory rendering transcript HGVS");
 		return 0;
 	}
 	required = 0u;
@@ -1203,7 +1203,7 @@ duckvep_scalar_hgvs_store_dna(duckvep_scalar_state_t *state,
 		if (required == SIZE_MAX ||
 		    !duckvep_scalar_hgvs_render_reserve(state, required + 1u)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: out of memory rendering transcript HGVS");
+			    "duckvep_annotate: out of memory rendering transcript HGVS");
 			return 0;
 		}
 		status = duckvep_hgvs_dna_render_basic(fact,
@@ -1217,7 +1217,7 @@ duckvep_scalar_hgvs_store_dna(duckvep_scalar_state_t *state,
 	if (!duckvep_scalar_hgvs_text_append(state,
 	    state->hgvs_render_scratch, required, &result->transcript_offset)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: transcript HGVS output exceeds the vector limit");
+		    "duckvep_annotate: transcript HGVS output exceeds the vector limit");
 		return 0;
 	}
 	result->transcript_length = (uint32_t)required;
@@ -1238,7 +1238,7 @@ duckvep_scalar_hgvs_store_protein(duckvep_scalar_state_t *state,
 	    !duckvep_scalar_hgvs_render_reserve(state,
 	    DUCKVEP_HGVS_INITIAL_RENDER_CAPACITY)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: out of memory rendering protein HGVS");
+		    "duckvep_annotate: out of memory rendering protein HGVS");
 		return 0;
 	}
 	required = 0u;
@@ -1248,7 +1248,7 @@ duckvep_scalar_hgvs_store_protein(duckvep_scalar_state_t *state,
 		if (required == SIZE_MAX ||
 		    !duckvep_scalar_hgvs_render_reserve(state, required + 1u)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: out of memory rendering protein HGVS");
+			    "duckvep_annotate: out of memory rendering protein HGVS");
 			return 0;
 		}
 		status = duckvep_hgvs_protein_render(fact, 0,
@@ -1262,7 +1262,7 @@ duckvep_scalar_hgvs_store_protein(duckvep_scalar_state_t *state,
 	if (!duckvep_scalar_hgvs_text_append(state,
 	    state->hgvs_render_scratch, required, &result->protein_offset)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: protein HGVS output exceeds the vector limit");
+		    "duckvep_annotate: protein HGVS output exceeds the vector limit");
 		return 0;
 	}
 	result->protein_length = (uint32_t)required;
@@ -1377,7 +1377,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	    batch == NULL || event == NULL || consequence == NULL ||
 	    hgvs_result == NULL || variant >= batch->count) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: invalid transcript row");
+		    "duckvep_annotate: invalid transcript row");
 		return 0;
 	}
 	if (consequence->overlap_object_kind !=
@@ -1387,7 +1387,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	scratch = duckvep_workspace_delta_scratch(state->workspace);
 	if (scratch == NULL) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_hgvs: worker scratch is unavailable");
+		    "duckvep_annotate: worker scratch is unavailable");
 		return 0;
 	}
 	tx_idx = consequence->tx_idx;
@@ -1526,7 +1526,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		    (size_t)dna_fact.ref_length : (size_t)dna_fact.alt_length + 1u;
 		if (!duckvep_scalar_hgvs_allele_reserve(state, allele_required)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: out of memory rotating a shifted allele");
+			    "duckvep_annotate: out of memory rotating a shifted allele");
 			return 0;
 		}
 		hgvs_status = duckvep_hgvs_shifted_cds_edit_build(
@@ -1674,14 +1674,14 @@ duckvep_scalar_hgvs_observe(void *observer_context,
 	    consequence == NULL || consequence->variant_idx >= batch->count) {
 		if (observer != NULL)
 			duckvep_sql_set_error(observer->error, observer->error_size,
-			    "duckvep_annotate_hgvs: invalid fused annotation row");
+			    "duckvep_annotate: invalid fused annotation row");
 		return 0;
 	}
 	state = observer->state;
 	if (!duckvep_scalar_hgvs_result_reserve(
 	    state, observer->next_result + 1u)) {
 		duckvep_sql_set_error(observer->error, observer->error_size,
-		    "duckvep_annotate_hgvs: out of memory growing HGVS facts");
+		    "duckvep_annotate: out of memory growing HGVS facts");
 		return 0;
 	}
 	result = &state->hgvs_results[observer->next_result++];
@@ -1691,7 +1691,7 @@ duckvep_scalar_hgvs_observe(void *observer_context,
 		return 1;
 	if (trace == NULL || trace->event == NULL) {
 		duckvep_sql_set_error(observer->error, observer->error_size,
-		    "duckvep_annotate_hgvs: transcript row is missing its live trace");
+		    "duckvep_annotate: transcript row is missing its live trace");
 		return 0;
 	}
 	/* Directional transcript candidates are deliberately emitted by the
@@ -1800,7 +1800,7 @@ duckvep_scalar_merge_bnd_results(duckvep_scalar_state_t *state,
 		return 1;
 	if (!duckvep_scalar_result_merge_reserve(state, feature_count)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_breakend: out of memory merging result streams");
+		    "duckvep_annotate: out of memory merging result streams");
 		return 0;
 	}
 	memcpy(state->result_merge, state->results + middle,
@@ -2042,7 +2042,7 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 		    hgvs_observer.next_result != state->result_count) {
 			duckvep_annotate_cursor_close(cursor);
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_hgvs: fused result streams diverged");
+			    "duckvep_annotate: fused result streams diverged");
 			return 0;
 		}
 		if (status == DUCKVEP_ERR_RESULT_FULL)
@@ -2074,8 +2074,8 @@ duckvep_scalar_append_endpoint_candidates(duckvep_scalar_state_t *state,
 	    position > (uint32_t)INT32_MAX - halo_distance) {
 		duckvep_sql_set_error(error, error_size,
 		    interval_features ?
-		    "duckvep_annotate_breakend: resident regulation-feature index cannot represent an endpoint" :
-		    "duckvep_annotate_breakend: resident transcript index cannot represent an endpoint");
+		    "duckvep_annotate: resident regulation-feature index cannot represent an endpoint" :
+		    "duckvep_annotate: resident transcript index cannot represent an endpoint");
 		return 0;
 	}
 	query_start = position > halo_distance + 1u ?
@@ -2090,8 +2090,8 @@ duckvep_scalar_append_endpoint_candidates(duckvep_scalar_state_t *state,
 	    *candidate_count + (size_t)hit_count)) {
 		duckvep_sql_set_error(error, error_size,
 		    interval_features ?
-		    "duckvep_annotate_breakend: could not collect endpoint regulation features" :
-		    "duckvep_annotate_breakend: could not collect endpoint transcripts");
+		    "duckvep_annotate: could not collect endpoint regulation features" :
+		    "duckvep_annotate: could not collect endpoint transcripts");
 		return 0;
 	}
 	for (hit = 0; hit < hit_count; hit++)
@@ -2149,7 +2149,7 @@ duckvep_scalar_run_breakend_object_pairs(duckvep_scalar_state_t *state,
 		if (unique_count > SIZE_MAX - pair_count ||
 		    !duckvep_scalar_pair_reserve(state, pair_count + unique_count)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_breakend: out of memory collecting candidate pairs");
+			    "duckvep_annotate: out of memory collecting candidate pairs");
 			return 0;
 		}
 		for (candidate = 0u; candidate < unique_count; candidate++) {
@@ -2165,7 +2165,7 @@ duckvep_scalar_run_breakend_object_pairs(duckvep_scalar_state_t *state,
 	if (pair_count > SIZE_MAX - old_count ||
 	    !duckvep_scalar_result_reserve(state, old_count + pair_count)) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_breakend: out of memory growing results");
+		    "duckvep_annotate: out of memory growing results");
 		return 0;
 	}
 	slice = duckvep_scalar_batch_slice(batch, begin, count);
@@ -2188,7 +2188,7 @@ duckvep_scalar_run_breakend_object_pairs(duckvep_scalar_state_t *state,
 		    &kernel_error);
 	}
 	if (status != DUCKVEP_OK) {
-		(void)snprintf(error, error_size, "duckvep_annotate_breakend: %s",
+		(void)snprintf(error, error_size, "duckvep_annotate: %s",
 		    kernel_error.message);
 		return 0;
 	}
@@ -2218,7 +2218,7 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 
 	if (upstream_distance > UINT32_MAX || downstream_distance > UINT32_MAX) {
 		duckvep_sql_set_error(error, error_size,
-		    "duckvep_annotate_breakend: transcript distance exceeds the uint32 kernel limit");
+		    "duckvep_annotate: transcript distance exceeds the uint32 kernel limit");
 		return 0;
 	}
 	halo_distance = upstream_distance > downstream_distance ?
@@ -2235,13 +2235,13 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 		    !duckvep_scalar_model_region(&state->entry->model,
 		    batch->mate_chrom_id[variant], &mate_length)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_breakend: endpoint region is absent from the loaded model");
+			    "duckvep_annotate: endpoint region is absent from the loaded model");
 			return 0;
 		}
 		if ((local_length != 0u && batch->pos1[variant] > local_length) ||
 		    (mate_length != 0u && batch->mate_pos1[variant] > mate_length)) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate_breakend: endpoint exceeds sequence-region length");
+			    "duckvep_annotate: endpoint exceeds sequence-region length");
 			return 0;
 		}
 	}
@@ -2267,7 +2267,7 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 		if (duckvep_options_open(&options_init, &state->options,
 		    &kernel_error) != DUCKVEP_OK) {
 			(void)snprintf(error, error_size,
-			    "duckvep_annotate_breakend: %s", kernel_error.message);
+			    "duckvep_annotate: %s", kernel_error.message);
 			return 0;
 		}
 		state->options_upstream_distance = (uint32_t)upstream_distance;
@@ -2939,7 +2939,7 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 				    hgvs->protein_length > state->hgvs_text_size -
 				    hgvs->protein_offset))) {
 					duckvep_sql_set_error(error, error_size,
-					    "duckvep_annotate_hgvs: rendered HGVS slice exceeds the vector text arena");
+					    "duckvep_annotate: rendered HGVS slice exceeds the vector text arena");
 					return 0;
 				}
 				if (hgvs->transcript_reason ==
@@ -3346,14 +3346,14 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 	result_type = compact ? duckvep_compact_annotation_list_type() :
 	    duckvep_annotation_list_type();
 	if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
-		name = compact ? "duckvep_annotate_sv_compact" :
-		    "duckvep_annotate_sv";
+		name = compact ? "_duckvep_annotate_structural_compact" :
+		    "_duckvep_annotate_structural_rich";
 	else if (event_family == DUCKVEP_SCALAR_BREAKEND)
-		name = compact ? "duckvep_annotate_breakend_compact" :
-		    "duckvep_annotate_breakend";
+		name = compact ? "_duckvep_annotate_breakend_compact" :
+		    "_duckvep_annotate_breakend_rich";
 	else
-		name = compact ? "duckvep_annotate_compact" :
-		    "duckvep_annotate";
+		name = compact ? "_duckvep_annotate_small_compact" :
+		    "_duckvep_annotate_small_rich";
 	duckdb_scalar_function_set_name(scalar, name);
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
 	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
@@ -3404,7 +3404,8 @@ duckvep_register_hgvs_scalar(duckdb_connection connection,
 
 	scalar = duckdb_create_scalar_function();
 	result_type = duckvep_hgvs_annotation_list_type();
-	duckdb_scalar_function_set_name(scalar, "duckvep_annotate_hgvs");
+	duckdb_scalar_function_set_name(scalar,
+	    "_duckvep_annotate_small_hgvs");
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
 	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
 	duckdb_scalar_function_add_parameter(scalar, ubigint_type);

@@ -1382,6 +1382,214 @@ dense_score_results
 
 The slower AlphaMissense path still processes `r round(real_alphamissense_join$input_rows_per_second[real_alphamissense_join$threads == 1] / 1e6, 2)` million GIAB alleles/s on one thread and `r round(real_alphamissense_join$input_rows_per_second[real_alphamissense_join$threads == 4] / 1e6, 2)` million/s on four. The provider has `r format(alpha_provider_rows, big.mark = ",", scientific = FALSE)` rows and its hot Parquet projection contains only VariantKey, score, and class. REVEL's hot projection has `r format(revel_provider_rows, big.mark = ",", scientific = FALSE)` rows.
 
+### Multiple exact providers in one plan
+
+The previous measurements isolate one provider at a time. This section tests
+whether ordinary DuckDB composition remains efficient when a case relation
+needs several supplementary sources together. The real three-provider query
+keeps the case side to one reversible `UBIGINT` key and projects one numeric
+payload from each provider. The equivalent separate-query total is the sum of
+three medians over the same probe, sources, thread count, and process.
+
+Provider key scope remains a semantic contract. ClinVar is unique on this hot
+key, while the prepared ClinvArbitration and AlphaMissense files contain a
+small number of repeated VariantKeys. The raw join therefore measures provider
+records and may return more rows than the probe. A production provider must
+either declare the finer key that makes those rows distinct or publish an
+explicit one-row-per-variant aggregation.
+
+```{r real-multiple-exact-providers}
+provider_key_cardinality <- DBI::dbGetQuery(
+  con,
+  sprintf(
+    paste0(
+      "SELECT 'ClinVar' AS provider, count(*)::BIGINT AS rows, ",
+      "count(DISTINCT vk)::BIGINT AS distinct_keys FROM read_parquet(%s) UNION ALL ",
+      "SELECT 'ClinvArbitration', count(*)::BIGINT, count(DISTINCT vk)::BIGINT ",
+      "FROM read_parquet(%s) UNION ALL ",
+      "SELECT 'AlphaMissense', count(*)::BIGINT, count(DISTINCT vk)::BIGINT ",
+      "FROM read_parquet(%s)"
+    ),
+    sql_path(real_clinvar_reversible_path),
+    sql_path(real_clinvarbitration_reversible_path),
+    sql_path(real_alphamissense_path)
+  )
+)
+provider_key_cardinality$duplicate_key_rows <-
+  provider_key_cardinality$rows - provider_key_cardinality$distinct_keys
+provider_key_cardinality
+
+real_multi_provider_sql <- sprintf(
+  paste(
+    "SELECT count(*)::BIGINT AS n,",
+    "count(cv.allele_id)::BIGINT AS clinvar_hits,",
+    "count(ca.allele_id)::BIGINT AS clinvarbitration_hits,",
+    "count(am.am_pathogenicity)::BIGINT AS alphamissense_hits,",
+    "sum(am.am_pathogenicity) AS alphamissense_score_sum",
+    "FROM read_parquet(%s) q",
+    "LEFT JOIN read_parquet(%s) cv USING (vk)",
+    "LEFT JOIN read_parquet(%s) ca USING (vk)",
+    "LEFT JOIN read_parquet(%s) am USING (vk)"
+  ),
+  sql_path(real_case_reversible_path),
+  sql_path(real_clinvar_reversible_path),
+  sql_path(real_clinvarbitration_reversible_path),
+  sql_path(real_alphamissense_path)
+)
+
+real_multi_provider <- measure_thread_grid(
+  "GIAB_three_real_exact_providers_one_plan",
+  alpha_probe_rows,
+  function() DBI::dbGetQuery(con, real_multi_provider_sql)
+)
+
+measure_one_exact_provider <- function(operation, provider_path, payload) {
+  measure_thread_grid(
+    operation,
+    alpha_probe_rows,
+    function() {
+      DBI::dbGetQuery(
+        con,
+        sprintf(
+          paste(
+            "SELECT count(*)::BIGINT AS n, count(p.%s)::BIGINT AS hits",
+            "FROM read_parquet(%s) q",
+            "LEFT JOIN read_parquet(%s) p USING (vk)"
+          ),
+          payload,
+          sql_path(real_case_reversible_path),
+          sql_path(provider_path)
+        )
+      )
+    }
+  )
+}
+
+real_multi_provider_separate <- rbind(
+  measure_one_exact_provider(
+    "GIAB_ClinVar_reversible_left_join",
+    real_clinvar_reversible_path,
+    "allele_id"
+  ),
+  measure_one_exact_provider(
+    "GIAB_ClinvArbitration_reversible_left_join",
+    real_clinvarbitration_reversible_path,
+    "allele_id"
+  ),
+  measure_one_exact_provider(
+    "GIAB_AlphaMissense_left_join",
+    real_alphamissense_path,
+    "am_pathogenicity"
+  )
+)
+
+real_multi_provider_comparison <- aggregate(
+  median_seconds ~ threads,
+  data = real_multi_provider_separate,
+  FUN = sum
+)
+names(real_multi_provider_comparison)[2L] <- "three_separate_seconds"
+real_multi_provider_comparison <- merge(
+  real_multi_provider_comparison,
+  real_multi_provider[, c("threads", "median_seconds")],
+  by = "threads",
+  sort = FALSE
+)
+names(real_multi_provider_comparison)[3L] <- "one_plan_seconds"
+real_multi_provider_comparison$one_plan_input_rows_per_second <-
+  alpha_probe_rows / real_multi_provider_comparison$one_plan_seconds
+real_multi_provider_comparison$speedup_vs_three_separate <-
+  real_multi_provider_comparison$three_separate_seconds /
+    real_multi_provider_comparison$one_plan_seconds
+
+real_multi_provider
+real_multi_provider_separate
+real_multi_provider_comparison
+
+multi_provider_plan <- DBI::dbGetQuery(
+  con,
+  paste("EXPLAIN", real_multi_provider_sql)
+)
+multi_provider_plan_text <- paste(multi_provider_plan[[2L]], collapse = "\n")
+multi_provider_plan_summary <- data.frame(
+  hash_join_operators = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("HASH_JOIN", multi_provider_plan_text, fixed = TRUE)
+  )),
+  parquet_scans = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("READ_PARQUET", multi_provider_plan_text, fixed = TRUE)
+  )),
+  dynamic_filter_sites = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("Dynamic Filters", multi_provider_plan_text, fixed = TRUE)
+  )),
+  order_operators = lengths(regmatches(
+    multi_provider_plan_text,
+    gregexpr("ORDER_BY", multi_provider_plan_text, fixed = TRUE)
+  )),
+  stringsAsFactors = FALSE
+)
+multi_provider_plan_summary
+```
+
+The real combined plan processes `r round(real_multi_provider_comparison$one_plan_input_rows_per_second[real_multi_provider_comparison$threads == 1] / 1e6, 2)` million GIAB alleles/s on one thread and `r round(real_multi_provider_comparison$one_plan_input_rows_per_second[real_multi_provider_comparison$threads == 4] / 1e6, 2)` million/s on four. It is `r round(real_multi_provider_comparison$speedup_vs_three_separate[real_multi_provider_comparison$threads == 1], 2)` times faster than issuing the three joins separately on one thread because the case relation is scanned once and DuckDB can plan the equality joins together.
+
+The following 1/4/12-provider test isolates join-count overhead. It reuses the
+unique real ClinVar numeric lane under independent aliases, projects one value
+per alias, and forces every payload to contribute to a checksum. This is a
+planner and memory stress over real Parquet pages, not a biological assertion
+that twelve sources have ClinVar's density or schema.
+
+```{r repeated-provider-join-count}
+clinvar_key_check <- provider_key_cardinality[
+  provider_key_cardinality$provider == "ClinVar",
+]
+stopifnot(clinvar_key_check$duplicate_key_rows == 0)
+
+repeated_provider_sql <- function(provider_count) {
+  aliases <- sprintf("p%02d", seq_len(provider_count))
+  joins <- paste(
+    sprintf(
+      "LEFT JOIN read_parquet(%s) %s USING (vk)",
+      sql_path(real_clinvar_reversible_path),
+      aliases
+    ),
+    collapse = "\n"
+  )
+  checksum <- paste(
+    sprintf("coalesce(%s.allele_id, 0)::HUGEINT", aliases),
+    collapse = " + "
+  )
+  sprintf(
+    paste(
+      "SELECT count(*)::BIGINT AS n, sum(%s) AS payload_checksum",
+      "FROM read_parquet(%s) q",
+      "%s"
+    ),
+    checksum,
+    sql_path(real_case_reversible_path),
+    joins
+  )
+}
+
+repeated_provider_counts <- c(1L, 4L, 12L)
+repeated_provider_join_results <- do.call(
+  rbind,
+  lapply(repeated_provider_counts, function(provider_count) {
+    result <- measure_thread_grid(
+      sprintf("GIAB_%02d_unique_exact_provider_joins", provider_count),
+      alpha_probe_rows,
+      function() DBI::dbGetQuery(con, repeated_provider_sql(provider_count))
+    )
+    result$provider_count <- provider_count
+    result
+  })
+)
+stopifnot(all(repeated_provider_join_results$result_rows == alpha_probe_rows))
+repeated_provider_join_results
+```
+
 ### Row-group zone-map pruning for a local delta
 
 Whole-genome joins necessarily visit the whole provider. Incremental
@@ -1679,7 +1887,7 @@ The physical-plan assertion above matters. DuckDB's
 double-inequality join sorts both relations on the first condition, constructs
 merged and permutation arrays for the second condition, and uses a bitmap to
 identify matching pairs. DuckDB parallelizes sorted blocks and can spool join
-blocks to disk. The measured 665/728 MiB is therefore the resident cost of real
+blocks to disk. The measured 665/712 MiB is therefore the resident cost of real
 parallel `IE_JOIN` planning/execution over these Parquet relations, not a nested
 loop mislabeled as an interval join. The per-contig `UNION ALL` is deliberate:
 it makes contig equality a static shard filter and leaves exactly the two
@@ -1938,6 +2146,30 @@ isolated_memory <- rbind(
   isolated_duckdb_measure("REVEL 77.97M exact join", revel_join_sql, 4L, rss_cpu_4),
   isolated_duckdb_measure("AlphaMissense 71.70M exact join", alpha_join_sql, 1L, rss_cpu_1),
   isolated_duckdb_measure("AlphaMissense 71.70M exact join", alpha_join_sql, 4L, rss_cpu_4),
+  isolated_duckdb_measure(
+    "GIAB three real exact providers one plan",
+    real_multi_provider_sql,
+    1L,
+    rss_cpu_1
+  ),
+  isolated_duckdb_measure(
+    "GIAB three real exact providers one plan",
+    real_multi_provider_sql,
+    4L,
+    rss_cpu_4
+  ),
+  isolated_duckdb_measure(
+    "GIAB twelve unique exact provider joins",
+    repeated_provider_sql(12L),
+    1L,
+    rss_cpu_1
+  ),
+  isolated_duckdb_measure(
+    "GIAB twelve unique exact provider joins",
+    repeated_provider_sql(12L),
+    4L,
+    rss_cpu_4
+  ),
   isolated_duckdb_measure("AlphaMissense chromosome 1 shard self-join", alpha_chr1_join_sql, 1L, rss_cpu_1),
   isolated_duckdb_measure("AlphaMissense chromosome 1 shard self-join", alpha_chr1_join_sql, 4L, rss_cpu_4),
   isolated_duckdb_measure("regulatory cgranges build and full GIAB probe", real_cgranges_sql, 1L, rss_cpu_1),
@@ -2009,10 +2241,12 @@ cgranges_memory_density
 
 The provider hot files below intentionally exclude source presentation columns.
 They are serving projections, not replacements for the source receipts. Exact
-providers are scanned one at a time; therefore twelve independent annotations
-have approximately the sum of their elapsed times but the maximum of their
-individual RSS values. Loading twelve indexes concurrently is neither required
-nor the design.
+providers may share one costed plan when the measured RSS is acceptable, as in
+the real three-provider result above. At larger catalog counts the execution
+macro may instead schedule bounded provider groups; twelve independent groups
+then have approximately the sum of their elapsed times but the maximum of their
+group RSS values. Loading twelve indexes concurrently is neither required nor
+the default design.
 
 ```{r provider-scale}
 provider_storage <- data.frame(
@@ -2088,7 +2322,8 @@ the measured REVEL-to-AlphaMissense throughput envelope to twelve equally dense
 providers. They do not claim that all real sources are that large, equally
 compressible, or equally expensive. For a 705-million-row or 1.17-billion-row
 query, the execution macro must compile chromosome or coordinate-tile tasks so
-one provider shard is the hash-build side and the population relation streams.
+one bounded group of provider shards and query keys supplies join state while
+the large provider relations stream.
 The measured largest AlphaMissense chromosome has `r format(alpha_chr1_rows, big.mark = ",", scientific = FALSE)` source rows; its isolated self-join is the concrete memory denominator for that scheduling model. Four chromosome workers may share immutable Parquet pages, but each owns its join state, so concurrency must be bounded by measured RSS rather than by the number of available source files.
 
 ## Notes
@@ -2107,6 +2342,12 @@ The measured largest AlphaMissense chromosome has `r format(alpha_chr1_rows, big
   map in the dataset manifest, Parquet key/value metadata, or a companion
   relation. Official VariantKey/RegionKey chromosome codes remain limited to
   canonical human contigs.
+- Multiple equality joins are valid composition, but provider count alone is
+  not the controlling cost. The provider receipt must declare key scope and
+  uniqueness, the plan must keep the case side narrow, and peak join state must
+  remain within the measured memory budget. Provider-specific rows should be
+  reduced or nested before transcript expansion rather than multiplied across
+  every transcript consequence.
 - RegionKey is more than exact equality: its chromosome/start ordering supports
   binary search, ordered merge, and bounded start-range discovery. Arbitrary
   nested intervals still require a proven look-back bound, an augmented

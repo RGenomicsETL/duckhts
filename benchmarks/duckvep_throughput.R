@@ -79,6 +79,16 @@ op <- add_option(
   default = "small",
   help = "prepared event shape: small or breakend [%default]"
 )
+op <- add_option(
+  op,
+  "--api-surface",
+  dest = "api_surface",
+  default = "native",
+  help = paste(
+    "annotation surface: native private lane or public duckvep_annotate",
+    "relation [%default]"
+  )
+)
 op <- add_option(op, "--output", default = "rich")
 op <- add_option(
   op,
@@ -183,8 +193,17 @@ if (opt$input_partitions < 1L || opt$input_partitions > 1024L) {
 if (!opt$output %in% c("rich", "compact", "hgvs")) {
   die("--output must be rich, compact, or hgvs")
 }
+if (!opt$api_surface %in% c("native", "public")) {
+  die("--api-surface must be native or public")
+}
 if (!opt$event_mode %in% c("small", "breakend")) {
   die("--event-mode must be small or breakend")
+}
+if (identical(opt$api_surface, "public") && identical(opt$output, "rich")) {
+  die("--api-surface public exposes compact output with optional HGVS")
+}
+if (identical(opt$api_surface, "public") && opt$input_partitions != 1L) {
+  die("--api-surface public uses DuckDB parallelism; set --input-partitions 1")
 }
 production <- nzchar(opt$database)
 if (isTRUE(opt$regulatory) && !production) {
@@ -653,6 +672,9 @@ if (production) {
   interval_feature_query <- NULL
   regulation_feature_count <- 0
 }
+if (identical(opt$api_surface, "public")) {
+  workload <- paste0(workload, "_public_relation")
+}
 if (variant_count < 1) {
   die("benchmark input contains no variants")
 }
@@ -731,24 +753,112 @@ annotation_input <- function(begin, count) {
   }
 }
 
+warmup_count <- min(opt$warmup, variant_count)
+public_event_table <- "duckvep_throughput_public_events"
+public_warmup_table <- "duckvep_throughput_public_events_warmup"
+if (identical(opt$api_surface, "public")) {
+  source <- annotation_input(0, variant_count)
+  projection <- if (identical(opt$event_mode, "breakend")) {
+    paste(
+      "input_variant_index::UBIGINT AS event_index,",
+      "seq_region::UINTEGER AS seq_region, \"position\"::UBIGINT AS position,",
+      "NULL::VARCHAR AS reference, NULL::VARCHAR AS alternate,",
+      "NULL::UBIGINT AS end_position, NULL::VARCHAR AS structural_type,",
+      "NULL::VARCHAR AS copy_change, mate_seq_region::UINTEGER AS mate_seq_region,",
+      "mate_position::UBIGINT AS mate_position"
+    )
+  } else {
+    paste(
+      "input_variant_index::UBIGINT AS event_index,",
+      "seq_region::UINTEGER AS seq_region, \"position\"::UBIGINT AS position,",
+      "\"reference\"::VARCHAR AS reference, \"alternate\"::VARCHAR AS alternate,",
+      "NULL::UBIGINT AS end_position, NULL::VARCHAR AS structural_type,",
+      "NULL::VARCHAR AS copy_change, NULL::UINTEGER AS mate_seq_region,",
+      "NULL::UBIGINT AS mate_position"
+    )
+  }
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP TABLE {public_event_table} AS
+       SELECT {projection}
+       FROM ({source}) AS source_events
+       ORDER BY event_index"
+    )
+  ))
+  warmup_sql <- whole_count(warmup_count, "--warmup")
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP VIEW {public_warmup_table} AS
+       SELECT * FROM {public_event_table}
+       WHERE event_index < {warmup_sql}
+       ORDER BY event_index"
+    )
+  ))
+}
+
 annotation_function_name <- function(output_mode) {
   if (identical(opt$event_mode, "breakend")) {
     if (output_mode == "compact") {
-      "duckvep_annotate_breakend_compact"
+      "_duckvep_annotate_breakend_compact"
     } else {
-      "duckvep_annotate_breakend"
+      "_duckvep_annotate_breakend_rich"
     }
   } else if (output_mode == "compact") {
-    "duckvep_annotate_compact"
+    "_duckvep_annotate_small_compact"
   } else if (output_mode == "hgvs") {
-    "duckvep_annotate_hgvs"
+    "_duckvep_annotate_small_hgvs"
   } else {
-    "duckvep_annotate"
+    "_duckvep_annotate_small_rich"
   }
 }
 
 annotation_cte <- function(n, output_mode) {
   n <- as.numeric(n)
+  if (identical(opt$api_surface, "public")) {
+    event_table <- if (n < variant_count) {
+      public_warmup_table
+    } else {
+      public_event_table
+    }
+    compact_fields <- c(
+      "transcript_index", "gene_index", "consequence_mask", "region_mask",
+      "impact_code", "status_code", "reason_code", "cdna_position",
+      "cds_position", "protein_position", "reference_amino_acid_code",
+      "alternate_amino_acid_code", "nmd_prediction_code",
+      "nmd_escape_reasons", "regulation_feature_index", "overlap_object_code"
+    )
+    annotation_fields <- if (identical(output_mode, "hgvs")) {
+      c(
+        compact_fields, "transcript_hgvs", "protein_hgvs", "hgvs_shift",
+        "transcript_hgvs_status", "transcript_hgvs_reason",
+        "protein_hgvs_status", "protein_hgvs_reason"
+      )
+    } else {
+      compact_fields
+    }
+    struct_fields <- paste0(
+      annotation_fields,
+      " := a.",
+      annotation_fields,
+      collapse = ", "
+    )
+    return(glue(
+      "WITH annotated AS (
+         SELECT
+           a.event_index AS input_variant_index,
+           a.duckvep_event_kind,
+           struct_pack({struct_fields}) AS annotation
+         FROM duckvep_annotate(
+           {sql_q(event_table)}, {sql_q(model_name)},
+           hgvs := {if (identical(output_mode, 'hgvs')) 'TRUE' else 'FALSE'},
+           upstream_distance := {distance_sql}::UBIGINT,
+           downstream_distance := {distance_sql}::UBIGINT
+         ) AS a
+       )"
+    ))
+  }
   function_name <- annotation_function_name(output_mode)
   function_arguments <- if (identical(opt$event_mode, "breakend")) {
     "seq_region, \"position\", mate_seq_region, mate_position"
@@ -833,7 +943,9 @@ composition_query <- function(n) {
 }
 
 fingerprint_query <- function(n) {
-  identity_fields <- if (identical(opt$event_mode, "breakend")) {
+  identity_fields <- if (identical(opt$api_surface, "public")) {
+    c("input_variant_index", "duckvep_event_kind")
+  } else if (identical(opt$event_mode, "breakend")) {
     c(
       "input_variant_index", "seq_region", "\"position\"",
       "mate_seq_region", "mate_position", "annotation_index"
@@ -888,7 +1000,6 @@ fingerprint_query <- function(n) {
   )
 }
 
-warmup_count <- min(opt$warmup, variant_count)
 warmup_sql <- whole_count(warmup_count, "--warmup")
 variant_sql <- whole_count(variant_count, "--variants")
 invisible(dbGetQuery(con, annotation_query(warmup_sql)))

@@ -319,6 +319,92 @@ dbGetQuery(
 )
 ```
 
+### DuckVEP consequence and HGVS annotation
+
+DuckVEP annotates a narrow event relation against an immutable named transcript
+model. Production models come from receipted Ensembl relations; this compact
+non-coding transcript keeps the README deterministic while exercising the same
+public DBI surface.
+
+```{r}
+duckvep_reference <- system.file(
+  "extdata", "fixture_ref.fa", package = "Rduckhts", mustWork = TRUE
+)
+
+dbExecute(con, "
+  CREATE OR REPLACE TABLE readme_duckvep_regions AS
+  SELECT 1::UINTEGER AS seq_region, 50000::UBIGINT AS sequence_length,
+         '11'::VARCHAR AS seq_region_name
+")
+dbExecute(con, "
+  CREATE OR REPLACE TABLE readme_duckvep_transcripts AS
+  SELECT 0::UINTEGER AS transcript_index, 1::UINTEGER AS seq_region,
+         100::UBIGINT AS transcript_start, 150::UBIGINT AS transcript_end,
+         1::TINYINT AS strand, 0::UINTEGER AS gene_index,
+         0::UBIGINT AS transcript_flags, NULL::UBIGINT AS cds_start,
+         NULL::UBIGINT AS cds_end, NULL::BLOB AS cds_sequence,
+         NULL::UTINYINT AS codon_table, NULL::BLOB AS pre_cds_sequence,
+         NULL::BLOB AS post_cds_sequence
+")
+dbExecute(con, "
+  CREATE OR REPLACE TABLE readme_duckvep_exons AS
+  SELECT 0::UINTEGER AS transcript_index, 100::UBIGINT AS exon_start,
+         150::UBIGINT AS exon_end, 1::UBIGINT AS exon_cdna_start,
+         51::UBIGINT AS exon_cdna_end, -1::TINYINT AS phase,
+         -1::TINYINT AS end_phase
+")
+
+duckvep_model_queries <- c(
+  "SELECT * FROM readme_duckvep_regions ORDER BY seq_region",
+  "SELECT * FROM readme_duckvep_transcripts
+   ORDER BY seq_region, transcript_start, transcript_index",
+  "SELECT * FROM readme_duckvep_exons
+   ORDER BY transcript_index, exon_cdna_start"
+)
+quoted_model <- vapply(
+  c("readme", duckvep_model_queries, duckvep_reference),
+  function(x) as.character(dbQuoteString(con, x)),
+  character(1)
+)
+dbGetQuery(
+  con,
+  sprintf(
+    "SELECT loaded FROM duckvep_model_load(
+       %s, %s, %s, %s, reference_fasta := %s
+     )",
+    quoted_model[[1]], quoted_model[[2]], quoted_model[[3]],
+    quoted_model[[4]], quoted_model[[5]]
+  )
+)
+
+dbExecute(con, "
+  CREATE OR REPLACE TABLE readme_duckvep_events AS
+  SELECT * FROM (VALUES
+    (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, 'G'::VARCHAR,
+     NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,
+     NULL::UINTEGER, NULL::UBIGINT)
+  ) AS e(event_index, seq_region, position, reference, alternate,
+         end_position, structural_type, copy_change,
+         mate_seq_region, mate_position)
+")
+
+dbGetQuery(con, "
+  SELECT a.event_index, a.transcript_index,
+         string_agg(t.consequence, '&' ORDER BY t.severity_rank) AS consequence,
+         a.transcript_hgvs, a.protein_hgvs
+  FROM duckvep_annotate(
+    'readme_duckvep_events', 'readme', hgvs := true,
+    upstream_distance := 0, downstream_distance := 0
+  ) AS a
+  JOIN duckvep_so_terms() AS t
+    ON (a.consequence_mask & t.consequence_mask) <> 0
+  GROUP BY ALL
+  ORDER BY a.event_index, a.transcript_index
+")
+
+dbGetQuery(con, "SELECT duckvep_model_drop('readme') AS dropped")
+```
+
 ### Interval + reference helpers
 
 ```{r}

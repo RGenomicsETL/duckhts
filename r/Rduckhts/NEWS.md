@@ -1,5 +1,11 @@
 
-# Rduckhts 1.4.0.9000-0.1.0 (development)
+# Rduckhts 1.5.0-0.1.0
+- bundle the unified `duckvep_annotate(events_table, model_name, hgvs := false,
+  ...)` relation and generated `duckvep_so_terms()` lookup. DBI callers can keep
+  one narrow mixed small/SV/BND event table, request independent-event HGVS
+  without changing schemas, decode consequence masks after filtering, and join
+  selected rows back by event identity. Add a bundled public-surface tinytest and
+  a deterministic model-to-annotation example in the rendered package README
 - bundle `duckhts_contig_key(...)` for DBI workflows that need a conservative join key
   across `chr`-prefixed VCF/dbSNP contigs and Ensembl-style region names. The helper
   normalizes mitochondrial `M`/`MT` to `MT` and uppercase `X`/`Y` but deliberately does

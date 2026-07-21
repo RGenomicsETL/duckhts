@@ -183,7 +183,7 @@ copy_query <- glue(
      annotated AS (
        SELECT
          v.*,
-         unnest(duckvep_annotate(
+         unnest(_duckvep_annotate_small_rich(
            'fastvep_comparison', v.seq_region, v.position,
            v.reference, v.alternate, {opt$distance}
          )) AS annotation
