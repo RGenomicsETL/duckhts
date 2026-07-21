@@ -525,6 +525,9 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     uint32_t genomic_high1;
     uint32_t genomic_first1;
     uint32_t genomic_last1;
+    uint32_t source_low1;
+    uint32_t source_high1;
+    int terminal_duplication = 0;
     int8_t strand;
 
     if (out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
@@ -640,17 +643,83 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
         duckvep_project_transcript_coordinate(
             transcripts, exons, edit->tx_idx, genomic_last1,
             &last_transcript) != DUCKVEP_TRANSCRIPT_EDIT_OK) {
-        /* look_for_slice_start clamps a partially overlapping feature, but
-         * hgvs_transcript still returns undef when clipping or the added
-         * shift carries the printable edit outside that transcript slice. */
-        return DUCKVEP_HGVS_NOT_APPLICABLE;
+        size_t i;
+        int duplicated = reference_length == 0u && alternate_length != 0u &&
+            ((strand > 0 && edit->event.feature_end1 >
+                 transcripts->end1[edit->tx_idx]) ||
+             (strand < 0 && edit->event.feature_start1 <
+                 transcripts->start1[edit->tx_idx]));
+
+        /* After transcript-slice clamping and allele clipping, an insertion
+         * may sit just beyond the transcript 3-prime endpoint. VEP still
+         * names it when the remaining ALT is a copy of the terminal
+         * transcript sequence (for example terminal CG>CC -> c.*10dup), but
+         * returns undef for a non-copy at the same uploaded coordinates. */
+        source_low1 = source_high1 = 0u;
+        if (duplicated && strand > 0) {
+            source_high1 = transcripts->end1[edit->tx_idx];
+            if ((uint64_t)source_high1 + 1u <
+                (uint64_t)alternate_length) {
+                duplicated = 0;
+            } else {
+                source_low1 = source_high1 -
+                    (uint32_t)alternate_length + 1u;
+            }
+        } else if (duplicated) {
+            source_low1 = transcripts->start1[edit->tx_idx];
+            if ((uint64_t)source_low1 + (uint64_t)alternate_length - 1u >
+                UINT32_MAX) {
+                duplicated = 0;
+            } else {
+                source_high1 = source_low1 +
+                    (uint32_t)alternate_length - 1u;
+            }
+        }
+        for (i = 0u; duplicated && i < alternate_length; i++) {
+            uint8_t alternate_base;
+            uint8_t reference_base;
+            uint32_t reference_position = strand > 0
+                ? source_low1 + (uint32_t)i
+                : source_high1 - (uint32_t)i;
+            status = hgvs_oriented_allele_base(
+                alternate_allele + alternate_offset, alternate_length,
+                strand, 0u, i, &alternate_base);
+            if (status != DUCKVEP_HGVS_OK) return status;
+            status = hgvs_reference_base(
+                reference, reference_position, &reference_base);
+            if (status != DUCKVEP_HGVS_OK) {
+                duplicated = 0;
+                break;
+            }
+            if (strand < 0) {
+                reference_base = (uint8_t)duckvep_dna_complement(
+                    (char)reference_base);
+            }
+            if (alternate_base != reference_base) duplicated = 0;
+        }
+        if (duplicated) {
+            status = hgvs_project_genomic_pair(
+                transcripts, exons, edit->tx_idx, source_low1, source_high1,
+                strand, &result.first, &result.last);
+            if (status != DUCKVEP_HGVS_OK) return status;
+            terminal_duplication = 1;
+        } else {
+            /* look_for_slice_start clamps a partially overlapping feature,
+             * but hgvs_transcript still returns undef when clipping or the
+             * added shift carries the printable edit outside that transcript
+             * slice. */
+            return DUCKVEP_HGVS_NOT_APPLICABLE;
+        }
+    } else {
+        status = duckvep_hgvs_coordinate_from_transcript(
+            transcripts, exons, edit->tx_idx, &first_transcript,
+            &result.first);
+        if (status != DUCKVEP_HGVS_OK) return status;
+        status = duckvep_hgvs_coordinate_from_transcript(
+            transcripts, exons, edit->tx_idx, &last_transcript,
+            &result.last);
+        if (status != DUCKVEP_HGVS_OK) return status;
     }
-    status = duckvep_hgvs_coordinate_from_transcript(
-        transcripts, exons, edit->tx_idx, &first_transcript, &result.first);
-    if (status != DUCKVEP_HGVS_OK) return status;
-    status = duckvep_hgvs_coordinate_from_transcript(
-        transcripts, exons, edit->tx_idx, &last_transcript, &result.last);
-    if (status != DUCKVEP_HGVS_OK) return status;
     result.numbering = result.first.kind ==
             (uint8_t)DUCKVEP_HGVS_COORDINATE_N
         ? (uint8_t)DUCKVEP_HGVS_NUMBERING_N
@@ -663,7 +732,9 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     result.alt = alternate_allele + alternate_offset;
     result.ref_length = (uint16_t)reference_length;
     result.alt_length = (uint16_t)alternate_length;
-    if (reference_length == 1u && alternate_length == 1u) {
+    if (terminal_duplication) {
+        result.shape = (uint8_t)DUCKVEP_HGVS_DNA_DUPLICATION;
+    } else if (reference_length == 1u && alternate_length == 1u) {
         result.shape = (uint8_t)DUCKVEP_HGVS_DNA_SUBSTITUTION;
     } else if (alternate_length == 0u) {
         result.shape = (uint8_t)DUCKVEP_HGVS_DNA_DELETION;
@@ -1747,6 +1818,61 @@ static void hgvs_protein_stop_distance(
             *known_out = 1u;
         }
     }
+}
+
+duckvep_hgvs_status_t
+duckvep_hgvs_protein_frameshift_termination_replay(
+    const duckvep_coding_context_t *late_context,
+    duckvep_hgvs_protein_fact_t    *fact) {
+
+    if (late_context == NULL || fact == NULL ||
+        fact->shape != (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT ||
+        fact->first_position1 == 0u) {
+        return DUCKVEP_HGVS_INVALID_ARG;
+    }
+    fact->termination_distance = 0u;
+    fact->termination_known = 0u;
+    hgvs_protein_stop_distance(
+        late_context, fact->first_position1, 1,
+        &fact->termination_distance, &fact->termination_known);
+    return DUCKVEP_HGVS_OK;
+}
+
+duckvep_hgvs_status_t
+duckvep_hgvs_protein_shifted_insertion_start_lost_finish(
+    const duckvep_coding_context_t *context,
+    duckvep_hgvs_protein_fact_t    *fact) {
+
+    uint32_t low;
+    size_t translation_length;
+    uint8_t reference_first;
+    uint8_t reference_last;
+
+    if (context == NULL || fact == NULL ||
+        fact->shape != (uint8_t)DUCKVEP_HGVS_PROTEIN_START_LOST ||
+        fact->start_lost_flanking == 0u || fact->ref_length != 2u ||
+        fact->first_position1 == UINT32_MAX ||
+        fact->last_position1 == UINT32_MAX) {
+        return DUCKVEP_HGVS_INVALID_ARG;
+    }
+    low = fact->first_position1 < fact->last_position1
+        ? fact->first_position1 : fact->last_position1;
+    translation_length = hgvs_protein_reference_length(context);
+    if ((uint64_t)low + 1u >= (uint64_t)translation_length) {
+        return DUCKVEP_HGVS_NOT_APPLICABLE;
+    }
+    reference_first = duckvep_coding_context_peptide_base(
+        context, 0, (size_t)low);
+    reference_last = duckvep_coding_context_peptide_base(
+        context, 0, (size_t)low + 1u);
+    if (reference_first == 0u || reference_last == 0u) {
+        return DUCKVEP_HGVS_MISSING_PEPTIDE;
+    }
+    fact->first_position1++;
+    fact->last_position1++;
+    fact->reference_first = reference_first;
+    fact->reference_last = reference_last;
+    return DUCKVEP_HGVS_OK;
 }
 
 static duckvep_hgvs_status_t hgvs_protein_fact_set_residues(

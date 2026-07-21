@@ -1054,11 +1054,12 @@ original slice and the later shift at once:
 The compatibility representation must therefore keep three concepts distinct: the
 lossless uploaded feature, the semantic edit used by consequence and haplotype kernels,
 and the clamped/cached transcript-slice facts used by VEP's HGVS formatter. Globally
-clamping semantic edit endpoints, or teaching the shared transcript projector to accept
-out-of-transcript coordinates, would change consequence, CDS, and phased-edit semantics.
-DuckVEP therefore carries explicit transcript-slice start/end facts in its HGVS-facing
-transcript edit, applies the separate HGVS shift offset during notation construction, and
-leaves the semantic prepared event unchanged. Deterministic properties pin clipped
+clamping semantic edit endpoints, or accepting an event whose complete uploaded feature
+also misses the transcript, would change consequence, CDS, and phased-edit semantics.
+DuckVEP therefore leaves the semantic prepared event unchanged and retains a clamped
+terminal projection only when that lossless complete feature overlaps the transcript. The
+HGVS-facing edit carries the separate transcript-slice start/end facts and applies the
+HGVS shift offset during notation construction. Deterministic properties pin clipped
 deletion, delins, and reversed insertion-slice states; the strict chromosome-21 ClinVar
 differential exercises the same implementation without any HGVSc/HGVSp disagreement.
 
@@ -1178,11 +1179,20 @@ that. The same cached complete-feature `coding` predicate also controls failure 
 only that witness's uploaded anchor is replaced with a wrong base, genomic validation makes
 HGVSc unresolved; HGVSp must be unresolved too because the feature was coding-admissible
 even though its original region label was 5-prime UTR. Treating that region label as the
-protein authority incorrectly returns not applicable. The same output keeps `fsTer?` even
-when the shifted peptide replay reaches a stop:
-`hgvs_protein()` deletes its private shift hash before `_stop_loss_extra_AA()` performs a
-late alternate-CDS lookup, so the original UTR-side coordinates cannot prove a termination
-distance. A deletion that removes the terminal peptide can likewise reconstruct stop loss
+protein authority incorrectly returns not applicable.
+
+The late frameshift stop search is a third, separate reconstruction. Before
+`_stop_loss_extra_AA()` asks for an alternate CDS, `hgvs_protein()` deletes its private
+shift hash. That restores both the original CDS coordinate and the original, unrotated
+feature allele; it does not reuse the shifted HGVSc display allele. Most UTR-side shifted
+frameshifts consequently retain `fsTer?`, including the short witness above, but this is
+not a blanket rule. The rare generated witness
+`chrDuck:119 G>GACGGTGATCCTGGGTGGCAGGTGATCTAGATAGGGGGGTGACTGGA`
+first renders shifted `c.3_4insGTGATCCTGGGTGGCAGGTGATCTAGATAGGGGGGTGACTGGAACG`,
+then the restored original allele at the original CDS coordinate finds a positive late
+stop and renders `p.Arg3IlefsTer6`. Replaying the rotated display allele instead produces
+the wrong `Ter5`; suppressing every non-CDS shifted termination produces the wrong
+`Ter?`. A deletion that removes the terminal peptide can likewise reconstruct stop loss
 while the cached original predicate remains false, yielding an ordinary terminal
 `p.Trp23_Ter24del` rather than an extension. Once the sidecar says sequence predicates are
 valid, its start-loss and stop-loss bits are therefore closed-world even though its
@@ -1194,6 +1204,16 @@ flanks, drops an intronic `Gap`, and moves the surviving cDNA coordinate inward 
 unshifted cDNA coordinates `3,2` and satisfy `_overlaps_start_codon` even though only one
 genomic flank is exonic. Requiring two exonic endpoints clears a valid cached start-loss
 fact. Fixed forward- and reverse-strand scenes cover both possible exon edges.
+
+The protein formatter adds another insertion-only state after 3-prime placement. For a
+shifted in-frame pure insertion with cached `start_lost`, peptide clipping can leave an
+empty reference allele. VEP retains the post-clipping mapper positions and reads the next
+two reference residues, one position later than DuckVEP's ordinary local peptide window.
+The generated `chrDuck:120 A>AAGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCA`
+therefore renders `p.ValArg3_?2`, not `p.MetVal2_?1`; the analogous position-121 witness
+renders `p.ArgThr4_?3`, not `p.ValArg3_?2`. This adjustment belongs to the typed protein
+fact and is gated by shifted, in-frame, pure-insertion start loss; applying it to ordinary
+unshifted start-loss delins changes already conformant states.
 
 The pure-C regression deliberately restores a frameshift fact from a sidecar whose SO mask
 contains only `coding_sequence_variant&splice_acceptor_variant`, then proves that an empty
@@ -1253,6 +1273,16 @@ shifted genomic-to-peptide endpoint precondition and does not compose that trans
 insertion into HGVSp. The statistical property therefore records the DNA-only state instead
 of asserting an unreachable composition status; deterministic public tests own HGVSp
 applicability.
+
+Complete-feature clamping can also make a duplication reachable after minimization moved
+the semantic differing base outside the transcript. On the positive-strand minimal
+fixture, uploaded terminal `chrDuck:250 CG>CC` minimizes to `G>C` at position 251, but
+`_var2transcript_slice_coords` first clamps the complete two-base feature to the terminal
+transcript base. Allele clipping then leaves an inserted `C`, which matches that terminal
+reference base and renders `c.*10dup`. The same geometry with a non-copy (`CG>CA`) remains
+absent. Rejecting the minimized event before retaining the overlapping complete feature
+loses this VEP state; admitting every outside minimized event would create false terminal
+annotations.
 
 Source anchors: Ensembl Variation 116 `TranscriptVariationAllele::hgvs_transcript`,
 `TranscriptVariationAllele::_genomic_shift`, `hgvs_variant_notation`, and its duplication

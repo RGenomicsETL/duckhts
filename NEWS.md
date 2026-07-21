@@ -1,6 +1,14 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- close four HGVS states found by a 100,000-random-allele executable VEP 116
+  differential, rather than by the C property suite alone. Shifted in-frame
+  start-loss insertions retain VEP's post-clipping mapper positions and next
+  two reference residues; a shifted frameshift performs its late stop search
+  at the original CDS coordinate with the restored unrotated allele; and a
+  minimized differing base just outside a transcript remains eligible for
+  complete-feature clamping, allowing terminal `CG>CC` to render `c.*10dup`.
+  Fixed SQL witnesses preserve all four exact HGVSc/HGVSp strings
 - add a fail-closed official Ensembl release-VCF conformance runner for literal
   SNVs. It maps each lossless `VE` row to a VCF ALT through the producer's
   zero-based allele Index, aggregates

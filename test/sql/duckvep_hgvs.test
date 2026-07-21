@@ -446,7 +446,8 @@ WITH variants(ord, position, reference, alternate) AS (
     (1, 202::UBIGINT,
      'CGTACGTACGTACGTACGTACGTACGTACGTACTGGTAAACGTACGTACG', 'C'),
     (2, 250::UBIGINT, 'C', 'A'),
-    (3, 250::UBIGINT, 'CG', 'GC')
+    (3, 250::UBIGINT, 'CG', 'GC'),
+    (4, 250::UBIGINT, 'CG', 'CC')
 )
 SELECT ord,
        annotation.transcript_hgvs,
@@ -462,6 +463,7 @@ ORDER BY ord;
 1	c.35_*10del	supported	not_applicable
 2	c.*10C>A	supported	not_applicable
 3	c.*10_*9insG	supported	not_applicable
+4	c.*10dup	supported	not_applicable
 
 # A 3-prime shift can move an insertion from the terminal codon to the first
 # 3-prime UTR base. VEP keeps HGVSc but has no peptide allele to format.
@@ -493,6 +495,48 @@ FROM unnest(_duckvep_annotate_small_hgvs(
 WHERE annotation.transcript_index = 0;
 ----
 c.1_2insACTA	p.Met1AsnfsTer?	1	supported
+
+# The randomized state explorer found two shifted in-frame insertions where
+# VEP retains the post-clipping mapper positions for start_lost. The two
+# reference residues therefore begin one position later than the ordinary
+# local peptide window.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 120::UBIGINT, 'A',
+     'AAGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCA'),
+    (2, 121::UBIGINT, 'T', 'TACGCCGCTACAGGTGCATGCTTGC')
+)
+SELECT ord,
+       annotation.transcript_hgvs,
+       annotation.protein_hgvs,
+       annotation.hgvs_shift
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0
+ORDER BY ord;
+----
+1	c.2_3insGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCAA	p.ValArg3_?2	1
+2	c.5_6insCCGCTACAGGTGCATGCTTGCACG	p.ArgThr4_?3	3
+
+# VEP removes its HGVS shift hash before the late frameshift stop search. The
+# original unrotated allele is consequently restored at the original CDS
+# coordinate; this rare positive search finds a stop instead of emitting Ter?.
+query TTTI
+SELECT annotation.transcript_hgvs,
+       annotation.protein_hgvs,
+       annotation.protein_hgvs_status,
+       annotation.hgvs_shift
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 119::UBIGINT, 'G',
+  'GACGGTGATCCTGGGTGGCAGGTGATCTAGATAGGGGGGTGACTGGA',
+  0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+c.3_4insGTGATCCTGGGTGGCAGGTGATCTAGATAGGGGGGTGACTGGAACG	p.Arg3IlefsTer6	supported	3
 
 # A wrong uploaded anchor makes both HGVS fields unresolved when the cached
 # complete-feature coding predicate is true, even though the original region

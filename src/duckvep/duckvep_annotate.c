@@ -1368,10 +1368,14 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	duckvep_variant_coding_context_status_t context_status;
 	duckvep_context_delta_status_t delta_status;
 	duckvep_feature_substitution_result_t feature_result;
+	duckvep_event_t shifted_event;
+	duckvep_haplotype_edit_t shifted_edit;
+	duckvep_coding_context_t late_context;
 	uint32_t tx_idx;
 	int protein_coordinates_defined;
 	int consequence_predicates_valid;
 	int delta_ready;
+	int shifted_edit_ready;
 
 	if (state == NULL || state->entry == NULL || state->workspace == NULL ||
 	    batch == NULL || event == NULL || consequence == NULL ||
@@ -1503,6 +1507,9 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	context_status = DUCKVEP_VARIANT_CODING_CONTEXT_UNSUPPORTED_KIND;
 	context_ptr = &context;
 	delta_ready = 0;
+	shifted_edit_ready = 0;
+	memset(&shifted_event, 0, sizeof shifted_event);
+	memset(&shifted_edit, 0, sizeof shifted_edit);
 	/* The consequence callback is synchronous: these pointers are valid until
 	 * this function returns.  An unshifted DNA fact describes the same edit, so
 	 * reuse both context and delta instead of rebuilding projection, alternate
@@ -1517,8 +1524,6 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		}
 	} else if ((dna_fact.ref_length == 0u) !=
 	    (dna_fact.alt_length == 0u)) {
-		duckvep_event_t shifted_event;
-		duckvep_haplotype_edit_t shifted_edit;
 		duckvep_edit_set_t edit_set;
 		size_t allele_required;
 
@@ -1539,6 +1544,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 			    duckvep_scalar_hgvs_reason(hgvs_status);
 			return 1;
 		}
+		shifted_edit_ready = 1;
 		if (shifted_edit.ref_len == 0u && shifted_edit.cds_start >
 		    model->sequences.cds_length[tx_idx]) {
 			hgvs_result->protein_reason =
@@ -1635,11 +1641,54 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		hgvs_result->protein_reason = duckvep_scalar_hgvs_reason(hgvs_status);
 		return 1;
 	}
+	if (shifted_edit_ready && delta.frameshift == 0u && delta.start_lost != 0u &&
+	    protein_fact.shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_START_LOST &&
+	    protein_fact.ref_length == 2u && shifted_edit.ref_len == 0u &&
+	    dna_fact.shift_offset != 0) {
+		hgvs_status =
+		    duckvep_hgvs_protein_shifted_insertion_start_lost_finish(
+		        context_ptr, &protein_fact);
+		if (hgvs_status != DUCKVEP_HGVS_OK) {
+			hgvs_result->protein_reason =
+			    duckvep_scalar_hgvs_reason(hgvs_status);
+			return 1;
+		}
+	}
 	if (protein_fact.shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT &&
 	    dna_fact.shift_offset != 0 &&
 	    (consequence->region_mask & DUCKVEP_REGION_CDS) == 0u) {
+		duckvep_haplotype_edit_t late_edit;
+		duckvep_edit_set_t late_set;
+
+		/* hgvs_protein deletes the shift hash before _stop_loss_extra_AA.
+		 * Replay the restored original allele at its original CDS coordinate;
+		 * most such rows retain Ter?, but the rare positive stop is real. */
 		protein_fact.termination_known = 0u;
 		protein_fact.termination_distance = 0u;
+		if (shifted_edit_ready && dna_fact.shift_offset > 0 &&
+		    shifted_edit.cds_start > (uint32_t)dna_fact.shift_offset) {
+			late_edit = shifted_edit;
+			late_edit.cds_start -= (uint32_t)dna_fact.shift_offset;
+			/* Deleting shift_hash also restores the original feature alleles;
+			 * the late stop search therefore does not consume the rotated HGVS
+			 * display allele used by the first peptide pass. */
+			late_edit.ref = transcript_edit.ref;
+			late_edit.alt = transcript_edit.alt;
+			late_edit.ref_len = transcript_edit.ref_length;
+			late_edit.alt_len = transcript_edit.alt_length;
+			late_set.edits = &late_edit;
+			late_set.count = 1u;
+			context_status = duckvep_model_coding_context_build(
+			    &model->transcripts, &model->exons, &model->sequences,
+			    tx_idx, model->transcripts.strand[tx_idx], event,
+			    &late_set, scratch->alt_cds, scratch->alt_cds_cap,
+			    scratch->ref_peptide, scratch->ref_peptide_cap,
+			    scratch->alt_peptide, scratch->alt_peptide_cap,
+			    &late_context);
+			if (context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK)
+				(void)duckvep_hgvs_protein_frameshift_termination_replay(
+				    &late_context, &protein_fact);
+		}
 	}
 	return duckvep_scalar_hgvs_store_protein(
 	    state, &protein_fact, hgvs_result, error, error_size);

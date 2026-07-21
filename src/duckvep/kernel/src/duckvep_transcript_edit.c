@@ -318,16 +318,32 @@ duckvep_transcript_edit_status_t duckvep_transcript_edit_project_prepared_hint(
     } else {
         if (result.event.end1 < transcript_start1 ||
             result.event.start1 > transcript_end1) {
-            return DUCKVEP_TRANSCRIPT_EDIT_OUTSIDE_TRANSCRIPT;
+            /* Allele minimization can move the semantic differing base just
+             * outside the transcript while the complete uploaded feature
+             * still overlaps its terminal base. VEP clamps that complete
+             * feature before deriving transcript-slice REF (terminal CG>CC
+             * is the observable c.*10dup case), so retain the terminal
+             * projection for the later clamped-feature interpreter. */
+            if (result.event.feature_start1 == 0u ||
+                result.event.feature_end1 < result.event.feature_start1 ||
+                result.event.feature_end1 < transcript_start1 ||
+                result.event.feature_start1 > transcript_end1) {
+                return DUCKVEP_TRANSCRIPT_EDIT_OUTSIDE_TRANSCRIPT;
+            }
+            first_pos1 = result.event.feature_start1 < transcript_start1
+                ? transcript_start1 : result.event.feature_start1;
+            last_pos1 = result.event.feature_end1 > transcript_end1
+                ? transcript_end1 : result.event.feature_end1;
+        } else {
+            /* TranscriptVariationAllele::_var2transcript_slice_coords clamps a
+             * partially overlapping feature before hgvs_variant_notation reads
+             * its transcript-slice REF. Preserve that executable mapper-gap
+             * behavior in the shared edit instead of rejecting one endpoint. */
+            first_pos1 = result.event.start1 < transcript_start1
+                ? transcript_start1 : result.event.start1;
+            last_pos1 = result.event.end1 > transcript_end1
+                ? transcript_end1 : result.event.end1;
         }
-        /* TranscriptVariationAllele::_var2transcript_slice_coords clamps a
-         * partially overlapping feature before hgvs_variant_notation reads
-         * its transcript-slice REF. Preserve that executable mapper-gap
-         * behavior in the shared edit instead of rejecting one endpoint. */
-        first_pos1 = result.event.start1 < transcript_start1
-            ? transcript_start1 : result.event.start1;
-        last_pos1 = result.event.end1 > transcript_end1
-            ? transcript_end1 : result.event.end1;
     }
     status = transcript_edit_project_pair(
         transcripts, exons, tx_idx, first_pos1, last_pos1, strand,
