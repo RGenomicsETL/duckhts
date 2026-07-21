@@ -444,6 +444,23 @@ core_current <- core_runs[
 stopifnot(
   nrow(core_current) == 6L,
   all(core_current$regulation_features == 1383580),
+  all(nchar(core_current$extension_sha256) == 64L),
+  all(nchar(core_current$model_database_sha256) == 64L),
+  all(nchar(core_current$model_logical_sha256) == 64L),
+  all(nchar(core_current$model_source_manifest_sha256) == 64L),
+  all(nchar(core_current$model_reference_sha256) == 64L),
+  all(nchar(core_current$model_region_ordinal_sha256) == 64L),
+  all(nchar(core_current$variants_database_sha256) == 64L),
+  all(nchar(core_current$corpus_source_sha256) == 64L),
+  all(core_current$fingerprint_schema_version == 2L),
+  all(nzchar(core_current$fingerprint_xor_hash)),
+  all(nzchar(core_current$fingerprint_sum_hash)),
+  all(core_current$model_source_version == "116"),
+  all(core_current$model_assembly == "GRCh38"),
+  all(core_current$variants == core_current$corpus_supported_alt_count),
+  length(unique(core_current$extension_sha256)) == 1L,
+  length(unique(core_current$model_database_sha256)) == 1L,
+  length(unique(core_current$model_logical_sha256)) == 1L,
   all(vapply(
     split(core_current$output_mode, core_current$workload),
     function(x) setequal(x, c("compact", "rich", "hgvs")),
@@ -504,6 +521,21 @@ core_table <- data.frame(
   stringsAsFactors = FALSE
 )
 knitr::kable(core_table, row.names = FALSE)
+
+core_receipts <- data.frame(
+  revision = core_current$revision,
+  corpus = unname(core_workload_labels[core_current$workload]),
+  output = core_current$output_mode,
+  extension_binary = substr(core_current$extension_sha256, 1L, 12L),
+  physical_model = substr(core_current$model_database_sha256, 1L, 12L),
+  logical_model = substr(core_current$model_logical_sha256, 1L, 12L),
+  corpus_source = substr(core_current$corpus_source_sha256, 1L, 12L),
+  staged_corpus = substr(core_current$variants_database_sha256, 1L, 12L),
+  public_row_xor = core_current$fingerprint_xor_hash,
+  public_row_sum = core_current$fingerprint_sum_hash,
+  stringsAsFactors = FALSE
+)
+knitr::kable(core_receipts, row.names = FALSE)
 ```
 
 This is the complete resident core-VEP model used for independent small
@@ -515,17 +547,27 @@ separate DuckDB stages.
 
 The core model emits 126,930,027 rows for ClinVar and 47,835,851 for GIAB,
 including 196,320 and 206,506 regulation/motif rows respectively. The pinned
-single-core rates are 382,067 compact, 171,376 rich, and 90,824 cumulative-HGVS
-alleles/s for ClinVar; GIAB reaches 1,116,579, 466,046, and 243,932/s. At the
-measured HGVS rates, 700 million input alleles project to 2.14 or 0.80
+single-core rates are 380,429 compact, 171,112 rich, and 91,184 cumulative-HGVS
+alleles/s for ClinVar; GIAB reaches 1,106,025, 460,958, and 244,631/s. At the
+measured HGVS rates, 700 million input alleles project to 2.13 or 0.79
 single-core hours before supplementary SQL joins.
+
+Every row in the production-core table is tied to exact source revision
+`r core_revision`,
+one extension-binary digest, the physical and logical model digests,
+the Ensembl source-manifest and logical-reference digests, the model-region
+ordinal digest, the staged-corpus digest, and the original VCF digest. The HGVS
+rows additionally record the physical FASTA and FAI digests. The receipt table
+shows shortened artifact digests for readability and the complete schema-version-2
+public-row XOR/sum fingerprints; the full SHA-256 values are retained in
+`benchmarks/data/duckvep_throughput.csv`.
 
 `duckvep_annotate_hgvs(...)` preserves interval-feature rows from the same
 candidate sweep and leaves their transcript/protein HGVS fields NULL. The HGVS
 byte checksum is therefore unchanged while output cardinality includes every
 regulatory/motif row; SQL and R regressions pin that pass-through. The earlier
 transcript-only GIAB run ranged from 3.592 to 6.477 seconds across five passes,
-whereas this core-model run ranged from 3.639 to 3.679 seconds. The apparently
+whereas this core-model run ranged from 3.686 to 3.721 seconds. The apparently
 faster compact result is not attributed to loading more intervals; use the
 stable absolute core-model result rather than treating non-adjacent noisy runs
 as an optimization comparison.
@@ -1240,13 +1282,17 @@ comparison is required:
 
 ```sh
 taskset -c 2 Rscript benchmarks/duckvep_throughput.R \
-  --database /path/to/staged.duckdb \
+  --database /path/to/model.duckdb \
+  --variants-database /path/to/staged-corpus.duckdb \
   --variants-table bench_variants \
-  --workload-name ensembl116_grch38_final_giab_sites_hash40 \
-  --variants 100957 --passes 9 --warmup 10000 --threads 1 \
-  --output compact
+  --corpus-source /path/to/source.vcf.gz \
+  --workload-name ensembl116_grch38_full_corpus_regulation \
+  --regulatory --variants 4095611 --passes 5 --warmup 100000 \
+  --threads 1 --input-partitions 1 --transcript-distance 5000 \
+  --output compact --fingerprint /tmp/full-public-row-fingerprint.csv
 ```
 
-Add `--regulatory` and use the
-`ensembl116_grch38_final_giab_sites_hash40_regulation` workload name to load
-`duckvep_regulation_features` and record the integrated core-feature lane.
+For cumulative HGVS, add `--reference-fasta` and change `--output` to `hgvs`.
+The source revision must be the current checkout; the history row records the
+extension binary, physical/logical model, model source, reference, staged
+corpus, original source, and public-row fingerprint receipts.

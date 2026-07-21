@@ -26,8 +26,10 @@
   consequence sweep with NULL HGVS fields, as pinned by SQL and R regressions,
   rather than requiring a second annotation scan. With all 1,383,580 resident
   RegulatoryFeature/MotifFeature intervals loaded, the full-corpus core-VEP
-  rates are 382,067/s compact, 171,376/s rich, and 90,824/s HGVS for ClinVar,
-  and 1,116,579/s, 466,046/s, and 243,932/s for GIAB
+  rates are 380,429/s compact, 171,112/s rich, and 91,184/s HGVS for ClinVar,
+  and 1,106,025/s, 460,958/s, and 244,631/s for GIAB. Each exact-head row now
+  retains extension, physical/logical model, reference, staged-corpus, and
+  original-VCF digests plus a full-public-row fingerprint
 - preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
   VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
   nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and

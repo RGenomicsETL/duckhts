@@ -117,18 +117,24 @@ insertion order; they remain only as historical measurements.
 | 2026-07-20 | e25c1513 | ensembl116_grch38_clinvar_annotation_dense_v2               | compact     |       4 |                4 |               10000 | 517,097    | 644,427     | 5,068,416 | 1,383,580           | 34,248,323     |      5 |       0.713 |          0.719 |       0.758 |              719189 |         1390.5 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 47,633,273             |
 | 2026-07-20 | e25c1513 | ensembl116_grch38_clinvar_annotation_dense_v2               | compact     |       1 |                1 |               50000 | 517,097    | 644,427     | 5,068,416 | 1,383,580           | 88,784,213     |      5 |       4.130 |          4.161 |       4.185 |              124272 |         8046.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 21,337,230             |
 | 2026-07-20 | e25c1513 | ensembl116_grch38_clinvar_annotation_dense_v2               | compact     |       4 |                4 |               50000 | 517,097    | 644,427     | 5,068,416 | 1,383,580           | 88,784,213     |      5 |       1.326 |          1.342 |       1.436 |              385318 |         2595.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 66,158,132             |
-| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal             | compact     |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      11.317 |         11.327 |      11.370 |              391848 |         2552.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 11,188,638             |
-| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal             | rich        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      25.287 |         25.365 |      25.415 |              174984 |         5714.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 4,996,401              |
-| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal             | hgvs        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      48.625 |         48.993 |      51.699 |               90594 |        11038.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,586,772              |
-| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal            | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       3.592 |          4.446 |       6.477 |              921190 |         1085.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 10,712,853             |
-| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal            | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       9.147 |          9.157 |       9.244 |              447266 |         2235.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 5,201,414              |
-| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal            | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |      16.701 |         16.770 |      17.858 |              244222 |         4094.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,840,152              |
 | 2026-07-21 | 056e2d56 | ensembl116_grch38_clinvar_20260706_full_literal_regulation  | compact     |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 1,383,580           | 126,930,027    |      5 |      11.562 |         11.617 |      11.692 |              382067 |         2617.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 10,926,231             |
 | 2026-07-21 | 056e2d56 | ensembl116_grch38_clinvar_20260706_full_literal_regulation  | rich        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 1,383,580           | 126,930,027    |      5 |      25.804 |         25.899 |      25.988 |              171376 |         5835.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 4,900,962              |
 | 2026-07-21 | 056e2d56 | ensembl116_grch38_clinvar_20260706_full_literal_regulation  | hgvs        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 1,383,580           | 126,930,027    |      5 |      48.761 |         48.869 |      48.906 |               90824 |        11010.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,597,353              |
 | 2026-07-21 | 056e2d56 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       3.639 |          3.668 |       3.679 |             1116579 |          895.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 13,041,399             |
 | 2026-07-21 | 056e2d56 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       8.776 |          8.788 |       8.836 |              466046 |         2145.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 5,443,315              |
 | 2026-07-21 | 056e2d56 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |      16.765 |         16.790 |      16.872 |              243932 |         4099.5 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,849,068              |
+| 2026-07-21 | 310890b5 | ensembl116_grch38_clinvar_20260706_full_literal_regulation  | compact     |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 1,383,580           | 126,930,027    |      5 |      11.550 |         11.667 |      11.687 |              380429 |         2628.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 10,879,406             |
+| 2026-07-21 | 310890b5 | ensembl116_grch38_clinvar_20260706_full_literal_regulation  | rich        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 1,383,580           | 126,930,027    |      5 |      25.854 |         25.939 |      25.982 |              171112 |         5844.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 4,893,405              |
+| 2026-07-21 | 310890b5 | ensembl116_grch38_clinvar_20260706_full_literal_regulation  | hgvs        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 1,383,580           | 126,930,027    |      5 |      48.586 |         48.676 |      48.927 |               91184 |        10966.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,607,651              |
+| 2026-07-21 | 310890b5 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       3.686 |          3.703 |       3.721 |             1106025 |          904.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 12,918,134             |
+| 2026-07-21 | 310890b5 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       8.854 |          8.885 |       8.944 |              460958 |         2169.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 5,383,889              |
+| 2026-07-21 | 310890b5 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |      16.693 |         16.742 |      16.791 |              244631 |         4087.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,857,236              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal             | compact     |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      11.317 |         11.327 |      11.370 |              391848 |         2552.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 11,188,638             |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal             | rich        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      25.287 |         25.365 |      25.415 |              174984 |         5714.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 4,996,401              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_clinvar_20260706_full_literal             | hgvs        |       1 |                1 |                5000 | 4,438,467  | 644,427     | 5,068,416 | 0                   | 126,733,707    |      5 |      48.625 |         48.993 |      51.699 |               90594 |        11038.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,586,772              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal            | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       3.592 |          4.446 |       6.477 |              921190 |         1085.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 10,712,853             |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal            | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       9.147 |          9.157 |       9.244 |              447266 |         2235.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 5,201,414              |
+| 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal            | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |      16.701 |         16.770 |      17.858 |              244222 |         4094.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,840,152              |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -272,12 +278,21 @@ the exact-size retry fix.
 
 | revision | corpus             | output  | resident_regulation_motif | input_alleles | output_rows | rows_per_allele | median_seconds | alleles_per_second | output_rows_per_second | elapsed_vs_compact | projected_700M_allele_hours |
 |:---------|:-------------------|:--------|:--------------------------|:--------------|:------------|----------------:|---------------:|:-------------------|:-----------------------|-------------------:|----------------------------:|
-| 056e2d56 | ClinVar 2026-07-06 | compact | 1,383,580                 | 4,438,467     | 126,930,027 |           28.60 |         11.617 | 382,067            | 10,926,231             |               1.00 |                        0.51 |
-| 056e2d56 | ClinVar 2026-07-06 | rich    | 1,383,580                 | 4,438,467     | 126,930,027 |           28.60 |         25.899 | 171,376            | 4,900,962              |               2.23 |                        1.13 |
-| 056e2d56 | ClinVar 2026-07-06 | hgvs    | 1,383,580                 | 4,438,467     | 126,930,027 |           28.60 |         48.869 | 90,824             | 2,597,353              |               4.21 |                        2.14 |
-| 056e2d56 | GIAB HG002 v4.2.1  | compact | 1,383,580                 | 4,095,611     | 47,835,851  |           11.68 |          3.668 | 1,116,579          | 13,041,399             |               1.00 |                        0.17 |
-| 056e2d56 | GIAB HG002 v4.2.1  | rich    | 1,383,580                 | 4,095,611     | 47,835,851  |           11.68 |          8.788 | 466,046            | 5,443,315              |               2.40 |                        0.42 |
-| 056e2d56 | GIAB HG002 v4.2.1  | hgvs    | 1,383,580                 | 4,095,611     | 47,835,851  |           11.68 |         16.790 | 243,932            | 2,849,068              |               4.58 |                        0.80 |
+| 310890b5 | ClinVar 2026-07-06 | compact | 1,383,580                 | 4,438,467     | 126,930,027 |           28.60 |         11.667 | 380,429            | 10,879,406             |               1.00 |                        0.51 |
+| 310890b5 | ClinVar 2026-07-06 | rich    | 1,383,580                 | 4,438,467     | 126,930,027 |           28.60 |         25.939 | 171,112            | 4,893,405              |               2.22 |                        1.14 |
+| 310890b5 | ClinVar 2026-07-06 | hgvs    | 1,383,580                 | 4,438,467     | 126,930,027 |           28.60 |         48.676 | 91,184             | 2,607,651              |               4.17 |                        2.13 |
+| 310890b5 | GIAB HG002 v4.2.1  | compact | 1,383,580                 | 4,095,611     | 47,835,851  |           11.68 |          3.703 | 1,106,025          | 12,918,134             |               1.00 |                        0.18 |
+| 310890b5 | GIAB HG002 v4.2.1  | rich    | 1,383,580                 | 4,095,611     | 47,835,851  |           11.68 |          8.885 | 460,958            | 5,383,889              |               2.40 |                        0.42 |
+| 310890b5 | GIAB HG002 v4.2.1  | hgvs    | 1,383,580                 | 4,095,611     | 47,835,851  |           11.68 |         16.742 | 244,631            | 2,857,236              |               4.52 |                        0.79 |
+
+| revision | corpus             | output  | extension_binary | physical_model | logical_model | corpus_source | staged_corpus | public_row_xor       | public_row_sum               |
+|:---------|:-------------------|:--------|:-----------------|:---------------|:--------------|:--------------|:--------------|:---------------------|:-----------------------------|
+| 310890b5 | ClinVar 2026-07-06 | compact | 53af1444f11b     | 4c2077c83958   | 296bc9063356  | 59a83b34d425  | fde5aa206844  | 5434592916959930391  | 1170715483948138239433590223 |
+| 310890b5 | ClinVar 2026-07-06 | rich    | 53af1444f11b     | 4c2077c83958   | 296bc9063356  | 59a83b34d425  | fde5aa206844  | 15731069621491065835 | 1170781327306548312741272715 |
+| 310890b5 | ClinVar 2026-07-06 | hgvs    | 53af1444f11b     | 4c2077c83958   | 296bc9063356  | 59a83b34d425  | fde5aa206844  | 3854825828222035738  | 1170739873865994974587183880 |
+| 310890b5 | GIAB HG002 v4.2.1  | compact | 53af1444f11b     | 4c2077c83958   | 296bc9063356  | adb4d4a50048  | 9e8eccb0719e  | 18071298266035115485 | 441264289735621502248147381  |
+| 310890b5 | GIAB HG002 v4.2.1  | rich    | 53af1444f11b     | 4c2077c83958   | 296bc9063356  | adb4d4a50048  | 9e8eccb0719e  | 2464071972670265587  | 441226953508179288041384557  |
+| 310890b5 | GIAB HG002 v4.2.1  | hgvs    | 53af1444f11b     | 4c2077c83958   | 296bc9063356  | adb4d4a50048  | 9e8eccb0719e  | 13799808553808525439 | 441236299918702761797429749  |
 
 This is the complete resident core-VEP model used for independent small
 variants: 644,427 transcripts plus 380,818 RegulatoryFeature and
@@ -288,11 +303,21 @@ clinical-resource joins remain separate DuckDB stages.
 
 The core model emits 126,930,027 rows for ClinVar and 47,835,851 for
 GIAB, including 196,320 and 206,506 regulation/motif rows respectively.
-The pinned single-core rates are 382,067 compact, 171,376 rich, and
-90,824 cumulative-HGVS alleles/s for ClinVar; GIAB reaches 1,116,579,
-466,046, and 243,932/s. At the measured HGVS rates, 700 million input
-alleles project to 2.14 or 0.80 single-core hours before supplementary
+The pinned single-core rates are 380,429 compact, 171,112 rich, and
+91,184 cumulative-HGVS alleles/s for ClinVar; GIAB reaches 1,106,025,
+460,958, and 244,631/s. At the measured HGVS rates, 700 million input
+alleles project to 2.13 or 0.79 single-core hours before supplementary
 SQL joins.
+
+Every row in the production-core table is tied to exact source revision
+310890b5621dfe1de93878b8bf8cde355e7238aa, one extension-binary digest,
+the physical and logical model digests, the Ensembl source-manifest and
+logical-reference digests, the model-region ordinal digest, the
+staged-corpus digest, and the original VCF digest. The HGVS rows
+additionally record the physical FASTA and FAI digests. The receipt
+table shows shortened artifact digests for readability and the complete
+schema-version-2 public-row XOR/sum fingerprints; the full SHA-256
+values are retained in `benchmarks/data/duckvep_throughput.csv`.
 
 `duckvep_annotate_hgvs(...)` preserves interval-feature rows from the
 same candidate sweep and leaves their transcript/protein HGVS fields
@@ -300,7 +325,7 @@ NULL. The HGVS byte checksum is therefore unchanged while output
 cardinality includes every regulatory/motif row; SQL and R regressions
 pin that pass-through. The earlier transcript-only GIAB run ranged from
 3.592 to 6.477 seconds across five passes, whereas this core-model run
-ranged from 3.639 to 3.679 seconds. The apparently faster compact result
+ranged from 3.686 to 3.721 seconds. The apparently faster compact result
 is not attributed to loading more intervals; use the stable absolute
 core-model result rather than treating non-adjacent noisy runs as an
 optimization comparison.
@@ -513,14 +538,18 @@ stable CPU comparison is required:
 
 ``` sh
 taskset -c 2 Rscript benchmarks/duckvep_throughput.R \
-  --database /path/to/staged.duckdb \
+  --database /path/to/model.duckdb \
+  --variants-database /path/to/staged-corpus.duckdb \
   --variants-table bench_variants \
-  --workload-name ensembl116_grch38_final_giab_sites_hash40 \
-  --variants 100957 --passes 9 --warmup 10000 --threads 1 \
-  --output compact
+  --corpus-source /path/to/source.vcf.gz \
+  --workload-name ensembl116_grch38_full_corpus_regulation \
+  --regulatory --variants 4095611 --passes 5 --warmup 100000 \
+  --threads 1 --input-partitions 1 --transcript-distance 5000 \
+  --output compact --fingerprint /tmp/full-public-row-fingerprint.csv
 ```
 
-Add `--regulatory` and use the
-`ensembl116_grch38_final_giab_sites_hash40_regulation` workload name to
-load `duckvep_regulation_features` and record the integrated
-core-feature lane.
+For cumulative HGVS, add `--reference-fasta` and change `--output` to
+`hgvs`. The source revision must be the current checkout; the history
+row records the extension binary, physical/logical model, model source,
+reference, staged corpus, original source, and public-row fingerprint
+receipts.

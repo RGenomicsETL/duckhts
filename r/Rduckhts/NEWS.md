@@ -16,8 +16,8 @@
   resident regulatory/motif rows from the same sweep with NULL HGVS fields;
   bundled DBI coverage prevents production callers from needing a second scan.
   With all 1,383,580 core RegulatoryFeature/MotifFeature intervals loaded, the
-  full-corpus rates are 382,067/s compact, 171,376/s rich, and 90,824/s HGVS for
-  ClinVar, and 1,116,579/s, 466,046/s, and 243,932/s for GIAB
+  full-corpus rates are 380,429/s compact, 171,112/s rich, and 91,184/s HGVS for
+  ClinVar, and 1,106,025/s, 460,958/s, and 244,631/s for GIAB
 - speed up the bundled DuckVEP consequence and cumulative HGVS paths by reusing one
   classification pass and compact prepared facts. Bundled annotation now preserves
   deterministic `annotation_index` values across DuckDB vector and disjoint ordered
