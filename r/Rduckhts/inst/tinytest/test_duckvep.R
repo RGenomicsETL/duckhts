@@ -511,6 +511,36 @@ expect_identical(
 expect_identical(public_annotation$transcript_hgvs, "n.25A>G")
 expect_true(is.na(public_annotation$protein_hgvs))
 
+public_annotation_without_hgvs <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.event_index, a.transcript_hgvs IS NULL AS hgvs_is_null",
+    "FROM duckvep_annotate('duckvep_r_public_events', 'r-hgvs',",
+    "hgvs := NULL, upstream_distance := 0, downstream_distance := 0) a"
+  )
+)
+expect_equal(public_annotation_without_hgvs$event_index, 1)
+expect_true(public_annotation_without_hgvs$hgvs_is_null)
+
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_contradictory_event AS SELECT * FROM (VALUES",
+    "(2::UBIGINT, 1::UINTEGER, 90::UBIGINT, NULL::VARCHAR, '<DEL>'::VARCHAR,",
+    "260::UBIGINT, 'DUP'::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT))",
+    "e(event_index, seq_region, position, reference, alternate, end_position,",
+    "structural_type, copy_change, mate_seq_region, mate_position)"
+  )
+)
+expect_error(
+  dbGetQuery(
+    con,
+    "SELECT * FROM duckvep_annotate('duckvep_r_contradictory_event', 'r-hgvs')"
+  ),
+  pattern = "symbolic alternate and structural_type disagree"
+)
+
 # Output beyond the initial native HGVS scratch capacity must be retried at
 # the reported size rather than exposing a truncated or invalid DuckDB string.
 hgvs_long <- dbGetQuery(

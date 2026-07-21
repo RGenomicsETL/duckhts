@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- make the unified `duckvep_annotate(...)` relation fail when a supported
+  symbolic ALT disagrees with an explicit structural type, rather than
+  silently reinterpreting the event, and make explicit `hgvs := NULL` follow
+  the documented `FALSE` default instead of dropping small-variant rows
 - replace the separate public small-variant, structural-event, breakend, compact,
   rich, and HGVS entry points with one pipe-friendly
   `duckvep_annotate(events_table, model_name, hgvs := false, ...)` relation.

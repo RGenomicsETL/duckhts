@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.0-0.1.0
+- make the bundled `duckvep_annotate(...)` relation reject conflicting
+  supported symbolic ALT and explicit structural-type values, and treat
+  explicit `hgvs := NULL` as the documented `FALSE` default instead of
+  filtering small variants from both annotation lanes
 - bundle the unified `duckvep_annotate(events_table, model_name, hgvs := false,
   ...)` relation and generated `duckvep_so_terms()` lookup. DBI callers can keep
   one narrow mixed small/SV/BND event table, request independent-event HGVS

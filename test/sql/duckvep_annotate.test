@@ -660,6 +660,36 @@ ORDER BY event_index;
 2	small_variant	2048	1
 3	breakend	268435460	1
 
+# An explicit NULL HGVS selector follows the documented FALSE default instead
+# of filtering small variants out of both native lanes.
+query ITII
+SELECT event_index, duckvep_event_kind, consequence_mask,
+       transcript_hgvs IS NULL
+FROM duckvep_annotate(
+  'duckvep_mixed_events', 'structural', hgvs := NULL,
+  upstream_distance := 0, downstream_distance := 0
+)
+ORDER BY event_index;
+----
+1	structural_variant	67108864	1
+2	small_variant	2048	1
+3	breakend	268435460	1
+
+# When both canonical type channels carry a supported structural vocabulary,
+# they must agree. A typed DUP cannot silently reinterpret a symbolic DEL.
+statement ok
+CREATE TABLE duckvep_contradictory_event AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 90::UBIGINT, NULL::VARCHAR, '<DEL>'::VARCHAR,
+   260::UBIGINT, 'DUP'::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+statement error
+SELECT * FROM duckvep_annotate('duckvep_contradictory_event', 'structural');
+----
+symbolic alternate and structural_type disagree
+
 # Unsupported raw symbolic vocabulary and incomplete BND coordinates fail at
 # the relation adapter instead of falling through the literal small-event lane.
 statement ok
