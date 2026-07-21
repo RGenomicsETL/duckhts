@@ -139,8 +139,9 @@ op <- add_option(
   type = "double",
   default = 10000000,
   help = paste(
-    "VEP --max_sv_size for structural-mode records; make the oracle's",
-    "default 10 Mb skip explicit and raise it for larger exact spans [%default]"
+    "VEP --max_sv_size for structural-mode records; the runner passes 10 Mb",
+    "by default so exact spans are not silently skipped, and records the value",
+    "in the oracle receipt. This is not VEP's own 5 kb default [%default]"
   )
 )
 op <- add_option(
@@ -243,6 +244,17 @@ op <- add_option(
     file.path(root, "build", "release", "duckhts.duckdb_extension")
   )
 )
+op <- add_option(
+  op,
+  "--skip-extension-build",
+  dest = "skip_extension_build",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "load --extension without a clean in-tree rebuild and mark emitted",
+    "artifacts as unbound diagnostics [%default]"
+  )
+)
 op <- add_option(op, "--fork", default = as.character(max(1L, min(8L, ncores))))
 op <- add_option(
   op,
@@ -282,6 +294,8 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
+root <- normalizePath(root[[1L]], mustWork = TRUE)
+source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
   die("--event-mode must be small, structural, or breakend")
 }
@@ -305,14 +319,16 @@ if (
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
 fasta_index <- paste0(opt$fasta, ".fai")
-required_files <- opt$extension
+external_model_database <- !nzchar(opt$model_sql) &&
+  !identical(opt$database, ":memory:")
+required_files <- character()
 if (!isTRUE(opt$source_audit_only)) {
   required_files <- c(opt$fasta, fasta_index, required_files)
 }
-external_model_database <- !nzchar(opt$model_sql) &&
-  !identical(opt$database, ":memory:")
 if (external_model_database) {
   required_files <- c(required_files, opt$database)
+} else if (nzchar(opt$model_sql)) {
+  required_files <- c(required_files, opt$model_sql)
 }
 if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
@@ -325,6 +341,47 @@ if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
+}
+source_revision <- if (isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_revision(root)
+} else {
+  duckvep_evidence_assert_checkout(
+    root,
+    context = "DuckVEP executable conformance evidence"
+  )
+}
+if (isTRUE(opt$skip_extension_build)) {
+  if (!file.exists(opt$extension)) {
+    die("missing input: {opt$extension}")
+  }
+  extension_build_binding <- "unbound_diagnostic"
+  extension_sha256 <- duckvep_evidence_sha256(opt$extension)
+} else {
+  extension_receipt <- duckvep_evidence_build_extension(
+    root,
+    opt$extension,
+    source_revision
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
+}
+model_artifact_kind <- if (external_model_database) "duckdb" else "sql"
+model_artifact_path <- if (external_model_database) opt$database else opt$model_sql
+model_artifact_sha256 <- if (nzchar(model_artifact_path)) {
+  duckvep_evidence_sha256(model_artifact_path)
+} else {
+  ""
+}
+reference_fasta_sha256 <- if (!isTRUE(opt$source_audit_only)) {
+  duckvep_evidence_sha256(opt$fasta)
+} else {
+  ""
+}
+reference_fai_sha256 <- if (!isTRUE(opt$source_audit_only)) {
+  duckvep_evidence_sha256(fasta_index)
+} else {
+  ""
 }
 
 fasta_regions <- if (isTRUE(opt$source_audit_only)) {
@@ -1544,8 +1601,29 @@ if (generate_breakend) {
   ))
 }
 
+source_bcf_columns <- character()
+if (
+  identical(opt$event_mode, "structural") &&
+    !generate_structural && nzchar(source_vcf)
+) {
+  source_bcf_columns <- dbGetQuery(
+    con,
+    glue(
+      "DESCRIBE SELECT * FROM read_bcf(
+         {sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential'
+       )"
+    )
+  )$column_name
+}
+source_optional_column <- function(name, missing_sql) {
+  if (name %in% source_bcf_columns) name else missing_sql
+}
+
 structural_source_sql <- if (generate_structural) {
-  "SELECT * FROM duckvep_generated_structural_source"
+  paste(
+    "SELECT *, NULL::INTEGER[] AS cipos, NULL::INTEGER[] AS ciend,",
+    "false AS imprecise FROM duckvep_generated_structural_source"
+  )
 } else if (generate_breakend) {
   "SELECT * FROM duckvep_generated_breakend_source"
 } else if (identical(opt$event_mode, "structural")) {
@@ -1558,6 +1636,11 @@ structural_source_sql <- if (generate_structural) {
        REF AS reference,
        ALT[1] AS alternate,
        upper(INFO_SVTYPE) AS source_svtype,
+       {source_optional_column('INFO_CIPOS', 'NULL::INTEGER[]')} AS cipos,
+       {source_optional_column('INFO_CIEND', 'NULL::INTEGER[]')} AS ciend,
+       coalesce(
+         {source_optional_column('INFO_IMPRECISE', 'false')}, false
+       ) AS imprecise,
        CASE
          WHEN upper(ALT[1]) = '<DUP:TANDEM>' THEN 'TDUP'
          WHEN upper(INFO_SVTYPE) = 'DEL' THEN 'DEL'
@@ -1775,7 +1858,7 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        CASE
          WHEN source_id LIKE 'duckvep-generated:%' THEN source_id
          ELSE concat(
-           'duckvep-sv:', chrom, ':', raw_position, ':', raw_end, ':',
+           'duckvep-sv:', source_id, ':', chrom, ':', raw_position, ':', raw_end, ':',
            structural_type, ':', alternate
          )
        END AS variant_id,
@@ -1791,6 +1874,9 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        structural_type,
        copy_change,
        source_svtype,
+       cipos,
+       ciend,
+       imprecise,
        var_type,
        length_bin
      FROM ranked
@@ -1936,6 +2022,14 @@ if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
   utils::write.csv(eligibility, opt$eligibility_out, row.names = FALSE, na = "")
 }
 if (isTRUE(opt$source_audit_only)) {
+  if (!isTRUE(opt$skip_extension_build)) {
+    duckvep_evidence_assert_checkout(
+      root,
+      source_revision,
+      opt$eligibility_out,
+      context = "DuckVEP source audit evidence"
+    )
+  }
   invisible(dbGetQuery(
     con,
     glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
@@ -1964,6 +2058,14 @@ if (!identical(opt$event_mode, "small")) {
     vcf_header,
     "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position\">",
     "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Structural variant type\">"
+  )
+}
+if (identical(opt$event_mode, "structural")) {
+  vcf_header <- c(
+    vcf_header,
+    "##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description=\"Imprecise structural variation\">",
+    "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS\">",
+    "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END\">"
   )
 }
 writeLines(
@@ -2010,6 +2112,7 @@ sample_vcf_query <- if (identical(opt$event_mode, "small")) {
 } else {
   paste(
     "SELECT v.chrom, v.raw_position AS position, v.raw_end, v.source_svtype,",
+    "v.cipos, v.ciend, v.imprecise,",
     "v.variant_id, v.reference, v.alternate FROM duckvep_sample v",
     "JOIN duckvep_oracle_sequence_order o USING (chrom)",
     "ORDER BY o.fasta_order, v.event_start, v.event_end, v.structural_type"
@@ -2029,7 +2132,36 @@ repeat {
   } else if (identical(opt$event_mode, "breakend")) {
     rep("SVTYPE=BND", nrow(chunk))
   } else {
-    paste0("END=", chunk$raw_end, ";SVTYPE=", chunk$source_svtype)
+    vapply(
+      seq_len(nrow(chunk)),
+      function(index) {
+        fields <- c(
+          paste0("END=", chunk$raw_end[[index]]),
+          paste0("SVTYPE=", chunk$source_svtype[[index]])
+        )
+        if (isTRUE(chunk$imprecise[[index]])) {
+          fields <- c(fields, "IMPRECISE")
+        }
+        cipos <- chunk$cipos[[index]]
+        if (length(cipos) != 0L && !all(is.na(cipos))) {
+          cipos_text <- ifelse(is.na(cipos), ".", as.character(cipos))
+          fields <- c(
+            fields,
+            paste0("CIPOS=", paste(cipos_text, collapse = ","))
+          )
+        }
+        ciend <- chunk$ciend[[index]]
+        if (length(ciend) != 0L && !all(is.na(ciend))) {
+          ciend_text <- ifelse(is.na(ciend), ".", as.character(ciend))
+          fields <- c(
+            fields,
+            paste0("CIEND=", paste(ciend_text, collapse = ","))
+          )
+        }
+        paste(fields, collapse = ";")
+      },
+      character(1L)
+    )
   }
   writeLines(
     paste(
@@ -2041,6 +2173,8 @@ repeat {
 }
 dbClearResult(res)
 close(vc)
+sample_vcf <- normalizePath(sample_vcf, mustWork = TRUE)
+input_vcf_sha256 <- duckvep_evidence_sha256(sample_vcf)
 
 stage_gff <- function(path) {
   if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) {
@@ -2822,6 +2956,15 @@ if (isTRUE(opt$hgvs)) {
        )
        SELECT
          {sql_q(run_date)} AS run_date,
+         {sql_q(source_revision)} AS source_revision,
+         {sql_q(extension_build_binding)} AS extension_build_binding,
+         {sql_q(extension_sha256)} AS extension_sha256,
+         {sql_q(model_artifact_kind)} AS model_artifact_kind,
+         {sql_q(model_artifact_sha256)} AS model_artifact_sha256,
+         {sql_q(reference_fasta_sha256)} AS reference_fasta_sha256,
+         {sql_q(reference_fai_sha256)} AS reference_fai_sha256,
+         {sql_q(source_sha256)} AS source_vcf_sha256,
+         {sql_q(input_vcf_sha256)} AS input_vcf_sha256,
          {sql_q(opt$corpus)} AS corpus,
          {sql_q(opt$model_name)} AS model,
          {sql_q(oracle_version)} AS oracle_version,
@@ -3009,4 +3152,13 @@ if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L &&
     "and {opt$hgvs_out}. Use --allow-hgvs-discordance only for an ",
     "explicitly investigative run."
   ))
+}
+
+if (!isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_assert_checkout(
+    root,
+    source_revision,
+    c(unname(declared_outputs), opt$eligibility_out, opt$sample_vcf),
+    context = "DuckVEP executable conformance evidence"
+  )
 }

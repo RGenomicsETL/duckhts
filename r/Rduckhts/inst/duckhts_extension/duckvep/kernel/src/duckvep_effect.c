@@ -318,6 +318,7 @@ void duckvep_effect_ctx_fill_point_sorted(
     uint32_t                          pos,
     uint32_t                          splice_region_exonic,
     uint32_t                          splice_region_intronic,
+    uint8_t                           repair_rewinds,
     uint16_t                         *exon_rank_io,
     duckvep_effect_ctx_t             *out) {
 
@@ -329,6 +330,7 @@ void duckvep_effect_ctx_fill_point_sorted(
     duckvep_classify_point_sorted(transcripts, exons, tx_idx, pos,
                                   splice_region_exonic,
                                   splice_region_intronic,
+                                  repair_rewinds,
                                   exon_rank_io, &region, &splice);
     duckvep_effect_ctx_set_topology(transcripts, variant_idx, tx_idx,
                                     pos, pos, &region, &splice, out);

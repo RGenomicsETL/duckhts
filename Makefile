@@ -342,12 +342,12 @@ duckvep-statistical-report:
 # Regenerate the real VEP witness output, then replace this revision's rows in
 # the append-only audit ledger. No counts are entered by hand.
 duckvep-record-conformance: test-duckvep-differential
-	Rscript test/duckvep/conformance/statistical_conformance.R \
-		--annotations test/duckvep/conformance/results/witnesses_annotations.parquet \
-		--history test/duckvep/conformance/data/conformance_history.csv
 	Rscript test/duckvep/conformance/hgvs_history.R \
 		--pairs test/duckvep/conformance/results/witnesses_hgvs_pairs.parquet \
 		--history test/duckvep/conformance/data/hgvs_history.csv
+	Rscript test/duckvep/conformance/statistical_conformance.R \
+		--annotations test/duckvep/conformance/results/witnesses_annotations.parquet \
+		--history test/duckvep/conformance/data/conformance_history.csv
 
 duckvep-record-properties:
 	Rscript test/duckvep/conformance/property_history.R \

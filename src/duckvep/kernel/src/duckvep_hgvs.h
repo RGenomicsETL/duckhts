@@ -283,7 +283,9 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_base(
  * n.12_13insAC) into a caller-owned buffer. The transcript stable identifier
  * is deliberately a relational projection outside the kernel. `required_out`
  * receives the byte count excluding NUL, including when capacity is zero or
- * truncation occurs. */
+ * truncation occurs. A missing or undersized output buffer returns
+ * DUCKVEP_HGVS_BUFFER_TOO_SMALL; callers may reserve required_out + 1 bytes
+ * and retry. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_render_basic(
     const duckvep_hgvs_dna_fact_t *fact,
     char                           *buffer,
@@ -300,6 +302,19 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
     const duckvep_sequence_delta_t *delta,
     duckvep_hgvs_protein_fact_t    *out);
 
+/* Build the subset of HGVSp facts completely represented by the consequence
+ * result's proven single-residue sidecar. This avoids reconstructing a coding
+ * context after consequence annotation has already established the peptide
+ * position and both residues. Stop-loss/extension, frameshift, and any
+ * multi-residue operation remain on duckvep_hgvs_protein_fact_build(). */
+DUCKVEP_INTERNAL_API duckvep_hgvs_status_t
+duckvep_hgvs_protein_fact_build_single_residue(
+    uint32_t                         position1,
+    uint8_t                          reference,
+    uint8_t                          alternate,
+    uint32_t                         consequence_flags,
+    duckvep_hgvs_protein_fact_t     *out);
+
 /* Return one one-letter peptide residue from the fact's clipped REF/ALT
  * sequence after any protein-level 3-prime rotation. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_base(
@@ -311,7 +326,10 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_base(
 /* Render the allocation-free VEP-style protein suffix (for example
  * p.(Arg97ProfsTer23)).  Ensembl's default three-letter amino-acid form is
  * intentional; protein identifiers remain a relational projection outside
- * the kernel. */
+ * the kernel. Facts built by the general interpreter borrow their coding
+ * context; proven single-residue facts are self-contained. A missing or
+ * undersized output buffer returns DUCKVEP_HGVS_BUFFER_TOO_SMALL and reports
+ * the required byte count excluding NUL. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_render(
     const duckvep_hgvs_protein_fact_t *fact,
     int                                predicted,

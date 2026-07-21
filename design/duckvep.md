@@ -69,7 +69,7 @@ The data placement follows the cost and lifetime of each fact:
 | Transcript spans, exon maps, prepared CDS/flanks, sparse sequence edits, and compact regulatory/motif intervals | One immutable named C model, because every variant reuses them. |
 | Variant alleles | Sorted batches, because genome-scale inputs stream and coordinate order makes candidate discovery nearly linear. |
 | dbSNP, ClinVar, gnomAD, scores, and interval tracks | DuckDB/Parquet streams or bounded tiles, because these sources can dwarf the transcript model and may be selected independently. |
-| Exon cursors, candidate lists, sequence scratch, and output buffers | One worker-owned workspace, because mutable state must not be shared across DuckDB workers or named models. |
+| Exon cursors, candidate lists, sequence scratch, and output buffers | One workspace borrowed exclusively by each active scalar callback, because mutable state must not be shared across concurrent callbacks or named models. |
 
 Five rules keep the design understandable:
 
@@ -417,10 +417,12 @@ coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 
 - A named model owns transcript, exon, sequence, regulation/motif SoAs, and both interval
   indexes and is immutable after publication.
-- The registry is tied to one DuckDB database. Dropping a model fails while a worker pins
-  it.
-- Each worker owns its workspace, exon cursor state, allele pool, result storage, mutable
-  faidx handle, and sequence scratch. The model pins open read descriptors for the validated
+- The registry is tied to one DuckDB database. Dropping a model fails while an active
+  callback pins it.
+- Each active scalar callback borrows an exclusive workspace containing exon cursor state,
+  allele pool, result storage, mutable faidx handle, and sequence scratch. The workspace
+  returns to the model pool after the callback; it is not permanently assigned to an input
+  partition. The model pins open read descriptors for the validated
   FASTA, `.fai`, and optional `.gzi`. Linux workers reopen those descriptors through
   `/proc/self/fd`; Windows workers use the resolved source while the model retains a
   deny-write handle. Other POSIX systems use independent handles on the resolved source and
@@ -449,8 +451,12 @@ equal-length containing span retains VEP's endpoint-UTR comparison behavior. The
 copies one DuckDB vector into compact arrays, splits on
 model/contig/window/order changes, seeds the first candidate set through cgranges, and
 advances independent sorted transcript and regulation/motif sweeps. The SNV point path
-keeps a per-transcript exon rank and advances it monotonically; other transcript spans use
-the exhaustive classifier. Regulation/motif rows use exact event overlap with no transcript
+keeps a per-transcript exon rank and advances it monotonically; normalized multi-base
+features keep a separate exon rank. A normalized-coordinate rewind within one vector uses
+a rewind-capable seek. If that vector was non-monotone, the workspace resets both rank
+arrays before its next vector: a transcript skipped after an earlier forward jump may still
+hold an ahead rank even when the next vector begins after the prior vector's final event.
+Regulation/motif rows use exact event overlap with no transcript
 flank. Both sweeps share the generic interval-candidate helper, but own separate active
 sets because their cardinalities differ. Transcript fast/exhaustive paths and the complete
 feature sweep are property-checked against independent or brute-force oracles.
@@ -697,11 +703,16 @@ is added.
 
 The implemented internal layer makes that ownership explicit:
 
+- `duckvep_model_open(...)` owns the canonical prepared transcript, exon, and sequence
+  views used by both consequence and HGVS. It derives the first complete reference stop
+  once per coding transcript, or validates a supplied immutable cache, so per-row HGVSp
+  does not rescan an unchanged CDS;
 - consequence evaluation and HGVS both consume the same prepared allele and CDS edit-set
   helpers; the hot consequence path does not construct a wider formatting object;
 - `duckvep_transcript_edit_t` is an HGVS-facing carrier built from that prepared allele and
-  one transcript. It adds VEP's endpoint-clipped transcript-slice coordinates without
-  trimming, reinterpreting, or clamping the semantic allele;
+  one transcript. Projection first adds VEP's endpoint-clipped transcript-slice
+  coordinates without trimming, reinterpreting, or clamping the semantic allele; CDS
+  projection is attached lazily only when reference validation or protein replay needs it;
 - typed transcript-coordinate facts distinguish coding `c.` from non-coding `n.` edits,
   preserve insertion and range geometry, and render into caller-owned bounded buffers;
 - VEP-compatible transcript 3-prime shifting consumes VEP's exact constrained +/-1000
@@ -709,7 +720,10 @@ The implemented internal layer makes that ownership explicit:
   lookup use a separately bounded wider view. Neither creates a second allele authority or
   changes the shift bytes; and
 - typed protein facts describe equality, substitution, deletion, insertion, delins,
-  duplication, frameshift, start loss, and extension before any string is allocated.
+  duplication, frameshift, start loss, and extension before any string is allocated. A
+  single CDS edit is exposed as a virtual alternate sequence, and first-stop scans traverse
+  unchanged reference spans plus the edit payload rather than materializing the full
+  alternate CDS.
 
 `duckvep_annotate_hgvs(...)` exposes those mechanics as a cumulative SQL result: the first
 16 fields are the compact consequence row, followed by transcript/protein suffixes,
@@ -720,7 +734,15 @@ an existing indexed FASTA through an exact sequence-region ordinal/name/length r
 the loader validates the index without creating or modifying it, while each annotation
 worker owns its faidx handle and reusable reference-window storage. One bounded fetch
 supplies distinct borrowed views for shifting and lookup. The adapter performs
-one candidate sweep and renders into DuckDB-owned output vectors.
+one candidate sweep and renders into DuckDB-owned output vectors. One worker-owned scratch
+buffer handles transcript and protein strings in a single render pass; it grows and retries
+only when a result does not fit.
+
+Consequence predicate flags are reusable evidence, not a closed-world serialization of the
+later HGVS replay. Positive frameshift evidence can complete a length-changing delta, and
+absence of frameshift is conclusive for a length-preserving CDS edit. A length-changing
+splice-overlapping edit without that positive flag must run the complete delta evaluator;
+otherwise VEP-compatible frameshifts can be misrendered as premature stops or delins.
 
 This implemented surface is not yet a full VEP-HGVS compatibility claim. It covers
 independent literal small variants and returns explicit unresolved reasons when reference,
@@ -794,6 +816,19 @@ belong as ignored arguments in the consequence-kernel API.
 
 ## Validation and performance
 
+The registered VEP-116 consequence engine is closed for its declared contract: supported
+independent literal small variants, typed exact single-locus structural events, paired
+breakends, core RegulatoryFeature/MotifFeature objects, and the assemblies/species/model
+receipts represented by the checked differentials below. “Closed” means new work must
+preserve this implementation as proven infrastructure and extend it through an explicit
+new input/output contract. It does not claim phased or compound consequences, raw bounded
+`<CNV:TR>` expansion, producer-specific symbolic/BND parsing, supplementary databases, or
+an untested model receipt. Strict VEP-116 parity here means nominal `POS`/`END`
+consequences while preserving `CIPOS`/`CIEND` as relational uncertainty metadata; it does
+not invent a confidence-aware consequence policy that VEP itself lacks. Held-out fuzzing
+and executable-VEP comparisons remain permanent regression gates rather than an
+indefinitely open prerequisite for every release.
+
 - `make test-duckvep-kernel` runs fixed and randomized pure-C properties; ASan and UBSan
   execute the same suite.
 - `make test-duckvep-kernel-statistical` raises randomized targets to an explicit seed and
@@ -837,7 +872,13 @@ belong as ignored arguments in the consequence-kernel API.
   1, 2, 6, 11, 17, 21, 22, and X and compared 2,140,911 emitted transcript pairs with the
   executable indexed VEP 116 cache. Every pair was resolved and exact, with no missing or
   extra emission. This is evidence for the sampled exact single-locus states, not a claim
-  for imprecise coordinates, STR payloads, or untested species.
+  for raw `<CNV:TR>` expansion, producer-specific symbolic encodings, or untested species.
+  The separate source-pinned `CIPOS`/`CIEND` contract retains inner/outer coordinates but
+  uses nominal `POS`/`END` for VEP-116 consequence terms. The checked-in 12-record
+  `structural_confidence_grch38.vcf` witness pairs nominal and imprecise forms of all six
+  executable exact single-locus kinds. It matched all 466 VEP transcript pairs, and each
+  engine produced equal nominal/imprecise consequence multisets for all six pairs while
+  the oracle VCF retained `IMPRECISE`, `CIPOS`, and `CIEND`.
 - The paired-BND campaign generated 1,004 same- and cross-chromosome events on chromosomes
   1, 2, 7, 21, and X and matched all 91,428 isolated executable-VEP transcript pairs.
   BND oracle buffers contain one event because VEP's chromosome-blind mate-coordinate tree
@@ -847,10 +888,24 @@ belong as ignored arguments in the consequence-kernel API.
   (120,224 pairs). Both are exact with no unresolved, extra, missing, or discordant row.
   The structural corpus observes every one of the six regulatory/motif SO terms across
   exact, containing, and partial feature geometries. These are declared sampled
-  distributions, not evidence for imprecise SV coordinates or untested funcgen releases.
+  distributions, not evidence for confidence-aware policy beyond VEP's nominal-coordinate
+  terms or for untested funcgen releases.
 - `make bench-duckvep-release-parquet` reads the official Ensembl variation consequence
   VCF through typed CSQ columns and records complete versus consequence-only Parquet size,
   checksum, cardinality, and elapsed time without committing the large artifacts.
+- Pinned shards of those official release VCFs are the preferred fast CI oracle for
+  already-observed alleles: compare DuckVEP transcript consequence rows directly with the
+  release-specific CSQ projection without starting a Perl VEP process. They complement,
+  rather than replace, executable-VEP witnesses and generated corpora because a known-
+  variant release cannot observe absent allele shapes, alternative VEP flags, phased
+  combinations, or every structural state.
+- Release engineering should publish receipt-hashed DuckDB model artifacts outside git,
+  keyed by Ensembl/Ensembl Genomes release, species, assembly, transcript-filter policy,
+  source relation hashes, and kernel/model ABI. A Zenodo record with a versioned manifest,
+  checksums, and selected small CI shards would let scheduled/full CI reuse the exact model
+  while ordinary builds remain network-free. The publication pipeline is separate from the
+  consequence authority: downloaded models must pass the same immutable receipt and model-
+  open validation as locally compiled models.
 - Throughput reports must state input variants, candidate/object pairs, output rows and
   bytes, threads, model, and machine. Site-level rate and cohort haplotype-update rate are
   different measurements.
@@ -874,6 +929,18 @@ rendered bytes, thread count and core pinning, model/corpus identity, and source
 Sorting-plus-execution is recorded separately from execution over already ordered input.
 A single independent edit is never relabelled as a haplotype benchmark.
 
+Independent-event parallel execution uses disjoint internally ordered input branches.
+Each concurrent scalar callback borrows one exclusive workspace from the resident model's
+pool; mutable sweep state, result builders, faidx handles, and reference windows are not
+shared, while the immutable model is. Stable active-set compaction preserves the ordered
+contents of each variant's result list, so its per-input `annotation_index` is stable
+across DuckDB vector and partition starts. The benchmark's commutative fingerprints prove
+equality of the `(input_variant_index, annotation_index, public row)` multiset, not global
+emission order. Consumers needing canonical order use
+`ORDER BY input_variant_index, annotation_index` after the parallel union. Haplotype
+execution cannot use arbitrary coordinate cuts because a cut may bisect a
+transcript/phase-set state.
+
 The generated reports are the numeric authority. At the latest tested ancestor for each
 corpus, the declared GRCh38 dbSNP, GIAB, ClinVar coding, and ClinVar cross-chromosome
 samples, GRCh37, and *P. falciparum* are exact against their indexed caches. The two
@@ -882,20 +949,33 @@ extra, missing, or discordant row. The separate NMD-plugin differential is exact
 68,554 eligible transcript pairs, including the 29,416 states both implementations leave
 unresolved.
 
-On the final 644,427-transcript GRCh38 model, the current adjacent one-core compact
-measurements are about 841,000 input alleles/s for the transcript-only GIAB topology sample
-and 801,000/s when the same run also loads all 1,383,580 admitted regulatory/motif features
-and emits their overlaps. The latter produces about 9.36 million output rows/s. The nearest
-recorded coding-focused baselines are about 332,000/s for repeated coding SNVs, 112,000/s
-for repeated coding non-SNVs, and 135,000/s for the repeated mixed coding set. The
-paired-breakend lane reaches about 74,000 semantic events/s and 6.92 million emitted
-transcript rows/s. These include stable-API list materialization and aggregation but exclude
-model load and input staging. The one-million-input-allele target is not met on the final
-model; output-row rates are a second denominator, not a substitute for the site-rate target.
-Exact revisions, checksums, row counts, resource measurements, and conditions live in the
-generated [conformance report](../benchmarks/duckvep_conformance.md) and
+On the final 644,427-transcript GRCh38 model, the nearest recorded one-core compact
+baselines preceding source `e25c151` are about 841,000 input alleles/s for the
+transcript-only GIAB topology sample, 801,000/s for its regulation/motif form, 332,000/s
+for repeated coding SNVs, 112,000/s for repeated coding non-SNVs, 135,000/s for the
+repeated mixed coding set, and 74,000 semantic BND events/s. They include stable-API list
+materialization and aggregation but exclude model load and input staging. Because the
+current hot-path source has not rerun those identical workloads, they are historical
+nearest baselines rather than current-head no-regression evidence. The current-revision
+measurement is the annotation-dense matrix below. The one-million-input-allele target is
+not met on every final-model workload; output-row rates are a second denominator, not a
+substitute for the site-rate target. Exact revisions, checksums, row counts, resource
+measurements, and conditions live in the generated
+[conformance report](../benchmarks/duckvep_conformance.md) and
 [throughput report](../benchmarks/duckvep_throughput.md).
 
-Open conformance and throughput work is tracked at
+The annotation-dense ClinVar matrix is the stricter execution check: at the default
+5,000-base transcript distance it expands 517,097 alleles into 26,518,787 rows at
+245,535 input alleles/s on one pinned P core and 818,191 input alleles/s on four pinned
+P cores with four explicit ordered partitions. The full public-row fingerprints match.
+Those commutative fingerprints establish the same per-input indexed row multiset, not
+global emission order.
+Source ownership makes the resident model immutable and shared; GNU `time -v` observed a
+7.03 MiB process peak-RSS increase, not a model-sized step, in this one/four-branch pair.
+That process measurement is not allocation attribution. At 50,000 bases the same inputs
+expand to 88,784,213 rows and the observed four-branch RSS premium remains 8.16 MiB.
+
+The closed consequence-conformance and dense-throughput campaigns are tracked at
 https://github.com/RGenomicsETL/duckhts/issues/93 and
-https://github.com/RGenomicsETL/duckhts/issues/95.
+https://github.com/RGenomicsETL/duckhts/issues/95. Phased execution remains a distinct
+semantic vertical at https://github.com/RGenomicsETL/duckhts/issues/92.

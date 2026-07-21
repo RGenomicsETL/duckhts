@@ -476,6 +476,20 @@ expect_identical(
   c("not_applicable", "not_applicable")
 )
 
+# Output beyond the initial native HGVS scratch capacity must be retried at
+# the reported size rather than exposing a truncated or invalid DuckDB string.
+hgvs_long <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs, a.transcript_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs', 1::UINTEGER, 124::UBIGINT,",
+    "'A', 'C' || repeat('A', 1405), 0::UBIGINT)) AS u(a)"
+  )
+)
+expect_identical(hgvs_long$transcript_hgvs_status, "supported")
+expect_true(nchar(hgvs_long$transcript_hgvs, type = "bytes") > 1400L)
+
 # A BGZF reference exercises the retained .gzi descriptor and worker-local
 # compressed-reference handle through the public DBI surface.
 compressed_reference <- tempfile("duckvep-reference-", fileext = ".fa.gz")
@@ -695,6 +709,24 @@ expect_identical(hgvs_coding$transcript_hgvs, "c.25A>G")
 expect_identical(hgvs_coding$protein_hgvs, "p.Lys9Glu")
 expect_identical(hgvs_coding$transcript_hgvs_status, "supported")
 expect_identical(hgvs_coding$protein_hgvs_status, "supported")
+
+# Protein HGVS uses its own exact-size retry after the initial native scratch
+# fills. Exercise that adapter path through DBI with an in-frame insertion.
+hgvs_long_protein <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.transcript_hgvs, a.protein_hgvs,",
+    "a.transcript_hgvs_status, a.protein_hgvs_status",
+    "FROM unnest(duckvep_annotate_hgvs(",
+    "'r-hgvs-coding', 1::UINTEGER, 124::UBIGINT,",
+    "'A', 'A' || repeat('GCT', 100), 0::UBIGINT",
+    ")) AS u(a)"
+  )
+)
+expect_true(nchar(hgvs_long_protein$transcript_hgvs, type = "bytes") > 256L)
+expect_true(nchar(hgvs_long_protein$protein_hgvs, type = "bytes") > 256L)
+expect_identical(hgvs_long_protein$transcript_hgvs_status, "supported")
+expect_identical(hgvs_long_protein$protein_hgvs_status, "supported")
 
 hgvs_directional <- dbGetQuery(
   con,
@@ -918,6 +950,21 @@ expect_identical(
     "transcription_factor_binding_site"
   )
 )
+
+hgvs_regulation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT a.regulation_feature_index, a.overlap_object_code,",
+    "a.transcript_hgvs, a.protein_hgvs, a.transcript_hgvs_status,",
+    "a.protein_hgvs_status FROM unnest(duckvep_annotate_hgvs(",
+    "'r-ensembl-mirna', 0::UINTEGER, 3::UBIGINT,",
+    "'G', 'A', 0::UBIGINT)) u(a)",
+    "WHERE a.regulation_feature_index IS NOT NULL"
+  )
+)
+expect_equal(hgvs_regulation$regulation_feature_index, 0)
+expect_equal(hgvs_regulation$overlap_object_code, 1)
+expect_true(all(is.na(hgvs_regulation[, 3:6])))
 
 breakend_regulation <- dbGetQuery(
   con,

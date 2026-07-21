@@ -11,7 +11,24 @@ root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
 history <- read.csv(
   file.path(root, "benchmarks", "data", "duckvep_throughput.csv"),
   stringsAsFactors = FALSE,
-  check.names = FALSE
+  check.names = FALSE,
+  colClasses = c(
+    source_revision = "character",
+    checksum_value = "character",
+    extension_sha256 = "character",
+    model_database_sha256 = "character",
+    model_logical_sha256 = "character",
+    model_source_manifest_sha256 = "character",
+    model_reference_sha256 = "character",
+    model_region_ordinal_sha256 = "character",
+    variants_database_sha256 = "character",
+    corpus_source_sha256 = "character",
+    reference_fasta_sha256 = "character",
+    reference_fai_sha256 = "character",
+    reference_gzi_sha256 = "character",
+    fingerprint_xor_hash = "character",
+    fingerprint_sum_hash = "character"
+  )
 )
 history$revision <- substr(history$source_revision, 1, 8)
 resources <- read.csv(
@@ -20,6 +37,24 @@ resources <- read.csv(
   check.names = FALSE
 )
 resources$revision <- substr(resources$source_revision, 1, 8)
+dense_threading <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_dense_threading.csv"),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(
+    source_revision = "character",
+    xor_hash = "character",
+    sum_hash = "character"
+  )
+)
+dense_threading$revision <- substr(dense_threading$source_revision, 1, 8)
+stopifnot(
+  length(unique(dense_threading$rss_measurement)) == 1L,
+  identical(
+    unique(dense_threading$rss_measurement),
+    "GNU /usr/bin/time -v process maximum resident set size"
+  )
+)
 
 nearest_tested_ancestor <- function(revisions) {
   revisions <- unique(revisions[nzchar(revisions)])
@@ -91,10 +126,11 @@ scan preserving insertion order; they remain only as historical measurements.
 
 ```{r runs}
 table <- history[, c(
-  "run_date", "revision", "workload", "output_mode", "threads", "variants",
-  "transcripts", "exons", "regulation_features", "annotated_rows", "passes", "min_seconds",
-  "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant",
-  "cpu", "cpu_affinity"
+  "run_date", "revision", "workload", "output_mode", "threads",
+  "input_partitions", "transcript_distance", "variants", "transcripts", "exons",
+  "regulation_features", "annotated_rows", "passes", "min_seconds",
+  "median_seconds", "max_seconds", "variants_per_second", "ns_per_variant", "cpu",
+  "cpu_affinity"
 )]
 table$output_rows_per_second <- round(
   table$annotated_rows / table$median_seconds
@@ -130,11 +166,479 @@ separate measurements and should not be compared as if only the engine changed.
 records an externally pinned run, while a range records a scheduler-visible CPU
 set.
 
+## Annotation-dense transcript distance and ordered parallel partitions
+
+```{r dense-threading}
+dense_keys <- paste(
+  dense_threading$xor_hash,
+  dense_threading$sum_hash,
+  sep = ":"
+)
+fingerprints_per_distance <- vapply(
+  split(dense_keys, dense_threading$transcript_distance),
+  function(keys) length(unique(keys)),
+  integer(1L)
+)
+stopifnot(all(fingerprints_per_distance == 1L))
+
+single_seconds <- setNames(
+  dense_threading$median_seconds[dense_threading$threads == 1L],
+  dense_threading$transcript_distance[dense_threading$threads == 1L]
+)
+single_rss <- setNames(
+  dense_threading$maximum_rss_kib[dense_threading$threads == 1L],
+  dense_threading$transcript_distance[dense_threading$threads == 1L]
+)
+dense_table <- data.frame(
+  revision = dense_threading$revision,
+  transcript_distance = format(
+    dense_threading$transcript_distance,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  threads = dense_threading$threads,
+  ordered_partitions = dense_threading$input_partitions,
+  input_alleles = format(
+    dense_threading$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    dense_threading$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  median_seconds = dense_threading$median_seconds,
+  input_alleles_per_second = format(
+    round(dense_threading$variants / dense_threading$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(dense_threading$annotated_rows / dense_threading$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  speedup = round(
+    unname(single_seconds[as.character(dense_threading$transcript_distance)]) /
+      dense_threading$median_seconds,
+    2L
+  ),
+  peak_RSS_GiB = round(dense_threading$maximum_rss_kib / 1024^2, 3L),
+  RSS_above_one_thread_MiB = round(
+    (
+      dense_threading$maximum_rss_kib -
+        unname(single_rss[as.character(dense_threading$transcript_distance)])
+    ) / 1024,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(dense_table, row.names = FALSE)
+```
+
+This is the release-116 GRCh38 model with all 644,427 admitted transcripts,
+5,068,416 exon memberships, and 1,383,580 regulation/motif intervals. The
+517,097 ClinVar alleles were selected from 318 annotation-dense genomic tiles,
+not diluted with transcript-sparse whole-genome positions. The largest REF and
+ALT alleles are 9,974 and 9,971 bases. Each row is the median of five complete
+passes after a 100,000-allele warmup. Model loading and corpus staging are
+outside the timed pass; compact list production, `unnest`, and final aggregation
+are included.
+
+One-thread runs are pinned to physical P core 2. Four-thread runs are pinned to
+physical P cores 2, 4, 6, and 8 and explicitly split the already ordered input
+into four disjoint coordinate ranges. Merely setting DuckDB `threads = 4` does
+not split one scalar-function branch. Each concurrent scalar callback borrows an
+exclusive mutable workspace from the shared immutable model; a partition is not
+permanently bound to one workspace. `input_variant_index` is the global input
+ordinal, while `annotation_index` is the one-based position inside each variant's
+result list. Consumers that require a canonical materialized row order use
+`ORDER BY input_variant_index, annotation_index` after the parallel union.
+
+The one- and four-partition runs have identical XOR and sum fingerprints over
+every `(input_variant_index, annotation_index, public row)` at each tested
+distance. These commutative fingerprints prove row-multiset and per-input-list
+equality, not global emission order. The 50,000-base case emits 88,784,213 rows
+and still scales from `r format(round(517097 / 4.161), big.mark = ",")` to
+`r format(round(517097 / 1.342), big.mark = ",")` input alleles/s. Peak RSS is
+GNU `/usr/bin/time -v` maximum resident set size for the complete one-process
+R/DuckDB invocation, including model load, warmup, and all five passes. Across
+the matrix, the largest observed four-thread premium over its one-thread pair is
+`r sprintf("%.2f MiB", max(dense_table$RSS_above_one_thread_MiB))`. Source
+ownership establishes that callbacks share the immutable model; the RSS result
+shows no model-sized process increase for these four-branch runs but is not
+allocation attribution. Wider transcript distance increases candidate pairs and
+output cardinality, not model ownership. These observations apply to the tested
+0, 5,000, 10,000, and 50,000-base configurations; arbitrary partition counts
+still require measurement.
+
+The benchmark source accepts every transcript distance from zero through
+`UINT32_MAX`; no classifier or sweep buffer is sized for a 5,000-base special
+case. VEP's separate fixed 5,000-base paired-breakend close-to-feature rule is a
+biological compatibility predicate applied after transcript discovery and must
+not be confused with the configurable transcript-distance search.
+
+## Routine optimization backlog
+
+The declared fixed-event consequence contract no longer depends on another
+semantic rewrite. Future speed work should preserve the conformance and
+full-row-fingerprint gates while attacking measured costs in this order:
+
+1. write compact SoA fields directly into DuckDB result vectors, avoiding the
+   compact-list-to-`unnest` materialization round trip;
+2. make the common coding-SNV route leaner while retaining one generated effect
+   composition authority;
+3. reuse genomic-to-transcript, exon, splice-window, and coding projection facts
+   that are currently rediscovered by adjacent predicates;
+4. separate HGVS fact production from string rendering and reuse one normalized
+   shift result across HGVSc/HGVSn/HGVSp;
+5. expose a persistent sorted table-function sweep so one logical input stream
+   does not reseed at every DuckDB vector edge; and
+6. make disjoint ordered partitions a first-class planner surface, keeping
+   stable identifiers numeric and joining presentation strings late.
+
+Exploratory local profiling suggested low branch-miss and cache-miss rates in the
+candidate sweep and a small candidate-discovery share of dense runtime. That profile
+is not retained as a checked comparable benchmark, so it is an avenue-selection hint,
+not a quantitative claim. Broad SIMD work is therefore not the first optimization
+target. Each item above needs an adjacent exact-revision comparison on the same model,
+corpus, transcript distance, output denominator, core affinity, and fingerprint before
+it can be called an improvement.
+
+## Historical full-corpus transcript-only diagnostic
+
+```{r full-literal-corpora}
+full_workload_labels <- c(
+  ensembl116_grch38_clinvar_20260706_full_literal =
+    "ClinVar 2026-07-06",
+  ensembl116_grch38_giab_hg002_v4_2_1_full_literal =
+    "GIAB HG002 v4.2.1"
+)
+full_runs <- history[
+  history$workload %in% names(full_workload_labels) &
+    history$output_mode %in% c("compact", "rich", "hgvs") &
+    history$threads == 1L &
+    history$input_partitions == 1L &
+    history$transcript_distance == 5000,
+  ,
+  drop = FALSE
+]
+full_revision <- nearest_tested_ancestor(full_runs$source_revision)
+full_current <- full_runs[
+  full_runs$source_revision == full_revision,
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(full_current) == 6L,
+  all(vapply(
+    split(full_current$output_mode, full_current$workload),
+    function(x) setequal(x, c("compact", "rich", "hgvs")),
+    logical(1L)
+  ))
+)
+mode_order <- c("compact", "rich", "hgvs")
+full_current <- full_current[order(
+  match(full_current$workload, names(full_workload_labels)),
+  match(full_current$output_mode, mode_order)
+), , drop = FALSE]
+compact_seconds <- setNames(
+  full_current$median_seconds[full_current$output_mode == "compact"],
+  full_current$workload[full_current$output_mode == "compact"]
+)
+full_table <- data.frame(
+  revision = full_current$revision,
+  corpus = unname(full_workload_labels[full_current$workload]),
+  output = full_current$output_mode,
+  input_alleles = format(
+    full_current$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    full_current$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  rows_per_allele = round(
+    full_current$annotated_rows / full_current$variants,
+    2L
+  ),
+  median_seconds = full_current$median_seconds,
+  alleles_per_second = format(
+    round(full_current$variants_per_second),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(full_current$annotated_rows / full_current$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  elapsed_vs_compact = round(
+    full_current$median_seconds /
+      unname(compact_seconds[full_current$workload]),
+    2L
+  ),
+  projected_700M_allele_hours = round(
+    700e6 / full_current$variants_per_second / 3600,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(full_table, row.names = FALSE)
+```
+
+These are full prepared literal-allele relations, not annotation-density samples.
+They are retained historical diagnostics from before core regulation/motif loading;
+they are not the production comparison.
+The ClinVar 2026-07-06 source contains 4,439,617 records and 4,438,515 source
+ALTs; 4,438,467 literal, model-addressable alleles enter the benchmark
+(4,134,694 SNVs and 303,773 non-SNVs). The longest retained REF and ALT are
+9,983 and 9,971 bases. The GIAB HG002 GRCh38 v4.2.1 benchmark source contains
+4,048,342 records and 4,096,123 source ALTs; 4,095,611 literal,
+model-addressable alleles enter the benchmark (3,463,000 SNVs and 632,611
+non-SNVs). Its longest retained REF and ALT are 9,704 and 3,686 bases.
+
+Every row uses the complete Ensembl 116 GRCh38 transcript model, a 5,000-base
+transcript distance, one ordered input partition, one thread pinned to CPU 2,
+a 100,000-allele warmup, and five complete timed passes. Model loading, VCF
+staging, and the untimed corpus receipt are excluded. Regulatory and motif
+features are not loaded in these rows. The timed query includes candidate
+discovery, consequence calculation, list materialization, `unnest`, and the
+mode-specific checksum aggregation.
+
+The 126,733,707 ClinVar rows are 28.55 transcript rows per input allele; the
+47,629,345 GIAB rows are 11.63 per allele. Consequently, the same HGVS engine
+reports 90,594 input alleles/s on ClinVar and 244,222/s on GIAB while sustaining
+2.59 and 2.84 million expanded rows/s respectively. At those measured rates,
+700 million input alleles project to 2.15 or 0.80 single-core hours; that range
+is an input-density sensitivity, not a gnomAD runtime claim. The full ClinVar
+HGVS pass also supplied the 1,406-base-ALT regression that found the former
+scratch-buffer over-read; all five recorded HGVS passes complete after the
+exact-size retry fix.
+
+## Full-corpus core VEP model
+
+```{r full-core-vep-corpora}
+core_workload_labels <- c(
+  ensembl116_grch38_clinvar_20260706_full_literal_regulation =
+    "ClinVar 2026-07-06",
+  ensembl116_grch38_giab_hg002_v4_2_1_full_literal_regulation =
+    "GIAB HG002 v4.2.1"
+)
+core_runs <- history[
+  history$workload %in% names(core_workload_labels) &
+    history$output_mode %in% c("compact", "rich", "hgvs") &
+    history$threads == 1L &
+    history$input_partitions == 1L &
+    history$transcript_distance == 5000,
+  ,
+  drop = FALSE
+]
+core_revision <- nearest_tested_ancestor(core_runs$source_revision)
+core_current <- core_runs[
+  core_runs$source_revision == core_revision,
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(core_current) == 6L,
+  all(core_current$regulation_features == 1383580),
+  all(
+    core_current$extension_build_binding == "htslib_distclean_make_release"
+  ),
+  all(nchar(core_current$extension_sha256) == 64L),
+  all(nchar(core_current$model_database_sha256) == 64L),
+  all(nchar(core_current$model_logical_sha256) == 64L),
+  all(nchar(core_current$model_source_manifest_sha256) == 64L),
+  all(nchar(core_current$model_reference_sha256) == 64L),
+  all(nchar(core_current$model_region_ordinal_sha256) == 64L),
+  all(nchar(core_current$variants_database_sha256) == 64L),
+  all(nchar(core_current$corpus_source_sha256) == 64L),
+  all(core_current$fingerprint_schema_version == 2L),
+  all(nzchar(core_current$fingerprint_xor_hash)),
+  all(nzchar(core_current$fingerprint_sum_hash)),
+  all(core_current$model_source_version == "116"),
+  all(core_current$model_assembly == "GRCh38"),
+  all(core_current$variants == core_current$corpus_supported_alt_count),
+  length(unique(core_current$extension_sha256)) == 1L,
+  length(unique(core_current$model_database_sha256)) == 1L,
+  length(unique(core_current$model_logical_sha256)) == 1L,
+  all(vapply(
+    split(core_current$output_mode, core_current$workload),
+    function(x) setequal(x, c("compact", "rich", "hgvs")),
+    logical(1L)
+  ))
+)
+core_current <- core_current[order(
+  match(core_current$workload, names(core_workload_labels)),
+  match(core_current$output_mode, mode_order)
+), , drop = FALSE]
+core_value <- function(workload, output_mode, column) {
+  value <- core_current[
+    core_current$workload == workload &
+      core_current$output_mode == output_mode,
+    column
+  ]
+  stopifnot(length(value) == 1L)
+  value[[1L]]
+}
+format_rate <- function(value) {
+  format(round(value), big.mark = ",", scientific = FALSE)
+}
+clinvar_core <- names(core_workload_labels)[[1L]]
+giab_core <- names(core_workload_labels)[[2L]]
+core_rates <- c(
+  clinvar_compact = format_rate(core_value(
+    clinvar_core, "compact", "variants_per_second"
+  )),
+  clinvar_rich = format_rate(core_value(
+    clinvar_core, "rich", "variants_per_second"
+  )),
+  clinvar_hgvs = format_rate(core_value(
+    clinvar_core, "hgvs", "variants_per_second"
+  )),
+  giab_compact = format_rate(core_value(
+    giab_core, "compact", "variants_per_second"
+  )),
+  giab_rich = format_rate(core_value(
+    giab_core, "rich", "variants_per_second"
+  )),
+  giab_hgvs = format_rate(core_value(
+    giab_core, "hgvs", "variants_per_second"
+  ))
+)
+core_hgvs_hours <- c(
+  clinvar = 700e6 / core_value(
+    clinvar_core, "hgvs", "variants_per_second"
+  ) / 3600,
+  giab = 700e6 / core_value(
+    giab_core, "hgvs", "variants_per_second"
+  ) / 3600
+)
+giab_core_compact_range <- c(
+  core_value(giab_core, "compact", "min_seconds"),
+  core_value(giab_core, "compact", "max_seconds")
+)
+core_compact_seconds <- setNames(
+  core_current$median_seconds[core_current$output_mode == "compact"],
+  core_current$workload[core_current$output_mode == "compact"]
+)
+core_table <- data.frame(
+  revision = core_current$revision,
+  corpus = unname(core_workload_labels[core_current$workload]),
+  output = core_current$output_mode,
+  resident_regulation_motif = format(
+    core_current$regulation_features,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  input_alleles = format(
+    core_current$variants,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows = format(
+    core_current$annotated_rows,
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  rows_per_allele = round(
+    core_current$annotated_rows / core_current$variants,
+    2L
+  ),
+  median_seconds = core_current$median_seconds,
+  alleles_per_second = format(
+    round(core_current$variants_per_second),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  output_rows_per_second = format(
+    round(core_current$annotated_rows / core_current$median_seconds),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  elapsed_vs_compact = round(
+    core_current$median_seconds /
+      unname(core_compact_seconds[core_current$workload]),
+    2L
+  ),
+  projected_700M_allele_hours = round(
+    700e6 / core_current$variants_per_second / 3600,
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(core_table, row.names = FALSE)
+
+core_receipts <- data.frame(
+  revision = core_current$revision,
+  corpus = unname(core_workload_labels[core_current$workload]),
+  output = core_current$output_mode,
+  extension_build = core_current$extension_build_binding,
+  extension_binary = substr(core_current$extension_sha256, 1L, 12L),
+  physical_model = substr(core_current$model_database_sha256, 1L, 12L),
+  logical_model = substr(core_current$model_logical_sha256, 1L, 12L),
+  corpus_source = substr(core_current$corpus_source_sha256, 1L, 12L),
+  staged_corpus = substr(core_current$variants_database_sha256, 1L, 12L),
+  public_row_xor = core_current$fingerprint_xor_hash,
+  public_row_sum = core_current$fingerprint_sum_hash,
+  stringsAsFactors = FALSE
+)
+knitr::kable(core_receipts, row.names = FALSE)
+```
+
+This is the complete resident core-VEP model used for independent small
+variants: 644,427 transcripts plus 380,818 RegulatoryFeature and 1,002,762
+MotifFeature intervals. It is a production core-consequence workload, not an
+end-to-end product benchmark: VCF/Parquet ingestion and external exact,
+positional, gene, interval, frequency, and clinical-resource joins remain
+separate DuckDB stages.
+
+The core model emits 126,930,027 rows for ClinVar and 47,835,851 for GIAB,
+including 196,320 and 206,506 regulation/motif rows respectively. The pinned
+single-core rates are `r core_rates[["clinvar_compact"]]` compact,
+`r core_rates[["clinvar_rich"]]` rich, and
+`r core_rates[["clinvar_hgvs"]]` cumulative-HGVS alleles/s for ClinVar; GIAB
+reaches `r core_rates[["giab_compact"]]`, `r core_rates[["giab_rich"]]`, and
+`r core_rates[["giab_hgvs"]]`/s. At the measured HGVS rates, 700 million input
+alleles project to `r sprintf("%.2f", core_hgvs_hours[["clinvar"]])` or
+`r sprintf("%.2f", core_hgvs_hours[["giab"]])` single-core hours before
+supplementary SQL joins.
+
+Every row in the production-core table is tied to exact source revision
+`r core_revision`,
+a vendored-htslib `distclean` followed by an in-tree `make release` rebuild and
+its extension-binary digest, the
+physical and logical model digests,
+the Ensembl source-manifest and logical-reference digests, the model-region
+ordinal digest, the staged-corpus digest, and the original VCF digest. The HGVS
+rows additionally record the physical FASTA and FAI digests. The receipt table
+shows shortened artifact digests for readability and the complete schema-version-2
+public-row XOR/sum fingerprints; the full SHA-256 values are retained in
+`benchmarks/data/duckvep_throughput.csv`.
+
+`duckvep_annotate_hgvs(...)` preserves interval-feature rows from the same
+candidate sweep and leaves their transcript/protein HGVS fields NULL. The HGVS
+byte checksum is therefore unchanged while output cardinality includes every
+regulatory/motif row; SQL and R regressions pin that pass-through. The earlier
+transcript-only GIAB run ranged from 3.592 to 6.477 seconds across five passes,
+whereas this core-model run ranged from
+`r sprintf("%.3f", giab_core_compact_range[[1L]])` to
+`r sprintf("%.3f", giab_core_compact_range[[2L]])` seconds. The apparently
+faster compact result is not attributed to loading more intervals; use the
+stable absolute core-model result rather than treating non-adjacent noisy runs
+as an optimization comparison.
+
 ## Independent-event HGVS materialization
 
-```{r hgvs-throughput}
+```{r hgvs-throughput, results='asis'}
 hgvs_runs <- history[
-  history$output_mode %in% c("rich", "hgvs") & history$threads == 1L,
+  history$output_mode %in% c("rich", "hgvs") &
+    history$workload == "ensembl116_grch38_final_coding_mixed_200k" &
+    history$threads == 1L,
   ,
   drop = FALSE
 ]
@@ -169,6 +673,25 @@ if (nrow(hgvs_runs)) {
       "variants", "annotated_rows", "median_seconds", "variants_per_second",
       "checksum_kind"
     )]
+    comparison_group <- paste(
+      comparable$host,
+      comparable$workload,
+      comparable$variants,
+      comparable$threads,
+      comparable$cpu_affinity,
+      sep = "\034"
+    )
+    rich_seconds <- setNames(
+      comparable$median_seconds[comparable$output_mode == "rich"],
+      comparison_group[comparable$output_mode == "rich"]
+    )
+    hgvs_table$output_rows_per_second <- round(
+      comparable$annotated_rows / comparable$median_seconds
+    )
+    hgvs_table$elapsed_vs_rich <- round(
+      comparable$median_seconds / unname(rich_seconds[comparison_group]),
+      2L
+    )
     hgvs_table$variants <- format(
       hgvs_table$variants,
       big.mark = ",",
@@ -180,10 +703,77 @@ if (nrow(hgvs_runs)) {
       scientific = FALSE
     )
     hgvs_table$variants_per_second <- round(hgvs_table$variants_per_second)
-    knitr::kable(hgvs_table, row.names = FALSE)
+    hgvs_table$output_rows_per_second <- format(
+      hgvs_table$output_rows_per_second,
+      big.mark = ",",
+      scientific = FALSE
+    )
+    cat(knitr::kable(hgvs_table, row.names = FALSE), sep = "\n")
+    cat("\n\n")
+
+    current_hgvs <- comparable[comparable$output_mode == "hgvs", , drop = FALSE]
+    if (nrow(current_hgvs) == 1L) {
+      same_workload <- hgvs_runs$output_mode == "hgvs" &
+        hgvs_runs$source_revision != comparison_revision &
+        hgvs_runs$host == current_hgvs$host &
+        hgvs_runs$workload == current_hgvs$workload &
+        hgvs_runs$variants == current_hgvs$variants &
+        hgvs_runs$threads == current_hgvs$threads &
+        hgvs_runs$cpu_affinity == current_hgvs$cpu_affinity
+      previous_revision <- nearest_tested_ancestor(
+        hgvs_runs$source_revision[same_workload]
+      )
+      previous_hgvs <- hgvs_runs[
+        same_workload & hgvs_runs$source_revision == previous_revision,
+        ,
+        drop = FALSE
+      ]
+      if (nrow(previous_hgvs) == 1L) {
+        change <- data.frame(
+          baseline_revision = previous_hgvs$revision,
+          current_revision = current_hgvs$revision,
+          input_variants = format(
+            current_hgvs$variants,
+            big.mark = ",",
+            scientific = FALSE
+          ),
+          output_rows = format(
+            current_hgvs$annotated_rows,
+            big.mark = ",",
+            scientific = FALSE
+          ),
+          baseline_seconds = previous_hgvs$median_seconds,
+          current_seconds = current_hgvs$median_seconds,
+          speedup = round(
+            previous_hgvs$median_seconds / current_hgvs$median_seconds,
+            2L
+          ),
+          current_input_variants_per_second = round(
+            current_hgvs$variants_per_second
+          ),
+          current_output_rows_per_second = format(
+            round(current_hgvs$annotated_rows / current_hgvs$median_seconds),
+            big.mark = ",",
+            scientific = FALSE
+          )
+        )
+        cat(knitr::kable(change, row.names = FALSE), sep = "\n")
+        cat("\n")
+      }
+    }
   }
 }
 ```
+
+[Ferro-hgvs v0.9.0](https://github.com/fulcrumgenomics/ferro-hgvs/tree/278e2c11134e3b49067d0c334f650c7c29db9cbe)
+reports 5.1 million patterns/s for parsing already rendered HGVS and
+a 77,000 patterns/s full-population normalization peak on an Apple M2 Max. Those
+are useful independent reference points but not the operation timed here:
+DuckVEP begins with genomic alleles, discovers every overlapping transcript,
+computes consequences, shifts and renders transcript/protein HGVS, and emits
+28.78 transcript rows per input in this workload. The table therefore reports
+both input alleles/s and expanded transcript-HGVS rows/s; it does not present a
+direct cross-machine speed ranking.
 
 The HGVS row materializes transcript/protein strings and status fields and
 checks their total byte count. Compare it only with the rich consequence row at
@@ -337,8 +927,8 @@ if (nrow(breakend) == 6L) {
       "rejected full-result sort",
       "pre-literal transcript A/B",
       "pre-literal transcript + regulation A/B",
-      "current transcript A/B",
-      "current transcript + regulation A/B"
+      "post-literal transcript A/B",
+      "post-literal transcript + regulation A/B"
     ),
     revision = breakend$revision,
     paired_events = format(
@@ -375,13 +965,15 @@ if (nrow(breakend) == 6L) {
 This measurement used the complete receipt-hashed GRCh38 model, compact output,
 one DuckDB thread, 15 timed passes, and a 10,000-event warmup. Model loading and
 staging were outside the timed region. The historical baseline and rejected-sort
-rows used `taskset -c 2`; the direct pre-literal/current A/B rows were rebuilt
-from their exact revisions and run consecutively with `taskset -c 4`. The
+rows used `taskset -c 2`; the direct pre-literal/post-literal A/B rows were rebuilt
+from their exact revisions and run consecutively with `taskset -c 4`. Here
+"post-literal" is revision `r substr(comparison_revision, 1L, 8L)`, not the report's
+current source; source `e25c151` has not rerun this identical BND workload. The
 site-rate headline alone would be misleading: the transcript-only workload emits
 93.83 rows per event, and the checksum covers every emitted mask. The
 `f97101e1` intermediate sorted all 18.8 million already variant-major transcript
-rows and was rejected. The current adapter instead sorts only the smaller
-feature stream and merges the two sorted streams linearly.
+rows and was rejected. The accepted comparison revision instead sorts only the
+smaller feature stream and merges the two sorted streams linearly.
 
 The direct transcript-only A/B is
 `r sprintf("%.3f", breakend_current_median)` seconds versus
@@ -391,12 +983,12 @@ regulation A/B is `r sprintf("%.3f", breakend_regulation_median)` versus
 `r sprintf("%.3f", breakend_pre_literal_regulation_median)` seconds
 (`r sprintf("%+.1f%%", breakend_regulation_change)`). Loading 1,383,580
 regulation/motif intervals and emitting 110,880 additional rows costs
-`r sprintf("%+.1f%%", breakend_regulation_overhead)` relative to the current
+`r sprintf("%+.1f%%", breakend_regulation_overhead)` relative to the post-literal
 transcript-only lane and preserves
 `r sprintf("%.2f", breakend_regulation_rows_per_second / 1e6)` million output
 rows/s.
 
-An earlier current-head run pinned to CPU 2 reported a 3.386-second median while
+An earlier run of the comparison revision pinned to CPU 2 reported a 3.386-second median while
 its fastest pass still completed in 2.712 seconds. Host inspection found three
 long-running unpinned CPU-bound workers, and a clean CPU-4 rerun returned to the
 2.6-second range. That contaminated row is not retained in the ledger. The
@@ -750,13 +1342,17 @@ comparison is required:
 
 ```sh
 taskset -c 2 Rscript benchmarks/duckvep_throughput.R \
-  --database /path/to/staged.duckdb \
+  --database /path/to/model.duckdb \
+  --variants-database /path/to/staged-corpus.duckdb \
   --variants-table bench_variants \
-  --workload-name ensembl116_grch38_final_giab_sites_hash40 \
-  --variants 100957 --passes 9 --warmup 10000 --threads 1 \
-  --output compact
+  --corpus-source /path/to/source.vcf.gz \
+  --workload-name ensembl116_grch38_full_corpus_regulation \
+  --regulatory --variants 4095611 --passes 5 --warmup 100000 \
+  --threads 1 --input-partitions 1 --transcript-distance 5000 \
+  --output compact --fingerprint /tmp/full-public-row-fingerprint.csv
 ```
 
-Add `--regulatory` and use the
-`ensembl116_grch38_final_giab_sites_hash40_regulation` workload name to load
-`duckvep_regulation_features` and record the integrated core-feature lane.
+For cumulative HGVS, add `--reference-fasta` and change `--output` to `hgvs`.
+The source revision must be the current checkout; the history row records the
+extension binary, physical/logical model, model source, reference, staged
+corpus, original source, and public-row fingerprint receipts.

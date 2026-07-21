@@ -19,6 +19,7 @@
 #ifndef DUCKVEP_CODON_H
 #define DUCKVEP_CODON_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -38,6 +39,15 @@ int duckvep_codon_table_supported(duckvep_codon_table_t table);
  * table id. The caller retains no ownership; NULL means unsupported. This is
  * the bulk-translation path after bases and table id have been validated. */
 const char *duckvep_codon_table_amino_acids(duckvep_codon_table_t table);
+
+/* Return the first raw-CDS stop as a one-based peptide position, or zero when
+ * no complete codon is a stop. N-containing codons translate to X. The return
+ * value is false only for an invalid base, unsupported table, or NULL output. */
+int duckvep_cds_first_stop_position1(
+    const uint8_t          *cds,
+    size_t                  cds_length,
+    duckvep_codon_table_t   table,
+    uint32_t               *position1_out);
 
 /* Coding-change classification bits. */
 enum {
@@ -64,6 +74,15 @@ char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table);
  * translation start. */
 duckvep_codon_result_t duckvep_codon_change(const char *ref3, const char *alt3,
                                             duckvep_codon_table_t table);
+
+/* Equivalent classifier for transcript-oriented codons already normalized to
+ * uppercase A/C/G/T/N by the validated model/edit path. N remains invalid; the
+ * caller must not pass any other byte. This avoids repeating six general ASCII
+ * normalization operations in the coding-SNV hot loop. */
+duckvep_codon_result_t duckvep_codon_change_prepared(
+    const char *ref3,
+    const char *alt3,
+    duckvep_codon_table_t table);
 
 #ifdef __cplusplus
 }

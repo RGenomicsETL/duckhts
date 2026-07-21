@@ -1,7 +1,7 @@
 # DuckVEP implementation mental model and frontier
 
 Status: current explanatory companion to [`duckvep.md`](duckvep.md), updated
-2026-07-19. This file explains the implementation deeply enough to rebuild the
+2026-07-20. This file explains the implementation deeply enough to rebuild the
 human mental model; it is not a second specification. The concise current contract
 is [`duckvep.md`](duckvep.md); the public SQL contract is
 [`functions.yaml`](../functions.yaml); code, tests, generated conformance reports,
@@ -351,7 +351,7 @@ The registry belongs to one DuckDB database. Named models are immutable and may
 coexist in the same process. Ordinals are only meaningful inside one model.
 Annotation pins a model; dropping it fails while pinned.
 
-Each worker has its own workspace:
+Each concurrent annotation callback borrows one exclusive workspace for its lifetime:
 
 - active transcript indexes and a span-candidate buffer, each sized to the
   largest transcript run on a contig;
@@ -363,8 +363,20 @@ Each worker has its own workspace:
 - caller-owned result storage.
 
 No mutable FASTA handle, htslib iterator, active set, sequence cache, or result
-builder is shared between workers. This is the core thread-safety rule and also
-allows different models to execute in the same process.
+builder is shared between concurrent callbacks. Returned workspaces may be reused by a
+later callback. This is the core thread-safety rule and also allows different models to
+execute in the same process.
+
+Independent-event parallelism uses disjoint, internally ordered input branches. Each
+concurrent scalar callback borrows one exclusive workspace from the immutable model's
+pool; a partition is not permanently bound to a workspace, and the current scalar sweep
+restarts at DuckDB vector edges. Stable active-set compaction preserves transcript and
+feature order inside each variant list, so the per-input `annotation_index` does not
+depend on the vector or ordered branch that processed it. A final global row order is
+still an SQL property: consumers that need one use
+`ORDER BY input_variant_index, annotation_index` after the parallel union. The scalar
+adapter does not manufacture these branches merely because `SET threads` is greater than
+one; the caller or a future table-function planner must expose them explicitly.
 
 The measured final GRCh38 artifact is 1.608 GiB. In the pinned benchmark process,
 loading it took 3.047 seconds; RSS rose from 0.114 GiB to 4.125 GiB and peaked at
@@ -400,6 +412,13 @@ The adapter is vectorized in the DuckDB sense, but its expression-local state do
 not survive arbitrary future vectors. It therefore seeds/restarts a sweep at each
 DuckDB vector. This is already a real batch path, but it is not yet a whole-file
 stream with explicit carry state.
+
+Worker workspaces can be returned to the pool and reused. Point and normalized-span
+exon ranks therefore have an explicit cross-vector invariant: after a vector whose
+prepared coordinates are non-monotone, both rank arrays are reset before the next
+non-empty vector. Comparing only the next vector's first coordinate with the prior
+vector's final coordinate is insufficient because a transcript skipped after an earlier
+forward jump can retain a rank beyond its next admitted event.
 
 ### Step 2: prepare event geometry once
 
@@ -539,11 +558,14 @@ model while emitting every compact transcript consequence. Candidate pairs,
 output rows, output bytes, and transcript density must accompany the input rate.
 
 The one-transcript smoke after PR #116 reached more than three million inputs/s.
-That only shows the adapter loop is not intrinsically slow. The current evidence is
-the final 644,427-transcript, 5,068,416-exon GRCh38 model on one pinned i5-13500
-core. The generated [throughput report](../benchmarks/duckvep_throughput.md) includes
-the stable DuckDB adapter, compact list materialization, `unnest`, aggregation, and
-an explicit `ORDER BY`; model loading and input staging are outside the timed pass.
+That only shows the adapter loop is not intrinsically slow. The nearest historical
+one-core baselines use the final 644,427-transcript, 5,068,416-exon GRCh38 model on one
+pinned i5-13500 core. The generated
+[throughput report](../benchmarks/duckvep_throughput.md) includes the stable DuckDB
+adapter, compact list materialization, `unnest`, aggregation, and an explicit input
+`ORDER BY`; model loading and input staging are outside the timed pass. These exact
+workloads predate source `e25c151`, whose directly comparable current-revision evidence
+is the annotation-dense matrix below.
 
 | Workload | Input alleles | Output rows | Median seconds | Input alleles/s | Output rows/s |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -560,12 +582,13 @@ rate and expanded work: the mixed lane writes almost 29 transcript rows per alle
 and still exceeds 3.8 million output rows/s, but 135,044 input alleles/s is far below
 the declared one-million input floor.
 
-The floor therefore remains open on the final model even for the ordinary GIAB
-lane, and the coding-heavy gap is large. Supplementary joins and final rendering are
-still unmeasured end to end. Every optimization must name and measure the work it
-removes—candidate visits, model gathers, projection, sequence bytes, translation,
-row writes, or DuckDB materialization—rather than substituting a smaller fixture or
-a different denominator.
+Those historical rows do not establish current-head regression status. They do show
+that the floor remained open on the final model and that the coding-heavy gap was large;
+the identical workloads still need rerunning after a future hot-path change when a direct
+comparison is required. Supplementary joins and final rendering are unmeasured end to
+end. Every optimization must name and measure the work it removes—candidate visits,
+model gathers, projection, sequence bytes, translation, row writes, or DuckDB
+materialization—rather than substituting a smaller fixture or a different denominator.
 
 At realistic density, the likely costs are:
 
@@ -712,16 +735,30 @@ The generated [conformance report](../benchmarks/duckvep_conformance.md) is buil
 the append-only CSV ledgers and is the current numeric authority. Exact sampled
 corpora remain evidence for their declared distributions, not a license to stop
 randomized state exploration.
-Phased interactions, more species, raw repeat expansion, imprecise structural
-coordinates, and real fusion corpora require their own generated distributions.
-Those are not all missing consequence predicates: VEP 116 evaluates structural
-confidence intervals and inserted-sequence payloads at nominal `POS`/`END`, while
+Phased interactions, more species, raw repeat expansion, producer-specific structural
+encodings, and real fusion corpora require their own generated distributions.
+Those are not all missing consequence predicates: VEP 116 evaluates structural events
+with confidence metadata and inserted-sequence payloads at nominal `POS`/`END`, while
 bounded repeat expansion is an input-preparation operation that can turn a
 `<CNV:TR>` record into an ordinary literal allele. Core regulatory/motif coverage
 now has exact GIAB-small-variant and generated-SV distributions, but other funcgen
 releases, species, paired BNDs, and uncertain event representations remain separate
 evidence. Independent small-variant exploration also continues; exact frozen
 corpora are checkpoints, not a stopping rule.
+
+For the declared VEP-116 consequence contract, the consequence engine is now treated as
+proven infrastructure rather than an open predicate-development project. Concretely,
+that statement covers the registered 41-term rule program, supported independent literal
+small variants, typed exact single-locus structural events, paired breakends, core
+RegulatoryFeature/MotifFeature objects, the declared assemblies/species/model receipts,
+and the recorded generated and real-data distributions above. It does not claim phased
+or compound consequences, raw bounded `<CNV:TR>` expansion, producer-specific
+symbolic/BND parsing, genomic HGVS, supplementary databases, or a species/model not named
+by a receipt. `CIPOS`/`CIEND` remain preserved uncertainty metadata while strict VEP-116
+consequences use nominal `POS`/`END`; no additional confidence-aware consequence policy is
+being claimed. Randomized properties and executable-VEP differentials remain permanent
+regression gates; new distributions extend the evidence without making day-to-day work
+wait on an unbounded claim of exhaustive biology.
 
 ## 10. Phased haplotypes and Haplosaurus
 
@@ -805,6 +842,11 @@ Structural `STR` remains a distinct event for provenance and later HGVS but uses
 VEP 116's tandem-repeat predicate algebra: copy gain, insertion, and amplification.
 When VEP can expand a bounded `<CNV:TR>` from repeat metadata below its structural
 size limit, that literal allele instead follows the ordinary small-variant path.
+The structural differential explicitly passes and receipts
+`VEP --max_sv_size 10000000` so large exact spans in its distribution are not silently
+skipped. VEP's own 5,000-base default is also the bounded-repeat expansion limit;
+neither value is the transcript-distance control or the separate fixed BND admission
+distance.
 
 `duckvep_annotate_sv(...)` and its compact form execute single-locus events through
 the sorted transcript sweep. `duckvep_annotate_breakend(...)` and its compact form
@@ -840,6 +882,15 @@ not inspect the inserted payload. They remain necessary for lossless round trip,
 HGVS, uncertainty-aware interpretation, and fusion work. Phased SVs and small edits
 must feed the same haplotype grouping model rather than creating a second
 compound-event engine.
+
+The executable regression for this rule is
+`test/duckvep/conformance/data/structural_confidence_grch38.vcf`. Its 12 records pair
+nominal and `IMPRECISE;CIPOS;CIEND` forms of CNV, DEL, DUP, tandem DUP, INV, and INS.
+The pinned VEP 116 cache and DuckVEP matched all 466 transcript pairs; within each
+engine, all six nominal/imprecise consequence multisets were identical. The
+conformance runner retains the declared source ID and confidence fields when it writes
+the sampled oracle VCF, so this test cannot accidentally erase the state it claims
+to exercise.
 
 The append-only public SO mask now binds all 41 terms in VEP 116's
 `%OVERLAP_CONSEQUENCES` registry. Six regulatory/TFBS terms have a separate
@@ -946,6 +997,27 @@ order and may not share mutable model/workspace/source iterators. Haplotype
 partitions need transcript-end and phase-set-aware splits; arbitrary range splits
 can cut an active haplotype and are not equivalent.
 
+The implemented independent-event adapter has been exercised as one ordered branch and
+as four disjoint ordered branches on pinned physical P cores. Concurrent callbacks borrow
+exclusive workspaces while sharing one immutable model. Their commutative full-row
+fingerprints prove the same `(input_variant_index, annotation_index, public row)` multiset
+at transcript distances 0, 5,000, 10,000, and 50,000 bases; they do not prove global
+emission order. The widest run expands 517,097 inputs into 88,784,213 rows. Source
+inspection establishes immutable model sharing, while the process-level RSS measurement
+shows that no model-sized increase was observed for this model, corpus, and four-branch
+configuration. It is not allocation attribution or permission to share mutable faidx
+handles, iterators, reference windows, or haplotype state.
+
+At source `e25c151`, the default 5,000-base run improves from 2.106 seconds on one
+P core (245,535 input alleles/s; 12.59 million output rows/s) to 0.632 seconds on
+four P cores and four ordered partitions (818,191 input alleles/s; 41.96 million
+output rows/s). Peak RSS changes from 5,446,084 to 5,453,280 KiB. At 50,000 bases,
+the same corpus improves from 4.161 to 1.342 seconds while emitting 88,784,213 rows;
+the four-worker RSS premium is 8.16 MiB. The rendered throughput report is the numeric
+authority for all four distances and their row-multiset fingerprints. Peak RSS is GNU
+`/usr/bin/time -v` maximum resident set size for the complete one-process R/DuckDB run;
+it is not a per-allocation C-heap measurement.
+
 The current scalar adapter restarts at DuckDB vector edges. A stateful table-function
 or another stable-lifecycle surface could preserve the sweep across chunks, but it
 must be explicit and ABI-stable. DuckDB Appender versus direct vector production
@@ -1033,13 +1105,15 @@ term-specific consequence engine.
 
 ## 16. Remaining implementation frontier, in dependency order
 
-### A. Continued statistical small-variant exploration
+### A. Consequence conformance as a permanent regression gate
 
 Issue: https://github.com/RGenomicsETL/duckhts/issues/93
 
 The declared dbSNP, GIAB, both GRCh38 ClinVar, GRCh37, and *P. falciparum*
-samples are exact. That closes the retained discrepancies; it does not close the
-state space. Fresh seeded distributions must continue. The
+samples are exact, as are the declared structural, paired-breakend, regulation/motif,
+NMD, and long-literal distributions. The registered VEP-116 consequence program is
+closed for those contracts. Fresh seeded distributions continue as regression and
+scope-extension evidence rather than an open-ended release blocker. The
 anti-overfitting claim depends on random placement around exon-intron junctions,
 CDS ends, transcript ends, rare transcript attributes, allele lengths, strands,
 and call-order states—not only a growing regression file. Any new discrepancy must
@@ -1048,26 +1122,40 @@ sequence fact, SO rule, VEP source-selection difference, or intentionally
 unsupported input before code changes. Do not add a term-shaped branch whose only
 evidence is the witness that requested it.
 
-### B. Final-model coding throughput and memory
+### B. Routine consequence throughput engineering
 
 Issue: https://github.com/RGenomicsETL/duckhts/issues/95
 
-The final GRCh38 receipt, model load/RSS accounting, GIAB topology workload, and
-coding-heavy workloads now exist. At the current implementation revision, the
-ordinary compact GIAB lane reaches about 841,000 input alleles/s. Loading all
-1,383,580 admitted regulatory/motif intervals and emitting their overlaps on the
-same stream reaches about 801,000/s. The exact mixed coding lane's nearest recorded
-baseline reaches about 135,000/s, with almost 29 output rows per allele. The
-one-million input target is not met.
+The final GRCh38 receipt, model load/RSS accounting, topology, coding-heavy, and
+annotation-dense workloads now exist. Performance remains a normal engineering backlog;
+it no longer justifies changing consequence semantics or delaying the next semantic
+vertical. The original one-million-input-allele single-core target is not met on every
+full-model workload, so reports continue to publish input rate beside candidate and
+output-row denominators rather than declaring the engine finished in a performance sense.
 
-Add stage counters and hardware counters before another rewrite: candidates,
+Retain stage counters and hardware counters for future work: candidates,
 topology-only pairs, CDS projections, splice projections, edited and translated
 bases, result bytes, branch misses, cache misses, and DuckDB materialization time.
-Profile fresh and warm sequence access separately. Then optimize the measured
-dominant work while retaining output cardinality and mask checksums. Persistent
-sweep state across DuckDB vectors and direct-vector/table-function materialization
-remain experiments constrained to the stable API; they are not reasons to fork the
-consequence semantics.
+Profile fresh and warm sequence access separately. The current ranked avenues are:
+
+1. write compact SoA columns directly into DuckDB vectors instead of building a rich
+   internal row and then materializing a nested stable-API list;
+2. keep the common coding-SNV path lean while centralizing its effect composition so the
+   optimized and generalized routes cannot drift;
+3. reuse prepared point-classifier facts where profiling shows repeated exon/splice work;
+4. separate HGVS fact production from string rendering and reuse allele-level genomic
+   shift work across transcript rows where VEP semantics permit it;
+5. preserve sweep state across DuckDB vectors or expose a stateful table-function surface;
+6. make disjoint ordered partition construction a first-class execution helper and keep
+   strings, stable identifiers, and supplementary joins late.
+
+These are profiling-informed avenues, not promises that SIMD is the universal answer.
+Exploratory local sampling suggested low branch-miss and cache-miss rates in the candidate
+sweep and a small candidate-discovery share, but it is not retained as a checked comparable
+benchmark and therefore supports no quantitative performance claim. Exon projection,
+variable edits, and nested result writing remain gather/branch/materialization work. Every
+optimization retains full-row fingerprints, VEP differentials, held-out properties, and
+RSS accounting.
 
 ### C. More species and genetic-code combinations
 
@@ -1125,12 +1213,29 @@ The shared lower-level authorities are implemented: one prepared event defines s
 allele geometry, and one CDS edit-set authority drives sequence replay. Consequence uses
 those lower-level facts directly. Independent-event DNA/protein HGVS wraps them in
 `duckvep_transcript_edit_t`, an HGVS-facing carrier that additionally records VEP's
-endpoint-clipped transcript-slice coordinates. This wider carrier is not constructed in
-the consequence hot path, and the phased executor does not exist yet; the future phased
+endpoint-clipped transcript-slice coordinates. Transcript projection and CDS attachment
+are separate stages: the adapter builds the former for HGVSc and attaches the latter lazily
+for no-FASTA reference validation or HGVSp. This wider carrier is not constructed in the
+consequence hot path, and the phased executor does not exist yet; the future phased
 executor must consume the same prepared CDS edit set rather than acquire another
 allele-trimming or coordinate authority. Typed `c.`/`n.` facts, VEP's genomic-reference
 transcript 3-prime shift, typed `p.` facts, and allocation-free renderers have deterministic
 and randomized pure-C coverage.
+
+The kernel-opened model is the canonical prepared model exposed internally to the SQL
+adapter. It derives or validates one immutable first-stop coordinate for each coding CDS.
+The coding context exposes a single edit as a virtual alternate CDS, scans unchanged spans
+and the edited payload codon-by-codon, and borrows the cached reference stop when the edit
+cannot affect it. Transcript and protein strings share one worker-owned render buffer and
+normally need one render call. These are execution choices beneath the typed edit/fact
+contracts; neither HGVS nor the adapter gains a second transcript or sequence authority.
+
+The consequence predicate sidecar is only complete enough to skip a later delta when CDS
+length is unchanged or it positively records frameshift. A missing frameshift bit on a
+length-changing splice overlap is not negative evidence: the full delta must run. This
+condition is centralized in
+`duckvep_sequence_delta_consequence_flags_complete_for_hgvs(...)` so future local-CSQ and
+phased consumers cannot repeat the closed-world mistake.
 
 `duckvep_annotate_hgvs(...)` is the cumulative public adapter. It returns the compact
 consequence row plus DNA/protein suffixes and structured status/reason fields from the same
@@ -1171,16 +1276,16 @@ contract applies, and independent apply-then-diff sequence replay.
 
 ## 17. The next recommended vertical
 
-With the declared VEP-116 consequence predicates closed, the dependency order is:
+With the declared VEP-116 consequence predicates and independent-event
+`c.`/`n.`/`p.` HGVS distribution closed, the next semantic vertical is the phased
+executor:
 
-1. close executable-VEP differential and cumulative performance evidence for the published
-   independent-event `c.`/`n.`/`p.` HGVS surface, then add a bcftools `--local-csq`
-   projection over the same transcript-edit facts;
-2. use that local projection for VariantStory/Talos parity without pretending Talos's
-   explicit `--local-csq` calls require haplotype execution;
-3. drive the same edit IR from the phased executor and compare it with VEP
-   Haplosaurus and haplotype-aware bcftools csq; and
-4. render haplotype HGVS from the completed alternate transcript/CDS/protein state.
+1. add the bcftools `--local-csq` field projection over the existing independent-event
+   transcript-edit facts when VariantStory/Talos compatibility needs it; this is an edge
+   projection, not another consequence engine;
+2. drive the shared edit IR from GT/PS-grouped transcript state and compare complete
+   attributed results with VEP Haplosaurus and haplotype-aware bcftools csq; and
+3. render haplotype HGVS from the completed alternate transcript/CDS/protein state.
 
 The phased executor remains tracked in
 https://github.com/RGenomicsETL/duckhts/issues/92. Independent small variants,

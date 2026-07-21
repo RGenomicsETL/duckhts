@@ -56,16 +56,13 @@ duckvep_impact_t duckvep_so_bit_impact(duckvep_so_bit_t bit) {
 }
 
 duckvep_impact_t duckvep_so_impact(uint64_t mask) {
-    duckvep_impact_t best = DUCKVEP_IMPACT_MODIFIER;
-    while (mask != 0u) {
-        unsigned bit = duckvep_first_set_bit(mask);
-        if (bit < (unsigned)DUCKVEP_SO_BIT_COUNT) {
-            duckvep_impact_t imp = k_so[bit].impact;
-            if (imp > best) best = imp;
-        }
-        mask &= mask - UINT64_C(1);
-    }
-    return best;
+    if ((mask & k_so_impact_high_mask) != 0u)
+        return DUCKVEP_IMPACT_HIGH;
+    if ((mask & k_so_impact_moderate_mask) != 0u)
+        return DUCKVEP_IMPACT_MODERATE;
+    if ((mask & k_so_impact_low_mask) != 0u)
+        return DUCKVEP_IMPACT_LOW;
+    return DUCKVEP_IMPACT_MODIFIER;
 }
 
 const char *duckvep_impact_name(duckvep_impact_t impact) {

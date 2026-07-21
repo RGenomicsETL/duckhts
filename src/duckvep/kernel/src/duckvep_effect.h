@@ -147,6 +147,7 @@ void duckvep_effect_ctx_fill_point_sorted(
     uint32_t                          pos,
     uint32_t                          splice_region_exonic,
     uint32_t                          splice_region_intronic,
+    uint8_t                           repair_rewinds,
     uint16_t                         *exon_rank_io,
     duckvep_effect_ctx_t             *out);
 

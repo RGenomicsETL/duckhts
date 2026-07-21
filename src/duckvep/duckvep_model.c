@@ -1,5 +1,5 @@
 #include "duckvep_model.h"
-#include "kernel/src/duckvep_codon.h"
+#include "kernel/src/duckvep_model_internal.h"
 
 #include <htslib/faidx.h>
 
@@ -1993,6 +1993,12 @@ duckvep_model_load_queries(duckdb_connection connection,
 		duckvep_owned_model_destroy(model);
 		return 0;
 	}
+	/* The kernel validates the borrowed model once and owns the canonical
+	 * immutable projection caches. Publish those prepared views to the adapter
+	 * instead of retaining a second transcript authority that lacks the caches. */
+	model->transcripts = *duckvep_model_prepared_transcripts(model->kernel);
+	model->exons = *duckvep_model_prepared_exons(model->kernel);
+	model->sequences = *duckvep_model_prepared_sequences(model->kernel);
 	if (!duckvep_owned_model_index(model, error, error_size)) {
 		duckvep_owned_model_destroy(model);
 		return 0;

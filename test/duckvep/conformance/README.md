@@ -170,12 +170,42 @@ concurrently without copying the model or serializing on a DuckDB file lock. Eve
 VCF ID contains its state, source transcript ordinal, coordinates, and operation; retaining
 `--sample-vcf` makes any discovered state directly reproducible.
 
+Structural mode passes `--max_sv_size 10000000` to VEP by default and records that value
+in the oracle receipt, so the executable does not silently skip an otherwise tested exact
+span. This is deliberately different from VEP's own 5,000-base default. That same VEP
+option also limits bounded `<CNV:TR>` literal expansion; it is unrelated to DuckVEP's
+configurable transcript-distance default and VEP's separate fixed 5-kb BND admission rule.
+
 The first eight-seed GRCh38 campaign covered chromosomes 1, 2, 6, 11, 17, 21, 22, and X:
 40,375 generated events produced 2,140,911 transcript pairs, all exact against executable
 indexed-cache VEP 116. Treat those denominators as the tested distribution. They do not
-extend the claim to paired breakends, imprecise coordinates, repeat payloads, or other
-species; add those as explicit event modes and strata rather than silently widening this
-one.
+extend the claim to paired breakends, raw `<CNV:TR>` repeat reconstruction, producer-
+specific symbolic encodings, or other species; add those as explicit event modes and
+strata rather than silently widening this one. VEP 116's separate `CIPOS`/`CIEND` source
+contract is that it preserves inner/outer coordinates while its registered consequence
+predicates continue to use nominal `POS`/`END`.
+
+The checked-in `data/structural_confidence_grch38.vcf` makes that confidence-coordinate
+contract executable. It pairs nominal and `IMPRECISE;CIPOS;CIEND` records with identical
+`POS`/`END` for CNV, DEL, DUP, tandem DUP, INV, and INS:
+
+```sh
+VEP_PREFIX=/opt/vep Rscript corpus_differential.R \
+  --event-mode structural \
+  --corpus sv_confidence_grch38 \
+  --vcf data/structural_confidence_grch38.vcf \
+  --database /data/homo_sapiens_116_GRCh38.duckdb \
+  --model-sql '' \
+  --cache-dir /data/vep-cache \
+  --fasta /data/GRCh38.fa \
+  --assembly GRCh38 --species homo_sapiens \
+  --chrom 21 --sample-per-shape 0 --fork 4
+```
+
+The pinned VEP 116 run emitted 466 transcript pairs. All 466 DuckVEP pairs were exact,
+and the nominal/imprecise consequence multisets matched for all six event-kind pairs in
+both engines. The sampled oracle VCF retains `IMPRECISE`, `CIPOS`, and `CIEND`; this is a
+nominal-coordinate consequence test, not evidence that the uncertainty interval is exact.
 
 Paired BNDs have their own generated mode because one event has two loci and cannot be
 represented as one structural span. It crosses same- and cross-chromosome endpoint pairs
@@ -216,13 +246,28 @@ The VCF and generated Parquet files remain outside git. The benchmark ledger ret
 SHA-256 checksums, record/allele/CSQ cardinalities, exact byte sizes, compression settings,
 thread count, and source revision.
 
+Small pinned shards of these official release VCFs are suitable for ordinary CI: their
+release-specific CSQ rows are a precomputed oracle, so DuckVEP can compare transcript
+consequences without launching the Perl VEP executable. A release shard is not a substitute
+for the generated witness and corpus lanes because it cannot test alleles or VEP option
+states absent from the published variation set. Full scheduled matrices should obtain the
+matching receipt-hashed DuckDB model from an external release store rather than committing
+multi-gigabyte caches to git. The planned distribution contract is one manifest entry per
+Ensembl/Ensembl Genomes release, species, assembly, model ABI, transcript-filter policy,
+source-relation hash set, and artifact digest; a Zenodo record can provide stable versioned
+storage while every downloaded model still passes normal receipt/model-open validation.
+
 `make duckvep-record-conformance` reruns the real VEP witnesses and records the current
 source revision in `data/conformance_history.csv`. Rows include the complete consequence
 set, individual SO terms, optional NMD-plugin predictions, VEP impact, allele shape,
 unresolved reason, exact Ensembl build, and annotation-artifact hash. The same target runs
 VEP with `--hgvs` and records exact HGVSc/HGVSp comparison counts in
-`data/hgvs_history.csv`; ignored pair-level Parquet is diagnostic input, not checked release
-evidence by itself.
+`data/hgvs_history.csv`. The pair-level Parquet embeds the clean source revision,
+vendored-htslib-distclean release-build binding, and SHA-256 receipts for the extension, model,
+reference FASTA/index, source VCF, and exact sampled VCF passed to VEP. The history
+writer rejects a diagnostic
+artifact, a stale checkout, or non-constant receipts before it updates checked release
+evidence.
 `make bench-duckvep-throughput` records the sorted
 stable-API path in `benchmarks/data/duckvep_throughput.csv`; its checked-in fixture has
 one transcript and is not a whole-genome performance claim. Render both views with
@@ -230,6 +275,19 @@ one transcript and is not a whole-genome performance claim. Render both views wi
 randomized suite and records every reported target, seed, trial count, and duplicate
 count in `data/property_history.csv` plus named state-distribution counters in
 `data/property_coverage_history.csv`; a failed suite writes no history row.
+
+The fixed-event campaign is a closed release-regression gate for the declared independent
+small-variant, typed DEL/DUP/tandem-DUP/INV/INS/CNV, paired-BND, transcript, mature-miRNA,
+regulation/motif, supported codon-table/SeqEdit, and NMD-plugin surfaces. Those structural
+event kinds have executable-VEP differentials. Structural `STR` additionally has pinned
+VEP-source semantics, fixed SQL/R adapter tests, and randomized C coverage: an unexpanded
+or oversized repeat uses the tandem-duplication gain/insertion fact algebra. Bounded
+`<CNV:TR>` reconstruction from repeat metadata remains input preparation before the
+literal small-variant path. `CIPOS`/`CIEND` remain relational evidence because strict VEP
+116 consequence terms use nominal `POS`/`END`. VEP accepts a finite symbolic vocabulary
+and rejects unrecognised kinds such as CPX; this gate does not promise arbitrary symbolic
+parsing. Phased multi-record haplotypes and untested releases/species remain outside it. A
+newly observed fixed-event mismatch reopens the gate.
 
 The corpus runner currently compares independent alleles. The pure C tests cover phased
 edit grouping, same-codon interactions, open frameshifts, and restored frameshifts; a VEP

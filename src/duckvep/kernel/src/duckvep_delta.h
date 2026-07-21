@@ -253,9 +253,20 @@ typedef struct duckvep_coding_context {
     uint8_t cds_changed;
     uint8_t pre_cds_complete;
     uint8_t post_cds_complete;
+    uint8_t ref_first_stop_known;
+    uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
+
+/* The compact consequence sidecar is a closed-world authority for cached
+ * start/stop-lost predicates, but frameshift is positive evidence only.  A
+ * length-changing splice-overlapping edit may acquire a frameshift during the
+ * complete HGVS replay even when the consequence-side flag is absent. */
+DUCKVEP_INTERNAL_API int
+duckvep_sequence_delta_consequence_flags_complete_for_hgvs(
+    const duckvep_coding_context_t *context,
+    uint32_t                        flags);
 
 /* VEP's codon-rounded peptide strings for one projected CDS edit. The window
  * borrows `duckvep_coding_context_t`; consumers read residues through
@@ -309,6 +320,21 @@ DUCKVEP_INTERNAL_API char duckvep_coding_context_cds_base(
     int                             alternate,
     size_t                          position0);
 
+/* Scan one alternate CDS prefix followed by a caller-owned transcript suffix
+ * and report the first translated stop. This is the sequential authority for
+ * consumers that need a stop position without materializing the complete
+ * alternate peptide. Ambiguous N codons translate to X and do not stop the
+ * scan. `stop_position0` is a zero-based peptide coordinate when `found` is
+ * set. */
+DUCKVEP_INTERNAL_API duckvep_coding_context_status_t
+duckvep_coding_context_first_alt_stop(
+    const duckvep_coding_context_t *ctx,
+    size_t                          cds_prefix_length,
+    const uint8_t                  *suffix,
+    size_t                          suffix_length,
+    size_t                         *stop_position0,
+    int                            *found);
+
 typedef enum duckvep_variant_coding_context_status {
     DUCKVEP_VARIANT_CODING_CONTEXT_OK = 0,
     DUCKVEP_VARIANT_CODING_CONTEXT_INVALID_ARG,
@@ -337,6 +363,7 @@ typedef enum duckvep_context_delta_status {
 
 typedef enum duckvep_sequence_delta_route {
     DUCKVEP_DELTA_ROUTE_DIRECT = 0,
+    DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL,
     DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT,
     DUCKVEP_DELTA_ROUTE_DEL_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INS_CONTEXT,
@@ -634,5 +661,31 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     uint32_t                          exon_hint,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta);
+
+/* Synchronous traced form used by consumers that must reuse the exact coding
+ * interpretation before worker scratch is recycled. `context_out` borrows the
+ * supplied scratch and is valid only until the next delta build on that
+ * workspace. A successful context is reported independently of whether the
+ * consequence delta is valid, because HGVS and later phased edit-set consumers
+ * may still need the translated state. Ordinary annotation calls the wrapper
+ * above and pays no trace-copy cost. */
+DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
+    duckvep_variant_kind_t            kind,
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    int8_t                            strand,
+    duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          classified_region_mask,
+    uint32_t                          exon_hint,
+    duckvep_sequence_delta_route_t   *route,
+    duckvep_sequence_delta_t         *delta,
+    duckvep_coding_context_t         *context_out,
+    duckvep_variant_coding_context_status_t *context_status_out);
 
 #endif /* DUCKVEP_DELTA_H */

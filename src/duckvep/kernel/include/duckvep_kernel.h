@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 16
+#define DUCKVEP_KERNEL_VERSION_MINOR 17
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -279,6 +279,10 @@ typedef struct duckvep_sequence_pool {
     const uint64_t *cds_offset;    /* [transcript_count] byte offset into cds_bytes      */
     const uint32_t *cds_length;    /* [transcript_count] 0 = non-coding                  */
     const uint8_t  *codon_table;   /* [transcript_count] duckvep_codon_table_t per tx    */
+    /* Optional immutable derived cache. Zero means the raw prepared CDS has
+     * no complete stop codon; a NULL array means the fact was not prepared and
+     * consumers must use the complete reference scan. */
+    const uint32_t *first_stop_position1; /* [transcript_count], peptide coordinate */
     size_t          transcript_count;
     /* VEP translation SeqEdits that replace one reference amino acid. The
      * Ensembl compiler accepts the release-116 single-residue forms used for

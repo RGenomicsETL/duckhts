@@ -89,8 +89,50 @@ typedef struct duckvep_transcript_edit {
     uint16_t alt_length;
     int8_t transcript_strand;
     duckvep_edit_set_t cds_edits;
-    uint8_t cds_status; /* duckvep_cds_edit_status_t */
+    uint8_t cds_status; /* duckvep_cds_edit_status_t; meaningful when cds_built */
+    uint8_t cds_built;  /* zero until the optional CDS extension is attached */
 } duckvep_transcript_edit_t;
+
+/* Project the uploaded event into transcript coordinates without constructing
+ * a CDS edit. HGVSc and HGVSn consume this stage directly; protein and phased
+ * mutation consumers attach the CDS extension below only when needed. */
+DUCKVEP_INTERNAL_API duckvep_transcript_edit_status_t
+duckvep_transcript_edit_project_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_variant_batch_t    *variants,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    duckvep_transcript_edit_t        *out);
+
+/* Sorted-annotation form. `exon_hint` is an absolute model exon index already
+ * proved by the consequence classifier to contain the edit. The projector
+ * uses it only when both semantic and uploaded feature coordinates fit that
+ * exon; all other shapes retain the exhaustive transcript-coordinate path. */
+DUCKVEP_INTERNAL_API duckvep_transcript_edit_status_t
+duckvep_transcript_edit_project_prepared_hint(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_variant_batch_t    *variants,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                          exon_hint,
+    duckvep_transcript_edit_t        *out);
+
+/* Attach the CDS edit-set extension to an already projected transcript edit.
+ * The caller-owned scratch remains borrowed through edit->cds_edits until it
+ * is reused. The returned status is also stored in edit->cds_status. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_transcript_edit_cds_fill_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *variants,
+    duckvep_haplotype_edit_t         *cds_scratch,
+    size_t                            cds_scratch_cap,
+    duckvep_transcript_edit_t        *edit);
 
 /* Project an arbitrary genomic base inside a transcript span to the coordinate
  * representation above.  This includes introns; use
@@ -121,10 +163,9 @@ duckvep_transcript_edit_build(
     size_t                            cds_scratch_cap,
     duckvep_transcript_edit_t        *out);
 
-/* Prepared-event form of duckvep_transcript_edit_build(). Annotation cursors
- * already own one validated event per input ALT and must pass that same value
- * to consequence, HGVS, and later haplotype consumers. This entry point never
- * reloads or re-trims REF/ALT. */
+/* Prepared-event form of duckvep_transcript_edit_build(). This convenience
+ * entry point performs both projection and CDS attachment. Consumers that can
+ * decide lazily use project_prepared() followed by cds_fill_prepared(). */
 DUCKVEP_INTERNAL_API duckvep_transcript_edit_status_t
 duckvep_transcript_edit_build_prepared(
     const duckvep_transcript_model_t *transcripts,
