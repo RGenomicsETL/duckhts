@@ -1540,31 +1540,46 @@ real_contigs <- DBI::dbGetQuery(
   sprintf("SELECT DISTINCT chrom FROM read_parquet(%s) ORDER BY chrom", sql_path(real_regulatory_path))
 )$chrom
 
+real_typed_contig_queries <- vapply(
+  real_contigs,
+  function(chrom) {
+    sprintf(
+      paste(
+        "SELECT count(*)::BIGINT AS n",
+        "FROM read_parquet(%s) q",
+        "JOIN read_parquet(%s) s",
+        "  ON q.start0 < s.end0 AND q.end0 > s.start0",
+        "WHERE q.chrom = %s AND s.chrom = %s"
+      ),
+      sql_path(real_case_path),
+      sql_path(real_regulatory_path),
+      sql_string(chrom),
+      sql_string(chrom)
+    )
+  },
+  character(1L)
+)
 real_typed_interval_sql <- paste0(
   "SELECT sum(n)::BIGINT AS n FROM (",
-  paste(
-    vapply(
-      real_contigs,
-      function(chrom) {
-        sprintf(
-          paste(
-            "SELECT count(*)::BIGINT AS n",
-            "FROM read_parquet(%s) q",
-            "JOIN read_parquet(%s) s",
-            "  ON q.start0 < s.end0 AND q.end0 > s.start0",
-            "WHERE q.chrom = %s AND s.chrom = %s"
-          ),
-          sql_path(real_case_path),
-          sql_path(real_regulatory_path),
-          sql_string(chrom),
-          sql_string(chrom)
-        )
-      },
-      character(1L)
-    ),
-    collapse = " UNION ALL "
-  ),
+  paste(real_typed_contig_queries, collapse = " UNION ALL "),
   ")"
+)
+
+real_typed_interval_plan <- DBI::dbGetQuery(
+  con,
+  paste("EXPLAIN", real_typed_contig_queries[[1L]])
+)$explain_value
+real_typed_iejoin_count <- sum(lengths(regmatches(
+  real_typed_interval_plan,
+  gregexpr("IE_JOIN", real_typed_interval_plan, fixed = TRUE)
+)))
+stopifnot(real_typed_iejoin_count == 1L)
+
+data.frame(
+  physical_operator = "IE_JOIN",
+  representative_contig = real_contigs[[1L]],
+  operators_in_representative_plan = real_typed_iejoin_count,
+  contig_shards_in_full_query = length(real_contigs)
 )
 
 real_typed_interval <- measure_thread_grid(
@@ -1658,6 +1673,17 @@ real_interval_speedups$speedup_vs_typed_iejoin <-
   real_interval_speedups$input_rows_per_second_typed_baseline
 real_interval_speedups
 ```
+
+The physical-plan assertion above matters. DuckDB's
+[IEJoin description](https://duckdb.org/2022/05/27/iejoin) explains that a
+double-inequality join sorts both relations on the first condition, constructs
+merged and permutation arrays for the second condition, and uses a bitmap to
+identify matching pairs. DuckDB parallelizes sorted blocks and can spool join
+blocks to disk. The measured 665/728 MiB is therefore the resident cost of real
+parallel `IE_JOIN` planning/execution over these Parquet relations, not a nested
+loop mislabeled as an interval join. The per-contig `UNION ALL` is deliberate:
+it makes contig equality a static shard filter and leaves exactly the two
+coordinate inequalities for each `IE_JOIN` operator.
 
 For this real source, cgranges is `r round(real_interval_speedups$speedup_vs_typed_iejoin[real_interval_speedups$operation == "real_regulatory_cgranges_count_pairs" & real_interval_speedups$threads == 1], 2)` times the typed DuckDB interval join on one thread and `r round(real_interval_speedups$speedup_vs_typed_iejoin[real_interval_speedups$operation == "real_regulatory_cgranges_count_pairs" & real_interval_speedups$threads == 4], 2)` times on four threads. The globally bounded RegionKey range is correct but loses because the single 48,907-base source interval widens candidate discovery for every GIAB allele.
 

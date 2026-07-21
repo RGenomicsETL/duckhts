@@ -8,11 +8,12 @@
   GIAB HG002, Ensembl regulation, and gnomAD constraint are staged as typed Parquet
   projections. A deterministic genome-spanning REVEL key sample prevents favorable
   leading-row-group pruning. On one/four pinned i5-13500 performance cores, REVEL
-  processes 1.28/4.40 million probe alleles/s, AlphaMissense 1.53/5.15 million/s, and
-  ClinvArbitration 14.08/46.02 million/s. Fresh-process serving peaks remain 175--189
+  processes 1.27/4.44 million probe alleles/s, AlphaMissense 1.52/5.19 million/s, and
+  ClinvArbitration 13.84/48.76 million/s. Fresh-process serving peaks remain 175--190
   MiB for those exact joins; one-time AlphaMissense and REVEL preparation peaks at
-  1.10 and 1.24 GiB. The 643,528-interval string-labelled cgranges build plus full-GIAB
-  probe peaks at 146 MiB versus 665/728 MiB for the per-contig DuckDB IEJoin plan.
+  1.10 and 1.25 GiB. The 643,528-interval string-labelled cgranges build plus full-GIAB
+  probe peaks at 146 MiB versus 665/712 MiB for the per-contig, EXPLAIN-confirmed
+  DuckDB IEJoin plan.
   Synthetic cgranges construction peaks at 129 MiB per million intervals without
   labels, 145 MiB with BIGINT labels, 197 MiB with VARCHAR labels, and 1.25 GiB for
   ten million BIGINT-labelled intervals. Narrow key-plus-payload storage projects to
