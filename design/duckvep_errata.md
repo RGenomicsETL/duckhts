@@ -1271,8 +1271,10 @@ Before this rule was isolated, all consequences and HGVSc strings were exact but
 HGVSp strings differed: 24 late stop distances followed the transcript mitochondrial
 table instead of VEP's implicit standard table, and one combined frameshift/stop-loss
 deletion missed the formatter precedence. Fixed C witnesses distinguish TGA under tables
-1 and 2 and pin the combined deletion-extension state; the executable full-shard
-differential remains the acceptance authority.
+1 and 2 and pin the combined deletion-extension state. The fail-closed rerun is exact for
+all 67,828 transcript pairs, including every one of the 3,294 present HGVSc and 2,354
+present HGVSp values; the executable full-shard differential remains the acceptance
+authority.
 
 Source anchors: Ensembl Variation 116
 `TranscriptVariationAllele::_get_hgvs_protein_format`,

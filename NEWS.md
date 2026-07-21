@@ -7,9 +7,9 @@
   ClinVar mitochondrial shard: the late `fsTer`/`extTer` stop search uses BioPerl's
   implicit standard codon table even when the transcript peptide uses mitochondrial table
   2, and cached `stop_lost` plus a deletion-form peptide takes precedence over the later
-  frameshift formatter. Consequences and HGVSc were already exact for all 67,828
-  transcript pairs; the 25 initial HGVSp disagreements are retained as the discovery
-  witness pending the fixed executable rerun
+  frameshift formatter. The fail-closed complete mitochondrial ClinVar rerun is exact for
+  all 67,828 transcript pairs, including 3,294 present HGVSc and 2,354 present HGVSp
+  values; the 25 initial HGVSp disagreements remain the discovery witness
 - close rare HGVS states found by a 100,000-random-allele executable VEP 116
   differential, rather than by the C property suite alone. Shifted in-frame
   start-loss insertions perform VEP's sequence-dependent peptide-level 3-prime
