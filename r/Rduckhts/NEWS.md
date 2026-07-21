@@ -1,5 +1,9 @@
 
 # Rduckhts 1.4.0.9000-0.1.0 (development)
+- bundle `duckhts_contig_key(...)` for DBI workflows that need a conservative join key
+  across `chr`-prefixed VCF/dbSNP contigs and Ensembl-style region names. The helper
+  normalizes mitochondrial `M`/`MT` to `MT` and uppercase `X`/`Y` but deliberately does
+  not guess numeric sex chromosomes, accessions, patches, or alternate loci
 - reset bundled DuckVEP exon cursors before a worker workspace is reused after a
   non-monotone normalized-event vector, preventing a transcript skipped after a
   forward jump from carrying an ahead exon rank into the next DBI vector

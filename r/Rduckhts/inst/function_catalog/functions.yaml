@@ -1117,6 +1117,18 @@
       ]
     },
     {
+      "name": "duckhts_contig_key",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "duckhts_contig_key(contig)",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Return a conservative contig join key by removing one non-empty leading chr prefix case-insensitively and normalizing M/MT to MT. X and Y are uppercased; all other suffixes are preserved. This does not map numeric sex chromosomes, accessions, patches, or alternate loci.",
+      "examples": [
+        "SELECT duckhts_contig_key('chr1'), duckhts_contig_key('chrM');"
+      ]
+    },
+    {
       "name": "are_overlapping_regions",
       "kind": "scalar",
       "category": "Intervals",

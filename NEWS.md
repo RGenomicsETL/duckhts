@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- add `duckhts_contig_key(...)` as the conservative chromosome/contig join authority for
+  VCF, dbSNP, and DuckVEP preparation: remove one non-empty leading `chr` prefix,
+  normalize mitochondrial `M`/`MT` spellings to `MT`, uppercase `X`/`Y`, and preserve all
+  other suffixes. Numeric sex chromosomes, accessions, patches, and alternate loci are not
+  guessed; DuckVEP callers must still reject model-side key collisions and the model
+  compiler retains exact same-name, same-length reference matching
 - add a rendered, receipt-pinned end-to-end DuckVEP/FastVEP comparison that
   includes compressed GIAB VCF decoding and real 17-column tab output. On one
   pinned i5-13500 performance core, DuckVEP also enforced the sorted-input
