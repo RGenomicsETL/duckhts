@@ -62,6 +62,20 @@ _Static_assert(sizeof(duckvep_sequence_delta_t) == 32u,
                "duckvep sequence delta no longer fits its hot-path budget");
 #endif
 
+/* Encode/apply positive raw sequence predicates carried beside a compact SO
+ * mask. Executable VEP witnesses contain emitted term sets that omit a raw
+ * predicate still consumed by hgvs_protein, so downstream HGVS must never
+ * reconstruct these facts by inspecting consequence_mask. Absence of a bit is
+ * not a closed-world false assertion for generalized splice-overlapping edits;
+ * apply augments facts independently proved by the HGVS CDS replay. */
+DUCKVEP_INTERNAL_API uint32_t duckvep_sequence_delta_consequence_flags(
+    const duckvep_sequence_delta_t *delta,
+    int                              attempted);
+
+DUCKVEP_INTERNAL_API int duckvep_sequence_delta_apply_consequence_flags(
+    uint32_t                   flags,
+    duckvep_sequence_delta_t *delta);
+
 /* True when the prepared transcript CDS ends in a one- or two-base codon.
  * VEP's partial_codon predicate derives this from `_translateable_seq` length;
  * it is not reliably equivalent to the cds_end_NF transcript attribute (notably
@@ -120,6 +134,59 @@ typedef enum duckvep_cds_edit_status {
     DUCKVEP_CDS_EDIT_INVALID_ALLELE,
     DUCKVEP_CDS_EDIT_REF_MISMATCH
 } duckvep_cds_edit_status_t;
+
+/* Prepared semantic allele borrowed by CDS projection after upload parsing or
+ * HGVS 3-prime placement has already chosen the event coordinates. Alleles
+ * are expressed in `variant_strand` orientation. `anchor_ref` is required only
+ * for an interbase insertion and names the retained flanking reference base;
+ * it is kept separate because the semantic REF length is zero. */
+typedef struct duckvep_prepared_cds_allele {
+    const duckvep_event_t *event;
+    const uint8_t         *ref;
+    const uint8_t         *alt;
+    const uint8_t         *anchor_ref;
+    uint16_t               ref_length;
+    uint16_t               alt_length;
+    int8_t                 variant_strand;
+} duckvep_prepared_cds_allele_t;
+
+/* Borrowed complete spliced-transcript sequence view for a sequence-backed
+ * coding transcript. The prepared CDS may contain positive start-phase
+ * padding; `phase_offset` hides those synthetic bytes from cDNA addressing.
+ * Non-coding transcript sequence storage is not yet part of the model and is
+ * reported as MISSING rather than synthesized. */
+typedef enum duckvep_transcript_sequence_status {
+    DUCKVEP_TRANSCRIPT_SEQUENCE_OK = 0,
+    DUCKVEP_TRANSCRIPT_SEQUENCE_MISSING,
+    DUCKVEP_TRANSCRIPT_SEQUENCE_INVALID
+} duckvep_transcript_sequence_status_t;
+
+typedef struct duckvep_transcript_sequence_view {
+    const uint8_t *pre_cds;
+    const uint8_t *cds;
+    const uint8_t *post_cds;
+    size_t pre_cds_len;
+    size_t cds_len;
+    size_t post_cds_len;
+    uint32_t coding_start_cdna;
+    uint32_t coding_end_cdna;
+    uint8_t phase_offset;
+} duckvep_transcript_sequence_view_t;
+
+DUCKVEP_INTERNAL_API duckvep_transcript_sequence_status_t
+duckvep_transcript_sequence_open(
+    const duckvep_transcript_model_t      *transcripts,
+    const duckvep_exon_model_t            *exons,
+    const duckvep_sequence_pool_t         *seq,
+    size_t                                 tx_idx,
+    duckvep_transcript_sequence_view_t    *out);
+
+/* Return one normalized transcript-oriented cDNA byte, or NUL when the
+ * coordinate/view is invalid. Ambiguous N is retained so each consumer can
+ * apply its own documented policy. */
+DUCKVEP_INTERNAL_API char duckvep_transcript_sequence_base(
+    const duckvep_transcript_sequence_view_t *sequence,
+    uint32_t                                  cdna_pos);
 
 typedef enum duckvep_coding_context_status {
     DUCKVEP_CODING_CONTEXT_OK = 0,
@@ -186,9 +253,87 @@ typedef struct duckvep_coding_context {
     uint8_t cds_changed;
     uint8_t pre_cds_complete;
     uint8_t post_cds_complete;
+    uint8_t ref_first_stop_known;
+    uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
+
+/* The compact consequence sidecar is a closed-world authority for cached
+ * start/stop-lost predicates, but frameshift is positive evidence only.  A
+ * length-changing splice-overlapping edit may acquire a frameshift during the
+ * complete HGVS replay even when the consequence-side flag is absent. */
+DUCKVEP_INTERNAL_API int
+duckvep_sequence_delta_consequence_flags_complete_for_hgvs(
+    const duckvep_coding_context_t *context,
+    uint32_t                        flags);
+
+/* VEP's codon-rounded peptide strings for one projected CDS edit. The window
+ * borrows `duckvep_coding_context_t`; consumers read residues through
+ * duckvep_coding_context_peptide_window_base() so virtual single-edit
+ * contexts, materialized haplotypes, terminal partial codons, and Ensembl
+ * Translation SeqEdits keep one authority. `peptide_offset` is zero-based in
+ * the complete protein; the remaining lengths count one-letter residues. */
+typedef struct duckvep_coding_peptide_window {
+    size_t peptide_offset;
+    size_t reference_span_length;
+    size_t ref_nt_length;
+    size_t alt_nt_length;
+    size_t ref_whole_length;
+    size_t alt_whole_length;
+    size_t ref_length;
+    size_t alt_length;
+    uint8_t ref_partial_x;
+    uint8_t alt_partial_x;
+} duckvep_coding_peptide_window_t;
+
+/* Open the exact codon-rounded local peptide window consumed by VEP 116 for a
+ * supported single edit. Consequence predicates currently use it for
+ * length-changing alleles; HGVS also uses it for equal-length edits. */
+DUCKVEP_INTERNAL_API int duckvep_coding_context_peptide_window_open(
+    const duckvep_coding_context_t  *ctx,
+    duckvep_coding_peptide_window_t *window);
+
+/* Read one local residue from an opened window. `alternate` selects the
+ * altered peptide when nonzero. Returns NUL for invalid or out-of-range input.
+ * Reference reads include sparse Ensembl Translation SeqEdits; alternate
+ * reads intentionally retain VEP's raw codon translation. */
+DUCKVEP_INTERNAL_API uint8_t duckvep_coding_context_peptide_window_base(
+    const duckvep_coding_context_t        *ctx,
+    const duckvep_coding_peptide_window_t *window,
+    int                                    alternate,
+    size_t                                 index);
+
+/* Read one residue from a complete coding context with the same reference
+ * edit and virtual-single-edit semantics as the local window above. */
+DUCKVEP_INTERNAL_API uint8_t duckvep_coding_context_peptide_base(
+    const duckvep_coding_context_t *ctx,
+    int                             alternate,
+    size_t                          position0);
+
+/* Read one normalized nucleotide from the reference or alternate CDS view.
+ * This preserves virtual single-edit storage and is the nucleotide authority
+ * for consumers, such as VEP-compatible frameshift HGVS, that translate
+ * across the CDS-to-3-prime-UTR join without materializing another sequence. */
+DUCKVEP_INTERNAL_API char duckvep_coding_context_cds_base(
+    const duckvep_coding_context_t *ctx,
+    int                             alternate,
+    size_t                          position0);
+
+/* Scan one alternate CDS prefix followed by a caller-owned transcript suffix
+ * and report the first translated stop. This is the sequential authority for
+ * consumers that need a stop position without materializing the complete
+ * alternate peptide. Ambiguous N codons translate to X and do not stop the
+ * scan. `stop_position0` is a zero-based peptide coordinate when `found` is
+ * set. */
+DUCKVEP_INTERNAL_API duckvep_coding_context_status_t
+duckvep_coding_context_first_alt_stop(
+    const duckvep_coding_context_t *ctx,
+    size_t                          cds_prefix_length,
+    const uint8_t                  *suffix,
+    size_t                          suffix_length,
+    size_t                         *stop_position0,
+    int                            *found);
 
 typedef enum duckvep_variant_coding_context_status {
     DUCKVEP_VARIANT_CODING_CONTEXT_OK = 0,
@@ -218,6 +363,7 @@ typedef enum duckvep_context_delta_status {
 
 typedef enum duckvep_sequence_delta_route {
     DUCKVEP_DELTA_ROUTE_DIRECT = 0,
+    DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL,
     DUCKVEP_DELTA_ROUTE_SUBSTITUTION_CONTEXT,
     DUCKVEP_DELTA_ROUTE_DEL_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INS_CONTEXT,
@@ -242,6 +388,21 @@ DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t duckvep_variant_cds_edit_build(
     int8_t                            transcript_strand,
     duckvep_haplotype_edit_t         *edit);
 
+/* Project one already prepared semantic allele into the common CDS edit IR.
+ * This is the shared entry point for uploaded variants, HGVS-shifted alleles,
+ * and later phased transcript edit sets. It validates the shifted REF against
+ * the prepared CDS and does not trim, normalize, or move the event. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_cds_edit_build_prepared_allele(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_prepared_cds_allele_t *allele,
+    uint32_t                          exon_hint,
+    duckvep_haplotype_edit_t         *edit);
+
 /* Project one small allele into the edit set consumed by the CodingContext and
  * haplotype kernels. Non-MNV shapes emit the one edit produced by
  * duckvep_variant_cds_edit_build(), while fully-CDS
@@ -257,6 +418,27 @@ DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t duckvep_variant_cds_edit_set_buil
     uint32_t                          variant_idx,
     size_t                            tx_idx,
     int8_t                            transcript_strand,
+    duckvep_haplotype_edit_t         *scratch,
+    size_t                            scratch_cap,
+    duckvep_edit_set_t               *out);
+
+/* Prepared-event form of duckvep_variant_cds_edit_set_build(). The caller has
+ * already interpreted the uploaded REF/ALT pair into `event`; this function
+ * must consume that exact geometry instead of trimming the raw alleles again.
+ * `exon_hint` is an absolute model exon index, or UINT32_MAX when unavailable.
+ * The output ownership and failure contract are identical to the wrapper
+ * above. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_variant_cds_edit_set_build_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_event_t            *event,
+    uint32_t                          exon_hint,
     duckvep_haplotype_edit_t         *scratch,
     size_t                            scratch_cap,
     duckvep_edit_set_t               *out);
@@ -279,6 +461,29 @@ DUCKVEP_INTERNAL_API duckvep_coding_context_status_t duckvep_coding_context_buil
     uint8_t                     *alt_peptide_scratch,
     size_t                       alt_peptide_cap,
     duckvep_coding_context_t    *ctx);
+
+/* Build and enrich a CodingContext from an already projected edit set and the
+ * immutable model. One length-changing edit may retain the virtual local
+ * sequence representation; multi-edit/haplotype sets materialize once. The
+ * resulting context borrows model sequence, edit alleles, and caller scratch.
+ * `event` is optional for phased sets; an independent insertion supplies it so
+ * the VEP terminal-stop guard remains available. */
+DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t
+duckvep_model_coding_context_build(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_event_t            *event,
+    const duckvep_edit_set_t         *edit_set,
+    uint8_t                          *alt_cds_scratch,
+    size_t                            alt_cds_cap,
+    uint8_t                          *ref_peptide_scratch,
+    size_t                            ref_peptide_cap,
+    uint8_t                          *alt_peptide_scratch,
+    size_t                            alt_peptide_cap,
+    duckvep_coding_context_t         *ctx);
 
 /* Compose one small variant directly into a CodingContext: build the
  * edit set, borrow the transcript CDS from `seq`, and call duckvep_coding_context_build.
@@ -304,6 +509,62 @@ DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_cod
     uint8_t                          *alt_peptide_scratch,
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
+
+/* Prepared-event form used when the annotation cursor has already interpreted
+ * REF/ALT once. `exon_hint` is an absolute model exon index or UINT32_MAX.
+ * The helper may retain the model-backed virtual single-edit representation;
+ * all consumers must use the coding-context peptide accessors rather than
+ * assuming complete alternate buffers were materialized. */
+DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t
+duckvep_variant_coding_context_build_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_event_t            *event,
+    uint32_t                          exon_hint,
+    duckvep_haplotype_edit_t         *edit_scratch,
+    size_t                            edit_scratch_cap,
+    uint8_t                          *alt_cds_scratch,
+    size_t                            alt_cds_cap,
+    uint8_t                          *ref_peptide_scratch,
+    size_t                            ref_peptide_cap,
+    uint8_t                          *alt_peptide_scratch,
+    size_t                            alt_peptide_cap,
+    duckvep_coding_context_t         *ctx);
+
+/* VEP maps an equal-length uploaded multi-base feature as one peptide window,
+ * even when semantic allele trimming leaves a smaller substitution.  This is
+ * the shared representation-sensitive path used by both consequence facts and
+ * independent-event HGVSp.  NOT_APPLICABLE means the caller should use the
+ * ordinary semantic edit set.  DELTA_ONLY means the uploaded feature was
+ * authoritative but no reusable peptide context exists (for example, a
+ * partial terminal codon or an explicit sequence/projection failure).
+ * CONTEXT_READY returns both the exact consequence delta and its borrowed
+ * coding context; the context remains valid until caller scratch is reused. */
+typedef enum duckvep_feature_substitution_result {
+    DUCKVEP_FEATURE_SUBSTITUTION_NOT_APPLICABLE = 0,
+    DUCKVEP_FEATURE_SUBSTITUTION_DELTA_ONLY = 1,
+    DUCKVEP_FEATURE_SUBSTITUTION_CONTEXT_READY = 2
+} duckvep_feature_substitution_result_t;
+
+DUCKVEP_INTERNAL_API duckvep_feature_substitution_result_t
+duckvep_feature_substitution_context_fill(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *variants,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          exon_hint,
+    duckvep_coding_context_t         *context_out,
+    duckvep_sequence_delta_t         *delta_out);
 
 /* Classify a CodingContext into sequence-delta facts. The classifier handles
  * length-preserving substitutions across complete codon windows and guarded
@@ -400,5 +661,31 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
     uint32_t                          exon_hint,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta);
+
+/* Synchronous traced form used by consumers that must reuse the exact coding
+ * interpretation before worker scratch is recycled. `context_out` borrows the
+ * supplied scratch and is valid only until the next delta build on that
+ * workspace. A successful context is reported independently of whether the
+ * consequence delta is valid, because HGVS and later phased edit-set consumers
+ * may still need the translated state. Ordinary annotation calls the wrapper
+ * above and pays no trace-copy cost. */
+DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
+    duckvep_variant_kind_t            kind,
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    int8_t                            strand,
+    duckvep_delta_scratch_t          *scratch,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          classified_region_mask,
+    uint32_t                          exon_hint,
+    duckvep_sequence_delta_route_t   *route,
+    duckvep_sequence_delta_t         *delta,
+    duckvep_coding_context_t         *context_out,
+    duckvep_variant_coding_context_status_t *context_status_out);
 
 #endif /* DUCKVEP_DELTA_H */

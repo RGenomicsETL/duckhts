@@ -12,6 +12,8 @@ duckhts_duckvep_kernel_source_files <- function() {
     "duckvep_sv.c",
     "duckvep_delta.c",
     "duckvep_projection.c",
+    "duckvep_transcript_edit.c",
+    "duckvep_hgvs.c",
     "duckvep_codon.c",
     "duckvep_coding.c",
     "duckvep_haplotype.c"
@@ -89,7 +91,8 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "duckvep_variant_tile.c",
     "duckvep_variant_tile.h",
     "duckvep_annotate.c",
-    "duckvep_ensembl.c"
+    "duckvep_ensembl.c",
+    "duckvep_sql.c"
   )
   duckvep_dest <- file.path(dest, "duckvep")
   dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
@@ -360,6 +363,7 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       file.path("duckvep", "duckvep_model.c"),
       file.path("duckvep", "duckvep_annotate.c"),
       file.path("duckvep", "duckvep_ensembl.c"),
+      file.path("duckvep", "duckvep_sql.c"),
       "wasm_http_hfile.c"
     )
   )

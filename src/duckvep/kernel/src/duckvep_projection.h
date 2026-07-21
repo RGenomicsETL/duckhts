@@ -62,6 +62,57 @@ int duckvep_project_cdna_to_genomic(
     uint32_t                         *genomic_pos_out,
     uint32_t                         *exon_idx_out);
 
+/* Resolve the spliced-transcript cDNA coordinates of the first and last CDS
+ * bases. Prepared models provide these values directly; borrowed-view callers
+ * may omit the cache and use the same exon projection fallback. The optional
+ * exon/phase outputs identify the translation-start exon and its positive
+ * Ensembl phase padding. This is the shared coordinate authority for coding
+ * projection, HGVS c. numbering, and complete-transcript sequence views. */
+int duckvep_project_coding_cdna_bounds(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                         *coding_start_cdna_out,
+    uint32_t                         *coding_end_cdna_out,
+    uint32_t                         *coding_start_exon_idx_out,
+    uint8_t                          *phase_offset_out);
+
+/* Reproduce VariationEffect::_overlaps_start_codon for the unshifted complete
+ * VariationFeature. The mapper preserves insertion geometry as start=end+1;
+ * this is observably different from asking whether a normalized CDS edit
+ * touches CDS position one. Mapper::map_insert drops an intronic Gap flank,
+ * while an ordinary feature requires both endpoint coordinates. A
+ * cds_start_NF transcript always returns false. */
+int duckvep_project_feature_overlaps_start_codon_unshifted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event);
+
+/* Reproduce the cached `_pre_consequence_predicates->{coding}` admission for
+ * a complete small-variant feature. This is broader than requiring both
+ * feature endpoints in CDS: one mapped CDS segment is sufficient, including
+ * one flank of an insertion at a UTR/CDS edge. */
+int duckvep_project_feature_has_coding_precondition_unshifted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event);
+
+/* Reproduce BaseTranscriptVariation::translation_coords for the complete
+ * VariationFeature after a signed genomic HGVS shift. Both the first and last
+ * mapper items must be coding coordinates; internal introns are permitted.
+ * Mapper::map_insert removes an intronic/transcript-external flank before the
+ * CDS conversion, but retains an exonic UTR flank as a terminal Gap. */
+int duckvep_project_complete_feature_translation_bounds(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                          genomic_shift,
+    uint32_t                         *cds_start_out,
+    uint32_t                         *cds_end_out);
+
 /* Full coding projection for a single genomic base. Returns 1 only when the
  * position is exonic AND inside the transcript's coding interval; otherwise 0.
  * The result is ready to identify the affected codon/protein residue. */

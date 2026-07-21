@@ -464,7 +464,7 @@ SELECT loaded FROM duckvep_model_load(
 
 query TTT
 SELECT annotation.consequence, annotation.status, coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-test', 0::UINTEGER, 4::UBIGINT, 'A', 'G', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -472,7 +472,7 @@ missense_variant&splice_region_variant	supported	-
 
 query TT
 SELECT annotation.reference_amino_acid, annotation.alternate_amino_acid
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-test', 0::UINTEGER, 4::UBIGINT, 'A', 'G', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -480,7 +480,7 @@ U	E
 
 query TTT
 SELECT annotation.consequence, annotation.status, coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-test', 0::UINTEGER, 28::UBIGINT, 'G', 'A', 0::UBIGINT
 )) AS u(annotation)
 ORDER BY annotation.transcript_index;
@@ -573,7 +573,7 @@ WITH variants(ord, position) AS (VALUES
 )
 SELECT ord, annotation.consequence
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'ensembl-mirna-test', 0::UINTEGER, position, 'A', 'C', 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -901,7 +901,7 @@ query ITTIITT
 SELECT annotation.transcript_index, annotation.consequence,
        annotation.status, annotation.cds_position, annotation.protein_position,
        annotation.reference_amino_acid, annotation.alternate_amino_acid
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-grch38-fixture', 2::UINTEGER, 32522::UBIGINT,
   'C', 'T', 0::UBIGINT
 )) AS u(annotation);
@@ -912,7 +912,7 @@ query ITTIITT
 SELECT annotation.transcript_index, annotation.consequence,
        annotation.status, annotation.cds_position, annotation.protein_position,
        annotation.reference_amino_acid, annotation.alternate_amino_acid
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-grch37-fixture', 1::UINTEGER, 9452::UBIGINT,
   'T', 'C', 0::UBIGINT
 )) AS u(annotation);
@@ -922,7 +922,7 @@ FROM unnest(duckvep_annotate(
 query ITTT
 SELECT annotation.transcript_index, annotation.consequence,
        annotation.status, annotation.reason
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-grch38-fixture', 0::UINTEGER, 3307::UBIGINT,
   'A', 'C', 0::UBIGINT
 )) AS u(annotation);
@@ -932,7 +932,7 @@ FROM unnest(duckvep_annotate(
 query IITT
 SELECT annotation.regulation_feature_index, annotation.overlap_object,
        annotation.consequence, annotation.status
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'ensembl-grch38-fixture', 1::UINTEGER, 75::UBIGINT,
   'A', 'C', 0::UBIGINT
 )) AS u(annotation)

@@ -1,0 +1,829 @@
+# name: test/sql/duckvep_hgvs.test
+# description: Cumulative DuckVEP consequence and independent-event HGVS projection
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+CREATE TABLE duckvep_hgvs_regions AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 1::UBIGINT, 'chrEmpty'::VARCHAR),
+  (1::UINTEGER, 260::UBIGINT, 'chrDuck'::VARCHAR)
+) t(seq_region, sequence_length, seq_region_name);
+
+statement ok
+CREATE TABLE duckvep_hgvs_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  100::UBIGINT transcript_start,
+  250::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  3::UBIGINT transcript_flags,
+  120::UBIGINT cds_start,
+  240::UBIGINT cds_end,
+  'ATGGTACGTACGTACGTACGTACGTACGTACTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAA'::BLOB cds_sequence,
+  1::UTINYINT codon_table,
+  'TACGTACGTACGTACGTACG'::BLOB pre_cds_sequence,
+  'ACGTACGTAC'::BLOB post_cds_sequence
+UNION ALL
+SELECT
+  1::UINTEGER,
+  1::UINTEGER,
+  100::UBIGINT,
+  250::UBIGINT,
+  -1::TINYINT,
+  1::UINTEGER,
+  0::UBIGINT,
+  NULL::UBIGINT,
+  NULL::UBIGINT,
+  NULL::BLOB,
+  NULL::UTINYINT,
+  NULL::BLOB,
+  NULL::BLOB;
+
+statement ok
+CREATE TABLE duckvep_hgvs_exons AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 100::UBIGINT, 150::UBIGINT,
+   1::UBIGINT, 51::UBIGINT, 0::TINYINT, 0::TINYINT),
+  (0::UINTEGER, 200::UBIGINT, 250::UBIGINT,
+   52::UBIGINT, 102::UBIGINT, 0::TINYINT, 0::TINYINT),
+  (1::UINTEGER, 200::UBIGINT, 250::UBIGINT,
+   1::UBIGINT, 51::UBIGINT, -1::TINYINT, -1::TINYINT),
+  (1::UINTEGER, 100::UBIGINT, 150::UBIGINT,
+   52::UBIGINT, 102::UBIGINT, -1::TINYINT, -1::TINYINT)
+) t(transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,
+    phase, end_phase);
+
+statement ok
+CREATE TABLE duckvep_hgvs_regulation AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 1::UINTEGER, 3::UINTEGER, 3::UINTEGER, 1::UTINYINT)
+) t(regulation_feature_index, seq_region, feature_start, feature_end,
+    feature_kind);
+
+# A reference-enabled model needs an explicit compact-ordinal to FASTA-name
+# relation. Loading validates the existing index and never creates one.
+statement error
+SELECT * FROM duckvep_model_load(
+  'hgvs-invalid-region-map',
+  'SELECT seq_region, sequence_length FROM duckvep_hgvs_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_hgvs_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_exons ORDER BY transcript_index, exon_cdna_start',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+reference_fasta requires seq_region, sequence_length, and seq_region_name
+
+# Explicit NULL is the same as omitting each optional relation/reference
+# parameter advertised with a NULL default.
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-explicit-null',
+  'SELECT seq_region, sequence_length FROM duckvep_hgvs_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_hgvs_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_exons ORDER BY transcript_index, exon_cdna_start',
+  mature_mirna_query := NULL,
+  peptide_edit_query := NULL,
+  interval_feature_query := NULL,
+  reference_fasta := NULL
+);
+----
+1
+
+query I
+SELECT duckvep_model_drop('hgvs-explicit-null');
+----
+1
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-reference',
+  'SELECT * FROM duckvep_hgvs_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_hgvs_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_exons ORDER BY transcript_index, exon_cdna_start',
+  interval_feature_query := 'SELECT * FROM duckvep_hgvs_regulation ORDER BY seq_region, feature_start, regulation_feature_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+# The cumulative surface preserves regulation/motif rows from the same
+# consequence sweep. HGVS fields are NULL because these are not transcript
+# edit failures and must not require a second production annotation pass.
+query IIIIIII
+SELECT annotation.regulation_feature_index,
+       annotation.overlap_object_code,
+       (annotation.transcript_index IS NULL)::INTEGER,
+       (annotation.transcript_hgvs IS NULL)::INTEGER,
+       (annotation.protein_hgvs IS NULL)::INTEGER,
+       (annotation.transcript_hgvs_status IS NULL)::INTEGER,
+       (annotation.protein_hgvs_status IS NULL)::INTEGER
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 3::UBIGINT, 'G', 'A', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.regulation_feature_index IS NOT NULL;
+----
+0	1	1	1	1	1	1
+
+# The observer and result arenas resume across a DuckDB/C result-buffer edge.
+# Seventy transcript rows followed by seventy regulatory/motif rows exceed the
+# adapter's initial 64-row allocation; no row or HGVS observation may be
+# replayed or dropped while the cursor grows and resumes.
+statement ok
+CREATE TABLE duckvep_hgvs_dense_transcripts AS
+SELECT
+  i::UINTEGER AS transcript_index,
+  1::UINTEGER AS seq_region,
+  100::UBIGINT AS transcript_start,
+  150::UBIGINT AS transcript_end,
+  1::TINYINT AS strand,
+  i::UINTEGER AS gene_index,
+  0::UBIGINT AS transcript_flags,
+  NULL::UBIGINT AS cds_start,
+  NULL::UBIGINT AS cds_end,
+  NULL::BLOB AS cds_sequence,
+  NULL::UTINYINT AS codon_table,
+  NULL::BLOB AS pre_cds_sequence,
+  NULL::BLOB AS post_cds_sequence
+FROM range(70) ids(i);
+
+statement ok
+CREATE TABLE duckvep_hgvs_dense_exons AS
+SELECT
+  i::UINTEGER AS transcript_index,
+  100::UBIGINT AS exon_start,
+  150::UBIGINT AS exon_end,
+  1::UBIGINT AS exon_cdna_start,
+  51::UBIGINT AS exon_cdna_end,
+  -1::TINYINT AS phase,
+  -1::TINYINT AS end_phase
+FROM range(70) ids(i);
+
+statement ok
+CREATE TABLE duckvep_hgvs_dense_regulation AS
+SELECT
+  i::UINTEGER AS regulation_feature_index,
+  1::UINTEGER AS seq_region,
+  100::UINTEGER AS feature_start,
+  150::UINTEGER AS feature_end,
+  CASE WHEN i % 2 = 0 THEN 1 ELSE 2 END::UTINYINT AS feature_kind
+FROM range(70) ids(i);
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-dense-resume',
+  'SELECT * FROM duckvep_hgvs_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_hgvs_dense_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_dense_exons ORDER BY transcript_index, exon_cdna_start',
+  interval_feature_query := 'SELECT * FROM duckvep_hgvs_dense_regulation ORDER BY seq_region, feature_start, regulation_feature_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+query IIIIIII
+WITH annotations AS (
+  SELECT annotation
+  FROM unnest(_duckvep_annotate_small_hgvs(
+    'hgvs-dense-resume', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
+  )) AS u(annotation)
+)
+SELECT count(*)::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code = 0
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code IN (1, 2)
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code = 0
+           AND annotation.transcript_hgvs_status = 'supported'
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code IN (1, 2)
+           AND annotation.transcript_hgvs_status IS NULL
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code IN (1, 2)
+           AND annotation.protein_hgvs_status IS NULL
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code = 0
+           AND annotation.transcript_hgvs IS NOT NULL
+       )::INTEGER
+FROM annotations;
+----
+140	70	70	70	70	70	70
+
+query I
+SELECT duckvep_model_drop('hgvs-dense-resume');
+----
+1
+
+# The cumulative surface keeps every compact consequence field and appends
+# transcript/protein HGVS. Transcript stable IDs remain a relational join.
+query IITTITTTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES (1, 124::UBIGINT, 'T', 'C')
+)
+SELECT ord,
+       annotation.transcript_index,
+       annotation.transcript_hgvs,
+       coalesce(annotation.protein_hgvs, '-'),
+       annotation.hgvs_shift,
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-'),
+       annotation.protein_hgvs_status,
+       coalesce(annotation.protein_hgvs_reason, '-')
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord, annotation.transcript_index;
+----
+1	0	c.5T>C	p.Val2Ala	0	supported	-	supported	-
+1	1	n.78A>G	-	0	supported	-	not_applicable	-
+
+# hgvs is a fixed-schema option on the public event-relation surface. The
+# small-event lane remains fused and returns the same two transcript rows.
+statement ok
+CREATE TABLE duckvep_hgvs_public_events AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, 'C'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+query IITT
+SELECT event_index, transcript_index, transcript_hgvs,
+       coalesce(protein_hgvs, '-')
+FROM duckvep_annotate(
+  'duckvep_hgvs_public_events', 'hgvs-reference',
+  hgvs := true, upstream_distance := 0, downstream_distance := 0
+)
+ORDER BY transcript_index;
+----
+1	0	c.5T>C	p.Val2Ala
+1	1	n.78A>G	-
+
+# A transcript HGVS string larger than the adapter's initial render scratch
+# must trigger an exact-size retry. The 1,406-base ALT matches the scale of a
+# real full-ClinVar insertion that previously exposed a truncated scratch read.
+query III
+WITH variant(position, reference, alternate) AS (
+  SELECT 124::UBIGINT, 'T', 'G' || repeat('A', 1405)
+)
+SELECT count(*)::INTEGER,
+       count_if(annotation.transcript_hgvs_status = 'supported')::INTEGER,
+       (min(length(annotation.transcript_hgvs)) > 1400)::INTEGER
+FROM variant,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation);
+----
+2	2	1
+
+# Protein HGVS has an independent render/retry path. An in-frame insertion
+# whose three-letter amino-acid spelling exceeds the initial native scratch
+# capacity must survive the DuckDB adapter without truncation.
+query ITIT
+SELECT (length(annotation.transcript_hgvs) > 256)::INTEGER,
+       annotation.transcript_hgvs_status,
+       (length(annotation.protein_hgvs) > 256)::INTEGER,
+       annotation.protein_hgvs_status
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 124::UBIGINT,
+  'T', 'T' || repeat('GCT', 100), 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+1	supported	1	supported
+
+# VEP-116 HGVS shifting is transcript-strand-relative and capped at its
+# hard-coded 1000-base search. On a sequence region shorter than 2,000 bases,
+# VEP's first-1,000 and last-1,000 reference slices overlap; its executable
+# search therefore revisits repeated bases and shifts these edits into the
+# 3-prime UTR. The shifted/rotated edit is also the protein edit, rather than a
+# coordinate-only string rewrite.
+query IITTITTTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 124::UBIGINT, 'T', 'TACGT'),
+    (2, 124::UBIGINT, 'TACGT', 'T')
+)
+SELECT ord,
+       annotation.transcript_index,
+       annotation.transcript_hgvs,
+       coalesce(annotation.protein_hgvs, '-'),
+       annotation.hgvs_shift,
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-'),
+       annotation.protein_hgvs_status,
+       coalesce(annotation.protein_hgvs_reason, '-')
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord, annotation.transcript_index;
+----
+1	0	c.*4_*7dup	-	119	supported	-	not_applicable	-
+1	1	n.98_101dup	-	20	supported	-	not_applicable	-
+2	0	c.*4_*7del	-	119	supported	-	not_applicable	-
+2	1	n.94_97del	-	20	supported	-	not_applicable	-
+
+# A model without a genomic reference can still render substitutions whose REF
+# was proven against prepared CDS. Other transcript sequence and pure
+# insertion/deletion edits remain explicit instead of trusting uploaded REF or
+# silently using unshifted HGVS.
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-no-reference',
+  'SELECT seq_region FROM duckvep_hgvs_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_hgvs_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_exons ORDER BY transcript_index, exon_cdna_start'
+);
+----
+1
+
+query ITTTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 124::UBIGINT, 'T', 'C'),
+    (2, 124::UBIGINT, 'TACGT', 'T'),
+    (3, 124::UBIGINT, 'AA', 'AC')
+)
+SELECT ord,
+       coalesce(annotation.transcript_hgvs, '-'),
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-'),
+       annotation.protein_hgvs_status
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-no-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0
+ORDER BY ord;
+----
+1	c.5T>C	supported	-	supported
+2	-	unresolved	missing_reference	unresolved
+3	-	unresolved	missing_reference	unresolved
+
+query ITTTT
+SELECT annotation.transcript_index,
+       coalesce(annotation.transcript_hgvs, '-'),
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-'),
+       annotation.protein_hgvs_status
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-no-reference', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
+)) AS u(annotation)
+ORDER BY annotation.transcript_index;
+----
+0	c.5T>C	supported	-	supported
+1	-	unresolved	missing_reference	not_applicable
+
+# Uploaded deletion bases are checked against the indexed genomic reference
+# before shifting.
+query TTTT
+SELECT coalesce(annotation.transcript_hgvs, '-'),
+       annotation.transcript_hgvs_status,
+       annotation.transcript_hgvs_reason,
+       annotation.protein_hgvs_reason
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 124::UBIGINT, 'TAGGT', 'T', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+-	unresolved	reference_mismatch	reference_mismatch
+
+# Reference validation covers the complete uploaded REF, not only the minimized
+# differing region. This catches a wrong insertion anchor and wrong retained
+# padding even when the semantic inserted/substituted bases are otherwise valid.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 124::UBIGINT, 'A', 'AACGT'),
+    (2, 124::UBIGINT, 'GA', 'GC')
+)
+SELECT ord,
+       annotation.transcript_hgvs_status,
+       annotation.transcript_hgvs_reason,
+       annotation.protein_hgvs_reason
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0
+ORDER BY ord;
+----
+1	unresolved	reference_mismatch	reference_mismatch
+2	unresolved	reference_mismatch	reference_mismatch
+
+# BaseTranscriptVariation clamps an uploaded feature that extends past the
+# transcript endpoint before it derives the displayed REF. This is observable
+# for deletion, substitution, and insertion-like replacement forms.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 202::UBIGINT,
+     'CGTACGTACGTACGTACGTACGTACGTACGTACTGGTAAACGTACGTACG', 'C'),
+    (2, 250::UBIGINT, 'C', 'A'),
+    (3, 250::UBIGINT, 'CG', 'GC')
+)
+SELECT ord,
+       annotation.transcript_hgvs,
+       annotation.transcript_hgvs_status,
+       annotation.protein_hgvs_status
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0
+ORDER BY ord;
+----
+1	c.35_*10del	supported	not_applicable
+2	c.*10C>A	supported	not_applicable
+3	c.*10_*9insG	supported	not_applicable
+
+# A 3-prime shift can move an insertion from the terminal codon to the first
+# 3-prime UTR base. VEP keeps HGVSc but has no peptide allele to format.
+query TTTT
+SELECT annotation.transcript_hgvs,
+       coalesce(annotation.protein_hgvs, '-'),
+       annotation.protein_hgvs_status,
+       coalesce(annotation.protein_hgvs_reason, '-')
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 239::UBIGINT, 'A', 'AATG', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+c.72_*1insTGA	-	not_applicable	-
+
+# VEP caches start_lost while evaluating the uploaded consequence state. This
+# insertion is originally 5-prime UTR, shifts one base into printable coding
+# coordinates, and yields a frameshift HGVSp; the shifted peptide replay must
+# not replace VEP's cached false start_lost with p.Met1?.
+query TTIT
+SELECT annotation.transcript_hgvs,
+       annotation.protein_hgvs,
+       annotation.hgvs_shift,
+       annotation.protein_hgvs_status
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 119::UBIGINT,
+  'G', 'GAACT', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+c.1_2insACTA	p.Met1AsnfsTer?	1	supported
+
+# A wrong uploaded anchor makes both HGVS fields unresolved when the cached
+# complete-feature coding predicate is true, even though the original region
+# label is 5-prime UTR. Protein applicability cannot be decided from that
+# unshifted region label.
+query TTTT
+SELECT annotation.transcript_hgvs_status,
+       annotation.transcript_hgvs_reason,
+       annotation.protein_hgvs_status,
+       annotation.protein_hgvs_reason
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 119::UBIGINT,
+  'A', 'AAACT', 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+unresolved	reference_mismatch	unresolved	reference_mismatch
+
+# Stop-loss extension distance needs the complete sequence-backed post-CDS
+# flank. It is not inferred from a fixed reference-window size.
+statement ok
+CREATE TABLE duckvep_hgvs_stop_extension_transcripts AS
+SELECT * REPLACE ('TAGTACGTAC'::BLOB AS post_cds_sequence)
+FROM duckvep_hgvs_transcripts
+WHERE transcript_index = 0;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-stop-extension',
+  'SELECT * FROM duckvep_hgvs_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_hgvs_stop_extension_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_exons WHERE transcript_index = 0 ORDER BY transcript_index, exon_cdna_start',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+query ITTT
+SELECT annotation.consequence_mask,
+       annotation.transcript_hgvs,
+       annotation.protein_hgvs,
+       annotation.protein_hgvs_status
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-stop-extension', 1::UINTEGER, 238::UBIGINT,
+  'TAA', 'CAA', 0::UBIGINT
+)) AS u(annotation);
+----
+32768	c.70T>C	p.Ter24GlnextTer1	supported
+
+# HGVS sidecars must be completed while their named model and worker-owned
+# faidx handle are still pinned. Switching models inside one DuckDB vector must
+# not overwrite earlier text or facts.
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-reference-two',
+  'SELECT * FROM duckvep_hgvs_regions ORDER BY seq_region',
+  'SELECT * FROM duckvep_hgvs_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_exons ORDER BY transcript_index, exon_cdna_start',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+query ITTI
+WITH variants(ord, model_name, position, reference, alternate) AS (
+  VALUES
+    (1, 'hgvs-reference', 124::UBIGINT, 'T', 'C'),
+    (2, 'hgvs-no-reference', 124::UBIGINT, 'T', 'C'),
+    (3, 'hgvs-reference-two', 124::UBIGINT, 'TACGT', 'T')
+)
+SELECT ord,
+       annotation.transcript_hgvs,
+       annotation.protein_hgvs,
+       annotation.hgvs_shift
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  model_name, 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0
+ORDER BY ord;
+----
+1	c.5T>C	p.Val2Ala	0
+2	c.5T>C	p.Val2Ala	0
+3	c.*4_*7del	NULL	119
+
+# Synthetic no-feature rows and non-transcript rows have no HGVS status; they
+# are not transcript-edit failures.
+query TTT
+SELECT coalesce(annotation.transcript_hgvs, '-'),
+       coalesce(annotation.transcript_hgvs_status, '-'),
+       coalesce(annotation.protein_hgvs_status, '-')
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 10::UBIGINT, 'A', 'C', 0::UBIGINT
+)) AS u(annotation);
+----
+-	-	-
+
+# VCF permits a retained right-hand anchor for an insertion before reference
+# base one. The consequence remains valid, but only the right insertion flank
+# lies inside this transcript, so VEP has no transcript HGVS to emit. For the corresponding
+# right-anchored deletion, VEP's overlapping short-sequence-region post slice
+# begins with the deleted base itself, so its executable shift loop advances
+# once and renders n.2del.
+statement ok
+CREATE TABLE duckvep_hgvs_position_one_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  1::UBIGINT transcript_start,
+  10::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  0::UBIGINT transcript_flags,
+  NULL::UBIGINT cds_start,
+  NULL::UBIGINT cds_end,
+  NULL::BLOB cds_sequence,
+  NULL::UTINYINT codon_table,
+  NULL::BLOB pre_cds_sequence,
+  NULL::BLOB post_cds_sequence;
+
+statement ok
+CREATE TABLE duckvep_hgvs_position_one_exons AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UBIGINT exon_start,
+  10::UBIGINT exon_end,
+  1::UBIGINT exon_cdna_start,
+  10::UBIGINT exon_cdna_end,
+  -1::TINYINT phase,
+  -1::TINYINT end_phase;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-position-one',
+  'SELECT * FROM duckvep_hgvs_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_hgvs_position_one_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_position_one_exons ORDER BY transcript_index, exon_cdna_start',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+query ITTTT
+WITH variants(ord, reference, alternate) AS (
+  VALUES
+    (1, 'A', 'CA'),
+    (2, 'AC', 'C')
+)
+SELECT ord,
+       coalesce(annotation.transcript_hgvs, '-'),
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-'),
+       annotation.protein_hgvs_status
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-position-one', 1::UINTEGER, 1::UBIGINT,
+  reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	-	not_applicable	-	not_applicable
+2	n.2del	supported	-	not_applicable
+
+# Candidate admission includes directional transcript rows. VEP emits no
+# transcript HGVS for an edit wholly upstream or downstream of the transcript;
+# these are non-applicable states, not failed transcript projections.
+query ITTT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 90::UBIGINT, 'C', 'A'),
+    (2, 251::UBIGINT, 'G', 'A')
+)
+SELECT ord,
+       coalesce(annotation.transcript_hgvs, '-'),
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-')
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, position, reference, alternate, 5000::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0
+ORDER BY ord;
+----
+1	-	not_applicable	-
+2	-	not_applicable	-
+
+# A left-anchored insertion after the final reference base has no right genomic
+# flank to fetch. It remains a valid VCF allele; transcript-distance admission
+# is a row-level not-applicable state rather than a query error.
+query TTTT
+SELECT coalesce(annotation.transcript_hgvs, '-'),
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-'),
+       annotation.protein_hgvs_status
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-reference', 1::UINTEGER, 260::UBIGINT, 'T', 'TA', 5000::UBIGINT
+)) AS u(annotation)
+WHERE annotation.transcript_index = 0;
+----
+-	not_applicable	-	not_applicable
+
+# VEP's +/-1000 genomic slice controls only 3-prime shifting. Duplication
+# detection later compares against the transcript feature sequence and may
+# need an adjacent copied source longer than 1000 bases. This real indexed
+# FASTA witness has a 1001-base 5-prime source whose first byte lies just
+# outside the exact shift slice.
+statement ok
+CREATE TABLE duckvep_hgvs_large_regions AS
+SELECT 0::UINTEGER seq_region,
+       1009800::UBIGINT sequence_length,
+       'CHROMOSOME_I'::VARCHAR seq_region_name;
+
+statement ok
+CREATE TABLE duckvep_hgvs_large_transcripts AS
+SELECT 0::UINTEGER transcript_index,
+       0::UINTEGER seq_region,
+       1000::UBIGINT transcript_start,
+       5999::UBIGINT transcript_end,
+       1::TINYINT strand,
+       0::UINTEGER gene_index,
+       0::UBIGINT transcript_flags,
+       NULL::UBIGINT cds_start,
+       NULL::UBIGINT cds_end,
+       NULL::BLOB cds_sequence,
+       NULL::UTINYINT codon_table,
+       NULL::BLOB pre_cds_sequence,
+       NULL::BLOB post_cds_sequence;
+
+statement ok
+CREATE TABLE duckvep_hgvs_large_exons AS
+SELECT 0::UINTEGER transcript_index,
+       1000::UBIGINT exon_start,
+       5999::UBIGINT exon_end,
+       1::UBIGINT exon_cdna_start,
+       5000::UBIGINT exon_cdna_end,
+       -1::TINYINT phase,
+       -1::TINYINT end_phase;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-large-duplication',
+  'SELECT * FROM duckvep_hgvs_large_regions',
+  'SELECT * FROM duckvep_hgvs_large_transcripts',
+  'SELECT * FROM duckvep_hgvs_large_exons',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/ce.fa'
+);
+----
+1
+
+query TITT
+WITH reference_region AS (
+  SELECT string_agg(seq, '' ORDER BY start) AS sequence
+  FROM fasta_nuc(
+    '__WORKING_DIRECTORY__/test/data/ce.fa',
+    bin_width := 5000,
+    region := 'CHROMOSOME_I:1000-5999',
+    include_seq := TRUE
+  )
+), variant AS (
+  SELECT 3499::UBIGINT AS pos,
+         substr(sequence, 2500, 1) AS uploaded_ref,
+         substr(sequence, 2500, 1) ||
+           substr(sequence, 1500, 1001) AS uploaded_alt
+  FROM reference_region
+)
+SELECT annotation.transcript_hgvs,
+       annotation.hgvs_shift,
+       annotation.transcript_hgvs_status,
+       coalesce(annotation.transcript_hgvs_reason, '-')
+FROM variant,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-large-duplication', 0::UINTEGER, pos,
+  uploaded_ref, uploaded_alt, 0::UBIGINT
+)) AS u(annotation);
+----
+n.1500_2500dup	0	supported	-
+
+# VEP 116 has a representation-specific HGVSc coordinate path on incomplete
+# CDS starts. A literal exonic SNP uses phase-aware TranscriptVariation
+# cds_start, while a two-base uploaded feature that trims to the same semantic
+# substitution uses the generic phase-neutral transcript coordinate.
+statement ok
+CREATE TABLE duckvep_hgvs_phase_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  100::UBIGINT transcript_start,
+  209::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  16::UBIGINT transcript_flags,
+  100::UBIGINT cds_start,
+  209::UBIGINT cds_end,
+  NULL::BLOB cds_sequence,
+  NULL::UTINYINT codon_table,
+  NULL::BLOB pre_cds_sequence,
+  NULL::BLOB post_cds_sequence;
+
+statement ok
+CREATE TABLE duckvep_hgvs_phase_exons AS
+SELECT * FROM (VALUES
+  (0::UINTEGER, 100::UBIGINT, 109::UBIGINT,
+   1::UBIGINT, 10::UBIGINT, 2::TINYINT, 0::TINYINT),
+  (0::UINTEGER, 200::UBIGINT, 209::UBIGINT,
+   11::UBIGINT, 20::UBIGINT, 0::TINYINT, 0::TINYINT)
+) t(transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,
+    phase, end_phase);
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-phase',
+  'SELECT * FROM duckvep_hgvs_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_hgvs_phase_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_phase_exons ORDER BY transcript_index, exon_cdna_start',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+query ITT
+WITH variants(ord, position, reference, alternate) AS (
+  VALUES
+    (1, 100::UBIGINT, 'T', 'G'),
+    (2, 100::UBIGINT, 'TA', 'TG')
+)
+SELECT ord,
+       annotation.transcript_hgvs,
+       annotation.transcript_hgvs_status
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-phase', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	c.3T>G	supported
+2	c.2A>G	supported
+
+# A CDS-overlapping multi-base feature whose last mapper item is an intronic
+# Gap has no HGVSp in VEP. It is non-applicable before sequence reconstruction,
+# even though this topology-only test model also lacks prepared CDS sequence.
+query TTT
+SELECT annotation.transcript_hgvs_status,
+       annotation.protein_hgvs_status,
+       coalesce(annotation.protein_hgvs_reason, '-')
+FROM unnest(_duckvep_annotate_small_hgvs(
+  'hgvs-phase', 1::UINTEGER, 109::UBIGINT, 'ACG', 'CCC', 0::UBIGINT
+)) AS u(annotation);
+----
+supported	not_applicable	-

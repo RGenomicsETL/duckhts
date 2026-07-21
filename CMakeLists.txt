@@ -99,6 +99,8 @@ set(EXTENSION_SOURCES
         src/duckvep/kernel/src/duckvep_sv.c
         src/duckvep/kernel/src/duckvep_delta.c
         src/duckvep/kernel/src/duckvep_projection.c
+        src/duckvep/kernel/src/duckvep_transcript_edit.c
+        src/duckvep/kernel/src/duckvep_hgvs.c
         src/duckvep/kernel/src/duckvep_codon.c
         src/duckvep/kernel/src/duckvep_coding.c
         src/duckvep/kernel/src/duckvep_haplotype.c
@@ -106,6 +108,7 @@ set(EXTENSION_SOURCES
         src/duckvep/duckvep_model.c
         src/duckvep/duckvep_annotate.c
         src/duckvep/duckvep_ensembl.c
+        src/duckvep/duckvep_sql.c
         src/hts_meta_reader.c
         src/quality_encoding.c
         src/quality_encoding_reader.c

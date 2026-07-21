@@ -4,6 +4,29 @@
 
 require duckhts
 
+query TTTTTTTTTTTTT
+SELECT duckhts_contig_key('chr1'),
+       duckhts_contig_key('1'),
+       duckhts_contig_key('chrM'),
+       duckhts_contig_key('CHRMT'),
+       duckhts_contig_key('M'),
+       duckhts_contig_key('mt'),
+       duckhts_contig_key('chrX'),
+       duckhts_contig_key('chry'),
+       duckhts_contig_key('chrGL000220.1'),
+       duckhts_contig_key('NC_000001.11'),
+       duckhts_contig_key('23'),
+       duckhts_contig_key('chrchr1'),
+       duckhts_contig_key('chr');
+----
+1	1	MT	MT	MT	MT	X	Y	GL000220.1	NC_000001.11	23	chr1	chr
+
+query II
+SELECT CASE WHEN duckhts_contig_key(NULL) IS NULL THEN 1 ELSE 0 END,
+       CASE WHEN duckhts_contig_key('') = '' THEN 1 ELSE 0 END;
+----
+1	1
+
 query T
 SELECT variantkey_hex(variantkey('chr1', 268435456, 'C', 'T'));
 ----

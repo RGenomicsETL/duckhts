@@ -94,9 +94,56 @@ op <- add_option(
   default = 10000L,
   help = "deterministic limit per allele type and length bin; 0 keeps all [%default]"
 )
+op <- add_option(
+  op,
+  "--max-allele-length",
+  dest = "max_allele_length",
+  type = "integer",
+  default = 50L,
+  help = paste(
+    "maximum literal REF or ALT length in the small-event lane;",
+    "the compact kernel limit is 65535 [%default]"
+  )
+)
+op <- add_option(
+  op,
+  "--split-multiallelic",
+  dest = "split_multiallelic",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "compare each ALT from a multiallelic record independently; genotype",
+    "fields are not used or rewritten [default: %default]"
+  )
+)
+op <- add_option(
+  op,
+  "--stratify-raw-allele-length",
+  dest = "stratify_raw_allele_length",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "also partition deterministic small-event sampling by the larger raw",
+    "REF/ALT length (1, 2..50, 51..1000, 1001..10000, >10000);",
+    "this preserves long uploaded representations independently of the",
+    "minimized edit-length bin [default: %default]"
+  )
+)
 op <- add_option(op, "--seed", type = "integer", default = 1L)
 op <- add_option(op, "--chrom", default = "")
 op <- add_option(op, "--distance", type = "integer", default = 5000L)
+op <- add_option(
+  op,
+  "--max-sv-size",
+  dest = "max_sv_size",
+  type = "double",
+  default = 10000000,
+  help = paste(
+    "VEP --max_sv_size for structural-mode records; the runner passes 10 Mb",
+    "by default so exact spans are not silently skipped, and records the value",
+    "in the oracle receipt. This is not VEP's own 5 kb default [%default]"
+  )
+)
 op <- add_option(
   op,
   "--regulatory",
@@ -109,9 +156,77 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--hgvs",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "also compare independent-event HGVSc/HGVSn and HGVSp suffixes from",
+    "_duckvep_annotate_small_hgvs(...) with VEP --hgvs [default: %default]"
+  )
+)
+op <- add_option(op, "--hgvs-out", dest = "hgvs_out", default = "")
+op <- add_option(
+  op,
+  "--hgvs-pairs-out",
+  dest = "hgvs_pairs_out",
+  default = ""
+)
+op <- add_option(
+  op,
+  "--allow-hgvs-discordance",
+  dest = "allow_hgvs_discordance",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "write investigative HGVS artifacts without failing on unresolved,",
+    "mismatched, missing, or extra rows [default: fail closed]"
+  )
+)
+op <- add_option(
+  op,
   "--annotations-out",
   dest = "annotations_out",
   default = ""
+)
+op <- add_option(
+  op,
+  "--eligibility-out",
+  dest = "eligibility_out",
+  default = "",
+  help = "optional CSV receipt for input allele classes and exclusions [%default]"
+)
+op <- add_option(
+  op,
+  "--source-audit-only",
+  dest = "source_audit_only",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "scan the complete small-event source, write --eligibility-out, and stop",
+    "before FASTA/VEP annotation; this records source support without",
+    "claiming executable conformance [default: %default]"
+  )
+)
+op <- add_option(
+  op,
+  "--source-url",
+  dest = "source_url",
+  default = "",
+  help = "published URL from which --vcf was obtained [%default]"
+)
+op <- add_option(
+  op,
+  "--source-version",
+  dest = "source_version",
+  default = "",
+  help = "release, object version, or accession identifying --vcf [%default]"
+)
+op <- add_option(
+  op,
+  "--source-checksum",
+  dest = "source_checksum",
+  default = "",
+  help = "expected checksum as md5:HEX or sha256:HEX [%default]"
 )
 op <- add_option(op, "--sample-vcf", dest = "sample_vcf", default = "")
 op <- add_option(
@@ -129,7 +244,30 @@ op <- add_option(
     file.path(root, "build", "release", "duckhts.duckdb_extension")
   )
 )
+op <- add_option(
+  op,
+  "--skip-extension-build",
+  dest = "skip_extension_build",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "load --extension without a clean in-tree rebuild and mark emitted",
+    "artifacts as unbound diagnostics [%default]"
+  )
+)
 op <- add_option(op, "--fork", default = as.character(max(1L, min(8L, ncores))))
+op <- add_option(
+  op,
+  "--vep-buffer-size",
+  dest = "vep_buffer_size",
+  type = "integer",
+  default = 5000L,
+  help = paste(
+    "VEP input buffer size for small and structural modes; breakend mode",
+    "remains isolated at one because neighboring BNDs change VEP semantics",
+    "[%default]"
+  )
+)
 op <- add_option(
   op,
   "--vep-prefix",
@@ -156,12 +294,23 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
+root <- normalizePath(root[[1L]], mustWork = TRUE)
+source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
   die("--event-mode must be small, structural, or breakend")
 }
+if (isTRUE(opt$hgvs) && !identical(opt$event_mode, "small")) {
+  die("--hgvs currently applies only to --event-mode small")
+}
+if (isTRUE(opt$hgvs) && isTRUE(opt$regulatory)) {
+  die("--hgvs compares transcript rows and cannot be combined with --regulatory")
+}
 if (
-  !requireNamespace("blit", quietly = TRUE) ||
-    utils::packageVersion("blit") < "0.2.0.9000"
+  !isTRUE(opt$source_audit_only) &&
+    (
+      !requireNamespace("blit", quietly = TRUE) ||
+        utils::packageVersion("blit") < "0.2.0.9000"
+    )
 ) {
   die(
     "the current WangLabCSU/blit checkout is required ",
@@ -170,36 +319,144 @@ if (
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
 fasta_index <- paste0(opt$fasta, ".fai")
-required_files <- c(opt$fasta, fasta_index, opt$extension)
 external_model_database <- !nzchar(opt$model_sql) &&
   !identical(opt$database, ":memory:")
+required_files <- character()
+if (!isTRUE(opt$source_audit_only)) {
+  required_files <- c(opt$fasta, fasta_index, required_files)
+}
 if (external_model_database) {
   required_files <- c(required_files, opt$database)
+} else if (nzchar(opt$model_sql)) {
+  required_files <- c(required_files, opt$model_sql)
 }
-if (identical(oracle_mode, "gff")) {
+if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
-} else if (!dir.exists(opt$cache_dir)) {
+} else if (
+  !isTRUE(opt$source_audit_only) &&
+    !dir.exists(opt$cache_dir)
+) {
   die("VEP cache root does not exist: {opt$cache_dir}")
 }
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
 }
+source_revision <- if (isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_revision(root)
+} else {
+  duckvep_evidence_assert_checkout(
+    root,
+    context = "DuckVEP executable conformance evidence"
+  )
+}
+if (isTRUE(opt$skip_extension_build)) {
+  if (!file.exists(opt$extension)) {
+    die("missing input: {opt$extension}")
+  }
+  extension_build_binding <- "unbound_diagnostic"
+  extension_sha256 <- duckvep_evidence_sha256(opt$extension)
+} else {
+  extension_receipt <- duckvep_evidence_build_extension(
+    root,
+    opt$extension,
+    source_revision
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
+}
+model_artifact_kind <- if (external_model_database) "duckdb" else "sql"
+model_artifact_path <- if (external_model_database) opt$database else opt$model_sql
+model_artifact_sha256 <- if (nzchar(model_artifact_path)) {
+  duckvep_evidence_sha256(model_artifact_path)
+} else {
+  ""
+}
+reference_fasta_sha256 <- if (!isTRUE(opt$source_audit_only)) {
+  duckvep_evidence_sha256(opt$fasta)
+} else {
+  ""
+}
+reference_fai_sha256 <- if (!isTRUE(opt$source_audit_only)) {
+  duckvep_evidence_sha256(fasta_index)
+} else {
+  ""
+}
 
-fasta_index_lines <- readLines(fasta_index, warn = FALSE)
-fasta_chroms <- sub("\t.*$", "", fasta_index_lines)
+fasta_regions <- if (isTRUE(opt$source_audit_only)) {
+  data.frame(chrom = character(), sequence_length = numeric())
+} else {
+  regions <- utils::read.delim(
+    fasta_index,
+    header = FALSE,
+    colClasses = c("character", "numeric", rep("NULL", 3L)),
+    quote = "",
+    comment.char = "",
+    stringsAsFactors = FALSE
+  )
+  names(regions) <- c("chrom", "sequence_length")
+  regions
+}
+fasta_chroms <- fasta_regions$chrom
 if (
-  length(fasta_chroms) == 0L ||
-    any(!nzchar(fasta_chroms)) ||
-    anyDuplicated(fasta_chroms)
+  !isTRUE(opt$source_audit_only) &&
+    (
+      length(fasta_chroms) == 0L ||
+        any(!nzchar(fasta_chroms)) ||
+        anyDuplicated(fasta_chroms) ||
+        any(!is.finite(fasta_regions$sequence_length)) ||
+        any(fasta_regions$sequence_length < 1) ||
+        any(fasta_regions$sequence_length > 4294967295) ||
+        any(fasta_regions$sequence_length != floor(fasta_regions$sequence_length))
+    )
 ) {
-  die("FASTA index has missing or duplicate sequence names: {fasta_index}")
+  die("FASTA index has invalid names or lengths: {fasta_index}")
 }
 if (opt$sample_per_shape < 0L) {
   die("--sample-per-shape must be non-negative")
 }
+if (opt$max_allele_length < 1L || opt$max_allele_length > 65535L) {
+  die("--max-allele-length must be between 1 and 65535")
+}
 if (opt$distance < 0L) {
   die("--distance must be non-negative")
+}
+if (opt$vep_buffer_size < 1L) {
+  die("--vep-buffer-size must be positive")
+}
+if (
+  !is.finite(opt$max_sv_size) ||
+    opt$max_sv_size < 1 ||
+    opt$max_sv_size > 4294967295 ||
+    opt$max_sv_size != floor(opt$max_sv_size)
+) {
+  die("--max-sv-size must be an integer between 1 and 4294967295")
+}
+if (
+  isTRUE(opt$source_audit_only) &&
+    (
+      !identical(opt$event_mode, "small") ||
+        !nzchar(opt$eligibility_out)
+    )
+) {
+  die("--source-audit-only requires small mode and --eligibility-out")
+}
+if (
+  !identical(opt$event_mode, "small") &&
+    (
+      isTRUE(opt$split_multiallelic) ||
+        isTRUE(opt$stratify_raw_allele_length) ||
+        nzchar(opt$eligibility_out)
+    )
+) {
+  die(
+    "--split-multiallelic, --stratify-raw-allele-length, and ",
+    "--eligibility-out apply only to --event-mode small"
+  )
+}
+if (nzchar(opt$source_version) && !nzchar(opt$source_url)) {
+  die("--source-version requires --source-url")
 }
 if (isTRUE(opt$regulatory) && identical(oracle_mode, "gff")) {
   die("--regulatory requires the indexed VEP cache, not the GFF oracle")
@@ -214,6 +471,9 @@ nmd_state_plugin <- file.path(
   "DuckVEPNMDState.pm"
 )
 if (nzchar(opt$nmd_plugin_dir)) {
+  if (isTRUE(opt$source_audit_only)) {
+    die("--source-audit-only does not execute the NMD plugin")
+  }
   if (!identical(opt$event_mode, "small")) {
     die("structural and breakend differentials do not compare NMD plugin output")
   }
@@ -261,6 +521,73 @@ if (!nzchar(opt$annotations_out)) {
     glue("{opt$corpus}_annotations.parquet")
   )
 }
+if (isTRUE(opt$hgvs) && !nzchar(opt$hgvs_out)) {
+  opt$hgvs_out <- file.path(
+    results_dir,
+    glue("{opt$corpus}_hgvs_conformance.csv")
+  )
+}
+if (isTRUE(opt$hgvs) && !nzchar(opt$hgvs_pairs_out)) {
+  opt$hgvs_pairs_out <- file.path(
+    results_dir,
+    glue("{opt$corpus}_hgvs_pairs.parquet")
+  )
+}
+
+canonical_output_path <- function(path) {
+  normalizePath(path.expand(path), winslash = "/", mustWork = FALSE)
+}
+annotation_stem <- sub(
+  "_annotations[.]parquet$",
+  "",
+  basename(opt$annotations_out)
+)
+statistical_outputs <- c(
+  statistical_conformance = file.path(
+    dirname(opt$annotations_out),
+    glue("{annotation_stem}_statistical_conformance.csv")
+  ),
+  methodology_audit = file.path(
+    dirname(opt$annotations_out),
+    glue("{annotation_stem}_methodology_audit.csv")
+  ),
+  consequence_pairs = file.path(
+    dirname(opt$annotations_out),
+    glue("{annotation_stem}_pairs.parquet")
+  ),
+  nmd_conformance = file.path(
+    dirname(opt$annotations_out),
+    glue("{annotation_stem}_nmd_conformance.csv")
+  )
+)
+declared_outputs <- c(annotations = opt$annotations_out, statistical_outputs)
+hgvs_discordance_count <- 0L
+if (isTRUE(opt$hgvs)) {
+  declared_outputs <- c(
+    declared_outputs,
+    hgvs_summary = opt$hgvs_out,
+    hgvs_pairs = opt$hgvs_pairs_out
+  )
+}
+canonical_outputs <- vapply(
+  declared_outputs,
+  canonical_output_path,
+  character(1L)
+)
+colliding_outputs <- unique(canonical_outputs[duplicated(canonical_outputs)])
+if (length(colliding_outputs) != 0L) {
+  labels <- vapply(
+    colliding_outputs,
+    function(path) paste(names(canonical_outputs)[canonical_outputs == path],
+      collapse = ", "
+    ),
+    character(1L)
+  )
+  die(
+    "output paths must be distinct; collision between ",
+    paste(labels, collapse = "; ")
+  )
+}
 
 temporary_files <- character()
 cleanup <- function() unlink(temporary_files, recursive = TRUE, force = TRUE)
@@ -301,11 +628,45 @@ invisible(dbWriteTable(
   "duckvep_oracle_sequence_order",
   data.frame(
     chrom = fasta_chroms,
+    sequence_length = fasta_regions$sequence_length,
     fasta_order = seq_along(fasta_chroms),
     stringsAsFactors = FALSE
   ),
   temporary = TRUE
 ))
+if (isTRUE(opt$hgvs)) {
+  so_bit_path <- file.path(
+    root,
+    "test",
+    "duckvep",
+    "conformance",
+    "data",
+    "so_bit_bindings.tsv"
+  )
+  if (!file.exists(so_bit_path)) {
+    die("missing generated SO-bit binding table: {so_bit_path}")
+  }
+  so_bits <- utils::read.delim(
+    so_bit_path,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  if (
+    !identical(names(so_bits), c("SO_term", "so_enum")) ||
+      nrow(so_bits) == 0L || nrow(so_bits) > 64L ||
+      anyNA(so_bits$SO_term) || any(!nzchar(so_bits$SO_term)) ||
+      anyDuplicated(so_bits$SO_term)
+  ) {
+    die("invalid generated SO-bit binding table: {so_bit_path}")
+  }
+  so_bits$bit_index <- seq_len(nrow(so_bits)) - 1L
+  invisible(dbWriteTable(
+    con,
+    "duckvep_so_bits",
+    so_bits[, c("SO_term", "bit_index")],
+    temporary = TRUE
+  ))
+}
 
 if (external_model_database) {
   invisible(dbExecute(
@@ -413,13 +774,74 @@ model_query_relation <- function(relation) {
   }
   relation_id
 }
+hgvs_region_query <- ""
+if (isTRUE(opt$hgvs)) {
+  if (!("name" %in% region_columns)) {
+    die("--hgvs requires name in duckvep_sequence_regions")
+  }
+  region_length_projection <- if (complete_coverage) {
+    ", sequence_length"
+  } else {
+    ""
+  }
+  model_regions <- dbGetQuery(
+    con,
+    paste(
+      "SELECT seq_region, name",
+      region_length_projection,
+      "FROM", model_query_relation("duckvep_sequence_regions"),
+      "ORDER BY seq_region"
+    )
+  )
+  if (
+    nrow(model_regions) == 0L || anyNA(model_regions[, c("seq_region", "name")]) ||
+      any(!nzchar(model_regions$name)) || anyDuplicated(model_regions$seq_region) ||
+      anyDuplicated(model_regions$name)
+  ) {
+    die("--hgvs requires unique non-NULL sequence-region ordinals and names")
+  }
+  fasta_match <- match(model_regions$name, fasta_regions$chrom)
+  if (anyNA(fasta_match)) {
+    die(
+      "model sequence region(s) are absent from the FASTA index: ",
+      "{paste(model_regions$name[is.na(fasta_match)], collapse = ', ')}"
+    )
+  }
+  fasta_lengths <- fasta_regions$sequence_length[fasta_match]
+  if (
+    complete_coverage &&
+      any(as.numeric(model_regions$sequence_length) != fasta_lengths)
+  ) {
+    die("model sequence lengths disagree with the FASTA index")
+  }
+  value_rows <- vapply(
+    seq_len(nrow(model_regions)),
+    function(i) {
+      glue(
+        "({format(model_regions$seq_region[i], scientific = FALSE)}::UINTEGER, ",
+        "{format(fasta_lengths[i], scientific = FALSE)}::UBIGINT, ",
+        "{sql_q(model_regions$name[i])}::VARCHAR)"
+      )
+    },
+    character(1)
+  )
+  hgvs_region_query <- paste0(
+    "SELECT * FROM (VALUES ",
+    paste(value_rows, collapse = ", "),
+    ") t(seq_region, sequence_length, seq_region_name) ORDER BY seq_region"
+  )
+}
 load_queries <- c(
-  paste(
-    "SELECT seq_region",
-    if (complete_coverage) ", sequence_length" else "",
-    "FROM", model_query_relation("duckvep_sequence_regions"),
-    "ORDER BY seq_region"
-  ),
+  if (isTRUE(opt$hgvs)) {
+    hgvs_region_query
+  } else {
+    paste(
+      "SELECT seq_region",
+      if (complete_coverage) ", sequence_length" else "",
+      "FROM", model_query_relation("duckvep_sequence_regions"),
+      "ORDER BY seq_region"
+    )
+  },
   paste(
     "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
     "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table,",
@@ -470,6 +892,12 @@ if (isTRUE(opt$regulatory)) {
 if (complete_coverage) {
   load_options <- c(load_options, "transcript_coverage_complete := TRUE")
 }
+if (isTRUE(opt$hgvs)) {
+  load_options <- c(
+    load_options,
+    glue("reference_fasta := {sql_q(normalizePath(opt$fasta))}")
+  )
+}
 loaded <- dbGetQuery(
   con,
   glue(
@@ -512,6 +940,55 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
   die("VCF does not exist: {source_vcf}")
 }
 
+if (!nzchar(source_vcf) && any(nzchar(c(opt$source_url, opt$source_checksum)))) {
+  die("source provenance options require --vcf")
+}
+source_sha256 <- ""
+verified_source_checksum <- ""
+source_bytes <- NA_real_
+if (nzchar(source_vcf)) {
+  source_vcf <- normalizePath(source_vcf)
+  source_bytes <- unname(file.info(source_vcf)$size)
+  sha_line <- system2("sha256sum", source_vcf, stdout = TRUE, stderr = FALSE)
+  if (length(sha_line) != 1L) {
+    die("cannot checksum {source_vcf}")
+  }
+  source_sha256 <- tolower(
+    strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
+  )
+  if (!grepl("^[0-9a-f]{64}$", source_sha256)) {
+    die("sha256sum returned an invalid digest for {source_vcf}")
+  }
+  if (nzchar(opt$source_checksum)) {
+    checksum_parts <- strsplit(opt$source_checksum, ":", fixed = TRUE)[[1L]]
+    if (length(checksum_parts) != 2L) {
+      die("--source-checksum must be md5:HEX or sha256:HEX")
+    }
+    checksum_algorithm <- tolower(checksum_parts[[1L]])
+    expected_checksum <- tolower(checksum_parts[[2L]])
+    actual_checksum <- switch(
+      checksum_algorithm,
+      md5 = tolower(unname(tools::md5sum(source_vcf))),
+      sha256 = source_sha256,
+      die("--source-checksum algorithm must be md5 or sha256")
+    )
+    expected_width <- if (identical(checksum_algorithm, "md5")) 32L else 64L
+    if (
+      nchar(expected_checksum) != expected_width ||
+        !grepl("^[0-9a-f]+$", expected_checksum)
+    ) {
+      die("--source-checksum has an invalid {checksum_algorithm} digest")
+    }
+    if (!identical(actual_checksum, expected_checksum)) {
+      die(
+        "source checksum mismatch: expected {expected_checksum}, ",
+        "found {actual_checksum}"
+      )
+    }
+    verified_source_checksum <- paste(checksum_algorithm, actual_checksum, sep = ":")
+  }
+}
+
 chrom_filter <- ""
 chroms <- trimws(strsplit(opt$chrom, ",", fixed = TRUE)[[1L]])
 chroms <- chroms[nzchar(chroms)]
@@ -526,10 +1003,42 @@ if (length(chroms) != 0L) {
     "AND r.name IN ({paste(vapply(chroms, sql_q, character(1)), collapse = ', ')})"
   )
 }
+small_source_sql <- ""
+if (identical(opt$event_mode, "small")) {
+  small_source_sql <- if (isTRUE(opt$split_multiallelic)) {
+    glue(
+      "SELECT
+         v.CHROM AS chrom,
+         v.POS::UBIGINT AS position,
+         v.REF AS reference,
+         a.alternate AS alternate
+       FROM read_bcf({sql_q(source_vcf)}, scan_mode := 'sequential') v
+       CROSS JOIN UNNEST(v.ALT) WITH ORDINALITY AS a(alternate, alt_index)
+       WHERE a.alternate IS NOT NULL
+         {chrom_filter}"
+    )
+  } else {
+    glue(
+      "SELECT
+         CHROM AS chrom,
+         POS::UBIGINT AS position,
+         REF AS reference,
+         ALT[1] AS alternate
+       FROM read_bcf({sql_q(source_vcf)}, scan_mode := 'sequential')
+       WHERE len(ALT) = 1
+         {chrom_filter}"
+    )
+  }
+}
 sample_filter <- if (opt$sample_per_shape == 0L) {
   ""
 } else {
   glue("WHERE sample_rank <= {opt$sample_per_shape}")
+}
+small_sample_partition <- if (isTRUE(opt$stratify_raw_allele_length)) {
+  "var_type, length_bin, raw_allele_length_bin"
+} else {
+  "var_type, length_bin"
 }
 generated_filter <- if (opt$sample_per_shape == 0L) {
   ""
@@ -593,6 +1102,112 @@ regulation_span_geometries <- if (isTRUE(opt$regulatory)) {
      WHERE f.feature_start > 1 AND f.feature_end > f.feature_start
        AND f.feature_end <= {model_sequence_length_sql}
        {generated_chrom_filter}"
+  )
+} else {
+  ""
+}
+
+# BND regulation observes two different point transforms: VEP removes the local
+# VCF anchor (POS + 1), while the mate coordinate is used verbatim. Generate
+# both raw representations at feature starts, midpoints, and ends so a seeded
+# campaign cannot appear exact merely because transcript-derived endpoints
+# happened not to land in a RegulatoryFeature or MotifFeature.
+regulation_breakend_geometries <- if (isTRUE(opt$regulatory)) {
+  glue(
+    "UNION ALL
+     SELECT
+       concat(
+         CASE f.feature_kind WHEN 1 THEN 'regulatory' ELSE 'motif' END,
+         '_', endpoint_role, '_', point_name
+       ) AS event_state,
+       f.regulation_feature_index AS transcript_index,
+       f.seq_region, r.name AS chrom,
+       CAST(feature_position + position_shift AS UINTEGER) AS position
+     FROM duckvep_regulation_features f
+     JOIN duckvep_sequence_regions r USING (seq_region)
+     CROSS JOIN LATERAL (VALUES
+       ('start', f.feature_start),
+       ('mid', (f.feature_start + f.feature_end) // 2),
+       ('end', f.feature_end)
+     ) feature_points(point_name, feature_position)
+     CROSS JOIN (VALUES
+       ('local', -1),
+       ('mate', 0)
+     ) endpoint_roles(endpoint_role, position_shift)
+     WHERE feature_position + position_shift > 0
+       AND feature_position + position_shift < 4294967295
+       {generated_chrom_filter}"
+  )
+} else {
+  ""
+}
+
+# Force the two same-chromosome states that shuffled endpoints do not guarantee:
+# both transformed endpoint points lie in the same object, or the mate lies in
+# the object while the transformed local point is one base before it. The first
+# state retains the local base term. The second exposes StructuralVariationOverlap's
+# fixed 5000-base endpoint admission and yields the object-level union of
+# intergenic_variant with feature_truncation.
+regulation_breakend_both_pairs <- if (isTRUE(opt$regulatory)) {
+  both_pair_limit <- if (opt$sample_per_shape == 0L) {
+    ""
+  } else {
+    glue(
+      "QUALIFY row_number() OVER (
+         PARTITION BY f.feature_kind, f.seq_region
+         ORDER BY hash(f.regulation_feature_index, {opt$seed}, 73)
+       ) <= {opt$sample_per_shape}"
+    )
+  }
+  glue(
+    "UNION ALL
+     SELECT
+       'intra' AS pair_class,
+       concat(
+         CASE selected.feature_kind
+           WHEN 1 THEN 'regulatory' ELSE 'motif'
+         END,
+         state.local_suffix
+       ) AS local_state,
+       concat(
+         CASE selected.feature_kind
+           WHEN 1 THEN 'regulatory' ELSE 'motif'
+         END,
+         state.mate_suffix
+       ) AS mate_state,
+       selected.regulation_feature_index AS local_transcript_index,
+       selected.regulation_feature_index AS mate_transcript_index,
+       selected.seq_region, selected.chrom,
+       CAST(
+         CAST(
+           CASE state.local_anchor
+             WHEN 'start' THEN selected.feature_start
+             ELSE selected.feature_end
+           END AS BIGINT
+         ) + state.local_raw_shift AS UINTEGER
+       ) AS position,
+       selected.seq_region AS mate_seq_region,
+       selected.chrom AS mate_chrom,
+       CAST(
+         (selected.feature_start + selected.feature_end) // 2 AS UINTEGER
+       )
+         AS mate_position
+     FROM (
+       SELECT f.*, r.name AS chrom
+       FROM duckvep_regulation_features f
+       JOIN duckvep_sequence_regions r USING (seq_region)
+       WHERE f.feature_start > 2
+         AND CAST(f.feature_end AS UBIGINT) + 5001 <=
+             {model_sequence_length_sql}
+         {generated_chrom_filter}
+       {both_pair_limit}
+     ) selected
+     CROSS JOIN (VALUES
+       ('_both_local_start', '_both_mate_mid', 'start', -1::BIGINT),
+       ('_mate_only_close_local_before', '_mate_exact_mid', 'start', -2::BIGINT),
+       ('_mate_only_exact_cap_after', '_mate_exact_mid', 'end', 4999::BIGINT),
+       ('_mate_only_beyond_cap_after', '_mate_exact_mid', 'end', 5000::BIGINT)
+     ) state(local_suffix, mate_suffix, local_anchor, local_raw_shift)"
   )
 } else {
   ""
@@ -890,6 +1505,7 @@ if (generate_breakend) {
                 (exon_end + next_exon_start) // 2
          FROM exons
          WHERE next_exon_start IS NOT NULL AND next_exon_start > exon_end + 1
+         {regulation_breakend_geometries}
        ), distinct_geometries AS (
          SELECT DISTINCT event_state, transcript_index, seq_region, chrom, position
          FROM endpoint_geometries
@@ -953,6 +1569,7 @@ if (generate_breakend) {
            ON m.seq_region = c.mate_seq_region
           AND m.endpoint_rank = 1 + ((l.endpoint_rank - 1) % m.endpoint_count)
          WHERE c.mate_seq_region <> l.seq_region
+         {regulation_breakend_both_pairs}
        ), oriented_pairs AS (
          SELECT p.*, orientation
          FROM endpoint_pairs p
@@ -984,8 +1601,29 @@ if (generate_breakend) {
   ))
 }
 
+source_bcf_columns <- character()
+if (
+  identical(opt$event_mode, "structural") &&
+    !generate_structural && nzchar(source_vcf)
+) {
+  source_bcf_columns <- dbGetQuery(
+    con,
+    glue(
+      "DESCRIBE SELECT * FROM read_bcf(
+         {sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential'
+       )"
+    )
+  )$column_name
+}
+source_optional_column <- function(name, missing_sql) {
+  if (name %in% source_bcf_columns) name else missing_sql
+}
+
 structural_source_sql <- if (generate_structural) {
-  "SELECT * FROM duckvep_generated_structural_source"
+  paste(
+    "SELECT *, NULL::INTEGER[] AS cipos, NULL::INTEGER[] AS ciend,",
+    "false AS imprecise FROM duckvep_generated_structural_source"
+  )
 } else if (generate_breakend) {
   "SELECT * FROM duckvep_generated_breakend_source"
 } else if (identical(opt$event_mode, "structural")) {
@@ -998,6 +1636,11 @@ structural_source_sql <- if (generate_structural) {
        REF AS reference,
        ALT[1] AS alternate,
        upper(INFO_SVTYPE) AS source_svtype,
+       {source_optional_column('INFO_CIPOS', 'NULL::INTEGER[]')} AS cipos,
+       {source_optional_column('INFO_CIEND', 'NULL::INTEGER[]')} AS ciend,
+       coalesce(
+         {source_optional_column('INFO_IMPRECISE', 'false')}, false
+       ) AS imprecise,
        CASE
          WHEN upper(ALT[1]) = '<DUP:TANDEM>' THEN 'TDUP'
          WHEN upper(INFO_SVTYPE) = 'DEL' THEN 'DEL'
@@ -1031,10 +1674,18 @@ structural_source_sql <- if (generate_structural) {
        CAST(regexp_extract(ALT[1], '([A-Za-z0-9_.-]+):([0-9]+)', 2) AS UBIGINT)
          AS mate_position,
        CASE
-         WHEN ALT[1] LIKE 'N]%]%' THEN 'N]M]'
-         WHEN ALT[1] LIKE 'N[%[%' THEN 'N[M['
-         WHEN ALT[1] LIKE ']%]%N' THEN ']M]N'
-         WHEN ALT[1] LIKE '[%[%N' THEN '[M[N'
+         WHEN regexp_full_match(
+           ALT[1], '[^\\[\\]]+\\][^\\[\\]]+:[0-9]+\\]'
+         ) THEN 'N]M]'
+         WHEN regexp_full_match(
+           ALT[1], '[^\\[\\]]+\\[[^\\[\\]]+:[0-9]+\\['
+         ) THEN 'N[M['
+         WHEN regexp_full_match(
+           ALT[1], '\\][^\\[\\]]+:[0-9]+\\][^\\[\\]]+'
+         ) THEN ']M]N'
+         WHEN regexp_full_match(
+           ALT[1], '\\[[^\\[\\]]+:[0-9]+\\[[^\\[\\]]+'
+         ) THEN '[M[N'
          ELSE 'source'
        END AS orientation
      FROM read_bcf({sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential')
@@ -1052,18 +1703,16 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
     "CREATE OR REPLACE TEMP TABLE duckvep_sample AS
      WITH alleles AS (
        SELECT DISTINCT
-         CHROM AS chrom,
-         POS::UBIGINT AS position,
-         REF AS reference,
-         ALT[1] AS alternate
-       FROM read_bcf({sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential')
-       WHERE len(ALT) = 1
-         AND REF <> ALT[1]
-         AND length(REF) BETWEEN 1 AND 50
-         AND length(ALT[1]) BETWEEN 1 AND 50
-         AND regexp_full_match(REF, '[ACGT]+')
-         AND regexp_full_match(ALT[1], '[ACGT]+')
-         {chrom_filter}
+         chrom,
+         position,
+         reference,
+         alternate
+       FROM ({small_source_sql}) source
+       WHERE reference <> alternate
+         AND length(reference) BETWEEN 1 AND {opt$max_allele_length}
+         AND length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+         AND regexp_full_match(upper(reference), '[ACGTN]+')
+         AND regexp_full_match(upper(alternate), '[ACGTN]+')
      ), shaped AS (
        SELECT *,
          CASE
@@ -1081,12 +1730,22 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
            WHEN abs(length_change) = 1 THEN concat(if(length_change > 0, '+', '-'), '1')
            WHEN abs(length_change) <= 3 THEN concat(if(length_change > 0, '+', '-'), '2..3')
            WHEN abs(length_change) <= 10 THEN concat(if(length_change > 0, '+', '-'), '4..10')
-           ELSE concat(if(length_change > 0, '+', '-'), '11..50')
-         END AS length_bin
+           WHEN abs(length_change) <= 50 THEN concat(if(length_change > 0, '+', '-'), '11..50')
+           WHEN abs(length_change) <= 1000 THEN concat(if(length_change > 0, '+', '-'), '51..1000')
+           WHEN abs(length_change) <= 10000 THEN concat(if(length_change > 0, '+', '-'), '1001..10000')
+           ELSE concat(if(length_change > 0, '+', '-'), '>10000')
+         END AS length_bin,
+         CASE
+           WHEN greatest(length(reference), length(alternate)) = 1 THEN '1'
+           WHEN greatest(length(reference), length(alternate)) <= 50 THEN '2..50'
+           WHEN greatest(length(reference), length(alternate)) <= 1000 THEN '51..1000'
+           WHEN greatest(length(reference), length(alternate)) <= 10000 THEN '1001..10000'
+           ELSE '>10000'
+         END AS raw_allele_length_bin
        FROM shaped
      ), ranked AS (
        SELECT *, row_number() OVER (
-         PARTITION BY var_type, length_bin
+         PARTITION BY {small_sample_partition}
          ORDER BY hash(chrom, position, reference, alternate, {opt$seed})
        ) AS sample_rank
        FROM binned
@@ -1199,7 +1858,7 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        CASE
          WHEN source_id LIKE 'duckvep-generated:%' THEN source_id
          ELSE concat(
-           'duckvep-sv:', chrom, ':', raw_position, ':', raw_end, ':',
+           'duckvep-sv:', source_id, ':', chrom, ':', raw_position, ':', raw_end, ':',
            structural_type, ':', alternate
          )
        END AS variant_id,
@@ -1215,6 +1874,9 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        structural_type,
        copy_change,
        source_svtype,
+       cipos,
+       ciend,
+       imprecise,
        var_type,
        length_bin
      FROM ranked
@@ -1233,8 +1895,152 @@ if (identical(opt$event_mode, "breakend")) {
     "SELECT count(DISTINCT variant_id) AS n FROM duckvep_sample"
   )$n[[1L]]
 }
+if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
+  split_predicate <- if (isTRUE(opt$split_multiallelic)) {
+    "TRUE"
+  } else {
+    "alt_count = 1"
+  }
+  eligibility <- dbGetQuery(
+    con,
+    glue(
+      "WITH records AS (
+         SELECT CHROM AS chrom, POS::UBIGINT AS position,
+                REF AS reference, ALT AS alternate_list
+         FROM read_bcf({sql_q(source_vcf)}, scan_mode := 'sequential')
+         WHERE TRUE {chrom_filter}
+       ), record_counts AS (
+         SELECT
+           count(*)::UBIGINT AS source_records,
+           count(*) FILTER (
+             WHERE alternate_list IS NULL OR len(alternate_list) = 0
+           )::UBIGINT AS records_without_alt,
+           count(*) FILTER (
+             WHERE len(alternate_list) > 1
+           )::UBIGINT AS multiallelic_records
+         FROM records
+       ), alleles AS (
+         SELECT r.chrom, r.position, r.reference, a.alternate,
+                len(r.alternate_list) AS alt_count
+         FROM records r
+         CROSS JOIN UNNEST(r.alternate_list) AS a(alternate)
+         WHERE a.alternate IS NOT NULL
+       ), classified AS (
+         SELECT *,
+           reference = alternate AS ref_equal,
+           regexp_full_match(alternate, '<[^>]+>') AS symbolic,
+           regexp_matches(alternate, '[\\[\\]]') AS breakend,
+           alternate = '*' AS spanning_deletion,
+           regexp_full_match(upper(reference), '[ACGTN]+') AND
+             regexp_full_match(upper(alternate), '[ACGTN]+') AS literal_acgtn
+         FROM alleles
+       ), allele_counts AS (
+         SELECT
+           count(*)::UBIGINT AS source_alt_alleles,
+           count(*) FILTER (WHERE alt_count > 1)::UBIGINT
+             AS multiallelic_alt_alleles,
+           count(*) FILTER (WHERE ref_equal)::UBIGINT AS ref_equal_alleles,
+           count(*) FILTER (WHERE symbolic)::UBIGINT AS symbolic_alleles,
+           count(*) FILTER (WHERE breakend)::UBIGINT AS breakend_alleles,
+           count(*) FILTER (WHERE spanning_deletion)::UBIGINT
+             AS spanning_deletion_alleles,
+           count(*) FILTER (WHERE literal_acgtn)::UBIGINT
+             AS literal_acgtn_alleles,
+           count(*) FILTER (
+             WHERE NOT symbolic AND NOT breakend AND NOT spanning_deletion AND
+                   NOT literal_acgtn
+           )::UBIGINT AS other_alleles,
+           count(*) FILTER (
+             WHERE literal_acgtn AND NOT ref_equal AND
+                   (length(reference) > {opt$max_allele_length} OR
+                    length(alternate) > {opt$max_allele_length})
+           )::UBIGINT AS literal_over_requested_limit,
+           count(*) FILTER (
+             WHERE literal_acgtn AND NOT ref_equal AND
+                   (length(reference) > 65535 OR length(alternate) > 65535)
+           )::UBIGINT AS literal_over_kernel_limit,
+           max(length(reference)) FILTER (WHERE literal_acgtn)::UBIGINT
+             AS max_literal_ref_length,
+           max(length(alternate)) FILTER (WHERE literal_acgtn)::UBIGINT
+             AS max_literal_alt_length
+         FROM classified
+       ), eligible_pre_model AS (
+         SELECT * FROM classified
+         WHERE {split_predicate}
+           AND NOT ref_equal
+           AND literal_acgtn
+           AND length(reference) BETWEEN 1 AND {opt$max_allele_length}
+           AND length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+       ), eligible_model AS (
+         SELECT e.*
+         FROM eligible_pre_model e
+         JOIN duckvep_sequence_regions r ON r.name = e.chrom
+       ), eligible_distinct AS (
+         SELECT DISTINCT chrom, position, reference, alternate
+         FROM eligible_model
+       )
+       SELECT
+         rc.*,
+         ac.*,
+         {if (isTRUE(opt$split_multiallelic)) '0' else 'ac.multiallelic_alt_alleles'}::UBIGINT
+           AS multiallelic_alt_alleles_excluded,
+         (SELECT count(*) FROM eligible_pre_model)::UBIGINT
+           AS eligible_rows_before_model,
+         ((SELECT count(*) FROM eligible_pre_model) -
+          (SELECT count(*) FROM eligible_model))::UBIGINT
+           AS eligible_rows_outside_model_contigs,
+         (SELECT count(*) FROM eligible_model)::UBIGINT AS eligible_model_rows,
+         (SELECT count(*) FROM eligible_distinct)::UBIGINT
+           AS eligible_distinct_alleles,
+         ((SELECT count(*) FROM eligible_model) -
+          (SELECT count(*) FROM eligible_distinct))::UBIGINT
+           AS duplicate_eligible_rows_removed
+       FROM record_counts rc CROSS JOIN allele_counts ac"
+    )
+  )
+  eligibility <- cbind(
+    data.frame(
+      run_date = as.character(Sys.Date()),
+      corpus = opt$corpus,
+      event_mode = opt$event_mode,
+      source_path = source_vcf,
+      source_url = opt$source_url,
+      source_version = opt$source_version,
+      source_sha256 = source_sha256,
+      verified_source_checksum = verified_source_checksum,
+      source_bytes = source_bytes,
+      max_allele_length = opt$max_allele_length,
+      split_multiallelic = isTRUE(opt$split_multiallelic),
+      stratify_raw_allele_length = isTRUE(opt$stratify_raw_allele_length),
+      sample_per_shape = opt$sample_per_shape,
+      selected_events = sample_count,
+      stringsAsFactors = FALSE
+    ),
+    eligibility
+  )
+  dir.create(dirname(opt$eligibility_out), recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(eligibility, opt$eligibility_out, row.names = FALSE, na = "")
+}
+if (isTRUE(opt$source_audit_only)) {
+  if (!isTRUE(opt$skip_extension_build)) {
+    duckvep_evidence_assert_checkout(
+      root,
+      source_revision,
+      opt$eligibility_out,
+      context = "DuckVEP source audit evidence"
+    )
+  }
+  invisible(dbGetQuery(
+    con,
+    glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
+  ))
+  cat(glue("source records audited: {eligibility$source_records[[1L]]}"), "\n")
+  cat(glue("eligible distinct alleles: {eligibility$eligible_distinct_alleles[[1L]]}"), "\n")
+  cat(glue("eligibility receipt: {opt$eligibility_out}"), "\n")
+  quit(save = "no", status = 0L)
+}
 if (sample_count == 0) {
-  die("the sampler found no supported {opt$event_mode} events in model regions")
+  die("the sampler found no eligible {opt$event_mode} events in model regions")
 }
 
 sample_vcf <- opt$sample_vcf
@@ -1252,6 +2058,14 @@ if (!identical(opt$event_mode, "small")) {
     vcf_header,
     "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position\">",
     "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Structural variant type\">"
+  )
+}
+if (identical(opt$event_mode, "structural")) {
+  vcf_header <- c(
+    vcf_header,
+    "##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description=\"Imprecise structural variation\">",
+    "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS\">",
+    "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END\">"
   )
 }
 writeLines(
@@ -1298,6 +2112,7 @@ sample_vcf_query <- if (identical(opt$event_mode, "small")) {
 } else {
   paste(
     "SELECT v.chrom, v.raw_position AS position, v.raw_end, v.source_svtype,",
+    "v.cipos, v.ciend, v.imprecise,",
     "v.variant_id, v.reference, v.alternate FROM duckvep_sample v",
     "JOIN duckvep_oracle_sequence_order o USING (chrom)",
     "ORDER BY o.fasta_order, v.event_start, v.event_end, v.structural_type"
@@ -1317,7 +2132,36 @@ repeat {
   } else if (identical(opt$event_mode, "breakend")) {
     rep("SVTYPE=BND", nrow(chunk))
   } else {
-    paste0("END=", chunk$raw_end, ";SVTYPE=", chunk$source_svtype)
+    vapply(
+      seq_len(nrow(chunk)),
+      function(index) {
+        fields <- c(
+          paste0("END=", chunk$raw_end[[index]]),
+          paste0("SVTYPE=", chunk$source_svtype[[index]])
+        )
+        if (isTRUE(chunk$imprecise[[index]])) {
+          fields <- c(fields, "IMPRECISE")
+        }
+        cipos <- chunk$cipos[[index]]
+        if (length(cipos) != 0L && !all(is.na(cipos))) {
+          cipos_text <- ifelse(is.na(cipos), ".", as.character(cipos))
+          fields <- c(
+            fields,
+            paste0("CIPOS=", paste(cipos_text, collapse = ","))
+          )
+        }
+        ciend <- chunk$ciend[[index]]
+        if (length(ciend) != 0L && !all(is.na(ciend))) {
+          ciend_text <- ifelse(is.na(ciend), ".", as.character(ciend))
+          fields <- c(
+            fields,
+            paste0("CIEND=", paste(ciend_text, collapse = ","))
+          )
+        }
+        paste(fields, collapse = ";")
+      },
+      character(1L)
+    )
   }
   writeLines(
     paste(
@@ -1329,6 +2173,8 @@ repeat {
 }
 dbClearResult(res)
 close(vc)
+sample_vcf <- normalizePath(sample_vcf, mustWork = TRUE)
+input_vcf_sha256 <- duckvep_evidence_sha256(sample_vcf)
 
 stage_gff <- function(path) {
   if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) {
@@ -1414,22 +2260,27 @@ gff_for_vep <- if (identical(oracle_mode, "gff")) {
 }
 
 engine_call_sql <- if (identical(opt$event_mode, "small")) {
+  annotate_function <- if (isTRUE(opt$hgvs)) {
+    "_duckvep_annotate_small_hgvs"
+  } else {
+    "_duckvep_annotate_small_rich"
+  }
   glue(
-    "duckvep_annotate(
+    "{annotate_function}(
        {sql_q(opt$model_name)}, v.seq_region, v.position,
        v.reference, v.alternate, {opt$distance}::UBIGINT
      )"
   )
 } else if (identical(opt$event_mode, "breakend")) {
   glue(
-    "duckvep_annotate_breakend(
+    "_duckvep_annotate_breakend_rich(
        {sql_q(opt$model_name)}, v.seq_region, v.position,
        v.mate_seq_region, v.mate_position, {opt$distance}::UBIGINT
      )"
   )
 } else {
   glue(
-    "duckvep_annotate_sv(
+    "_duckvep_annotate_structural_rich(
        {sql_q(opt$model_name)}, v.seq_region, v.event_start, v.event_end,
        v.structural_type, v.copy_change, {opt$distance}::UBIGINT
      )"
@@ -1438,9 +2289,87 @@ engine_call_sql <- if (identical(opt$event_mode, "small")) {
 
 engine_time <- system.time({
   engine_nmd_sql <- if (nmd_oracle_enabled) {
-    "coalesce(v.annotation.nmd_prediction, 'not_applicable')"
+    if (isTRUE(opt$hgvs)) {
+      "CASE v.annotation.nmd_prediction_code
+         WHEN 1 THEN 'triggering'
+         WHEN 2 THEN 'escaping'
+         WHEN 3 THEN 'unresolved'
+         ELSE 'not_applicable'
+       END"
+    } else {
+      "coalesce(v.annotation.nmd_prediction, 'not_applicable')"
+    }
   } else {
     "'not_measured'::VARCHAR"
+  }
+  engine_consequence_sql <- if (isTRUE(opt$hgvs)) {
+    "coalesce((
+       SELECT string_agg(b.SO_term, '&' ORDER BY b.SO_term)
+       FROM duckvep_so_bits b
+       WHERE (
+         v.annotation.consequence_mask &
+         (1::UBIGINT << b.bit_index)
+       ) != 0
+     ), '')"
+  } else {
+    "list_aggregate(
+       list_sort(list_distinct(string_split(v.annotation.consequence, '&'))),
+       'string_agg', '&'
+     )"
+  }
+  engine_impact_sql <- if (isTRUE(opt$hgvs)) {
+    "CASE v.annotation.impact_code
+       WHEN 3 THEN 'HIGH'
+       WHEN 2 THEN 'MODERATE'
+       WHEN 1 THEN 'LOW'
+       ELSE 'MODIFIER'
+     END"
+  } else {
+    "v.annotation.impact"
+  }
+  engine_status_sql <- if (isTRUE(opt$hgvs)) {
+    "CASE v.annotation.status_code
+       WHEN 0 THEN 'supported'
+       ELSE 'unresolved'
+     END"
+  } else {
+    "v.annotation.status"
+  }
+  engine_reason_sql <- if (isTRUE(opt$hgvs)) {
+    "CASE
+       WHEN v.annotation.status_code = 0 THEN NULL
+       WHEN v.annotation.transcript_index IS NULL AND
+            v.annotation.reason_code = 1 THEN 'no_feature_in_loaded_model'
+       WHEN v.annotation.reason_code = 2 THEN 'missing_sequence'
+       WHEN v.annotation.reason_code = 3 THEN 'ambiguous_sequence'
+       WHEN v.annotation.reason_code = 4 THEN 'reference_mismatch'
+       WHEN v.annotation.reason_code = 5 THEN 'non_contiguous_cds_edit'
+       WHEN v.annotation.reason_code = 6 THEN 'unsupported_compound_consequence'
+       WHEN v.annotation.reason_code = 7 THEN 'invalid_model_projection'
+       WHEN v.annotation.reason_code = 8 THEN 'internal_capacity_error'
+       WHEN v.annotation.reason_code = 9 THEN 'missing_transcript_tail'
+       WHEN v.annotation.reason_code = 10 THEN 'missing_transcript_flank'
+       ELSE 'invalid_status'
+     END"
+  } else {
+    "v.annotation.reason"
+  }
+  engine_hgvs_sql <- if (isTRUE(opt$hgvs)) {
+    "v.annotation.transcript_hgvs AS hgvsc,
+     v.annotation.protein_hgvs AS hgvsp,
+     v.annotation.transcript_hgvs_status AS hgvsc_status,
+     v.annotation.transcript_hgvs_reason AS hgvsc_reason,
+     v.annotation.protein_hgvs_status AS hgvsp_status,
+     v.annotation.protein_hgvs_reason AS hgvsp_reason,
+     v.annotation.hgvs_shift"
+  } else {
+    "NULL::VARCHAR AS hgvsc,
+     NULL::VARCHAR AS hgvsp,
+     'not_measured'::VARCHAR AS hgvsc_status,
+     NULL::VARCHAR AS hgvsc_reason,
+     'not_measured'::VARCHAR AS hgvsp_status,
+     NULL::VARCHAR AS hgvsp_reason,
+     NULL::UINTEGER AS hgvs_shift"
   }
   regulation_annotation_sql <- if (isTRUE(opt$regulatory)) {
     glue(
@@ -1457,7 +2386,14 @@ engine_time <- system.time({
          v.annotation.impact,
          v.annotation.status,
          v.annotation.reason,
-         {engine_nmd_sql} AS nmd_prediction
+         {engine_nmd_sql} AS nmd_prediction,
+         NULL::VARCHAR AS hgvsc,
+         NULL::VARCHAR AS hgvsp,
+         'not_applicable'::VARCHAR AS hgvsc_status,
+         NULL::VARCHAR AS hgvsc_reason,
+         'not_applicable'::VARCHAR AS hgvsp_status,
+         NULL::VARCHAR AS hgvsp_reason,
+         NULL::UINTEGER AS hgvs_shift
        FROM annotated v
        JOIN duckvep_regulation_features f
          ON f.regulation_feature_index = v.annotation.regulation_feature_index"
@@ -1485,21 +2421,21 @@ engine_time <- system.time({
            0::UTINYINT AS object_order,
            n.transcript_index AS object_index,
            n.transcript_id AS tx,
-           list_aggregate(
-             list_sort(list_distinct(string_split(v.annotation.consequence, '&'))),
-             'string_agg', '&'
-           ) AS consequence,
-           v.annotation.impact,
-           v.annotation.status,
-           v.annotation.reason,
-           {engine_nmd_sql} AS nmd_prediction
+           {engine_consequence_sql} AS consequence,
+           {engine_impact_sql} AS impact,
+           {engine_status_sql} AS status,
+           {engine_reason_sql} AS reason,
+           {engine_nmd_sql} AS nmd_prediction,
+           {engine_hgvs_sql}
          FROM annotated v
          JOIN duckvep_transcript_names n
            ON n.transcript_index = v.annotation.transcript_index
          {regulation_annotation_sql}
        )
        SELECT
-         variant_id, tx, consequence, impact, status, reason, nmd_prediction
+         variant_id, tx, consequence, impact, status, reason, nmd_prediction,
+         hgvsc, hgvsp, hgvsc_status, hgvsc_reason,
+         hgvsp_status, hgvsp_reason, hgvs_shift
        FROM named
        ORDER BY seq_region, position, object_order, object_index"
     )
@@ -1576,9 +2512,47 @@ if (identical(opt$event_mode, "breakend")) {
     "breakend_buffer_size=1",
     "input_order=fasta_index"
   )
+} else {
+  oracle_details <- c(
+    oracle_details,
+    glue("vep_buffer_size={opt$vep_buffer_size}")
+  )
+}
+if (identical(opt$event_mode, "structural")) {
+  oracle_details <- c(
+    oracle_details,
+    glue("max_sv_size={format(opt$max_sv_size, scientific = FALSE)}")
+  )
 }
 if (isTRUE(opt$regulatory)) {
   oracle_details <- c(oracle_details, "regulatory=true")
+}
+if (nzchar(source_sha256)) {
+  oracle_details <- c(
+    oracle_details,
+    glue("source_sha256={source_sha256}"),
+    glue("source_bytes={format(source_bytes, scientific = FALSE, trim = TRUE)}")
+  )
+}
+if (nzchar(opt$source_url)) {
+  oracle_details <- c(oracle_details, glue("source_url={opt$source_url}"))
+}
+if (nzchar(opt$source_version)) {
+  oracle_details <- c(
+    oracle_details,
+    glue("source_version={opt$source_version}")
+  )
+}
+if (identical(opt$event_mode, "small")) {
+  oracle_details <- c(
+    oracle_details,
+    glue("max_allele_length={opt$max_allele_length}"),
+    glue("split_multiallelic={tolower(isTRUE(opt$split_multiallelic))}"),
+    glue(
+      "stratify_raw_allele_length=",
+      "{tolower(isTRUE(opt$stratify_raw_allele_length))}"
+    )
+  )
 }
 oracle_build <- paste(
   c(
@@ -1617,10 +2591,26 @@ if (identical(opt$event_mode, "breakend")) {
   # the executable oracle's transcript set.
   vep_args <- c(vep_args, "--buffer_size", "1")
 } else {
-  vep_args <- c(vep_args, "--fork", opt$fork)
+  vep_args <- c(
+    vep_args,
+    "--buffer_size",
+    as.character(opt$vep_buffer_size),
+    "--fork",
+    opt$fork
+  )
+}
+if (identical(opt$event_mode, "structural")) {
+  vep_args <- c(
+    vep_args,
+    "--max_sv_size",
+    format(opt$max_sv_size, scientific = FALSE)
+  )
 }
 if (isTRUE(opt$regulatory)) {
   vep_args <- c(vep_args, "--regulatory")
+}
+if (isTRUE(opt$hgvs)) {
+  vep_args <- c(vep_args, "--hgvs")
 }
 if (identical(oracle_mode, "cache")) {
   vep_args <- c(
@@ -1695,6 +2685,35 @@ sample_event_relation <- if (identical(opt$event_mode, "breakend")) {
 } else {
   "duckvep_sample"
 }
+vep_hgvs_sql <- if (isTRUE(opt$hgvs)) {
+  "regexp_replace(
+     json_extract_string(tc.value, '$.hgvsc'), '^[^:]+:', ''
+   ) AS hgvsc,
+   regexp_replace(
+     json_extract_string(tc.value, '$.hgvsp'), '^[^:]+:', ''
+   ) AS hgvsp,
+   CASE
+     WHEN json_extract_string(tc.value, '$.hgvsc') IS NULL
+       THEN 'not_applicable'
+     ELSE 'supported'
+   END AS hgvsc_status,
+   NULL::VARCHAR AS hgvsc_reason,
+   CASE
+     WHEN json_extract_string(tc.value, '$.hgvsp') IS NULL
+       THEN 'not_applicable'
+     ELSE 'supported'
+   END AS hgvsp_status,
+   NULL::VARCHAR AS hgvsp_reason,
+   NULL::UINTEGER AS hgvs_shift"
+} else {
+  "NULL::VARCHAR AS hgvsc,
+   NULL::VARCHAR AS hgvsp,
+   'not_measured'::VARCHAR AS hgvsc_status,
+   NULL::VARCHAR AS hgvsc_reason,
+   'not_measured'::VARCHAR AS hgvsp_status,
+   NULL::VARCHAR AS hgvsp_reason,
+   NULL::UINTEGER AS hgvs_shift"
+}
 invisible(dbExecute(
   con,
   glue(
@@ -1714,7 +2733,8 @@ invisible(dbExecute(
        coalesce(json_extract_string(tc.value, '$.impact'), '') AS impact,
        'oracle'::VARCHAR AS status,
        NULL::VARCHAR AS reason,
-       {vep_nmd_sql} AS nmd_prediction
+       {vep_nmd_sql} AS nmd_prediction,
+       {vep_hgvs_sql}
      FROM read_json(
        {sql_q(vep_json)}, format = 'newline_delimited', sample_size = -1
      ) j,
@@ -1769,11 +2789,107 @@ if (isTRUE(opt$regulatory)) {
          coalesce(impact, ''),
          'oracle'::VARCHAR,
          NULL::VARCHAR,
-         {feature_nmd_prediction}
+         {feature_nmd_prediction},
+         NULL::VARCHAR,
+         NULL::VARCHAR,
+         'not_applicable'::VARCHAR,
+         NULL::VARCHAR,
+         'not_applicable'::VARCHAR,
+         NULL::VARCHAR,
+         NULL::UINTEGER
        FROM feature_rows"
     )
   ))
 }
+
+# InputBuffer::get_overlapping_vfs can construct the same structural overlap
+# more than once. Each overlap also carries every endpoint no farther than 5000
+# bases from the object. VEP therefore emits both byte-identical rows and
+# distinct allele-level consequence rows for one (variant, object). The public
+# conformance unit is the unioned consequence set for that pair, just as it is
+# for transcript BNDs. Non-consequence state must still agree before unioning.
+vep_state_conflicts <- dbGetQuery(
+  con,
+  "SELECT variant_id, tx
+   FROM vep_annotation
+   GROUP BY variant_id, tx
+   HAVING count(DISTINCT (
+     status, reason, nmd_prediction,
+     hgvsc, hgvsp, hgvsc_status, hgvsc_reason, hgvsp_status, hgvsp_reason
+   )) > 1
+   LIMIT 1"
+)
+if (nrow(vep_state_conflicts) != 0L) {
+  die(
+    "VEP emitted conflicting non-consequence state for (",
+    "{vep_state_conflicts$variant_id[1]}, {vep_state_conflicts$tx[1]})"
+  )
+}
+vep_duplicate_rows <- dbGetQuery(
+  con,
+  "SELECT count(*) - count(DISTINCT (
+     variant_id, tx, consequence, impact, status, reason, nmd_prediction,
+     hgvsc, hgvsp, hgvsc_status, hgvsc_reason, hgvsp_status, hgvsp_reason
+   )) AS duplicate_rows
+   FROM vep_annotation"
+)$duplicate_rows[[1L]]
+vep_distinct_object_rows_merged <- dbGetQuery(
+  con,
+  "SELECT count(DISTINCT (
+     variant_id, tx, consequence, impact, status, reason, nmd_prediction,
+     hgvsc, hgvsp, hgvsc_status, hgvsc_reason, hgvsp_status, hgvsp_reason
+   )) - count(DISTINCT (variant_id, tx)) AS merged_rows
+   FROM vep_annotation"
+)$merged_rows[[1L]]
+invisible(dbExecute(
+  con,
+  "CREATE OR REPLACE TEMP TABLE vep_annotation AS
+   WITH exploded AS (
+     SELECT
+       variant_id, tx,
+       unnest(string_split(consequence, '&')) AS consequence_term,
+       CASE impact
+         WHEN 'HIGH' THEN 4
+         WHEN 'MODERATE' THEN 3
+         WHEN 'LOW' THEN 2
+         WHEN 'MODIFIER' THEN 1
+         ELSE 0
+       END AS impact_rank,
+       status, reason, nmd_prediction,
+       hgvsc, hgvsp, hgvsc_status, hgvsc_reason,
+       hgvsp_status, hgvsp_reason, hgvs_shift
+     FROM vep_annotation
+   )
+   SELECT
+     variant_id,
+     tx,
+     coalesce(
+       list_aggregate(
+         list_sort(list_distinct(list(consequence_term))),
+         'string_agg', '&'
+       ),
+       ''
+     ) AS consequence,
+     CASE max(impact_rank)
+       WHEN 4 THEN 'HIGH'
+       WHEN 3 THEN 'MODERATE'
+       WHEN 2 THEN 'LOW'
+       WHEN 1 THEN 'MODIFIER'
+       ELSE ''
+     END AS impact,
+     any_value(status) AS status,
+     any_value(reason) AS reason,
+     any_value(nmd_prediction) AS nmd_prediction,
+     any_value(hgvsc) AS hgvsc,
+     any_value(hgvsp) AS hgvsp,
+     any_value(hgvsc_status) AS hgvsc_status,
+     any_value(hgvsc_reason) AS hgvsc_reason,
+     any_value(hgvsp_status) AS hgvsp_status,
+     any_value(hgvsp_reason) AS hgvsp_reason,
+     any_value(hgvs_shift) AS hgvs_shift
+   FROM exploded
+   GROUP BY variant_id, tx"
+))
 
 run_date <- as.character(Sys.Date())
 invisible(dbExecute(
@@ -1799,7 +2915,14 @@ invisible(dbExecute(
        a.impact,
        a.status,
        a.reason,
-       a.nmd_prediction
+       a.nmd_prediction,
+       a.hgvsc,
+       a.hgvsp,
+       a.hgvsc_status,
+       a.hgvsc_reason,
+       a.hgvsp_status,
+       a.hgvsp_reason,
+       a.hgvs_shift
      FROM vep_annotation a JOIN {sample_event_relation} v USING (variant_id)
      UNION ALL
      SELECT
@@ -1807,7 +2930,8 @@ invisible(dbExecute(
        {sql_q(oracle_version)}, {sql_q(oracle_build)}, 'duckvep',
        a.variant_id, v.chrom, v.position, v.reference, v.alternate,
        v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason,
-       a.nmd_prediction
+       a.nmd_prediction, a.hgvsc, a.hgvsp, a.hgvsc_status, a.hgvsc_reason,
+       a.hgvsp_status, a.hgvsp_reason, a.hgvs_shift
      FROM duckvep_annotation a JOIN {sample_event_relation} v USING (variant_id)"
   )
 ))
@@ -1819,6 +2943,146 @@ invisible(dbExecute(
      (FORMAT parquet, COMPRESSION zstd)"
   )
 ))
+
+if (isTRUE(opt$hgvs)) {
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP TABLE duckvep_hgvs_pairs AS
+       WITH pair_keys AS (
+         SELECT variant_id, tx FROM vep_annotation
+         UNION
+         SELECT variant_id, tx FROM duckvep_annotation
+       )
+       SELECT
+         {sql_q(run_date)} AS run_date,
+         {sql_q(source_revision)} AS source_revision,
+         {sql_q(extension_build_binding)} AS extension_build_binding,
+         {sql_q(extension_sha256)} AS extension_sha256,
+         {sql_q(model_artifact_kind)} AS model_artifact_kind,
+         {sql_q(model_artifact_sha256)} AS model_artifact_sha256,
+         {sql_q(reference_fasta_sha256)} AS reference_fasta_sha256,
+         {sql_q(reference_fai_sha256)} AS reference_fai_sha256,
+         {sql_q(source_sha256)} AS source_vcf_sha256,
+         {sql_q(input_vcf_sha256)} AS input_vcf_sha256,
+         {sql_q(opt$corpus)} AS corpus,
+         {sql_q(opt$model_name)} AS model,
+         {sql_q(oracle_version)} AS oracle_version,
+         {sql_q(oracle_build)} AS oracle_build,
+         k.variant_id,
+         k.tx,
+         s.chrom,
+         s.position AS pos,
+         s.reference AS ref,
+         s.alternate AS alt,
+         s.var_type,
+         s.length_bin,
+         v.consequence AS vep_consequence,
+         d.consequence AS duckvep_consequence,
+         v.hgvsc AS vep_hgvsc,
+         d.hgvsc AS duckvep_hgvsc,
+         coalesce(d.hgvsc_status, 'missing') AS duckvep_hgvsc_status,
+         d.hgvsc_reason AS duckvep_hgvsc_reason,
+         v.hgvsp AS vep_hgvsp,
+         d.hgvsp AS duckvep_hgvsp,
+         coalesce(d.hgvsp_status, 'missing') AS duckvep_hgvsp_status,
+         d.hgvsp_reason AS duckvep_hgvsp_reason,
+         d.hgvs_shift AS duckvep_hgvs_shift,
+         CASE
+           WHEN v.variant_id IS NULL THEN 'engine_extra_row'
+           WHEN d.variant_id IS NULL THEN 'engine_missing_row'
+           WHEN d.hgvsc_status = 'unresolved' THEN 'engine_unresolved'
+           WHEN v.hgvsc IS NULL AND d.hgvsc IS NULL THEN 'both_absent'
+           WHEN v.hgvsc IS NULL THEN 'engine_extra'
+           WHEN d.hgvsc IS NULL THEN 'engine_missing'
+           WHEN v.hgvsc = d.hgvsc THEN 'match'
+           ELSE 'mismatch'
+         END AS hgvsc_comparison,
+         CASE
+           WHEN v.variant_id IS NULL THEN 'engine_extra_row'
+           WHEN d.variant_id IS NULL THEN 'engine_missing_row'
+           WHEN d.hgvsp_status = 'unresolved' THEN 'engine_unresolved'
+           WHEN v.hgvsp IS NULL AND d.hgvsp IS NULL THEN 'both_absent'
+           WHEN v.hgvsp IS NULL THEN 'engine_extra'
+           WHEN d.hgvsp IS NULL THEN 'engine_missing'
+           WHEN v.hgvsp = d.hgvsp THEN 'match'
+           ELSE 'mismatch'
+         END AS hgvsp_comparison
+       FROM pair_keys k
+       LEFT JOIN vep_annotation v USING (variant_id, tx)
+       LEFT JOIN duckvep_annotation d USING (variant_id, tx)
+       JOIN {sample_event_relation} s USING (variant_id)"
+    )
+  ))
+  hgvs_pair_count <- dbGetQuery(
+    con,
+    "SELECT count(*) AS n FROM duckvep_hgvs_pairs"
+  )$n[[1L]]
+  if (hgvs_pair_count == 0) {
+    die("HGVS differential produced no transcript pairs")
+  }
+  dir.create(
+    dirname(opt$hgvs_pairs_out),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  invisible(dbExecute(
+    con,
+    glue(
+      "COPY duckvep_hgvs_pairs TO {sql_q(opt$hgvs_pairs_out)}
+       (FORMAT parquet, COMPRESSION zstd)"
+    )
+  ))
+  hgvs_summary <- dbGetQuery(
+    con,
+    "WITH comparisons AS (
+       SELECT
+         'hgvsc'::VARCHAR AS metric,
+         hgvsc_comparison AS comparison,
+         var_type,
+         length_bin,
+         coalesce(vep_consequence, '(no_vep_emission)') AS consequence_class,
+         duckvep_hgvsc_status AS engine_status,
+         coalesce(duckvep_hgvsc_reason, '') AS engine_reason
+       FROM duckvep_hgvs_pairs
+       UNION ALL
+       SELECT
+         'hgvsp', hgvsp_comparison, var_type, length_bin,
+         coalesce(vep_consequence, '(no_vep_emission)'),
+         duckvep_hgvsp_status,
+         coalesce(duckvep_hgvsp_reason, '')
+       FROM duckvep_hgvs_pairs
+     )
+     SELECT
+       metric,
+       comparison,
+       var_type,
+       length_bin,
+       consequence_class,
+       engine_status,
+       engine_reason,
+       count(*) AS n
+     FROM comparisons
+     GROUP BY ALL
+     ORDER BY metric, comparison, n DESC, var_type, length_bin,
+              consequence_class, engine_status, engine_reason"
+  )
+  dir.create(dirname(opt$hgvs_out), recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(hgvs_summary, opt$hgvs_out, row.names = FALSE)
+  hgvs_discordance_count <- dbGetQuery(
+    con,
+    "SELECT count(*) AS n
+     FROM (
+       SELECT hgvsc_comparison AS comparison FROM duckvep_hgvs_pairs
+       UNION ALL
+       SELECT hgvsp_comparison FROM duckvep_hgvs_pairs
+     )
+     WHERE comparison IN (
+       'engine_unresolved', 'mismatch', 'engine_extra', 'engine_missing',
+       'engine_extra_row', 'engine_missing_row'
+     )"
+  )$n[[1L]]
+}
 
 counts <- dbGetQuery(
   con,
@@ -1851,7 +3115,23 @@ cat(
   "\n",
   sep = ""
 )
+cat(glue("VEP duplicate object rows collapsed: {vep_duplicate_rows}"), "\n", sep = "")
+cat(
+  glue(
+    "VEP distinct allele-level object rows unioned: ",
+    "{vep_distinct_object_rows_merged}"
+  ),
+  "\n",
+  sep = ""
+)
 cat(glue("annotations: {opt$annotations_out}"), "\n", sep = "")
+if (isTRUE(opt$hgvs)) {
+  cat(glue("HGVS pairs: {opt$hgvs_pairs_out}"), "\n", sep = "")
+  cat(glue("HGVS summary: {opt$hgvs_out}"), "\n", sep = "")
+}
+if (nzchar(opt$eligibility_out)) {
+  cat(glue("eligibility receipt: {opt$eligibility_out}"), "\n", sep = "")
+}
 
 report <- file.path(
   root,
@@ -1863,4 +3143,22 @@ report <- file.path(
 rc <- system2("Rscript", c(report, "--annotations", opt$annotations_out))
 if (rc != 0L) {
   die("statistical report failed with exit status {rc}")
+}
+if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L &&
+    !isTRUE(opt$allow_hgvs_discordance)) {
+  die(glue(
+    "HGVS differential found {hgvs_discordance_count} unresolved, ",
+    "mismatch, missing, or extra comparisons; inspect {opt$hgvs_pairs_out} ",
+    "and {opt$hgvs_out}. Use --allow-hgvs-discordance only for an ",
+    "explicitly investigative run."
+  ))
+}
+
+if (!isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_assert_checkout(
+    root,
+    source_revision,
+    c(unname(declared_outputs), opt$eligibility_out, opt$sample_vcf),
+    context = "DuckVEP executable conformance evidence"
+  )
 }

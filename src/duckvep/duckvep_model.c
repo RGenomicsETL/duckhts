@@ -1,14 +1,27 @@
 #include "duckvep_model.h"
-#include "kernel/src/duckvep_codon.h"
+#include "kernel/src/duckvep_model_internal.h"
+
+#include <htslib/faidx.h>
 
 DUCKDB_EXTENSION_EXTERN
 
+#include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+
+#if defined(_WIN32)
+#include <io.h>
+#include <share.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 typedef struct duckvep_query_result {
 	duckdb_prepared_statement statement;
@@ -22,12 +35,27 @@ typedef struct duckvep_load_bind {
 	char *mature_mirna_query;
 	char *peptide_edit_query;
 	char *interval_feature_query;
+	char *reference_fasta;
 	int transcript_coverage_complete;
 } duckvep_load_bind_t;
 
 typedef struct duckvep_load_state {
 	int emitted;
 } duckvep_load_state_t;
+
+static char *duckvep_string_copy(const char *);
+
+static void
+duckvep_reference_descriptor_close(int descriptor)
+{
+	if (descriptor < 0)
+		return;
+#if defined(_WIN32)
+	(void)_close(descriptor);
+#else
+	(void)close(descriptor);
+#endif
+}
 
 void
 duckvep_sql_set_error(char *error, size_t error_size, const char *message)
@@ -79,6 +107,9 @@ duckvep_model_reserve_regions(duckvep_owned_model_t *model, size_t needed)
 		return 0;
 	if (!duckvep_sql_resize((void **)&model->sequence_lengths,
 	    sizeof(*model->sequence_lengths), capacity))
+		return 0;
+	if (!duckvep_sql_resize((void **)&model->sequence_names,
+	    sizeof(*model->sequence_names), capacity))
 		return 0;
 	model->known_seq_region_capacity = capacity;
 	return 1;
@@ -245,6 +276,25 @@ duckvep_owned_model_destroy(duckvep_owned_model_t *model)
 		duckvep_model_close(model->kernel);
 	free(model->known_seq_regions);
 	free(model->sequence_lengths);
+	if (model->sequence_names != NULL) {
+		size_t region;
+
+		for (region = 0; region < model->known_seq_region_count; region++)
+			free(model->sequence_names[region]);
+	}
+	free(model->sequence_names);
+	free(model->reference_fasta_path);
+	free(model->reference_fai_path);
+	free(model->reference_gzi_path);
+	free(model->reference_fasta_open_path);
+	free(model->reference_fai_open_path);
+	free(model->reference_gzi_open_path);
+	if (model->reference_descriptors_open) {
+		duckvep_reference_descriptor_close(
+		    model->reference_fasta_descriptor);
+		duckvep_reference_descriptor_close(model->reference_fai_descriptor);
+		duckvep_reference_descriptor_close(model->reference_gzi_descriptor);
+	}
 	free(model->seq_regions);
 	free(model->transcript_starts);
 	free(model->transcript_ends);
@@ -492,13 +542,20 @@ duckvep_result_schema(duckdb_result *result, const char *const *names,
 
 static int
 duckvep_load_regions(duckdb_connection connection, const char *query,
-	duckvep_owned_model_t *model, char *error, size_t error_size)
+	int require_sequence_names, duckvep_owned_model_t *model,
+	char *error, size_t error_size)
 {
 	static const char *const one_name[] = {"seq_region"};
 	static const duckdb_type one_type[] = {DUCKDB_TYPE_UINTEGER};
 	static const char *const two_names[] = {"seq_region", "sequence_length"};
 	static const duckdb_type two_types[] = {
 		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT
+	};
+	static const char *const three_names[] = {
+		"seq_region", "sequence_length", "seq_region_name"
+	};
+	static const duckdb_type three_types[] = {
+		DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_VARCHAR
 	};
 	duckvep_query_result_t query_result;
 	duckdb_data_chunk chunk;
@@ -510,23 +567,30 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 		return 0;
 	ok = 0;
 	column_count = duckdb_column_count(&query_result.result);
-	if (column_count != 1 && column_count != 2) {
+	if (column_count != 1 && column_count != 2 && column_count != 3) {
 		duckvep_sql_set_error(error, error_size,
-		    "seq_region query must return seq_region and optional sequence_length");
+		    "seq_region query must return seq_region, optional sequence_length, and optional seq_region_name");
 		goto done;
 	}
-	if (model->transcript_coverage_complete && column_count != 2) {
+	if (model->transcript_coverage_complete && column_count < 2) {
 		duckvep_sql_set_error(error, error_size,
 		    "complete transcript coverage requires sequence_length for every region");
 		goto done;
 	}
+	if (require_sequence_names && column_count != 3) {
+		duckvep_sql_set_error(error, error_size,
+		    "reference_fasta requires seq_region, sequence_length, and seq_region_name in the region query");
+		goto done;
+	}
 	if (!duckvep_result_schema(&query_result.result,
-	    column_count == 1 ? one_name : two_names,
-	    column_count == 1 ? one_type : two_types,
+	    column_count == 1 ? one_name :
+	    (column_count == 2 ? two_names : three_names),
+	    column_count == 1 ? one_type :
+	    (column_count == 2 ? two_types : three_types),
 	    (size_t)column_count, SIZE_MAX, error, error_size))
 		goto done;
 	while ((chunk = duckdb_fetch_chunk(query_result.result)) != NULL) {
-		duckdb_vector region_vector, length_vector;
+		duckdb_vector region_vector, length_vector, name_vector;
 		uint32_t *values;
 		uint64_t *lengths;
 		idx_t row, rows;
@@ -534,7 +598,10 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 		rows = duckdb_data_chunk_get_size(chunk);
 		region_vector = duckdb_data_chunk_get_vector(chunk, 0);
 		length_vector = column_count == 2
-		    ? duckdb_data_chunk_get_vector(chunk, 1) : NULL;
+		    ? duckdb_data_chunk_get_vector(chunk, 1) :
+		    (column_count == 3 ? duckdb_data_chunk_get_vector(chunk, 1) : NULL);
+		name_vector = column_count == 3
+		    ? duckdb_data_chunk_get_vector(chunk, 2) : NULL;
 		values = (uint32_t *)duckdb_vector_get_data(region_vector);
 		lengths = length_vector != NULL
 		    ? (uint64_t *)duckdb_vector_get_data(length_vector) : NULL;
@@ -543,7 +610,9 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 
 			if (duckvep_row_is_null(region_vector, row) ||
 			    (length_vector != NULL &&
-			    duckvep_row_is_null(length_vector, row))) {
+			    duckvep_row_is_null(length_vector, row)) ||
+			    (name_vector != NULL &&
+			    duckvep_row_is_null(name_vector, row))) {
 				duckvep_sql_set_error(error, error_size,
 				    "seq_region query contains NULL");
 				duckdb_destroy_data_chunk(&chunk);
@@ -576,6 +645,20 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 				duckdb_destroy_data_chunk(&chunk);
 				goto done;
 			}
+			model->sequence_names[index] = NULL;
+			if (name_vector != NULL) {
+				model->sequence_names[index] =
+				    duckvep_vector_string(name_vector, row);
+				if (model->sequence_names[index] == NULL ||
+				    model->sequence_names[index][0] == '\0') {
+					free(model->sequence_names[index]);
+					model->sequence_names[index] = NULL;
+					duckvep_sql_set_error(error, error_size,
+					    "seq_region_name must be a non-empty string without embedded NUL bytes");
+					duckdb_destroy_data_chunk(&chunk);
+					goto done;
+				}
+			}
 			model->known_seq_regions[index] = (uint16_t)values[row];
 			model->sequence_lengths[index] = lengths != NULL
 			    ? (uint32_t)lengths[row] : 0;
@@ -592,6 +675,393 @@ duckvep_load_regions(duckdb_connection connection, const char *query,
 done:
 	duckvep_query_result_close(&query_result);
 	return ok;
+}
+
+static int
+duckvep_sequence_name_compare(const void *left, const void *right)
+{
+	const char *const *a, *const *b;
+
+	a = left;
+	b = right;
+	return strcmp(*a, *b);
+}
+
+static char *
+duckvep_reference_path_with_suffix(const char *path, const char *suffix)
+{
+	size_t path_length, suffix_length;
+	char *result;
+
+	if (path == NULL || suffix == NULL)
+		return NULL;
+	path_length = strlen(path);
+	suffix_length = strlen(suffix);
+	if (path_length > SIZE_MAX - suffix_length - 1u)
+		return NULL;
+	result = malloc(path_length + suffix_length + 1u);
+	if (result == NULL)
+		return NULL;
+	memcpy(result, path, path_length);
+	memcpy(result + path_length, suffix, suffix_length + 1u);
+	return result;
+}
+
+static int
+duckvep_reference_file_identity_read_descriptor(int descriptor,
+	duckvep_reference_file_identity_t *identity)
+{
+#if defined(_WIN32)
+	struct _stat64 status;
+#else
+	struct stat status;
+#endif
+
+	if (identity == NULL)
+		return 0;
+	memset(identity, 0, sizeof(*identity));
+	if (descriptor < 0)
+		return 1;
+	errno = 0;
+#if defined(_WIN32)
+	if (_fstat64(descriptor, &status) != 0)
+#else
+	if (fstat(descriptor, &status) != 0)
+#endif
+		return 0;
+	if (status.st_size < 0)
+		return 0;
+	identity->device = (uint64_t)status.st_dev;
+	identity->inode = (uint64_t)status.st_ino;
+	identity->size = (uint64_t)status.st_size;
+	identity->mtime_seconds = (int64_t)status.st_mtime;
+#if defined(__APPLE__)
+	identity->mtime_nanoseconds =
+	    (uint32_t)status.st_mtimespec.tv_nsec;
+#elif !defined(_WIN32)
+	identity->mtime_nanoseconds = (uint32_t)status.st_mtim.tv_nsec;
+#endif
+	identity->present = 1;
+	return 1;
+}
+
+static int
+duckvep_reference_descriptor_open(const char *path, int required,
+	int *descriptor_out, duckvep_reference_file_identity_t *identity)
+{
+	int descriptor;
+
+	if (path == NULL || descriptor_out == NULL || identity == NULL)
+		return 0;
+	*descriptor_out = -1;
+	memset(identity, 0, sizeof(*identity));
+	errno = 0;
+#if defined(_WIN32)
+	errno_t open_error;
+
+	descriptor = -1;
+	open_error = _sopen_s(&descriptor, path, _O_RDONLY | _O_BINARY,
+	    _SH_DENYWR, 0);
+	if (open_error != 0) {
+		if (!required && open_error == ENOENT)
+			return 1;
+		return 0;
+	}
+#else
+	{
+		int flags;
+
+		flags = O_RDONLY;
+#if defined(O_CLOEXEC)
+		flags |= O_CLOEXEC;
+#endif
+		descriptor = open(path, flags);
+	}
+	if (descriptor < 0) {
+		if (!required && errno == ENOENT)
+			return 1;
+		return 0;
+	}
+#endif
+	if (!duckvep_reference_file_identity_read_descriptor(descriptor,
+	    identity)) {
+		duckvep_reference_descriptor_close(descriptor);
+		return 0;
+	}
+	*descriptor_out = descriptor;
+	return 1;
+}
+
+static char *
+duckvep_reference_descriptor_path(int descriptor, const char *source_path)
+{
+#if defined(_WIN32)
+	HANDLE handle;
+	DWORD needed, written;
+	char *path;
+
+	(void)source_path;
+	if (descriptor < 0)
+		return NULL;
+	handle = (HANDLE)_get_osfhandle(descriptor);
+	if (handle == INVALID_HANDLE_VALUE)
+		return NULL;
+	needed = GetFinalPathNameByHandleA(handle, NULL, 0,
+	    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+	if (needed == 0 || needed > SIZE_MAX - 1u)
+		return NULL;
+	path = malloc((size_t)needed + 1u);
+	if (path == NULL)
+		return NULL;
+	written = GetFinalPathNameByHandleA(handle, path, needed + 1u,
+	    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+	if (written == 0 || written > needed) {
+		free(path);
+		return NULL;
+	}
+	return path;
+#else
+	if (descriptor < 0)
+		return NULL;
+#if defined(__linux__)
+	char buffer[64];
+	int written;
+
+	(void)source_path;
+	written = snprintf(buffer, sizeof(buffer), "/proc/self/fd/%d",
+	    descriptor);
+	if (written < 0 || (size_t)written >= sizeof(buffer))
+		return NULL;
+	return duckvep_string_copy(buffer);
+#elif defined(__APPLE__)
+	{
+		char path[PATH_MAX];
+
+		(void)source_path;
+		if (fcntl(descriptor, F_GETPATH, path) != 0)
+			return NULL;
+		return duckvep_string_copy(path);
+	}
+#else
+	return duckvep_string_copy(source_path);
+#endif
+#endif
+}
+
+static int
+duckvep_reference_file_identity_equal(
+	const duckvep_reference_file_identity_t *left,
+	const duckvep_reference_file_identity_t *right)
+{
+	if (left == NULL || right == NULL || left->present != right->present)
+		return 0;
+	if (!left->present)
+		return 1;
+	/*
+	 * POSIX rename can update ctime without changing the open file or its
+	 * contents.  Device/inode detect a different object; size/mtime detect
+	 * ordinary in-place mutation without rejecting a safely pinned rename.
+	 */
+	return left->device == right->device &&
+	    left->inode == right->inode && left->size == right->size &&
+	    left->mtime_seconds == right->mtime_seconds &&
+	    left->mtime_nanoseconds == right->mtime_nanoseconds;
+}
+
+#if !defined(__linux__) && !defined(_WIN32)
+static int
+duckvep_reference_open_path_identity_matches(const char *path,
+	const duckvep_reference_file_identity_t *expected)
+{
+	duckvep_reference_file_identity_t observed;
+	int descriptor;
+	int matches;
+
+	if (expected == NULL)
+		return 0;
+	if (!expected->present)
+		return path == NULL;
+	if (path == NULL || !duckvep_reference_descriptor_open(path, 1,
+	    &descriptor, &observed))
+		return 0;
+	matches = duckvep_reference_file_identity_equal(expected, &observed);
+	duckvep_reference_descriptor_close(descriptor);
+	return matches;
+}
+#endif
+
+int
+duckvep_model_reference_identity_matches(const duckvep_owned_model_t *model)
+{
+	duckvep_reference_file_identity_t fasta, fai, gzi;
+
+	if (model == NULL)
+		return 0;
+	if (model->reference_fasta_path == NULL)
+		return 1;
+	if (!model->reference_descriptors_open ||
+	    !duckvep_reference_file_identity_read_descriptor(
+	    model->reference_fasta_descriptor, &fasta) ||
+	    !duckvep_reference_file_identity_read_descriptor(
+	    model->reference_fai_descriptor, &fai) ||
+	    !duckvep_reference_file_identity_read_descriptor(
+	    model->reference_gzi_descriptor, &gzi))
+		return 0;
+#if !defined(__linux__) && !defined(_WIN32)
+	if (!duckvep_reference_open_path_identity_matches(
+	    model->reference_fasta_open_path,
+	    &model->reference_fasta_identity) ||
+	    !duckvep_reference_open_path_identity_matches(
+	    model->reference_fai_open_path,
+	    &model->reference_fai_identity) ||
+	    !duckvep_reference_open_path_identity_matches(
+	    model->reference_gzi_open_path,
+	    &model->reference_gzi_identity))
+		return 0;
+#endif
+	return duckvep_reference_file_identity_equal(
+	    &model->reference_fasta_identity, &fasta) &&
+	    duckvep_reference_file_identity_equal(
+	    &model->reference_fai_identity, &fai) &&
+	    duckvep_reference_file_identity_equal(
+	    &model->reference_gzi_identity, &gzi);
+}
+
+static int
+duckvep_validate_reference_fasta(const char *reference_fasta,
+	duckvep_owned_model_t *model, char *error, size_t error_size)
+{
+	faidx_t *fai;
+	char **sorted_names;
+	size_t region;
+	int ok;
+
+	if (reference_fasta == NULL)
+		return 1;
+	model->reference_fasta_path = duckvep_string_copy(reference_fasta);
+	model->reference_fai_path = duckvep_reference_path_with_suffix(
+	    reference_fasta, ".fai");
+	model->reference_gzi_path = duckvep_reference_path_with_suffix(
+	    reference_fasta, ".gzi");
+	if (model->reference_fasta_path == NULL ||
+	    model->reference_fai_path == NULL ||
+	    model->reference_gzi_path == NULL) {
+		duckvep_sql_set_error(error, error_size,
+		    "out of memory retaining reference FASTA identity paths");
+		return 0;
+	}
+	model->reference_fasta_descriptor = -1;
+	model->reference_fai_descriptor = -1;
+	model->reference_gzi_descriptor = -1;
+	model->reference_descriptors_open = 1;
+	if (!duckvep_reference_descriptor_open(model->reference_fasta_path, 1,
+	    &model->reference_fasta_descriptor,
+	    &model->reference_fasta_identity)) {
+		duckvep_sql_set_error(error, error_size,
+		    "could not pin the reference FASTA");
+		return 0;
+	}
+	if (!duckvep_reference_descriptor_open(model->reference_fai_path, 1,
+	    &model->reference_fai_descriptor,
+	    &model->reference_fai_identity)) {
+		duckvep_sql_set_error(error, error_size,
+		    "could not pin the reference FASTA .fai index");
+		return 0;
+	}
+	if (!duckvep_reference_descriptor_open(model->reference_gzi_path, 0,
+	    &model->reference_gzi_descriptor,
+	    &model->reference_gzi_identity)) {
+		duckvep_sql_set_error(error, error_size,
+		    "could not pin the reference FASTA .gzi index");
+		return 0;
+	}
+	model->reference_fasta_open_path = duckvep_reference_descriptor_path(
+	    model->reference_fasta_descriptor, model->reference_fasta_path);
+	model->reference_fai_open_path = duckvep_reference_descriptor_path(
+	    model->reference_fai_descriptor, model->reference_fai_path);
+	if (model->reference_gzi_identity.present)
+		model->reference_gzi_open_path =
+		    duckvep_reference_descriptor_path(
+		    model->reference_gzi_descriptor, model->reference_gzi_path);
+	if (model->reference_fasta_open_path == NULL ||
+	    model->reference_fai_open_path == NULL ||
+	    (model->reference_gzi_identity.present &&
+	    model->reference_gzi_open_path == NULL)) {
+		duckvep_sql_set_error(error, error_size,
+		    "could not retain stable reference descriptor paths");
+		return 0;
+	}
+	if (model->known_seq_region_count == 0 ||
+	    model->known_seq_region_count > SIZE_MAX / sizeof(*sorted_names)) {
+		duckvep_sql_set_error(error, error_size,
+		    "reference FASTA region map exceeds addressable memory");
+		return 0;
+	}
+	sorted_names = malloc(model->known_seq_region_count *
+	    sizeof(*sorted_names));
+	if (sorted_names == NULL) {
+		duckvep_sql_set_error(error, error_size,
+		    "out of memory validating reference FASTA region names");
+		return 0;
+	}
+	for (region = 0; region < model->known_seq_region_count; region++) {
+		if (model->sequence_names[region] == NULL ||
+		    model->sequence_lengths[region] == 0) {
+			free(sorted_names);
+			duckvep_sql_set_error(error, error_size,
+			    "reference FASTA requires a name and length for every model region");
+			return 0;
+		}
+		sorted_names[region] = model->sequence_names[region];
+	}
+	qsort(sorted_names, model->known_seq_region_count,
+	    sizeof(*sorted_names), duckvep_sequence_name_compare);
+	for (region = 1; region < model->known_seq_region_count; region++) {
+		if (strcmp(sorted_names[region - 1], sorted_names[region]) == 0) {
+			free(sorted_names);
+			duckvep_sql_set_error(error, error_size,
+			    "seq_region_name values must be unique");
+			return 0;
+		}
+	}
+	free(sorted_names);
+	if (!duckvep_model_reference_identity_matches(model)) {
+		duckvep_sql_set_error(error, error_size,
+		    "reference FASTA or index changed while the model was loading");
+		return 0;
+	}
+
+	fai = fai_load3_format(model->reference_fasta_open_path,
+	    model->reference_fai_open_path, model->reference_gzi_open_path,
+	    0, FAI_FASTA);
+	if (fai == NULL) {
+		duckvep_sql_set_error(error, error_size,
+		    "could not open the indexed reference FASTA without creating an index");
+		return 0;
+	}
+	ok = 1;
+	for (region = 0; region < model->known_seq_region_count; region++) {
+		hts_pos_t length;
+
+		length = faidx_seq_len64(fai, model->sequence_names[region]);
+		if (length < 0 || (uint64_t)length !=
+		    (uint64_t)model->sequence_lengths[region]) {
+			(void)snprintf(error, error_size,
+			    "reference FASTA contig %s is absent or has the wrong length",
+			    model->sequence_names[region]);
+			ok = 0;
+			break;
+		}
+	}
+	fai_destroy(fai);
+	if (!ok)
+		return 0;
+	if (!duckvep_model_reference_identity_matches(model)) {
+		duckvep_sql_set_error(error, error_size,
+		    "reference FASTA or index changed while the model was loading");
+		return 0;
+	}
+	return 1;
 }
 
 static int
@@ -1450,7 +1920,7 @@ duckvep_model_load_queries(duckdb_connection connection,
 	const char *region_query, const char *transcript_query,
 	const char *exon_query, const char *mature_mirna_query,
 	const char *peptide_edit_query, const char *interval_feature_query,
-	int transcript_coverage_complete,
+	const char *reference_fasta, int transcript_coverage_complete,
 	duckvep_owned_model_t *model,
 	char *error, size_t error_size)
 {
@@ -1468,7 +1938,9 @@ duckvep_model_load_queries(duckdb_connection connection,
 	if (!duckvep_query_command(connection, "BEGIN TRANSACTION", error,
 	    error_size))
 		return 0;
-	ok = duckvep_load_regions(connection, region_query, model, error,
+	ok = duckvep_load_regions(connection, region_query,
+	    reference_fasta != NULL, model, error, error_size) &&
+	    duckvep_validate_reference_fasta(reference_fasta, model, error,
 	    error_size) &&
 	    duckvep_load_transcripts(connection, transcript_query, model, error,
 	    error_size) &&
@@ -1521,6 +1993,12 @@ duckvep_model_load_queries(duckdb_connection connection,
 		duckvep_owned_model_destroy(model);
 		return 0;
 	}
+	/* The kernel validates the borrowed model once and owns the canonical
+	 * immutable projection caches. Publish those prepared views to the adapter
+	 * instead of retaining a second transcript authority that lacks the caches. */
+	model->transcripts = *duckvep_model_prepared_transcripts(model->kernel);
+	model->exons = *duckvep_model_prepared_exons(model->kernel);
+	model->sequences = *duckvep_model_prepared_sequences(model->kernel);
 	if (!duckvep_owned_model_index(model, error, error_size)) {
 		duckvep_owned_model_destroy(model);
 		return 0;
@@ -1538,12 +2016,23 @@ duckvep_model_entry_destroy(duckvep_model_entry_t *entry)
 	for (workspace = entry->workspaces; workspace != NULL;
 	    workspace = next) {
 		next = workspace->next;
-		duckvep_workspace_close(workspace->workspace);
-		free(workspace);
+		duckvep_workspace_cache_destroy(workspace);
 	}
 	free(entry->name);
 	duckvep_owned_model_destroy(&entry->model);
 	free(entry);
+}
+
+void
+duckvep_workspace_cache_destroy(duckvep_workspace_cache_t *cache)
+{
+	if (cache == NULL)
+		return;
+	if (cache->reference_fai != NULL)
+		fai_destroy(cache->reference_fai);
+	free(cache->reference_bases);
+	duckvep_workspace_close(cache->workspace);
+	free(cache);
 }
 
 static duckvep_model_entry_t *
@@ -1744,6 +2233,8 @@ duckvep_model_load_bind_destroy(void *pointer)
 		duckdb_free(bind->peptide_edit_query);
 	if (bind->interval_feature_query != NULL)
 		duckdb_free(bind->interval_feature_query);
+	if (bind->reference_fasta != NULL)
+		duckdb_free(bind->reference_fasta);
 	free(bind);
 }
 
@@ -1755,6 +2246,7 @@ duckvep_model_load_bind(duckdb_bind_info info)
 	duckdb_value mature_mirna_value;
 	duckdb_value peptide_edit_value;
 	duckdb_value interval_feature_value;
+	duckdb_value reference_fasta_value;
 	duckdb_logical_type bool_type;
 	idx_t parameter_count;
 	size_t index;
@@ -1786,20 +2278,17 @@ duckvep_model_load_bind(duckdb_bind_info info)
 	if (mature_mirna_value != NULL) {
 		if (duckdb_is_null_value(mature_mirna_value)) {
 			duckdb_destroy_value(&mature_mirna_value);
-			duckdb_bind_set_error(info,
-			    "duckvep_model_load: mature_mirna_query cannot be NULL");
-			duckvep_model_load_bind_destroy(bind);
-			return;
-		}
-		bind->mature_mirna_query = duckdb_get_varchar(
-		    mature_mirna_value);
-		duckdb_destroy_value(&mature_mirna_value);
-		if (bind->mature_mirna_query == NULL ||
-		    bind->mature_mirna_query[0] == '\0') {
-			duckdb_bind_set_error(info,
-			    "duckvep_model_load: mature_mirna_query must be a non-empty string");
-			duckvep_model_load_bind_destroy(bind);
-			return;
+		} else {
+			bind->mature_mirna_query = duckdb_get_varchar(
+			    mature_mirna_value);
+			duckdb_destroy_value(&mature_mirna_value);
+			if (bind->mature_mirna_query == NULL ||
+			    bind->mature_mirna_query[0] == '\0') {
+				duckdb_bind_set_error(info,
+				    "duckvep_model_load: mature_mirna_query must be a non-empty string");
+				duckvep_model_load_bind_destroy(bind);
+				return;
+			}
 		}
 	}
 	peptide_edit_value = duckdb_bind_get_named_parameter(
@@ -1807,20 +2296,17 @@ duckvep_model_load_bind(duckdb_bind_info info)
 	if (peptide_edit_value != NULL) {
 		if (duckdb_is_null_value(peptide_edit_value)) {
 			duckdb_destroy_value(&peptide_edit_value);
-			duckdb_bind_set_error(info,
-			    "duckvep_model_load: peptide_edit_query cannot be NULL");
-			duckvep_model_load_bind_destroy(bind);
-			return;
-		}
-		bind->peptide_edit_query = duckdb_get_varchar(
-		    peptide_edit_value);
-		duckdb_destroy_value(&peptide_edit_value);
-		if (bind->peptide_edit_query == NULL ||
-		    bind->peptide_edit_query[0] == '\0') {
-			duckdb_bind_set_error(info,
-			    "duckvep_model_load: peptide_edit_query must be a non-empty string");
-			duckvep_model_load_bind_destroy(bind);
-			return;
+		} else {
+			bind->peptide_edit_query = duckdb_get_varchar(
+			    peptide_edit_value);
+			duckdb_destroy_value(&peptide_edit_value);
+			if (bind->peptide_edit_query == NULL ||
+			    bind->peptide_edit_query[0] == '\0') {
+				duckdb_bind_set_error(info,
+				    "duckvep_model_load: peptide_edit_query must be a non-empty string");
+				duckvep_model_load_bind_destroy(bind);
+				return;
+			}
 		}
 	}
 	interval_feature_value = duckdb_bind_get_named_parameter(
@@ -1828,20 +2314,35 @@ duckvep_model_load_bind(duckdb_bind_info info)
 	if (interval_feature_value != NULL) {
 		if (duckdb_is_null_value(interval_feature_value)) {
 			duckdb_destroy_value(&interval_feature_value);
-			duckdb_bind_set_error(info,
-			    "duckvep_model_load: interval_feature_query cannot be NULL");
-			duckvep_model_load_bind_destroy(bind);
-			return;
+		} else {
+			bind->interval_feature_query = duckdb_get_varchar(
+			    interval_feature_value);
+			duckdb_destroy_value(&interval_feature_value);
+			if (bind->interval_feature_query == NULL ||
+			    bind->interval_feature_query[0] == '\0') {
+				duckdb_bind_set_error(info,
+				    "duckvep_model_load: interval_feature_query must be a non-empty string");
+				duckvep_model_load_bind_destroy(bind);
+				return;
+			}
 		}
-		bind->interval_feature_query = duckdb_get_varchar(
-		    interval_feature_value);
-		duckdb_destroy_value(&interval_feature_value);
-		if (bind->interval_feature_query == NULL ||
-		    bind->interval_feature_query[0] == '\0') {
-			duckdb_bind_set_error(info,
-			    "duckvep_model_load: interval_feature_query must be a non-empty string");
-			duckvep_model_load_bind_destroy(bind);
-			return;
+	}
+	reference_fasta_value = duckdb_bind_get_named_parameter(
+	    info, "reference_fasta");
+	if (reference_fasta_value != NULL) {
+		if (duckdb_is_null_value(reference_fasta_value)) {
+			duckdb_destroy_value(&reference_fasta_value);
+		} else {
+			bind->reference_fasta = duckdb_get_varchar(
+			    reference_fasta_value);
+			duckdb_destroy_value(&reference_fasta_value);
+			if (bind->reference_fasta == NULL ||
+			    bind->reference_fasta[0] == '\0') {
+				duckdb_bind_set_error(info,
+				    "duckvep_model_load: reference_fasta must be a non-empty string");
+				duckvep_model_load_bind_destroy(bind);
+				return;
+			}
 		}
 	}
 	complete_value = duckdb_bind_get_named_parameter(
@@ -1917,7 +2418,8 @@ duckvep_model_load_init(duckdb_init_info info)
 	    bind->mature_mirna_query,
 	    bind->peptide_edit_query,
 	    bind->interval_feature_query,
-	    bind->transcript_coverage_complete, &entry->model, error,
+	    bind->reference_fasta, bind->transcript_coverage_complete,
+	    &entry->model, error,
 	    sizeof(error));
 	pthread_mutex_unlock(&registry->query_mutex);
 	if (!loaded) {
@@ -2055,6 +2557,8 @@ duckvep_register_model_functions(duckdb_connection connection,
 	    "peptide_edit_query", varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "interval_feature_query", varchar_type);
+	duckdb_table_function_add_named_parameter(table,
+	    "reference_fasta", varchar_type);
 	duckdb_table_function_add_named_parameter(table,
 	    "transcript_coverage_complete", bool_type);
 	duckvep_registry_retain(registry);

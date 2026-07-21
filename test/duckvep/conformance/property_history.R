@@ -31,6 +31,19 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--coverage-history",
+  dest = "coverage_history",
+  default = file.path(
+    root,
+    "test",
+    "duckvep",
+    "conformance",
+    "data",
+    "property_coverage_history.csv"
+  )
+)
+op <- add_option(
+  op,
   "--source-revision",
   dest = "source_revision",
   default = ""
@@ -111,6 +124,43 @@ if (
   die("a property target did not pass every requested trial")
 }
 
+coverage_lines <- grep("\\[[^]]+ coverage\\]", log, value = TRUE)
+coverage <- do.call(
+  rbind,
+  lapply(coverage_lines, function(line) {
+    coverage_name <- sub(
+      ".*\\[([^]]+ coverage)\\].*",
+      "\\1",
+      line,
+      perl = TRUE
+    )
+    payload <- sub(".*\\[[^]]+ coverage\\][[:space:]]*", "", line, perl = TRUE)
+    matches <- regmatches(
+      payload,
+      gregexpr(
+        "([A-Za-z_][A-Za-z0-9_]*|[+-][0-9]+)=([0-9]+)",
+        payload,
+        perl = TRUE
+      )
+    )[[1L]]
+    if (!length(matches) || identical(matches, "")) {
+      die("coverage line contains no numeric counters: {line}")
+    }
+    data.frame(
+      coverage = coverage_name,
+      metric = sub("=.*", "", matches),
+      count = as.numeric(sub("^[^=]+=", "", matches)),
+      stringsAsFactors = FALSE
+    )
+  })
+)
+if (is.null(coverage) || !nrow(coverage)) {
+  die("property log contains no distribution coverage counters")
+}
+if (anyDuplicated(paste(coverage$coverage, coverage$metric))) {
+  die("property log contains duplicate distribution coverage counters")
+}
+
 total <- capture(
   log,
   "^Total: ([0-9]+) tests .* ([0-9.]+) sec\\), ([0-9]+) assertions$",
@@ -168,6 +218,22 @@ rows <- data.frame(
 )
 rows <- rows[order(rows$target), , drop = FALSE]
 
+coverage_rows <- data.frame(
+  run_date = as.character(Sys.Date()),
+  source_revision = opt$source_revision,
+  configured_trials = as.numeric(opt$trials),
+  seed = properties$reported_seed[[1L]],
+  coverage = coverage$coverage,
+  metric = coverage$metric,
+  count = coverage$count,
+  stringsAsFactors = FALSE
+)
+coverage_rows <- coverage_rows[
+  order(coverage_rows$coverage, coverage_rows$metric),
+  ,
+  drop = FALSE
+]
+
 dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
 if (file.exists(opt$history)) {
   old <- utils::read.csv(
@@ -199,6 +265,58 @@ if (!file.rename(tmp, opt$history)) {
   die("cannot replace history: {opt$history}")
 }
 
+dir.create(
+  dirname(opt$coverage_history),
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+if (file.exists(opt$coverage_history)) {
+  old_coverage <- utils::read.csv(
+    opt$coverage_history,
+    stringsAsFactors = FALSE,
+    check.names = FALSE,
+    colClasses = c(source_revision = "character", seed = "character")
+  )
+  if (!identical(names(old_coverage), names(coverage_rows))) {
+    die("coverage history schema does not match: {opt$coverage_history}")
+  }
+  coverage_run_key <- paste(
+    coverage_rows$source_revision[[1L]],
+    coverage_rows$seed[[1L]],
+    coverage_rows$configured_trials[[1L]]
+  )
+  old_coverage_key <- paste(
+    old_coverage$source_revision,
+    old_coverage$seed,
+    old_coverage$configured_trials
+  )
+  coverage_rows <- rbind(
+    old_coverage[old_coverage_key != coverage_run_key, , drop = FALSE],
+    coverage_rows
+  )
+}
+coverage_rows <- coverage_rows[
+  order(
+    coverage_rows$run_date,
+    coverage_rows$source_revision,
+    coverage_rows$seed,
+    coverage_rows$coverage,
+    coverage_rows$metric
+  ),
+  ,
+  drop = FALSE
+]
+coverage_tmp <- tempfile(
+  "duckvep-property-coverage-",
+  dirname(opt$coverage_history),
+  ".csv"
+)
+utils::write.csv(coverage_rows, coverage_tmp, row.names = FALSE)
+if (!file.rename(coverage_tmp, opt$coverage_history)) {
+  unlink(coverage_tmp)
+  die("cannot replace coverage history: {opt$coverage_history}")
+}
+
 cat(
   glue(
     "{nrow(properties)} randomized targets; ",
@@ -209,3 +327,4 @@ cat(
   sep = ""
 )
 cat(glue("history -> {opt$history}"), "\n", sep = "")
+cat(glue("coverage history -> {opt$coverage_history}"), "\n", sep = "")

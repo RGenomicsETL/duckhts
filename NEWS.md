@@ -1,6 +1,230 @@
 # DuckHTS Extension News
 
-# duckhts 1.4.0.9000 (development)
+# duckhts 1.5.0
+- make the unified `duckvep_annotate(...)` relation fail when a supported
+  symbolic ALT disagrees with an explicit structural type, rather than
+  silently reinterpreting the event, and make explicit `hgvs := NULL` follow
+  the documented `FALSE` default instead of dropping small-variant rows
+- replace the separate public small-variant, structural-event, breakend, compact,
+  rich, and HGVS entry points with one pipe-friendly
+  `duckvep_annotate(events_table, model_name, hgvs := false, ...)` relation.
+  The canonical narrow event schema derives and validates each event family,
+  dispatches to private native lanes, and returns one fixed compact schema with
+  nullable HGVS fields. Add `duckvep_so_terms()` as the generated mask-decoding
+  relation, public SQL/R regressions, and rendered root/package README examples
+- measure that public relation on all 4,095,611 model-addressable GIAB HG002
+  v4.2.1 literal alleles against the complete Ensembl 116 GRCh38 model. At the
+  checked `8da057b0` revision it emits 47,629,345 rows at 1,000,882 compact
+  alleles/s on one pinned core and 3,138,399/s on four pinned cores; cumulative
+  HGVS reaches 238,797 and 737,549 alleles/s respectively. Adjacent one-core
+  private-lane rows quantify the public validation/dispatch cost as 12.7% for
+  compact output and 3.8% for HGVS. See the rendered
+  `benchmarks/duckvep_throughput.md` evidence and denominators
+- extend the rendered VariantKey/RegionKey supplementary-annotation benchmark with
+  isolated peak-RSS measurements and real dense exact providers. Official AlphaMissense
+  v2 GRCh38 (71,697,556 rows), a receipted REVEL v1.3 GRCh37 projection (77,966,138
+  rows), ClinvArbitration Zenodo record 16792026 GRCh38 (3,647,840 rows), ClinVar,
+  GIAB HG002, Ensembl regulation, and gnomAD constraint are staged as typed Parquet
+  projections. A deterministic genome-spanning REVEL key sample prevents favorable
+  leading-row-group pruning. On one/four pinned i5-13500 performance cores, REVEL
+  processes 1.27/4.44 million probe alleles/s, AlphaMissense 1.52/5.19 million/s, and
+  ClinvArbitration 13.84/48.76 million/s. Fresh-process serving peaks remain 175--190
+  MiB for those exact joins; one-time AlphaMissense and REVEL preparation peaks at
+  1.10 and 1.25 GiB. The 643,528-interval string-labelled cgranges build plus full-GIAB
+  probe peaks at 146 MiB versus 665/712 MiB for the per-contig, EXPLAIN-confirmed
+  DuckDB IEJoin plan.
+  Synthetic cgranges construction peaks at 129 MiB per million intervals without
+  labels, 145 MiB with BIGINT labels, 197 MiB with VARCHAR labels, and 1.25 GiB for
+  ten million BIGINT-labelled intervals. Narrow key-plus-payload storage projects to
+  1.82--4.33 GB for 705,486,649 TOPMed Freeze 8 rows and 3.03--7.20 GB for
+  1,172,689,405 live dbSNP Build 157 RefSNP rows. Twelve equally dense exact providers
+  project to 27--32 minutes and 46--53 minutes respectively on four cores; these are
+  explicit logical-time projections, not measured population runs. The accompanying
+  design contract requires assembly/normalization receipts, collision-safe reversible
+  and hashed lanes, sequential provider scans, and RSS-bounded chromosome/tile tasks
+  rather than full-catalog cgranges indexes or twelve concurrently resident providers.
+- add `duckhts_contig_key(...)` as the conservative chromosome/contig join authority for
+  VCF, dbSNP, and DuckVEP preparation: remove one non-empty leading `chr` prefix,
+  normalize mitochondrial `M`/`MT` spellings to `MT`, uppercase `X`/`Y`, and preserve all
+  other suffixes. Numeric sex chromosomes, accessions, patches, and alternate loci are not
+  guessed; DuckVEP callers must still reject model-side key collisions and the model
+  compiler retains exact same-name, same-length reference matching
+- add a rendered, receipt-pinned end-to-end DuckVEP/FastVEP comparison that
+  includes compressed GIAB VCF decoding and real 17-column tab output. On one
+  pinned i5-13500 performance core, DuckVEP also enforced the sorted-input
+  contract inside the measured query and completed 4,048,342 records in a
+  three-run median 64.54 seconds, versus 164.38 seconds for the current FastVEP
+  native build. These are explicitly different native output contracts, not an
+  engine-only speedup claim. The report separately controls FastVEP Rayon
+  threads and DuckDB task threads. At four pinned physical performance cores,
+  DuckVEP completes the same workload in a three-run median 32.06 seconds
+  versus FastVEP's 68.09-second observation, a measured 2.12-fold
+  same-core-count wall-time advantage. DuckVEP scales 2.01-fold from one to
+  four threads at 251% median aggregate CPU use; measured process RSS rises
+  only from 5.47 to 5.57 GiB, which rules out a fourfold total-RSS increase but
+  is not per-allocation attribution. The report also records FastVEP's
+  2.81-fold six-core speedup and 289% aggregate CPU use, retains output
+  digests, and compares both engines with the same executable VEP 116 HGVS
+  oracle instead of treating speed as evidence of semantic parity
+- reset worker-local point and normalized-span exon ranks before reusing a workspace
+  after a non-monotone prepared-event vector. A later variant can skip a transcript
+  after an earlier forward jump, leaving that transcript's rank ahead even when the
+  next DuckDB vector begins after the prior vector's final coordinate. A deterministic
+  two-vector pure-C regression compares the reused workspace with a fresh workspace
+  and preserves the exon consequence
+- fix cumulative HGVS rendering for transcript or protein strings larger than
+  the worker's initial scratch buffer. Renderers now report the exact required
+  capacity and return `BUFFER_TOO_SMALL` before the adapter retries; the adapter
+  also preserves DuckDB's checked UTF-8 rejection and validates every HGVS text-
+  arena slice before materialization. Pure-C, SQL, and R regressions include a
+  1,405-base inserted sequence matching the long-allele class found by the full
+  ClinVar run and independent transcript/protein strings beyond the initial
+  scratch capacity. At the exact fixed revision, pinned one-core complete-corpus runs
+  process 4,438,467 literal ClinVar alleles at 391,848/s compact, 174,984/s rich,
+  and 90,594/s with cumulative HGVS (126,733,707 rows), while 4,095,611 GIAB
+  HG002 alleles run at 921,190/s, 447,266/s, and 244,222/s respectively
+  (47,629,345 rows). The checked rendered report records five passes, the
+  5,000-base transcript distance, CPU affinity, input and output denominators,
+  and the absence of resident regulation/motif features. The throughput driver
+  now also permits the cumulative HGVS surface to load the resident
+  regulation/motif relation: interval-feature rows pass through the same
+  consequence sweep with NULL HGVS fields, as pinned by SQL and R regressions,
+  rather than requiring a second annotation scan. With all 1,383,580 resident
+  RegulatoryFeature/MotifFeature intervals loaded, the full-corpus core-VEP
+  rates are 387,944/s compact, 173,439/s rich, and 92,806/s HGVS for ClinVar,
+  and 1,121,164/s, 468,230/s, and 249,004/s for GIAB. Each exact-head row now
+  requires a vendored-htslib `distclean` followed by an in-tree release rebuild
+  and retains its extension digest,
+  physical/logical model, reference, staged-corpus, and original-VCF digests
+  plus a full-public-row fingerprint. Executable HGVS pair artifacts carry the
+  same source/binary/model/reference lineage, including separate source and exact
+  sampled-VEP-input digests, and the checked history rejects
+  unbound diagnostics. Capacity-one pure-C and greater-than-64-row SQL
+  regressions prove that transcript, RegulatoryFeature, and MotifFeature
+  observer callbacks resume without replay or loss when the result arena grows
+- preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
+  VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
+  nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and
+  DuckVEP matched all 466 transcript pairs, and each engine produced identical nominal and
+  imprecise consequence multisets for all six event kinds. This pins the intentional
+  nominal-`POS`/`END` consequence contract while retaining confidence intervals as source
+  evidence
+- accelerate the shared DuckVEP consequence/HGVS execution path without adding a
+  second biological authority: pack splice facts, use generated SO-impact masks,
+  prepare normalized codons once, and let the cumulative HGVS adapter observe the
+  consequence pass instead of replaying transcript classification. Stable active-set
+  compaction now preserves `annotation_index` across DuckDB vector and disjoint ordered
+  partition starts. The dense-region benchmark driver records arbitrary transcript
+  distances, explicit ordered input partitions, full public-row multiset fingerprints, corpus
+  receipts, and composition. On 517,097 annotation-dense GRCh38 alleles, one pinned
+  i5-13500 P core emits 26,518,787 compact rows in 2.106 seconds at the 5,000-base
+  distance (245,535 alleles/s); four pinned P cores and four disjoint ordered partitions
+  take 0.632 seconds (818,191 alleles/s) with the same row-multiset fingerprint. Source
+  ownership keeps the resident model immutable and shared; GNU `time -v` observed process
+  peak RSS rising from 5,446,084 to 5,453,280 KiB, without a model-sized step, but that
+  process measurement is not allocation attribution. Zero-, 10,000-, and 50,000-base
+  runs retain exact one/four-worker row-multiset fingerprints; the
+  50,000-base case emits 88,784,213 rows with an 8.2 MiB four-worker RSS premium. The
+  fixed VEP breakend overlap-allele admission distance remains separate from the
+  caller-configurable transcript search distance
+- add `duckvep_annotate_hgvs(...)`, a cumulative independent-event surface that returns
+  the compact consequence row together with transcript `c.`/`n.` and default-VEP protein
+  `p.` HGVS suffixes, structured status/reason fields, and the applied transcript-direction
+  shift without repeating candidate discovery. `duckvep_model_load(...)` can now bind an
+  existing indexed reference FASTA through an exact ordinal/name/length relation; model
+  validation never creates or modifies an index and pins open read descriptors for the
+  validated FASTA, `.fai`, and optional `.gzi`. Linux workers reopen those descriptors,
+  Windows retains a resolved source under deny-write sharing, and other POSIX workers open
+  the resolved source independently with identity checks rather than sharing `/dev/fd` seek
+  state. Each annotation worker owns
+  its mutable faidx handle and a forward-read-ahead reference window reused by contained
+  sorted alleles. External in-place mutation of a loaded source is outside the model
+  contract and is rejected when descriptor metadata or the resolved source identity changes
+  around a fetch. Explicit NULL
+  for an optional model relation or reference is equivalent to omission. One prepared event/CDS edit authority
+  feeds consequence evaluation and the HGVS-facing transcript edit; DNA placement, repeat
+  rotation, and alternate-protein reconstruction then consume that same edit, while bounded
+  allocation-free renderers keep VEP's default unparenthesized HGVSp distinct from its
+  optional prediction display. Deterministic, SQL, R/DBI, and randomized pure-C coverage
+  spans both strands, reference mismatch, missing-reference state, repeat shifting, mixed
+  models in one DuckDB vector, ordinary peptide replay, and extended frameshift translation.
+  Transcript rows admitted only through an upstream/downstream distance now report HGVS
+  `not_applicable`, matching VEP's absent HGVSc, instead of presenting transcript-external
+  edit geometry as an unresolved projection. HGVSc numbering also preserves VEP 116's
+  representation-specific phase asymmetry: a literal exonic SNP uses the phase-aware CDS
+  start, while intronic SNPs, indels, and multi-base features continue through VEP's
+  phase-neutral generic transcript-coordinate path. Protein HGVS now returns
+  `not_applicable` when VEP's first or last genomic-to-peptide mapper item is a Gap, instead
+  of presenting an ordinary CDS-overlap/no-HGVSp state as a reconstruction failure. When
+  transcript HGVS fails reference validation, protein status now uses VEP's cached
+  complete-feature coding predicate rather than the original region label; a 5-prime-UTR
+  insertion that could shift into coding coordinates remains unresolved instead of being
+  mislabeled not applicable.
+  A no-reference model now fails closed as `missing_reference` when retained uploaded REF
+  padding or an anchor cannot be checked by the prepared CDS; it cannot validate only the
+  minimized differing REF and emit supported HGVS for a different uploaded allele. Protein
+  replay also reproduces VEP 116's `_trim_incomplete_codon` assignment bug: edited CDS
+  strings of one or two bases are dropped before appending the 3-prime UTR, while every
+  edited CDS of at least three bases remains wholly untrimmed. Reference-backed HGVS now
+  keeps VEP's exact constrained +/-1000 genomic shift slice separate from the wider lookup
+  view used to validate complete uploaded REF padding and identify adjacent copied sources;
+  retained padding cannot change the shift, and insertions copied from more than 1000
+  adjacent bases retain `dup` syntax instead of silently degrading to `ins`. Statistical runs publish
+  named state-distribution counters so a passing total cannot hide unvisited edit shapes.
+  A strict executable-VEP 116 chromosome-21 ClinVar differential matched all 56,998
+  consequence rows and found zero HGVSc/HGVSp differences: 20,782 pairs matched both
+  strings, 24,089 matched HGVSc with no protein string on either side, and 12,127 had
+  neither string. This closes the exercised independent literal-small-variant matrix, not
+  genomic HGVS, RefSeq RNA edits, exact structural/BND HGVS, or phased/compound HGVS;
+  ferro-hgvs v0.9.0 is a pinned independent
+  specification/corpus oracle, not a C/CRAN/Wasm dependency or replacement for VEP 116
+  behavior. HGVS execution now consumes the kernel-prepared transcript, exon, and sequence
+  views as its canonical model; derives and validates each reference CDS first-stop once at
+  model open; projects the transcript edit before lazily attaching CDS edits; scans a
+  virtual single-edit CDS without rebuilding the complete alternate sequence; and renders
+  through one reusable worker buffer with retry only when the result exceeds its capacity.
+  Consequence sidecars remain a cache rather than a second coding authority: an absent
+  frameshift bit is conclusive only for length-preserving CDS edits, while length-changing
+  splice overlaps run the full peptide delta unless the sidecar positively proves a
+  frameshift. Exact VEP regressions include the ClinVar splice-overlapping deletions that
+  render `p.Gly180AspfsTer36` and `p.Ala359PhefsTer8` despite lacking a consequence-side
+  frameshift term. The production throughput driver accepts `chrom` as the sequence-region
+  name column used by the final staged Ensembl model, so the HGVS workload is reproducible
+  from that canonical staging relation rather than requiring a benchmark-only alias. On
+  the pinned one-thread, 200,000-allele mixed-coding workload, cumulative HGVS execution
+  falls from 32.106 to 4.579 seconds: 43,678 input alleles/s and 1,257,200 generated
+  transcript-HGVS rows/s. The matched rich lane is 2.067 seconds, reducing the incremental
+  HGVS tax from 15.79-fold to 2.22-fold while preserving the same 5,756,720 output rows and
+  byte checksum. The sequence-pool first-stop cache extends the public standalone model
+  view and advances the kernel ABI to 0.17.0
+- match VEP 116 for complete transcript overlap by ordinary long literal
+  alleles: a normalized deletion now enters the same tier-1
+  `transcript_ablation` predicate as a symbolic deletion, while an equal-length
+  uploaded span keeps VEP's four-comparison predicates on otherwise-empty UTR
+  intervals and suppresses `coding_sequence_variant` even when sequence
+  evaluation independently produced an unknown-coding fact. Add fixed C, SQL,
+  and R witnesses plus checksum-pinned HPRC pangenome long-allele differential
+  coverage; the configured 5,000-base upstream/downstream distance affects only
+  candidate admission outside transcripts, not these overlapping states
+- keep paired-BND result materialization linear in the dominant transcript-row
+  count: transcript and interval-feature evaluators remain separate sorted
+  streams, only the smaller feature stream is ordered by object kind, and a
+  worker-owned merge buffer combines them in variant-major order. Models with
+  no resident regulation features now retain the original transcript-only fast
+  path instead of sorting an already ordered expansion
+- tighten the DuckVEP statistical consequence oracle around VEP 116 terminal-codon
+  insertions: the insertion-length-aware endpoint reconstruction is now modeled only for
+  empty or `X`-containing local alternate peptides, while concrete local peptides retain
+  VEP's `ref_eq_alt_sequence` path. A held-out reverse-strand regression discovered after
+  93,064 generated cases now pins the resulting
+  `frameshift_variant&stop_gained` state
+- keep VEP's fixed 5000-base BND overlap-allele admission independent of the
+  caller-selected transcript window in both directions: with a zero directional distance,
+  an admitted local allele whose upstream/downstream predicate is disabled now contributes
+  default `intergenic_variant` beside mate-derived `feature_truncation`. Add C, SQL, R, and
+  executable-VEP regressions at zero, intermediate, default, and wider distances so the
+  shared 5000-base default cannot hide this allele-row union
+- close the remaining typed VEP-116 structural consequence inputs without inventing semantics for unused payloads: `duckvep_annotate_sv(...)` and its compact form now accept structural tandem repeats as `STR`/`TANDEM_REPEAT`/`CNV:TR`, preserve that event identity, and reproduce VEP's tandem-duplication gain/insertion predicates; bounded repeats expanded to literal alleles continue through the small-variant path. Paired-BND annotation now queries resident RegulatoryFeature and MotifFeature indexes at both the shifted local point and verbatim mate point and reproduces VEP's asymmetric feature semantics: local exact hits keep the base regulatory/motif term, mate-only exact hits use generic HIGH-impact `feature_truncation`, a same-contig shifted local point outside but within VEP's fixed 5000-base admission distance adds `intergenic_variant` to that mate-discovered object, and the local base term wins when both points hit one object exactly. Mixed transcript/regulation BND batches are restored to variant-major order before DuckDB list materialization, preserving one result list per input event. The executable oracle collapses byte-identical object rows, unions distinct allele-level consequences per object, and rejects conflicting non-consequence state. Add one shared explicit event/object-pair kernel path, SQL/R mixed-vector regressions, randomized all-feature BND/STR oracles, and executable-VEP breakend generation that targets feature starts, midpoints, and ends in raw-local, verbatim-mate, both-exact, mate-exact/local-close, exact-5000, and beyond-5000 forms. Fixed C/SQL/R regressions use a 10000-base caller window to prove it cannot widen VEP's separate fixed structural-allele cap; randomized sweep windows span 0 through 65535 bases instead of stopping at the shared default. Bump the standalone kernel ABI to 0.15.0. Exact VEP 116 source audit confirms that `CIPOS`/`CIEND` and structural inserted sequence do not alter its registered 41-term consequence predicates, so they remain relational provenance and future HGVS/round-trip inputs rather than ignored hot-kernel parameters
 - keep unprojected FASTQ query names outside the BAM publishing limit: direct `read_fastq(...)` scans now accept long headers when `NAME` / `PAIR_ID` are neither returned nor needed for paired-file comparison, while name-producing scans retain the htslib-compatible limit. Also make an explicit `duckhts_fastq_qc(..., max_cycles)` value below 128 cap the aggregate's initial per-group cycle allocation instead of allocating the default 128-entry growth quantum
 - add `duckhts_fastq_qc(sequence, quality [, max_cycles])`, a bounded aggregate over canonical FASTQ strings that emits exact global read/base/Q20/Q30/Q40/base-composition totals and compact per-cycle sufficient statistics without relationally expanding every base. The shared scalar kernel is the correctness oracle; AVX2, ARM NEON, and wasm SIMD128 slots use the existing per-kernel dispatch and preserve exact scalar results. Add SQL/R aggregate regressions, seeded standalone SIMD contracts, target-compilation checks, and a pinned one-core HG001 exome comparison against current fastp
 - accelerate `read_fastq(...)` by parsing FASTQ records directly over htslib transport into only the projected DuckDB columns, removing the temporary `bam1_t` round trip while preserving multiline sequence/quality framing, htslib-style query names, paired/interleaved checks, string and packed nt16/Phred output, quality-encoding conversion, and count shortcuts. Truncated sequence or quality blocks now raise precise DuckDB errors instead of being mistaken for clean EOF. Add SQL/R multiline, packed-output, and truncation regressions plus a pinned one-core before/after benchmark and a separately labelled current-fastp QC comparison

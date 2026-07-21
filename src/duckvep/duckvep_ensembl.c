@@ -8,49 +8,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdlib.h>
 #include <string.h>
 
-static bool
-duckvep_register_sql(duckdb_connection connection, const char *const *parts,
-	size_t part_count)
-{
-	duckdb_result result;
-	duckdb_state state;
-	char *sql;
-	size_t index, length, offset;
-
-	length = 0;
-	for (index = 0; index < part_count; index++) {
-		if (strlen(parts[index]) > SIZE_MAX - length)
-			return false;
-		length += strlen(parts[index]);
-	}
-	if (length == SIZE_MAX)
-		return false;
-	sql = malloc(length + 1);
-	if (sql == NULL)
-		return false;
-	offset = 0;
-	for (index = 0; index < part_count; index++) {
-		size_t part_length;
-
-		part_length = strlen(parts[index]);
-		memcpy(sql + offset, parts[index], part_length);
-		offset += part_length;
-	}
-	sql[offset] = '\0';
-	state = duckdb_query(connection, sql, &result);
-	free(sql);
-	if (state != DuckDBSuccess) {
-		const char *error;
-
-		error = duckdb_result_error(&result);
-		fprintf(stderr, "[duckhts] failed DuckVEP SQL registration: %s\n",
-		    error != NULL ? error : "unknown error");
-		duckdb_destroy_result(&result);
-		return false;
-	}
-	duckdb_destroy_result(&result);
-	return true;
-}
+#include "duckvep_sql.h"
 
 static bool
 duckvep_register_ensembl_regions(duckdb_connection connection)
@@ -112,7 +70,8 @@ duckvep_register_ensembl_regions(duckdb_connection connection)
 		"ORDER BY seq_region"
 	};
 
-	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+	return duckvep_register_sql_parts(connection, sql,
+	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
@@ -488,7 +447,8 @@ duckvep_register_ensembl_transcripts(duckdb_connection connection)
 		"WHERE validation.valid ORDER BY p.transcript_index"
 	};
 
-	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+	return duckvep_register_sql_parts(connection, sql,
+	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
@@ -566,7 +526,8 @@ duckvep_register_ensembl_regulation_features(duckdb_connection connection)
 		"ORDER BY regulation_feature_index"
 	};
 
-	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+	return duckvep_register_sql_parts(connection, sql,
+	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
@@ -700,7 +661,8 @@ duckvep_register_model_receipt(duckdb_connection connection)
 		"CROSS JOIN validation WHERE validation.valid"
 	};
 
-	return duckvep_register_sql(connection, sql, sizeof(sql) / sizeof(sql[0]));
+	return duckvep_register_sql_parts(connection, sql,
+	    sizeof(sql) / sizeof(sql[0]));
 }
 
 bool

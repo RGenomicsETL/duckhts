@@ -1,0 +1,23 @@
+	Command being timed: "taskset -c 2 env RAYON_NUM_THREADS=1 .sync/fastVEP/target/release/fastvep annotate --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz --output /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.tab --output-format tab --distance 5000 --no-progress --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache"
+	User time (seconds): 161.97
+	System time (seconds): 2.67
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:44.75
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 3321924
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 968896
+	Voluntary context switches: 13832
+	Involuntary context switches: 20349
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 12454056
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

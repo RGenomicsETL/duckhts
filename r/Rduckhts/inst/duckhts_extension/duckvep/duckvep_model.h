@@ -6,11 +6,22 @@
 #include "cgranges.h"
 #include "kernel/include/duckvep_kernel.h"
 
+#include <htslib/faidx.h>
+
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #define DUCKVEP_SQL_ERROR_SIZE 512
+
+typedef struct duckvep_reference_file_identity {
+	uint64_t device;
+	uint64_t inode;
+	uint64_t size;
+	int64_t mtime_seconds;
+	uint32_t mtime_nanoseconds;
+	int present;
+} duckvep_reference_file_identity_t;
 
 typedef struct duckvep_owned_model {
 	duckvep_transcript_model_t transcripts;
@@ -20,6 +31,20 @@ typedef struct duckvep_owned_model {
 	duckvep_model_t *kernel;
 	uint16_t *known_seq_regions;
 	uint32_t *sequence_lengths;
+	char **sequence_names;
+	char *reference_fasta_path;
+	char *reference_fai_path;
+	char *reference_gzi_path;
+	char *reference_fasta_open_path;
+	char *reference_fai_open_path;
+	char *reference_gzi_open_path;
+	duckvep_reference_file_identity_t reference_fasta_identity;
+	duckvep_reference_file_identity_t reference_fai_identity;
+	duckvep_reference_file_identity_t reference_gzi_identity;
+	int reference_fasta_descriptor;
+	int reference_fai_descriptor;
+	int reference_gzi_descriptor;
+	int reference_descriptors_open;
 	size_t known_seq_region_count;
 	uint16_t *seq_regions;
 	uint32_t *transcript_starts;
@@ -79,6 +104,13 @@ typedef struct duckvep_owned_model {
 
 typedef struct duckvep_workspace_cache {
 	duckvep_workspace_t *workspace;
+	/* faidx_t carries mutable seek/decompression state and therefore belongs
+	 * to one checked-out worker cache, never the shared immutable model. */
+	faidx_t *reference_fai;
+	char *reference_bases;
+	size_t reference_length;
+	uint32_t reference_start1;
+	uint16_t reference_chrom_id;
 	struct duckvep_workspace_cache *next;
 } duckvep_workspace_cache_t;
 
@@ -117,6 +149,9 @@ duckvep_workspace_cache_t *duckvep_registry_workspace_take(
 	duckvep_registry_t *, duckvep_model_entry_t *, char *, size_t);
 void duckvep_registry_workspace_return(duckvep_registry_t *,
 	duckvep_model_entry_t *, duckvep_workspace_cache_t *);
+void duckvep_workspace_cache_destroy(duckvep_workspace_cache_t *);
+int duckvep_model_reference_identity_matches(
+	const duckvep_owned_model_t *);
 void duckvep_register_model_functions(duckdb_connection,
 	duckvep_registry_t *);
 

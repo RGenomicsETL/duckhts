@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 14
+#define DUCKVEP_KERNEL_VERSION_MINOR 17
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -101,7 +101,13 @@ typedef enum duckvep_sv_type {
     DUCKVEP_SV_TANDEM_DUPLICATION,
     DUCKVEP_SV_INVERSION,
     DUCKVEP_SV_CNV,
-    DUCKVEP_SV_BREAKEND
+    DUCKVEP_SV_BREAKEND,
+    /* An unexpanded/oversized symbolic tandem repeat. VEP retains this as a
+     * StructuralVariationFeature with tandem-repeat identity, while its
+     * consequence predicates are the same gain/insertion predicates used by
+     * a tandem duplication. Bounded repeats expanded to literal alleles enter
+     * the ordinary small-variant path instead. */
+    DUCKVEP_SV_TANDEM_REPEAT
 } duckvep_sv_type_t;
 
 typedef enum duckvep_copy_change {
@@ -197,6 +203,16 @@ typedef struct duckvep_candidate_pairs {
     size_t          count;
 } duckvep_candidate_pairs_t;
 
+/* Explicit event/interval-feature candidates. This is the two-locus BND join
+ * point for regulatory and motif features: the caller discovers candidates at
+ * the local VEP-shifted point and the mate point, deduplicates them, then the
+ * kernel remains the sole authority for exact overlap and consequence terms. */
+typedef struct duckvep_interval_feature_pairs {
+    const uint32_t *variant_idx;   /* [count] */
+    const uint32_t *feature_idx;   /* [count] */
+    size_t          count;
+} duckvep_interval_feature_pairs_t;
+
 typedef struct duckvep_transcript_model {
     const uint16_t *chrom_id;      /* [transcript_count]                       */
     const uint32_t *start1;        /* [transcript_count] transcript span start */
@@ -263,6 +279,10 @@ typedef struct duckvep_sequence_pool {
     const uint64_t *cds_offset;    /* [transcript_count] byte offset into cds_bytes      */
     const uint32_t *cds_length;    /* [transcript_count] 0 = non-coding                  */
     const uint8_t  *codon_table;   /* [transcript_count] duckvep_codon_table_t per tx    */
+    /* Optional immutable derived cache. Zero means the raw prepared CDS has
+     * no complete stop codon; a NULL array means the fact was not prepared and
+     * consumers must use the complete reference scan. */
+    const uint32_t *first_stop_position1; /* [transcript_count], peptide coordinate */
     size_t          transcript_count;
     /* VEP translation SeqEdits that replace one reference amino acid. The
      * Ensembl compiler accepts the release-116 single-residue forms used for
@@ -297,7 +317,16 @@ typedef enum duckvep_consequence_flag {
      * codon/peptide predicate. The consequence_mask may still contain
      * coding_sequence_variant as the safe
      * fallback; this bit makes that fallback auditable rather than silent. */
-    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0
+    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED = 1u << 0,
+    /* Original TranscriptVariationAllele sequence predicates. These are
+     * facts, not a reverse mapping from emitted SO terms: executable VEP
+     * witnesses contain masks that omit a raw predicate still consumed by
+     * hgvs_protein. */
+    DUCKVEP_CONSEQUENCE_FLAG_FRAMESHIFT = 1u << 1,
+    DUCKVEP_CONSEQUENCE_FLAG_START_LOST = 1u << 2,
+    DUCKVEP_CONSEQUENCE_FLAG_STOP_LOST = 1u << 3,
+    DUCKVEP_CONSEQUENCE_FLAG_STOP_RETAINED = 1u << 4,
+    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_PREDICATES_VALID = 1u << 5
 } duckvep_consequence_flag_t;
 
 typedef enum duckvep_sequence_status {
@@ -558,6 +587,19 @@ duckvep_status_t duckvep_annotate_pairs(
     duckvep_workspace_t              *workspace,
     duckvep_result_builder_t         *results,
     duckvep_error_t                  *error);
+
+/* Evaluate an explicit, ordered set of event/regulatory-or-motif candidates.
+ * Pairs must be unique and sorted by (variant_idx, feature_idx). Unlike the
+ * sorted one-locus sweep this accepts BND events and evaluates both the local
+ * VEP-shifted point and the raw mate point against each feature. */
+duckvep_status_t duckvep_annotate_interval_feature_pairs(
+    const duckvep_model_t                  *model,
+    const duckvep_variant_batch_t          *variants,
+    const duckvep_interval_feature_pairs_t *pairs,
+    const duckvep_options_t                *options,
+    duckvep_workspace_t                    *workspace,
+    duckvep_result_builder_t               *results,
+    duckvep_error_t                        *error);
 
 #ifdef __cplusplus
 }

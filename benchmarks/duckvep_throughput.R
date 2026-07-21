@@ -2,7 +2,8 @@
 
 # Record the stable DuckDB C-API path over a sorted variant stream. With no
 # database this uses the checked-in one-transcript fixture. --database expects
-# pre-staged bench_regions, bench_transcripts, bench_exons, and bench_variants.
+# pre-staged bench_regions, bench_transcripts, and bench_exons. Variants may
+# reside in the model database or in a separately staged read-only database.
 # Complete production models expose sequence_length plus full transcript flanks;
 # --regulatory additionally loads a prepared regulation-feature relation. Older
 # topology-only staging databases remain accepted as partial models.
@@ -28,6 +29,17 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--skip-extension-build",
+  dest = "skip_extension_build",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "load --extension without a clean in-tree rebuild; diagnostic runs only",
+    "and incompatible with --history [%default]"
+  )
+)
+op <- add_option(
+  op,
   "--model-sql",
   dest = "model_sql",
   default = file.path(
@@ -41,10 +53,24 @@ op <- add_option(
 op <- add_option(op, "--database", default = "")
 op <- add_option(
   op,
+  "--variants-database",
+  dest = "variants_database",
+  default = "",
+  help = "optional database containing --variants-table [%default]"
+)
+op <- add_option(
+  op,
   "--variants-table",
   dest = "variants_table",
   default = "bench_variants",
   help = "prepared variant relation in --database [%default]"
+)
+op <- add_option(
+  op,
+  "--corpus-source",
+  dest = "corpus_source",
+  default = "",
+  help = "optional original VCF/BCF artifact hashed into the receipt [%default]"
 )
 op <- add_option(
   op,
@@ -53,7 +79,24 @@ op <- add_option(
   default = "small",
   help = "prepared event shape: small or breakend [%default]"
 )
+op <- add_option(
+  op,
+  "--api-surface",
+  dest = "api_surface",
+  default = "native",
+  help = paste(
+    "annotation surface: native private lane or public duckvep_annotate",
+    "relation [%default]"
+  )
+)
 op <- add_option(op, "--output", default = "rich")
+op <- add_option(
+  op,
+  "--reference-fasta",
+  dest = "reference_fasta",
+  default = "",
+  help = "indexed FASTA required by --output hgvs [%default]"
+)
 op <- add_option(
   op,
   "--regulatory",
@@ -68,8 +111,46 @@ op <- add_option(op, "--warmup", type = "double", default = 100000)
 op <- add_option(op, "--threads", type = "integer", default = 1L)
 op <- add_option(
   op,
+  "--input-partitions",
+  dest = "input_partitions",
+  type = "integer",
+  default = 1L,
+  help = paste(
+    "number of disjoint ordered input partitions exposed to DuckDB",
+    "(1..1024) [%default]"
+  )
+)
+op <- add_option(
+  op,
+  "--transcript-distance",
+  dest = "transcript_distance",
+  type = "double",
+  default = 5000,
+  help = "symmetric upstream/downstream transcript window in bases [%default]"
+)
+op <- add_option(
+  op,
   "--history",
   default = file.path(root, "benchmarks", "data", "duckvep_throughput.csv")
+)
+op <- add_option(
+  op,
+  "--composition",
+  default = "",
+  help = "optional untimed compact SO/region/object composition CSV [%default]"
+)
+op <- add_option(
+  op,
+  "--fingerprint",
+  default = "",
+  help = "optional untimed full-public-row fingerprint CSV [%default]"
+)
+op <- add_option(
+  op,
+  "--expected-fingerprint",
+  dest = "expected_fingerprint",
+  default = "",
+  help = "optional checked fingerprint baseline to verify [%default]"
 )
 op <- add_option(
   op,
@@ -80,33 +161,155 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
+root <- normalizePath(root[[1L]], mustWork = TRUE)
+source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 whole_count <- function(x, name) {
   if (!is.finite(x) || x < 1 || x != floor(x)) {
     die("{name} must be a positive integer")
   }
   format(x, scientific = FALSE, trim = TRUE)
 }
+whole_nonnegative <- function(x, name, maximum = Inf) {
+  if (!is.finite(x) || x < 0 || x != floor(x) || x > maximum) {
+    die("{name} must be an integer from zero through {maximum}")
+  }
+  format(x, scientific = FALSE, trim = TRUE)
+}
 variant_sql <- whole_count(opt$variants, "--variants")
+distance_sql <- whole_nonnegative(
+  opt$transcript_distance,
+  "--transcript-distance",
+  2^32 - 1
+)
 if (opt$passes < 1L) {
   die("--passes must be positive")
 }
 if (opt$threads < 1L) {
   die("--threads must be positive")
 }
-if (!opt$output %in% c("rich", "compact")) {
-  die("--output must be rich or compact")
+if (opt$input_partitions < 1L || opt$input_partitions > 1024L) {
+  die("--input-partitions must be from 1 through 1024")
+}
+if (!opt$output %in% c("rich", "compact", "hgvs")) {
+  die("--output must be rich, compact, or hgvs")
+}
+if (!opt$api_surface %in% c("native", "public")) {
+  die("--api-surface must be native or public")
 }
 if (!opt$event_mode %in% c("small", "breakend")) {
   die("--event-mode must be small or breakend")
+}
+if (identical(opt$api_surface, "public") && identical(opt$output, "rich")) {
+  die("--api-surface public exposes compact output with optional HGVS")
+}
+if (identical(opt$api_surface, "public") && opt$input_partitions != 1L) {
+  die("--api-surface public uses DuckDB parallelism; set --input-partitions 1")
 }
 production <- nzchar(opt$database)
 if (isTRUE(opt$regulatory) && !production) {
   die("--regulatory requires a production --database")
 }
-inputs <- c(opt$extension, if (production) opt$database else opt$model_sql)
+if (identical(opt$output, "hgvs") && !identical(opt$event_mode, "small")) {
+  die("--output hgvs currently requires --event-mode small")
+}
+if (identical(opt$output, "hgvs") && !nzchar(opt$reference_fasta)) {
+  if (production) {
+    die("--output hgvs with --database requires --reference-fasta")
+  }
+  opt$reference_fasta <- file.path(
+    root,
+    "test",
+    "data",
+    "duckvep",
+    "minimal.fa"
+  )
+}
+sha256_file <- duckvep_evidence_sha256
+inputs <- c(
+  if (production) opt$database else opt$model_sql,
+  if (nzchar(opt$variants_database)) opt$variants_database,
+  if (nzchar(opt$reference_fasta)) opt$reference_fasta,
+  if (nzchar(opt$corpus_source)) opt$corpus_source
+)
+if (nzchar(opt$expected_fingerprint)) {
+  inputs <- c(inputs, opt$expected_fingerprint)
+}
 missing <- inputs[!file.exists(inputs)]
 if (length(missing) != 0L) {
   die("missing input(s):\n{paste(missing, collapse = '\n')}")
+}
+evidence_outputs <- c(opt$history, opt$composition, opt$fingerprint)
+evidence_outputs <- evidence_outputs[nzchar(evidence_outputs)]
+revision <- if (isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_revision(root)
+} else {
+  duckvep_evidence_assert_checkout(
+    root,
+    allowed_outputs = evidence_outputs,
+    context = "DuckVEP throughput evidence"
+  )
+}
+if (!nzchar(opt$source_revision)) {
+  opt$source_revision <- revision
+} else if (!identical(opt$source_revision, revision)) {
+  die(
+    "--source-revision {opt$source_revision} is not the current checkout ",
+    "revision {revision}"
+  )
+}
+if (isTRUE(opt$skip_extension_build)) {
+  if (nzchar(opt$history)) {
+    die("--skip-extension-build cannot append checked benchmark history")
+  }
+  if (!file.exists(opt$extension)) {
+    die("missing input: {opt$extension}")
+  }
+  extension_build_binding <- "unbound_diagnostic"
+  extension_sha256 <- sha256_file(opt$extension)
+} else {
+  extension_receipt <- duckvep_evidence_build_extension(
+    root,
+    opt$extension,
+    revision,
+    evidence_outputs
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
+}
+model_database_sha256 <- if (production) {
+  sha256_file(normalizePath(opt$database))
+} else {
+  ""
+}
+variants_database_sha256 <- if (nzchar(opt$variants_database)) {
+  sha256_file(normalizePath(opt$variants_database))
+} else {
+  ""
+}
+reference_fasta_sha256 <- if (nzchar(opt$reference_fasta)) {
+  sha256_file(normalizePath(opt$reference_fasta))
+} else {
+  ""
+}
+reference_fai_sha256 <- if (
+  nzchar(opt$reference_fasta) && file.exists(paste0(opt$reference_fasta, ".fai"))
+) {
+  sha256_file(normalizePath(paste0(opt$reference_fasta, ".fai")))
+} else {
+  ""
+}
+reference_gzi_sha256 <- if (
+  nzchar(opt$reference_fasta) && file.exists(paste0(opt$reference_fasta, ".gzi"))
+) {
+  sha256_file(normalizePath(paste0(opt$reference_fasta, ".gzi")))
+} else {
+  ""
+}
+corpus_source_sha256 <- if (nzchar(opt$corpus_source)) {
+  sha256_file(normalizePath(opt$corpus_source))
+} else {
+  ""
 }
 
 drv <- duckdb(config = list(allow_unsigned_extensions = "true"))
@@ -121,21 +324,178 @@ identifier_q <- function(x) as.character(dbQuoteIdentifier(con, x))
 invisible(dbExecute(con, glue("SET threads = {opt$threads}")))
 invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 
+variants_catalog <- "duckvep_benchmark_variants"
+corpus_receipt <- NULL
+dense_corpus_receipt <- NULL
+model_logical_sha256 <- ""
+model_assembly <- ""
+model_source_version <- ""
+model_source_manifest_sha256 <- ""
+model_reference_sha256 <- ""
+model_region_ordinal_sha256 <- ""
+receipt_value <- function(receipt, column, default = "") {
+  if (is.null(receipt) || !column %in% names(receipt) || is.na(receipt[[column]][[1L]])) {
+    return(default)
+  }
+  as.character(receipt[[column]][[1L]])
+}
+if (nzchar(opt$variants_database)) {
+  if (!production) {
+    die("--variants-database requires --database")
+  }
+  invisible(dbExecute(
+    con,
+    glue(
+      "ATTACH {sql_q(normalizePath(opt$variants_database))} AS ",
+      "{identifier_q(variants_catalog)} (READ_ONLY)"
+    )
+  ))
+}
+
+if (production) {
+  main_relations <- dbGetQuery(
+    con,
+    "SELECT table_name FROM information_schema.tables
+     WHERE table_catalog = current_database() AND table_schema = 'main'"
+  )$table_name
+  if ("model_receipt" %in% main_relations) {
+    model_receipt <- dbGetQuery(
+      con,
+      "SELECT * FROM model_receipt"
+    )
+    if (nrow(model_receipt) != 1L) {
+      die("model_receipt must contain exactly one row")
+    }
+    model_source_version <- receipt_value(model_receipt, "source_version")
+    model_assembly <- receipt_value(model_receipt, "assembly")
+    model_logical_sha256 <- receipt_value(model_receipt, "model_sha256")
+    model_source_manifest_sha256 <- receipt_value(
+      model_receipt,
+      "source_manifest_sha256"
+    )
+    model_reference_sha256 <- receipt_value(model_receipt, "reference_sha256")
+  }
+  if ("model_regions" %in% main_relations) {
+    model_region_ordinal_sha256 <- dbGetQuery(
+      con,
+      "SELECT sha256(string_agg(
+         seq_region::VARCHAR || ':' || seq_region_name || ':' ||
+         sequence_length::VARCHAR,
+         '|' ORDER BY seq_region
+       )) AS digest
+       FROM model_regions"
+    )$digest[[1L]]
+  }
+}
+
+if (nzchar(opt$variants_database)) {
+  sidecar_relations <- dbGetQuery(
+    con,
+    glue(
+      "SELECT table_name FROM information_schema.tables
+       WHERE table_catalog = {sql_q(variants_catalog)}
+         AND table_schema = 'main'"
+    )
+  )$table_name
+  has_dense_receipt <- "dense_corpus_receipt" %in% sidecar_relations
+  if (startsWith(opt$variants_table, "bench_dense_") && !has_dense_receipt) {
+    die("dense variant table requires dense_corpus_receipt")
+  }
+  if (has_dense_receipt) {
+    dense_corpus_receipt <- dbGetQuery(
+      con,
+      glue(
+        "SELECT * FROM {identifier_q(variants_catalog)}.main.dense_corpus_receipt"
+      )
+    )
+    if (nrow(dense_corpus_receipt) != 1L ||
+        dense_corpus_receipt$schema_version[[1L]] != 2L) {
+      die("dense_corpus_receipt must contain one schema-version-2 row")
+    }
+    corpus_receipt <- dense_corpus_receipt
+    if (!nzchar(model_logical_sha256)) {
+      die("dense corpus requires a model_receipt")
+    }
+    if (!identical(
+          as.character(dense_corpus_receipt$model_sha256[[1L]]),
+          model_logical_sha256
+        ) ||
+        !identical(
+          as.character(dense_corpus_receipt$assembly[[1L]]),
+          model_assembly
+        ) ||
+        !identical(
+          as.character(dense_corpus_receipt$model_source_version[[1L]]),
+          model_source_version
+        ) ||
+        !identical(
+          as.character(dense_corpus_receipt$region_ordinal_sha256[[1L]]),
+          as.character(model_region_ordinal_sha256)
+        )) {
+      die("dense corpus receipt does not match the benchmark model")
+    }
+  } else if ("corpus_receipt" %in% sidecar_relations) {
+    corpus_receipt <- dbGetQuery(
+      con,
+      glue("SELECT * FROM {identifier_q(variants_catalog)}.main.corpus_receipt")
+    )
+    if (nrow(corpus_receipt) != 1L) {
+      die("corpus_receipt must contain exactly one row")
+    }
+  }
+  receipt_source_sha256 <- receipt_value(corpus_receipt, "source_sha256")
+  if (nzchar(corpus_source_sha256) && nzchar(receipt_source_sha256) &&
+      !identical(corpus_source_sha256, receipt_source_sha256)) {
+    die("--corpus-source SHA-256 does not match the staged corpus receipt")
+  }
+}
+
 model_name <- "throughput"
 if (production) {
-  variants_table <- identifier_q(opt$variants_table)
+  variants_table <- if (nzchar(opt$variants_database)) {
+    paste(
+      identifier_q(variants_catalog),
+      identifier_q("main"),
+      identifier_q(opt$variants_table),
+      sep = "."
+    )
+  } else {
+    identifier_q(opt$variants_table)
+  }
+  variants_columns <- dbGetQuery(
+    con,
+    glue("DESCRIBE SELECT * FROM {variants_table}")
+  )$column_name
+  stable_source_order <- all(
+    c("source_record_index", "source_alt_index") %in% variants_columns
+  )
   event_projection <- if (identical(opt$event_mode, "breakend")) {
     "seq_region, \"position\", mate_seq_region, mate_position"
   } else {
     "seq_region, \"position\", \"reference\", \"alternate\""
   }
+  input_order <- if (identical(opt$event_mode, "breakend")) {
+    "seq_region, \"position\", mate_seq_region, mate_position"
+  } else {
+    paste(
+      "seq_region, \"position\", \"reference\", \"alternate\"",
+      if (stable_source_order) {
+        ", source_record_index, source_alt_index"
+      } else {
+        ""
+      }
+    )
+  }
   invisible(dbExecute(
     con,
     glue(
       "CREATE OR REPLACE TEMP TABLE duckvep_throughput_variants AS
-       SELECT {event_projection}
+       SELECT
+         (row_number() OVER (ORDER BY {input_order}) - 1)::UBIGINT
+           AS input_variant_index,
+         {event_projection}
        FROM {variants_table}
-       ORDER BY seq_region, \"position\"
+       ORDER BY {input_order}
        LIMIT {variant_sql}"
     )
   ))
@@ -151,27 +511,61 @@ if (production) {
   )$n[[1L]]
   workload <- if (nzchar(opt$workload_name)) {
     opt$workload_name
+  } else if (!is.null(dense_corpus_receipt)) {
+    paste0(
+      "ensembl", dense_corpus_receipt$model_source_version[[1L]], "_",
+      tolower(dense_corpus_receipt$assembly[[1L]]), "_",
+      tolower(dense_corpus_receipt$source_name[[1L]]),
+      "_annotation_dense_v", dense_corpus_receipt$schema_version[[1L]]
+    )
   } else {
-    "ensembl116_grch38_giab_sites_hash40"
+    paste0("production_", opt$variants_table)
   }
   region_columns <- dbGetQuery(
     con,
     "SELECT column_name FROM duckdb_columns() WHERE table_name = 'bench_regions'"
   )$column_name
+  region_name_column <- if ("seq_region_name" %in% region_columns) {
+    "seq_region_name"
+  } else if ("name" %in% region_columns) {
+    "name"
+  } else if ("chrom" %in% region_columns) {
+    "chrom"
+  } else {
+    ""
+  }
   transcript_columns <- dbGetQuery(
     con,
     "SELECT column_name FROM duckdb_columns() WHERE table_name = 'bench_transcripts'"
   )$column_name
   complete_coverage <- "sequence_length" %in% region_columns
+  if (
+    identical(opt$output, "hgvs") &&
+      (!complete_coverage || !nzchar(region_name_column))
+  ) {
+    die(
+      "--output hgvs requires sequence_length and a seq_region_name, name, ",
+      "or chrom column ",
+      "in bench_regions"
+    )
+  }
   complete_flanks <- all(
     c("pre_cds_sequence", "post_cds_sequence") %in% transcript_columns
   )
   load_queries <- c(
-    paste(
-      "SELECT seq_region",
-      if (complete_coverage) ", sequence_length" else "",
-      "FROM bench_regions ORDER BY seq_region"
-    ),
+    if (identical(opt$output, "hgvs")) {
+      paste(
+        "SELECT seq_region, sequence_length,",
+        region_name_column,
+        "AS seq_region_name FROM bench_regions ORDER BY seq_region"
+      )
+    } else {
+      paste(
+        "SELECT seq_region",
+        if (complete_coverage) ", sequence_length" else "",
+        "FROM bench_regions ORDER BY seq_region"
+      )
+    },
     paste(
       "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
       "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
@@ -249,10 +643,19 @@ if (production) {
   region_count <- 1
   transcript_count <- 1
   exon_count <- 2
-  complete_coverage <- FALSE
-  complete_flanks <- TRUE
+  complete_coverage <- identical(opt$output, "hgvs")
+  complete_flanks <- FALSE
   load_queries <- c(
-    "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region",
+    if (identical(opt$output, "hgvs")) {
+      paste(
+        "SELECT seq_region,",
+        "CASE seq_region WHEN 0 THEN 1 ELSE 260 END::UBIGINT AS sequence_length,",
+        "name AS seq_region_name",
+        "FROM duckvep_sequence_regions ORDER BY seq_region"
+      )
+    } else {
+      "SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region"
+    },
     paste(
       "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
       "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table",
@@ -268,6 +671,9 @@ if (production) {
   peptide_edit_query <- NULL
   interval_feature_query <- NULL
   regulation_feature_count <- 0
+}
+if (identical(opt$api_surface, "public")) {
+  workload <- paste0(workload, "_public_relation")
 }
 if (variant_count < 1) {
   die("benchmark input contains no variants")
@@ -291,6 +697,12 @@ if (!is.null(interval_feature_query)) {
     glue("interval_feature_query := {sql_q(interval_feature_query)}")
   )
 }
+if (nzchar(opt$reference_fasta)) {
+  load_options <- c(
+    load_options,
+    glue("reference_fasta := {sql_q(normalizePath(opt$reference_fasta))}")
+  )
+}
 if (complete_coverage) {
   load_options <- c(load_options, "transcript_coverage_complete := TRUE")
 }
@@ -307,66 +719,287 @@ if (!identical(loaded, TRUE)) {
   die("model load failed")
 }
 
-annotation_query <- function(n) {
-  input <- if (production) {
+annotation_input <- function(begin, count) {
+  begin_sql <- whole_nonnegative(begin, "input partition start")
+  end_sql <- whole_nonnegative(begin + count, "input partition end")
+  if (production) {
     columns <- if (identical(opt$event_mode, "breakend")) {
       "seq_region, \"position\", mate_seq_region, mate_position"
     } else {
       "seq_region, \"position\", \"reference\", \"alternate\""
     }
     glue(
-      "SELECT {columns} FROM duckvep_throughput_variants
-       ORDER BY seq_region, \"position\" LIMIT {n}"
+      "SELECT input_variant_index, {columns}
+       FROM duckvep_throughput_variants
+       WHERE input_variant_index >= {begin_sql}
+         AND input_variant_index < {end_sql}
+       ORDER BY input_variant_index"
     )
   } else if (identical(opt$event_mode, "breakend")) {
     glue(
-      "SELECT 1::UINTEGER AS seq_region, 159::UBIGINT AS \"position\",
+      "SELECT i::UBIGINT AS input_variant_index,
+              1::UINTEGER AS seq_region, 159::UBIGINT AS \"position\",
               1::UINTEGER AS mate_seq_region, 170::UBIGINT AS mate_position
-       FROM range({n})"
+       FROM range({begin_sql}, {end_sql}) r(i)"
     )
   } else {
     glue(
-      "SELECT 1::UINTEGER AS seq_region, 124::UBIGINT AS \"position\",
+      "SELECT i::UBIGINT AS input_variant_index,
+              1::UINTEGER AS seq_region, 124::UBIGINT AS \"position\",
               'T' AS \"reference\",
               CASE WHEN i % 2 = 0 THEN 'C' ELSE 'G' END AS \"alternate\"
-       FROM range({n}) r(i)"
+       FROM range({begin_sql}, {end_sql}) r(i)"
     )
   }
-  function_name <- if (identical(opt$event_mode, "breakend")) {
-    if (opt$output == "compact") {
-      "duckvep_annotate_breakend_compact"
+}
+
+warmup_count <- min(opt$warmup, variant_count)
+public_event_table <- "duckvep_throughput_public_events"
+public_warmup_table <- "duckvep_throughput_public_events_warmup"
+if (identical(opt$api_surface, "public")) {
+  source <- annotation_input(0, variant_count)
+  projection <- if (identical(opt$event_mode, "breakend")) {
+    paste(
+      "input_variant_index::UBIGINT AS event_index,",
+      "seq_region::UINTEGER AS seq_region, \"position\"::UBIGINT AS position,",
+      "NULL::VARCHAR AS reference, NULL::VARCHAR AS alternate,",
+      "NULL::UBIGINT AS end_position, NULL::VARCHAR AS structural_type,",
+      "NULL::VARCHAR AS copy_change, mate_seq_region::UINTEGER AS mate_seq_region,",
+      "mate_position::UBIGINT AS mate_position"
+    )
+  } else {
+    paste(
+      "input_variant_index::UBIGINT AS event_index,",
+      "seq_region::UINTEGER AS seq_region, \"position\"::UBIGINT AS position,",
+      "\"reference\"::VARCHAR AS reference, \"alternate\"::VARCHAR AS alternate,",
+      "NULL::UBIGINT AS end_position, NULL::VARCHAR AS structural_type,",
+      "NULL::VARCHAR AS copy_change, NULL::UINTEGER AS mate_seq_region,",
+      "NULL::UBIGINT AS mate_position"
+    )
+  }
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP TABLE {public_event_table} AS
+       SELECT {projection}
+       FROM ({source}) AS source_events
+       ORDER BY event_index"
+    )
+  ))
+  warmup_sql <- whole_count(warmup_count, "--warmup")
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE OR REPLACE TEMP VIEW {public_warmup_table} AS
+       SELECT * FROM {public_event_table}
+       WHERE event_index < {warmup_sql}
+       ORDER BY event_index"
+    )
+  ))
+}
+
+annotation_function_name <- function(output_mode) {
+  if (identical(opt$event_mode, "breakend")) {
+    if (output_mode == "compact") {
+      "_duckvep_annotate_breakend_compact"
     } else {
-      "duckvep_annotate_breakend"
+      "_duckvep_annotate_breakend_rich"
     }
-  } else if (opt$output == "compact") {
-    "duckvep_annotate_compact"
+  } else if (output_mode == "compact") {
+    "_duckvep_annotate_small_compact"
+  } else if (output_mode == "hgvs") {
+    "_duckvep_annotate_small_hgvs"
   } else {
-    "duckvep_annotate"
+    "_duckvep_annotate_small_rich"
   }
-  checksum <- if (opt$output == "compact") {
-    "CAST(sum(annotation.consequence_mask) AS VARCHAR)"
-  } else {
-    "CAST(sum(length(annotation.consequence)) AS VARCHAR)"
+}
+
+annotation_cte <- function(n, output_mode) {
+  n <- as.numeric(n)
+  if (identical(opt$api_surface, "public")) {
+    event_table <- if (n < variant_count) {
+      public_warmup_table
+    } else {
+      public_event_table
+    }
+    compact_fields <- c(
+      "transcript_index", "gene_index", "consequence_mask", "region_mask",
+      "impact_code", "status_code", "reason_code", "cdna_position",
+      "cds_position", "protein_position", "reference_amino_acid_code",
+      "alternate_amino_acid_code", "nmd_prediction_code",
+      "nmd_escape_reasons", "regulation_feature_index", "overlap_object_code"
+    )
+    annotation_fields <- if (identical(output_mode, "hgvs")) {
+      c(
+        compact_fields, "transcript_hgvs", "protein_hgvs", "hgvs_shift",
+        "transcript_hgvs_status", "transcript_hgvs_reason",
+        "protein_hgvs_status", "protein_hgvs_reason"
+      )
+    } else {
+      compact_fields
+    }
+    struct_fields <- paste0(
+      annotation_fields,
+      " := a.",
+      annotation_fields,
+      collapse = ", "
+    )
+    return(glue(
+      "WITH annotated AS (
+         SELECT
+           a.event_index AS input_variant_index,
+           a.duckvep_event_kind,
+           struct_pack({struct_fields}) AS annotation
+         FROM duckvep_annotate(
+           {sql_q(event_table)}, {sql_q(model_name)},
+           hgvs := {if (identical(output_mode, 'hgvs')) 'TRUE' else 'FALSE'},
+           upstream_distance := {distance_sql}::UBIGINT,
+           downstream_distance := {distance_sql}::UBIGINT
+         ) AS a
+       )"
+    ))
   }
+  function_name <- annotation_function_name(output_mode)
   function_arguments <- if (identical(opt$event_mode, "breakend")) {
     "seq_region, \"position\", mate_seq_region, mate_position"
   } else {
     "seq_region, \"position\", \"reference\", \"alternate\""
   }
+  partition_count <- min(opt$input_partitions, n)
+  partition_begin <- floor((0:(partition_count - 1)) * n / partition_count)
+  partition_end <- floor((1:partition_count) * n / partition_count)
+  branches <- vapply(
+    seq_len(partition_count),
+    function(index) {
+      input <- annotation_input(
+        partition_begin[[index]],
+        partition_end[[index]] - partition_begin[[index]]
+      )
+      glue(
+        "SELECT
+           input_variant_index,
+           seq_region,
+           \"position\",
+           {if (identical(opt$event_mode, 'breakend')) 'mate_seq_region, mate_position,' else '\"reference\", \"alternate\",'}
+           {function_name}(
+             {sql_q(model_name)}, {function_arguments},
+             {distance_sql}::UBIGINT
+           ) AS annotations
+         FROM ({input}) AS variants"
+      )
+    },
+    character(1L)
+  )
   glue(
-    "WITH variants AS ({input}), annotated AS (
-       SELECT unnest({function_name}(
-         {sql_q(model_name)}, {function_arguments},
-         5000::UBIGINT
-       )) AS annotation
-       FROM variants
-     )
+    "WITH annotation_lists AS (
+       {paste(branches, collapse = '\nUNION ALL\n')}
+     ), annotated AS (
+       SELECT
+         * EXCLUDE (annotations),
+         generate_subscripts(annotations, 1)::UINTEGER AS annotation_index,
+         unnest(annotations) AS annotation
+       FROM annotation_lists
+     )"
+  )
+}
+
+annotation_query <- function(n) {
+  checksum <- if (opt$output == "compact") {
+    "CAST(sum(annotation.consequence_mask) AS VARCHAR)"
+  } else if (opt$output == "hgvs") {
+    paste(
+      "CAST(sum(",
+      "length(coalesce(annotation.transcript_hgvs, '')) +",
+      "length(coalesce(annotation.protein_hgvs, '')) +",
+      "length(annotation.transcript_hgvs_status) +",
+      "length(annotation.protein_hgvs_status)",
+      ") AS VARCHAR)"
+    )
+  } else {
+    "CAST(sum(length(annotation.consequence)) AS VARCHAR)"
+  }
+  glue(
+    "{annotation_cte(n, opt$output)}
      SELECT count(*)::DOUBLE AS annotated_rows, {checksum} AS checksum
      FROM annotated"
   )
 }
 
-warmup_count <- min(opt$warmup, variant_count)
+composition_query <- function(n) {
+  glue(
+    "{annotation_cte(n, 'compact')}
+     SELECT
+       annotation.consequence_mask,
+       annotation.region_mask,
+       annotation.impact_code,
+       annotation.status_code,
+       annotation.reason_code,
+       annotation.overlap_object_code,
+       count(*)::DOUBLE AS output_rows
+     FROM annotated
+     GROUP BY ALL
+     ORDER BY ALL"
+  )
+}
+
+fingerprint_query <- function(n) {
+  identity_fields <- if (identical(opt$api_surface, "public")) {
+    c("input_variant_index", "duckvep_event_kind")
+  } else if (identical(opt$event_mode, "breakend")) {
+    c(
+      "input_variant_index", "seq_region", "\"position\"",
+      "mate_seq_region", "mate_position", "annotation_index"
+    )
+  } else {
+    c(
+      "input_variant_index", "seq_region", "\"position\"",
+      "\"reference\"", "\"alternate\"", "annotation_index"
+    )
+  }
+  annotation_fields <- if (opt$output == "rich") {
+    c(
+      "transcript_index", "gene_index", "consequence", "impact", "region",
+      "status", "reason", "cdna_position", "cds_position", "protein_position",
+      "reference_amino_acid", "alternate_amino_acid", "nmd_prediction",
+      "nmd_escape_intronless", "nmd_escape_early_cds", "nmd_escape_last_exon",
+      "nmd_escape_penultimate_exon_end", "regulation_feature_index",
+      "overlap_object"
+    )
+  } else {
+    compact_fields <- c(
+      "transcript_index", "gene_index", "consequence_mask", "region_mask",
+      "impact_code", "status_code", "reason_code", "cdna_position",
+      "cds_position", "protein_position", "reference_amino_acid_code",
+      "alternate_amino_acid_code", "nmd_prediction_code",
+      "nmd_escape_reasons", "regulation_feature_index", "overlap_object_code"
+    )
+    if (opt$output == "hgvs") {
+      c(
+        compact_fields, "transcript_hgvs", "protein_hgvs", "hgvs_shift",
+        "transcript_hgvs_status", "transcript_hgvs_reason",
+        "protein_hgvs_status", "protein_hgvs_reason"
+      )
+    } else {
+      compact_fields
+    }
+  }
+  hash_arguments <- paste(
+    c(identity_fields, paste0("annotation.", annotation_fields)),
+    collapse = ", "
+  )
+  glue(
+    "{annotation_cte(n, opt$output)}, row_fingerprints AS (
+       SELECT hash({hash_arguments}) AS row_hash
+       FROM annotated
+     )
+     SELECT
+       count(*)::UBIGINT AS output_rows,
+       bit_xor(row_hash)::VARCHAR AS xor_hash,
+       sum(row_hash)::VARCHAR AS sum_hash
+     FROM row_fingerprints"
+  )
+}
+
 warmup_sql <- whole_count(warmup_count, "--warmup")
 variant_sql <- whole_count(variant_count, "--variants")
 invisible(dbGetQuery(con, annotation_query(warmup_sql)))
@@ -386,18 +1019,219 @@ if (length(unique(check$checksum)) != 1L) {
   die("annotation checksum changed across benchmark passes")
 }
 
-if (!nzchar(opt$source_revision)) {
-  revision <- suppressWarnings(system2(
-    "git",
-    c("-C", root, "rev-parse", "HEAD"),
-    stdout = TRUE,
-    stderr = FALSE
-  ))
-  revision_status <- attr(revision, "status")
-  if (!is.null(revision_status) && revision_status != 0L) {
-    die("cannot determine source revision")
+if (nzchar(opt$composition)) {
+  masks <- dbGetQuery(con, composition_query(variant_sql))
+  composition_rows <- sum(masks$output_rows)
+  if (!identical(as.numeric(composition_rows), as.numeric(check$annotated_rows[[1L]]))) {
+    die("compact composition cardinality differs from timed output")
   }
-  opt$source_revision <- trimws(revision[[1L]])
+
+  aggregate_codes <- function(codes, values, labels) {
+    counts <- aggregate(
+      masks$output_rows,
+      by = list(code = codes),
+      FUN = sum
+    )
+    names(counts)[[2L]] <- "output_rows"
+    counts$category <- unname(labels[as.character(counts$code)])
+    if (anyNA(counts$category)) {
+      die("composition contains an unknown numeric code")
+    }
+    counts[, c("category", "output_rows"), drop = FALSE]
+  }
+  append_dimension <- function(parts, dimension, values) {
+    if (!nrow(values)) return(parts)
+    values$dimension <- dimension
+    rbind(parts, values[, c("dimension", "category", "output_rows")])
+  }
+
+  composition <- data.frame(
+    dimension = character(),
+    category = character(),
+    output_rows = numeric(),
+    stringsAsFactors = FALSE
+  )
+  object_labels <- c(
+    `0` = "transcript",
+    `1` = "regulatory_region",
+    `2` = "transcription_factor_binding_site"
+  )
+  impact_labels <- c(
+    `0` = "modifier", `1` = "low", `2` = "moderate", `3` = "high"
+  )
+  status_labels <- c(`0` = "supported", `1` = "unresolved")
+  reason_labels <- c(
+    `0` = "none",
+    `1` = "no_feature_in_loaded_model",
+    `2` = "missing_sequence",
+    `3` = "ambiguous_sequence",
+    `4` = "reference_mismatch",
+    `5` = "non_contiguous_cds_edit",
+    `6` = "unsupported_compound_consequence",
+    `7` = "invalid_model_projection",
+    `8` = "internal_capacity_error",
+    `9` = "missing_transcript_tail",
+    `10` = "missing_transcript_flank"
+  )
+  composition <- append_dimension(
+    composition,
+    "overlap_object",
+    aggregate_codes(masks$overlap_object_code, masks$output_rows, object_labels)
+  )
+  composition <- append_dimension(
+    composition,
+    "impact",
+    aggregate_codes(masks$impact_code, masks$output_rows, impact_labels)
+  )
+  composition <- append_dimension(
+    composition,
+    "status",
+    aggregate_codes(masks$status_code, masks$output_rows, status_labels)
+  )
+  composition <- append_dimension(
+    composition,
+    "reason",
+    aggregate_codes(masks$reason_code, masks$output_rows, reason_labels)
+  )
+
+  region_labels <- c(
+    "upstream", "downstream", "intron", "exon", "CDS", "UTR", "splice"
+  )
+  region_masks <- as.numeric(masks$region_mask)
+  for (bit in seq_along(region_labels) - 1L) {
+    present <- floor(region_masks / (2^bit)) %% 2 == 1
+    if (any(present)) {
+      composition <- append_dimension(
+        composition,
+        "region",
+        data.frame(
+          category = region_labels[[bit + 1L]],
+          output_rows = sum(masks$output_rows[present]),
+          stringsAsFactors = FALSE
+        )
+      )
+    }
+  }
+  if (any(region_masks == 0)) {
+    composition <- append_dimension(
+      composition,
+      "region",
+      data.frame(
+        category = "none",
+        output_rows = sum(masks$output_rows[region_masks == 0]),
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+
+  so_bindings <- utils::read.delim(
+    file.path(
+      root,
+      "test",
+      "duckvep",
+      "conformance",
+      "data",
+      "so_bit_bindings.tsv"
+    ),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  consequence_masks <- as.numeric(masks$consequence_mask)
+  for (bit in seq_len(nrow(so_bindings)) - 1L) {
+    present <- floor(consequence_masks / (2^bit)) %% 2 == 1
+    if (any(present)) {
+      composition <- append_dimension(
+        composition,
+        "SO_term",
+        data.frame(
+          category = so_bindings$SO_term[[bit + 1L]],
+          output_rows = sum(masks$output_rows[present]),
+          stringsAsFactors = FALSE
+        )
+      )
+    }
+  }
+  composition$workload <- workload
+  composition$timed_output_mode <- opt$output
+  composition$transcript_distance <- opt$transcript_distance
+  composition$input_variants <- variant_count
+  composition$denominator_output_rows <- composition_rows
+  composition$share_of_output_rows <- composition$output_rows / composition_rows
+  composition <- composition[
+    order(composition$dimension, -composition$output_rows, composition$category),
+    c(
+      "workload", "timed_output_mode", "transcript_distance", "input_variants",
+      "denominator_output_rows", "dimension", "category", "output_rows",
+      "share_of_output_rows"
+    ),
+    drop = FALSE
+  ]
+  dir.create(dirname(opt$composition), recursive = TRUE, showWarnings = FALSE)
+  tmp_composition <- tempfile(
+    "duckvep-composition-",
+    dirname(opt$composition),
+    ".csv"
+  )
+  utils::write.csv(composition, tmp_composition, row.names = FALSE)
+  if (!file.rename(tmp_composition, opt$composition)) {
+    unlink(tmp_composition)
+    die("cannot replace composition: {opt$composition}")
+  }
+}
+
+fingerprint_schema_version <- ""
+fingerprint_xor_hash <- ""
+fingerprint_sum_hash <- ""
+if (nzchar(opt$fingerprint) || nzchar(opt$expected_fingerprint)) {
+  fingerprint_values <- dbGetQuery(con, fingerprint_query(variant_sql))
+  if (nrow(fingerprint_values) != 1L ||
+      fingerprint_values$output_rows[[1L]] != check$annotated_rows[[1L]]) {
+    die("full-row fingerprint cardinality differs from timed output")
+  }
+  fingerprint <- data.frame(
+    schema_version = 2L,
+    workload = workload,
+    output_mode = opt$output,
+    transcript_distance = as.character(opt$transcript_distance),
+    input_variants = as.integer(variant_count),
+    output_rows = as.character(fingerprint_values$output_rows[[1L]]),
+    xor_hash = as.character(fingerprint_values$xor_hash[[1L]]),
+    sum_hash = as.character(fingerprint_values$sum_hash[[1L]]),
+    model_sha256 = model_logical_sha256,
+    region_ordinal_sha256 = model_region_ordinal_sha256,
+    variants_database_sha256 = variants_database_sha256,
+    stringsAsFactors = FALSE
+  )
+  fingerprint_schema_version <- as.character(fingerprint$schema_version[[1L]])
+  fingerprint_xor_hash <- as.character(fingerprint$xor_hash[[1L]])
+  fingerprint_sum_hash <- as.character(fingerprint$sum_hash[[1L]])
+  if (nzchar(opt$expected_fingerprint)) {
+    expected <- utils::read.csv(
+      opt$expected_fingerprint,
+      stringsAsFactors = FALSE,
+      check.names = FALSE,
+      colClasses = "character"
+    )
+    observed <- fingerprint
+    observed[] <- lapply(observed, as.character)
+    if (!identical(names(expected), names(observed)) ||
+        nrow(expected) != 1L || !identical(expected, observed)) {
+      die("full-row fingerprint differs from baseline: {opt$expected_fingerprint}")
+    }
+  }
+  if (nzchar(opt$fingerprint)) {
+    dir.create(dirname(opt$fingerprint), recursive = TRUE, showWarnings = FALSE)
+    tmp_fingerprint <- tempfile(
+      "duckvep-fingerprint-",
+      dirname(opt$fingerprint),
+      ".csv"
+    )
+    utils::write.csv(fingerprint, tmp_fingerprint, row.names = FALSE)
+    if (!file.rename(tmp_fingerprint, opt$fingerprint)) {
+      unlink(tmp_fingerprint)
+      die("cannot replace fingerprint: {opt$fingerprint}")
+    }
+  }
 }
 
 declared_version <- sub(
@@ -431,6 +1265,16 @@ cpu <- if (file.exists("/proc/cpuinfo")) {
 } else {
   Sys.info()[["machine"]]
 }
+cpu_affinity <- if (file.exists("/proc/self/status")) {
+  line <- grep(
+    "^Cpus_allowed_list[[:space:]]*:",
+    readLines("/proc/self/status"),
+    value = TRUE
+  )
+  if (length(line)) trimws(sub("^[^:]+:", "", line[[1L]])) else "unknown"
+} else {
+  "unknown"
+}
 
 median_seconds <- stats::median(elapsed)
 row <- data.frame(
@@ -443,8 +1287,14 @@ row <- data.frame(
   cpu = cpu,
   workload = workload,
   output_mode = opt$output,
-  input_order = "nondecreasing_seq_region_position",
+  input_order = if (opt$input_partitions == 1L) {
+    "nondecreasing_seq_region_position"
+  } else {
+    "disjoint_nondecreasing_seq_region_position"
+  },
   threads = opt$threads,
+  input_partitions = opt$input_partitions,
+  transcript_distance = as.numeric(opt$transcript_distance),
   variants = as.integer(variant_count),
   regions = as.integer(region_count),
   transcripts = as.integer(transcript_count),
@@ -460,10 +1310,56 @@ row <- data.frame(
   annotated_rows = as.integer(check$annotated_rows[[1L]]),
   checksum_kind = if (opt$output == "compact") {
     "consequence_mask_sum"
+  } else if (opt$output == "hgvs") {
+    "hgvs_text_status_bytes"
   } else {
     "consequence_text_bytes"
   },
   checksum_value = check$checksum[[1L]],
+  cpu_affinity = cpu_affinity,
+  extension_build_binding = extension_build_binding,
+  extension_sha256 = extension_sha256,
+  model_database_sha256 = model_database_sha256,
+  model_logical_sha256 = model_logical_sha256,
+  model_source_manifest_sha256 = model_source_manifest_sha256,
+  model_reference_sha256 = model_reference_sha256,
+  model_source_version = model_source_version,
+  model_assembly = model_assembly,
+  model_region_ordinal_sha256 = model_region_ordinal_sha256,
+  variants_database_sha256 = variants_database_sha256,
+  corpus_receipt_schema_version = receipt_value(corpus_receipt, "schema_version"),
+  corpus_source_name = receipt_value(corpus_receipt, "source_name"),
+  corpus_source_record_count = receipt_value(
+    corpus_receipt,
+    "source_record_count"
+  ),
+  corpus_source_alt_count = receipt_value(corpus_receipt, "source_alt_count"),
+  corpus_supported_alt_count = if (
+    nzchar(receipt_value(corpus_receipt, "supported_model_literal_alt_count"))
+  ) {
+    receipt_value(corpus_receipt, "supported_model_literal_alt_count")
+  } else {
+    receipt_value(corpus_receipt, "supported_alt_count")
+  },
+  corpus_max_reference_length = receipt_value(
+    corpus_receipt,
+    "max_reference_length"
+  ),
+  corpus_max_alternate_length = receipt_value(
+    corpus_receipt,
+    "max_alternate_length"
+  ),
+  corpus_source_sha256 = if (nzchar(corpus_source_sha256)) {
+    corpus_source_sha256
+  } else {
+    receipt_value(corpus_receipt, "source_sha256")
+  },
+  reference_fasta_sha256 = reference_fasta_sha256,
+  reference_fai_sha256 = reference_fai_sha256,
+  reference_gzi_sha256 = reference_gzi_sha256,
+  fingerprint_schema_version = fingerprint_schema_version,
+  fingerprint_xor_hash = fingerprint_xor_hash,
+  fingerprint_sum_hash = fingerprint_sum_hash,
   stringsAsFactors = FALSE
 )
 
@@ -477,18 +1373,37 @@ if (nzchar(opt$history)) {
       check.names = FALSE,
       colClasses = c(
         source_revision = "character",
-        checksum_value = "character"
+        checksum_value = "character",
+        extension_build_binding = "character",
+        extension_sha256 = "character",
+        model_database_sha256 = "character",
+        model_logical_sha256 = "character",
+        model_source_manifest_sha256 = "character",
+        model_reference_sha256 = "character",
+        model_region_ordinal_sha256 = "character",
+        variants_database_sha256 = "character",
+        corpus_source_sha256 = "character",
+        reference_fasta_sha256 = "character",
+        reference_fai_sha256 = "character",
+        reference_gzi_sha256 = "character",
+        fingerprint_xor_hash = "character",
+        fingerprint_sum_hash = "character"
       )
     )
     if (!identical(names(old), names(row))) {
       die("history schema does not match: {opt$history}")
     }
+    same_affinity <- !is.na(old$cpu_affinity) &
+      old$cpu_affinity == row$cpu_affinity
     same <- old$source_revision == row$source_revision &
       old$host == row$host &
       old$workload == row$workload &
       old$output_mode == row$output_mode &
       old$threads == row$threads &
-      old$variants == row$variants
+      old$input_partitions == row$input_partitions &
+      old$transcript_distance == row$transcript_distance &
+      old$variants == row$variants &
+      same_affinity
     rows <- rbind(old[!same, , drop = FALSE], row)
   }
   rows <- rows[
@@ -504,6 +1419,15 @@ if (nzchar(opt$history)) {
   }
 }
 
+if (!isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_assert_checkout(
+    root,
+    revision,
+    evidence_outputs,
+    context = "DuckVEP throughput evidence"
+  )
+}
+
 invisible(dbGetQuery(
   con,
   glue("SELECT duckvep_model_drop({sql_q(model_name)})")
@@ -512,7 +1436,9 @@ cat(
   glue(
     "{format(variant_count, big.mark = ',', scientific = FALSE)} sorted variants; median ",
     "{sprintf('%.3f', median_seconds)} s; ",
-    "{sprintf('%.1f', row$ns_per_variant)} ns/variant"
+    "{sprintf('%.1f', row$ns_per_variant)} ns/variant; ",
+    "{format(check$annotated_rows[[1L]], big.mark = ',', scientific = FALSE)} rows; ",
+    "{sprintf('%.2f', check$annotated_rows[[1L]] / variant_count)} rows/variant"
   ),
   "\n",
   sep = ""
@@ -520,6 +1446,8 @@ cat(
 cat(
   glue(
     "model load: {sprintf('%.3f', unname(model_load_timing[['elapsed']]))} s; ",
+    "input partitions: {format(opt$input_partitions, big.mark = ',')}; ",
+    "transcript distance: {format(opt$transcript_distance, big.mark = ',')} bases; ",
     "complete coverage: {tolower(as.character(complete_coverage))}; ",
     "complete transcript flanks: {tolower(as.character(complete_flanks))}; ",
     "regulation features: {format(regulation_feature_count, big.mark = ',')}"
@@ -529,4 +1457,7 @@ cat(
 )
 if (nzchar(opt$history)) {
   cat(glue("history -> {opt$history}"), "\n", sep = "")
+}
+if (nzchar(opt$composition)) {
+  cat(glue("composition -> {opt$composition}"), "\n", sep = "")
 }

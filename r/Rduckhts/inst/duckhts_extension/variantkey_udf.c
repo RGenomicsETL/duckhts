@@ -79,6 +79,77 @@ static inline const char *get_string_at(duckdb_vector vector, idx_t row, idx_t *
     return duckdb_string_t_data(val);
 }
 
+static inline int ascii_lower(int c) {
+    if (c >= 'A' && c <= 'Z') return c + ('a' - 'A');
+    return c;
+}
+
+static inline int span_equals_ascii_ci(const char *value, idx_t value_len, const char *literal) {
+    idx_t literal_len = (idx_t)strlen(literal);
+    if (!value || value_len != literal_len) return 0;
+    for (idx_t i = 0; i < value_len; i++) {
+        if (ascii_lower((unsigned char)value[i]) != ascii_lower((unsigned char)literal[i])) return 0;
+    }
+    return 1;
+}
+
+static void contig_key_span(const char *value,
+                            idx_t value_len,
+                            const char **key,
+                            idx_t *key_len) {
+    static const char mt[] = "MT";
+    static const char x[] = "X";
+    static const char y[] = "Y";
+
+    *key = value;
+    *key_len = value_len;
+    if (!value) return;
+
+    if (value_len > 3 &&
+        ascii_lower((unsigned char)value[0]) == 'c' &&
+        ascii_lower((unsigned char)value[1]) == 'h' &&
+        ascii_lower((unsigned char)value[2]) == 'r') {
+        *key = value + 3;
+        *key_len = value_len - 3;
+    }
+
+    if (span_equals_ascii_ci(*key, *key_len, "M") ||
+        span_equals_ascii_ci(*key, *key_len, "MT")) {
+        *key = mt;
+        *key_len = 2;
+    } else if (span_equals_ascii_ci(*key, *key_len, "X")) {
+        *key = x;
+        *key_len = 1;
+    } else if (span_equals_ascii_ci(*key, *key_len, "Y")) {
+        *key = y;
+        *key_len = 1;
+    }
+}
+
+static void duckhts_contig_key_scalar(duckdb_function_info info,
+                                      duckdb_data_chunk input,
+                                      duckdb_vector output) {
+    duckdb_vector contig_vec = duckdb_data_chunk_get_vector(input, 0);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+
+    (void)info;
+    for (idx_t row = 0; row < row_count; row++) {
+        idx_t contig_len = 0;
+        idx_t key_len = 0;
+        const char *contig;
+        const char *key;
+
+        if (!row_is_valid(contig_vec, row)) {
+            set_null_at(output, row);
+            continue;
+        }
+
+        contig = get_string_at(contig_vec, row, &contig_len);
+        contig_key_span(contig, contig_len, &key, &key_len);
+        duckdb_vector_assign_string_element_len(output, row, key, key_len);
+    }
+}
+
 static int get_variantkey_from_parts(const char *chrom,
                                      idx_t chrom_len,
                                      int64_t pos1,
@@ -894,6 +965,14 @@ void register_variantkey_functions(duckdb_connection connection) {
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type utinyint_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
     duckdb_logical_type uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+
+    fn = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(fn, "duckhts_contig_key");
+    duckdb_scalar_function_add_parameter(fn, varchar_type);
+    duckdb_scalar_function_set_return_type(fn, varchar_type);
+    duckdb_scalar_function_set_function(fn, duckhts_contig_key_scalar);
+    duckdb_register_scalar_function(connection, fn);
+    duckdb_destroy_scalar_function(&fn);
 
     fn = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(fn, "encode_variantkey");

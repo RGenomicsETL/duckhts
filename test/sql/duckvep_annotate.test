@@ -108,7 +108,7 @@ SELECT loaded FROM duckvep_model_load(
 query TTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'partial-cds-end', 1::UINTEGER, 106::UBIGINT, 'C', 'CA', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -117,7 +117,7 @@ frameshift_variant	supported	-
 query TTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'partial-cds-end', 1::UINTEGER, 109::UBIGINT, 'GGGT', 'G', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -128,7 +128,7 @@ inframe_deletion	supported	-
 query TTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'partial-cds-end', 1::UINTEGER, 112::UBIGINT, 'T', 'A', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -137,18 +137,77 @@ incomplete_terminal_codon_variant&coding_sequence_variant	supported	-
 query TTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'partial-cds-end', 1::UINTEGER, 111::UBIGINT, 'GTT', 'G', 0::UBIGINT
 )) AS u(annotation);
 ----
 protein_altering_variant&incomplete_terminal_codon_variant	supported	-
+
+# A long literal allele remains an ordinary VariationFeature in VEP. Complete
+# transcript overlap plus its normalized deletion fact still has tier-1
+# feature_ablation semantics. Equal-length containing spans keep VEP's empty
+# endpoint-UTR predicates and suppress coding_unknown.
+statement ok
+CREATE TABLE duckvep_complete_span_transcripts AS
+SELECT
+  0::UINTEGER transcript_index,
+  1::UINTEGER seq_region,
+  100::UBIGINT transcript_start,
+  108::UBIGINT transcript_end,
+  1::TINYINT strand,
+  0::UINTEGER gene_index,
+  3::UBIGINT transcript_flags,
+  100::UBIGINT cds_start,
+  108::UBIGINT cds_end,
+  'ATGAAATAA'::BLOB cds_sequence,
+  1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence,
+  ''::BLOB post_cds_sequence;
+
+statement ok
+CREATE TABLE duckvep_complete_span_exons AS
+SELECT
+  0::UINTEGER transcript_index,
+  100::UBIGINT exon_start,
+  108::UBIGINT exon_end,
+  1::UBIGINT exon_cdna_start,
+  9::UBIGINT exon_cdna_end,
+  0::TINYINT phase,
+  0::TINYINT end_phase;
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'complete-span',
+  'SELECT seq_region FROM duckvep_test_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_complete_span_transcripts',
+  'SELECT * FROM duckvep_complete_span_exons'
+);
+----
+1
+
+query ITT
+WITH variants(ord, reference, alternate) AS (
+  VALUES
+    (1, repeat('A', 11), repeat('A', 5) || 'C' || repeat('A', 5)),
+    (2, repeat('A', 11), 'A')
+)
+SELECT ord, annotation.consequence, annotation.status
+FROM variants,
+LATERAL unnest(_duckvep_annotate_small_rich(
+  'complete-span', 1::UINTEGER, 99::UBIGINT,
+  reference, alternate, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	5_prime_UTR_variant&3_prime_UTR_variant&coding_transcript_variant	supported
+2	transcript_ablation	supported
 
 # VEP does not suppress inframe_insertion when partial_codon is true, and its
 # X-bearing peptide also keeps coding_sequence_variant.
 query TTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'partial-cds-end', 1::UINTEGER, 111::UBIGINT, 'G', 'GGCCA', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -191,7 +250,7 @@ SELECT
   coalesce(annotation.cds_position::VARCHAR, '-'),
   coalesce(annotation.protein_position::VARCHAR, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', seq_region, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord, annotation.transcript_index NULLS FIRST;
@@ -230,7 +289,7 @@ SELECT
   annotation.nmd_prediction_code,
   annotation.nmd_escape_reasons
 FROM variants,
-LATERAL unnest(duckvep_annotate_compact(
+LATERAL unnest(_duckvep_annotate_small_compact(
   'fixture', seq_region, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord, annotation.transcript_index NULLS FIRST;
@@ -258,7 +317,7 @@ WITH variants(ord, position, reference, alternate) AS (
 SELECT ord, annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -284,7 +343,7 @@ WITH variants(ord, position, reference, alternate) AS (
 )
 SELECT ord, annotation.consequence, annotation.status
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -309,7 +368,7 @@ WITH variants(ord, position, reference, alternate) AS (
 SELECT ord, annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -348,7 +407,7 @@ SELECT loaded FROM duckvep_model_load(
 query TTTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-'), annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 0::UINTEGER, 100::UBIGINT, 'A', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -357,7 +416,7 @@ intergenic_variant	supported	-	intergenic
 query IIII
 SELECT annotation.consequence_mask, annotation.region_mask,
        annotation.status_code, annotation.reason_code
-FROM unnest(duckvep_annotate_compact(
+FROM unnest(_duckvep_annotate_small_compact(
   'fixture-complete', 0::UINTEGER, 100::UBIGINT, 'A', 'C'
 )) AS u(annotation);
 ----
@@ -367,7 +426,7 @@ FROM unnest(duckvep_annotate_compact(
 # transcript-relative directions independently. A zero disables that direction.
 query TT
 SELECT annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',
   10::UBIGINT, 0::UBIGINT
 )) AS u(annotation);
@@ -376,7 +435,7 @@ upstream_gene_variant	upstream
 
 query TT
 SELECT annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'C',
   10::UBIGINT, 0::UBIGINT
 )) AS u(annotation);
@@ -385,7 +444,7 @@ intergenic_variant	intergenic
 
 query TT
 SELECT annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',
   0::UBIGINT, 10::UBIGINT
 )) AS u(annotation);
@@ -394,7 +453,7 @@ intergenic_variant	intergenic
 
 query TT
 SELECT annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'C',
   0::UBIGINT, 10::UBIGINT
 )) AS u(annotation);
@@ -405,7 +464,7 @@ downstream_gene_variant	downstream
 # downstream side, P at the nominal limit is therefore one base beyond it.
 query TT
 SELECT annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 260::UBIGINT, 'A', 'AC',
   0::UBIGINT, 10::UBIGINT
 )) AS u(annotation);
@@ -414,7 +473,7 @@ intergenic_variant	intergenic
 
 query TT
 SELECT annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 259::UBIGINT, 'A', 'AC',
   0::UBIGINT, 10::UBIGINT
 )) AS u(annotation);
@@ -423,7 +482,7 @@ downstream_gene_variant	downstream
 
 query II
 SELECT annotation.region_mask, annotation.status_code
-FROM unnest(duckvep_annotate_compact(
+FROM unnest(_duckvep_annotate_small_compact(
   'fixture-complete', 1::UINTEGER, 90::UBIGINT, 'A', 'C',
   10::UBIGINT, 0::UBIGINT
 )) AS u(annotation);
@@ -431,7 +490,7 @@ FROM unnest(duckvep_annotate_compact(
 1	0
 
 statement error
-SELECT duckvep_annotate(
+SELECT _duckvep_annotate_small_rich(
   'fixture-complete', 1::UINTEGER, 1001::UBIGINT, 'A', 'C', 0::UBIGINT
 );
 ----
@@ -462,7 +521,7 @@ WITH variants(ord, model_name, position, reference, alternate) AS (
 )
 SELECT ord, annotation.gene_index, annotation.consequence
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   model_name, 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -496,7 +555,7 @@ SELECT loaded FROM duckvep_model_load(
 
 query TTT
 SELECT annotation.consequence, annotation.status, annotation.reason
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'structural', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -510,11 +569,12 @@ WITH events(ord, start1, end1, structural_type, copy_change) AS (
     (1, 90::UBIGINT, 260::UBIGINT, 'DEL', 'LOSS'),
     (2, 90::UBIGINT, 260::UBIGINT, 'DUP', 'GAIN'),
     (3, 110::UBIGINT, 230::UBIGINT, 'CNV', 'LOSS'),
-    (4, 110::UBIGINT, 230::UBIGINT, 'CNV', 'GAIN')
+    (4, 110::UBIGINT, 230::UBIGINT, 'CNV', 'GAIN'),
+    (5, 90::UBIGINT, 260::UBIGINT, 'STR', 'UNKNOWN')
 )
 SELECT structural_type, copy_change, annotation.consequence, annotation.status
 FROM events,
-LATERAL unnest(duckvep_annotate_sv(
+LATERAL unnest(_duckvep_annotate_structural_rich(
   'structural', 1::UINTEGER, start1, end1, structural_type, copy_change,
   0::UBIGINT
 )) AS u(annotation)
@@ -524,11 +584,12 @@ DEL	LOSS	transcript_ablation	supported
 DUP	GAIN	transcript_amplification	supported
 CNV	LOSS	start_lost&feature_truncation&start_retained_variant&coding_sequence_variant&5_prime_UTR_variant&intron_variant	supported
 CNV	GAIN	start_lost&feature_elongation&start_retained_variant&coding_sequence_variant&5_prime_UTR_variant&intron_variant	supported
+STR	UNKNOWN	transcript_amplification	supported
 
 query IIIII
 SELECT annotation.consequence_mask, annotation.region_mask,
        annotation.impact_code, annotation.status_code, annotation.reason_code
-FROM unnest(duckvep_annotate_sv_compact(
+FROM unnest(_duckvep_annotate_structural_compact(
   'structural', 1::UINTEGER, 90::UBIGINT, 260::UBIGINT,
   'DUP', 'GAIN', 0::UBIGINT
 )) AS u(annotation);
@@ -536,7 +597,7 @@ FROM unnest(duckvep_annotate_sv_compact(
 67108864	116	3	0	0
 
 statement error
-SELECT duckvep_annotate_sv(
+SELECT _duckvep_annotate_structural_rich(
   'structural', 1::UINTEGER, 100::UBIGINT, 200::UBIGINT,
   'DEL', 'GAIN'
 );
@@ -554,7 +615,7 @@ WITH bnd_event(event_id, local_region, local_position, mate_region, mate_positio
 SELECT event_id, annotation.consequence,
        coalesce(annotation.region, '-'), annotation.status
 FROM bnd_event,
-LATERAL unnest(duckvep_annotate_breakend(
+LATERAL unnest(_duckvep_annotate_breakend_rich(
   'structural', local_region, local_position, mate_region, mate_position,
   0::UBIGINT
 )) AS u(annotation);
@@ -564,39 +625,262 @@ bnd-1	feature_truncation&intron_variant	intron	supported
 query IIIII
 SELECT annotation.consequence_mask, annotation.region_mask,
        annotation.impact_code, annotation.status_code, annotation.reason_code
-FROM unnest(duckvep_annotate_breakend_compact(
+FROM unnest(_duckvep_annotate_breakend_compact(
   'structural', 1::UINTEGER, 159::UBIGINT,
   1::UINTEGER, 170::UBIGINT, 0::UBIGINT
 )) AS u(annotation);
 ----
 268435460	4	3	0	0
 
+# The public relation surface derives all three event families from one narrow,
+# globally coordinate-ordered event relation. It carries only event_index into
+# transcript expansion and leaves HGVS columns NULL when hgvs is disabled.
+statement ok
+CREATE TABLE duckvep_mixed_events AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 90::UBIGINT, NULL::VARCHAR, '<DUP>'::VARCHAR,
+   260::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (2::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, 'C'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (3::UBIGINT, 1::UINTEGER, 159::UBIGINT, NULL::VARCHAR, 'N]1:170]'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, 1::UINTEGER, 170::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+query ITII
+SELECT event_index, duckvep_event_kind, consequence_mask,
+       transcript_hgvs IS NULL
+FROM duckvep_annotate(
+  'duckvep_mixed_events', 'structural',
+  upstream_distance := 0, downstream_distance := 0
+)
+ORDER BY event_index;
+----
+1	structural_variant	67108864	1
+2	small_variant	2048	1
+3	breakend	268435460	1
+
+# An explicit NULL HGVS selector follows the documented FALSE default instead
+# of filtering small variants out of both native lanes.
+query ITII
+SELECT event_index, duckvep_event_kind, consequence_mask,
+       transcript_hgvs IS NULL
+FROM duckvep_annotate(
+  'duckvep_mixed_events', 'structural', hgvs := NULL,
+  upstream_distance := 0, downstream_distance := 0
+)
+ORDER BY event_index;
+----
+1	structural_variant	67108864	1
+2	small_variant	2048	1
+3	breakend	268435460	1
+
+# When both canonical type channels carry a supported structural vocabulary,
+# they must agree. A typed DUP cannot silently reinterpret a symbolic DEL.
+statement ok
+CREATE TABLE duckvep_contradictory_event AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 90::UBIGINT, NULL::VARCHAR, '<DEL>'::VARCHAR,
+   260::UBIGINT, 'DUP'::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+statement error
+SELECT * FROM duckvep_annotate('duckvep_contradictory_event', 'structural');
+----
+symbolic alternate and structural_type disagree
+
+# Unsupported raw symbolic vocabulary and incomplete BND coordinates fail at
+# the relation adapter instead of falling through the literal small-event lane.
+statement ok
+CREATE TABLE duckvep_invalid_event AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 100::UBIGINT, 'N'::VARCHAR, '<CPX>'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+statement error
+SELECT * FROM duckvep_annotate('duckvep_invalid_event', 'structural');
+----
+a structural event requires end_position and a supported structural_type
+
+query ITTI
+SELECT bit_index, consequence, impact, severity_rank
+FROM duckvep_so_terms()
+WHERE consequence_mask = 2048;
+----
+11	coding_sequence_variant	MODIFIER	23
+
 # A transcript admitted only by the mate has no local topology. The rich region
 # is NULL and the compact region mask is zero; feature_truncation still survives.
 query TTI
 SELECT annotation.consequence, coalesce(annotation.region, '-'),
        compact.region_mask
-FROM unnest(duckvep_annotate_breakend(
-  'structural', 1::UINTEGER, 300::UBIGINT,
+FROM unnest(_duckvep_annotate_breakend_rich(
+  'structural', 1::UINTEGER, 5250::UBIGINT,
   1::UINTEGER, 170::UBIGINT, 0::UBIGINT
 )) AS u(annotation),
-unnest(duckvep_annotate_breakend_compact(
-  'structural', 1::UINTEGER, 300::UBIGINT,
+unnest(_duckvep_annotate_breakend_compact(
+  'structural', 1::UINTEGER, 5250::UBIGINT,
   1::UINTEGER, 170::UBIGINT, 0::UBIGINT
 )) AS c(compact);
 ----
 feature_truncation	-	0
 
+# RegulatoryFeature and MotifFeature candidates are collected at both BND
+# endpoints. The local coordinate follows VEP's anchor removal (POS + 1), the
+# mate coordinate remains verbatim, and a feature hit by both endpoints emits
+# once. A local hit keeps the ordinary object term; a mate-only hit takes VEP's
+# generic feature_truncation chromosome-breakpoint branch. For a mate-only hit,
+# VEP also retains intergenic_variant when the local point is outside but within
+# its fixed 5000-base structural-feature admission distance. When both endpoints
+# hit one object, the local term wins.
+query IIII
+WITH events(ord, local_position, mate_position) AS (
+  VALUES
+    (1, 999::UBIGINT, 300::UBIGINT),
+    (2, 300::UBIGINT, 1010::UBIGINT),
+    (3, 999::UBIGINT, 1010::UBIGINT)
+)
+SELECT ord, annotation.regulation_feature_index,
+       annotation.consequence_mask, annotation.overlap_object_code
+FROM events,
+LATERAL unnest(_duckvep_annotate_breakend_compact(
+  'fixture', 1::UINTEGER, local_position,
+  1::UINTEGER, mate_position, 0::UBIGINT
+)) AS u(annotation)
+WHERE annotation.regulation_feature_index IS NOT NULL
+ORDER BY ord, annotation.regulation_feature_index;
+----
+1	0	549755813888	1
+1	1	68719476736	2
+2	0	8858370048	1
+2	1	8858370048	2
+3	0	549755813888	1
+3	1	68719476736	2
+
+# Transcript and regulation-feature pair evaluators produce separate sorted
+# streams. A vector containing several BNDs must still materialize one complete
+# result list per input event rather than concatenating those streams globally.
+query IIII
+WITH events(ord, local_position, mate_position) AS (
+  VALUES
+    (1, 159::UBIGINT, 1010::UBIGINT),
+    (2, 124::UBIGINT, 1011::UBIGINT)
+)
+SELECT ord, count(*)::INTEGER,
+       count(*) FILTER (WHERE annotation.transcript_index IS NOT NULL)::INTEGER,
+       count(*) FILTER (WHERE annotation.regulation_feature_index IS NOT NULL)::INTEGER
+FROM events,
+LATERAL unnest(_duckvep_annotate_breakend_compact(
+  'fixture', 1::UINTEGER, local_position,
+  1::UINTEGER, mate_position, 0::UBIGINT
+)) AS u(annotation)
+GROUP BY ord
+ORDER BY ord;
+----
+1	3	1	2
+2	3	1	2
+
+# The public adapter keeps VEP's two equal-looking 5000-base rules separate.
+# A caller-selected 10000-base transcript window allows ordinary predicates on
+# a mate-created overlap allele to inspect the local BND feature even past
+# StructuralVariationOverlap's fixed 5000-base allele cap. The cap still decides
+# which endpoint alleles exist; it does not clamp the separate directional
+# predicate. Regulatory/motif endpoint admission remains independently fixed.
+query ITT
+WITH events(ord, local_position) AS (
+  VALUES
+    (1, 5249::UBIGINT), -- shifted point is 5000 after transcript end 250
+    (2, 5250::UBIGINT)  -- shifted point is 5001 after transcript end 250
+)
+SELECT ord, annotation.consequence, coalesce(annotation.region, '-')
+FROM events,
+LATERAL unnest(_duckvep_annotate_breakend_rich(
+  'structural', 1::UINTEGER, local_position,
+  1::UINTEGER, 124::UBIGINT, 10000::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	feature_truncation&downstream_gene_variant	downstream
+2	feature_truncation&downstream_gene_variant	downstream
+
+# The fixed structural-overlap endpoint rule also survives a caller distance
+# of zero. At exactly 5000 bases the local overlap allele loses its disabled
+# downstream predicate and falls back to intergenic_variant, while the mate
+# allele contributes feature_truncation. At 5001 bases no local allele exists.
+query ITT
+WITH events(ord, local_position) AS (
+  VALUES
+    (1, 5249::UBIGINT),
+    (2, 5250::UBIGINT)
+)
+SELECT ord, annotation.consequence, coalesce(annotation.region, '-')
+FROM events,
+LATERAL unnest(_duckvep_annotate_breakend_rich(
+  'structural', 1::UINTEGER, local_position,
+  1::UINTEGER, 124::UBIGINT, 0::UBIGINT
+)) AS u(annotation)
+ORDER BY ord;
+----
+1	feature_truncation&intergenic_variant	-
+2	feature_truncation	-
+
+# The fixed 5000-base StructuralVariationOverlap test does not independently
+# discover a transcript that the caller's directional source window excluded.
+# Executable indexed-cache VEP 116 returns only intergenic alleles when both BND
+# points are outside an isolated transcript under --distance 0, then two
+# duplicate downstream transcript alleles at --distance 5000 and 10000. The
+# public DuckVEP row union therefore has no transcript at zero and one stable
+# downstream row at either wider setting.
+query IITTTT
+WITH distances(distance) AS (
+  VALUES (0::UBIGINT), (5000::UBIGINT), (10000::UBIGINT)
+)
+SELECT distance,
+       coalesce(annotation.transcript_index::BIGINT, -1),
+       annotation.consequence, annotation.status,
+       coalesce(annotation.reason, '-'), coalesce(annotation.region, '-')
+FROM distances,
+LATERAL unnest(_duckvep_annotate_breakend_rich(
+  'structural', 1::UINTEGER, 5249::UBIGINT,
+  1::UINTEGER, 5250::UBIGINT, distance
+)) AS u(annotation)
+ORDER BY distance;
+----
+0	-1	sequence_variant	unresolved	no_feature_in_loaded_model	-
+5000	0	downstream_gene_variant	supported	-	downstream
+10000	0	downstream_gene_variant	supported	-	downstream
+
+query IT
+WITH events(ord, local_position) AS (
+  VALUES
+    (1, 6019::UBIGINT), -- shifted point is 5000 after feature end 1020
+    (2, 6020::UBIGINT)  -- shifted point is 5001 after feature end 1020
+)
+SELECT ord, annotation.consequence
+FROM events,
+LATERAL unnest(_duckvep_annotate_breakend_rich(
+  'fixture', 1::UINTEGER, local_position,
+  1::UINTEGER, 1010::UBIGINT, 10000::UBIGINT
+)) AS u(annotation)
+WHERE annotation.regulation_feature_index = 0
+ORDER BY ord;
+----
+1	feature_truncation&intergenic_variant
+2	feature_truncation
+
 statement error
-SELECT duckvep_annotate_sv(
+SELECT _duckvep_annotate_structural_rich(
   'structural', 1::UINTEGER, 100::UBIGINT, 100::UBIGINT,
   'BND', 'UNKNOWN'
 );
 ----
-use duckvep_annotate_breakend with both loci
+provide both mate coordinates for a breakend
 
 statement error
-SELECT duckvep_annotate_breakend(
+SELECT _duckvep_annotate_breakend_rich(
   'structural', 1::UINTEGER, 0::UBIGINT,
   1::UINTEGER, 170::UBIGINT
 );
@@ -607,7 +891,7 @@ invalid one-based endpoint coordinate
 # generic unsupported-sequence result.
 query TTT
 SELECT annotation.consequence, annotation.status, annotation.reason
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, 124::UBIGINT, 'A', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -621,7 +905,7 @@ SELECT annotation.consequence, annotation.nmd_prediction,
        (annotation.protein_position IS NOT NULL)::INTEGER,
        (annotation.reference_amino_acid IS NULL)::INTEGER,
        (annotation.alternate_amino_acid IS NULL)::INTEGER
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, 124::UBIGINT, 'T', 'TC', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -641,7 +925,7 @@ WITH variants(ord, position, reference, alternate) AS (
 SELECT ord, annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, reference, alternate, 1::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -699,7 +983,7 @@ SELECT ord,
        list_aggregate(list_sort(string_split(annotation.consequence, '&')),
                       'string_agg', '&')
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'insertion-boundaries', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -723,7 +1007,7 @@ WITH variants(ord, position, reference, alternate) AS (
 SELECT ord, annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -754,7 +1038,7 @@ SELECT loaded FROM duckvep_model_load(
 
 query TTT
 SELECT annotation.consequence, annotation.status, annotation.reason
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-no-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -781,7 +1065,7 @@ SELECT loaded FROM duckvep_model_load(
 query TTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-')
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-legacy-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -789,7 +1073,7 @@ stop_retained_variant	supported	-
 
 query TTT
 SELECT annotation.consequence, annotation.status, annotation.reason
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture-legacy-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -814,7 +1098,7 @@ SELECT loaded FROM duckvep_model_load(
 
 query T
 SELECT annotation.consequence
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'nmd', 1::UINTEGER, 160::UBIGINT, 'T', 'C', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -873,7 +1157,7 @@ SELECT ord, annotation.consequence, annotation.nmd_prediction,
        annotation.nmd_escape_last_exon::INTEGER,
        annotation.nmd_escape_penultimate_exon_end::INTEGER
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'nmd-prediction', 1::UINTEGER, position, 'C', 'T', 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -892,7 +1176,7 @@ WITH variants(ord, position, reference, alternate) AS (
 )
 SELECT ord, annotation.consequence
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -908,7 +1192,7 @@ WITH variants(ord, position) AS (
 )
 SELECT ord, annotation.consequence
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, position, 'A', 'C', 10::UBIGINT
 )) AS u(annotation)
 ORDER BY ord;
@@ -920,7 +1204,7 @@ ORDER BY ord;
 query TTTT
 SELECT annotation.consequence, annotation.status,
        coalesce(annotation.reason, '-'), annotation.nmd_prediction
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, 151::UBIGINT, 'G', 'A', 0::UBIGINT
 )) AS u(annotation);
 ----
@@ -932,7 +1216,7 @@ splice_donor_variant	supported	-	unresolved
 query I
 SELECT count(*)
 FROM (
-  SELECT unnest(duckvep_annotate(
+  SELECT unnest(_duckvep_annotate_small_rich(
     'fixture', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
   )) AS annotation
   FROM range(5000)
@@ -983,7 +1267,7 @@ SELECT loaded FROM duckvep_model_load(
 # downstream.
 query ITT
 SELECT annotation.transcript_index, annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'position-one', 1::UINTEGER, 25::UBIGINT, 'A', 'C',
   10::UBIGINT, 0::UBIGINT
 )) AS u(annotation);
@@ -992,7 +1276,7 @@ FROM unnest(duckvep_annotate(
 
 query ITT
 SELECT annotation.transcript_index, annotation.consequence, annotation.region
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'position-one', 1::UINTEGER, 25::UBIGINT, 'A', 'C',
   0::UBIGINT, 10::UBIGINT
 )) AS u(annotation);
@@ -1005,7 +1289,7 @@ WITH variants(ord, reference, alternate) AS (
 )
 SELECT ord, count(*), min(annotation.consequence)
 FROM variants,
-LATERAL unnest(duckvep_annotate(
+LATERAL unnest(_duckvep_annotate_small_rich(
   'position-one', 1::UINTEGER, 1::UBIGINT, reference, alternate, 0::UBIGINT
 )) AS u(annotation)
 GROUP BY ord
@@ -1027,7 +1311,7 @@ WITH small_events(ord, position, reference, alternate) AS (
 ), observed AS (
   SELECT ord, annotation.*
   FROM small_events,
-  LATERAL unnest(duckvep_annotate_compact(
+  LATERAL unnest(_duckvep_annotate_small_compact(
     'fixture', 1::UINTEGER, position, reference, alternate, 0::UBIGINT
   )) AS u(annotation)
   WHERE annotation.regulation_feature_index IS NOT NULL
@@ -1037,7 +1321,7 @@ WITH small_events(ord, position, reference, alternate) AS (
     (3, 990::UBIGINT, 1030::UBIGINT, 'DEL', 'LOSS'),
     (4, 990::UBIGINT, 1030::UBIGINT, 'DUP', 'GAIN')
   ) events(ord, event_start, event_end, structural_type, copy_change),
-  LATERAL unnest(duckvep_annotate_sv_compact(
+  LATERAL unnest(_duckvep_annotate_structural_compact(
     'fixture', 1::UINTEGER, event_start, event_end,
     structural_type, copy_change, 0::UBIGINT
   )) AS u(annotation)
@@ -1061,7 +1345,7 @@ query IITT
 SELECT annotation.regulation_feature_index,
        annotation.transcript_index IS NULL,
        annotation.consequence, annotation.overlap_object
-FROM unnest(duckvep_annotate(
+FROM unnest(_duckvep_annotate_small_rich(
   'fixture', 1::UINTEGER, 1010::UBIGINT, 'A', 'T', 0::UBIGINT
 )) AS u(annotation)
 WHERE annotation.regulation_feature_index IS NOT NULL
@@ -1071,7 +1355,7 @@ ORDER BY annotation.regulation_feature_index;
 1	1	TF_binding_site_variant	transcription_factor_binding_site
 
 statement error
-SELECT duckvep_annotate(
+SELECT _duckvep_annotate_small_rich(
   'missing', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
 );
 ----

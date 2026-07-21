@@ -42,8 +42,9 @@ duckvep_region_state_t duckvep_region_classify_span(
 
 /* Sorted small-span fast path. `exon_rank_io` is the next genomic-order exon
  * whose end is not before start1. Spans contained in one exon or one intron are
- * classified in constant time; boundary-crossing spans use the exhaustive
- * classifier above. */
+ * classified in constant time; exon-intron-junction-crossing spans use the
+ * exhaustive classifier above. Set `repair_rewinds` only when normalized
+ * feature coordinates can move backwards within the current input vector. */
 duckvep_region_state_t duckvep_region_classify_span_sorted(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -52,10 +53,22 @@ duckvep_region_state_t duckvep_region_classify_span_sorted(
     uint32_t                          end1,
     uint32_t                          splice_exonic,
     uint32_t                          splice_intronic,
+    uint8_t                           repair_rewinds,
     uint16_t                         *exon_rank_io);
 
 /* Point compatibility wrapper. */
 uint32_t duckvep_region_mask(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          pos,
+    uint32_t                          splice_exonic,
+    uint32_t                          splice_intronic);
+
+/* Return nonzero only when a point is provably outside every splice predicate
+ * window of the transcript. The 16-base floor retains VEP's fixed
+ * polypyrimidine windows; caller-selected generic windows may widen it. */
+int duckvep_point_outside_splice_reach(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     size_t                            tx_idx,
@@ -81,8 +94,10 @@ typedef struct duckvep_splice_state {
 /* Fused point-event classifier for the sorted hot path. `exon_rank_io` is the
  * genomic-order rank of the first exon whose end is not before `pos`; initialize
  * it to UINT16_MAX for a new transcript run. Successive calls for the same
- * transcript must have non-decreasing positions. The model already limits exon
- * counts to uint16_t. Exons remain stored in transcript order, so genomic rank
+ * transcript must have non-decreasing positions unless `repair_rewinds` is set.
+ * In repair mode a backwards normalized coordinate performs one binary seek.
+ * The model already limits exon counts to uint16_t. Exons remain stored in
+ * transcript order, so genomic rank
  * runs forward on both strands while the implementation maps minus-strand ranks
  * back to the borrowed exon slice. `splice_exonic` and `splice_intronic`
  * configure the exact generic splice-region predicate; `region_out` omits the
@@ -94,6 +109,7 @@ void duckvep_classify_point_sorted(
     uint32_t                          pos,
     uint32_t                          splice_exonic,
     uint32_t                          splice_intronic,
+    uint8_t                           repair_rewinds,
     uint16_t                         *exon_rank_io,
     duckvep_region_state_t           *region_out,
     duckvep_splice_state_t           *splice_out);

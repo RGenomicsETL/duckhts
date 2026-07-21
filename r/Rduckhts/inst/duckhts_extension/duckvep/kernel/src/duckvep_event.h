@@ -327,7 +327,8 @@ static inline uint8_t duckvep_event_copy_change_at(
         return (uint8_t)DUCKVEP_COPY_CHANGE_LOSS;
     }
     if (sv_type == (uint8_t)DUCKVEP_SV_DUPLICATION ||
-        sv_type == (uint8_t)DUCKVEP_SV_TANDEM_DUPLICATION) {
+        sv_type == (uint8_t)DUCKVEP_SV_TANDEM_DUPLICATION ||
+        sv_type == (uint8_t)DUCKVEP_SV_TANDEM_REPEAT) {
         return (uint8_t)DUCKVEP_COPY_CHANGE_GAIN;
     }
     return batch->copy_change != NULL ? batch->copy_change[idx]

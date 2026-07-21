@@ -156,6 +156,66 @@ SELECT regionkey_hex(regionkey('X', 1007, 1807, 1)) AS rkx,
        ) AS overlaps;
 ```
 
+### DuckVEP consequence and HGVS annotation
+
+DuckVEP keeps transcript models immutable and resident while variants remain an
+ordinary narrow relation. Production models are prepared from receipted Ensembl
+relations with `duckvep_ensembl_*`; this small deterministic model demonstrates
+the complete load, annotation, SO decoding, and release lifecycle.
+
+```{sql eval=TRUE, collapse=FALSE, comment=""}
+CREATE OR REPLACE TABLE readme_duckvep_regions AS
+SELECT 1::UINTEGER AS seq_region, 50000::UBIGINT AS sequence_length,
+       '11'::VARCHAR AS seq_region_name;
+
+CREATE OR REPLACE TABLE readme_duckvep_transcripts AS
+SELECT 0::UINTEGER AS transcript_index, 1::UINTEGER AS seq_region,
+       100::UBIGINT AS transcript_start, 150::UBIGINT AS transcript_end,
+       1::TINYINT AS strand, 0::UINTEGER AS gene_index,
+       0::UBIGINT AS transcript_flags, NULL::UBIGINT AS cds_start,
+       NULL::UBIGINT AS cds_end, NULL::BLOB AS cds_sequence,
+       NULL::UTINYINT AS codon_table, NULL::BLOB AS pre_cds_sequence,
+       NULL::BLOB AS post_cds_sequence;
+
+CREATE OR REPLACE TABLE readme_duckvep_exons AS
+SELECT 0::UINTEGER AS transcript_index, 100::UBIGINT AS exon_start,
+       150::UBIGINT AS exon_end, 1::UBIGINT AS exon_cdna_start,
+       51::UBIGINT AS exon_cdna_end, -1::TINYINT AS phase,
+       -1::TINYINT AS end_phase;
+
+SELECT loaded
+FROM duckvep_model_load(
+  'readme',
+  'SELECT * FROM readme_duckvep_regions ORDER BY seq_region',
+  'SELECT * FROM readme_duckvep_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM readme_duckvep_exons ORDER BY transcript_index, exon_cdna_start',
+  reference_fasta := 'test/data/fixture_ref.fa'
+);
+
+CREATE OR REPLACE TABLE readme_duckvep_events AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, 'G'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,
+   NULL::UINTEGER, NULL::UBIGINT)
+) AS e(event_index, seq_region, position, reference, alternate,
+       end_position, structural_type, copy_change,
+       mate_seq_region, mate_position);
+
+SELECT a.event_index, a.transcript_index,
+       string_agg(t.consequence, '&' ORDER BY t.severity_rank) AS consequence,
+       a.transcript_hgvs, a.protein_hgvs
+FROM duckvep_annotate(
+  'readme_duckvep_events', 'readme', hgvs := true,
+  upstream_distance := 0, downstream_distance := 0
+) AS a
+JOIN duckvep_so_terms() AS t
+  ON (a.consequence_mask & t.consequence_mask) <> 0
+GROUP BY ALL
+ORDER BY a.event_index, a.transcript_index;
+
+SELECT duckvep_model_drop('readme') AS dropped;
+```
+
 ### Interval + reference helpers
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}

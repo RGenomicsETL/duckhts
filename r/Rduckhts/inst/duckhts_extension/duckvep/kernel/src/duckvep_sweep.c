@@ -200,14 +200,21 @@ int duckvep_sweep_cursor_next(
         cursor->add++;
     }
 
-    k = 0u;
-    while (k < cursor->nact) {
-        uint32_t end1 = cursor->interval_end1[cursor->active[k]];
-        if (sat_add_u32(end1, cursor->halo) < event_start) {
-            cursor->active[k] = cursor->active[--cursor->nact];
-        } else {
-            k++;
+    /* Admissions are in model-ordinal order and the cgranges seed is sorted by
+     * the adapter.  Compact survivors in place instead of replacing an expired
+     * entry with the last active ordinal.  This keeps each per-variant result
+     * list independent of DuckDB vector and input-partition edges, which in
+     * turn permits deterministic parallel UNION ALL execution without a
+     * per-variant result sort in the adapter. */
+    {
+        size_t write = 0u;
+        for (k = 0u; k < cursor->nact; k++) {
+            uint32_t interval = cursor->active[k];
+            uint32_t end1 = cursor->interval_end1[interval];
+            if (sat_add_u32(end1, cursor->halo) >= event_start)
+                cursor->active[write++] = interval;
         }
+        cursor->nact = write;
     }
 
     *variant_idx = (uint32_t)cursor->vi;

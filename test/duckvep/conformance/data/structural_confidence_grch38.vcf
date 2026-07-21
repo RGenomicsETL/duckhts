@@ -1,0 +1,21 @@
+##fileformat=VCFv4.2
+##reference=GRCh38
+##contig=<ID=21,length=46709983>
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position">
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Structural variant type">
+##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
+##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS">
+##INFO=<ID=CIEND,Number=2,Type=Integer,Description="Confidence interval around END">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+21	7467462	nominal-cnv	N	<CNV>	.	PASS	END=7467465;SVTYPE=CNV
+21	7467462	confidence-cnv	N	<CNV>	.	PASS	END=7467465;SVTYPE=CNV;IMPRECISE;CIPOS=-2,1;CIEND=-1,2
+21	7467462	nominal-del	N	<DEL>	.	PASS	END=7467465;SVTYPE=DEL
+21	7467462	confidence-del	N	<DEL>	.	PASS	END=7467465;SVTYPE=DEL;IMPRECISE;CIPOS=-2,1;CIEND=-1,2
+21	7467462	nominal-dup	N	<DUP>	.	PASS	END=7467465;SVTYPE=DUP
+21	7467462	confidence-dup	N	<DUP>	.	PASS	END=7467465;SVTYPE=DUP;IMPRECISE;CIPOS=-2,1;CIEND=-1,2
+21	7467462	nominal-tdup	N	<DUP:TANDEM>	.	PASS	END=7467465;SVTYPE=DUP
+21	7467462	confidence-tdup	N	<DUP:TANDEM>	.	PASS	END=7467465;SVTYPE=DUP;IMPRECISE;CIPOS=-2,1;CIEND=-1,2
+21	7467462	nominal-inv	N	<INV>	.	PASS	END=7467465;SVTYPE=INV
+21	7467462	confidence-inv	N	<INV>	.	PASS	END=7467465;SVTYPE=INV;IMPRECISE;CIPOS=-2,1;CIEND=-1,2
+21	13546123	nominal-ins	N	<INS>	.	PASS	END=13546123;SVTYPE=INS
+21	13546123	confidence-ins	N	<INS>	.	PASS	END=13546123;SVTYPE=INS;IMPRECISE;CIPOS=-2,0;CIEND=0,2

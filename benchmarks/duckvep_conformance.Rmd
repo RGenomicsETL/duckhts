@@ -25,6 +25,37 @@ property_history <- read.csv(
   check.names = FALSE,
   colClasses = c(source_revision = "character", seed = "character")
 )
+property_coverage_history <- read.csv(
+  file.path(
+    root,
+    "test",
+    "duckvep",
+    "conformance",
+    "data",
+    "property_coverage_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character", seed = "character")
+)
+hgvs_history <- read.csv(
+  file.path(
+    root, "test", "duckvep", "conformance", "data", "hgvs_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(
+    source_revision = "character",
+    artifact_sha256 = "character",
+    extension_sha256 = "character",
+    model_artifact_sha256 = "character",
+    reference_fasta_sha256 = "character",
+    reference_fai_sha256 = "character",
+    source_vcf_sha256 = "character",
+    input_vcf_sha256 = "character",
+    oracle_version = "character"
+  )
+)
 release_parquet <- read.csv(
   file.path(
     root, "benchmarks", "data", "duckvep_release_parquet.csv"
@@ -93,6 +124,39 @@ latest_state_runs <- state_overall[
   ,
   drop = FALSE
 ]
+hgvs_bound_history <- hgvs_history[
+  hgvs_history$extension_build_binding == "htslib_distclean_make_release" &
+    grepl("^[0-9a-f]{64}$", hgvs_history$extension_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$model_artifact_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$reference_fasta_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$reference_fai_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$source_vcf_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$input_vcf_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$artifact_sha256),
+  ,
+  drop = FALSE
+]
+hgvs_runs <- unique(hgvs_bound_history[, c(
+  "source_revision", "corpus", "model", "oracle_version", "oracle_build"
+), drop = FALSE])
+latest_hgvs_run_ids <- NULL
+if (nrow(hgvs_runs)) {
+  groups <- interaction(hgvs_runs$corpus, hgvs_runs$model, drop = TRUE)
+  latest_hgvs_run_ids <- do.call(rbind, lapply(
+    split(hgvs_runs, groups),
+    function(rows) {
+      tested_ancestors <- revision_ancestry[
+        revision_ancestry %in% rows$source_revision
+      ]
+      revision <- if (length(tested_ancestors)) {
+        tested_ancestors[[1L]]
+      } else {
+        rows$source_revision[[nrow(rows)]]
+      }
+      rows[rows$source_revision == revision, , drop = FALSE]
+    }
+  ))
+}
 nmd_history <- history[
   history$stratum_kind == "nmd_prediction",
   ,
@@ -152,6 +216,46 @@ resident model. Independent frozen distributions and seeds are kept separate so
 a fix cannot improve its own hand-picked witnesses and hide a regression
 elsewhere.
 
+Official Ensembl variation release VCFs provide a second, precomputed oracle lane:
+their CSQ projection can be compared in ordinary CI without starting Perl VEP. Pinned
+release shards are fast regression evidence for known alleles; executable-VEP and
+generated-corpus lanes remain necessary for novel allele states, option-dependent
+semantics, phased combinations, and sampled structural geometry. Matching full models
+belong in receipt-hashed external artifacts (for example a versioned Zenodo record), not
+in git or the network-free extension build step.
+
+## Declared conformance closure
+
+The independent-event consequence engine is closed as a semantic implementation campaign
+for the declared model and event surfaces: admitted Ensembl transcript, mature-miRNA,
+RegulatoryFeature, and MotifFeature objects; independent literal small alleles; exact typed
+DEL, DUP, tandem-DUP, INV, INS, and CNV events; structural tandem repeats (`STR`); paired
+breakends; supported BioPerl codon tables and exceptional Ensembl peptide edits; and the
+separately declared VEP NMD-plugin result. DEL/DUP/tandem-DUP/INV/INS/CNV and BND have
+generated executable-VEP differentials. Structural `STR` has source-derived VEP-116
+semantics plus fixed SQL/R and randomized C coverage; raw repeat reconstruction is a
+separate input-preparation operation. The evidence spans GRCh38, GRCh37, and
+*P. falciparum*, executable witnesses, indexed-cache corpora, generated state exploration,
+sanitizer runs, and pure-C oracle properties.
+
+“Closed” means future consequence changes are routine engineering behind these regression
+gates. VEP 116 parses `CIPOS`/`CIEND` into inner/outer structural coordinates, but its
+registered consequence predicates use nominal `POS`/`END`; DuckVEP therefore annotates
+that nominal span while the surrounding relation preserves the uncertainty metadata.
+The checked-in 12-record GRCh38 confidence witness records this directly: nominal and
+`IMPRECISE;CIPOS;CIEND` forms of CNV, DEL, DUP, tandem DUP, INV, and INS produced 466/466
+exact transcript pairs, and both engines had equal nominal/imprecise consequence
+multisets for all six event-kind pairs.
+VEP can also expand a bounded `<CNV:TR>` from `RN`, `RUS`, and `RUC` or `RB` into a literal
+allele before consequence calculation. Implementing that lossless expansion and mapping
+VEP's finite supported symbolic vocabulary into the typed event API are narrower input-
+preparation tasks, not missing consequence predicates. VEP itself rejects unrecognised
+types such as CPX, so this closure does not promise arbitrary symbolic parsing. Untested
+species/releases and phased multi-record haplotypes remain outside the closure. Haplotype
+grouping and combined consequence attribution are the next semantic vertical and require
+their own executable oracle and performance campaign. Any newly observed fixed-event
+mismatch reopens this contract rather than being relabelled as unsupported.
+
 ## Latest tested revision per corpus
 
 ```{r latest}
@@ -178,6 +282,89 @@ corpus. Expensive corpora do not inherit evidence from a later run of another
 corpus, and a newly tested corpus does not hide older still-applicable evidence.
 The SO and impact tables keep the same runs separate so the largest corpus cannot
 hide a smaller species- or assembly-specific frontier.
+
+## Independent-event HGVS differential
+
+```{r hgvs, results='asis'}
+if (!is.null(latest_hgvs_run_ids) && nrow(latest_hgvs_run_ids)) {
+  hgvs_latest <- merge(
+    latest_hgvs_run_ids,
+    hgvs_bound_history,
+    by = c(
+      "source_revision", "corpus", "model", "oracle_version", "oracle_build"
+    ),
+    all.x = TRUE,
+    sort = FALSE
+  )
+  hgvs_table <- do.call(rbind, lapply(
+    split(hgvs_latest, interaction(hgvs_latest$corpus, hgvs_latest$metric)),
+    function(rows) {
+      exact <- sum(rows$n[rows$comparison %in% c("match", "both_absent")])
+      total <- sum(rows$n)
+      data.frame(
+        revision = short_revision(rows$source_revision[[1L]]),
+        corpus = rows$corpus[[1L]],
+        model = rows$model[[1L]],
+        metric = toupper(rows$metric[[1L]]),
+        exact = paste0(
+          format(exact, big.mark = ","),
+          "/",
+          format(total, big.mark = ",")
+        ),
+        match = sum(rows$n[rows$comparison == "match"]),
+        both_absent = sum(rows$n[rows$comparison == "both_absent"]),
+        discordant = sum(
+          rows$n[!rows$comparison %in% c("match", "both_absent")]
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  ))
+  hgvs_table <- hgvs_table[order(hgvs_table$corpus, hgvs_table$metric), ]
+  cat(knitr::kable(hgvs_table, row.names = FALSE), sep = "\n")
+  cat("\n\n")
+  receipts <- unique(hgvs_latest[, c(
+    "source_revision", "corpus", "extension_build_binding",
+    "extension_sha256", "model_artifact_kind", "model_artifact_sha256",
+    "reference_fasta_sha256", "reference_fai_sha256", "source_vcf_sha256",
+    "input_vcf_sha256",
+    "artifact_sha256"
+  ), drop = FALSE])
+  stopifnot(all(
+    receipts$extension_build_binding == "htslib_distclean_make_release"
+  ))
+  receipt_table <- data.frame(
+    revision = short_revision(receipts$source_revision),
+    corpus = receipts$corpus,
+    extension_build = receipts$extension_build_binding,
+    extension = substr(receipts$extension_sha256, 1L, 12L),
+    model_kind = receipts$model_artifact_kind,
+    model = substr(receipts$model_artifact_sha256, 1L, 12L),
+    reference = substr(receipts$reference_fasta_sha256, 1L, 12L),
+    reference_index = substr(receipts$reference_fai_sha256, 1L, 12L),
+    source_vcf = substr(receipts$source_vcf_sha256, 1L, 12L),
+    input_vcf = substr(receipts$input_vcf_sha256, 1L, 12L),
+    pair_artifact = substr(receipts$artifact_sha256, 1L, 12L),
+    stringsAsFactors = FALSE
+  )
+  cat(knitr::kable(receipt_table, row.names = FALSE), sep = "\n")
+} else {
+  cat("No revision-keyed HGVS differential has been recorded.\n")
+}
+```
+
+This is exact string agreement for independent transcript events with VEP 116
+invoked using `--hgvs`. A comparison is exact when both engines emit the same
+string or both omit that HGVS field. Unresolved, missing, extra, and unequal
+strings remain discordant; none is removed from the denominator.
+The checked ledger accepts only a pair artifact produced from the current clean
+source revision by a vendored-htslib distclean followed by an in-tree release
+build. The table retains complete
+SHA-256 receipts for the extension, model, FASTA and index, source VCF, exact
+sampled VCF passed to VEP, and pair-level Parquet; shortened digests are
+rendered above.
+Legacy HGVS rows recorded before build receipts were introduced remain in the
+append-only CSV but are not presented as checked evidence.
 
 ## Paired-breakend differential
 
@@ -308,7 +495,9 @@ if (nrow(regulation_runs)) {
 The GIAB run checks ordinary alleles against transcript and core funcgen objects.
 The generated structural run deliberately crosses, contains, exactly matches,
 and partially overlaps RegulatoryFeature and MotifFeature intervals under DEL,
-DUP, TDUP, INV, INS, CNV, and unknown exact-span operations. The resident model
+DUP, TDUP, INV, INS, and CNV operations. Structural `STR` is covered separately by
+the source-derived VEP-116 rule, fixed SQL/R adapter tests, and randomized C oracles;
+this generated executable-VEP run does not reconstruct raw repeat metadata. The resident model
 contains only VEP-admitted core funcgen objects: VEP 116 removes
 `epigenetically_modified_region` rows before constructing RegulatoryFeature
 overlap objects, so DuckVEP excludes them during deterministic model preparation
@@ -485,6 +674,12 @@ complete typed DuckHTS reader projection and the narrower `VE` plus CSQ projecti
 the bulk oracle lane. It is a storage comparison, not a claim that the Parquet projection
 can reproduce the original VCF byte-for-byte.
 
+The consequence projection is also the natural CI payload: retain deterministic shards
+with source URL, Ensembl release/species/assembly, artifact digest, row cardinalities, and
+CSQ schema. A scheduled full-release job may pair the complete projection with a published
+receipt-hashed DuckDB model. Neither form broadens the supported consequence contract; it
+only makes a large known-variant regression cheap to replay.
+
 ```{r release-parquet}
 last_storage <- release_parquet[nrow(release_parquet), , drop = FALSE]
 storage <- release_parquet[
@@ -587,6 +782,47 @@ for (column in c("trials", "passed", "failed", "skipped", "duplicates")) {
   )
 }
 knitr::kable(latest_properties, row.names = FALSE)
+```
+
+Passing the requested number of trials is necessary but does not prove that a
+generator visited the states named by its contract. Randomized properties therefore
+emit distribution counters, and the recorder stores each counter as a separate
+numeric row. The table below is the latest complete run's state distribution; the
+long-form CSV remains the machine-readable authority. Zero is evidence too: it
+identifies a state that the declared seed did not exercise and must not be hidden by
+the suite-level pass count.
+
+```{r property-coverage}
+latest_coverage <- property_coverage_history[
+  property_coverage_history$source_revision == last_property$source_revision &
+    property_coverage_history$seed == last_property$seed &
+    property_coverage_history$configured_trials ==
+      last_property$configured_trials,
+  c("coverage", "metric", "count"),
+  drop = FALSE
+]
+if (nrow(latest_coverage)) {
+  latest_coverage$count <- format(
+    latest_coverage$count,
+    big.mark = ",",
+    scientific = FALSE
+  )
+  latest_coverage$state_count <- paste0(
+    latest_coverage$metric,
+    "=",
+    latest_coverage$count
+  )
+  coverage_table <- aggregate(
+    state_count ~ coverage,
+    data = latest_coverage,
+    FUN = paste,
+    collapse = "; "
+  )
+  names(coverage_table) <- c("randomized distribution", "observed states")
+  knitr::kable(coverage_table, row.names = FALSE)
+} else {
+  cat("No distribution-counter ledger has been recorded for the latest run yet.\n")
+}
 ```
 
 ## Individual Sequence Ontology terms

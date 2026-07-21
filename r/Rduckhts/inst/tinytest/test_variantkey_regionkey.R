@@ -8,6 +8,21 @@ test_variantkey_regionkey <- function() {
 
   expect_silent(rduckhts_load(con))
 
+  contig_keys <- dbGetQuery(
+    con,
+    paste(
+      "SELECT duckhts_contig_key(contig) AS key",
+      "FROM (VALUES",
+      "('chr1'), ('1'), ('chrM'), ('CHRMT'), ('M'), ('mt'), ('chrX'), ('chry'),",
+      "('chrGL000220.1'), ('NC_000001.11'), ('23'), ('chrchr1'), ('chr'), (''), (NULL)",
+      ") AS t(contig)"
+    )
+  )
+  expect_equal(
+    contig_keys$key,
+    c("1", "1", "MT", "MT", "MT", "MT", "X", "Y", "GL000220.1", "NC_000001.11", "23", "chr1", "chr", "", NA_character_)
+  )
+
   vkx <- dbGetQuery(
     con,
     "SELECT variantkey_hex(variantkey('chr1', 268435456, 'C', 'T')) AS vkx"

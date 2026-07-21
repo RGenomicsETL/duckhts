@@ -1,0 +1,23 @@
+	Command being timed: "taskset -c 2 Rscript benchmarks/benchmark_duckvep_fastvep_worker.R --extension build/release/duckhts.duckdb_extension --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz --output /tmp/duckvep-fastvep-benchmark/review2/duckvep_giab_threads1_run2.tab --threads 1 --distance 5000 --memory-limit 4GB"
+	User time (seconds): 57.91
+	System time (seconds): 5.73
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:03.75
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 5736280
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 1902317
+	Voluntary context switches: 242
+	Involuntary context switches: 670
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 21350528
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
