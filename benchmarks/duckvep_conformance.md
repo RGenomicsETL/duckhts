@@ -85,16 +85,25 @@ assembly-specific frontier.
 
 | revision | corpus                     | model        | metric | exact         | match | both_absent | discordant |
 |:---------|:---------------------------|:-------------|:-------|:--------------|------:|------------:|-----------:|
-| 7dae50cd | clinvar_chr21_hgvs_seed113 | differential | HGVSC  | 56,998/56,998 | 44871 |       12127 |          0 |
-| 7dae50cd | clinvar_chr21_hgvs_seed113 | differential | HGVSP  | 56,998/56,998 | 20782 |       36216 |          0 |
-| e25c1513 | witnesses                  | differential | HGVSC  | 268/268       |   262 |           6 |          0 |
-| e25c1513 | witnesses                  | differential | HGVSP  | 268/268       |   134 |         134 |          0 |
+| c977cba1 | clinvar_chr21_hgvs_seed113 | differential | HGVSC  | 56,998/56,998 | 44871 |       12127 |          0 |
+| c977cba1 | clinvar_chr21_hgvs_seed113 | differential | HGVSP  | 56,998/56,998 | 20782 |       36216 |          0 |
+
+| revision | corpus                     | extension_build               | extension    | model_kind | model        | reference    | reference_index | source_vcf   | input_vcf    | pair_artifact |
+|:---------|:---------------------------|:------------------------------|:-------------|:-----------|:-------------|:-------------|:----------------|:-------------|:-------------|:--------------|
+| c977cba1 | clinvar_chr21_hgvs_seed113 | htslib_distclean_make_release | 53af1444f11b | duckdb     | 4c2077c83958 | 1e74081a49ce | 0998f61682f4    | 7ecec9a75071 | 7ecec9a75071 | 326379827c7d  |
 
 This is exact string agreement for independent transcript events with
 VEP 116 invoked using `--hgvs`. A comparison is exact when both engines
 emit the same string or both omit that HGVS field. Unresolved, missing,
 extra, and unequal strings remain discordant; none is removed from the
-denominator.
+denominator. The checked ledger accepts only a pair artifact produced
+from the current clean source revision by a vendored-htslib distclean
+followed by an in-tree release build. The table retains complete SHA-256
+receipts for the extension, model, FASTA and index, source VCF, exact
+sampled VCF passed to VEP, and pair-level Parquet; shortened digests are
+rendered above. Legacy HGVS rows recorded before build receipts were
+introduced remain in the append-only CSV but are not presented as
+checked evidence.
 
 ## Paired-breakend differential
 

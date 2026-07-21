@@ -249,7 +249,7 @@ rows <- rows[
   drop = FALSE
 ]
 tmp <- tempfile("duckvep-hgvs-", dirname(opt$history), ".csv")
-utils::write.csv(rows, tmp, row.names = FALSE)
+utils::write.csv(rows, tmp, row.names = FALSE, na = "")
 if (!file.rename(tmp, opt$history)) {
   unlink(tmp)
   die("cannot replace history: {opt$history}")

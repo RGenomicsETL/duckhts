@@ -124,7 +124,19 @@ latest_state_runs <- state_overall[
   ,
   drop = FALSE
 ]
-hgvs_runs <- unique(hgvs_history[, c(
+hgvs_bound_history <- hgvs_history[
+  hgvs_history$extension_build_binding == "htslib_distclean_make_release" &
+    grepl("^[0-9a-f]{64}$", hgvs_history$extension_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$model_artifact_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$reference_fasta_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$reference_fai_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$source_vcf_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$input_vcf_sha256) &
+    grepl("^[0-9a-f]{64}$", hgvs_history$artifact_sha256),
+  ,
+  drop = FALSE
+]
+hgvs_runs <- unique(hgvs_bound_history[, c(
   "source_revision", "corpus", "model", "oracle_version", "oracle_build"
 ), drop = FALSE])
 latest_hgvs_run_ids <- NULL
@@ -273,11 +285,11 @@ hide a smaller species- or assembly-specific frontier.
 
 ## Independent-event HGVS differential
 
-```{r hgvs}
+```{r hgvs, results='asis'}
 if (!is.null(latest_hgvs_run_ids) && nrow(latest_hgvs_run_ids)) {
   hgvs_latest <- merge(
     latest_hgvs_run_ids,
-    hgvs_history,
+    hgvs_bound_history,
     by = c(
       "source_revision", "corpus", "model", "oracle_version", "oracle_build"
     ),
@@ -309,7 +321,7 @@ if (!is.null(latest_hgvs_run_ids) && nrow(latest_hgvs_run_ids)) {
     }
   ))
   hgvs_table <- hgvs_table[order(hgvs_table$corpus, hgvs_table$metric), ]
-  knitr::kable(hgvs_table, row.names = FALSE)
+  cat(knitr::kable(hgvs_table, row.names = FALSE), sep = "\n")
   cat("\n\n")
   receipts <- unique(hgvs_latest[, c(
     "source_revision", "corpus", "extension_build_binding",
@@ -335,7 +347,7 @@ if (!is.null(latest_hgvs_run_ids) && nrow(latest_hgvs_run_ids)) {
     pair_artifact = substr(receipts$artifact_sha256, 1L, 12L),
     stringsAsFactors = FALSE
   )
-  knitr::kable(receipt_table, row.names = FALSE)
+  cat(knitr::kable(receipt_table, row.names = FALSE), sep = "\n")
 } else {
   cat("No revision-keyed HGVS differential has been recorded.\n")
 }
@@ -351,6 +363,8 @@ build. The table retains complete
 SHA-256 receipts for the extension, model, FASTA and index, source VCF, exact
 sampled VCF passed to VEP, and pair-level Parquet; shortened digests are
 rendered above.
+Legacy HGVS rows recorded before build receipts were introduced remain in the
+append-only CSV but are not presented as checked evidence.
 
 ## Paired-breakend differential
 
