@@ -28,8 +28,15 @@
   RegulatoryFeature/MotifFeature intervals loaded, the full-corpus core-VEP
   rates are 380,429/s compact, 171,112/s rich, and 91,184/s HGVS for ClinVar,
   and 1,106,025/s, 460,958/s, and 244,631/s for GIAB. Each exact-head row now
-  retains extension, physical/logical model, reference, staged-corpus, and
-  original-VCF digests plus a full-public-row fingerprint
+  requires a vendored-htslib `distclean` followed by an in-tree release rebuild
+  and retains its extension digest,
+  physical/logical model, reference, staged-corpus, and original-VCF digests
+  plus a full-public-row fingerprint. Executable HGVS pair artifacts carry the
+  same source/binary/model/reference lineage, including separate source and exact
+  sampled-VEP-input digests, and the checked history rejects
+  unbound diagnostics. Capacity-one pure-C and greater-than-64-row SQL
+  regressions prove that transcript, RegulatoryFeature, and MotifFeature
+  observer callbacks resume without replay or loss when the result arena grows
 - preserve declared source record IDs, `IMPRECISE`, `CIPOS`, and `CIEND` when the executable-
   VEP structural differential rebuilds its sampled VCF. A checked-in GRCh38 witness pairs
   nominal and imprecise CNV, DEL, DUP, tandem-DUP, INV, and INS records: VEP 116 and

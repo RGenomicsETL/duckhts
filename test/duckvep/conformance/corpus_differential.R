@@ -244,6 +244,17 @@ op <- add_option(
     file.path(root, "build", "release", "duckhts.duckdb_extension")
   )
 )
+op <- add_option(
+  op,
+  "--skip-extension-build",
+  dest = "skip_extension_build",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "load --extension without a clean in-tree rebuild and mark emitted",
+    "artifacts as unbound diagnostics [%default]"
+  )
+)
 op <- add_option(op, "--fork", default = as.character(max(1L, min(8L, ncores))))
 op <- add_option(
   op,
@@ -283,6 +294,8 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
+root <- normalizePath(root[[1L]], mustWork = TRUE)
+source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
   die("--event-mode must be small, structural, or breakend")
 }
@@ -306,14 +319,16 @@ if (
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
 fasta_index <- paste0(opt$fasta, ".fai")
-required_files <- opt$extension
+external_model_database <- !nzchar(opt$model_sql) &&
+  !identical(opt$database, ":memory:")
+required_files <- character()
 if (!isTRUE(opt$source_audit_only)) {
   required_files <- c(opt$fasta, fasta_index, required_files)
 }
-external_model_database <- !nzchar(opt$model_sql) &&
-  !identical(opt$database, ":memory:")
 if (external_model_database) {
   required_files <- c(required_files, opt$database)
+} else if (nzchar(opt$model_sql)) {
+  required_files <- c(required_files, opt$model_sql)
 }
 if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
@@ -326,6 +341,47 @@ if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
+}
+source_revision <- if (isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_revision(root)
+} else {
+  duckvep_evidence_assert_checkout(
+    root,
+    context = "DuckVEP executable conformance evidence"
+  )
+}
+if (isTRUE(opt$skip_extension_build)) {
+  if (!file.exists(opt$extension)) {
+    die("missing input: {opt$extension}")
+  }
+  extension_build_binding <- "unbound_diagnostic"
+  extension_sha256 <- duckvep_evidence_sha256(opt$extension)
+} else {
+  extension_receipt <- duckvep_evidence_build_extension(
+    root,
+    opt$extension,
+    source_revision
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
+}
+model_artifact_kind <- if (external_model_database) "duckdb" else "sql"
+model_artifact_path <- if (external_model_database) opt$database else opt$model_sql
+model_artifact_sha256 <- if (nzchar(model_artifact_path)) {
+  duckvep_evidence_sha256(model_artifact_path)
+} else {
+  ""
+}
+reference_fasta_sha256 <- if (!isTRUE(opt$source_audit_only)) {
+  duckvep_evidence_sha256(opt$fasta)
+} else {
+  ""
+}
+reference_fai_sha256 <- if (!isTRUE(opt$source_audit_only)) {
+  duckvep_evidence_sha256(fasta_index)
+} else {
+  ""
 }
 
 fasta_regions <- if (isTRUE(opt$source_audit_only)) {
@@ -1966,6 +2022,14 @@ if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
   utils::write.csv(eligibility, opt$eligibility_out, row.names = FALSE, na = "")
 }
 if (isTRUE(opt$source_audit_only)) {
+  if (!isTRUE(opt$skip_extension_build)) {
+    duckvep_evidence_assert_checkout(
+      root,
+      source_revision,
+      opt$eligibility_out,
+      context = "DuckVEP source audit evidence"
+    )
+  }
   invisible(dbGetQuery(
     con,
     glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
@@ -2109,6 +2173,8 @@ repeat {
 }
 dbClearResult(res)
 close(vc)
+sample_vcf <- normalizePath(sample_vcf, mustWork = TRUE)
+input_vcf_sha256 <- duckvep_evidence_sha256(sample_vcf)
 
 stage_gff <- function(path) {
   if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) {
@@ -2890,6 +2956,15 @@ if (isTRUE(opt$hgvs)) {
        )
        SELECT
          {sql_q(run_date)} AS run_date,
+         {sql_q(source_revision)} AS source_revision,
+         {sql_q(extension_build_binding)} AS extension_build_binding,
+         {sql_q(extension_sha256)} AS extension_sha256,
+         {sql_q(model_artifact_kind)} AS model_artifact_kind,
+         {sql_q(model_artifact_sha256)} AS model_artifact_sha256,
+         {sql_q(reference_fasta_sha256)} AS reference_fasta_sha256,
+         {sql_q(reference_fai_sha256)} AS reference_fai_sha256,
+         {sql_q(source_sha256)} AS source_vcf_sha256,
+         {sql_q(input_vcf_sha256)} AS input_vcf_sha256,
          {sql_q(opt$corpus)} AS corpus,
          {sql_q(opt$model_name)} AS model,
          {sql_q(oracle_version)} AS oracle_version,
@@ -3077,4 +3152,13 @@ if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L &&
     "and {opt$hgvs_out}. Use --allow-hgvs-discordance only for an ",
     "explicitly investigative run."
   ))
+}
+
+if (!isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_assert_checkout(
+    root,
+    source_revision,
+    c(unname(declared_outputs), opt$eligibility_out, opt$sample_vcf),
+    context = "DuckVEP executable conformance evidence"
+  )
 }

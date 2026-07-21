@@ -262,8 +262,12 @@ source revision in `data/conformance_history.csv`. Rows include the complete con
 set, individual SO terms, optional NMD-plugin predictions, VEP impact, allele shape,
 unresolved reason, exact Ensembl build, and annotation-artifact hash. The same target runs
 VEP with `--hgvs` and records exact HGVSc/HGVSp comparison counts in
-`data/hgvs_history.csv`; ignored pair-level Parquet is diagnostic input, not checked release
-evidence by itself.
+`data/hgvs_history.csv`. The pair-level Parquet embeds the clean source revision,
+vendored-htslib-distclean release-build binding, and SHA-256 receipts for the extension, model,
+reference FASTA/index, source VCF, and exact sampled VCF passed to VEP. The history
+writer rejects a diagnostic
+artifact, a stale checkout, or non-constant receipts before it updates checked release
+evidence.
 `make bench-duckvep-throughput` records the sorted
 stable-API path in `benchmarks/data/duckvep_throughput.csv`; its checked-in fixture has
 one transcript and is not a whole-genome performance claim. Render both views with

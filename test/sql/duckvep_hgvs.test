@@ -128,6 +128,101 @@ WHERE annotation.regulation_feature_index IS NOT NULL;
 ----
 0	1	1	1	1	1	1
 
+# The observer and result arenas resume across a DuckDB/C result-buffer edge.
+# Seventy transcript rows followed by seventy regulatory/motif rows exceed the
+# adapter's initial 64-row allocation; no row or HGVS observation may be
+# replayed or dropped while the cursor grows and resumes.
+statement ok
+CREATE TABLE duckvep_hgvs_dense_transcripts AS
+SELECT
+  i::UINTEGER AS transcript_index,
+  1::UINTEGER AS seq_region,
+  100::UBIGINT AS transcript_start,
+  150::UBIGINT AS transcript_end,
+  1::TINYINT AS strand,
+  i::UINTEGER AS gene_index,
+  0::UBIGINT AS transcript_flags,
+  NULL::UBIGINT AS cds_start,
+  NULL::UBIGINT AS cds_end,
+  NULL::BLOB AS cds_sequence,
+  NULL::UTINYINT AS codon_table,
+  NULL::BLOB AS pre_cds_sequence,
+  NULL::BLOB AS post_cds_sequence
+FROM range(70) ids(i);
+
+statement ok
+CREATE TABLE duckvep_hgvs_dense_exons AS
+SELECT
+  i::UINTEGER AS transcript_index,
+  100::UBIGINT AS exon_start,
+  150::UBIGINT AS exon_end,
+  1::UBIGINT AS exon_cdna_start,
+  51::UBIGINT AS exon_cdna_end,
+  -1::TINYINT AS phase,
+  -1::TINYINT AS end_phase
+FROM range(70) ids(i);
+
+statement ok
+CREATE TABLE duckvep_hgvs_dense_regulation AS
+SELECT
+  i::UINTEGER AS regulation_feature_index,
+  1::UINTEGER AS seq_region,
+  100::UINTEGER AS feature_start,
+  150::UINTEGER AS feature_end,
+  CASE WHEN i % 2 = 0 THEN 1 ELSE 2 END::UTINYINT AS feature_kind
+FROM range(70) ids(i);
+
+query I
+SELECT loaded FROM duckvep_model_load(
+  'hgvs-dense-resume',
+  'SELECT * FROM duckvep_hgvs_regions WHERE seq_region = 1',
+  'SELECT * FROM duckvep_hgvs_dense_transcripts ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT * FROM duckvep_hgvs_dense_exons ORDER BY transcript_index, exon_cdna_start',
+  interval_feature_query := 'SELECT * FROM duckvep_hgvs_dense_regulation ORDER BY seq_region, feature_start, regulation_feature_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/minimal.fa'
+);
+----
+1
+
+query IIIIIII
+WITH annotations AS (
+  SELECT annotation
+  FROM unnest(duckvep_annotate_hgvs(
+    'hgvs-dense-resume', 1::UINTEGER, 124::UBIGINT, 'T', 'C', 0::UBIGINT
+  )) AS u(annotation)
+)
+SELECT count(*)::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code = 0
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code IN (1, 2)
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code = 0
+           AND annotation.transcript_hgvs_status = 'supported'
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code IN (1, 2)
+           AND annotation.transcript_hgvs_status IS NULL
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code IN (1, 2)
+           AND annotation.protein_hgvs_status IS NULL
+       )::INTEGER,
+       count(*) FILTER (
+         WHERE annotation.overlap_object_code = 0
+           AND annotation.transcript_hgvs IS NOT NULL
+       )::INTEGER
+FROM annotations;
+----
+140	70	70	70	70	70	70
+
+query I
+SELECT duckvep_model_drop('hgvs-dense-resume');
+----
+1
+
 # The cumulative surface keeps every compact consequence field and appends
 # transcript/protein HGVS. Transcript stable IDs remain a relational join.
 query IITTITTTT

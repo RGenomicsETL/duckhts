@@ -26,6 +26,7 @@
 #include "duckvep_coding.h"
 #include "duckvep_haplotype.h"
 #include "duckvep_variant_tile.h"
+#include "duckvep_annotation_internal.h"
 #include "duckvep_workspace_internal.h"
 
 #include "greatest.h"
@@ -8510,6 +8511,153 @@ TEST annotate_cursor_resumes_known_scene(void) {
     duckvep_annotate_cursor_close(cur);
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
+    duckvep_model_close(model);
+    PASS();
+}
+
+struct annotation_observer_capture {
+    const duckvep_variant_batch_t *expected_batch;
+    duckvep_consequence_t rows[6];
+    duckvep_event_t events[6];
+    uint8_t trace_present[6];
+    size_t count;
+};
+
+static int annotation_observer_capture_row(
+    void                             *context,
+    const duckvep_variant_batch_t    *variants,
+    const duckvep_consequence_t      *row,
+    const duckvep_annotation_trace_t *trace) {
+
+    struct annotation_observer_capture *capture =
+        (struct annotation_observer_capture *)context;
+    size_t index;
+
+    if (capture == NULL || variants == NULL ||
+        capture->expected_batch == NULL ||
+        variants->count != capture->expected_batch->count ||
+        variants->pos1 != capture->expected_batch->pos1 || row == NULL ||
+        capture->count >= sizeof capture->rows / sizeof capture->rows[0]) {
+        return 0;
+    }
+    index = capture->count++;
+    capture->rows[index] = *row;
+    capture->trace_present[index] = trace != NULL ? 1u : 0u;
+    if (trace != NULL) {
+        if (trace->event == NULL) return 0;
+        capture->events[index] = *trace->event;
+    } else {
+        memset(&capture->events[index], 0, sizeof capture->events[index]);
+    }
+    return 1;
+}
+
+/* The cumulative HGVS adapter observes each consequence synchronously because
+ * transcript traces borrow worker scratch. A full one-row output chunk must
+ * pause only after that row and its callback are complete, then resume at the
+ * next transcript/regulatory/motif object without replaying or dropping an
+ * observation. */
+TEST annotation_observer_resumes_across_transcript_and_interval_rows(void) {
+    static const uint16_t tchrom[1] = {0u};
+    static const uint32_t tstart[1] = {100u};
+    static const uint32_t tend[1] = {150u};
+    static const int8_t strand[1] = {1};
+    static const uint64_t flags[1] = {0u};
+    static const uint32_t zero32[1] = {0u};
+    static const uint16_t zero16[1] = {0u};
+    static const uint16_t fchrom[2] = {0u, 0u};
+    static const uint32_t fstart[2] = {100u, 100u};
+    static const uint32_t fend[2] = {150u, 150u};
+    static const uint8_t fkind[2] = {
+        (uint8_t)DUCKVEP_INTERVAL_FEATURE_REGULATORY_REGION,
+        (uint8_t)DUCKVEP_INTERVAL_FEATURE_TF_BINDING_SITE
+    };
+    static const uint16_t vchrom[2] = {0u, 0u};
+    static const uint32_t vpos[2] = {110u, 111u};
+    static const uint32_t vend[2] = {110u, 111u};
+    static const uint8_t vkind[2] = {
+        (uint8_t)DUCKVEP_KIND_SNV,
+        (uint8_t)DUCKVEP_KIND_SNV
+    };
+    duckvep_transcript_model_t tx;
+    duckvep_exon_model_t exons;
+    duckvep_interval_feature_model_t features;
+    duckvep_variant_batch_t variants;
+    duckvep_model_t *model = NULL;
+    duckvep_options_t *options = NULL;
+    duckvep_workspace_t *workspace = NULL;
+    duckvep_annotate_cursor_t *cursor = NULL;
+    duckvep_error_t error;
+    duckvep_consequence_t row;
+    duckvep_result_builder_t builder;
+    struct annotation_observer_capture capture;
+    size_t emitted = 0u;
+    size_t fill_count = 0u;
+
+    memset(&tx, 0, sizeof tx);
+    memset(&exons, 0, sizeof exons);
+    memset(&features, 0, sizeof features);
+    memset(&variants, 0, sizeof variants);
+    memset(&error, 0, sizeof error);
+    memset(&capture, 0, sizeof capture);
+    tx.chrom_id = tchrom; tx.start1 = tstart; tx.end1 = tend; tx.strand = strand;
+    tx.flags = flags; tx.exon_offset = zero32; tx.exon_count = zero16;
+    tx.cds_start1 = zero32; tx.cds_end1 = zero32; tx.transcript_count = 1u;
+    features.chrom_id = fchrom; features.start1 = fstart; features.end1 = fend;
+    features.kind = fkind; features.feature_count = 2u;
+    variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
+    variants.variant_kind = vkind; variants.count = 2u;
+    capture.expected_batch = &variants;
+
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open_with_interval_features(
+        &tx, &exons, NULL, &features, &model, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &options, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &workspace, &error));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_cursor_open(
+        model, &variants, options, workspace, &cursor, &error));
+    duckvep_annotate_cursor_set_observer(
+        cursor, annotation_observer_capture_row, &capture);
+
+    while (!duckvep_annotate_cursor_done(cursor)) {
+        duckvep_status_t status;
+        size_t before = capture.count;
+
+        duckvep_result_builder_init(&builder, &row, 1u);
+        status = duckvep_annotate_cursor_fill(cursor, &builder, &error);
+        ASSERT(status == DUCKVEP_OK || status == DUCKVEP_ERR_RESULT_FULL);
+        ASSERT_EQ(duckvep_result_builder_count(&builder), capture.count - before);
+        if (duckvep_result_builder_count(&builder) == 1u) {
+            ASSERT(emitted < 6u);
+            ASSERT(consequence_rows_equal(&row, &capture.rows[emitted]));
+            emitted++;
+        }
+        fill_count++;
+        ASSERT(fill_count <= 7u);
+    }
+
+    ASSERT_EQ(6u, emitted);
+    ASSERT_EQ(6u, capture.count);
+    ASSERT_EQ(7u, fill_count);
+    for (emitted = 0u; emitted < 6u; emitted++) {
+        uint32_t expected_variant = (uint32_t)(emitted / 3u);
+        uint8_t expected_object = (uint8_t)(emitted % 3u);
+
+        ASSERT_EQ(expected_variant, capture.rows[emitted].variant_idx);
+        ASSERT_EQ(expected_object, capture.rows[emitted].overlap_object_kind);
+        if (expected_object == (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
+            ASSERT_EQ(1u, capture.trace_present[emitted]);
+            ASSERT_EQ(vpos[expected_variant], capture.events[emitted].raw_start1);
+            ASSERT_EQ((uint8_t)DUCKVEP_KIND_SNV, capture.events[emitted].kind);
+        } else {
+            ASSERT_EQ(0u, capture.trace_present[emitted]);
+            ASSERT_EQ((uint32_t)(expected_object - 1u),
+                      capture.rows[emitted].interval_feature_idx);
+        }
+    }
+
+    duckvep_annotate_cursor_close(cursor);
+    duckvep_workspace_close(workspace);
+    duckvep_options_close(options);
     duckvep_model_close(model);
     PASS();
 }
@@ -23601,6 +23749,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_matches_composition_for_any_scene);
     RUN_TEST(annotation_shortcuts_match_generalized_for_any_sorted_scene);
     RUN_TEST(annotate_cursor_resumes_known_scene);
+    RUN_TEST(annotation_observer_resumes_across_transcript_and_interval_rows);
     RUN_TEST(sorted_point_cursor_survives_tiles_and_resets_on_rewind);
     RUN_TEST(padded_snv_rewind_uses_vep_feature_span);
     RUN_TEST(span_cursor_resets_after_nonmonotone_tile_skips_transcript);

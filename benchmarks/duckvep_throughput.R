@@ -29,6 +29,17 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--skip-extension-build",
+  dest = "skip_extension_build",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "load --extension without a clean in-tree rebuild; diagnostic runs only",
+    "and incompatible with --history [%default]"
+  )
+)
+op <- add_option(
+  op,
   "--model-sql",
   dest = "model_sql",
   default = file.path(
@@ -140,6 +151,8 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
+root <- normalizePath(root[[1L]], mustWork = TRUE)
+source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 whole_count <- function(x, name) {
   if (!is.finite(x) || x < 1 || x != floor(x)) {
     die("{name} must be a positive integer")
@@ -192,14 +205,8 @@ if (identical(opt$output, "hgvs") && !nzchar(opt$reference_fasta)) {
     "minimal.fa"
   )
 }
-sha256_file <- function(path) {
-  value <- system2("sha256sum", path, stdout = TRUE, stderr = TRUE)
-  status <- attr(value, "status")
-  if (!is.null(status) && status != 0L) die("sha256sum failed for {path}")
-  strsplit(value[[1L]], "[[:space:]]+")[[1L]][[1L]]
-}
+sha256_file <- duckvep_evidence_sha256
 inputs <- c(
-  opt$extension,
   if (production) opt$database else opt$model_sql,
   if (nzchar(opt$variants_database)) opt$variants_database,
   if (nzchar(opt$reference_fasta)) opt$reference_fasta,
@@ -212,7 +219,45 @@ missing <- inputs[!file.exists(inputs)]
 if (length(missing) != 0L) {
   die("missing input(s):\n{paste(missing, collapse = '\n')}")
 }
-extension_sha256 <- sha256_file(normalizePath(opt$extension))
+evidence_outputs <- c(opt$history, opt$composition, opt$fingerprint)
+evidence_outputs <- evidence_outputs[nzchar(evidence_outputs)]
+revision <- if (isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_revision(root)
+} else {
+  duckvep_evidence_assert_checkout(
+    root,
+    allowed_outputs = evidence_outputs,
+    context = "DuckVEP throughput evidence"
+  )
+}
+if (!nzchar(opt$source_revision)) {
+  opt$source_revision <- revision
+} else if (!identical(opt$source_revision, revision)) {
+  die(
+    "--source-revision {opt$source_revision} is not the current checkout ",
+    "revision {revision}"
+  )
+}
+if (isTRUE(opt$skip_extension_build)) {
+  if (nzchar(opt$history)) {
+    die("--skip-extension-build cannot append checked benchmark history")
+  }
+  if (!file.exists(opt$extension)) {
+    die("missing input: {opt$extension}")
+  }
+  extension_build_binding <- "unbound_diagnostic"
+  extension_sha256 <- sha256_file(opt$extension)
+} else {
+  extension_receipt <- duckvep_evidence_build_extension(
+    root,
+    opt$extension,
+    revision,
+    evidence_outputs
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
+}
 model_database_sha256 <- if (production) {
   sha256_file(normalizePath(opt$database))
 } else {
@@ -1078,26 +1123,6 @@ if (nzchar(opt$fingerprint) || nzchar(opt$expected_fingerprint)) {
   }
 }
 
-revision <- suppressWarnings(system2(
-  "git",
-  c("-C", root, "rev-parse", "HEAD"),
-  stdout = TRUE,
-  stderr = FALSE
-))
-revision_status <- attr(revision, "status")
-if (!is.null(revision_status) && revision_status != 0L) {
-  die("cannot determine source revision")
-}
-revision <- trimws(revision[[1L]])
-if (!nzchar(opt$source_revision)) {
-  opt$source_revision <- revision
-} else if (!identical(opt$source_revision, revision)) {
-  die(
-    "--source-revision {opt$source_revision} is not the current checkout ",
-    "revision {revision}"
-  )
-}
-
 declared_version <- sub(
   "^version:[[:space:]]*",
   "",
@@ -1181,6 +1206,7 @@ row <- data.frame(
   },
   checksum_value = check$checksum[[1L]],
   cpu_affinity = cpu_affinity,
+  extension_build_binding = extension_build_binding,
   extension_sha256 = extension_sha256,
   model_database_sha256 = model_database_sha256,
   model_logical_sha256 = model_logical_sha256,
@@ -1237,6 +1263,7 @@ if (nzchar(opt$history)) {
       colClasses = c(
         source_revision = "character",
         checksum_value = "character",
+        extension_build_binding = "character",
         extension_sha256 = "character",
         model_database_sha256 = "character",
         model_logical_sha256 = "character",
@@ -1279,6 +1306,15 @@ if (nzchar(opt$history)) {
     unlink(tmp)
     die("cannot replace history: {opt$history}")
   }
+}
+
+if (!isTRUE(opt$skip_extension_build)) {
+  duckvep_evidence_assert_checkout(
+    root,
+    revision,
+    evidence_outputs,
+    context = "DuckVEP throughput evidence"
+  )
 }
 
 invisible(dbGetQuery(

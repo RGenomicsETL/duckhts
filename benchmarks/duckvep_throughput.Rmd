@@ -306,7 +306,7 @@ target. Each item above needs an adjacent exact-revision comparison on the same 
 corpus, transcript distance, output denominator, core affinity, and fingerprint before
 it can be called an improvement.
 
-## Full-corpus transcript throughput
+## Historical full-corpus transcript-only diagnostic
 
 ```{r full-literal-corpora}
 full_workload_labels <- c(
@@ -444,6 +444,9 @@ core_current <- core_runs[
 stopifnot(
   nrow(core_current) == 6L,
   all(core_current$regulation_features == 1383580),
+  all(
+    core_current$extension_build_binding == "htslib_distclean_make_release"
+  ),
   all(nchar(core_current$extension_sha256) == 64L),
   all(nchar(core_current$model_database_sha256) == 64L),
   all(nchar(core_current$model_logical_sha256) == 64L),
@@ -526,6 +529,7 @@ core_receipts <- data.frame(
   revision = core_current$revision,
   corpus = unname(core_workload_labels[core_current$workload]),
   output = core_current$output_mode,
+  extension_build = core_current$extension_build_binding,
   extension_binary = substr(core_current$extension_sha256, 1L, 12L),
   physical_model = substr(core_current$model_database_sha256, 1L, 12L),
   logical_model = substr(core_current$model_logical_sha256, 1L, 12L),
@@ -554,7 +558,9 @@ single-core hours before supplementary SQL joins.
 
 Every row in the production-core table is tied to exact source revision
 `r core_revision`,
-one extension-binary digest, the physical and logical model digests,
+a vendored-htslib `distclean` followed by an in-tree `make release` rebuild and
+its extension-binary digest, the
+physical and logical model digests,
 the Ensembl source-manifest and logical-reference digests, the model-region
 ordinal digest, the staged-corpus digest, and the original VCF digest. The HGVS
 rows additionally record the physical FASTA and FAI digests. The receipt table
