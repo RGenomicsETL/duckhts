@@ -483,7 +483,8 @@ cat(
   glue(
     "staged {format(receipt$supported_alt_count, big.mark = ',', scientific = FALSE)} ",
     "literal ALT alleles from {format(receipt$selected_tile_count, big.mark = ',')} ",
-    "annotation-dense tiles -> {output_database}"
+    "{if (isTRUE(opt$all_tiles)) 'primary-contig' else 'annotation-dense'} ",
+    "tiles -> {output_database}"
   ),
   "\n",
   sep = ""
