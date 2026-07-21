@@ -818,6 +818,40 @@ Protein domains and genuinely supplementary interval sources use range joins or 
 interval streams, followed by the smallest source-specific predicate needed for a joined
 pair. Strings and JSON remain the final projection.
 
+The serving contract is manifest-driven generated SQL, analogous to
+`hts_union_query(...)`, rather than one C table function per database. A provider receipt
+must declare at least provider/release identity, assembly, normalization contract, source
+digest, key kind (`variant`, `position`, `interval`, or `gene`), partition layout, and hot
+payload columns. Assembly and normalization are semantic inputs: a source such as a TSV
+without an assembly declaration may be receipted and inspected, but must not be keyed or
+joined. Provider-specific licences and cold presentation metadata remain in the receipt or
+side relations.
+
+For exact human providers, preparation writes two hot lanes. Reversible normalized alleles
+use only `UBIGINT vk` plus narrow payload columns. Hashed/nonreversible alleles retain the
+normalized contig/position/reference/alternate tuple and refine every VariantKey match on
+that tuple. Non-human providers use a release-scoped numeric contig ordinal plus exact
+alleles rather than pretending the official human VariantKey contig space is universal.
+Position, interval, and gene providers use their own typed keys; they do not inherit exact
+variant semantics merely because all are exposed by one manifest.
+
+The generated annotation query selects touched chromosome or coordinate-tile Parquet
+shards, runs one provider at a time, and emits provider identity/release with every result.
+At population scale the query relation streams while one bounded provider shard is the
+join-build side. Several chromosome tasks may run concurrently, but their mutable join
+state is per task even when immutable Parquet pages are shared. The scheduler therefore
+bounds concurrency from measured peak RSS. It must not load a dozen full providers or
+build a whole-dbSNP cgranges index.
+
+cgranges remains the repeated-query choice for compact interval tracks when its measured
+resident cost is acceptable. The current public registry also owns output coordinates,
+label validity, labels, and one chromosome string per interval; this is materially larger
+than cgranges' 16-byte core interval. Count-only payload elision and chromosome interning
+are valid future optimizations. Exact dbSNP, TOPMed, REVEL, AlphaMissense, ClinVar, and
+frequency sources stay sorted/partitioned Parquet streams. The measured storage, serving
+RSS, interval-index density, and twelve-provider logical-time envelope live in
+`benchmarks/benchmark_variantkey_join_overlap.md`.
+
 The stateful stable-API integration is tracked at
 https://github.com/RGenomicsETL/duckhts/issues/94. Supplementary source plumbing does not
 belong as ignored arguments in the consequence-kernel API.

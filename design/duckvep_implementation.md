@@ -966,6 +966,11 @@ numeric keys, and perform interval/range joins at the right cardinality. A custo
 cache or mmap format is justified only by a reproducible workload where this path
 cannot meet latency or throughput.
 
+The canonical provider receipt, exact/hashed lane split, assembly gate, and bounded
+chromosome/tile scheduling contract are defined in `design/duckvep.md`. Peak RSS and
+dbSNP/TOPMed-scale projections are numeric claims and therefore live only in the rendered
+`benchmarks/benchmark_variantkey_join_overlap.md` report.
+
 Interactive serving is also compatible with the architecture: keep named
 transcript models resident; use prepared DuckDB queries, zone-map-pruned tiles,
 and a small bounded hot-tile cache; expose the database through a DuckDB server

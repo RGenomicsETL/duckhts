@@ -1,6 +1,28 @@
 # DuckHTS Extension News
 
 # duckhts 1.4.0.9000 (development)
+- extend the rendered VariantKey/RegionKey supplementary-annotation benchmark with
+  isolated peak-RSS measurements and real dense exact providers. Official AlphaMissense
+  v2 GRCh38 (71,697,556 rows), a receipted REVEL v1.3 GRCh37 projection (77,966,138
+  rows), ClinvArbitration Zenodo record 16792026 GRCh38 (3,647,840 rows), ClinVar,
+  GIAB HG002, Ensembl regulation, and gnomAD constraint are staged as typed Parquet
+  projections. A deterministic genome-spanning REVEL key sample prevents favorable
+  leading-row-group pruning. On one/four pinned i5-13500 performance cores, REVEL
+  processes 1.28/4.40 million probe alleles/s, AlphaMissense 1.53/5.15 million/s, and
+  ClinvArbitration 14.08/46.02 million/s. Fresh-process serving peaks remain 175--189
+  MiB for those exact joins; one-time AlphaMissense and REVEL preparation peaks at
+  1.10 and 1.24 GiB. The 643,528-interval string-labelled cgranges build plus full-GIAB
+  probe peaks at 146 MiB versus 665/728 MiB for the per-contig DuckDB IEJoin plan.
+  Synthetic cgranges construction peaks at 129 MiB per million intervals without
+  labels, 145 MiB with BIGINT labels, 197 MiB with VARCHAR labels, and 1.25 GiB for
+  ten million BIGINT-labelled intervals. Narrow key-plus-payload storage projects to
+  1.82--4.33 GB for 705,486,649 TOPMed Freeze 8 rows and 3.03--7.20 GB for
+  1,172,689,405 live dbSNP Build 157 RefSNP rows. Twelve equally dense exact providers
+  project to 27--32 minutes and 46--53 minutes respectively on four cores; these are
+  explicit logical-time projections, not measured population runs. The accompanying
+  design contract requires assembly/normalization receipts, collision-safe reversible
+  and hashed lanes, sequential provider scans, and RSS-bounded chromosome/tile tasks
+  rather than full-catalog cgranges indexes or twelve concurrently resident providers.
 - add `duckhts_contig_key(...)` as the conservative chromosome/contig join authority for
   VCF, dbSNP, and DuckVEP preparation: remove one non-empty leading `chr` prefix,
   normalize mitochondrial `M`/`MT` spellings to `MT`, uppercase `X`/`Y`, and preserve all
