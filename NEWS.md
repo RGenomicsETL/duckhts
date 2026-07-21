@@ -1,6 +1,16 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- add a fail-closed official Ensembl release-VCF conformance runner for literal
+  SNVs. It maps each lossless `VE` row to a VCF ALT through the producer's
+  zero-based allele Index, aggregates
+  consequence sets per transcript, runs the public rich DuckVEP relation against
+  a receipt-matched model, and rejects mismatched, missing, extra, oracle-less,
+  or unsupported rows. The documented non-SNV follow-up is pinned to Ensembl
+  Variation release/116's GVF `Variant_seq`/`Index` plus `gvf2vcf.pl` lineage.
+  Document that the release CSQ presentation overwrites repeated consequence
+  terms for one allele/feature and therefore is not a full-set oracle; non-SNV
+  ownership must not be guessed from padded VCF ALT strings
 - let the deterministic DuckVEP corpus stager select every primary-contig tile
   for full GIAB/ClinVar performance gates, and record a caller-declared corpus
   name plus the dense-versus-full selection mode in its receipt. The historical

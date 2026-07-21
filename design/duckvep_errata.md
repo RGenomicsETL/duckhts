@@ -8,6 +8,30 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## Ensembl release CSQ is a lossy projection of the complete VE relation
+
+The official Ensembl variation release VCF contains both `VE` and `CSQ`. `VE` preserves
+one `Consequence|Index|Feature_type|Feature_id` item for every stored variation-effect
+row; its zero-based Index identifies the corresponding GVF `Variant_seq`. The release
+`CSQ` field is assembled later by `gvf2vcf.pl` in a hash keyed only by allele and feature.
+Assigning `Consequence` to that hash overwrites earlier terms for the same pair. A
+non-coding intronic allele can therefore retain both `non_coding_transcript_variant` and
+`intron_variant` in VE while CSQ contains only `intron_variant`.
+
+Consequently the official VCF is a valid precomputed consequence oracle only through VE,
+not by treating its CSQ text as the complete VEP consequence set. CSQ remains useful for
+testing the typed VCF parser and its advertised presentation fields. Release conformance
+must aggregate VE by Index and feature, set transcript flank distances to zero to match
+the variation database's overlap-only dump, and keep the exact producer revision in its
+receipt. For non-SNVs, do not infer ownership by comparing the GVF/CSQ allele text with a
+padded VCF ALT: the producer records `Variant_seq` and Index before
+`VariationFeature->to_VCF_record` constructs the VCF representation.
+
+Source anchor: Ensembl Variation release/116 commit
+`2fb834b987ede3824e200197a838ce11e91aeb4b`,
+`scripts/misc/release/gvf2vcf.pl::parse_consequence_info`, and
+`scripts/export/release/dump_gvf.pl`.
+
 ## VEP removes EMAR rows before regulatory overlap evaluation
 
 The Ensembl funcgen `regulatory_feature` table contains

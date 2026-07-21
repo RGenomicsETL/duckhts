@@ -247,7 +247,7 @@ SHA-256 checksums, record/allele/CSQ cardinalities, exact byte sizes, compressio
 thread count, and source revision.
 
 Small pinned shards of these official release VCFs are suitable for ordinary CI: their
-release-specific CSQ rows are a precomputed oracle, so DuckVEP can compare transcript
+release-specific `VE` rows are a precomputed oracle, so DuckVEP can compare transcript
 consequences without launching the Perl VEP executable. A release shard is not a substitute
 for the generated witness and corpus lanes because it cannot test alleles or VEP option
 states absent from the published variation set. Full scheduled matrices should obtain the
@@ -256,6 +256,36 @@ multi-gigabyte caches to git. The planned distribution contract is one manifest 
 Ensembl/Ensembl Genomes release, species, assembly, model ABI, transcript-filter policy,
 source-relation hash set, and artifact digest; a Zenodo record can provide stable versioned
 storage while every downloaded model still passes normal receipt/model-open validation.
+
+`release_vcf_differential.R` makes that precomputed-oracle lane executable. Its first
+fail-closed stratum is literal SNVs. The release `VE` field retains
+`Consequence|Index|Feature_type|Feature_id`; its zero-based Index maps each consequence to
+the original GVF `Variant_seq` and corresponding VCF ALT, so multiallelic records remain
+unambiguous. It aggregates the published VE consequence set per ALT/transcript,
+runs the public rich `duckvep_annotate(...)` relation against the receipt-matched model, and
+requires exact transcript/object pairs, no missing/extra rows, no oracle-less input, and no
+unsupported DuckVEP row. Both transcript distances are zero because the variation database
+dump records overlapping feature consequences, not VEP CLI's optional transcript flanks.
+Do not instead map by CSQ allele text for indels. The Ensembl Variation
+release-116 producer at `2fb834b987ede3824e200197a838ce11e91aeb4b` writes a GVF
+`Variant_seq` and `Index` before `gvf2vcf.pl` asks `VariationFeature->to_VCF_record` for the
+padded VCF alleles; the future non-SNV stratum must reproduce that indexed relation rather
+than equate CSQ allele text with a transformed VCF ALT. `gvf2vcf.pl` also stores
+`Consequence` in a hash keyed only by allele and feature while constructing CSQ, so repeated
+VE terms overwrite one another there; CSQ is a useful typed presentation, not the complete
+consequence-set oracle.
+
+Run it through the repository target so the exact input, model, release, assembly, and
+output receipt remain visible in one command:
+
+```sh
+make test-duckvep-release-vcf DUCKVEP_RELEASE_DIFFERENTIAL_ARGS="\
+  --input /data/homo_sapiens_incl_consequences-chr22.vcf.gz \
+  --database /data/homo_sapiens_116_GRCh38.duckdb \
+  --release 116 --assembly GRCh38 --chromosome 22 --threads 1 \
+  --source-checksum sha256:HEX \
+  --output test/duckvep/conformance/results/release_116_chr22_snv.csv"
+```
 
 `make duckvep-record-conformance` reruns the real VEP witnesses and records the current
 source revision in `data/conformance_history.csv`. Rows include the complete consequence

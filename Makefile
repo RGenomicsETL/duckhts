@@ -5,6 +5,7 @@
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
 	test-duckvep-state-exploration \
+	test-duckvep-release-vcf \
 	duckvep-corpus-differential duckvep-statistical-report \
 	duckvep-record-conformance duckvep-record-properties \
 	bench-duckvep-throughput bench-duckvep-release-parquet \
@@ -327,6 +328,16 @@ test-duckvep-state-exploration: release
 		--corpus state_exploration_seed_$${seed} \
 		--vcf $$vcf --extension build/release/duckhts.duckdb_extension \
 		--sample-per-shape 0 --seed $$seed --hgvs
+
+# Compare a receipt-matched DuckVEP model with the lossless VE relation in an
+# official Ensembl variation release VCF. Pass the source/model/receipt paths
+# through DUCKVEP_RELEASE_DIFFERENTIAL_ARGS; the runner rebuilds and binds the
+# extension to the clean source revision unless explicitly put in diagnostic
+# mode.
+test-duckvep-release-vcf:
+	Rscript test/duckvep/conformance/release_vcf_differential.R \
+		--extension build/release/duckhts.duckdb_extension \
+		$(DUCKVEP_RELEASE_DIFFERENTIAL_ARGS)
 
 duckvep-corpus-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
