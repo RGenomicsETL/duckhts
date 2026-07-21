@@ -981,6 +981,43 @@ indefinitely open prerequisite for every release.
   Sorting cost is not hidden, but it is not charged only to DuckVEP either. DuckDB may sort
   once and stream ordered chunks directly into the consequence or phased executor.
 
+### Finite-quotient conformance certificate roadmap
+
+Statistical differential testing remains a permanent release gate because it reaches rare
+combinations that fixed witnesses and ordinary corpora do not. It can be strengthened, but
+not replaced, by a machine-checkable finite quotient of the declared VEP-116 state machine.
+The certificate has three separate proof obligations:
+
+1. The generated fact-to-SO program is finite. Its generator currently requires one
+   consequence-bearing predicate bit per rule, an empty forbidden mask, a unique binding,
+   and three suppression groups. Empty input, every singleton, every cross-group pair, and
+   the all-bits case therefore form a complete algebraic basis for every possible predicate
+   mask. The property suite must check both ordinary and structural evaluators against the
+   reference interpreter over that basis, and generation must continue to fail if a future
+   rule invalidates the argument.
+2. Geometry and transcript state are quotiented by every comparison that production code
+   observes: event shape; strand; first/internal/penultimate/last exon; relative position at
+   and immediately around transcript, exon, intron, CDS, start/stop, splice, and NMD
+   thresholds; length-change sign and modulo three; phase; coding/biotype state; and exact
+   structural containment/truncation relations. A deterministic relational generator will
+   reject unsatisfiable combinations and retain one minimal concrete VEP witness for every
+   reachable branch signature. Zero-observation classes fail the certificate.
+3. Sequence and HGVS state are quotiented only where an equivalence argument exists:
+   equality/prefix/suffix/internal difference, copied-source availability, stop placement,
+   repeat period, typed peptide edit, and VEP shift distances at 0, 1, 999, 1000, and the
+   first disallowed step. Arbitrary sequence length and repeated-byte loops still require
+   reference-interpreter properties, sanitizer runs, long-allele distributions, or a
+   bounded/symbolic C proof with explicit loop invariants. A short representative list is
+   not evidence for all strings.
+
+The resulting certificate may claim exhaustive agreement only for the declared abstract
+domain and must publish its dimension tables, satisfiability constraints, reachable class
+count, witness mapping, and executable-VEP result. Full ClinVar HGVS, held-out generated
+seeds, long HPRC alleles, structural/BND campaigns, multiple assemblies, and non-human
+species remain independent gates: they test whether the abstraction omitted a real source
+state or whether model construction supplied the wrong facts. This work follows the 1.5.0
+release salvo; it does not reopen the already measured independent-event contract.
+
 HGVS and haplotype performance use cumulative lanes over identical prepared input:
 
 | Lane | Required work |

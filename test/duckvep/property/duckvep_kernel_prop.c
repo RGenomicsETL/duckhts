@@ -4038,20 +4038,35 @@ TEST generated_effect_lookup_matches_rule_interpreter(void) {
     unsigned b;
     uint64_t all = 0u;
 
+    /* The generator requires each consequence rule to consume one unique bit,
+     * forbids compound/negative masks, and partitions rules into three suppression
+     * groups. Within one group evaluation is an OR homomorphism; between groups a
+     * single pair exercises the complete suppression relation. Consequently zero,
+     * all singletons, all pairs, and the all-bits case are a complete basis for any
+     * input subset, not merely sampled masks. Apply the same basis after the
+     * structural VariationFeature-class mask. */
     ASSERT_EQ(duckvep_effect_eval_reference(0u), duckvep_effect_eval(0u));
+    ASSERT_EQ(duckvep_effect_eval_structural_reference(0u),
+              duckvep_effect_eval_structural(0u));
     for (a = 0u; a < (unsigned)DUCKVEP_PRE_BIT_COUNT; a++) {
         uint64_t one = DUCKVEP_PRE(a);
         all |= one;
         ASSERT_EQ(duckvep_effect_eval_reference(one),
                   duckvep_effect_eval(one));
+        ASSERT_EQ(duckvep_effect_eval_structural_reference(one),
+                  duckvep_effect_eval_structural(one));
         for (b = 0u; b < (unsigned)DUCKVEP_PRE_BIT_COUNT; b++) {
             uint64_t pair = one | DUCKVEP_PRE(b);
             ASSERT_EQ(duckvep_effect_eval_reference(pair),
                       duckvep_effect_eval(pair));
+            ASSERT_EQ(duckvep_effect_eval_structural_reference(pair),
+                      duckvep_effect_eval_structural(pair));
         }
     }
     ASSERT_EQ(duckvep_effect_eval_reference(all),
               duckvep_effect_eval(all));
+    ASSERT_EQ(duckvep_effect_eval_structural_reference(all),
+              duckvep_effect_eval_structural(all));
     PASS();
 }
 
