@@ -13,10 +13,10 @@ for both engines.
 ## Result
 
 On one pinned physical performance core, DuckVEP processed the full file
-and wrote 47.63 million annotation rows in a median **64.31 seconds**
+and wrote 47.63 million annotation rows in a median **64.54 seconds**
 over three runs. Native FastVEP wrote 47.83 million rows in a median
 **164.38 seconds** over three runs. The observed FastVEP/DuckVEP median
-wall-time ratio is **2.56**.
+wall-time ratio is **2.55**.
 
 That ratio describes these two native operational pipelines; it is not a
 controlled engine-only speedup. DuckVEP enforces input order inside its
@@ -29,15 +29,78 @@ manufacture an artificial common kernel number.
 
 | engine  | runs | median seconds | minimum seconds | maximum seconds | source records/s | source ALT alleles/s | output rows | output rows/s | median CPU % | maximum RSS GiB |
 |:--------|-----:|---------------:|----------------:|----------------:|-----------------:|---------------------:|:------------|--------------:|-------------:|----------------:|
-| DuckVEP |    3 |          64.31 |           64.30 |           64.65 |            62950 |                63693 | 47,629,345  |        740621 |           99 |            5.46 |
+| DuckVEP |    3 |          64.54 |           63.75 |           66.44 |            62726 |                63466 | 47,629,345  |        737982 |           99 |            5.47 |
 | FastVEP |    3 |         164.38 |          164.23 |          164.75 |            24628 |                24919 | 47,828,122  |        290961 |           99 |            3.17 |
 
 The comparable rates use all 4,048,342 source records and all 4,096,123
 source ALT alleles for both engines. DuckVEP annotates 4,095,611 literal
-A/C/G/T/N alleles at 63,685 accepted alleles/s; 512 symbolic or
+A/C/G/T/N alleles at 63,458 accepted alleles/s; 512 symbolic or
 otherwise non-literal ALT alleles remain outside this particular
 small-allele projection rather than disappearing from the shared source
 denominator.
+
+## Four-core comparison
+
+The four-core comparison pins both processes to physical performance
+cores 2, 4, 6, and 8. DuckVEP uses four DuckDB task threads while
+retaining `decompression_threads := 0`; FastVEP uses four Rayon workers.
+DuckVEP has three observations, while the FastVEP scaling point has one
+and therefore no dispersion estimate.
+
+| engine  | runs | median seconds | minimum seconds | maximum seconds | source ALT alleles/s | output rows/s | median CPU % | maximum RSS GiB |
+|:--------|-----:|---------------:|----------------:|----------------:|---------------------:|--------------:|-------------:|----------------:|
+| DuckVEP |    3 |          32.06 |           31.99 |           32.39 |               127764 |       1485631 |          251 |            5.57 |
+| FastVEP |    1 |          68.09 |           68.09 |           68.09 |                60157 |        702425 |          239 |            3.17 |
+
+DuckVEP’s four-thread median is **32.06 seconds**, versus **68.09
+seconds** for FastVEP. The observed same-core-count wall-time ratio is
+therefore **2.12** in DuckVEP’s favor. DuckVEP delivers a 2.01-fold
+speedup over its one-thread median, or 50.3% elapsed-time parallel
+efficiency, and reaches only 251% median aggregate CPU use. The measured
+pipeline therefore remains limited by serial or partially parallel
+reader, sort, coordination, or writer work rather than saturating four
+cores with consequence computation.
+
+The implementation contract shares the immutable resident model across
+DuckDB workers while giving each worker its own mutable annotation
+workspace. Measured maximum process RSS was 5.57 GiB at four threads,
+versus 5.47 GiB at one. That process-level observation rules out a
+fourfold increase in total RSS; it does not attribute individual
+allocations to the model or worker workspaces.
+
+### Four-core operator profile
+
+An additional diagnostic run used the same four-core command and real
+output contract with DuckDB JSON profiling enabled. It recorded 29.68
+seconds of query latency and 64.27 aggregate CPU-seconds, or 2.17 cores
+averaged across the query. The six largest local operator CPU totals
+were:
+
+| stage                              | aggregate CPU seconds | output rows |
+|:-----------------------------------|----------------------:|:------------|
+| TSV COPY                           |                 16.59 | 1           |
+| transcript-label hash join         |                 14.56 | 47,629,345  |
+| annotation-list expansion / UNNEST |                  8.66 | 47,629,345  |
+| 17-field text projection           |                  7.78 | 47,629,345  |
+| sequential read_bcf scan           |                  4.34 | 4,048,342   |
+| FILTER                             |                  2.86 | 4,095,611   |
+
+These are aggregate operator CPU times, not additive wall-clock phases,
+and do not by themselves prove which operator serialized a pipeline.
+They do show that this query has no chromosome-per-worker scheduler:
+DuckDB schedules vector-sized work around a global sort. The largest
+measured costs are the 47.63-million-row transcript-label join, TSV
+writer, annotation-list expansion, and final string projection. The
+one-handle sequential VCF scan is visible but smaller. The observed 251%
+median process utilization is therefore not a largest-chromosome tail,
+and the end-to-end scaling ceiling is not attributable to the
+consequence kernel alone.
+
+If explicit genomic parallelism is introduced later, dynamically
+scheduled coordinate tiles are preferable to one static task per
+chromosome. Static chromosome tasks would create exactly the
+chromosome-size and transcript-density tail that this current query does
+not have.
 
 ## FastVEP scaling
 
@@ -64,18 +127,16 @@ Each scaling point is one observation from the same sequence of runs;
 unlike the one-core comparison, the scaling table has no repeated-run
 dispersion estimate.
 
-The six-core FastVEP wall time is 5.66 seconds shorter than the one-core
+The six-core FastVEP wall time is 5.89 seconds shorter than the one-core
 DuckVEP wall time. That is useful capacity information, but it is not a
-same-core-count comparison; this report has no end-to-end four- or
-six-core DuckVEP row.
+same-core-count comparison; this report has no end-to-end six-core
+DuckVEP row.
 
 DuckDB was fixed at `PRAGMA threads=1` and the complete R worker was
-pinned to CPU 2 for the one-core comparison. This report does not mix
-DuckDB task parallelism, htslib decompression threads, or
-operating-system placement into that number. A future DuckVEP scaling
-row should use explicit coordinate partitions with one immutable shared
-model and bounded per-partition workspaces; it should not relabel
-decompression threads as annotation threads.
+pinned to CPU 2 for the one-core comparison. The four-core DuckVEP row
+changes only `PRAGMA threads` and the affinity set. Neither row uses
+htslib decompression threads, so the report does not relabel
+decompression work as annotation parallelism.
 
 ## What was timed
 
@@ -104,7 +165,7 @@ does not perform an explicit sort.
 
 | tool    | output_contract       | row_count  | bytes         | lines      | observed_sha256                                                  | observed_runs | byte_order_stable |
 |:--------|:----------------------|:-----------|:--------------|:-----------|:-----------------------------------------------------------------|--------------:|:------------------|
-| duckvep | matched_tab_17_fields | 47,629,345 | 6,174,109,710 | 47,629,346 | ae9dae548ca57a1e18c3649bd7e99103ea2605331042e66e4e51801ee9c42822 |             4 | FALSE             |
+| duckvep | matched_tab_17_fields | 47,629,345 | 6,174,109,710 | 47,629,346 | cab3099378b4ccb0de4c2ecabc4cf6cac58c32aeb456015c8a6657782c24e8e3 |             6 | FALSE             |
 | fastvep | native_tab_17_fields  | 47,828,122 | 6,376,454,054 | 47,828,124 | aec1d995ecd519e86f449372f4c9b6975f72dc9284afc16c646778e9c14d201f |             6 | TRUE              |
 
 FastVEP’s tab schema is its native fixed 17-field projection. DuckVEP
@@ -113,12 +174,13 @@ volume, but it does not fabricate FastVEP-only presentation values such
 as codon strings, flags, or existing-variation labels. The SHA-256 value
 is an observed file receipt, not an assertion that the two engines write
 identical text. FastVEP produced the same bytes in all six checked
-thread/repeat observations. DuckVEP produced two byte orders across four
-observations because the final relational join has no output `ORDER BY`;
-a same-parser order-independent fingerprint over all 47,629,345 rows was
-identical in the two runs checked for multiset stability. Its checked
-fingerprint is XOR 15135830789387217416, low-32-bit sum
-102267960154848972, and high-32-bit sum 102341672868090308.
+thread/repeat observations. DuckVEP produced multiple byte orders across
+6 observations because the final relational join has no output
+`ORDER BY`; a same-parser order-independent fingerprint over all
+47,629,345 rows was identical in all 6 runs checked for multiset
+stability. Its checked fingerprint is XOR 15135830789387217416,
+low-32-bit sum 102267960154848972, and high-32-bit sum
+102341672868090308.
 
 The FastVEP cache contains 645,457 transcripts; the exact VEP-filtered
 DuckVEP model contains 644,427. The 1,030-transcript difference remains
@@ -190,6 +252,7 @@ workload does not become the only performance authority.
 |:---------------------------------|:-----------------------------------------------------------------|
 | DuckHTS measured checkout        | 2a1c37cf2938e8226a078f19ca429ffeff84de73                         |
 | DuckHTS extension binary         | 53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b |
+| DuckVEP benchmark worker         | 4af9f71500e4ffd081c6853ee96c7e9a298e9ed3bd52d32e3e9dfdcc9f0497e2 |
 | FastVEP checkout                 | 7038e7c17708e7d2226149e78e0bb297bcc6d1d6                         |
 | FastVEP native binary            | b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a |
 | FastVEP rebuilt transcript cache | 00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962 |
@@ -203,10 +266,12 @@ workload does not become the only performance authority.
 
 The extension binary was clean-built at `c977cba`; there are no
 extension, public-catalog, or build-wiring changes from that revision
-through the measured `2a1c37c` checkout. FastVEP was updated to the
-latest upstream checkout before the run and its transcript cache was
-rebuilt from the receipt-pinned Ensembl 116 GFF3 and FASTA rather than
-reusing an older cache.
+through the measured `2a1c37c` checkout. The separate worker SHA-256
+identifies the exact benchmark harness used for every retained DuckVEP
+timing; the report aborts if its checked worker differs. FastVEP was
+updated to the latest upstream checkout before the run and its
+transcript cache was rebuilt from the receipt-pinned Ensembl 116 GFF3
+and FASTA rather than reusing an older cache.
 
 The host is an Intel Core i5-13500 with six physical performance cores.
 CPU 2 is the single-core lane; FastVEP uses CPU sets `2`, `2,4`,
@@ -220,8 +285,8 @@ warm local filesystem page cache and do not claim cold-storage or
 The exact measured command lines are retained verbatim in the checked-in
 GNU time files. The DuckVEP worker is
 `benchmarks/benchmark_duckvep_fastvep_worker.R`; it owns the SQL and
-exposes `--threads`, `--distance`, and `--memory-limit`. FastVEP was
-built with:
+exposes `--threads`, `--distance`, `--memory-limit`, and optional
+`--profile-json`. FastVEP was built with:
 
 ``` bash
 env RUSTFLAGS='-C target-cpu=native' cargo build \
@@ -281,6 +346,34 @@ Rscript benchmarks/benchmark_duckvep_fastvep_receipt.R \
   --threads 1 --run 1 --skip-lines 1 \
   --timing-file benchmarks/data/duckvep_fastvep/fastvep_giab_threads1.time \
   --output /tmp/duckvep-fastvep-benchmark/fastvep_receipt_run1.csv
+```
+
+The four-core DuckVEP measurements change the affinity set and DuckDB
+task count without enabling htslib decompression workers. Run suffixes
+and timing destinations distinguish the three repetitions:
+
+``` bash
+/usr/bin/time -v \
+  -o /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_run1.time \
+  taskset -c 2,4,6,8 \
+  Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
+  --extension build/release/duckhts.duckdb_extension \
+  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
+  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4.tab \
+  --threads 4 --distance 5000 --memory-limit 4GB
+
+taskset -c 2,4,6,8 \
+  Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
+  --extension build/release/duckhts.duckdb_extension \
+  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
+  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.tab \
+  --threads 4 --distance 5000 --memory-limit 4GB \
+  --profile-json /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json
+
+cp /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json \
+  benchmarks/data/duckvep_fastvep/duckvep_giab_threads4_profile.json
 ```
 
 The same receipt command is run before an output is replaced. Its

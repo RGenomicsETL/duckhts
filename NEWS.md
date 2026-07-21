@@ -5,13 +5,19 @@
   includes compressed GIAB VCF decoding and real 17-column tab output. On one
   pinned i5-13500 performance core, DuckVEP also enforced the sorted-input
   contract inside the measured query and completed 4,048,342 records in a
-  three-run median 64.31 seconds, versus 164.38 seconds for the current FastVEP
+  three-run median 64.54 seconds, versus 164.38 seconds for the current FastVEP
   native build. These are explicitly different native output contracts, not an
   engine-only speedup claim. The report separately controls FastVEP Rayon
-  threads, records its 2.81-fold
-  six-core speedup and 289% aggregate CPU use, retains output digests, and
-  compares both engines with the same executable VEP 116 HGVS oracle instead
-  of treating speed as evidence of semantic parity
+  threads and DuckDB task threads. At four pinned physical performance cores,
+  DuckVEP completes the same workload in a three-run median 32.06 seconds
+  versus FastVEP's 68.09-second observation, a measured 2.12-fold
+  same-core-count wall-time advantage. DuckVEP scales 2.01-fold from one to
+  four threads at 251% median aggregate CPU use; measured process RSS rises
+  only from 5.47 to 5.57 GiB, which rules out a fourfold total-RSS increase but
+  is not per-allocation attribution. The report also records FastVEP's
+  2.81-fold six-core speedup and 289% aggregate CPU use, retains output
+  digests, and compares both engines with the same executable VEP 116 HGVS
+  oracle instead of treating speed as evidence of semantic parity
 - reset worker-local point and normalized-span exon ranks before reusing a workspace
   after a non-monotone prepared-event vector. A later variant can skip a transcript
   after an earlier forward jump, leaving that transcript's rank ahead even when the

@@ -75,6 +75,18 @@ timings <- do.call(rbind, list(
     "DuckVEP", 1L, 3L
   ),
   read_gnu_time(
+    file.path(data_dir, "duckvep_giab_threads4.time"),
+    "DuckVEP", 4L, 1L
+  ),
+  read_gnu_time(
+    file.path(data_dir, "duckvep_giab_threads4_run2.time"),
+    "DuckVEP", 4L, 2L
+  ),
+  read_gnu_time(
+    file.path(data_dir, "duckvep_giab_threads4_run3.time"),
+    "DuckVEP", 4L, 3L
+  ),
+  read_gnu_time(
     file.path(data_dir, "fastvep_giab_threads1.time"),
     "FastVEP", 1L, 1L
   ),
@@ -99,6 +111,60 @@ timings <- do.call(rbind, list(
     "FastVEP", 6L, 1L
   )
 ))
+
+profile <- jsonlite::read_json(file.path(
+  data_dir,
+  "duckvep_giab_threads4_profile.json"
+), simplifyVector = FALSE)
+profile_rows <- function(node) {
+  own <- NULL
+  if (!is.null(node$operator_name)) {
+    detail <- ""
+    if (!is.null(node$extra_info$Conditions)) {
+      detail <- paste(unlist(node$extra_info$Conditions), collapse = "; ")
+    } else if (!is.null(node$extra_info$Function)) {
+      detail <- paste(unlist(node$extra_info$Function), collapse = "; ")
+    }
+    own <- data.frame(
+      operator = node$operator_name,
+      local_cpu_seconds = as.numeric(node$operator_timing),
+      rows = as.numeric(node$operator_cardinality),
+      detail = detail,
+      stringsAsFactors = FALSE
+    )
+  }
+  children <- lapply(node$children, profile_rows)
+  do.call(rbind, c(list(own), children))
+}
+profile_operators <- profile_rows(profile)
+profile_operators <- profile_operators[
+  order(profile_operators$local_cpu_seconds, decreasing = TRUE),
+]
+profile_top <- head(profile_operators, 6L)
+profile_top$stage <- profile_top$operator
+profile_top$stage[
+  profile_top$operator == "HASH_JOIN" &
+    grepl("transcript_index", profile_top$detail, fixed = TRUE)
+] <- "transcript-label hash join"
+profile_top$stage[profile_top$operator == "COPY_TO_FILE"] <- "TSV COPY"
+profile_top$stage[profile_top$operator == "UNNEST"] <-
+  "annotation-list expansion / UNNEST"
+profile_top$stage[
+  profile_top$operator == "PROJECTION" &
+    profile_top$local_cpu_seconds > 7
+] <- "17-field text projection"
+profile_top$stage[profile_top$operator == "READ_BCF"] <-
+  "sequential read_bcf scan"
+profile_top$`aggregate CPU seconds` <- round(
+  profile_top$local_cpu_seconds, 2
+)
+profile_top$`output rows` <- format(
+  profile_top$rows, big.mark = ",", scientific = FALSE
+)
+profile_top <- profile_top[, c(
+  "stage", "aggregate CPU seconds", "output rows"
+)]
+profile_average_cores <- profile$cpu_time / profile$latency
 
 output_observations <- read.csv(
   file.path(data_dir, "output_observations.csv"),
@@ -180,6 +246,35 @@ duck_accepted_rate_text <- format(
   round(duckvep_supported_alt_alleles / duck_one$median_seconds),
   big.mark = ","
 )
+
+four_core_runs <- timings[timings$threads == 4L, ]
+four_core_summary <- do.call(rbind, lapply(
+  split(four_core_runs, four_core_runs$engine),
+  function(x) {
+    data.frame(
+      engine = x$engine[[1L]],
+      runs = nrow(x),
+      median_seconds = median(x$elapsed_seconds),
+      minimum_seconds = min(x$elapsed_seconds),
+      maximum_seconds = max(x$elapsed_seconds),
+      median_cpu_percent = median(x$cpu_percent),
+      maximum_rss_kib = max(x$maximum_rss_kib),
+      stringsAsFactors = FALSE
+    )
+  }
+))
+fast_four <- four_core_summary[four_core_summary$engine == "FastVEP", ]
+duck_four <- four_core_summary[four_core_summary$engine == "DuckVEP", ]
+stopifnot(nrow(fast_four) == 1L, nrow(duck_four) == 1L)
+four_core_ratio_text <- sprintf(
+  "%.2f", fast_four$median_seconds / duck_four$median_seconds
+)
+duck_four_speedup_text <- sprintf(
+  "%.2f", duck_one$median_seconds / duck_four$median_seconds
+)
+duck_four_efficiency_text <- sprintf(
+  "%.1f", 100 * duck_one$median_seconds / duck_four$median_seconds / 4
+)
 ```
 
 Status: current measured comparison of DuckVEP and FastVEP on the complete GIAB
@@ -243,6 +338,87 @@ alleles at `r duck_accepted_rate_text` accepted alleles/s; 512 symbolic or
 otherwise non-literal ALT alleles remain outside this particular small-allele
 projection rather than disappearing from the shared source denominator.
 
+## Four-core comparison
+
+The four-core comparison pins both processes to physical performance cores
+2, 4, 6, and 8. DuckVEP uses four DuckDB task threads while retaining
+`decompression_threads := 0`; FastVEP uses four Rayon workers. DuckVEP has
+three observations, while the FastVEP scaling point has one and therefore no
+dispersion estimate.
+
+```{r four-core-table}
+four_core <- four_core_summary
+four_core$source_alt_alleles_per_second <- round(
+  source_alt_alleles / four_core$median_seconds
+)
+four_core$output_rows <- as.numeric(receipts$row_count[match(
+  tolower(four_core$engine),
+  receipts$tool
+)])
+four_core$output_rows_per_second <- round(
+  four_core$output_rows / four_core$median_seconds
+)
+four_core$maximum_rss_gib <- round(four_core$maximum_rss_kib / 1024^2, 2)
+four_core <- four_core[, c(
+  "engine", "runs", "median_seconds", "minimum_seconds", "maximum_seconds",
+  "source_alt_alleles_per_second", "output_rows_per_second",
+  "median_cpu_percent", "maximum_rss_gib"
+)]
+names(four_core) <- c(
+  "engine", "runs", "median seconds", "minimum seconds", "maximum seconds",
+  "source ALT alleles/s", "output rows/s", "median CPU %", "maximum RSS GiB"
+)
+knitr::kable(four_core, row.names = FALSE)
+```
+
+DuckVEP's four-thread median is **`r sprintf('%.2f', duck_four$median_seconds)`
+seconds**, versus **`r sprintf('%.2f', fast_four$median_seconds)` seconds** for
+FastVEP. The observed same-core-count wall-time ratio is therefore
+**`r four_core_ratio_text`** in DuckVEP's favor. DuckVEP delivers a
+`r duck_four_speedup_text`-fold speedup over its one-thread median, or
+`r duck_four_efficiency_text`% elapsed-time parallel efficiency, and reaches
+only `r round(duck_four$median_cpu_percent)`% median aggregate CPU use. The
+measured pipeline therefore remains limited by serial or partially parallel
+reader, sort, coordination, or writer work rather than saturating four cores
+with consequence computation.
+
+The implementation contract shares the immutable resident model across DuckDB
+workers while giving each worker its own mutable annotation workspace. Measured
+maximum process RSS was
+`r sprintf('%.2f', duck_four$maximum_rss_kib / 1024^2)` GiB at four threads,
+versus `r sprintf('%.2f', duck_one$maximum_rss_kib / 1024^2)` GiB at one. That
+process-level observation rules out a fourfold increase in total RSS; it does
+not attribute individual allocations to the model or worker workspaces.
+
+### Four-core operator profile
+
+An additional diagnostic run used the same four-core command and real output
+contract with DuckDB JSON profiling enabled. It recorded
+`r sprintf('%.2f', profile$latency)` seconds of query latency and
+`r sprintf('%.2f', profile$cpu_time)` aggregate CPU-seconds, or
+`r sprintf('%.2f', profile_average_cores)` cores averaged across the query.
+The six largest local operator CPU totals were:
+
+```{r four-core-profile}
+knitr::kable(profile_top, row.names = FALSE)
+```
+
+These are aggregate operator CPU times, not additive wall-clock phases, and do
+not by themselves prove which operator serialized a pipeline. They do show
+that this query has no chromosome-per-worker scheduler: DuckDB schedules
+vector-sized work around a global sort. The largest measured costs are the
+47.63-million-row transcript-label join, TSV writer, annotation-list expansion,
+and final string projection. The one-handle sequential VCF scan is visible but
+smaller. The observed `r round(duck_four$median_cpu_percent)`% median process
+utilization is therefore not a
+largest-chromosome tail, and the end-to-end scaling ceiling is not attributable
+to the consequence kernel alone.
+
+If explicit genomic parallelism is introduced later, dynamically scheduled
+coordinate tiles are preferable to one static task per chromosome. Static
+chromosome tasks would create exactly the chromosome-size and transcript-density
+tail that this current query does not have.
+
 ## FastVEP scaling
 
 FastVEP was compiled with `RUSTFLAGS='-C target-cpu=native'`; its release
@@ -301,15 +477,14 @@ the scaling table has no repeated-run dispersion estimate.
 
 The six-core FastVEP wall time is `r six_vs_duck_seconds_text` seconds shorter than the one-core
 DuckVEP wall time. That is useful capacity information, but it is not a
-same-core-count comparison; this report has no end-to-end four- or six-core
-DuckVEP row.
+same-core-count comparison; this report has no end-to-end six-core DuckVEP
+row.
 
 DuckDB was fixed at `PRAGMA threads=1` and the complete R worker was pinned to
-CPU 2 for the one-core comparison. This report does not mix DuckDB task
-parallelism, htslib decompression threads, or operating-system placement into
-that number. A future DuckVEP scaling row should use explicit coordinate
-partitions with one immutable shared model and bounded per-partition workspaces;
-it should not relabel decompression threads as annotation threads.
+CPU 2 for the one-core comparison. The four-core DuckVEP row changes only
+`PRAGMA threads` and the affinity set. Neither row uses htslib decompression
+threads, so the report does not relabel decompression work as annotation
+parallelism.
 
 ## What was timed
 
@@ -359,9 +534,12 @@ not fabricate FastVEP-only presentation values such as codon strings, flags,
 or existing-variation labels. The SHA-256 value is an observed file receipt,
 not an assertion that the two engines write identical text. FastVEP produced
 the same bytes in all six checked thread/repeat observations. DuckVEP produced
-two byte orders across four observations because the final relational join has
-no output `ORDER BY`; a same-parser order-independent fingerprint over all
-47,629,345 rows was identical in the two runs checked for multiset stability.
+multiple byte orders across
+`r receipts$observed_runs[receipts$tool == 'duckvep']` observations because
+the final relational join has no output `ORDER BY`; a same-parser
+order-independent fingerprint over all 47,629,345 rows was identical in all
+`r receipts$repeated_multiset_runs[receipts$tool == 'duckvep']` runs checked
+for multiset stability.
 Its checked fingerprint is XOR `r receipts$xor_hash[receipts$tool == 'duckvep']`,
 low-32-bit sum `r receipts$low32_sum[receipts$tool == 'duckvep']`, and
 high-32-bit sum `r receipts$high32_sum[receipts$tool == 'duckvep']`.
@@ -429,10 +607,20 @@ end-to-end workload does not become the only performance authority.
 ## Revisions and input receipts
 
 ```{r receipt-table}
+worker_sha256 <- strsplit(system2(
+  "sha256sum",
+  file.path(root, "benchmarks", "benchmark_duckvep_fastvep_worker.R"),
+  stdout = TRUE
+), " +")[[1L]][[1L]]
+stopifnot(identical(
+  worker_sha256,
+  "4af9f71500e4ffd081c6853ee96c7e9a298e9ed3bd52d32e3e9dfdcc9f0497e2"
+))
 receipt_table <- data.frame(
   item = c(
     "DuckHTS measured checkout",
     "DuckHTS extension binary",
+    "DuckVEP benchmark worker",
     "FastVEP checkout",
     "FastVEP native binary",
     "FastVEP rebuilt transcript cache",
@@ -447,6 +635,7 @@ receipt_table <- data.frame(
   receipt = c(
     "2a1c37cf2938e8226a078f19ca429ffeff84de73",
     "53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b",
+    worker_sha256,
     "7038e7c17708e7d2226149e78e0bb297bcc6d1d6",
     "b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a",
     "00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962",
@@ -465,9 +654,11 @@ knitr::kable(receipt_table, row.names = FALSE)
 
 The extension binary was clean-built at `c977cba`; there are no extension,
 public-catalog, or build-wiring changes from that revision through the measured
-`2a1c37c` checkout. FastVEP was updated to the latest upstream checkout before
-the run and its transcript cache was rebuilt from the receipt-pinned Ensembl
-116 GFF3 and FASTA rather than reusing an older cache.
+`2a1c37c` checkout. The separate worker SHA-256 identifies the exact benchmark
+harness used for every retained DuckVEP timing; the report aborts if its checked
+worker differs. FastVEP was updated to the latest upstream checkout before the
+run and its transcript cache was rebuilt from the receipt-pinned Ensembl 116
+GFF3 and FASTA rather than reusing an older cache.
 
 The host is an Intel Core i5-13500 with six physical performance cores. CPU 2
 is the single-core lane; FastVEP uses CPU sets `2`, `2,4`, `2,4,6,8`, and
@@ -480,7 +671,8 @@ cache and do not claim cold-storage or `fsync` latency.
 The exact measured command lines are retained verbatim in the checked-in GNU
 time files. The DuckVEP worker is
 `benchmarks/benchmark_duckvep_fastvep_worker.R`; it owns the SQL and exposes
-`--threads`, `--distance`, and `--memory-limit`. FastVEP was built with:
+`--threads`, `--distance`, `--memory-limit`, and optional `--profile-json`.
+FastVEP was built with:
 
 ```{bash, eval=FALSE, echo=TRUE}
 env RUSTFLAGS='-C target-cpu=native' cargo build \
@@ -539,6 +731,34 @@ Rscript benchmarks/benchmark_duckvep_fastvep_receipt.R \
   --threads 1 --run 1 --skip-lines 1 \
   --timing-file benchmarks/data/duckvep_fastvep/fastvep_giab_threads1.time \
   --output /tmp/duckvep-fastvep-benchmark/fastvep_receipt_run1.csv
+```
+
+The four-core DuckVEP measurements change the affinity set and DuckDB task
+count without enabling htslib decompression workers. Run suffixes and timing
+destinations distinguish the three repetitions:
+
+```{bash, eval=FALSE, echo=TRUE}
+/usr/bin/time -v \
+  -o /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_run1.time \
+  taskset -c 2,4,6,8 \
+  Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
+  --extension build/release/duckhts.duckdb_extension \
+  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
+  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4.tab \
+  --threads 4 --distance 5000 --memory-limit 4GB
+
+taskset -c 2,4,6,8 \
+  Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
+  --extension build/release/duckhts.duckdb_extension \
+  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
+  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.tab \
+  --threads 4 --distance 5000 --memory-limit 4GB \
+  --profile-json /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json
+
+cp /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json \
+  benchmarks/data/duckvep_fastvep/duckvep_giab_threads4_profile.json
 ```
 
 The same receipt command is run before an output is replaced. Its per-run rows

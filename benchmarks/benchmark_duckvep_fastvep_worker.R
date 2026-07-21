@@ -29,6 +29,13 @@ op <- add_option(op, "--output", default = "")
 op <- add_option(op, "--threads", type = "integer", default = 1L)
 op <- add_option(op, "--distance", type = "integer", default = 5000L)
 op <- add_option(op, "--memory-limit", dest = "memory_limit", default = "4GB")
+op <- add_option(
+  op,
+  "--profile-json",
+  dest = "profile_json",
+  default = "",
+  help = "optional DuckDB JSON profile path for the measured COPY query"
+)
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
@@ -67,6 +74,15 @@ invisible(dbExecute(con, glue("LOAD {sql_q(extension)}")))
 invisible(dbExecute(con, glue("PRAGMA threads={opt$threads}")))
 invisible(dbExecute(con, glue("SET memory_limit = {sql_q(opt$memory_limit)}")))
 invisible(dbExecute(con, "SET preserve_insertion_order = false"))
+if (nzchar(opt$profile_json)) {
+  profile_json <- normalizePath(opt$profile_json, mustWork = FALSE)
+  dir.create(dirname(profile_json), recursive = TRUE, showWarnings = FALSE)
+  invisible(dbExecute(con, "PRAGMA enable_profiling = 'json'"))
+  invisible(dbExecute(
+    con,
+    glue("PRAGMA profiling_output = {sql_q(profile_json)}")
+  ))
+}
 invisible(dbExecute(
   con,
   glue("ATTACH {sql_q(model)} AS duckvep_bench_model (READ_ONLY)")
@@ -155,18 +171,14 @@ copy_query <- glue(
          AND regexp_full_match(a.alternate, '[ACGTNacgtn]+')
          AND upper(s.reference) <> upper(a.alternate)
      ),
-     ordered AS (
+     prepared AS (
        SELECT
-         row_number() OVER (
-           ORDER BY r.seq_region, a.position, a.record_index, a.alt_index
-         )::UBIGINT AS allele_index,
          a.record_index, a.alt_index, r.seq_region, a.chrom, a.position,
          a.variant_id, upper(a.reference) AS reference,
          upper(a.alternate) AS alternate
        FROM alleles a
        JOIN duckvep_bench_regions r
          ON r.name = regexp_replace(a.chrom, '^chr', '')
-       ORDER BY r.seq_region, a.position, a.record_index, a.alt_index
      ),
      annotated AS (
        SELECT
@@ -175,7 +187,11 @@ copy_query <- glue(
            'fastvep_comparison', v.seq_region, v.position,
            v.reference, v.alternate, {opt$distance}
          )) AS annotation
-       FROM ordered v
+       FROM (
+         SELECT *
+         FROM prepared
+         ORDER BY seq_region, position, record_index, alt_index
+       ) v
      )
      SELECT
        coalesce(
