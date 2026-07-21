@@ -1286,9 +1286,12 @@ fixture, uploaded terminal `chrDuck:250 CG>CC` minimizes to `G>C` at position 25
 `_var2transcript_slice_coords` first clamps the complete two-base feature to the terminal
 transcript base. Allele clipping then leaves an inserted `C`, which matches that terminal
 reference base and renders `c.*10dup`. The same geometry with a non-copy (`CG>CA`) remains
-absent. Rejecting the minimized event before retaining the overlapping complete feature
-loses this VEP state; admitting every outside minimized event would create false terminal
-annotations.
+absent. The complete feature must clamp to exactly that one terminal base: uploaded
+`chrDuck:249 ACG>ACC` retains two in-transcript bases before clipping and VEP leaves its
+resulting out-of-range insertion absent, even though the remaining `C` is a terminal copy.
+Rejecting the minimized event before retaining the overlapping complete feature loses the
+positive VEP state; admitting every outside minimized event or every terminal-copy suffix
+creates false terminal annotations.
 
 Source anchors: Ensembl Variation 116 `TranscriptVariationAllele::hgvs_transcript`,
 `TranscriptVariationAllele::_genomic_shift`, `hgvs_variant_notation`, and its duplication

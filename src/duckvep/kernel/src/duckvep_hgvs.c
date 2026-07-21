@@ -645,16 +645,20 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
             &last_transcript) != DUCKVEP_TRANSCRIPT_EDIT_OK) {
         size_t i;
         int duplicated = reference_length == 0u && alternate_length != 0u &&
-            ((strand > 0 && edit->event.feature_end1 >
-                 transcripts->end1[edit->tx_idx]) ||
-             (strand < 0 && edit->event.feature_start1 <
-                 transcripts->start1[edit->tx_idx]));
+            ((strand > 0 && edit->event.feature_start1 ==
+                 transcripts->end1[edit->tx_idx] &&
+              edit->event.feature_end1 > transcripts->end1[edit->tx_idx]) ||
+             (strand < 0 && edit->event.feature_end1 ==
+                 transcripts->start1[edit->tx_idx] &&
+              edit->event.feature_start1 < transcripts->start1[edit->tx_idx]));
 
         /* After transcript-slice clamping and allele clipping, an insertion
          * may sit just beyond the transcript 3-prime endpoint. VEP still
-         * names it when the remaining ALT is a copy of the terminal
-         * transcript sequence (for example terminal CG>CC -> c.*10dup), but
-         * returns undef for a non-copy at the same uploaded coordinates. */
+         * names it when the clamped complete feature is exactly the terminal
+         * transcript base and the remaining ALT copies terminal sequence (for
+         * example terminal CG>CC -> c.*10dup). A longer in-transcript prefix
+         * such as ACG>ACC clips to an out-of-range insertion and remains
+         * absent even though its final ALT byte is also a terminal copy. */
         source_low1 = source_high1 = 0u;
         if (duplicated && strand > 0) {
             source_high1 = transcripts->end1[edit->tx_idx];
