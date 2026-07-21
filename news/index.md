@@ -1,7 +1,141 @@
 # Changelog
 
-## Rduckhts 1.4.0.9000-0.1.0 (development)
+## Rduckhts 1.5.0-0.1.0
 
+- make the bundled `duckvep_annotate(...)` relation reject conflicting
+  supported symbolic ALT and explicit structural-type values, and treat
+  explicit `hgvs := NULL` as the documented `FALSE` default instead of
+  filtering small variants from both annotation lanes
+- bundle the unified
+  `duckvep_annotate(events_table, model_name, hgvs := false, ...)`
+  relation and generated `duckvep_so_terms()` lookup. DBI callers can
+  keep one narrow mixed small/SV/BND event table, request
+  independent-event HGVS without changing schemas, decode consequence
+  masks after filtering, and join selected rows back by event identity.
+  Add a bundled public-surface tinytest and a deterministic
+  model-to-annotation example in the rendered package README
+- bundle `duckhts_contig_key(...)` for DBI workflows that need a
+  conservative join key across `chr`-prefixed VCF/dbSNP contigs and
+  Ensembl-style region names. The helper normalizes mitochondrial
+  `M`/`MT` to `MT` and uppercase `X`/`Y` but deliberately does not guess
+  numeric sex chromosomes, accessions, patches, or alternate loci
+- reset bundled DuckVEP exon cursors before a worker workspace is reused
+  after a non-monotone normalized-event vector, preventing a transcript
+  skipped after a forward jump from carrying an ahead exon rank into the
+  next DBI vector
+- fix bundled cumulative HGVS output for strings larger than the native
+  renderer’s initial scratch capacity. The bundled adapter retries with
+  the reported exact capacity instead of exposing truncated text,
+  retains a failed UTF-8 assignment as NULL, and rejects an invalid
+  internal text slice. A DBI regression exercises a transcript HGVS
+  string longer than 1,400 bytes and an independently rendered protein
+  HGVS string beyond the initial capacity. Pinned one-core full-corpus
+  DBI-path benchmarks at the fixed revision process 4,438,467 ClinVar
+  literal alleles at 391,848/s compact, 174,984/s rich, and 90,594/s
+  with cumulative HGVS; the corresponding 4,095,611-allele GIAB HG002
+  rates are 921,190/s, 447,266/s, and 244,222/s. Cumulative annotation
+  preserves resident regulatory/motif rows from the same sweep with NULL
+  HGVS fields; bundled DBI coverage prevents production callers from
+  needing a second scan. With all 1,383,580 core
+  RegulatoryFeature/MotifFeature intervals loaded, the full-corpus rates
+  are 387,944/s compact, 173,439/s rich, and 92,806/s HGVS for ClinVar,
+  and 1,121,164/s, 468,230/s, and 249,004/s for GIAB
+- speed up the bundled DuckVEP consequence and cumulative HGVS paths by
+  reusing one classification pass and compact prepared facts. Bundled
+  annotation now preserves deterministic `annotation_index` values
+  across DuckDB vector and disjoint ordered partition starts. The
+  resident model remains immutable and shared: a pinned four-core dense
+  GRCh38 run at the default 5,000-base transcript distance produced the
+  same 26,518,787-row multiset fingerprint as one core and improved from
+  245,535 to 818,191 input alleles/s. GNU `time -v` observed about 7.0
+  MiB additional process peak RSS and no model-sized step; this is a
+  process observation, not allocation attribution. Tests also cover
+  zero-, 10,000-, and 50,000-base transcript distances so the bundled
+  behavior is not specialized to the default distance
+- bundle `duckvep_annotate_hgvs(...)` for DBI workflows that need
+  compact independent-event consequence rows together with transcript
+  `c.`/`n.` and default-VEP protein `p.` HGVS suffixes, the applied
+  3-prime shift, and explicit supported/unresolved/not-applicable
+  states. Bundled `duckvep_model_load(...)` can bind an existing indexed
+  reference FASTA through an exact ordinal/name/length relation; it does
+  not create an index and retains open read descriptors for the
+  validated FASTA, `.fai`, and optional `.gzi`. Linux workers reopen
+  those descriptors, Windows keeps a resolved source under deny-write
+  sharing, and other POSIX workers use independent resolved-source
+  handles with identity checks rather than sharing `/dev/fd` seek state.
+  Annotation workers own separate faidx handles, reuse contained sorted
+  reference windows, and reject detectable in-place source mutation
+  around a fetch. Explicit NULL optional model queries and reference
+  parameters behave like omission. Bundled tests cover reference-backed
+  substitution and insertion rendering through the public DBI surface.
+  Transcript rows admitted only by an upstream/downstream distance
+  report HGVS `not_applicable`, matching VEP’s absent HGVSc, rather than
+  an unresolved projection. Literal exonic SNP HGVSc also retains VEP
+  116’s phase-aware CDS-start fast path without shifting intronic SNP,
+  indel, or multi-base feature coordinates. Protein HGVS reports
+  `not_applicable` when the VEP feature has a leading or trailing
+  genomic-to-peptide mapper Gap. Reference failures use VEP’s cached
+  complete-feature coding predicate, so a 5-prime-UTR insertion that
+  could shift into CDS remains protein-unresolved rather than falsely
+  not applicable. A bundled model without FASTA now reports
+  `missing_reference` when retained uploaded REF padding or an anchor
+  cannot be checked by the prepared CDS, instead of validating only the
+  minimized differing REF. The bundled reference path keeps VEP’s exact
+  +/-1000 shift slice separate from complete uploaded-REF validation and
+  adjacent duplication-source lookup, so retained padding does not
+  change the shift and copied sources longer than 1000 bases still
+  render as `dup`. Endpoint-overlapping transcript edits retain VEP’s
+  clipped transcript-slice coordinates, and protein replay reproduces
+  VEP’s one/two-base alternate-CDS trimming assignment bug before
+  appending the 3-prime UTR. Bundled HGVS execution now reuses the
+  kernel-prepared model, derives each reference first stop once, defers
+  CDS projection until protein HGVS needs it, scans a virtual
+  single-edit CDS instead of rebuilding the complete alternate sequence,
+  and renders through a reusable worker buffer. The bundled consequence
+  sidecar shortcut remains fail-closed for length-changing splice
+  overlaps: without a positive frameshift fact, those edits run the
+  complete peptide delta so their VEP-compatible frameshift HGVSp is
+  retained. A pinned one-thread mixed-coding run generates 5,756,720
+  transcript-HGVS rows from 200,000 alleles in 4.579 seconds, down from
+  32.106 seconds for the previous bundled path; the matched bundled rich
+  lane takes 2.067 seconds
+- bundled DuckVEP now gives ordinary long literal deletions the same
+  complete- transcript `transcript_ablation` semantics as symbolic
+  deletions. Equal-length containing alleles also preserve VEP 116’s
+  otherwise-empty endpoint UTR terms without leaking an internal
+  unknown-coding fact into `coding_sequence_variant`; bundled DBI tests
+  pin both public results
+- speed up bundled paired-BND annotation by preserving the already
+  sorted transcript stream and linearly merging only the much smaller
+  resident regulation-feature stream; transcript-only models no longer
+  sort the full expanded result before returning one list per input
+  event
+- bundled paired-BND annotation now keeps VEP’s fixed 5000-base
+  overlap-allele admission independent of a caller-selected zero
+  transcript window: an admitted local allele whose directional
+  predicate is disabled contributes default `intergenic_variant` beside
+  mate-derived `feature_truncation`. Add bundled DBI regressions at zero
+  and wider caller distances
+- bundled DuckVEP exact structural annotation now accepts
+  `STR`/`TANDEM_REPEAT`/`CNV:TR` spans and preserves structural
+  tandem-repeat identity while matching VEP 116’s tandem-duplication
+  consequence predicates. Bundled paired-BND annotation now returns
+  RegulatoryFeature and MotifFeature rows found at either endpoint, once
+  per feature, in addition to transcript consequences; local exact hits
+  keep the base object term, mate-only exact hits use VEP’s generic
+  HIGH-impact `feature_truncation`, and a shifted local point on the
+  same contig but outside and within 5000 bases adds
+  `intergenic_variant` to that mate-discovered object. The local base
+  term wins when both points hit one object exactly, and mixed
+  transcript/regulation batches preserve one result list per input
+  event. A caller-selected transcript distance above 5000 does not widen
+  VEP’s separate fixed structural-breakend allele-admission cap. Add DBI
+  tinytests for these surfaces and update generated function
+  documentation Structural adapters consume nominal `POS`/`END`
+  geometry, matching VEP 116’s registered consequence predicates;
+  callers retain `CIPOS`/`CIEND`, inserted sequence, and raw repeat
+  metadata beside the result for provenance, later HGVS, and round-trip
+  rendering
 - fix bundled projected `read_fastq(...)` scans so FASTQ headers longer
   than the BAM query-name limit remain usable when `NAME` / `PAIR_ID`
   are not requested and no paired-file comparison needs them;
