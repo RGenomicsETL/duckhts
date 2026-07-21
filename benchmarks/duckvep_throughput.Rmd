@@ -436,7 +436,20 @@ full_runs <- history[
   ,
   drop = FALSE
 ]
-full_revision <- nearest_tested_ancestor(full_runs$source_revision)
+full_revision_groups <- split(full_runs, full_runs$source_revision)
+full_complete_revisions <- names(Filter(
+  function(rows) {
+    nrow(rows) == 6L &&
+      setequal(rows$workload, names(full_workload_labels)) &&
+      all(vapply(
+        split(rows$output_mode, rows$workload),
+        function(x) setequal(x, c("compact", "rich", "hgvs")),
+        logical(1L)
+      ))
+  },
+  full_revision_groups
+))
+full_revision <- nearest_tested_ancestor(full_complete_revisions)
 full_current <- full_runs[
   full_runs$source_revision == full_revision,
   ,
