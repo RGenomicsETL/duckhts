@@ -1244,6 +1244,38 @@ Source anchors: the separate VEP 116 consequence and `hgvs_protein` call paths,
 `duckvep_sequence_delta_apply_consequence_flags` /
 `duckvep_sequence_delta_consequence_flags_complete_for_hgvs`.
 
+## Late protein-stop search ignores the transcript codon table
+
+VEP 116 does not use one translation authority throughout protein HGVS. Its ordinary
+transcript consequence and peptide paths honor the transcript's codon table, including
+vertebrate mitochondrial table 2. The late termination search used to append `fsTerN` or
+`extTerN` does not: `_stop_loss_extra_AA()` rebuilds an alternate `Bio::PrimarySeq` and
+calls `$alt_cds->translate()` without a codon-table argument, so BioPerl silently uses
+standard table 1. On mitochondrial transcripts, an alternate `TGA` is consequently a
+stop for the late HGVS search even though it is Trp in the peptide that established the
+frameshift consequence. DuckVEP reproduces that inconsistency only in the late stop
+search; all ordinary mitochondrial coding consequences remain table-2 translations.
+
+The same formatter exposes a precedence state that consequence names alone do not make
+obvious. `_get_hgvs_protein_format()` tests cached `stop_lost` combined with peptide type
+`del` or `>` before it reaches its `fs` branch. A frame-changing terminal edit may
+therefore retain both `frameshift_variant` and `stop_lost` as consequences while its
+protein string is a deletion-extension such as `p.Ter227delextTer?`, not a frameshift or
+plain deletion.
+
+The complete 2026-07-06 ClinVar mitochondrial shard supplies 67,828 transcript pairs.
+Before this rule was isolated, all consequences and HGVSc strings were exact but 25
+HGVSp strings differed: 24 late stop distances followed the transcript mitochondrial
+table instead of VEP's implicit standard table, and one combined frameshift/stop-loss
+deletion missed the formatter precedence. Fixed C witnesses distinguish TGA under tables
+1 and 2 and pin the combined deletion-extension state; the executable full-shard
+differential remains the acceptance authority.
+
+Source anchors: Ensembl Variation 116
+`TranscriptVariationAllele::_get_hgvs_protein_format`,
+`TranscriptVariationAllele::_stop_loss_extra_AA`, and the argument-free
+`Bio::PrimarySeq::translate()` call in that late path.
+
 ## DNA duplication projects the copied source before requiring insertion flanks
 
 VEP decides whether an inserted sequence is a tandem duplication before it formats an

@@ -1,6 +1,15 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- make HGVS differentials unconditionally fail closed: the corpus harness no longer
+  accepts a flag that converts unresolved, mismatched, missing, or extra HGVS rows into a
+  successful run. Reproduce two VEP 116 protein-formatting states exposed by the complete
+  ClinVar mitochondrial shard: the late `fsTer`/`extTer` stop search uses BioPerl's
+  implicit standard codon table even when the transcript peptide uses mitochondrial table
+  2, and cached `stop_lost` plus a deletion-form peptide takes precedence over the later
+  frameshift formatter. Consequences and HGVSc were already exact for all 67,828
+  transcript pairs; the 25 initial HGVSp disagreements are retained as the discovery
+  witness pending the fixed executable rerun
 - close rare HGVS states found by a 100,000-random-allele executable VEP 116
   differential, rather than by the C property suite alone. Shifted in-frame
   start-loss insertions perform VEP's sequence-dependent peptide-level 3-prime

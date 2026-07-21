@@ -1792,6 +1792,7 @@ static void hgvs_protein_stop_distance(
     size_t edited_cds_length;
     size_t stop_position0;
     size_t reference_length;
+    duckvep_coding_context_t vep_context;
     int found;
 
     if (distance_out != NULL) *distance_out = 0u;
@@ -1801,11 +1802,18 @@ static void hgvs_protein_stop_distance(
         return;
     }
     edited_cds_length = hgvs_protein_vep_alt_cds_length(context);
+    /* VEP 116's _stop_loss_extra_AA() calls $alt_cds->translate() without
+     * passing the transcript's codon table. BioPerl therefore uses standard
+     * table 1 for this late stop search even when the ordinary peptide and
+     * consequence path used (for example) vertebrate mitochondrial table 2.
+     * Preserve that executable inconsistency only in this formatter query. */
+    vep_context = *context;
+    vep_context.codon_table = (uint8_t)DUCKVEP_CODON_TABLE_STANDARD;
     if (context->post_cds_complete == 0u ||
         (context->post_cds_length != 0u &&
          context->post_cds_bases == NULL) ||
         duckvep_coding_context_first_alt_stop(
-            context, edited_cds_length, context->post_cds_bases,
+            &vep_context, edited_cds_length, context->post_cds_bases,
             context->post_cds_length, &stop_position0, &found) !=
                 DUCKVEP_CODING_CONTEXT_OK ||
         !found) {
@@ -2294,6 +2302,17 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
             fact.ref_length = 1u;
             fact.reference_last = fact.reference_first;
             fact.start_lost_flanking = 1u;
+        } else if (delta->stop_lost &&
+                   fact.shape ==
+                       (uint8_t)DUCKVEP_HGVS_PROTEIN_DELETION) {
+            /* _get_hgvs_protein_format tests cached stop_lost plus a del/>
+             * peptide type before its later fs branch. A frame-changing edit
+             * that removes the terminal peptide is therefore rendered as a
+             * stop extension, not as an ordinary deletion. */
+            fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_EXTENSION;
+            hgvs_protein_stop_distance(
+                context, fact.first_position1, 0,
+                &fact.termination_distance, &fact.termination_known);
         }
         *out = fact;
         return DUCKVEP_HGVS_OK;

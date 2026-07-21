@@ -173,17 +173,6 @@ op <- add_option(
 )
 op <- add_option(
   op,
-  "--allow-hgvs-discordance",
-  dest = "allow_hgvs_discordance",
-  action = "store_true",
-  default = FALSE,
-  help = paste(
-    "write investigative HGVS artifacts without failing on unresolved,",
-    "mismatched, missing, or extra rows [default: fail closed]"
-  )
-)
-op <- add_option(
-  op,
   "--annotations-out",
   dest = "annotations_out",
   default = ""
@@ -3144,13 +3133,11 @@ rc <- system2("Rscript", c(report, "--annotations", opt$annotations_out))
 if (rc != 0L) {
   die("statistical report failed with exit status {rc}")
 }
-if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L &&
-    !isTRUE(opt$allow_hgvs_discordance)) {
+if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L) {
   die(glue(
     "HGVS differential found {hgvs_discordance_count} unresolved, ",
     "mismatch, missing, or extra comparisons; inspect {opt$hgvs_pairs_out} ",
-    "and {opt$hgvs_out}. Use --allow-hgvs-discordance only for an ",
-    "explicitly investigative run."
+    "and {opt$hgvs_out}."
   ))
 }
 

@@ -6735,6 +6735,68 @@ TEST hgvs_short_alternate_cds_reproduces_vep_trim_assignment(void) {
     PASS();
 }
 
+TEST hgvs_late_stop_search_reproduces_vep_standard_table_and_precedence(void) {
+    static const uint8_t mt_alt_cds[12] = {
+        'A','T','G', 'T','G','A', 'G','C','C', 'T','A','A'
+    };
+    static const uint8_t ref_peptide[2] = {'M', '*'};
+    static const uint8_t terminal_ref_cds[3] = {'T','A','A'};
+    static const uint8_t terminal_alt_cds[2] = {'T','A'};
+    static const uint8_t terminal_ref_peptide[1] = {'*'};
+    static const uint8_t empty_alt_peptide[1] = {0u};
+    duckvep_coding_context_t context;
+    duckvep_sequence_delta_t delta;
+    duckvep_hgvs_protein_fact_t fact;
+    char rendered[48];
+    size_t required = 0u;
+
+    /* Ordinary mitochondrial translation treats TGA as Trp. VEP's late HGVS
+     * termination search nevertheless uses BioPerl's default table 1, finds
+     * that TGA immediately, and reports one changed residue rather than three. */
+    memset(&context, 0, sizeof context);
+    memset(&fact, 0, sizeof fact);
+    context.alt_cds = mt_alt_cds;
+    context.alt_cds_len = sizeof mt_alt_cds;
+    context.ref_peptide = ref_peptide;
+    context.ref_peptide_len = sizeof ref_peptide;
+    context.codon_table =
+        (uint8_t)DUCKVEP_CODON_TABLE_VERT_MITO;
+    context.post_cds_complete = 1u;
+    fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT;
+    fact.first_position1 = 2u;
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_protein_frameshift_termination_replay(
+                  &context, &fact));
+    ASSERT(fact.termination_known);
+    ASSERT_EQ(1u, fact.termination_distance);
+
+    /* The formatter checks stop_lost+deletion before frameshift. A terminal
+     * peptide removed by a frame-changing edit is therefore a del-extension. */
+    memset(&context, 0, sizeof context);
+    memset(&delta, 0, sizeof delta);
+    context.ref_cds = terminal_ref_cds;
+    context.ref_cds_len = sizeof terminal_ref_cds;
+    context.alt_cds = terminal_alt_cds;
+    context.alt_cds_len = sizeof terminal_alt_cds;
+    context.ref_peptide = terminal_ref_peptide;
+    context.ref_peptide_len = sizeof terminal_ref_peptide;
+    context.alt_peptide = empty_alt_peptide;
+    context.alt_peptide_len = 0u;
+    context.codon_table = (uint8_t)DUCKVEP_CODON_TABLE_STANDARD;
+    context.post_cds_complete = 1u;
+    delta.valid = 1u;
+    delta.frameshift = 1u;
+    delta.stop_lost = 1u;
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_protein_fact_build(&context, &delta, &fact));
+    ASSERT_EQ(DUCKVEP_HGVS_PROTEIN_EXTENSION, fact.shape);
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_protein_render(
+                  &fact, 0, rendered, sizeof rendered, &required));
+    ASSERT_EQ(0, strcmp("p.Ter1delextTer?", rendered));
+    PASS();
+}
+
 TEST hgvs_genomic_search_interval_preserves_vep_insertion_geometry(void) {
     duckvep_event_t event;
     uint32_t start1 = 0u;
@@ -23798,6 +23860,7 @@ int main(int argc, char **argv) {
     RUN_TEST(hgvs_sidecar_requires_frameshift_proof_for_length_change);
     RUN_TEST(hgvs_protein_facts_render_core_vep_shapes);
     RUN_TEST(hgvs_short_alternate_cds_reproduces_vep_trim_assignment);
+    RUN_TEST(hgvs_late_stop_search_reproduces_vep_standard_table_and_precedence);
     RUN_TEST(hgvs_genomic_search_interval_preserves_vep_insertion_geometry);
     RUN_TEST(hgvs_uploaded_reference_validates_vcf_anchor_and_padding);
     RUN_TEST(hgvs_shift_stops_at_vep_1000_base_cap);

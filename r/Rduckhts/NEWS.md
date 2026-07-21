@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.0-0.1.0
+- make bundled mitochondrial HGVSp reproduce VEP 116's late termination search, which
+  uses the standard codon table even when ordinary transcript translation uses
+  mitochondrial table 2, and render a combined frame-changing terminal deletion plus
+  cached stop loss through VEP's deletion-extension precedence
 - bundle rare HGVS compatibility fixes found by a 100,000-random-allele
   differential against the VEP 116 executable. Shifted in-frame start-loss
   insertions perform VEP's sequence-dependent peptide-level 3-prime rotation;
