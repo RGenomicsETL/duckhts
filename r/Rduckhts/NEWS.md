@@ -5,8 +5,13 @@
   explicit DuckHTS audit text without losing the compact numeric fields.
   `rich := TRUE, hgvs := TRUE` returns those fields and independent-event HGVS
   from one fused native pass. Add DBI coverage for the public rich/HGVS schema
-  and expand the rendered root DuckVEP documentation; the package function
-  catalog is regenerated from the public SQL authority
+  and expand the rendered root DuckVEP documentation. On the checked complete
+  GIAB HG002 public-relation workload, the bundled compact, rich, HGVS, and
+  rich-plus-HGVS contracts process 964,354, 346,030, 238,325, and 180,495
+  alleles/s on one pinned core, or 3,192,214, 1,513,530, 858,619, and 637,846
+  alleles/s on four pinned cores, while emitting and checksum-validating
+  47,835,851 rows against the full regulation-enabled Ensembl model. The package
+  function catalog is regenerated from the public SQL authority
 - make the bundled `duckvep_annotate(...)` relation reject conflicting
   supported symbolic ALT and explicit structural-type values, and treat
   explicit `hgvs := NULL` as the documented `FALSE` default instead of

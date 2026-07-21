@@ -617,14 +617,19 @@ index without copying those resources into every resident transcript.
 
 #### Measured performance and FastVEP comparison
 
-On the complete GIAB HG002 v4.2.1 input (4,096,123 ALT alleles;
-47,629,345 annotation rows), the checked public relation benchmark at a
-5,000-base window records 1,012,262 alleles/s for compact consequence
-and 241,230 alleles/s with HGVS on one pinned physical core. Four pinned
-physical cores record 3,370,873 compact alleles/s and 857,361 HGVS
-alleles/s. Input staging and model load are outside this resident-engine
-measurement; every pass checksum-validates the full output denominator.
-The exact revision, hashes, RSS, core affinity, and workload are in
+On the complete GIAB HG002 v4.2.1 input, 4,095,611 model-addressable
+literal alleles staged from 4,096,123 ALT alleles emit 47,835,851
+annotation rows against the complete Ensembl 116 GRCh38 model, including
+all 1,383,580 resident regulatory and motif features. At a 5,000-base
+transcript window, the checked public relation records 964,354 compact,
+346,030 rich, 238,325 HGVS, and 180,495 fused rich-plus-HGVS alleles/s
+on one pinned physical core. Four pinned physical cores record
+3,192,214, 1,513,530, 858,619, and 637,846 alleles/s respectively. Input
+staging and model load are outside this resident-engine measurement;
+every pass checksum-validates all 47.84 million output rows, and a
+separate full-row fingerprint proves one-thread/four-thread equality for
+every output contract. The exact revision, hashes, core affinity, and
+workload are in
 [benchmarks/duckvep_throughput.md](benchmarks/duckvep_throughput.md).
 
 The separate end-to-end comparison includes VCF decoding, DuckVEP’s

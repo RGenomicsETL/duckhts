@@ -28,14 +28,15 @@
   dispatches to private native lanes, and returns one fixed compact schema with
   nullable HGVS fields. Add `duckvep_so_terms()` as the generated mask-decoding
   relation, public SQL/R regressions, and rendered root/package README examples
-- measure that public relation on all 4,095,611 model-addressable GIAB HG002
-  v4.2.1 literal alleles against the complete Ensembl 116 GRCh38 model. At the
-  checked `8da057b0` revision it emits 47,629,345 rows at 1,000,882 compact
-  alleles/s on one pinned core and 3,138,399/s on four pinned cores; cumulative
-  HGVS reaches 238,797 and 737,549 alleles/s respectively. Adjacent one-core
-  private-lane rows quantify the public validation/dispatch cost as 12.7% for
-  compact output and 3.8% for HGVS. See the rendered
-  `benchmarks/duckvep_throughput.md` evidence and denominators
+- measure all four public output contracts on all 4,095,611 model-addressable
+  GIAB HG002 v4.2.1 literal alleles against the complete Ensembl 116 GRCh38
+  model, including 1,383,580 regulatory/motif features. At checked revision
+  `6c640890` the relation emits 47,835,851 rows at 964,354 compact, 346,030 rich,
+  238,325 HGVS, and 180,495 fused rich-plus-HGVS alleles/s on one pinned core;
+  four pinned cores reach 3,192,214, 1,513,530, 858,619, and 637,846 alleles/s.
+  Five complete passes checksum the full output denominator and separate
+  full-row fingerprints prove one-thread/four-thread equality for every output
+  contract. See the rendered `benchmarks/duckvep_throughput.md` evidence
 - extend the rendered VariantKey/RegionKey supplementary-annotation benchmark with
   isolated peak-RSS measurements and real dense exact providers. Official AlphaMissense
   v2 GRCh38 (71,697,556 rows), a receipted REVEL v1.3 GRCh37 projection (77,966,138

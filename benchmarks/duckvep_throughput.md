@@ -4,12 +4,12 @@ DuckVEP sorted-stream throughput
 <!-- duckvep_throughput.md is generated from duckvep_throughput.Rmd. -->
 
 This benchmark drives the internal rich `_duckvep_annotate_small_rich`,
-numeric `_duckvep_annotate_small_compact`, or independent-event
-`_duckvep_annotate_small_hgvs` result through DuckDB’s stable extension
-API with nondecreasing sequence-region and position keys. It records
-candidate sweep, consequence classification, list materialization,
-`unnest`, and final aggregation together. Model loading and input
-staging are outside the timed pass.
+numeric `_duckvep_annotate_small_compact`, independent-event
+`_duckvep_annotate_small_hgvs`, or fused rich-plus-HGVS result through
+DuckDB’s stable extension API with nondecreasing sequence-region and
+position keys. It records candidate sweep, consequence classification,
+list materialization, `unnest`, and final aggregation together. Model
+loading and input staging are outside the timed pass.
 
 The checked-in one-transcript workload is a repeatable adapter floor.
 The final production-density workload uses the receipt-hashed Ensembl
@@ -141,6 +141,14 @@ insertion order; they remain only as historical measurements.
 | 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal                 | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       3.592 |          4.446 |       6.477 |              921190 |         1085.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 10,712,853             |
 | 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal                 | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       9.147 |          9.157 |       9.244 |              447266 |         2235.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 5,201,414              |
 | 2026-07-21 | 33a15026 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal                 | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |      16.701 |         16.770 |      17.858 |              244222 |         4094.6 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,840,152              |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       4.162 |          4.247 |       4.427 |              964354 |         1037.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 11,263,445             |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | compact     |       4 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       1.271 |          1.283 |       1.334 |             3192214 |          313.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 37,284,373             |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | rich        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       9.566 |         11.836 |      35.602 |              346030 |         2889.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 4,041,556              |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | rich        |       4 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       2.693 |          2.706 |       2.759 |             1513530 |          660.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 17,677,698             |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |      17.117 |         17.185 |      17.346 |              238325 |         4196.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,783,582              |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | hgvs        |       4 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       4.725 |          4.770 |       4.884 |              858619 |         1164.7 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 10,028,480             |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | rich_hgvs   |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |      22.609 |         22.691 |      22.890 |              180495 |         5540.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,108,142              |
+| 2026-07-21 | 6c640890 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | rich_hgvs   |       4 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       6.228 |          6.421 |       6.447 |              637846 |         1567.8 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 7,449,907              |
 | 2026-07-21 | 8da057b0 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal                 | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       3.556 |          3.573 |       3.585 |             1146267 |          872.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 13,330,351             |
 | 2026-07-21 | 8da057b0 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal                 | hgvs        |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |      16.486 |         16.505 |      16.565 |              248144 |         4029.9 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,885,752              |
 | 2026-07-21 | 8da057b0 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | compact     |       1 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 0                   | 47,629,345     |      5 |       4.072 |          4.092 |       4.268 |             1000882 |          999.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 11,639,625             |
@@ -253,27 +261,33 @@ and fingerprint before it can be called an improvement.
 
 ## Public relation API cost and scaling
 
-| revision | api                 | output  | threads | input_alleles | output_rows | median_seconds | alleles_per_second | output_rows_per_second | speedup_vs_one_core_native |
-|:---------|:--------------------|:--------|--------:|:--------------|:------------|---------------:|:-------------------|:-----------------------|---------------------------:|
-| c6b532b4 | private native lane | compact |       1 | 4,095,611     | 47,629,345  |          3.549 | 1,154,018          | 13,420,497             |                       1.00 |
-| c6b532b4 | public relation     | compact |       1 | 4,095,611     | 47,629,345  |          4.046 | 1,012,262          | 11,771,959             |                       0.88 |
-| c6b532b4 | public relation     | compact |       4 | 4,095,611     | 47,629,345  |          1.215 | 3,370,873          | 39,201,107             |                       2.92 |
-| c6b532b4 | private native lane | hgvs    |       1 | 4,095,611     | 47,629,345  |         16.291 | 251,403            | 2,923,660              |                       1.00 |
-| c6b532b4 | public relation     | hgvs    |       1 | 4,095,611     | 47,629,345  |         16.978 | 241,230            | 2,805,357              |                       0.96 |
-| c6b532b4 | public relation     | hgvs    |       4 | 4,095,611     | 47,629,345  |          4.777 | 857,360            | 9,970,556              |                       3.41 |
+| revision | output    | threads | input_alleles | output_rows | median_seconds | alleles_per_second | output_rows_per_second | scaling_vs_one_core | elapsed_vs_compact |
+|:---------|:----------|--------:|:--------------|:------------|---------------:|:-------------------|:-----------------------|--------------------:|-------------------:|
+| 6c640890 | compact   |       1 | 4,095,611     | 47,835,851  |          4.247 | 964,354            | 11,263,445             |                1.00 |               1.00 |
+| 6c640890 | compact   |       4 | 4,095,611     | 47,835,851  |          1.283 | 3,192,214          | 37,284,373             |                3.31 |               1.00 |
+| 6c640890 | rich      |       1 | 4,095,611     | 47,835,851  |         11.836 | 346,030            | 4,041,556              |                1.00 |               2.79 |
+| 6c640890 | rich      |       4 | 4,095,611     | 47,835,851  |          2.706 | 1,513,530          | 17,677,698             |                4.37 |               2.11 |
+| 6c640890 | hgvs      |       1 | 4,095,611     | 47,835,851  |         17.185 | 238,325            | 2,783,582              |                1.00 |               4.05 |
+| 6c640890 | hgvs      |       4 | 4,095,611     | 47,835,851  |          4.770 | 858,619            | 10,028,480             |                3.60 |               3.72 |
+| 6c640890 | rich_hgvs |       1 | 4,095,611     | 47,835,851  |         22.691 | 180,495            | 2,108,142              |                1.00 |               5.34 |
+| 6c640890 | rich_hgvs |       4 | 4,095,611     | 47,835,851  |          6.421 | 637,846            | 7,449,907              |                3.53 |               5.00 |
 
 This exact-revision comparison uses the complete Ensembl 116 GRCh38
-transcript model and all 4,095,611 model-addressable literal alleles
-from GIAB HG002 v4.2.1. Every run emits 47,629,345 rows at a 5,000-base
+model: 644,427 transcripts, 5,068,416 exon memberships, and all
+1,383,580 resident RegulatoryFeature and MotifFeature intervals. It
+annotates every one of the 4,095,611 model-addressable literal alleles
+staged from GIAB HG002 v4.2.1 and emits 47,835,851 rows at a 5,000-base
 transcript distance after a 100,000-allele warmup and five complete
 passes. One-thread runs are pinned to CPU 2; four-thread runs are
 restricted to CPUs 2, 4, 6, and 8. Input VCF decoding, coordinate
 sorting, canonical event-table staging, and model loading are outside
-the timed pass. The public rows time event validation and family
+the timed pass. Each public row times event validation and family
 dispatch through `duckvep_annotate(...)`, native consequence/HGVS work,
-fixed-schema row expansion, and checksum aggregation. The adjacent
-private rows quantify the public SQL layer without changing model,
-corpus, consequence semantics, or output denominator.
+fixed-schema row expansion, and checksum aggregation. An additional
+full-row fingerprint outside the timed passes proves
+one-thread/four-thread equality separately for each output contract.
+`elapsed_vs_compact` compares projections at the same thread count; it
+is not a comparison against a private kernel lane.
 
 ## Historical full-corpus transcript-only diagnostic
 
