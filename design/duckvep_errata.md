@@ -1253,8 +1253,11 @@ vertebrate mitochondrial table 2. The late termination search used to append `fs
 calls `$alt_cds->translate()` without a codon-table argument, so BioPerl silently uses
 standard table 1. On mitochondrial transcripts, an alternate `TGA` is consequently a
 stop for the late HGVS search even though it is Trp in the peptide that established the
-frameshift consequence. DuckVEP reproduces that inconsistency only in the late stop
-search; all ordinary mitochondrial coding consequences remain table-2 translations.
+frameshift consequence. The formatter searches that complete table-1 translation from
+its beginning. When the first such TGA lies before the affected residue, its computed
+distance is non-positive and VEP prints `Ter?`; the search must not reuse a first-stop
+shortcut proved under table 2. DuckVEP reproduces that inconsistency only in the late
+stop search; all ordinary mitochondrial coding consequences remain table-2 translations.
 
 The same formatter exposes a precedence state that consequence names alone do not make
 obvious. `_get_hgvs_protein_format()` tests cached `stop_lost` combined with peptide type

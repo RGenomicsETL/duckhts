@@ -1809,6 +1809,11 @@ static void hgvs_protein_stop_distance(
      * Preserve that executable inconsistency only in this formatter query. */
     vep_context = *context;
     vep_context.codon_table = (uint8_t)DUCKVEP_CODON_TABLE_STANDARD;
+    /* This shortcut was proved with context->codon_table. Reusing its first
+     * stop fact after switching tables can skip an earlier mitochondrial TGA
+     * that VEP's full table-1 translation sees before the edited codon. */
+    vep_context.ref_first_stop_known = 0u;
+    vep_context.ref_first_stop_position1 = 0u;
     if (context->post_cds_complete == 0u ||
         (context->post_cds_length != 0u &&
          context->post_cds_bases == NULL) ||

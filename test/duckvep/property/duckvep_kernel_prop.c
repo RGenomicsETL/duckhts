@@ -6739,6 +6739,11 @@ TEST hgvs_late_stop_search_reproduces_vep_standard_table_and_precedence(void) {
     static const uint8_t mt_alt_cds[12] = {
         'A','T','G', 'T','G','A', 'G','C','C', 'T','A','A'
     };
+    static const uint8_t mt_virtual_ref_cds[12] = {
+        'T','G','A', 'G','C','C', 'G','C','C', 'T','A','A'
+    };
+    static const uint8_t mt_virtual_ref_peptide[4] = {'W', 'A', 'A', '*'};
+    static const uint8_t virtual_alt_base[1] = {'A'};
     static const uint8_t ref_peptide[2] = {'M', '*'};
     static const uint8_t terminal_ref_cds[3] = {'T','A','A'};
     static const uint8_t terminal_alt_cds[2] = {'T','A'};
@@ -6769,6 +6774,36 @@ TEST hgvs_late_stop_search_reproduces_vep_standard_table_and_precedence(void) {
                   &context, &fact));
     ASSERT(fact.termination_known);
     ASSERT_EQ(1u, fact.termination_distance);
+
+    /* The virtual single-edit scanner normally starts at the edited codon
+     * after using a reference first-stop fact. That fact was established with
+     * table 2 and cannot hide the upstream TGA seen by VEP's table-1 replay. */
+    memset(&context, 0, sizeof context);
+    memset(&fact, 0, sizeof fact);
+    context.ref_cds = mt_virtual_ref_cds;
+    context.ref_cds_len = sizeof mt_virtual_ref_cds;
+    context.alt_cds_len = sizeof mt_virtual_ref_cds;
+    context.ref_peptide = mt_virtual_ref_peptide;
+    context.ref_peptide_len = sizeof mt_virtual_ref_peptide;
+    context.single_edit_alt = virtual_alt_base;
+    context.virtual_single_edit = 1u;
+    context.has_single_edit = 1u;
+    context.single_edit_cds_start = 7u;
+    context.single_edit_ref_len = 1u;
+    context.single_edit_alt_len = 1u;
+    context.transcript_strand = 1;
+    context.single_edit_variant_strand = 1;
+    context.codon_table = (uint8_t)DUCKVEP_CODON_TABLE_VERT_MITO;
+    context.ref_first_stop_known = 1u;
+    context.ref_first_stop_position1 = 4u;
+    context.post_cds_complete = 1u;
+    fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT;
+    fact.first_position1 = 3u;
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_protein_frameshift_termination_replay(
+                  &context, &fact));
+    ASSERT_FALSE(fact.termination_known);
+    ASSERT_EQ(0u, fact.termination_distance);
 
     /* The formatter checks stop_lost+deletion before frameshift. A terminal
      * peptide removed by a frame-changing edit is therefore a del-extension. */
