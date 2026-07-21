@@ -391,6 +391,8 @@ knitr::kable(full_table, row.names = FALSE)
 ```
 
 These are full prepared literal-allele relations, not annotation-density samples.
+They are retained historical diagnostics from before core regulation/motif loading;
+they are not the production comparison.
 The ClinVar 2026-07-06 source contains 4,439,617 records and 4,438,515 source
 ALTs; 4,438,467 literal, model-addressable alleles enter the benchmark
 (4,134,694 SNVs and 303,773 non-SNVs). The longest retained REF and ALT are
@@ -474,6 +476,52 @@ core_current <- core_current[order(
   match(core_current$workload, names(core_workload_labels)),
   match(core_current$output_mode, mode_order)
 ), , drop = FALSE]
+core_value <- function(workload, output_mode, column) {
+  value <- core_current[
+    core_current$workload == workload &
+      core_current$output_mode == output_mode,
+    column
+  ]
+  stopifnot(length(value) == 1L)
+  value[[1L]]
+}
+format_rate <- function(value) {
+  format(round(value), big.mark = ",", scientific = FALSE)
+}
+clinvar_core <- names(core_workload_labels)[[1L]]
+giab_core <- names(core_workload_labels)[[2L]]
+core_rates <- c(
+  clinvar_compact = format_rate(core_value(
+    clinvar_core, "compact", "variants_per_second"
+  )),
+  clinvar_rich = format_rate(core_value(
+    clinvar_core, "rich", "variants_per_second"
+  )),
+  clinvar_hgvs = format_rate(core_value(
+    clinvar_core, "hgvs", "variants_per_second"
+  )),
+  giab_compact = format_rate(core_value(
+    giab_core, "compact", "variants_per_second"
+  )),
+  giab_rich = format_rate(core_value(
+    giab_core, "rich", "variants_per_second"
+  )),
+  giab_hgvs = format_rate(core_value(
+    giab_core, "hgvs", "variants_per_second"
+  ))
+)
+core_hgvs_hours <- c(
+  clinvar = 700e6 / core_value(
+    clinvar_core, "hgvs", "variants_per_second"
+  ) / 3600,
+  giab = 700e6 / core_value(
+    giab_core, "hgvs", "variants_per_second"
+  ) / 3600
+)
+giab_core_compact_range <- c(
+  core_value(giab_core, "compact", "min_seconds"),
+  core_value(giab_core, "compact", "max_seconds")
+)
 core_compact_seconds <- setNames(
   core_current$median_seconds[core_current$output_mode == "compact"],
   core_current$workload[core_current$output_mode == "compact"]
@@ -551,10 +599,14 @@ separate DuckDB stages.
 
 The core model emits 126,930,027 rows for ClinVar and 47,835,851 for GIAB,
 including 196,320 and 206,506 regulation/motif rows respectively. The pinned
-single-core rates are 380,429 compact, 171,112 rich, and 91,184 cumulative-HGVS
-alleles/s for ClinVar; GIAB reaches 1,106,025, 460,958, and 244,631/s. At the
-measured HGVS rates, 700 million input alleles project to 2.13 or 0.79
-single-core hours before supplementary SQL joins.
+single-core rates are `r core_rates[["clinvar_compact"]]` compact,
+`r core_rates[["clinvar_rich"]]` rich, and
+`r core_rates[["clinvar_hgvs"]]` cumulative-HGVS alleles/s for ClinVar; GIAB
+reaches `r core_rates[["giab_compact"]]`, `r core_rates[["giab_rich"]]`, and
+`r core_rates[["giab_hgvs"]]`/s. At the measured HGVS rates, 700 million input
+alleles project to `r sprintf("%.2f", core_hgvs_hours[["clinvar"]])` or
+`r sprintf("%.2f", core_hgvs_hours[["giab"]])` single-core hours before
+supplementary SQL joins.
 
 Every row in the production-core table is tied to exact source revision
 `r core_revision`,
@@ -573,7 +625,9 @@ candidate sweep and leaves their transcript/protein HGVS fields NULL. The HGVS
 byte checksum is therefore unchanged while output cardinality includes every
 regulatory/motif row; SQL and R regressions pin that pass-through. The earlier
 transcript-only GIAB run ranged from 3.592 to 6.477 seconds across five passes,
-whereas this core-model run ranged from 3.686 to 3.721 seconds. The apparently
+whereas this core-model run ranged from
+`r sprintf("%.3f", giab_core_compact_range[[1L]])` to
+`r sprintf("%.3f", giab_core_compact_range[[2L]])` seconds. The apparently
 faster compact result is not attributed to loading more intervals; use the
 stable absolute core-model result rather than treating non-adjacent noisy runs
 as an optimization comparison.
