@@ -408,8 +408,8 @@ if (nzchar(opt$variants_database)) {
       )
     )
     if (nrow(dense_corpus_receipt) != 1L ||
-        dense_corpus_receipt$schema_version[[1L]] != 2L) {
-      die("dense_corpus_receipt must contain one schema-version-2 row")
+        !dense_corpus_receipt$schema_version[[1L]] %in% c(2L, 3L)) {
+      die("dense_corpus_receipt must contain one supported schema-version row")
     }
     corpus_receipt <- dense_corpus_receipt
     if (!nzchar(model_logical_sha256)) {
