@@ -1832,46 +1832,12 @@ duckvep_hgvs_protein_frameshift_termination_replay(
     }
     fact->termination_distance = 0u;
     fact->termination_known = 0u;
+    /* _get_hgvs_protein_format passes start - 1 to
+     * _stop_loss_extra_AA(), whose first statement rejects zero. */
+    if (fact->first_position1 == 1u) return DUCKVEP_HGVS_OK;
     hgvs_protein_stop_distance(
         late_context, fact->first_position1, 1,
         &fact->termination_distance, &fact->termination_known);
-    return DUCKVEP_HGVS_OK;
-}
-
-duckvep_hgvs_status_t
-duckvep_hgvs_protein_shifted_insertion_start_lost_finish(
-    const duckvep_coding_context_t *context,
-    duckvep_hgvs_protein_fact_t    *fact) {
-
-    uint32_t low;
-    size_t translation_length;
-    uint8_t reference_first;
-    uint8_t reference_last;
-
-    if (context == NULL || fact == NULL ||
-        fact->shape != (uint8_t)DUCKVEP_HGVS_PROTEIN_START_LOST ||
-        fact->start_lost_flanking == 0u || fact->ref_length != 2u ||
-        fact->first_position1 == UINT32_MAX ||
-        fact->last_position1 == UINT32_MAX) {
-        return DUCKVEP_HGVS_INVALID_ARG;
-    }
-    low = fact->first_position1 < fact->last_position1
-        ? fact->first_position1 : fact->last_position1;
-    translation_length = hgvs_protein_reference_length(context);
-    if ((uint64_t)low + 1u >= (uint64_t)translation_length) {
-        return DUCKVEP_HGVS_NOT_APPLICABLE;
-    }
-    reference_first = duckvep_coding_context_peptide_base(
-        context, 0, (size_t)low);
-    reference_last = duckvep_coding_context_peptide_base(
-        context, 0, (size_t)low + 1u);
-    if (reference_first == 0u || reference_last == 0u) {
-        return DUCKVEP_HGVS_MISSING_PEPTIDE;
-    }
-    fact->first_position1++;
-    fact->last_position1++;
-    fact->reference_first = reference_first;
-    fact->reference_last = reference_last;
     return DUCKVEP_HGVS_OK;
 }
 
@@ -2334,6 +2300,13 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
         uint8_t reference_last;
 
         if (fact.ref_length == 0u) {
+            /* _get_hgvs_peptides() treats this as a peptide insertion before
+             * its final start_lost override. Rotate the changed peptide across
+             * matching following reference residues exactly as VEP's
+             * _check_peptides_post_var()/_shift_3prime() do. */
+            fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_INSERTION;
+            status = hgvs_protein_shift_simple(&fact);
+            if (status != DUCKVEP_HGVS_OK) return status;
             uint32_t low = fact.first_position1 < fact.last_position1
                 ? fact.first_position1 : fact.last_position1;
             size_t translation_length =

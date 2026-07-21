@@ -1184,9 +1184,11 @@ protein authority incorrectly returns not applicable.
 The late frameshift stop search is a third, separate reconstruction. Before
 `_stop_loss_extra_AA()` asks for an alternate CDS, `hgvs_protein()` deletes its private
 shift hash. That restores both the original CDS coordinate and the original, unrotated
-feature allele; it does not reuse the shifted HGVSc display allele. Most UTR-side shifted
-frameshifts consequently retain `fsTer?`, including the short witness above, but this is
-not a blanket rule. The rare generated witness
+feature allele; it does not reuse the shifted HGVSc display allele. The formatter passes
+`protein_start - 1` into `_stop_loss_extra_AA()`, which rejects zero before rebuilding an
+alternate CDS. Position-1 frameshifts therefore retain `fsTer?`, including the short
+witness above, even when a direct translated edit would contain a later stop. This is not
+a blanket rule. The rare generated witness
 `chrDuck:119 G>GACGGTGATCCTGGGTGGCAGGTGATCTAGATAGGGGGGTGACTGGA`
 first renders shifted `c.3_4insGTGATCCTGGGTGGCAGGTGATCTAGATAGGGGGGTGACTGGAACG`,
 then the restored original allele at the original CDS coordinate finds a positive late
@@ -1205,15 +1207,19 @@ unshifted cDNA coordinates `3,2` and satisfy `_overlaps_start_codon` even though
 genomic flank is exonic. Requiring two exonic endpoints clears a valid cached start-loss
 fact. Fixed forward- and reverse-strand scenes cover both possible exon edges.
 
-The protein formatter adds another insertion-only state after 3-prime placement. For a
-shifted in-frame pure insertion with cached `start_lost`, peptide clipping can leave an
-empty reference allele. VEP retains the post-clipping mapper positions and reads the next
-two reference residues, one position later than DuckVEP's ordinary local peptide window.
-The generated `chrDuck:120 A>AAGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCA`
+The protein formatter adds another insertion-only state after genomic 3-prime placement.
+For a shifted in-frame pure insertion with cached `start_lost`, peptide clipping can leave
+an empty reference allele. Before the final start-loss override, VEP still treats this as
+a peptide insertion: `_check_peptides_post_var()` and `_shift_3prime()` rotate the changed
+peptide across matching following reference residues and advance the mapper positions.
+Only then does it read the two flanking reference residues. The generated
+`chrDuck:120 A>AAGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCA`
 therefore renders `p.ValArg3_?2`, not `p.MetVal2_?1`; the analogous position-121 witness
-renders `p.ArgThr4_?3`, not `p.ValArg3_?2`. This adjustment belongs to the typed protein
-fact and is gated by shifted, in-frame, pure-insertion start loss; applying it to ordinary
-unshifted start-loss delins changes already conformant states.
+renders `p.ArgThr4_?3`, not `p.ValArg3_?2`. This is sequence-dependent: the equally shifted
+`chrDuck:120 A>AAGA` has changed peptide `K`, which does not match the following reference
+`V`, so VEP retains `p.MetVal2_?1`. Advancing every shifted start-loss insertion is wrong.
+The shared protein fact now performs the same bounded peptide rotation before replacing
+the insertion shape with VEP's start-loss syntax.
 
 The pure-C regression deliberately restores a frameshift fact from a sidecar whose SO mask
 contains only `coding_sequence_variant&splice_acceptor_variant`, then proves that an empty

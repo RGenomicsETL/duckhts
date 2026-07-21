@@ -311,16 +311,6 @@ duckvep_hgvs_protein_frameshift_termination_replay(
     const duckvep_coding_context_t *late_context,
     duckvep_hgvs_protein_fact_t    *fact);
 
-/* Complete VEP's shifted, in-frame pure-insertion start_lost state. Its
- * formatter retains the post-clipping mapper positions and reads the next two
- * reference residues, one position later than the ordinary local peptide
- * window. Call only for a shifted pure insertion whose consequence facts
- * contain start_lost and not frameshift. */
-DUCKVEP_INTERNAL_API duckvep_hgvs_status_t
-duckvep_hgvs_protein_shifted_insertion_start_lost_finish(
-    const duckvep_coding_context_t *context,
-    duckvep_hgvs_protein_fact_t    *fact);
-
 /* Build the subset of HGVSp facts completely represented by the consequence
  * result's proven single-residue sidecar. This avoids reconstructing a coding
  * context after consequence annotation has already established the peptide

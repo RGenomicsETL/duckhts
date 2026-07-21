@@ -1,10 +1,11 @@
 
 # Rduckhts 1.5.0-0.1.0
-- bundle four HGVS compatibility fixes found by a 100,000-random-allele
+- bundle rare HGVS compatibility fixes found by a 100,000-random-allele
   differential against the VEP 116 executable. Shifted in-frame start-loss
-  insertions retain VEP's later mapper positions and reference residues;
-  shifted frameshifts repeat VEP's late original-coordinate, original-allele
-  stop search; and terminal complete-feature clamping can render a duplicated
+  insertions perform VEP's sequence-dependent peptide-level 3-prime rotation;
+  position-1 shifted frameshifts retain `Ter?`, while later frameshifts can
+  repeat VEP's late original-coordinate, original-allele stop search; and
+  terminal complete-feature clamping can render a duplicated
   transcript base even when minimization moved the differing base outside the
   transcript. Bundled SQL behavior is pinned by exact HGVSc/HGVSp witnesses
 - bundle `duckvep_annotate(..., rich := TRUE)` so DBI workflows can request

@@ -1641,19 +1641,6 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		hgvs_result->protein_reason = duckvep_scalar_hgvs_reason(hgvs_status);
 		return 1;
 	}
-	if (shifted_edit_ready && delta.frameshift == 0u && delta.start_lost != 0u &&
-	    protein_fact.shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_START_LOST &&
-	    protein_fact.ref_length == 2u && shifted_edit.ref_len == 0u &&
-	    dna_fact.shift_offset != 0) {
-		hgvs_status =
-		    duckvep_hgvs_protein_shifted_insertion_start_lost_finish(
-		        context_ptr, &protein_fact);
-		if (hgvs_status != DUCKVEP_HGVS_OK) {
-			hgvs_result->protein_reason =
-			    duckvep_scalar_hgvs_reason(hgvs_status);
-			return 1;
-		}
-	}
 	if (protein_fact.shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT &&
 	    dna_fact.shift_offset != 0 &&
 	    (consequence->region_mask & DUCKVEP_REGION_CDS) == 0u) {

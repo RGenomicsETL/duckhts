@@ -496,16 +496,18 @@ WHERE annotation.transcript_index = 0;
 ----
 c.1_2insACTA	p.Met1AsnfsTer?	1	supported
 
-# The randomized state explorer found two shifted in-frame insertions where
-# VEP retains the post-clipping mapper positions for start_lost. The two
-# reference residues therefore begin one position later than the ordinary
-# local peptide window.
+# The randomized state explorer found shifted in-frame insertions where VEP
+# first clips a common peptide prefix, then performs peptide-level 3-prime
+# rotation before its start_lost override. Rotation occurs only when the
+# changed peptide matches following reference residues; the short third row
+# pins the equally important no-rotation state.
 query ITTT
 WITH variants(ord, position, reference, alternate) AS (
   VALUES
     (1, 120::UBIGINT, 'A',
      'AAGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCA'),
-    (2, 121::UBIGINT, 'T', 'TACGCCGCTACAGGTGCATGCTTGC')
+    (2, 121::UBIGINT, 'T', 'TACGCCGCTACAGGTGCATGCTTGC'),
+    (3, 120::UBIGINT, 'A', 'AAGA')
 )
 SELECT ord,
        annotation.transcript_hgvs,
@@ -520,6 +522,7 @@ ORDER BY ord;
 ----
 1	c.2_3insGGTCTACCCGCCACTCGCATTATCTGACAACCCCTGAGTGCGCAA	p.ValArg3_?2	1
 2	c.5_6insCCGCTACAGGTGCATGCTTGCACG	p.ArgThr4_?3	3
+3	c.2_3insGAA	p.MetVal2_?1	1
 
 # VEP removes its HGVS shift hash before the late frameshift stop search. The
 # original unrotated allele is consequently restored at the original CDS
