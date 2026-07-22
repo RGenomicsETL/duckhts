@@ -1,6 +1,14 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- preflight the peak intermediate CDS length before applying an exact-alias
+  multi-edit haplotype. A high-coordinate insertion followed by a lower-coordinate
+  deletion can now return `BUFFER_TOO_SMALL` without mutating the caller buffer even
+  when the final CDS length would fit. Also relabel the historical pair-level
+  Clopper--Pearson calculation in the conformance report as descriptive under an
+  independent-pair model; clustered transcript/object pairs and deliberately targeted
+  generators are not presented as a deployment error-rate bound, while every observed
+  mismatch, unresolved state, extra row, or missing row remains a release failure
 - expose `duckhts_htslib_version()`, `duckhts_htslib_features()`, and
   `duckhts_htslib_feature_string()` as immutable runtime diagnostics for the htslib
   actually loaded with the extension. Rduckhts now publishes a versioned installed

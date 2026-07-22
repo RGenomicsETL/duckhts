@@ -5,10 +5,12 @@
 # computes the VEP executable-oracle statistical table: for each comparator
 # engine and VEP consequence stratum, use the UNION of (variant, transcript) pairs
 # that either VEP or the engine emitted, count exact SO-term-set discordance and
-# emission misses/extras, and attach a Clopper-Pearson 95% upper bound via
-# binom.test. It writes every pair and summary before failing closed on any
-# consequence discordance, missing/extra row, or DuckVEP unresolved state. VEP
-# remains the sole oracle.
+# emission misses/extras, and attach the historical `upper95` column: a
+# descriptive Clopper-Pearson calculation under an independent-pair Bernoulli
+# model. Transcript/object pairs are clustered within events, transcripts, and
+# genes, so this value is not a deployment error-rate guarantee. It writes every
+# pair and summary before failing closed on any consequence discordance,
+# missing/extra row, or DuckVEP unresolved state. VEP remains the sole oracle.
 
 suppressMessages({
   library(optparse)
@@ -877,7 +879,7 @@ cat(glue("  annotations -> {opt$annotations}"), "\n", sep = "")
 for (i in seq_len(nrow(audit))) {
   cat(
     glue(
-      "  {audit$engine[i]}: exact {audit$exact_agree[i]}/{audit$n[i]}; resolved {audit$resolved_agree[i]}/{audit$resolved_n[i]}, discord {audit$resolved_discordant[i]} (<= {sprintf('%.2e', audit$upper95[i])} @95%); unresolved {audit$unresolved[i]}, extra {audit$engine_extra[i]}, missing {audit$engine_missing[i]}"
+      "  {audit$engine[i]}: exact {audit$exact_agree[i]}/{audit$n[i]}; resolved {audit$resolved_agree[i]}/{audit$resolved_n[i]}, discord {audit$resolved_discordant[i]} (descriptive independent-pair upper95 {sprintf('%.2e', audit$upper95[i])}); unresolved {audit$unresolved[i]}, extra {audit$engine_extra[i]}, missing {audit$engine_missing[i]}"
     ),
     "\n",
     sep = ""
@@ -894,7 +896,8 @@ if (nrow(nmd_audit) != 0L) {
         "  NMD {nmd_audit$engine[i]}: exact ",
         "{nmd_audit$exact_agree[i]}/{comparable}; ",
         "discord {nmd_audit$exact_discordant[i]} ",
-        "(<= {sprintf('%.2e', nmd_audit$upper95[i])} @95%); ",
+        "(descriptive independent-pair upper95 ",
+        "{sprintf('%.2e', nmd_audit$upper95[i])}); ",
         "not comparable {nmd_audit$not_comparable[i]}, ",
         "oracle unresolved {nmd_audit$oracle_unresolved[i]}, ",
         "engine unresolved {nmd_audit$engine_unresolved[i]}"

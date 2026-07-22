@@ -784,8 +784,10 @@ The normal distinct-buffer path validates the edit set first and then copies eac
 unchanged CDS segment and alternate base exactly once, so mutation is
 `O(CDS bytes + ALT bytes + edits)`. Exact input/output aliasing remains compatible
 through the older `memmove` path because cumulative displacement can change sign
-within one haplotype; the phased executor owns distinct worker scratch and takes the
-linear path.
+within one haplotype. Its preflight therefore checks the largest intermediate CDS
+length in application order, rather than only the final length, before changing the
+caller buffer. The phased executor owns distinct worker scratch and takes the linear
+path.
 
 ### What is missing
 
