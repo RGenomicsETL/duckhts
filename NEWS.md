@@ -6,8 +6,8 @@
   actually loaded with the extension. Rduckhts now publishes a versioned installed
   htslib linking receipt with exact headers/library paths, static dependencies,
   configured features, and source/build identity; its public accessor rejects
-  source/header/runtime version disagreement and is exercised by a fresh downstream C
-  consumer that opens bundled BAM, CRAM, BCF, and VCF files
+  source/header/runtime version disagreement and is exercised by an in-memory
+  Rtinycc-built downstream C consumer that opens bundled BAM, CRAM, BCF, and VCF files
 - add `read_bigwig(path, region := NULL, blocks_per_iteration := 64)` for
   projection-aware scans of stored zero-based, half-open BigWig signal intervals.
   Comma-separated htslib-style regions are merged and deduplicated; full scans claim

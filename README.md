@@ -346,9 +346,10 @@ a multi-region scan distributes merged ranges. `blocks_per_iteration`
 controls indexed block batching inside a worker, not the number of
 workers.
 
-This executable query reads a real 100 kb slice of the UCSC GRCh38
-phyloP 100-way track rather than converting it to an intermediate text
-file:
+This query reads a real 100 kb slice of the UCSC GRCh38 phyloP 100-way
+track rather than converting it to an intermediate text file. It is
+shown without running it during README rendering so documentation builds
+remain offline:
 
 ``` sql
 SELECT count(*) AS stored_intervals,
@@ -359,13 +360,6 @@ FROM read_bigwig(
   region := 'chr22:20000000-20099999'
 );
 ```
-
-    ┌──────────────────┬─────────────────────┬──────────────────┐
-    │ stored_intervals │       minimum       │     maximum      │
-    │      int64       │       double        │      double      │
-    ├──────────────────┼─────────────────────┼──────────────────┤
-    │            96783 │ -10.786999702453613 │ 9.60200023651123 │
-    └──────────────────┴─────────────────────┴──────────────────┘
 
 ### Variant normalization
 

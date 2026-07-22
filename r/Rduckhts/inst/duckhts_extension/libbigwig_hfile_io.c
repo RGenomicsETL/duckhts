@@ -27,10 +27,10 @@ duckhts_bigwig_fill(URL_t *url, size_t position)
     off_t current;
     size_t filled;
 
-    file = duckhts_bigwig_hfile(url);
-    if (url == NULL || file == NULL || url->memBuf == NULL ||
+    if (url == NULL || url->x.fp == NULL || url->memBuf == NULL ||
         url->bufSize == 0u || (uintmax_t)position > INT64_MAX)
         return 0;
+    file = duckhts_bigwig_hfile(url);
     current = htell(file);
     if (current < 0 || (uintmax_t)current != (uintmax_t)position) {
         if (hseek(file, (off_t)position, SEEK_SET) < 0)

@@ -8,6 +8,7 @@
 
 #include "duckdb_extension.h"
 #include <htslib/hts.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +86,18 @@ extern void register_duckhts_simd_functions(duckdb_connection connection);
 static const char *duckhts_loaded_htslib_version = "";
 static unsigned int duckhts_loaded_htslib_features = 0;
 static char duckhts_loaded_htslib_feature_string[1200];
+static pthread_once_t duckhts_htslib_snapshot_once = PTHREAD_ONCE_INIT;
+
+static void duckhts_snapshot_htslib(void) {
+    const char *version = hts_version();
+    const char *feature_string = hts_feature_string();
+
+    duckhts_loaded_htslib_version = version ? version : "";
+    duckhts_loaded_htslib_features = hts_features();
+    snprintf(duckhts_loaded_htslib_feature_string,
+             sizeof(duckhts_loaded_htslib_feature_string), "%s",
+             feature_string ? feature_string : "");
+}
 
 static void duckhts_htslib_version_scalar(duckdb_function_info info,
                                            duckdb_data_chunk input,
@@ -141,14 +154,8 @@ static void register_duckhts_htslib_string_function(duckdb_connection connection
 static void register_duckhts_htslib_functions(duckdb_connection connection) {
     duckdb_scalar_function function;
     duckdb_logical_type uinteger_type;
-    const char *version = hts_version();
-    const char *feature_string = hts_feature_string();
 
-    duckhts_loaded_htslib_version = version ? version : "";
-    duckhts_loaded_htslib_features = hts_features();
-    snprintf(duckhts_loaded_htslib_feature_string,
-             sizeof(duckhts_loaded_htslib_feature_string), "%s",
-             feature_string ? feature_string : "");
+    pthread_once(&duckhts_htslib_snapshot_once, duckhts_snapshot_htslib);
 
     register_duckhts_htslib_string_function(connection, "duckhts_htslib_version",
                                              duckhts_htslib_version_scalar);
