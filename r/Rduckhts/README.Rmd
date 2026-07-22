@@ -65,7 +65,11 @@ What this means in practice:
 - CORS must allow both the primary file and index sidecars (`.tbi`/`.csi`), including range requests.
 - htslib may probe a `.csi` sidecar before falling back to `.tbi`; a `.csi` `404` is not a regression if the `.tbi` path succeeds.
 - `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR backend.
-- The simple local `python3 -m http.server` setup ignores HTTP `Range`; in that case the backend warns and falls back to full-object fetch + local byte slicing. This is acceptable for small smoke tests, but production servers should support `Range`.
+- Local test servers should return `Accept-Ranges: bytes` and `206 Partial
+  Content` for both the data file and its index sidecars. An R-native option is
+  [`goserveR`](https://github.com/sounkou-bioinfo/goserveR). Without byte-range
+  support the backend warns and falls back to fetching the complete object before
+  slicing it locally.
 
 ### `Module.duckhtsWasmHttpConfig`
 
@@ -321,10 +325,41 @@ dbGetQuery(
 
 ### DuckVEP consequence and HGVS annotation
 
+#### Design and validation
+
 DuckVEP annotates a narrow event relation against an immutable named transcript
 model. Production models come from receipted Ensembl relations; this compact
 non-coding transcript keeps the README deterministic while exercising the same
-public DBI surface.
+public DBI surface. The bundled extension shares one read-only model across DuckDB
+workers and gives each worker private mutable annotation state. Compact masks/codes are
+the high-cardinality interface; rich consequence text and independent-event HGVS are
+optional projections of the same candidate sweep.
+
+DuckVEP returns a relation rather than owning a closed annotation-cache format.
+Any source DuckDB can scan--local or S3 Parquet, a DuckLake snapshot, VCF/BCF,
+tabix text, or an attached database--can provide exact allele, interval, gene, or
+disease annotations through ordinary joins. The root
+[DuckHTS README](https://github.com/RGenomicsETL/duckhts#duckvep-a-resident-ensembl-vep-consequence-engine)
+shows the complete real HG002 WGS + Ensembl 116 + ClinVar/ClinvArbitration +
+AlphaMissense + gnomAD + interval workflow and its materialized timing evidence;
+the small example below remains only the CRAN/offline executable check.
+
+The release gate combines pure-C property/statistical tests, SQL and R end-to-end tests,
+source-labelled Ensembl fixtures, and fail-closed differentials against executable VEP
+116. Complete ClinVar/GIAB and selected GRCh37 campaigns retain every compared
+allele/object pair. The large-campaign `{targets}`/`blit`/micromamba workflow lives in the
+DuckHTS source repository; it is not reimplemented in the R package.
+
+#### Current scope
+
+The current surface covers independent small variants, exact span SVs, paired BNDs,
+regulation/motif consequences, NMD, and independent-event HGVSc/HGVSn/HGVSp. Combined
+phased haplotype consequences/HGVS, imprecise-SV confidence intervals, STR-specific rules,
+and arbitrary producer-specific symbolic interpretation remain explicit follow-up work.
+Supplementary population and clinical annotations remain typed DuckDB/Parquet/DuckLake
+relations joined after consequence filtering.
+
+#### Minimal R example
 
 ```{r}
 duckvep_reference <- system.file(

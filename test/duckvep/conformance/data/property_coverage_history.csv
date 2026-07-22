@@ -697,3 +697,505 @@
 "2026-07-20","e25c1513ebbdf22a6daadb6680352c7edb457292",1e+05,"0x0000000001352770","variant-coding-context coverage","pep_same",13440
 "2026-07-20","e25c1513ebbdf22a6daadb6680352c7edb457292",1e+05,"0x0000000001352770","variant-coding-context coverage","rev",50160
 "2026-07-20","e25c1513ebbdf22a6daadb6680352c7edb457292",1e+05,"0x0000000001352770","variant-coding-context coverage","snv",19927
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","del",812864
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","indel",813545
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","ins",812507
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","interbase",902980
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","mnv",812753
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","prefix",2846124
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","suffix",2250917
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","allele sweep coverage","tail",2688238
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","coding_tx",639817
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","cursor_splits",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","far",4949769
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","generalized",12293826
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","mirna_tx",319059
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","nmd_rows",2284080
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","annotation-shortcut coverage","simple",1708024
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","body",41341
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","del",20044
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","fwd",49999
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","indel",20148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","ins",19792
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","mnv",20182
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","rev",50001
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","snv",19834
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","start",29048
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-builder coverage","stop",29611
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","body",41341
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","cap0",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","del",20044
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","fwd",49999
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","indel",20148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","ins",19792
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","mnv",20182
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","rev",50001
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","snv",19834
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","start",29048
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set coverage","stop",29611
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","body",33424
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","capfail",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","fwd",49926
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","multi",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","rev",50074
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","start",33288
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cds-edit-set-mnv coverage","stop",33288
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","capfail",3e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","del",20044
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","fwd",49999
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","indel",20148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","ins",19792
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","mnv",20182
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","pep_diff",86476
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","pep_same",13524
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","rev",50001
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","coding-context coverage","snv",19834
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","codon coverage","mis",68211
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","codon coverage","stop_gained",4074
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","codon coverage","stop_lost",3991
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","codon coverage","stop_retained",668
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","codon coverage","syn",23056
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","complete-overlap coverage","forward",50047
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","complete-overlap coverage","over_5000",12417
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","complete-overlap coverage","reverse",49953
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","complete-overlap coverage","right_endpoint",1419
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delins-shape coverage","forward",50149
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delins-shape coverage","inframe",49796
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delins-shape coverage","lengthen",49961
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delins-shape coverage","protein_altering",50204
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delins-shape coverage","reverse",49851
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delins-shape coverage","shorten",50039
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","fwd",49768
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","mis",20165
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","rev",50232
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","stop_gained",19776
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","stop_lost",19971
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","stop_retained",19947
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-delta coverage","syn",20141
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-inframe-deletion coverage","forward",50057
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-inframe-deletion coverage","reverse",49943
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-inframe-insertion coverage","forward",49991
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","context-inframe-insertion coverage","reverse",50009
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","fwd",50298
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","len2",49881
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","len3",50119
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","missense",50129
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","rev",49702
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","stop_gained",24879
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cross-mnv coverage","synonymous",24992
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-cross-route coverage","context",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-cross-route coverage","fwd",50298
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-cross-route coverage","len2",49881
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-cross-route coverage","len3",50119
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-cross-route coverage","rev",49702
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-del-route coverage","forward",50057
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-del-route coverage","full",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-del-route coverage","reverse",49943
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-ins-route coverage","forward",49991
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-ins-route coverage","full",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-ins-route coverage","reverse",50009
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","full",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","fwd",49768
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","mis",20165
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","rev",50232
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","stop_gained",19776
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","stop_lost",19971
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","stop_retained",19947
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","cursor-route coverage","syn",20141
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","fwd",50298
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","len2",49881
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","len3",50119
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","missense",50129
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","rev",49702
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","stop_gained",24879
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-cross-scratch coverage","synonymous",24992
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","del",20044
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","fwd",49999
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","indel",20148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","ins",19792
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","mnv",20182
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","rev",50001
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-exon-hint coverage","snv",19834
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","capfail",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","fwd",49768
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","mis",20165
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","rev",50232
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","stop_gained",19776
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","stop_lost",19971
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","stop_retained",19947
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch coverage","syn",20141
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch-indel coverage","forward",50149
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch-indel coverage","lengthen",49961
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch-indel coverage","reverse",49851
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-scratch-indel coverage","shorten",50039
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","fwd",49768
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","mis",20165
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","rev",50232
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","stop_gained",19776
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","stop_lost",19971
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","stop_retained",19947
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","delta-wrapper coverage","syn",20141
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","del",24821
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","indel",25113
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","ins",25242
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","interbase",27984
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","prefix",81104
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","prefix0_interbase",7054
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","sub",24824
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","event normalization coverage","suffix",78007
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","-1",8399
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","-2",8390
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","+1",8234
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","+2",8323
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","del",33270
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","delins",33346
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","ins",33384
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","reverse",50081
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","stop_gained",1907
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","terminal_cil_protein_altering",6
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","terminal_cil_retained",50
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","terminal_endpoint",4094
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","terminal_missing_tail",0
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","terminal_nonstop",50
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift coverage","terminal_reverse",2085
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift length-oracle coverage","frameshift",62601
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift length-oracle coverage","inframe_len",12513
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","frameshift length-oracle coverage","stop_gained",2077
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","body",33424
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","fwd",49926
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","one_codon",15892
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","rev",50074
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","several_codons",84108
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","start",33288
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","haplotype-MNV equivalence coverage","stop",33288
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","at_vep_limit",1
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","composed",99834
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","del",49803
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","dup",36148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","fwd",49742
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","ins",50031
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","nonlocal_ref_replay",1564
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","protein",92951
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","rev",50092
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","rotated",19643
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVS shift coverage","terminal_duplication",0
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","del",33372
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","delins",33328
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","eligible",95852
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","equal_stop",24
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","fs",90780
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","fwd",47648
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","immediate_stop",5048
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","ins",29152
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","non_fs",4148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","rev",48204
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","shortened",0
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","ter_known",19079
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp frameshift coverage","ter_unknown",71701
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","del",3928
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","delins",3866
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","dup",380
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","equal",8477
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","fwd",17270
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","ins",1457
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","replayed",34755
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","rev",17485
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","special",64083
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","sub",16647
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","terminal_not_applicable",1162
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","vep_position_zero",1172
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","HGVSp replay coverage","vep_stop_equal",0
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","inframe_deletion coverage","forward",50057
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","inframe_deletion coverage","reverse",49943
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","inframe_insertion coverage","forward",49991
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","inframe_insertion coverage","reverse",50009
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","mnv coverage","len2",49952
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","mnv coverage","len3",50048
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","non-boundary insertion coverage","forward",50298
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","non-boundary insertion coverage","inframe_insertion",50232
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","non-boundary insertion coverage","protein_altering",49768
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","non-boundary insertion coverage","reverse",49702
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","del",11305
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","delins",5690
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","fallback",38917
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","fast",21067
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","frameshift",18798
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","fwd",10391
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","inframe_del",1823
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","inframe_ins",446
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","ins",4072
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","simple-indel equivalence coverage","rev",10676
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","start-codon coverage","co_stop_gained",4144
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","start-codon coverage","co_synonymous",24473
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","start-codon coverage","lost_and_retained",1624
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","start-codon coverage","start_lost",1e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","start-codon coverage","start_retained",1624
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","start-codon coverage","synonymous",24473
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","capfail",4e+05
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","del",20044
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","fwd",49999
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","indel",20148
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","ins",19792
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","mnv",20182
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","pep_diff",86476
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","pep_same",13524
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","rev",50001
+"2026-07-22","05620047af03fc54b119cbc8b0291a3c899844da",1e+05,"0x0000000001df5e77","variant-coding-context coverage","snv",19834
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","del",814232
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","indel",813961
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","ins",814209
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","interbase",904664
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","mnv",813736
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","prefix",2848058
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","suffix",2254513
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","allele sweep coverage","tail",2690498
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","coding_tx",640798
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","cursor_splits",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","far",4891274
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","generalized",12186678
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","mirna_tx",318134
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","nmd_rows",2266345
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","annotation-shortcut coverage","simple",1696639
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","body",41396
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","del",19878
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","fwd",50047
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","indel",19976
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","ins",19868
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","mnv",20099
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","rev",49953
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","snv",20179
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","start",29365
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-builder coverage","stop",29239
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","body",41396
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","cap0",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","del",19878
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","fwd",50047
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","indel",19976
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","ins",19868
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","mnv",20099
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","rev",49953
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","snv",20179
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","start",29365
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set coverage","stop",29239
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","body",33342
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","capfail",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","fwd",49970
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","multi",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","rev",50030
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","start",33285
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cds-edit-set-mnv coverage","stop",33373
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","capfail",3e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","del",19878
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","fwd",50047
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","indel",19976
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","ins",19868
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","mnv",20099
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","pep_diff",86635
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","pep_same",13365
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","rev",49953
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","coding-context coverage","snv",20179
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","codon coverage","mis",68022
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","codon coverage","stop_gained",4045
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","codon coverage","stop_lost",3983
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","codon coverage","stop_retained",688
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","codon coverage","syn",23262
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","complete-overlap coverage","forward",49911
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","complete-overlap coverage","over_5000",12447
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","complete-overlap coverage","reverse",50089
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","complete-overlap coverage","right_endpoint",1475
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delins-shape coverage","forward",50068
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delins-shape coverage","inframe",49893
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delins-shape coverage","lengthen",49810
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delins-shape coverage","protein_altering",50107
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delins-shape coverage","reverse",49932
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delins-shape coverage","shorten",50190
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","fwd",50304
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","mis",20112
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","rev",49696
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","stop_gained",19940
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","stop_lost",20166
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","stop_retained",19981
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-delta coverage","syn",19801
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-inframe-deletion coverage","forward",49968
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-inframe-deletion coverage","reverse",50032
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-inframe-insertion coverage","forward",50131
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","context-inframe-insertion coverage","reverse",49869
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","fwd",49929
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","len2",50023
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","len3",49977
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","missense",49799
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","rev",50071
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","stop_gained",25241
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cross-mnv coverage","synonymous",24960
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-cross-route coverage","context",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-cross-route coverage","fwd",49929
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-cross-route coverage","len2",50023
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-cross-route coverage","len3",49977
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-cross-route coverage","rev",50071
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-del-route coverage","forward",49968
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-del-route coverage","full",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-del-route coverage","reverse",50032
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-ins-route coverage","forward",50131
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-ins-route coverage","full",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-ins-route coverage","reverse",49869
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","full",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","fwd",50304
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","mis",20112
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","rev",49696
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","stop_gained",19940
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","stop_lost",20166
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","stop_retained",19981
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","cursor-route coverage","syn",19801
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","fwd",49929
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","len2",50023
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","len3",49977
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","missense",49799
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","rev",50071
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","stop_gained",25241
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-cross-scratch coverage","synonymous",24960
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","del",19878
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","fwd",50047
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","indel",19976
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","ins",19868
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","mnv",20099
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","rev",49953
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-exon-hint coverage","snv",20179
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","capfail",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","fwd",50304
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","mis",20112
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","rev",49696
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","stop_gained",19940
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","stop_lost",20166
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","stop_retained",19981
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch coverage","syn",19801
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch-indel coverage","forward",50068
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch-indel coverage","lengthen",49810
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch-indel coverage","reverse",49932
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-scratch-indel coverage","shorten",50190
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","fwd",50304
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","mis",20112
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","rev",49696
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","stop_gained",19940
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","stop_lost",20166
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","stop_retained",19981
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","delta-wrapper coverage","syn",19801
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","del",24988
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","indel",24956
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","ins",25147
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","interbase",27916
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","prefix",81213
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","prefix0_interbase",6937
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","sub",24909
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","event normalization coverage","suffix",78054
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","-1",7441
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","-2",7255
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","+1",7346
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","+2",7295
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","del",29036
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","delins",29337
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","ins",41627
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","reverse",48045
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","stop_gained",1552
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","terminal_cil_protein_altering",8
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","terminal_cil_retained",45
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","terminal_endpoint",16627
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","terminal_missing_tail",4200
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","terminal_nonstop",12492
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift coverage","terminal_reverse",8376
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift length-oracle coverage","frameshift",62446
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift length-oracle coverage","inframe_len",12586
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","frameshift length-oracle coverage","stop_gained",1956
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","body",33342
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","fwd",49970
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","one_codon",15979
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","rev",50030
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","several_codons",84021
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","start",33285
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","haplotype-MNV equivalence coverage","stop",33373
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","at_vep_limit",0
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","composed",96726
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","del",48478
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","dup",37911
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","fwd",50046
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","ins",51377
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","nonlocal_ref_replay",1561
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","protein",90188
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","rev",49809
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","rotated",20755
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVS shift coverage","terminal_duplication",3129
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","del",24987
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","delins",28931
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","eligible",91618
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","equal_stop",23
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","fs",87231
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","fwd",45884
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","immediate_stop",4364
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","ins",37700
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","non_fs",8382
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","rev",45734
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","shortened",0
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","ter_known",17384
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp frameshift coverage","ter_unknown",69847
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","del",3872
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","delins",3861
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","dup",447
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","equal",8471
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","fwd",17371
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","ins",1491
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","replayed",34967
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","rev",17596
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","special",63941
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","sub",16825
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","terminal_not_applicable",1092
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","vep_position_zero",1330
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","HGVSp replay coverage","vep_stop_equal",0
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","inframe_deletion coverage","forward",49968
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","inframe_deletion coverage","reverse",50032
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","inframe_insertion coverage","forward",50131
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","inframe_insertion coverage","reverse",49869
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","mnv coverage","len2",50284
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","mnv coverage","len3",49716
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","non-boundary insertion coverage","forward",49929
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","non-boundary insertion coverage","inframe_insertion",49696
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","non-boundary insertion coverage","protein_altering",50304
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","non-boundary insertion coverage","reverse",50071
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","del",11262
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","delins",5631
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","fallback",38813
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","fast",20909
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","frameshift",18696
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","fwd",10324
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","inframe_del",1774
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","inframe_ins",439
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","ins",4016
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","simple-indel equivalence coverage","rev",10585
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","start-codon coverage","co_stop_gained",4297
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","start-codon coverage","co_synonymous",24433
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","start-codon coverage","lost_and_retained",1638
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","start-codon coverage","start_lost",1e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","start-codon coverage","start_retained",1638
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","start-codon coverage","synonymous",24433
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","after_tail_rejected",41710
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","length_mod0",33494
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","length_mod1",33160
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","length_mod2",33346
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","mitochondrial",49993
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","nonstop",70873
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","reverse_orientation",50117
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","same_orientation",49883
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","site_first",41876
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","site_internal",16414
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","standard",50007
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","stop",7001
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","tail1",50209
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","terminal-partial-insertion coverage","tail2",49791
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","capfail",4e+05
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","del",19878
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","fwd",50047
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","indel",19976
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","ins",19868
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","mnv",20099
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","pep_diff",86635
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","pep_same",13365
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","rev",49953
+"2026-07-22","6eebf9b0d0a1e9ba0be30a9137fe8a2928a85dc1",1e+05,"0x6a09e667f3bcc909","variant-coding-context coverage","snv",20179

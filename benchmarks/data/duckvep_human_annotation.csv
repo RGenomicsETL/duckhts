@@ -1,0 +1,14 @@
+source_revision,run_date,workload,stage,threads,cpu_affinity,duckdb_version,page_cache,input_alleles,result_rows,seconds,max_rss_kb,output_bytes
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,model_load,4,unpinned,v1.5.1,warm,7378240,644427,2.398,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,vcf_decode_canonicalize_sort,4,unpinned,v1.5.1,warm,7378240,7378240,12.200,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,ClinVar_exact_collision_safe,4,unpinned,v1.5.1,warm,7378240,50749,0.259,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,ClinvArbitration_exact_collision_safe,4,unpinned,v1.5.1,warm,7378240,45232,0.176,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,AlphaMissense_exact,4,unpinned,v1.5.1,warm,7378240,14850,0.523,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,Ensembl_regulatory_IEJoin,4,unpinned,v1.5.1,warm,7378240,414813,83.960,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,DuckVEP_rich_HGVS_regulatory,4,unpinned,v1.5.1,warm,7378240,88392840,142.672,,0
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,compose_gene_constraint_and_write_ZSTD_Parquet,4,unpinned,v1.5.1,warm,7378240,88392840,41.004,,275600689
+60871026cf819df0c8f13e7979918417852d4a26,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,whole_process_warm_page_cache,4,unpinned,v1.5.1,warm,7378240,88392840,284.890,49142628,275600689
+79cf706cf417c4dc1f59015cd982ac42b3475492,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,Ensembl_regulatory_RegionKey_IEJoin_stream,4,unpinned,v1.5.1,warm,7378240,414813,0.770,1594188,4262629
+79cf706cf417c4dc1f59015cd982ac42b3475492,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,Ensembl_regulatory_cgranges_bulk_stream,4,unpinned,v1.5.1,warm,7378240,414813,1.144,831300,4451147
+79cf706cf417c4dc1f59015cd982ac42b3475492,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,DuckVEP_rich_HGVS_regulatory_parallel_stream_4GB,4,unpinned,v1.5.1,warm,7378240,88392840,24.524,5218856,274046172
+79cf706cf417c4dc1f59015cd982ac42b3475492,2026-07-22,DeepVariant_HG002_40x_GRCh38_WGS_real_providers,compose_all_providers_parallel_stream_4GB,4,unpinned,v1.5.1,warm,7378240,88392840,28.841,5564916,285798217

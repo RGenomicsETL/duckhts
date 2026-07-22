@@ -1,6 +1,182 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- correct the real-WGS regulatory-provider plan after `EXPLAIN` showed that the
+  documented chromosome equality forced a hash join with range residuals rather than
+  IEJoin. Two packed RegionKey inequalities encode chromosome plus half-open coordinates
+  exactly for the supported contigs and produce the identical 745,252 overlap pairs and
+  414,813 matched alleles in 0.770 seconds instead of 83.960 seconds; the measured
+  cgranges bulk alternative takes 1.144 seconds with lower peak RSS and remains the path
+  for arbitrary contig names. Replace the 88-million-row retained consequence table and
+  global ordered write with a direct four-writer Parquet stream under a 4 GB DuckDB memory
+  limit. The full rich/HGVS plus ClinVar, ClinvArbitration, AlphaMissense, gene-constraint,
+  and regulatory composition now writes 88,392,840 rows in 28.841 seconds with 5.31 GiB
+  process high-water RSS; an order-independent full-row fingerprint matches the earlier
+  46.87 GiB retained-intermediate run, which remains in the benchmark receipt as the
+  diagnosed failure
+- replace the root DuckVEP fixture-led narrative with a real human annotation flow over
+  a public HG002 40x DeepVariant GRCh38 whole-genome callset, the complete Ensembl 116
+  GRCh38 transcript/regulation model, collision-safe ClinVar and ClinvArbitration joins,
+  AlphaMissense, gnomAD gene constraint, and an
+  IEJoin-compatible regulatory interval provider. Show how each reusable provider Parquet
+  relation is built from its declared release artifact, then present the case workflow as
+  separately timed SQL stages and tabulate the resident-engine and FastVEP
+  comparisons. Explain the continuing sorted transcript/feature sweep, immutable-model
+  versus per-worker memory,
+  relation-native supplementary-provider contract, and the fixed/property/statistical/
+  executable/corpus conformance ladder. Record a timed whole-genome run over
+  chromosomes 1--22, X, Y, and MT in the rendered throughput report, including its peak
+  process memory, and distinguish extension-build, README-render, and optional VEP-oracle
+  prerequisites
+- document the end-to-end DuckVEP corpus and release-upgrade workflow: separate source,
+  model, oracle, and comparison identities; preserve original-record-to-analysis-allele
+  lineage and every pair denominator; inventory the generated, GIAB, ClinVar, GRCh37,
+  non-human, regulatory, SV/BND, official Ensembl release-VCF, and HPRC lanes; and state
+  exactly what is portable today versus what still needs a published external model/corpus
+  pack. Limit large-artifact byte hashing to acquisition, publication, transfer, or an
+  explicit release audit rather than presenting repeated full-file hashing as biological
+  rigor. Add an optional `{targets}` campaign DAG that tracks
+  corpus/model/reference/receipt paths, skips unchanged campaigns using its native file
+  tracking, branches at coarse named campaigns, retains saved error workspaces, builds the
+  clean release extension once, and reuses its revision-bound receipt across branches.
+  Keep `blit` as the quoted shell-script execution layer for targets-to-runner and
+  micromamba/VEP commands instead of growing a second command runner or generic digest
+  cache; each executed evidence run hashes the artifacts it actually consumes, rejects
+  caller-supplied precomputed digests, and publishes complete campaign outputs through an
+  atomic directory replacement with interrupted-run recovery. Add focused contracts for
+  traversal/symlink rejection, case-sensitive path identity, two-stage Windows batch
+  quoting, atomic publication, and both recoverable interruption states. Require
+  cache-backed campaigns to carry an acquisition/install receipt for the complete
+  species/release/assembly cache leaf. The receipt binds the upstream checksum or immutable
+  object identity plus `info.txt`, file count, byte total, and a deterministic
+  relative-path/size/modification/change-time inventory. A cue-always cache-state target
+  cheaply restates that inventory before reuse, detecting incomplete, replaced, or ordinarily edited shards
+  without repeatedly hashing the 49 GB cache contents. Keep the staged
+  annotation path separate from its stable published identity so methodology audits do
+  not retain a temporary path after atomic publication
+- close three rare consequence/HGVS states. VEP's start-loss predicate directly evaluates in-frame
+  deletion before its generic start test; DuckVEP's staged classifier now establishes
+  that dependent fact first, and the offset-based start test requires a 5-prime UTR. A pure
+  insertion inside an incomplete terminal codon now exposes the empty-reference,
+  insertion-only peptide to consequence predicates while preserving the codon-rounded
+  edited-CDS view required by HGVSp. Fixed C witnesses plus exact public SQL and R
+  regressions reproduce the remapped `ENST00000650713` state, including
+  `c.280_281insAGT`, `p.Ter94=`, and its one-base 3-prime shift against a reference
+  fixture that preserves the required downstream sequence. The large-corpus harness now
+  spills pair evidence through Parquet,
+  releases the resident model before comparison, asserts pair-key uniqueness, and keeps
+  every HGVS discordance as an unconditional failure. The statistical executable-oracle
+  audit now also fails on every consequence mismatch, missing/extra row, DuckVEP
+  unresolved state, a status outside the explicit
+  `supported`/`not_applicable`/`unresolved` vocabulary, or a status/value/reason
+  inconsistency after preserving the complete pair and summary artifacts. Begin the
+  machine-checkable whole-engine state model with a connected transition inventory that
+  names observed dimensions, implementation and VEP authority, deterministic/property/
+  executable evidence, and honest proof status. The generated check keeps haplotype
+  mechanics and unimplemented combined classification visibly outside independent-event
+  consequence claims. Make rare-state coverage requirements executable: selected
+  statistical states must occur, zero counters require a named fixed C witness, and every
+  failed campaign retains its complete seed-specific log. Treat held-out SV/BND and
+  HPRC/pangenome campaigns as counterexample-guided state exploration rather than optional
+  representativeness checks. Give newly discovered reachable rare classes dedicated
+  generator strata instead of depending on accidental sampling. Document the pinned
+  upstream VEP and Ensembl Variation test lineage as separate oracle-health and extracted-
+  fixture gates. Preserve all 49 release-116 VEP tests, the two release-116 Variation
+  consequence/HGVS authorities, and the five release-89 monolithic VEP tests under
+  repository/ref-preserving paths with exact source commits and per-file SHA-256 receipts;
+  the offline build check rejects changed, omitted, or unreceipted mirrors, while the
+  release-source check compares every byte and complete suite inventory with the exact
+  declared Git objects. Record the reproducible VEP-oracle self-test environment separately:
+  the pinned 49-file suite passes 1,977 assertions with 293 explicit skips under a
+  checked-in Linux-64 explicit Conda lock containing VEP 116.0, Perl 5.32.1, and BioPerl
+  1.7.8; optional Perl modules can change the suite's dynamic assertion denominator, so the
+  receipt preserves the complete solved environment without redundantly hashing its
+  Git-tracked lock file.
+  Add one explicit release-conformance audit target that requires the exact Git-backed
+  mirror check as well as current executable-campaign evidence; the ordinary build remains
+  network-free. Pin the two Variation semantic-source filenames rather than accepting any
+  two tests from that release. Commit the verbose upstream TAP receipt and make its exact
+  executed-file inventory, plans, assertions, per-file passes, skip reasons, and final
+  result checksum- and content-verified; any `not ok` is fatal. Harden statistical
+  history publication against excluded tests, untracked or mid-run source changes,
+  concurrent campaigns with different ledger names, and process termination during
+  journal cleanup; stale journals are recovered before the clean-worktree gate and one
+  recoverable lock per destination directory prevents concurrent
+  custom ledger pairs from replacing a shared output file. Official campaigns invoke the
+  committed root Makefile with inherited GNU Make controls and optional property compiler
+  flags cleared, then recheck source provenance after consuming the final evidence input. Dead
+  publication owners are now detected from `pskill(..., signal = 0)`'s returned status,
+  so their journals can actually be recovered.
+  Define current campaign evidence by unchanged implementation and executable-conformance
+  inputs since the measured ancestor revision, so the later commit that records a receipt
+  does not make that receipt stale while any semantic source or harness change still does;
+  the comparison now covers the complete extension/readers/vendor/build-helper closure,
+  upstream semantic mirrors, and pinned build submodule. Staged, unstaged, compiler-like
+  untracked inputs or a dirty build submodule make the strict audit fail.
+  Checked executable campaigns likewise invoke explicit committed Makefiles with inherited
+  GNU Make controls cleared, distclean vendored htslib, and reject ignored or untracked
+  compiler inputs before rebuilding the receipt-bound extension.
+  Clear inherited compiler, CMake, DuckDB, vcpkg, and toolchain controls from the checked
+  build and regenerate its platform/version metadata through the committed configure helper
+  before compilation.
+  The smaller
+  legacy monolithic VEP suite is not a hidden conformance authority, and VEP's
+  “subversion” is its point-release number rather than SVN. Split
+  alternative transcript, structural, interval, NMD, HGVS, and haplotype execution paths
+  and require every implemented path's inputs and declared terminal state to be reachable.
+  Resolve randomized properties, executable corpus campaigns, and explicit fail-closed
+  error/status outcomes through checked manifests; report the unimplemented combined
+  haplotype classifier as a structurally connected planned path, never as an executable
+  one. Pin the rare complete-first-codon deletion and terminal partial-codon insertion
+  through the public rich-plus-HGVS relation as well as the kernel and executable
+  differential; the public reduction retains the no-UTR absence of `start_lost` and the
+  apparently contradictory stop-gain consequence with `p.Ter5=` rendering.
+- make HGVS differentials unconditionally fail closed: the corpus harness no longer
+  accepts a flag that converts unresolved, mismatched, missing, or extra HGVS rows into a
+  successful run. Reproduce two VEP 116 protein-formatting states exposed by the complete
+  ClinVar mitochondrial shard: the late `fsTer`/`extTer` stop search uses BioPerl's
+  implicit standard codon table even when the transcript peptide uses mitochondrial table
+  2, and cached `stop_lost` plus a deletion-form peptide takes precedence over the later
+  frameshift formatter. The fail-closed complete mitochondrial ClinVar rerun is exact for
+  all 67,828 transcript pairs, including 3,294 present HGVSc and 2,354 present HGVSp
+  values; the 25 initial HGVSp disagreements remain the discovery witness
+- close rare HGVS states found by a 100,000-random-allele executable VEP 116
+  differential, rather than by the C property suite alone. Shifted in-frame
+  start-loss insertions perform VEP's sequence-dependent peptide-level 3-prime
+  rotation before selecting flanking reference residues; a shifted frameshift
+  at protein position 1 retains `Ter?`, while later positions can perform VEP's
+  late stop search at the original CDS coordinate with the restored unrotated
+  allele; and a
+  minimized differing base just outside a transcript remains eligible for
+  complete-feature clamping, allowing terminal `CG>CC` to render `c.*10dup`.
+  Fixed SQL witnesses preserve the positive and negative rotation states and
+  the exact HGVSc/HGVSp strings
+- add a fail-closed official Ensembl release-VCF conformance runner for literal
+  SNVs. It maps each lossless `VE` row to a VCF ALT through the producer's
+  zero-based allele Index, aggregates
+  consequence sets per transcript, runs the public rich DuckVEP relation against
+  a receipt-matched model, and rejects mismatched, missing, extra, oracle-less,
+  or unsupported rows. The documented non-SNV follow-up is pinned to Ensembl
+  Variation release/116's GVF `Variant_seq`/`Index` plus `gvf2vcf.pl` lineage.
+  Document that the release CSQ presentation overwrites repeated consequence
+  terms for one allele/feature and therefore is not a full-set oracle; non-SNV
+  ownership must not be guessed from padded VCF ALT strings
+- let the deterministic DuckVEP corpus stager select every primary-contig tile
+  for full GIAB/ClinVar performance gates, and record a caller-declared corpus
+  name plus the dense-versus-full selection mode in its receipt. The historical
+  density-ranked default remains unchanged
+- extend the unified `duckvep_annotate(...)` relation with `rich := TRUE`.
+  The fixed public schema retains the compact SO/region masks, IMPACT/status/
+  reason codes, positions, amino-acid bytes, NMD codes, and object ordinals
+  while adding VEP-facing consequence, IMPACT, region, amino-acid, NMD, and
+  overlap-object text plus explicitly named `duckvep_status` and
+  `duckvep_reason` audit fields. `rich := TRUE, hgvs := TRUE` fuses candidate
+  discovery, consequence classification, and independent-event HGVSc/HGVSn/
+  HGVSp in one native pass. Add mixed small/SV/BND and rich-plus-HGVS SQL
+  regressions, extend the receipt-bound throughput driver to all four output
+  choices, and replace the root README's synthetic-first DuckVEP overview with
+  the Ensembl relation compiler, canonical event, conformance, performance,
+  supplementary-join, and fair FastVEP comparison contracts
 - make the unified `duckvep_annotate(...)` relation fail when a supported
   symbolic ALT disagrees with an explicit structural type, rather than
   silently reinterpreting the event, and make explicit `hgvs := NULL` follow
@@ -12,14 +188,15 @@
   dispatches to private native lanes, and returns one fixed compact schema with
   nullable HGVS fields. Add `duckvep_so_terms()` as the generated mask-decoding
   relation, public SQL/R regressions, and rendered root/package README examples
-- measure that public relation on all 4,095,611 model-addressable GIAB HG002
-  v4.2.1 literal alleles against the complete Ensembl 116 GRCh38 model. At the
-  checked `8da057b0` revision it emits 47,629,345 rows at 1,000,882 compact
-  alleles/s on one pinned core and 3,138,399/s on four pinned cores; cumulative
-  HGVS reaches 238,797 and 737,549 alleles/s respectively. Adjacent one-core
-  private-lane rows quantify the public validation/dispatch cost as 12.7% for
-  compact output and 3.8% for HGVS. See the rendered
-  `benchmarks/duckvep_throughput.md` evidence and denominators
+- measure all four public output contracts on all 4,095,611 model-addressable
+  GIAB HG002 v4.2.1 literal alleles against the complete Ensembl 116 GRCh38
+  model, including 1,383,580 regulatory/motif features. At checked revision
+  `6c640890` the relation emits 47,835,851 rows at 964,354 compact, 346,030 rich,
+  238,325 HGVS, and 180,495 fused rich-plus-HGVS alleles/s on one pinned core;
+  four pinned cores reach 3,192,214, 1,513,530, 858,619, and 637,846 alleles/s.
+  Five complete passes checksum the full output denominator and separate
+  full-row fingerprints prove one-thread/four-thread equality for every output
+  contract. See the rendered `benchmarks/duckvep_throughput.md` evidence
 - extend the rendered VariantKey/RegionKey supplementary-annotation benchmark with
   isolated peak-RSS measurements and real dense exact providers. Official AlphaMissense
   v2 GRCh38 (71,697,556 rows), a receipted REVEL v1.3 GRCh37 projection (77,966,138

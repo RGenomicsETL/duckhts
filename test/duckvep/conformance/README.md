@@ -17,13 +17,27 @@ consequence.
 
 The runner uses the current `WangLabCSU/blit` command API (tested at
 `940c2c1385ba6ad72f0c63b861e90abe8ae6e6f3`) to execute
-`micromamba run -p "$VEP_PREFIX" vep ...` without a shell. The default prefix is
+`micromamba run -p "$VEP_PREFIX" vep ...` through a generated shell script whose dynamic
+tokens are individually quoted. The default prefix is
 `/root/miniconda3/envs/vep`; override `VEP_PREFIX` for another VEP 116 environment.
 Install that `blit` checkout with `R CMD INSTALL /path/to/blit`. A matching VEP
 environment can be created with `micromamba create -p "$VEP_PREFIX"
-bioconda::ensembl-vep=116.0`.
+--file test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt` on
+Linux-64. Before launching VEP, the runner requires the installed explicit package URL set
+to equal that lock exactly; naming a lock file without matching the live environment is
+not accepted as provenance.
 
-The tests have three independent jobs:
+The optional [`../../../pipelines/duckvep/`](../../../pipelines/duckvep/README.md)
+workflow uses `{targets}` for campaign invalidation, branching, resume behavior, and saved
+error workspaces. It builds the release extension once and passes a revision- and
+byte-bound receipt to every campaign branch. `blit` remains the external VEP/micromamba
+process layer; the targets graph does not reconstruct those command lines. Large corpus,
+reference, model, cache-info, and cache-receipt paths are tracked inputs, while DuckVEP retains the
+semantic receipts and full comparison denominators. The runner performs its explicit
+receipt hashes whenever it executes, does not accept precomputed artifact digests, and
+does not maintain an independent generic cache.
+
+The validation gates have independent jobs:
 
 - `make test-duckvep-kernel` checks the pure C engine against brute-force interval,
   base-walk, genetic-code, edit-rebuild, and composition oracles. AddressSanitizer and
@@ -53,6 +67,82 @@ The tests have three independent jobs:
   20,000 deterministic alleles concentrated around transcript boundaries and distributed
   across the transcript, and compares all of them with executable VEP 116. The generated
   VCF records the seed; pair-level Parquet keeps every disagreement and unresolved row.
+  `data/property_coverage_requirements.tsv` makes the rare-state denominator executable:
+  a statistically required state must receive at least one observation, while an allowed
+  zero count must name a fixed C witness. An undeclared zero counter, a missing required
+  counter, or a statistically required zero fails and preserves the complete property log
+  under `results/` with its seed and requested trial count.
+  The acceptance path fails after writing those artifacts if it observes any consequence
+  mismatch, missing/extra row, or DuckVEP unresolved state. It cannot turn a statistical
+  failure into a successful campaign by excluding it from the resolved denominator.
+
+The finite-state campaign manifest uses exact source revision, artifact digest, corpus,
+model, oracle version, and oracle-build tokens. Its checker parses the selected CSV rows
+and validates their all-row and mismatch counters; it never treats a corpus-name substring
+as evidence. `make duckvep-state-current-check` is the stricter release audit: it fails
+until every executable campaign named by the state relation has evidence at current HEAD.
+Historical successful evidence remains useful for lineage, but cannot satisfy that
+current-release gate after implementation or executable-conformance-input changes. A
+campaign need not name the later evidence-only commit that records its result: the strict
+check instead proves that its source commit is an ancestor of `HEAD` and that the DuckVEP
+sources, build/catalog inputs, property harness, vendored property library, executable
+conformance inputs, transition relation, and outcome relation are byte-unchanged since
+measurement. Evidence histories, generated result artifacts, the campaign receipt
+manifest, and documentation are excluded from that comparison so committing a receipt
+does not immediately make the receipt stale. The strict check also rejects staged,
+unstaged, or untracked semantic inputs; release evidence is evaluated only from a clean,
+committed implementation and harness.
+
+Property and distribution histories recover an interrupted journal before enforcing the
+clean-worktree gate, then use one publication lock per destination directory,
+which prevents concurrent publication of overlapping custom ledger pairs such as `(A, B)`
+and `(A, C)`.
+Publication is recoverable across process termination between the two POSIX renames;
+removing the journal commits the pair before rollback copies are deleted. This is not a
+claim of power-loss durability on filesystems that have not persisted file and directory
+metadata. The campaign invokes the committed root `Makefile` explicitly, clears inherited
+GNU Make control variables and optional property compiler flags, and rechecks all tracked
+and untracked source inputs—including ignored compiler inputs in the complete C property
+source/vendor closure—after the final evidence input has been consumed.
+
+## Upstream Ensembl test lineage
+
+The Ensembl suites are useful oracle checks, but they do not replace a DuckVEP
+differential. Exact source files and per-file SHA-256 receipts are committed under
+[`../upstream/`](../upstream/README.md); `perl ../upstream/check_sources.pl` rejects local
+drift, omissions, and unreceipted additions without network access. Pin all repositories
+to release 116 before using them:
+
+- `Ensembl/ensembl-vep` release/116 commit
+  `57ea5c52340acc1f156267f810ad162e26597082` supplies the VEP runner/parser,
+  cache, regulatory/motif, structural-VCF, chromosome-alias, mitochondrial, and
+  small Haplosaurus tests. Its bundled cache is primarily Ensembl 84 GRCh38 test
+  data from small chromosome-21/22 regions; passing it proves that the Perl oracle
+  environment is healthy, not that DuckVEP is conformant.
+- `Ensembl/ensembl-variation` release/116 supplies the richer semantic authority.
+  `modules/t/variation_effect.t` has 189 targeted consequence cases and
+  `modules/t/hgvs_parser.t` has exact genomic, transcript, and protein HGVS cases;
+  import provenance-labelled cases from those files and then compare both engines on
+  the matching model. Do not describe this as DuckVEP directly passing Ensembl's
+  internal suite.
+- The legacy monolithic VEP suite is preserved in the Git history of
+  `Ensembl/ensembl-tools/scripts/variant_effect_predictor`. Its last pre-removal
+  snapshot is smaller than the current VEP suite. The older consequence and HGVS
+  lineage is already present in `ensembl-variation` Git history, where
+  `variation_effect.t` and `hgvs_parser.t` were added in 2011 and 2012. Ensembl
+  migrated its CVS development history to Git for release 75; VEP's
+  `VEP_SUB_VERSION` and “Subversion update” commit messages mean point releases such
+  as 115.2, not the Apache Subversion version-control system. There is no separate
+  public SVN conformance authority.
+
+The upstream suites exercise core topology, start/stop, frameshift/in-frame,
+incomplete-codon, mature-miRNA, frameshift-intron, selected HGVS shift,
+regulatory/motif, structural-parser, mitochondrial-codon, and one small phased-SNV
+case. They do not exhaust the named VEP-116 compatibility rules in
+`design/duckvep_errata.md`, the 1,000-base shift cap, the full BND/SV predicate
+matrix, long/pangenome alleles, or phased indel/MNV edit sets. Keep three separate
+receipts: the pinned upstream self-test, extracted upstream semantic fixtures, and
+the DuckVEP fixed/property/statistical/corpus conformance campaign.
 
 The state exploration defaults are reproducible and can be widened without changing code:
 
@@ -71,6 +161,11 @@ cases. The ordinary, AddressSanitizer, and UndefinedBehaviorSanitizer targets ea
 reconstruction is a fallback only for an empty or `X`-containing local alternate peptide.
 The minimized concrete-`*` scene now has a fixed regression, while the corrected random
 oracle still observed 49 genuine fallback cases and 1,877 stop-gained frame changes.
+
+Once a rare state is discovered, its generator receives a dedicated stratum instead of
+depending on its accidental probability under a broad distribution. The terminal missing-
+tail, terminal-duplication, and non-stop terminal-codon strata follow this rule; the
+coverage manifest or direct property assertion makes their absence a failed run.
 
 The independent executable differential with seed `20260716` wrote 100,268 variants (268
 fixed witnesses plus 100,000 generated alleles) and matched all 100,268 VEP-116 transcript
@@ -106,11 +201,21 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --corpus clinvar \
   --vcf /data/clinvar.vcf.gz \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --database /data/duckvep-model.duckdb \
   --model-sql '' \
   --sample-per-shape 50000"
 ```
+
+The corpus comparison is spillable rather than proportional to the complete annotation
+relation. `--duckdb-memory-limit` (default `8GB`) and `--duckdb-threads` (default `4`)
+control the DuckDB evidence-projection phase. The resident DuckVEP model is allocated
+outside DuckDB's memory limit; the runner writes the two engines' unique
+`(source, variant_id, transcript)` rows to Parquet, drops the resident model and in-memory
+annotation tables, and then performs consequence and HGVS full outer joins from those
+files. Duplicate pair keys fail before comparison instead of multiplying rows.
 
 Add `--nmd-plugin-dir /path/to/pinned/VEP_plugins` to the same command to run
 `NMD.pm`. The runner rejects any `NMD.pm` whose SHA-256 differs from the pinned
@@ -159,6 +264,8 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --database /data/homo_sapiens_116_GRCh38.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 21 --seed 17 --sample-per-shape 100"
@@ -197,6 +304,8 @@ VEP_PREFIX=/opt/vep Rscript corpus_differential.R \
   --database /data/homo_sapiens_116_GRCh38.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 21 --sample-per-shape 0 --fork 4
@@ -218,6 +327,8 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --database /data/homo_sapiens_116_GRCh38.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 1,2,7,21,X --seed 31 --sample-per-shape 2"
@@ -247,7 +358,7 @@ SHA-256 checksums, record/allele/CSQ cardinalities, exact byte sizes, compressio
 thread count, and source revision.
 
 Small pinned shards of these official release VCFs are suitable for ordinary CI: their
-release-specific CSQ rows are a precomputed oracle, so DuckVEP can compare transcript
+release-specific `VE` rows are a precomputed oracle, so DuckVEP can compare transcript
 consequences without launching the Perl VEP executable. A release shard is not a substitute
 for the generated witness and corpus lanes because it cannot test alleles or VEP option
 states absent from the published variation set. Full scheduled matrices should obtain the
@@ -256,6 +367,36 @@ multi-gigabyte caches to git. The planned distribution contract is one manifest 
 Ensembl/Ensembl Genomes release, species, assembly, model ABI, transcript-filter policy,
 source-relation hash set, and artifact digest; a Zenodo record can provide stable versioned
 storage while every downloaded model still passes normal receipt/model-open validation.
+
+`release_vcf_differential.R` makes that precomputed-oracle lane executable. Its first
+fail-closed stratum is literal SNVs. The release `VE` field retains
+`Consequence|Index|Feature_type|Feature_id`; its zero-based Index maps each consequence to
+the original GVF `Variant_seq` and corresponding VCF ALT, so multiallelic records remain
+unambiguous. It aggregates the published VE consequence set per ALT/transcript,
+runs the public rich `duckvep_annotate(...)` relation against the receipt-matched model, and
+requires exact transcript/object pairs, no missing/extra rows, no oracle-less input, and no
+unsupported DuckVEP row. Both transcript distances are zero because the variation database
+dump records overlapping feature consequences, not VEP CLI's optional transcript flanks.
+Do not instead map by CSQ allele text for indels. The Ensembl Variation
+release-116 producer at `2fb834b987ede3824e200197a838ce11e91aeb4b` writes a GVF
+`Variant_seq` and `Index` before `gvf2vcf.pl` asks `VariationFeature->to_VCF_record` for the
+padded VCF alleles; the future non-SNV stratum must reproduce that indexed relation rather
+than equate CSQ allele text with a transformed VCF ALT. `gvf2vcf.pl` also stores
+`Consequence` in a hash keyed only by allele and feature while constructing CSQ, so repeated
+VE terms overwrite one another there; CSQ is a useful typed presentation, not the complete
+consequence-set oracle.
+
+Run it through the repository target so the exact input, model, release, assembly, and
+output receipt remain visible in one command:
+
+```sh
+make test-duckvep-release-vcf DUCKVEP_RELEASE_DIFFERENTIAL_ARGS="\
+  --input /data/homo_sapiens_incl_consequences-chr22.vcf.gz \
+  --database /data/homo_sapiens_116_GRCh38.duckdb \
+  --release 116 --assembly GRCh38 --chromosome 22 --threads 1 \
+  --source-checksum sha256:HEX \
+  --output test/duckvep/conformance/results/release_116_chr22_snv.csv"
+```
 
 `make duckvep-record-conformance` reruns the real VEP witnesses and records the current
 source revision in `data/conformance_history.csv`. Rows include the complete consequence
@@ -274,7 +415,9 @@ one transcript and is not a whole-genome performance claim. Render both views wi
 `make duckvep-render-reports`. `make duckvep-record-properties` runs the pure-C
 randomized suite and records every reported target, seed, trial count, and duplicate
 count in `data/property_history.csv` plus named state-distribution counters in
-`data/property_coverage_history.csv`; a failed suite writes no history row.
+`data/property_coverage_history.csv`. A failed suite writes no successful history row, but
+retains its complete seed-specific log. The coverage-requirement manifest prevents a green
+suite from silently omitting a declared rare state.
 
 The fixed-event campaign is a closed release-regression gate for the declared independent
 small-variant, typed DEL/DUP/tandem-DUP/INV/INS/CNV, paired-BND, transcript, mature-miRNA,

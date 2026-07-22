@@ -24,6 +24,13 @@ op <- add_option(
 )
 op <- add_option(op, "--model-database", dest = "model_database")
 op <- add_option(op, "--source-vcf", dest = "source_vcf")
+op <- add_option(
+  op,
+  "--source-name",
+  dest = "source_name",
+  default = "ClinVar",
+  help = "declared corpus name retained in the receipt [%default]"
+)
 op <- add_option(op, "--output-database", dest = "output_database")
 op <- add_option(op, "--tile-size", dest = "tile_size", type = "integer", default = 250000L)
 op <- add_option(
@@ -34,6 +41,14 @@ op <- add_option(
   default = 64L
 )
 op <- add_option(op, "--threads", type = "integer", default = 4L)
+op <- add_option(
+  op,
+  "--all-tiles",
+  dest = "all_tiles",
+  action = "store_true",
+  default = FALSE,
+  help = "stage every primary-contig tile instead of the density-ranked subset"
+)
 op <- add_option(op, "--overwrite", action = "store_true", default = FALSE)
 opt <- parse_args(op)
 
@@ -50,6 +65,7 @@ if (length(missing_options)) {
 if (opt$tile_size < 1L) die("--tile-size must be positive")
 if (opt$tiles_per_axis < 1L) die("--tiles-per-axis must be positive")
 if (opt$threads < 1L) die("--threads must be positive")
+if (!nzchar(trimws(opt$source_name))) die("--source-name must not be empty")
 
 input_paths <- c(opt$extension, opt$model_database, opt$source_vcf)
 missing_paths <- input_paths[!file.exists(input_paths)]
@@ -114,6 +130,12 @@ sql_q <- function(x) as.character(dbQuoteString(con, x))
 
 invisible(dbExecute(con, glue("SET threads = {opt$threads}")))
 invisible(dbExecute(con, glue("LOAD {sql_q(extension)}")))
+tile_selection_filter <- if (isTRUE(opt$all_tiles)) {
+  ""
+} else {
+  glue("WHERE rank_in_axis <= {opt$tiles_per_axis}")
+}
+
 invisible(dbExecute(
   con,
   glue("ATTACH {sql_q(model_database)} AS duckvep_model (READ_ONLY)")
@@ -280,7 +302,7 @@ invisible(dbExecute(
          tile_id,
          list(axis ORDER BY axis) AS selection_categories
        FROM ranked
-       WHERE rank_in_axis <= {opt$tiles_per_axis}
+       {tile_selection_filter}
        GROUP BY seq_region, tile_id
      )
      SELECT m.*, s.selection_categories
@@ -427,8 +449,8 @@ staged_counts <- dbGetQuery(
 )
 
 receipt <- data.frame(
-  schema_version = 2L,
-  source_name = "ClinVar",
+  schema_version = 3L,
+  source_name = opt$source_name,
   source_path = source_vcf,
   source_sha256 = source_sha256,
   source_alt_count = source_alt_count,
@@ -438,6 +460,7 @@ receipt <- data.frame(
   region_ordinal_sha256 = as.character(region_ordinal_sha256),
   tile_size = opt$tile_size,
   tiles_per_axis = opt$tiles_per_axis,
+  selection_mode = if (isTRUE(opt$all_tiles)) "all_primary_tiles" else "density_ranked",
   selected_tile_count = staged_counts$selected_tile_count,
   selected_tile_bases = staged_counts$selected_tile_bases,
   selected_source_alt_count = staged_counts$selected_source_alt_count,
@@ -460,7 +483,8 @@ cat(
   glue(
     "staged {format(receipt$supported_alt_count, big.mark = ',', scientific = FALSE)} ",
     "literal ALT alleles from {format(receipt$selected_tile_count, big.mark = ',')} ",
-    "annotation-dense tiles -> {output_database}"
+    "{if (isTRUE(opt$all_tiles)) 'primary-contig' else 'annotation-dense'} ",
+    "tiles -> {output_database}"
   ),
   "\n",
   sep = ""

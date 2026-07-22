@@ -85,6 +85,55 @@ Five rules keep the design understandable:
    all emitted variant/object pairs; throughput reports count input alleles, candidate
    work, emitted rows, bytes, model, threads, and materialization.
 
+### The continuing sweep, concretely
+
+A per-allele interval lookup would repeatedly search the same chromosome-sized transcript
+index. DuckVEP instead exploits the public input contract: model rows and ALT alleles are
+both nondecreasing by model-local contig and coordinate. At the first allele of one native
+batch, cgranges supplies every transcript whose span plus directional flank can contain the
+event. The workspace then retains three monotone frontiers:
+
+1. the next transcript start not yet admitted;
+2. the active transcript indices not yet expired behind the current event; and
+3. the exon rank last reached for each active transcript on the point and general-feature
+   projection paths.
+
+For each later allele, the worker advances the admission frontier while transcript starts
+are reachable, compacts expired transcripts out of the active set, and projects only the
+survivors. A wide allele may additionally admit transcripts whose starts fall inside its
+full event span; those candidates are unioned with the continuing point active set. The
+regulation/motif relation uses the same general interval-candidate mechanics but a separate
+active set and exact event overlap, because it has no upstream/downstream transcript flank.
+
+```text
+sorted model spans:       [T1---------] [T2---]       [T3-----------]
+sorted event starts:          e1  e2        e3  e4             e5
+                              ^ seed once
+                                 admit newly reachable starts ->
+                                 retire ends left of the event ->
+                                 classify the remaining active set
+```
+
+Ignoring emitted pairs, one monotone run is `O(transcripts admitted + events)` rather than
+`O(events * log(transcripts))` independent searches. Dense regions still cost real work:
+if an event overlaps many transcripts or core features, DuckVEP must emit and classify
+those candidates. There is no reward for selecting sparse windows, and the performance
+suite therefore includes transcript-, exon-, non-coding-RNA-, regulation-, motif-, and
+observed-variant-dense tiles.
+
+The `upstream_distance` and `downstream_distance` values change admission geometry only.
+They are not allocation sizes and do not clip the event. Statistical sweep scenes exercise
+zero, 1, 50, 100, 4,999, 5,000, 5,001, 10,000, 50,000, and 65,535-base distances, including
+alleles wider than the requested flank. The current scalar adapter has no guaranteed state
+across DuckDB vector edges, so it seeds each native vector and continues inside that vector.
+A future stateful table-function adapter may carry the same frontiers across vectors; it
+must not create a second candidate-selection authority.
+
+The resident model is immutable and shared among DuckDB workers. Each checked-out workspace
+owns its active/candidate arrays, exon cursors, result builder, reference window, and faidx
+handle. Partitioning therefore multiplies bounded workspace scratch rather than the whole
+transcript/sequence model, and no mutable iterator or reference cache crosses threads.
+
 Phased haplotypes and structural variants reuse projection, sequence editing, and the SO
 rules, but they are not disguised as independent small variants. Haplotypes group several
 edits before translation; breakends retain two loci. Supplementary annotation and ACMG/AMP
@@ -772,7 +821,7 @@ bug. A strict chromosome-21 ClinVar run compared 56,998 transcript pairs: 20,782
 both HGVSc and HGVSp, 24,089 matched HGVSc with HGVSp absent on both sides, and 12,127 had
 both strings absent, with zero discordant, unresolved, missing, or extra HGVS rows. That is
 evidence for the exercised GRCh38 independent-event distribution, not for untested species,
-assemblies, transcript-source quirks, or other HGVS classes.
+assemblies, transcript-source-specific sequence/projection states, or other HGVS classes.
 
 The execution split is:
 
@@ -907,6 +956,10 @@ indefinitely open prerequisite for every release.
   `test/duckvep/conformance/property_history.R` records those counters in a long-form
   append-only ledger, so a passing run cannot hide that a declared edit shape, strand,
   terminal state, shift limit, or haplotype interaction received zero observations.
+  `data/property_coverage_requirements.tsv` classifies selected counters as statistically
+  required or covered by a named deterministic C witness. The history runner fails on a
+  missing counter, a statistically required zero, or any other zero without such a witness,
+  and preserves the complete seed-specific failure log.
 - The regulation/motif lane compares the complete resumable cursor, at one output row of
   capacity, with a brute-force all-event/all-feature evaluator for randomized small alleles
   and exact structural events. The offline Ensembl fixture independently imports and emits
@@ -980,6 +1033,125 @@ indefinitely open prerequisite for every release.
   annotation from already coordinate-sorted input, and read-plus-sort-plus-annotation.
   Sorting cost is not hidden, but it is not charged only to DuckVEP either. DuckDB may sort
   once and stream ordered chunks directly into the consequence or phased executor.
+
+### Finite-quotient conformance certificate
+
+Statistical differential testing remains a permanent release gate because it reaches rare
+combinations that fixed witnesses and ordinary corpora do not. It can be strengthened, but
+not replaced, by a machine-checkable finite quotient of the declared VEP-116 state machine.
+The formalization starts from the checked
+`test/duckvep/conformance/data/state_machine_transitions.tsv` transition relation. Each
+row names the input fact authorities and output state, every comparison that the transition observes, the
+implementing source, the pinned VEP authority, and its current proof class. The generated
+check rejects unproduced inputs, disconnected outputs, missing implementation files,
+absent fixed tests or randomized property names, a proof class without its required
+executable campaign receipt, or a claim that an unimplemented transition has evidence.
+`state_machine_campaigns.tsv` resolves each campaign identifier to an exact
+source-revision/artifact/corpus/model/oracle key. The checker parses the selected rows and
+rejects a nonzero discordance/missing/extra counter, a non-exact all-row, or an HGVS
+comparison other than match/both-absent; a corpus-name substring cannot certify a failed
+campaign. Historical campaign evidence remains source-pinned. Before a release,
+`make duckvep-state-current-check` additionally requires every named executable campaign
+to have been run on an ancestor of the checked-out `HEAD` with no intervening change to
+the complete extension source/vendor closure, VCF/FASTA readers, DuckVEP implementation,
+build/catalog inputs and pinned build submodule, property harness, upstream semantic
+mirrors, or executable conformance inputs. Compiler-like untracked inputs and a dirty
+build submodule are also fatal. Evidence-only commits do not invalidate the campaign they record.
+`state_machine_outcomes.tsv` names fail-closed input/resource
+errors and unresolved/not-applicable result statuses, with their implementations and fixed
+witnesses; transitions declare which terminal outcomes they can produce. A `+` in
+`input_states` denotes
+fact authorities merged by the transition. The `paths` column names concrete execution
+lanes; the checker proves that every implemented transition on seven executable lanes has
+reachable inputs from `raw_allele` and that each lane reaches its declared terminal state.
+The combined haplotype-classification lane is reported separately as one structurally
+connected planned path; its `not_implemented` transition cannot count as executable
+reachability. A lane that does not
+request HGVS or that does not describe a structural/interval event leaves the corresponding
+optional fact state absent rather than manufacturing a value.
+
+For one annotation object, define the execution state as
+
+```text
+S = (uploaded allele, canonical event, candidate object, topology,
+     projected edit, coding context, predicate cache, consequence set,
+     NMD result, HGVS facts, emission cursor)
+```
+
+and each production stage as a typed partial transition `T_i : S_i -> S_(i+1) + Error`.
+An error is an observable terminal state: unsupported, unresolved, missing emission, and
+extra emission are not erased before comparison. Transcript and regulatory-object paths
+share event preparation and SO selection but have distinct candidate/topology transitions.
+The haplotype rows are in the same relation and are explicitly marked `mechanics_only` or
+`not_implemented`; independent-event evidence cannot silently certify them.
+
+This is counterexample-guided abstraction refinement, not an attempt to replace empirical
+testing with a small hand-picked table. The finite abstraction proposes equivalence
+classes. Held-out statistical alleles, generated exact SV/BND events, complete ClinVar,
+and HPRC long/pangenome alleles then search for a counterexample. The SV and HPRC campaigns
+are therefore state-space exploration inputs: long alleles, graph-derived representations,
+and rare topology combinations are valuable precisely when they reach states absent from
+ordinary short-variant corpora. Every counterexample is
+preserved in pair-level evidence and must either refine an observed dimension, add a
+satisfiability constraint, expose a wrong transition, or be declared outside the input
+contract. A successful sampled campaign never proves an unobserved equivalence class.
+After a sampled counterexample identifies a reachable rare class, the generator must give
+that class a dedicated stratum and the coverage manifest must require it. Repeatedly hoping
+that the class appears under an unrelated broad distribution is not an acceptance gate.
+
+Ensembl's own tests remain a separate source of semantic witnesses. Exact sources are
+mirrored under `test/duckvep/upstream/` using repository/ref-preserving paths, and
+`sources.tsv` binds every mirrored file to its repository, exact commit, upstream path,
+SHA-256, and validation role. The offline generated check rejects drift or an unreceipted
+test. `self_test_receipts.tsv` separately binds a successful upstream execution to the
+exact VEP source commit, checksum-pinned module distribution, Perl version, assertion
+denominator, and explicit skip counts. The release/116 VEP suite checks the Perl oracle
+environment and useful parser/regulatory/SV/Haplosaurus paths, while the release/116
+`ensembl-variation`
+`variation_effect.t` and `hgvs_parser.t` files contain the denser consequence and HGVS
+cases (`variation_effect.t` contains 189 targeted consequence cases). Extracted DuckVEP
+cases retain repository commit, file hash, source line/test name,
+model and expected result. These suites are modest and do
+not enumerate this document's whole state relation, so they cannot replace the finite rule
+proof, named compatibility witnesses, or the statistical and corpus campaigns. The legacy
+monolithic VEP tests are already preserved in the `ensembl-tools` Git history and are
+smaller than the current suite. Ensembl migrated its CVS history to Git; VEP's own
+“subversion” label is the point-release component, not an Apache Subversion repository.
+
+The certificate has three separate proof obligations:
+
+1. The generated fact-to-SO program is finite. Its generator currently requires one
+   consequence-bearing predicate bit per rule, an empty forbidden mask, a unique binding,
+   and three suppression groups. Empty input, every singleton, every cross-group pair, and
+   the all-bits case therefore form a complete algebraic basis for every possible predicate
+   mask. The property suite must check both ordinary and structural evaluators against the
+   reference interpreter over that basis, and generation must continue to fail if a future
+   rule invalidates the argument.
+2. Geometry and transcript state are quotiented by every comparison that production code
+   observes: event shape; strand; first/internal/penultimate/last exon; relative position at
+   and immediately around transcript, exon, intron, CDS, start/stop, splice, and NMD
+   thresholds; length-change sign and modulo three; phase; coding/biotype state; and exact
+   structural containment/truncation relations. A deterministic relational generator will
+   reject unsatisfiable combinations and retain one minimal concrete VEP witness for every
+   reachable branch signature. Zero-observation classes fail the certificate.
+3. Sequence and HGVS state are quotiented only where an equivalence argument exists:
+   equality/prefix/suffix/internal difference, copied-source availability, stop placement,
+   repeat period, typed peptide edit, and VEP shift distances at 0, 1, 999, 1000, and the
+   first disallowed step. Arbitrary sequence length and repeated-byte loops still require
+   reference-interpreter properties, sanitizer runs, long-allele distributions, or a
+   bounded/symbolic C proof with explicit loop invariants. A short representative list is
+   not evidence for all strings.
+
+The resulting certificate may claim exhaustive agreement only for the declared abstract
+domain and must publish its dimension tables, satisfiability constraints, reachable class
+count, witness mapping, and executable-VEP result. Full ClinVar HGVS, held-out generated
+seeds, long HPRC alleles, structural/BND campaigns, multiple assemblies, and non-human
+species remain independent gates: they test whether the abstraction omitted a real source
+state or whether model construction supplied the wrong facts. The fact-to-SO transition
+already has its finite-basis proof in
+`generated_effect_lookup_matches_rule_interpreter`; geometry, sequence, HGVS, SV, and
+haplotype rows retain their narrower proof status until their quotient and reachability
+certificate exist.
 
 HGVS and haplotype performance use cumulative lanes over identical prepared input:
 

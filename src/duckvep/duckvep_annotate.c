@@ -1368,10 +1368,14 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	duckvep_variant_coding_context_status_t context_status;
 	duckvep_context_delta_status_t delta_status;
 	duckvep_feature_substitution_result_t feature_result;
+	duckvep_event_t shifted_event;
+	duckvep_haplotype_edit_t shifted_edit;
+	duckvep_coding_context_t late_context;
 	uint32_t tx_idx;
 	int protein_coordinates_defined;
 	int consequence_predicates_valid;
 	int delta_ready;
+	int shifted_edit_ready;
 
 	if (state == NULL || state->entry == NULL || state->workspace == NULL ||
 	    batch == NULL || event == NULL || consequence == NULL ||
@@ -1503,6 +1507,9 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	context_status = DUCKVEP_VARIANT_CODING_CONTEXT_UNSUPPORTED_KIND;
 	context_ptr = &context;
 	delta_ready = 0;
+	shifted_edit_ready = 0;
+	memset(&shifted_event, 0, sizeof shifted_event);
+	memset(&shifted_edit, 0, sizeof shifted_edit);
 	/* The consequence callback is synchronous: these pointers are valid until
 	 * this function returns.  An unshifted DNA fact describes the same edit, so
 	 * reuse both context and delta instead of rebuilding projection, alternate
@@ -1517,8 +1524,6 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		}
 	} else if ((dna_fact.ref_length == 0u) !=
 	    (dna_fact.alt_length == 0u)) {
-		duckvep_event_t shifted_event;
-		duckvep_haplotype_edit_t shifted_edit;
 		duckvep_edit_set_t edit_set;
 		size_t allele_required;
 
@@ -1539,6 +1544,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 			    duckvep_scalar_hgvs_reason(hgvs_status);
 			return 1;
 		}
+		shifted_edit_ready = 1;
 		if (shifted_edit.ref_len == 0u && shifted_edit.cds_start >
 		    model->sequences.cds_length[tx_idx]) {
 			hgvs_result->protein_reason =
@@ -1638,8 +1644,38 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	if (protein_fact.shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT &&
 	    dna_fact.shift_offset != 0 &&
 	    (consequence->region_mask & DUCKVEP_REGION_CDS) == 0u) {
+		duckvep_haplotype_edit_t late_edit;
+		duckvep_edit_set_t late_set;
+
+		/* hgvs_protein deletes the shift hash before _stop_loss_extra_AA.
+		 * Replay the restored original allele at its original CDS coordinate;
+		 * most such rows retain Ter?, but the rare positive stop is real. */
 		protein_fact.termination_known = 0u;
 		protein_fact.termination_distance = 0u;
+		if (shifted_edit_ready && dna_fact.shift_offset > 0 &&
+		    shifted_edit.cds_start > (uint32_t)dna_fact.shift_offset) {
+			late_edit = shifted_edit;
+			late_edit.cds_start -= (uint32_t)dna_fact.shift_offset;
+			/* Deleting shift_hash also restores the original feature alleles;
+			 * the late stop search therefore does not consume the rotated HGVS
+			 * display allele used by the first peptide pass. */
+			late_edit.ref = transcript_edit.ref;
+			late_edit.alt = transcript_edit.alt;
+			late_edit.ref_len = transcript_edit.ref_length;
+			late_edit.alt_len = transcript_edit.alt_length;
+			late_set.edits = &late_edit;
+			late_set.count = 1u;
+			context_status = duckvep_model_coding_context_build(
+			    &model->transcripts, &model->exons, &model->sequences,
+			    tx_idx, model->transcripts.strand[tx_idx], event,
+			    &late_set, scratch->alt_cds, scratch->alt_cds_cap,
+			    scratch->ref_peptide, scratch->ref_peptide_cap,
+			    scratch->alt_peptide, scratch->alt_peptide_cap,
+			    &late_context);
+			if (context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK)
+				(void)duckvep_hgvs_protein_frameshift_termination_replay(
+				    &late_context, &protein_fact);
+		}
 	}
 	return duckvep_scalar_hgvs_store_protein(
 	    state, &protein_fact, hgvs_result, error, error_size);
@@ -2506,25 +2542,120 @@ duckvep_scalar_prepare_output_list(duckvep_scalar_state_t *state,
 	return 1;
 }
 
+/* Compact SQL codes preserve the kernel enum values for sequence failures.
+ * Zero means no failure; one is reserved for the adapter-only case where a
+ * partial model has no loaded transcript feature for the input. */
+enum {
+	DUCKVEP_COMPACT_STATUS_SUPPORTED = 0,
+	DUCKVEP_COMPACT_STATUS_UNRESOLVED = 1,
+	DUCKVEP_COMPACT_REASON_NONE = 0,
+	DUCKVEP_COMPACT_REASON_NO_FEATURE = 1
+};
+
+static int
+duckvep_scalar_write_hgvs_fields(duckvep_scalar_state_t *state,
+	duckdb_vector *vectors, uint64_t **validity, size_t first_column,
+	size_t output_row, size_t result_index, char *error, size_t error_size)
+{
+	const duckvep_hgvs_scalar_result_t *hgvs;
+	const char *reason;
+	uint32_t *hgvs_shifts;
+
+	hgvs = &state->hgvs_results[result_index];
+	if ((hgvs->transcript_length != 0u &&
+	    (hgvs->transcript_offset > state->hgvs_text_size ||
+	    hgvs->transcript_length > state->hgvs_text_size -
+	    hgvs->transcript_offset)) ||
+	    (hgvs->protein_length != 0u &&
+	    (hgvs->protein_offset > state->hgvs_text_size ||
+	    hgvs->protein_length > state->hgvs_text_size -
+	    hgvs->protein_offset))) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate: rendered HGVS slice exceeds the vector text arena");
+		return 0;
+	}
+	hgvs_shifts = duckdb_vector_get_data(vectors[first_column + 2u]);
+	if (hgvs->transcript_reason == DUCKVEP_HGVS_ADAPTER_NONE &&
+	    hgvs->transcript_length != 0u) {
+		duckvep_scalar_assign_ascii_valid(vectors[first_column],
+		    validity[first_column], (idx_t)output_row,
+		    state->hgvs_text + hgvs->transcript_offset,
+		    hgvs->transcript_length);
+		hgvs_shifts[output_row] = hgvs->shift_offset;
+		duckvep_scalar_set_valid(validity[first_column + 2u],
+		    (idx_t)output_row);
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 3u],
+		    validity[first_column + 3u], (idx_t)output_row,
+		    "supported", sizeof("supported") - 1u);
+	} else if (hgvs->transcript_reason ==
+	    DUCKVEP_HGVS_ADAPTER_NOT_APPLICABLE) {
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 3u],
+		    validity[first_column + 3u], (idx_t)output_row,
+		    "not_applicable", sizeof("not_applicable") - 1u);
+	} else {
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 3u],
+		    validity[first_column + 3u], (idx_t)output_row,
+		    "unresolved", sizeof("unresolved") - 1u);
+		reason = duckvep_scalar_hgvs_reason_name(hgvs->transcript_reason);
+		if (reason != NULL)
+			duckvep_scalar_assign_ascii_valid(vectors[first_column + 4u],
+			    validity[first_column + 4u], (idx_t)output_row,
+			    reason, strlen(reason));
+	}
+	if (hgvs->protein_reason == DUCKVEP_HGVS_ADAPTER_NONE &&
+	    hgvs->protein_length != 0u) {
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 1u],
+		    validity[first_column + 1u], (idx_t)output_row,
+		    state->hgvs_text + hgvs->protein_offset,
+		    hgvs->protein_length);
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 5u],
+		    validity[first_column + 5u], (idx_t)output_row,
+		    "supported", sizeof("supported") - 1u);
+	} else if (hgvs->protein_reason ==
+	    DUCKVEP_HGVS_ADAPTER_NOT_APPLICABLE) {
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 5u],
+		    validity[first_column + 5u], (idx_t)output_row,
+		    "not_applicable", sizeof("not_applicable") - 1u);
+	} else {
+		duckvep_scalar_assign_ascii_valid(vectors[first_column + 5u],
+		    validity[first_column + 5u], (idx_t)output_row,
+		    "unresolved", sizeof("unresolved") - 1u);
+		reason = duckvep_scalar_hgvs_reason_name(hgvs->protein_reason);
+		if (reason != NULL)
+			duckvep_scalar_assign_ascii_valid(vectors[first_column + 6u],
+			    validity[first_column + 6u], (idx_t)output_row,
+			    reason, strlen(reason));
+	}
+	return 1;
+}
+
 static int
 duckvep_scalar_write_output(duckvep_scalar_state_t *state,
-	duckdb_vector output, idx_t input_rows, char *error, size_t error_size)
+	duckdb_vector output, idx_t input_rows, int with_hgvs,
+	char *error, size_t error_size)
 {
-	duckdb_vector child, vectors[19];
-	uint64_t *validity[19];
+	duckdb_vector child, vectors[36];
+	uint64_t *validity[36];
 	uint32_t *transcript_indices, *gene_indices;
 	uint32_t *regulation_feature_indices;
-	uint64_t *cdna_positions, *cds_positions, *protein_positions;
+	uint32_t *cdna_positions, *cds_positions, *protein_positions;
 	bool *nmd_escape_intronless, *nmd_escape_early_cds;
 	bool *nmd_escape_last_exon, *nmd_escape_penultimate_exon_end;
-	size_t output_count, source, row, column;
+	uint64_t *consequence_masks;
+	uint32_t *region_masks;
+	uint8_t *impact_codes, *status_codes, *reason_codes;
+	uint8_t *reference_amino_acids, *alternate_amino_acids;
+	uint8_t *nmd_prediction_codes, *nmd_escape_reasons;
+	uint8_t *overlap_object_codes;
+	size_t output_count, source, row, column, column_count;
 
 	if (!duckvep_scalar_prepare_output_list(state, output, input_rows,
 	    &output_count,
 	    error, error_size))
 		return 0;
 	child = duckdb_list_vector_get_child(output);
-	for (column = 0; column < 19; column++) {
+	column_count = with_hgvs ? 36u : 29u;
+	for (column = 0; column < column_count; column++) {
 		vectors[column] = duckdb_struct_vector_get_child(child,
 		    (idx_t)column);
 		validity[column] = duckdb_vector_get_validity(vectors[column]);
@@ -2539,7 +2670,25 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 	nmd_escape_last_exon = duckdb_vector_get_data(vectors[15]);
 	nmd_escape_penultimate_exon_end = duckdb_vector_get_data(vectors[16]);
 	regulation_feature_indices = duckdb_vector_get_data(vectors[17]);
+	consequence_masks = duckdb_vector_get_data(vectors[19]);
+	region_masks = duckdb_vector_get_data(vectors[20]);
+	impact_codes = duckdb_vector_get_data(vectors[21]);
+	status_codes = duckdb_vector_get_data(vectors[22]);
+	reason_codes = duckdb_vector_get_data(vectors[23]);
+	reference_amino_acids = duckdb_vector_get_data(vectors[24]);
+	alternate_amino_acids = duckdb_vector_get_data(vectors[25]);
+	nmd_prediction_codes = duckdb_vector_get_data(vectors[26]);
+	nmd_escape_reasons = duckdb_vector_get_data(vectors[27]);
+	overlap_object_codes = duckdb_vector_get_data(vectors[28]);
 	duckvep_scalar_set_null_range(vectors[17], &validity[17], output_count);
+	for (column = 24; column <= 25; column++)
+		duckvep_scalar_set_null_range(vectors[column], &validity[column],
+		    output_count);
+	if (with_hgvs) {
+		for (column = 29; column < 36; column++)
+			duckvep_scalar_set_null_range(vectors[column],
+			    &validity[column], output_count);
+	}
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -2592,6 +2741,21 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 				    (idx_t)output_count);
 			duckvep_scalar_set_null(vectors[18], &validity[18],
 			    (idx_t)output_count);
+			consequence_masks[output_count] = complete ?
+			    DUCKVEP_SO(DUCKVEP_SO_INTERGENIC) : 0u;
+			region_masks[output_count] = 0u;
+			impact_codes[output_count] = DUCKVEP_IMPACT_MODIFIER;
+			status_codes[output_count] = complete ?
+			    DUCKVEP_COMPACT_STATUS_SUPPORTED :
+			    DUCKVEP_COMPACT_STATUS_UNRESOLVED;
+			reason_codes[output_count] = complete ?
+			    DUCKVEP_COMPACT_REASON_NONE :
+			    DUCKVEP_COMPACT_REASON_NO_FEATURE;
+			nmd_prediction_codes[output_count] =
+			    DUCKVEP_NMD_NOT_APPLICABLE;
+			nmd_escape_reasons[output_count] = 0u;
+			duckvep_scalar_set_null(vectors[28], &validity[28],
+			    (idx_t)output_count);
 			output_count++;
 		}
 		for (source = begin; source < end; source++, output_count++) {
@@ -2601,6 +2765,20 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			size_t consequence_length, region_length;
 
 			result = &state->results[source];
+			consequence_masks[output_count] = result->consequence_mask;
+			region_masks[output_count] = result->region_mask;
+			impact_codes[output_count] = result->impact;
+			status_codes[output_count] = (result->flags &
+			    DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED) != 0 ?
+			    DUCKVEP_COMPACT_STATUS_UNRESOLVED :
+			    DUCKVEP_COMPACT_STATUS_SUPPORTED;
+			reason_codes[output_count] = status_codes[output_count] ==
+			    DUCKVEP_COMPACT_STATUS_UNRESOLVED ?
+			    result->sequence_status : DUCKVEP_COMPACT_REASON_NONE;
+			nmd_prediction_codes[output_count] = result->nmd_prediction;
+			nmd_escape_reasons[output_count] = result->nmd_escape_reasons;
+			overlap_object_codes[output_count] =
+			    result->overlap_object_kind;
 			if (result->overlap_object_kind ==
 			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
 				transcript_indices[output_count] = result->tx_idx;
@@ -2680,25 +2858,28 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			}
 			if (result->cdna_pos >= 0)
 				cdna_positions[output_count] =
-				    (uint64_t)result->cdna_pos;
+				    (uint32_t)result->cdna_pos;
 			else
 				duckvep_scalar_set_null(vectors[7], &validity[7],
 				    (idx_t)output_count);
 			if (result->cds_pos >= 0)
 				cds_positions[output_count] =
-				    (uint64_t)result->cds_pos;
+				    (uint32_t)result->cds_pos;
 			else
 				duckvep_scalar_set_null(vectors[8], &validity[8],
 				    (idx_t)output_count);
 			if (result->protein_pos >= 0)
 				protein_positions[output_count] =
-				    (uint64_t)result->protein_pos;
+				    (uint32_t)result->protein_pos;
 			else
 				duckvep_scalar_set_null(vectors[9], &validity[9],
 				    (idx_t)output_count);
 			amino_acid[1] = '\0';
 			if (result->aa_ref != 0u) {
 				amino_acid[0] = (char)result->aa_ref;
+				reference_amino_acids[output_count] = result->aa_ref;
+				duckvep_scalar_set_valid(validity[24],
+				    (idx_t)output_count);
 				duckvep_scalar_assign_ascii(vectors[10],
 				    (idx_t)output_count, amino_acid, 1);
 			} else {
@@ -2707,6 +2888,9 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 			}
 			if (result->aa_alt != 0u) {
 				amino_acid[0] = (char)result->aa_alt;
+				alternate_amino_acids[output_count] = result->aa_alt;
+				duckvep_scalar_set_valid(validity[25],
+				    (idx_t)output_count);
 				duckvep_scalar_assign_ascii(vectors[11],
 				    (idx_t)output_count, amino_acid, 1);
 			} else {
@@ -2760,20 +2944,15 @@ duckvep_scalar_write_output(duckvep_scalar_state_t *state,
 				    "duckvep_annotate: invalid kernel NMD prediction");
 				return 0;
 			}
+			if (with_hgvs && result->overlap_object_kind ==
+			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT &&
+			    !duckvep_scalar_write_hgvs_fields(state, vectors, validity,
+			    29u, output_count, source, error, error_size))
+				return 0;
 		}
 	}
 	return 1;
 }
-
-/* Compact SQL codes preserve the kernel enum values for sequence failures.
- * Zero means no failure; one is reserved for the adapter-only case where a
- * partial model has no loaded transcript feature for the input. */
-enum {
-	DUCKVEP_COMPACT_STATUS_SUPPORTED = 0,
-	DUCKVEP_COMPACT_STATUS_UNRESOLVED = 1,
-	DUCKVEP_COMPACT_REASON_NONE = 0,
-	DUCKVEP_COMPACT_REASON_NO_FEATURE = 1
-};
 
 static int
 duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
@@ -2790,7 +2969,6 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 	uint8_t *reference_amino_acids, *alternate_amino_acids;
 	uint8_t *nmd_prediction_codes, *nmd_escape_reasons;
 	uint8_t *overlap_object_codes;
-	uint32_t *hgvs_shifts;
 	size_t output_count, source, row, column, column_count;
 
 	if (!duckvep_scalar_prepare_output_list(state, output, input_rows,
@@ -2829,12 +3007,10 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 		    output_count);
 	duckvep_scalar_set_null_range(vectors[14], &validity[14], output_count);
 	if (with_hgvs) {
-		hgvs_shifts = duckdb_vector_get_data(vectors[18]);
 		for (column = 16; column < 23; column++)
 			duckvep_scalar_set_null_range(vectors[column],
 			    &validity[column], output_count);
-	} else
-		hgvs_shifts = NULL;
+	}
 	output_count = 0;
 	source = 0;
 	for (row = 0; row < (size_t)input_rows; row++) {
@@ -2925,89 +3101,10 @@ duckvep_scalar_write_compact_output(duckvep_scalar_state_t *state,
 			nmd_prediction_codes[output_count] = result->nmd_prediction;
 			nmd_escape_reasons[output_count] = result->nmd_escape_reasons;
 			if (with_hgvs && result->overlap_object_kind ==
-			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT) {
-				const duckvep_hgvs_scalar_result_t *hgvs;
-				const char *reason;
-
-				hgvs = &state->hgvs_results[source];
-				if ((hgvs->transcript_length != 0u &&
-				    (hgvs->transcript_offset > state->hgvs_text_size ||
-				    hgvs->transcript_length > state->hgvs_text_size -
-				    hgvs->transcript_offset)) ||
-				    (hgvs->protein_length != 0u &&
-				    (hgvs->protein_offset > state->hgvs_text_size ||
-				    hgvs->protein_length > state->hgvs_text_size -
-				    hgvs->protein_offset))) {
-					duckvep_sql_set_error(error, error_size,
-					    "duckvep_annotate: rendered HGVS slice exceeds the vector text arena");
-					return 0;
-				}
-				if (hgvs->transcript_reason ==
-				    DUCKVEP_HGVS_ADAPTER_NONE &&
-				    hgvs->transcript_length != 0u) {
-					duckvep_scalar_assign_ascii_valid(vectors[16],
-					    validity[16],
-					    (idx_t)output_count,
-					    state->hgvs_text + hgvs->transcript_offset,
-					    hgvs->transcript_length);
-					hgvs_shifts[output_count] = hgvs->shift_offset;
-					duckvep_scalar_set_valid(validity[18],
-					    (idx_t)output_count);
-					duckvep_scalar_assign_ascii_valid(vectors[19],
-					    validity[19],
-					    (idx_t)output_count, "supported",
-					    sizeof("supported") - 1u);
-				} else if (hgvs->transcript_reason ==
-				    DUCKVEP_HGVS_ADAPTER_NOT_APPLICABLE) {
-					duckvep_scalar_assign_ascii_valid(vectors[19],
-					    validity[19], (idx_t)output_count,
-					    "not_applicable",
-					    sizeof("not_applicable") - 1u);
-				} else {
-					duckvep_scalar_assign_ascii_valid(vectors[19],
-					    validity[19],
-					    (idx_t)output_count, "unresolved",
-					    sizeof("unresolved") - 1u);
-					reason = duckvep_scalar_hgvs_reason_name(
-					    hgvs->transcript_reason);
-					if (reason != NULL)
-						duckvep_scalar_assign_ascii_valid(vectors[20],
-						    validity[20],
-						    (idx_t)output_count, reason,
-						    strlen(reason));
-				}
-				if (hgvs->protein_reason ==
-				    DUCKVEP_HGVS_ADAPTER_NONE &&
-				    hgvs->protein_length != 0u) {
-					duckvep_scalar_assign_ascii_valid(vectors[17],
-					    validity[17],
-					    (idx_t)output_count,
-					    state->hgvs_text + hgvs->protein_offset,
-					    hgvs->protein_length);
-					duckvep_scalar_assign_ascii_valid(vectors[21],
-					    validity[21],
-					    (idx_t)output_count, "supported",
-					    sizeof("supported") - 1u);
-				} else if (hgvs->protein_reason ==
-				    DUCKVEP_HGVS_ADAPTER_NOT_APPLICABLE) {
-					duckvep_scalar_assign_ascii_valid(vectors[21],
-					    validity[21],
-					    (idx_t)output_count, "not_applicable",
-					    sizeof("not_applicable") - 1u);
-				} else {
-					duckvep_scalar_assign_ascii_valid(vectors[21],
-					    validity[21],
-					    (idx_t)output_count, "unresolved",
-					    sizeof("unresolved") - 1u);
-					reason = duckvep_scalar_hgvs_reason_name(
-					    hgvs->protein_reason);
-					if (reason != NULL)
-						duckvep_scalar_assign_ascii_valid(vectors[22],
-						    validity[22],
-						    (idx_t)output_count, reason,
-						    strlen(reason));
-				}
-			}
+			    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT &&
+			    !duckvep_scalar_write_hgvs_fields(state, vectors, validity,
+			    16u, output_count, source, error, error_size))
+				return 0;
 		}
 	}
 	return 1;
@@ -3153,8 +3250,8 @@ duckvep_annotate_scalar_execute(duckdb_function_info info,
 		begin = end;
 	}
 	if (!(compact ? duckvep_scalar_write_compact_output(state, output, rows,
-	    with_hgvs, error, sizeof(error)) : duckvep_scalar_write_output(state, output,
-	    rows, error, sizeof(error))))
+	    with_hgvs, error, sizeof(error)) : duckvep_scalar_write_output(state,
+	    output, rows, with_hgvs, error, sizeof(error))))
 		goto failed;
 	duckvep_scalar_state_release(state);
 	return;
@@ -3184,6 +3281,14 @@ duckvep_annotate_hgvs_scalar(duckdb_function_info info,
 	duckdb_data_chunk input, duckdb_vector output)
 {
 	duckvep_annotate_scalar_execute(info, input, output, 1, 1,
+	    DUCKVEP_SCALAR_SMALL);
+}
+
+static void
+duckvep_annotate_rich_hgvs_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckvep_annotate_scalar_execute(info, input, output, 0, 1,
 	    DUCKVEP_SCALAR_SMALL);
 }
 
@@ -3220,7 +3325,7 @@ duckvep_annotate_breakend_compact_scalar(duckdb_function_info info,
 }
 
 static duckdb_logical_type
-duckvep_annotation_list_type(void)
+duckvep_annotation_list_type(int with_hgvs)
 {
 	const char *names[] = {
 		"transcript_index", "gene_index", "consequence", "impact",
@@ -3229,17 +3334,24 @@ duckvep_annotation_list_type(void)
 		"alternate_amino_acid", "nmd_prediction",
 		"nmd_escape_intronless", "nmd_escape_early_cds",
 		"nmd_escape_last_exon", "nmd_escape_penultimate_exon_end",
-		"regulation_feature_index", "overlap_object"
+		"regulation_feature_index", "overlap_object",
+		"consequence_mask", "region_mask", "impact_code", "status_code",
+		"reason_code", "reference_amino_acid_code",
+		"alternate_amino_acid_code", "nmd_prediction_code",
+		"nmd_escape_reasons", "overlap_object_code",
+		"transcript_hgvs", "protein_hgvs", "hgvs_shift",
+		"transcript_hgvs_status", "transcript_hgvs_reason",
+		"protein_hgvs_status", "protein_hgvs_reason"
 	};
-	duckdb_logical_type types[19], structure, list;
-	size_t index;
+	duckdb_logical_type types[36], structure, list;
+	size_t index, column_count;
 
 	types[0] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	types[1] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	for (index = 2; index <= 6; index++)
 		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	for (index = 7; index <= 9; index++)
-		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	types[10] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	types[11] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	types[12] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -3247,9 +3359,21 @@ duckvep_annotation_list_type(void)
 		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
 	types[17] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	types[18] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-	structure = duckdb_create_struct_type(types, names, 19);
+	types[19] = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+	types[20] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+	for (index = 21; index < 29; index++)
+		types[index] = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+	column_count = with_hgvs ? 36u : 29u;
+	if (with_hgvs) {
+		types[29] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+		types[30] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+		types[31] = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+		for (index = 32; index < 36; index++)
+			types[index] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+	}
+	structure = duckdb_create_struct_type(types, names, column_count);
 	list = duckdb_create_list_type(structure);
-	for (index = 0; index < 19; index++)
+	for (index = 0; index < column_count; index++)
 		duckdb_destroy_logical_type(&types[index]);
 	duckdb_destroy_logical_type(&structure);
 	return list;
@@ -3344,7 +3468,7 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 
 	scalar = duckdb_create_scalar_function();
 	result_type = compact ? duckvep_compact_annotation_list_type() :
-	    duckvep_annotation_list_type();
+	    duckvep_annotation_list_type(0);
 	if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
 		name = compact ? "_duckvep_annotate_structural_compact" :
 		    "_duckvep_annotate_structural_rich";
@@ -3397,14 +3521,16 @@ static void
 duckvep_register_hgvs_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int distance_parameters)
+	int distance_parameters, int rich)
 {
 	duckdb_scalar_function scalar;
 	duckdb_logical_type result_type;
 
 	scalar = duckdb_create_scalar_function();
-	result_type = duckvep_hgvs_annotation_list_type();
+	result_type = rich ? duckvep_annotation_list_type(1) :
+	    duckvep_hgvs_annotation_list_type();
 	duckdb_scalar_function_set_name(scalar,
+	    rich ? "_duckvep_annotate_small_rich_hgvs" :
 	    "_duckvep_annotate_small_hgvs");
 	duckdb_scalar_function_add_parameter(scalar, varchar_type);
 	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
@@ -3420,8 +3546,8 @@ duckvep_register_hgvs_scalar(duckdb_connection connection,
 	duckvep_registry_retain(registry);
 	duckdb_scalar_function_set_extra_info(scalar, registry,
 	    duckvep_registry_release);
-	duckdb_scalar_function_set_function(scalar,
-	    duckvep_annotate_hgvs_scalar);
+	duckdb_scalar_function_set_function(scalar, rich ?
+	    duckvep_annotate_rich_hgvs_scalar : duckvep_annotate_hgvs_scalar);
 	(void)duckdb_register_scalar_function(connection, scalar);
 	duckdb_destroy_scalar_function(&scalar);
 	duckdb_destroy_logical_type(&result_type);
@@ -3455,11 +3581,17 @@ register_duckvep_functions(duckdb_connection connection,
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
 	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_SMALL);
 	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0);
+	    uinteger_type, ubigint_type, 0, 0);
 	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1);
+	    uinteger_type, ubigint_type, 1, 0);
 	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2);
+	    uinteger_type, ubigint_type, 2, 0);
+	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, 1);
+	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, 1);
+	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 2, 1);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,
 	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_STRUCTURAL);
 	duckvep_register_annotate_scalar(connection, registry, varchar_type,

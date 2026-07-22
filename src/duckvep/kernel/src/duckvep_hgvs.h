@@ -302,6 +302,15 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
     const duckvep_sequence_delta_t *delta,
     duckvep_hgvs_protein_fact_t    *out);
 
+/* VEP deletes its HGVS shift hash before the late frameshift stop search.
+ * Adapters that replay the restored original allele at the original CDS
+ * coordinate use this helper to replace the provisional Ter distance without
+ * rebuilding the already cached frameshift residues. */
+DUCKVEP_INTERNAL_API duckvep_hgvs_status_t
+duckvep_hgvs_protein_frameshift_termination_replay(
+    const duckvep_coding_context_t *late_context,
+    duckvep_hgvs_protein_fact_t    *fact);
+
 /* Build the subset of HGVSp facts completely represented by the consequence
  * result's proven single-residue sidecar. This avoids reconstructing a coding
  * context after consequence annotation has already established the peptide

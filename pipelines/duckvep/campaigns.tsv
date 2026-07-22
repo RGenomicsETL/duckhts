@@ -1,0 +1,2 @@
+id	enabled	corpus	event_mode	gff	gff_index_policy	fasta	database	model_sql	model_name	sample_per_shape	seed	hgvs	fork	duckdb_threads	oracle_environment_receipt
+witnesses_targets	true	witnesses_targets	small	test/data/duckvep/minimal.gff3	ignore	test/data/duckvep/minimal.fa	:memory:	test/duckvep/conformance/minimal_model.sql	differential	10000	1	true	1	1	test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt

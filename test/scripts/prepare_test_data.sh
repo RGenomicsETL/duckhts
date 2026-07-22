@@ -35,6 +35,37 @@ rm -rf "$DUCKVEP_FIXTURE_DST"
 mkdir -p "$DUCKVEP_FIXTURE_DST"
 cp -a "$DUCKVEP_FIXTURE_SRC/." "$DUCKVEP_FIXTURE_DST/"
 echo "  DuckVEP Ensembl core fixture"
+
+# ---- DuckVEP terminal partial-codon fixtures ----
+mkdir -p "$DST/duckvep"
+cat > "$DST/duckvep/terminal_partial.fa" <<'EOF'
+>partial
+AAAAAAAAAAAAAAAAAAAAATGCCCAAAGGGTCAAAAAAAAAAAAAAAAAAAA
+EOF
+samtools faidx "$DST/duckvep/terminal_partial.fa"
+# Exact Ensembl 116 GRCh38 1:45011916-45014703 reference slice used by the
+# ENST00000650713 / ClinVar 1:45013701:C:CTAG regression. The committed bases
+# are the fixture authority; verify their source digest before rebuilding the
+# index or copying the fixture into the R package.
+CLINVAR_PARTIAL_FASTA="$DST/duckvep/clinvar_terminal_partial.fa"
+CLINVAR_PARTIAL_SHA256="55af53489858b09a2d482d8953320bdf7cecc33d74c1272dfcd1e02fc4d1de0b"
+observed_clinvar_partial_sha256="$(
+  { tail -n +2 "$CLINVAR_PARTIAL_FASTA" || true; } |
+    tr -d '\n' |
+    sha256sum |
+    cut -d' ' -f1
+)"
+if [[ "$observed_clinvar_partial_sha256" != "$CLINVAR_PARTIAL_SHA256" ]]; then
+  echo "ClinVar terminal-partial reference fixture digest mismatch" >&2
+  exit 1
+fi
+samtools faidx "$CLINVAR_PARTIAL_FASTA"
+cp "$DST/duckvep/terminal_partial.fa" "$PKG_DST/duckvep_terminal_partial.fa"
+cp "$DST/duckvep/terminal_partial.fa.fai" "$PKG_DST/duckvep_terminal_partial.fa.fai"
+cp "$CLINVAR_PARTIAL_FASTA" "$PKG_DST/duckvep_clinvar_terminal_partial.fa"
+cp "$CLINVAR_PARTIAL_FASTA.fai" "$PKG_DST/duckvep_clinvar_terminal_partial.fa.fai"
+echo "  DuckVEP terminal partial-codon fixtures"
+
 if [[ "$MODE" == "--duckvep-only" ]]; then
   echo "==> DuckVEP fixture sync complete"
   exit 0

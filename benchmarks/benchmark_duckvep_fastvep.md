@@ -248,30 +248,33 @@ workload does not become the only performance authority.
 
 ## Revisions and input receipts
 
-| item                             | receipt                                                          |
-|:---------------------------------|:-----------------------------------------------------------------|
-| DuckHTS measured checkout        | 2a1c37cf2938e8226a078f19ca429ffeff84de73                         |
-| DuckHTS extension binary         | 53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b |
-| DuckVEP benchmark worker         | 4af9f71500e4ffd081c6853ee96c7e9a298e9ed3bd52d32e3e9dfdcc9f0497e2 |
-| FastVEP checkout                 | 7038e7c17708e7d2226149e78e0bb297bcc6d1d6                         |
-| FastVEP native binary            | b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a |
-| FastVEP rebuilt transcript cache | 00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962 |
-| DuckVEP Ensembl 116 GRCh38 model | 4c2077c83958f7a300119225f91ebf288baba49497d6efe691a2a9898eb4710a |
-| GIAB HG002 input VCF             | adb4d4a50048aa13353a06b84fcfcbca09a5d17525efaa4cea44f8822e81175c |
-| ClinVar 2026-07-06 source VCF    | 59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 |
-| held-out ClinVar input VCF       | 7ecec9a7507166c2f6d4db240ba27b6f07ed9da3b0d95936882888941bcf3bf4 |
-| Ensembl 116 primary FASTA        | 1e74081a49ceb9739cc14c812fbb8b3db978eb80ba8e5350beb80d8ad8dfef3b |
-| Ensembl 116 primary FASTA index  | 0998f61682f4041b11f0d156e1db6dae3e4c743e26643a3f45ea7faea70cb604 |
-| Ensembl 116 GFF3                 | 08e881d96ab6385a2c31f063a018be4b2c36860b323f2724be07022deeef21ce |
+| item                                | receipt                                                          |
+|:------------------------------------|:-----------------------------------------------------------------|
+| DuckHTS measured checkout           | 2a1c37cf2938e8226a078f19ca429ffeff84de73                         |
+| DuckHTS extension binary            | 53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b |
+| DuckVEP measured worker revision    | 44f3e3533c957a798939bda6106c828f0bbea75c                         |
+| DuckVEP current reproduction worker | 819a3c8a6c4ec2ec0b8489c0910ceb7e20deb9f3cdf2399ce794e7b65068195d |
+| FastVEP checkout                    | 7038e7c17708e7d2226149e78e0bb297bcc6d1d6                         |
+| FastVEP native binary               | b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a |
+| FastVEP rebuilt transcript cache    | 00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962 |
+| DuckVEP Ensembl 116 GRCh38 model    | 4c2077c83958f7a300119225f91ebf288baba49497d6efe691a2a9898eb4710a |
+| GIAB HG002 input VCF                | adb4d4a50048aa13353a06b84fcfcbca09a5d17525efaa4cea44f8822e81175c |
+| ClinVar 2026-07-06 source VCF       | 59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 |
+| held-out ClinVar input VCF          | 7ecec9a7507166c2f6d4db240ba27b6f07ed9da3b0d95936882888941bcf3bf4 |
+| Ensembl 116 primary FASTA           | 1e74081a49ceb9739cc14c812fbb8b3db978eb80ba8e5350beb80d8ad8dfef3b |
+| Ensembl 116 primary FASTA index     | 0998f61682f4041b11f0d156e1db6dae3e4c743e26643a3f45ea7faea70cb604 |
+| Ensembl 116 GFF3                    | 08e881d96ab6385a2c31f063a018be4b2c36860b323f2724be07022deeef21ce |
 
 The extension binary was clean-built at `c977cba`; there are no
 extension, public-catalog, or build-wiring changes from that revision
-through the measured `2a1c37c` checkout. The separate worker SHA-256
-identifies the exact benchmark harness used for every retained DuckVEP
-timing; the report aborts if its checked worker differs. FastVEP was
-updated to the latest upstream checkout before the run and its
-transcript cache was rebuilt from the receipt-pinned Ensembl 116 GFF3
-and FASTA rather than reusing an older cache.
+through the measured `2a1c37c` checkout. Git revision `44f3e35`
+preserves the exact benchmark worker used for every retained DuckVEP
+timing. The current worker hash identifies the reproduction script
+rendered below without requiring that script to remain byte-identical as
+the public SQL API evolves. FastVEP was updated to the latest upstream
+checkout before the run and its transcript cache was rebuilt from the
+receipt-pinned Ensembl 116 GFF3 and FASTA rather than reusing an older
+cache.
 
 The host is an Intel Core i5-13500 with six physical performance cores.
 CPU 2 is the single-core lane; FastVEP uses CPU sets `2`, `2,4`,
@@ -395,6 +398,8 @@ Rscript test/duckvep/conformance/corpus_differential.R \
   --source-version 20260706 \
   --source-checksum sha256:59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 \
   --cache-dir /root/duckvep/data/vep_cache \
+  --cache-info /root/duckvep/data/vep_cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /root/duckvep/data/receipts/homo_sapiens-116-GRCh38.tsv \
   --assembly GRCh38 --species homo_sapiens \
   --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
   --database /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \

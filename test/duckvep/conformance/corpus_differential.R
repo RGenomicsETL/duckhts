@@ -41,12 +41,42 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--gff-index-policy",
+  dest = "gff_index_policy",
+  default = "auto",
+  help = paste(
+    "GFF staging policy: auto uses an existing .tbi companion, require needs it,",
+    "and ignore always restages deterministically [default: %default]"
+  )
+)
+op <- add_option(
+  op,
   "--cache-dir",
   dest = "cache_dir",
   default = "",
   help = paste(
     "VEP cache root; when set, use --cache --offline instead of --gff",
     "[default: use --gff]"
+  )
+)
+op <- add_option(
+  op,
+  "--cache-info",
+  dest = "cache_info",
+  default = "",
+  help = paste(
+    "cache info.txt used as release metadata; required with",
+    "--cache-dir and recorded in oracle_build [%default]"
+  )
+)
+op <- add_option(
+  op,
+  "--cache-receipt",
+  dest = "cache_receipt",
+  default = "",
+  help = paste(
+    "acquisition/install receipt for the complete cache leaf; required with",
+    "--cache-dir and validated without rehashing cache contents [%default]"
   )
 )
 op <- add_option(op, "--assembly", default = "GRCh38")
@@ -173,20 +203,16 @@ op <- add_option(
 )
 op <- add_option(
   op,
-  "--allow-hgvs-discordance",
-  dest = "allow_hgvs_discordance",
-  action = "store_true",
-  default = FALSE,
-  help = paste(
-    "write investigative HGVS artifacts without failing on unresolved,",
-    "mismatched, missing, or extra rows [default: fail closed]"
-  )
-)
-op <- add_option(
-  op,
   "--annotations-out",
   dest = "annotations_out",
   default = ""
+)
+op <- add_option(
+  op,
+  "--annotations-label",
+  dest = "annotations_label",
+  default = "",
+  help = "stable published annotation path recorded by the statistical audit [%default]"
 )
 op <- add_option(
   op,
@@ -255,6 +281,17 @@ op <- add_option(
     "artifacts as unbound diagnostics [%default]"
   )
 )
+op <- add_option(
+  op,
+  "--extension-build-receipt",
+  dest = "extension_build_receipt",
+  default = "",
+  help = paste(
+    "reuse one clean release build produced by the targets campaign DAG;",
+    "the receipt, extension bytes, and current source revision are verified",
+    "before annotation [%default]"
+  )
+)
 op <- add_option(op, "--fork", default = as.character(max(1L, min(8L, ncores))))
 op <- add_option(
   op,
@@ -277,6 +314,20 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--oracle-environment-receipt",
+  dest = "oracle_environment_receipt",
+  default = file.path(
+    root,
+    "test",
+    "duckvep",
+    "upstream",
+    "receipts",
+    "vep116_2026-07-22.conda-explicit.txt"
+  ),
+  help = "explicit Conda lock for the VEP oracle environment [%default]"
+)
+op <- add_option(
+  op,
   "--micromamba",
   default = Sys.getenv("MICROMAMBA", "micromamba"),
   help = "micromamba executable [%default]"
@@ -291,6 +342,24 @@ op <- add_option(
     "DuckVEP variant-induced NMD predictions with the executable plugin"
   )
 )
+op <- add_option(
+  op,
+  "--duckdb-memory-limit",
+  dest = "duckdb_memory_limit",
+  default = "8GB",
+  help = paste(
+    "DuckDB memory cap for the spillable oracle comparison and evidence",
+    "projection; resident DuckVEP model allocations are separate [%default]"
+  )
+)
+op <- add_option(
+  op,
+  "--duckdb-threads",
+  dest = "duckdb_threads",
+  type = "integer",
+  default = 4L,
+  help = "DuckDB worker threads for evidence projection [%default]"
+)
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
@@ -298,6 +367,12 @@ root <- normalizePath(root[[1L]], mustWork = TRUE)
 source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
   die("--event-mode must be small, structural, or breakend")
+}
+if (!(opt$gff_index_policy %in% c("auto", "require", "ignore"))) {
+  die("--gff-index-policy must be auto, require, or ignore")
+}
+if (isTRUE(opt$skip_extension_build) && nzchar(opt$extension_build_receipt)) {
+  die("--skip-extension-build and --extension-build-receipt are mutually exclusive")
 }
 if (isTRUE(opt$hgvs) && !identical(opt$event_mode, "small")) {
   die("--hgvs currently applies only to --event-mode small")
@@ -318,6 +393,11 @@ if (
   )
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
+if (!isTRUE(opt$source_audit_only) &&
+    identical(oracle_mode, "cache") &&
+    (!nzchar(opt$cache_info) || !nzchar(opt$cache_receipt))) {
+  die("--cache-dir requires --cache-info and --cache-receipt")
+}
 fasta_index <- paste0(opt$fasta, ".fai")
 external_model_database <- !nzchar(opt$model_sql) &&
   !identical(opt$database, ":memory:")
@@ -330,6 +410,15 @@ if (external_model_database) {
 } else if (nzchar(opt$model_sql)) {
   required_files <- c(required_files, opt$model_sql)
 }
+if (nzchar(opt$extension_build_receipt)) {
+  required_files <- c(required_files, opt$extension_build_receipt)
+}
+if (!isTRUE(opt$source_audit_only)) {
+  required_files <- c(required_files, opt$oracle_environment_receipt)
+}
+if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
+  required_files <- c(required_files, opt$cache_info, opt$cache_receipt)
+}
 if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
 } else if (
@@ -341,6 +430,84 @@ if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
+}
+oracle_environment_receipt_sha256 <- ""
+cache_info_sha256 <- ""
+cache_receipt_sha256 <- ""
+cache_inventory_sha256 <- ""
+cache_inventory_entries <- ""
+cache_inventory_bytes <- ""
+if (!isTRUE(opt$source_audit_only)) {
+  opt$oracle_environment_receipt <- normalizePath(
+    opt$oracle_environment_receipt,
+    mustWork = TRUE
+  )
+  environment_lock <- readLines(
+    opt$oracle_environment_receipt,
+    warn = FALSE
+  )
+  if (sum(environment_lock == "@EXPLICIT") != 1L ||
+      !any(grepl("/ensembl-vep-116[.]0-", environment_lock)) ||
+      !any(grepl("/perl-bioperl-core-1[.]7[.]8-", environment_lock))) {
+    die("oracle environment receipt is not the explicit VEP-116/BioPerl-1.7.8 lock")
+  }
+  oracle_environment_receipt_sha256 <- duckvep_evidence_sha256(
+    opt$oracle_environment_receipt
+  )
+}
+if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
+  cache_root <- normalizePath(opt$cache_dir, mustWork = TRUE)
+  opt$cache_info <- normalizePath(opt$cache_info, mustWork = TRUE)
+  expected_cache_version <- if (nzchar(opt$cache_version)) {
+    opt$cache_version
+  } else {
+    "116"
+  }
+  expected_cache_info <- duckvep_evidence_cache_info_path(
+    cache_root,
+    opt$species,
+    expected_cache_version,
+    opt$assembly
+  )
+  if (!identical(opt$cache_info, expected_cache_info)) {
+    die(
+      "--cache-info must be SPECIES/CACHE_VERSION_ASSEMBLY/info.txt ",
+      "below --cache-dir"
+    )
+  }
+  cache_metadata <- utils::read.delim(
+    opt$cache_info,
+    header = FALSE,
+    col.names = c("field", "value"),
+    colClasses = "character",
+    quote = "",
+    comment.char = "",
+    stringsAsFactors = FALSE
+  )
+  cache_value <- function(field) {
+    value <- cache_metadata$value[cache_metadata$field == field]
+    if (length(value) != 1L || !nzchar(value)) {
+      die("cache info must define {field} exactly once")
+    }
+    value
+  }
+  if (!identical(cache_value("species"), opt$species) ||
+      !identical(cache_value("assembly"), opt$assembly)) {
+    die("cache info species/assembly does not match the campaign")
+  }
+  cache_info_sha256 <- duckvep_evidence_sha256(opt$cache_info)
+  opt$cache_receipt <- normalizePath(opt$cache_receipt, mustWork = TRUE)
+  cache_receipt <- duckvep_evidence_validate_cache_receipt(
+    opt$cache_receipt,
+    cache_root,
+    opt$species,
+    expected_cache_version,
+    opt$assembly
+  )
+  cache_receipt_sha256 <- cache_receipt$receipt_sha256
+  cache_inventory_sha256 <- cache_receipt$inventory_sha256
+  cache_inventory_entries <- as.character(cache_receipt$entries)
+  cache_inventory_bytes <- cache_receipt$bytes
 }
 source_revision <- if (isTRUE(opt$skip_extension_build)) {
   duckvep_evidence_revision(root)
@@ -356,6 +523,16 @@ if (isTRUE(opt$skip_extension_build)) {
   }
   extension_build_binding <- "unbound_diagnostic"
   extension_sha256 <- duckvep_evidence_sha256(opt$extension)
+} else if (nzchar(opt$extension_build_receipt)) {
+  extension_receipt <- duckvep_evidence_read_extension_receipt(
+    opt$extension_build_receipt,
+    root,
+    opt$extension,
+    source_revision
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
 } else {
   extension_receipt <- duckvep_evidence_build_extension(
     root,
@@ -425,6 +602,9 @@ if (opt$distance < 0L) {
 if (opt$vep_buffer_size < 1L) {
   die("--vep-buffer-size must be positive")
 }
+if (opt$duckdb_threads < 1L) {
+  die("--duckdb-threads must be positive")
+}
 if (
   !is.finite(opt$max_sv_size) ||
     opt$max_sv_size < 1 ||
@@ -485,11 +665,7 @@ if (nzchar(opt$nmd_plugin_dir)) {
   if (!file.exists(nmd_plugin)) {
     die("NMD.pm does not exist in {opt$nmd_plugin_dir}")
   }
-  sha_line <- system2("sha256sum", nmd_plugin, stdout = TRUE, stderr = FALSE)
-  if (length(sha_line) != 1L) {
-    die("cannot checksum {nmd_plugin}")
-  }
-  nmd_plugin_sha256 <- strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
+  nmd_plugin_sha256 <- duckvep_evidence_sha256(nmd_plugin)
   expected_nmd_sha256 <-
     "1e38bd67783ff09bad2775d09235dd77f23a7e5ade50fa56d4777235092e0eeb"
   if (!identical(nmd_plugin_sha256, expected_nmd_sha256)) {
@@ -501,17 +677,7 @@ if (nzchar(opt$nmd_plugin_dir)) {
   if (!file.exists(nmd_state_plugin)) {
     die("missing NMD coordinate observer: {nmd_state_plugin}")
   }
-  state_sha_line <- system2(
-    "sha256sum",
-    nmd_state_plugin,
-    stdout = TRUE,
-    stderr = FALSE
-  )
-  if (length(state_sha_line) != 1L) {
-    die("cannot checksum {nmd_state_plugin}")
-  }
-  nmd_state_plugin_sha256 <-
-    strsplit(trimws(state_sha_line), "[[:space:]]+")[[1L]][1L]
+  nmd_state_plugin_sha256 <- duckvep_evidence_sha256(nmd_state_plugin)
 }
 nmd_oracle_enabled <- nzchar(nmd_plugin_sha256)
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
@@ -592,6 +758,11 @@ if (length(colliding_outputs) != 0L) {
 temporary_files <- character()
 cleanup <- function() unlink(temporary_files, recursive = TRUE, force = TRUE)
 on.exit(cleanup(), add = TRUE)
+duckdb_temp_dir <- tempfile(pattern = "duckvep-differential-spill-")
+if (!dir.create(duckdb_temp_dir)) {
+  die("cannot create DuckDB spill directory: {duckdb_temp_dir}")
+}
+temporary_files <- c(temporary_files, duckdb_temp_dir)
 nmd_plugin_run_dir <- opt$nmd_plugin_dir
 if (nmd_oracle_enabled) {
   nmd_plugin_run_dir <- tempfile(pattern = "duckvep-nmd-plugins-")
@@ -616,6 +787,16 @@ drv <- duckdb(
 con <- dbConnect(drv)
 on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
+invisible(dbExecute(
+  con,
+  glue("SET temp_directory = {sql_q(duckdb_temp_dir)}")
+))
+invisible(dbExecute(
+  con,
+  glue("SET memory_limit = {sql_q(opt$duckdb_memory_limit)}")
+))
+invisible(dbExecute(con, glue("SET threads = {opt$duckdb_threads}")))
+invisible(dbExecute(con, "SET preserve_insertion_order = false"))
 invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 invisible(tryCatch(
   dbExecute(con, "LOAD json"),
@@ -921,7 +1102,7 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
   temporary_files <- c(temporary_files, source_vcf)
   rc <- system2(
     "Rscript",
-    c(
+    duckvep_system2_quote(c(
       file.path(root, "test", "duckvep", "conformance", "generate_witnesses.R"),
       "--gff",
       opt$gff,
@@ -933,7 +1114,7 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
       source_vcf,
       "--ext",
       opt$extension
-    )
+    ))
   )
   if (rc != 0L || !file.exists(source_vcf)) die("witness generation failed")
 } else if (nzchar(source_vcf) && !file.exists(source_vcf)) {
@@ -949,16 +1130,7 @@ source_bytes <- NA_real_
 if (nzchar(source_vcf)) {
   source_vcf <- normalizePath(source_vcf)
   source_bytes <- unname(file.info(source_vcf)$size)
-  sha_line <- system2("sha256sum", source_vcf, stdout = TRUE, stderr = FALSE)
-  if (length(sha_line) != 1L) {
-    die("cannot checksum {source_vcf}")
-  }
-  source_sha256 <- tolower(
-    strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
-  )
-  if (!grepl("^[0-9a-f]{64}$", source_sha256)) {
-    die("sha256sum returned an invalid digest for {source_vcf}")
-  }
+  source_sha256 <- duckvep_evidence_sha256(source_vcf)
   if (nzchar(opt$source_checksum)) {
     checksum_parts <- strsplit(opt$source_checksum, ":", fixed = TRUE)[[1L]]
     if (length(checksum_parts) != 2L) {
@@ -2177,7 +2349,11 @@ sample_vcf <- normalizePath(sample_vcf, mustWork = TRUE)
 input_vcf_sha256 <- duckvep_evidence_sha256(sample_vcf)
 
 stage_gff <- function(path) {
-  if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) {
+  indexed <- grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))
+  if (identical(opt$gff_index_policy, "require") && !indexed) {
+    die("--gff-index-policy=require needs a bgzip GFF with a .tbi companion")
+  }
+  if (!identical(opt$gff_index_policy, "ignore") && indexed) {
     return(path)
   }
   header <- tempfile(fileext = ".header")
@@ -2211,7 +2387,7 @@ stage_gff <- function(path) {
   close(body_con)
   rc <- system2(
     "sort",
-    c("-k1,1", "-k4,4n", body),
+    duckvep_system2_quote(c("-k1,1", "-k4,4n", body)),
     stdout = sorted_body,
     env = "LC_ALL=C"
   )
@@ -2454,14 +2630,61 @@ if (!dir.exists(opt$vep_prefix)) {
   die("VEP environment prefix does not exist: {opt$vep_prefix}")
 }
 vep_prefix <- normalizePath(opt$vep_prefix)
+blit_capture <- function(command, context) {
+  output <- tempfile("duckvep-blit-")
+  on.exit(unlink(output), add = TRUE)
+  status <- suppressWarnings(blit::cmd_run(
+    command,
+    stdout = output,
+    stderr = "2>&1",
+    stdin = NULL,
+    verbose = FALSE
+  ))
+  value <- readLines(output, warn = FALSE)
+  if (!identical(status, 0L)) {
+    detail <- paste(value, collapse = "\n")
+    if (nzchar(detail)) detail <- paste0(":\n", detail)
+    die("{context}{detail}")
+  }
+  value
+}
+installed_environment <- do.call(
+  blit::conda,
+  c(
+    as.list(duckvep_blit_quote(c("list", "-p", vep_prefix, "--explicit"))),
+    list(conda = duckvep_blit_quote(micromamba))
+  )
+) |>
+  blit_capture("cannot inspect the VEP environment")
+installed_packages <- duckvep_evidence_explicit_packages(installed_environment)
+locked_packages <- duckvep_evidence_explicit_packages(environment_lock)
+if (!length(installed_packages) || !identical(installed_packages, locked_packages)) {
+  die("installed VEP environment does not match --oracle-environment-receipt")
+}
+vep_environment_history <- file.path(vep_prefix, "conda-meta", "history")
+if (!file.exists(vep_environment_history)) {
+  die("VEP environment has no conda-meta/history: {vep_prefix}")
+}
+vep_home <- tempfile("duckvep-vep-home-")
+dir.create(vep_home, recursive = FALSE, showWarnings = FALSE)
+temporary_files <- c(temporary_files, vep_home)
 vep_command <- function(...) {
-  blit::conda(
+  arguments <- duckvep_blit_quote(c(
     "run",
+    "--clean-env",
+    "--env",
+    paste0("HOME=", vep_home),
     "-p",
     vep_prefix,
     "vep",
-    ...,
-    conda = micromamba
+    ...
+  ))
+  do.call(
+    blit::conda,
+    c(
+      as.list(arguments),
+      list(conda = duckvep_blit_quote(micromamba))
+    )
   )
 }
 
@@ -2505,6 +2728,23 @@ oracle_details <- if (identical(oracle_mode, "cache")) {
   details
 } else {
   "oracle=gff"
+}
+oracle_details <- c(
+  oracle_details,
+  glue(
+    "oracle_environment_receipt_sha256=",
+    "{oracle_environment_receipt_sha256}"
+  )
+)
+if (nzchar(cache_info_sha256)) {
+  oracle_details <- c(
+    oracle_details,
+    glue("cache_info_sha256={cache_info_sha256}"),
+    glue("cache_receipt_sha256={cache_receipt_sha256}"),
+    glue("cache_inventory_sha256={cache_inventory_sha256}"),
+    glue("cache_inventory_entries={cache_inventory_entries}"),
+    glue("cache_inventory_bytes={cache_inventory_bytes}")
+  )
 }
 if (identical(opt$event_mode, "breakend")) {
   oracle_details <- c(
@@ -2895,9 +3135,18 @@ run_date <- as.character(Sys.Date())
 invisible(dbExecute(
   con,
   glue(
-    "CREATE OR REPLACE TEMP TABLE duckvep_annotation_dump AS
+    "CREATE OR REPLACE TEMP VIEW duckvep_annotation_dump AS
      SELECT
        {sql_q(run_date)} AS run_date,
+       {sql_q(source_revision)} AS source_revision,
+       {sql_q(extension_build_binding)} AS extension_build_binding,
+       {sql_q(extension_sha256)} AS extension_sha256,
+       {sql_q(model_artifact_kind)} AS model_artifact_kind,
+       {sql_q(model_artifact_sha256)} AS model_artifact_sha256,
+       {sql_q(reference_fasta_sha256)} AS reference_fasta_sha256,
+       {sql_q(reference_fai_sha256)} AS reference_fai_sha256,
+       {sql_q(source_sha256)} AS source_vcf_sha256,
+       {sql_q(input_vcf_sha256)} AS input_vcf_sha256,
        {sql_q(opt$corpus)} AS corpus,
        {sql_q(opt$model_name)} AS model,
        {sql_q(oracle_version)} AS oracle_version,
@@ -2926,7 +3175,12 @@ invisible(dbExecute(
      FROM vep_annotation a JOIN {sample_event_relation} v USING (variant_id)
      UNION ALL
      SELECT
-       {sql_q(run_date)}, {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
+       {sql_q(run_date)}, {sql_q(source_revision)},
+       {sql_q(extension_build_binding)}, {sql_q(extension_sha256)},
+       {sql_q(model_artifact_kind)}, {sql_q(model_artifact_sha256)},
+       {sql_q(reference_fasta_sha256)}, {sql_q(reference_fai_sha256)},
+       {sql_q(source_sha256)}, {sql_q(input_vcf_sha256)},
+       {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
        {sql_q(oracle_version)}, {sql_q(oracle_build)}, 'duckvep',
        a.variant_id, v.chrom, v.position, v.reference, v.alternate,
        v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason,
@@ -2943,16 +3197,45 @@ invisible(dbExecute(
      (FORMAT parquet, COMPRESSION zstd)"
   )
 ))
+invisible(dbExecute(con, "DROP VIEW duckvep_annotation_dump"))
+invisible(dbExecute(con, "DROP TABLE vep_annotation"))
+invisible(dbExecute(con, "DROP TABLE duckvep_annotation"))
+invisible(dbGetQuery(
+  con,
+  glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
+))
+
+duplicate_annotation_pair <- dbGetQuery(
+  con,
+  glue(
+    "SELECT source, variant_id, coalesce(tx, '') AS tx, count(*) AS n
+     FROM read_parquet({sql_q(opt$annotations_out)})
+     GROUP BY source, variant_id, coalesce(tx, '')
+     HAVING count(*) > 1
+     LIMIT 1"
+  )
+)
+if (nrow(duplicate_annotation_pair) != 0L) {
+  die(
+    "annotation dump is not unique for source=",
+    duplicate_annotation_pair$source[[1L]],
+    ", variant_id=", duplicate_annotation_pair$variant_id[[1L]],
+    ", tx=", duplicate_annotation_pair$tx[[1L]],
+    ": ", duplicate_annotation_pair$n[[1L]], " rows"
+  )
+}
 
 if (isTRUE(opt$hgvs)) {
   invisible(dbExecute(
     con,
     glue(
-      "CREATE OR REPLACE TEMP TABLE duckvep_hgvs_pairs AS
-       WITH pair_keys AS (
-         SELECT variant_id, tx FROM vep_annotation
-         UNION
-         SELECT variant_id, tx FROM duckvep_annotation
+      "CREATE OR REPLACE TEMP VIEW duckvep_hgvs_pairs AS
+       WITH annotations AS (
+         SELECT * FROM read_parquet({sql_q(opt$annotations_out)})
+       ), v AS (
+         SELECT * FROM annotations WHERE source = 'vep'
+       ), d AS (
+         SELECT * FROM annotations WHERE source = 'duckvep'
        )
        SELECT
          {sql_q(run_date)} AS run_date,
@@ -2969,14 +3252,14 @@ if (isTRUE(opt$hgvs)) {
          {sql_q(opt$model_name)} AS model,
          {sql_q(oracle_version)} AS oracle_version,
          {sql_q(oracle_build)} AS oracle_build,
-         k.variant_id,
-         k.tx,
-         s.chrom,
-         s.position AS pos,
-         s.reference AS ref,
-         s.alternate AS alt,
-         s.var_type,
-         s.length_bin,
+         coalesce(v.variant_id, d.variant_id) AS variant_id,
+         coalesce(v.tx, d.tx) AS tx,
+         coalesce(v.chrom, d.chrom) AS chrom,
+         coalesce(v.pos, d.pos) AS pos,
+         coalesce(v.ref, d.ref) AS ref,
+         coalesce(v.alt, d.alt) AS alt,
+         coalesce(v.var_type, d.var_type) AS var_type,
+         coalesce(v.length_bin, d.length_bin) AS length_bin,
          v.consequence AS vep_consequence,
          d.consequence AS duckvep_consequence,
          v.hgvsc AS vep_hgvsc,
@@ -2991,6 +3274,21 @@ if (isTRUE(opt$hgvs)) {
          CASE
            WHEN v.variant_id IS NULL THEN 'engine_extra_row'
            WHEN d.variant_id IS NULL THEN 'engine_missing_row'
+           WHEN d.hgvsc_status IS NULL OR
+                d.hgvsc_status NOT IN ('supported', 'not_applicable', 'unresolved')
+             THEN 'engine_invalid_status'
+           WHEN d.hgvsc_status = 'supported' AND
+                (d.hgvsc IS NULL OR d.hgvsc = '')
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsc_status IN ('not_applicable', 'unresolved') AND
+                d.hgvsc IS NOT NULL
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsc_status IN ('supported', 'not_applicable') AND
+                d.hgvsc_reason IS NOT NULL
+             THEN 'engine_invalid_reason'
+           WHEN d.hgvsc_status = 'unresolved' AND
+                (d.hgvsc_reason IS NULL OR d.hgvsc_reason = '')
+             THEN 'engine_invalid_reason'
            WHEN d.hgvsc_status = 'unresolved' THEN 'engine_unresolved'
            WHEN v.hgvsc IS NULL AND d.hgvsc IS NULL THEN 'both_absent'
            WHEN v.hgvsc IS NULL THEN 'engine_extra'
@@ -3001,6 +3299,21 @@ if (isTRUE(opt$hgvs)) {
          CASE
            WHEN v.variant_id IS NULL THEN 'engine_extra_row'
            WHEN d.variant_id IS NULL THEN 'engine_missing_row'
+           WHEN d.hgvsp_status IS NULL OR
+                d.hgvsp_status NOT IN ('supported', 'not_applicable', 'unresolved')
+             THEN 'engine_invalid_status'
+           WHEN d.hgvsp_status = 'supported' AND
+                (d.hgvsp IS NULL OR d.hgvsp = '')
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsp_status IN ('not_applicable', 'unresolved') AND
+                d.hgvsp IS NOT NULL
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsp_status IN ('supported', 'not_applicable') AND
+                d.hgvsp_reason IS NOT NULL
+             THEN 'engine_invalid_reason'
+           WHEN d.hgvsp_status = 'unresolved' AND
+                (d.hgvsp_reason IS NULL OR d.hgvsp_reason = '')
+             THEN 'engine_invalid_reason'
            WHEN d.hgvsp_status = 'unresolved' THEN 'engine_unresolved'
            WHEN v.hgvsp IS NULL AND d.hgvsp IS NULL THEN 'both_absent'
            WHEN v.hgvsp IS NULL THEN 'engine_extra'
@@ -3008,19 +3321,10 @@ if (isTRUE(opt$hgvs)) {
            WHEN v.hgvsp = d.hgvsp THEN 'match'
            ELSE 'mismatch'
          END AS hgvsp_comparison
-       FROM pair_keys k
-       LEFT JOIN vep_annotation v USING (variant_id, tx)
-       LEFT JOIN duckvep_annotation d USING (variant_id, tx)
-       JOIN {sample_event_relation} s USING (variant_id)"
+       FROM v
+       FULL OUTER JOIN d USING (variant_id, tx)"
     )
   ))
-  hgvs_pair_count <- dbGetQuery(
-    con,
-    "SELECT count(*) AS n FROM duckvep_hgvs_pairs"
-  )$n[[1L]]
-  if (hgvs_pair_count == 0) {
-    die("HGVS differential produced no transcript pairs")
-  }
   dir.create(
     dirname(opt$hgvs_pairs_out),
     recursive = TRUE,
@@ -3030,12 +3334,20 @@ if (isTRUE(opt$hgvs)) {
     con,
     glue(
       "COPY duckvep_hgvs_pairs TO {sql_q(opt$hgvs_pairs_out)}
-       (FORMAT parquet, COMPRESSION zstd)"
+      (FORMAT parquet, COMPRESSION zstd)"
     )
   ))
+  hgvs_pair_relation <- glue("read_parquet({sql_q(opt$hgvs_pairs_out)})")
+  hgvs_pair_count <- dbGetQuery(
+    con,
+    glue("SELECT count(*) AS n FROM {hgvs_pair_relation}")
+  )$n[[1L]]
+  if (hgvs_pair_count == 0) {
+    die("HGVS differential produced no transcript pairs")
+  }
   hgvs_summary <- dbGetQuery(
     con,
-    "WITH comparisons AS (
+    glue("WITH comparisons AS (
        SELECT
          'hgvsc'::VARCHAR AS metric,
          hgvsc_comparison AS comparison,
@@ -3044,14 +3356,14 @@ if (isTRUE(opt$hgvs)) {
          coalesce(vep_consequence, '(no_vep_emission)') AS consequence_class,
          duckvep_hgvsc_status AS engine_status,
          coalesce(duckvep_hgvsc_reason, '') AS engine_reason
-       FROM duckvep_hgvs_pairs
+       FROM {hgvs_pair_relation}
        UNION ALL
        SELECT
          'hgvsp', hgvsp_comparison, var_type, length_bin,
          coalesce(vep_consequence, '(no_vep_emission)'),
          duckvep_hgvsp_status,
          coalesce(duckvep_hgvsp_reason, '')
-       FROM duckvep_hgvs_pairs
+       FROM {hgvs_pair_relation}
      )
      SELECT
        metric,
@@ -3065,34 +3377,32 @@ if (isTRUE(opt$hgvs)) {
      FROM comparisons
      GROUP BY ALL
      ORDER BY metric, comparison, n DESC, var_type, length_bin,
-              consequence_class, engine_status, engine_reason"
+              consequence_class, engine_status, engine_reason")
   )
   dir.create(dirname(opt$hgvs_out), recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(hgvs_summary, opt$hgvs_out, row.names = FALSE)
   hgvs_discordance_count <- dbGetQuery(
     con,
-    "SELECT count(*) AS n
+    glue("SELECT count(*) AS n
      FROM (
-       SELECT hgvsc_comparison AS comparison FROM duckvep_hgvs_pairs
+       SELECT hgvsc_comparison AS comparison FROM {hgvs_pair_relation}
        UNION ALL
-       SELECT hgvsp_comparison FROM duckvep_hgvs_pairs
+       SELECT hgvsp_comparison FROM {hgvs_pair_relation}
      )
      WHERE comparison IN (
+       'engine_invalid_status', 'engine_invalid_value', 'engine_invalid_reason',
        'engine_unresolved', 'mismatch', 'engine_extra', 'engine_missing',
        'engine_extra_row', 'engine_missing_row'
-     )"
+     )")
   )$n[[1L]]
 }
 
 counts <- dbGetQuery(
   con,
-  "SELECT source, count(*) AS annotation_rows
-   FROM duckvep_annotation_dump GROUP BY source ORDER BY source"
+  glue("SELECT source, count(*) AS annotation_rows
+   FROM read_parquet({sql_q(opt$annotations_out)})
+   GROUP BY source ORDER BY source")
 )
-invisible(dbGetQuery(
-  con,
-  glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
-))
 
 cat(glue("sampled variants: {sample_count}"), "\n", sep = "")
 for (i in seq_len(nrow(counts))) {
@@ -3140,18 +3450,45 @@ report <- file.path(
   "conformance",
   "statistical_conformance.R"
 )
-rc <- system2("Rscript", c(report, "--annotations", opt$annotations_out))
+rc <- system2(
+  "Rscript",
+  duckvep_system2_quote(c(
+    report,
+    "--annotations", opt$annotations_out,
+    if (nzchar(opt$annotations_label)) {
+      c("--annotations-label", opt$annotations_label)
+    },
+    "--pair-level-input",
+    "--duckdb-memory-limit", opt$duckdb_memory_limit,
+    "--duckdb-threads", as.character(opt$duckdb_threads)
+  ))
+)
 if (rc != 0L) {
   die("statistical report failed with exit status {rc}")
 }
-if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L &&
-    !isTRUE(opt$allow_hgvs_discordance)) {
+if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L) {
   die(glue(
-    "HGVS differential found {hgvs_discordance_count} unresolved, ",
-    "mismatch, missing, or extra comparisons; inspect {opt$hgvs_pairs_out} ",
-    "and {opt$hgvs_out}. Use --allow-hgvs-discordance only for an ",
-    "explicitly investigative run."
+    "HGVS differential found {hgvs_discordance_count} invalid-status/value/reason, ",
+    "unresolved, mismatch, missing, or extra comparisons; inspect ",
+    "{opt$hgvs_pairs_out} ",
+    "and {opt$hgvs_out}."
   ))
+}
+
+if (identical(oracle_mode, "cache")) {
+  final_cache_receipt <- duckvep_evidence_validate_cache_receipt(
+    opt$cache_receipt,
+    opt$cache_dir,
+    opt$species,
+    if (nzchar(opt$cache_version)) opt$cache_version else "116",
+    opt$assembly
+  )
+  if (!identical(
+    final_cache_receipt$inventory_sha256,
+    cache_inventory_sha256
+  )) {
+    die("VEP cache state changed during executable conformance")
+  }
 }
 
 if (!isTRUE(opt$skip_extension_build)) {
