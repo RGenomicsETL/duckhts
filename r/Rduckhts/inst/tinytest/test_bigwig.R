@@ -12,6 +12,28 @@ test_bigwig <- function() {
     "extdata", "libbigwig_test.bw", package = "Rduckhts", mustWork = TRUE
   )
 
+  read_little_endian <- function(bytes, offset0, width) {
+    sum(as.integer(bytes[offset0 + seq_len(width)]) * 256^(0:(width - 1L)))
+  }
+  write_little_endian <- function(bytes, offset0, value, width) {
+    bytes[offset0 + seq_len(width)] <- as.raw(
+      floor(value / 256^(0:(width - 1L))) %% 256
+    )
+    bytes
+  }
+  write_bigwig_bytes <- function(bytes) {
+    path <- tempfile("rduckhts_corrupt_", fileext = ".bw")
+    writeBin(bytes, path)
+    path
+  }
+  query_bigwig_count <- function(path) {
+    dbGetQuery(con, paste0(
+      "SELECT count(*) FROM read_bigwig(",
+      as.character(dbQuoteString(con, path)),
+      ")"
+    ))
+  }
+
   expect_silent(rduckhts_bigwig(
     con,
     "bigwig_intervals",
@@ -45,6 +67,57 @@ test_bigwig <- function() {
   expect_error(
     rduckhts_bigwig(con, "bad_region", bigwig_path, region = character()),
     "region must contain"
+  )
+
+  fixture_bytes <- readBin(
+    bigwig_path,
+    what = "raw",
+    n = file.info(bigwig_path)$size
+  )
+  corrupt_paths <- character()
+  on.exit(unlink(corrupt_paths), add = TRUE)
+
+  chrom_tree_offset <- read_little_endian(fixture_bytes, 8L, 8L)
+  chrom_key_size <- read_little_endian(
+    fixture_bytes,
+    chrom_tree_offset + 8L,
+    4L
+  )
+  chrom_count <- read_little_endian(
+    fixture_bytes,
+    chrom_tree_offset + 16L,
+    8L
+  )
+  chrom_index_offset <- chrom_tree_offset + 36L + chrom_key_size
+  bad_chrom_index <- write_little_endian(
+    fixture_bytes,
+    chrom_index_offset,
+    chrom_count,
+    4L
+  )
+  corrupt_paths <- c(corrupt_paths, write_bigwig_bytes(bad_chrom_index))
+  expect_error(
+    query_bigwig_count(corrupt_paths[[length(corrupt_paths)]]),
+    "failed to open a valid BigWig file"
+  )
+
+  index_offset <- read_little_endian(fixture_bytes, 24L, 8L)
+  index_root_offset <- index_offset + 48L
+  expect_identical(
+    read_little_endian(fixture_bytes, index_root_offset, 1L),
+    1
+  )
+  short_block <- write_little_endian(fixture_bytes, 52L, 0, 4L)
+  short_block <- write_little_endian(
+    short_block,
+    index_root_offset + 28L,
+    1,
+    8L
+  )
+  corrupt_paths <- c(corrupt_paths, write_bigwig_bytes(short_block))
+  expect_error(
+    query_bigwig_count(corrupt_paths[[length(corrupt_paths)]]),
+    "failed to initialize an indexed range|failed while reading an indexed range"
   )
 }
 

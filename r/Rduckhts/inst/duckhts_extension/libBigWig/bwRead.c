@@ -192,6 +192,8 @@ static uint64_t readChromLeaf(bigWigFile_t *bw, chromList_t *cl, uint32_t valueS
     for(i=0; i<nVals; i++) {
         if(bwRead((void*) chrom, sizeof(char), valueSize, bw) != valueSize) goto error;
         if(bwRead((void*) &idx, sizeof(uint32_t), 1, bw) != 1) goto error;
+        if((uint64_t) idx >= (uint64_t) cl->nKeys) goto error;
+        if(cl->chrom[idx] != NULL) goto error;
         if(bwRead((void*) &(cl->len[idx]), sizeof(uint32_t), 1, bw) != 1) goto error;
         cl->chrom[idx] = bwStrdup(chrom);
         if(!(cl->chrom[idx])) goto error;
@@ -253,6 +255,10 @@ static chromList_t *bwReadChromList(bigWigFile_t *bw) {
     if(bwRead((void*) &keySize, sizeof(uint32_t), 1, bw) != 1) goto error;
     if(bwRead((void*) &valueSize, sizeof(uint32_t), 1, bw) != 1) goto error;
     if(bwRead((void*) &itemCount, sizeof(uint64_t), 1, bw) != 1) goto error;
+    if(!keySize || keySize > 1048576U || valueSize != 8U) goto error;
+    if(itemCount > UINT32_MAX) goto error;
+    if(itemCount > SIZE_MAX / sizeof(char*)) goto error;
+    if(itemCount > SIZE_MAX / sizeof(uint32_t)) goto error;
 
     cl->nKeys = itemCount;
     cl->chrom = calloc(itemCount, sizeof(char*));

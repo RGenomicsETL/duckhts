@@ -12,7 +12,9 @@
   `rduckhts_bigwig()` materialization/view helper. Region vectors use htslib's
   one-based inclusive syntax while returned intervals retain stored zero-based,
   half-open coordinates. Add the pinned upstream libBigWig fixture, DBI tests, package
-  examples, Devon Ryan's copyright-holder attribution, and the vendored MIT license
+  examples, Devon Ryan's copyright-holder attribution, and the vendored MIT license.
+  Malformed chromosome-tree IDs and truncated data blocks return reader errors before
+  indexed storage or interval decoding
 - reorganize the rendered package DuckVEP example into explicit design/validation,
   supported-scope, current-gap, and executable-example sections. The documentation now
   distinguishes independent-event consequence/HGVS support from combined haplotypes,

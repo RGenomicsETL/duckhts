@@ -391,8 +391,10 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOver
     uint64_t i;
     uint16_t j;
     int compressed = 0, rv;
-    uLongf sz = fp->hdr->bufSize, tmp;
+    uLongf sz = fp->hdr->bufSize, tmp = 0;
     void *buf = NULL, *compBuf = NULL;
+    uint64_t blockSize;
+    uint32_t itemSize;
     uint32_t start = 0, end , *p;
     float value;
     bwDataHeader_t hdr;
@@ -411,6 +413,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOver
 
     for(i=0; i<o->n; i++) {
         if(bwSetPos(fp, o->offset[i])) goto error;
+        if(o->size[i] > SIZE_MAX) goto error;
 
         if(sz < o->size[i]) {
             compBuf = realloc(compBuf, o->size[i]);
@@ -423,12 +426,28 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOver
             tmp = fp->hdr->bufSize; //This gets over-written by uncompress
             rv = uncompress(buf, (uLongf *) &tmp, compBuf, o->size[i]);
             if(rv != Z_OK) goto error;
+            blockSize = tmp;
         } else {
             buf = compBuf;
+            blockSize = o->size[i];
         }
 
-        //TODO: ensure that tmp is large enough!
+        if(blockSize < 24U) goto error;
         bwFillDataHdr(&hdr, buf);
+        switch(hdr.type) {
+        case 1:
+            itemSize = 12U;
+            break;
+        case 2:
+            itemSize = 8U;
+            break;
+        case 3:
+            itemSize = 4U;
+            break;
+        default:
+            goto error;
+        }
+        if((uint64_t) hdr.nItems > (blockSize - 24U) / itemSize) goto error;
 
         p = ((uint32_t*) buf);
         p += 6;
@@ -436,7 +455,6 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOver
 
         if(hdr.type == 3) start = hdr.start - hdr.step;
 
-        //FIXME: We should ensure that sz is large enough to hold nItems of the given type
         for(j=0; j<hdr.nItems; j++) {
             switch(hdr.type) {
             case 1:
