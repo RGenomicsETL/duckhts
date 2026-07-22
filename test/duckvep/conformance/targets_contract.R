@@ -36,7 +36,10 @@ dir.create(file.path(vep_prefix, "conda-meta"), recursive = TRUE)
 writeLines("fixture", file.path(vep_prefix, "conda-meta", "history"))
 extension <- file.path(temporary_root, "duckhts.duckdb_extension")
 extension_receipt <- file.path(temporary_root, "extension.tsv")
-invisible(lapply(c(extension, extension_receipt), writeLines, text = "fixture"))
+invisible(lapply(
+  c(extension, extension_receipt),
+  function(path) writeLines("fixture", con = path)
+))
 manifest <- file.path(temporary_root, "campaigns.tsv")
 campaign <- data.frame(
   id = "contract",
