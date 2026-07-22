@@ -18,7 +18,9 @@
   caller-supplied precomputed digests, and publishes complete campaign outputs through an
   atomic directory replacement with interrupted-run recovery. Add focused contracts for
   traversal/symlink rejection, case-sensitive path identity, two-stage Windows batch
-  quoting, atomic publication, and both recoverable interruption states
+  quoting, atomic publication, and both recoverable interruption states. Keep the staged
+  annotation path separate from its stable published identity so methodology audits do
+  not retain a temporary path after atomic publication
 - close three rare consequence/HGVS states. VEP's start-loss predicate directly evaluates in-frame
   deletion before its generic start test; DuckVEP's staged classifier now establishes
   that dependent fact first, and the offset-based start test requires a 5-prime UTR. A pure

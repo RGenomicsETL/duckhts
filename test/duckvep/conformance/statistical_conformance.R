@@ -32,6 +32,16 @@ op <- OptionParser(
   usage = "%prog [options]  (default: newest test/duckvep/conformance/results/*_annotations.parquet)"
 )
 op <- add_option(op, "--annotations", default = "")
+op <- add_option(
+  op,
+  "--annotations-label",
+  dest = "annotations_label",
+  default = "",
+  help = paste(
+    "stable published identity recorded in the methodology audit while",
+    "--annotations may be a transactional staging path [%default]"
+  )
+)
 op <- add_option(op, "--out", default = "")
 op <- add_option(op, "--audit-out", dest = "audit_out", default = "")
 op <- add_option(op, "--pairs-out", dest = "pairs_out", default = "")
@@ -97,6 +107,11 @@ if (!nzchar(opt$annotations)) {
   opt$annotations <- candidates[order(info$mtime, decreasing = TRUE)[1L]]
 }
 opt$annotations <- normalizePath(opt$annotations, mustWork = TRUE)
+annotations_label <- if (nzchar(opt$annotations_label)) {
+  normalizePath(opt$annotations_label, mustWork = FALSE)
+} else {
+  opt$annotations
+}
 stem <- sub("_annotations[.]parquet$", "", basename(opt$annotations))
 out_dir <- dirname(opt$annotations)
 if (!nzchar(opt$out)) {
@@ -512,7 +527,7 @@ audit <- dbGetQuery(
 )
 audit$run_date <- as.character(Sys.Date())
 audit$upper95 <- mapply(upper95, audit$resolved_discordant, audit$resolved_n)
-audit$annotations <- opt$annotations
+audit$annotations <- annotations_label
 
 nmd_stats <- dbGetQuery(
   con,

@@ -327,7 +327,8 @@ duckvep_targets_campaign_args <- function(
     campaign,
     extension,
     extension_receipt,
-    outputs) {
+    outputs,
+    published_outputs = outputs) {
   values <- c(
     corpus = "corpus",
     event_mode = "event-mode",
@@ -385,6 +386,7 @@ duckvep_targets_campaign_args <- function(
     "--extension", extension,
     "--extension-build-receipt", extension_receipt,
     "--annotations-out", outputs[["annotations"]],
+    "--annotations-label", published_outputs[["annotations"]],
     "--sample-vcf", outputs[["sample_vcf"]],
     "--keep-sample-vcf",
     if ("eligibility" %in% names(outputs)) {
@@ -605,7 +607,8 @@ duckvep_targets_run_campaign <- function(
     campaign,
     extension_paths$extension,
     extension_paths$receipt,
-    staged_outputs
+    staged_outputs,
+    outputs
   )
   runner <- file.path(
     root,

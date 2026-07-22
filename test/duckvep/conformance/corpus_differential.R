@@ -199,6 +199,13 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--annotations-label",
+  dest = "annotations_label",
+  default = "",
+  help = "stable published annotation path recorded by the statistical audit [%default]"
+)
+op <- add_option(
+  op,
   "--eligibility-out",
   dest = "eligibility_out",
   default = "",
@@ -3418,6 +3425,9 @@ rc <- system2(
   duckvep_system2_quote(c(
     report,
     "--annotations", opt$annotations_out,
+    if (nzchar(opt$annotations_label)) {
+      c("--annotations-label", opt$annotations_label)
+    },
     "--pair-level-input",
     "--duckdb-memory-limit", opt$duckdb_memory_limit,
     "--duckdb-threads", as.character(opt$duckdb_threads)

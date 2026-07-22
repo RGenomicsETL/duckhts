@@ -87,4 +87,5 @@ set, so changing one campaign does not invalidate unrelated evidence branches. A
 writes a complete fresh sibling directory, then replaces the campaign directory with one
 atomic rename. An interrupted replacement leaves a discoverable `.previous-*` directory;
 the next run restores it when the final directory is absent, or removes it after observing
-the complete replacement.
+the complete replacement. The runner reads and writes staging paths during execution but
+records the stable published annotation path in the methodology audit.
