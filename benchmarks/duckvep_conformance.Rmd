@@ -256,6 +256,25 @@ grouping and combined consequence attribution are the next semantic vertical and
 their own executable oracle and performance campaign. Any newly observed fixed-event
 mismatch reopens this contract rather than being relabelled as unsupported.
 
+## Evidence units and statistical interpretation
+
+The release evidence has three distinct units. A complete-corpus audit establishes
+exactness only for every event in that named corpus. The generated state-exploration
+campaign deliberately over-samples rare splice, coding, strand, length, and structural
+states to discover defects and demonstrate transition coverage; it is not a sample of
+deployment prevalence. A population error-rate statement would require a separately
+specified probability sample whose primary outcome is whether the complete output
+multiset for each independently sampled input event differs from VEP.
+
+The append-only history retains its original `upper95` field for schema compatibility.
+Tables below label that value as a *descriptive independent-pair* Clopper--Pearson
+calculation. Transcript and other annotated-object pairs are clustered within input
+events, transcripts, and genes, and the targeted generators are intentionally not
+deployment samples. These calculations therefore are not general engine error-rate
+bounds; separate stratum values are also not simultaneous confidence intervals. The
+release gate itself is deterministic and stricter: any discordance, unresolved state,
+extra emission, or missing emission fails the audited run.
+
 ## Latest tested revision per corpus
 
 ```{r latest}
@@ -271,7 +290,7 @@ latest_table <- data.frame(
   exact = paste0(latest_runs$exact_agree, "/", latest_runs$n),
   unresolved = latest_runs$unresolved,
   resolved_disagreements = latest_runs$resolved_discordant,
-  resolved_error_upper_95 = percent(latest_runs$upper95),
+  descriptive_independent_pair_upper_95 = percent(latest_runs$upper95),
   stringsAsFactors = FALSE
 )
 knitr::kable(latest_table, row.names = FALSE)
@@ -387,7 +406,7 @@ if (nrow(breakend_run)) {
     unresolved = breakend_run$unresolved,
     extra = breakend_run$engine_extra,
     missing = breakend_run$engine_missing,
-    resolved_error_upper_95 = percent(breakend_run$upper95),
+    descriptive_independent_pair_upper_95 = percent(breakend_run$upper95),
     stringsAsFactors = FALSE
   )
   knitr::kable(breakend_table, row.names = FALSE)
@@ -440,7 +459,7 @@ if (nrow(regulation_runs)) {
     unresolved = regulation_runs$unresolved,
     extra = regulation_runs$engine_extra,
     missing = regulation_runs$engine_missing,
-    exact_error_upper_95 = percent(regulation_runs$upper95),
+    descriptive_independent_pair_upper_95 = percent(regulation_runs$upper95),
     stringsAsFactors = FALSE
   )
   knitr::kable(regulation_table, row.names = FALSE)
@@ -552,7 +571,7 @@ timeline <- overall[, c(
 )]
 timeline$source_revision <- short_revision(timeline$source_revision)
 timeline$exact_rate <- percent(timeline$exact_agree / timeline$n)
-timeline$resolved_error_upper_95 <- percent(timeline$upper95)
+timeline$descriptive_independent_pair_upper_95 <- percent(timeline$upper95)
 timeline$upper95 <- NULL
 knitr::kable(timeline, row.names = FALSE)
 ```
@@ -575,7 +594,7 @@ if (nrow(latest_state_runs)) {
     exact = latest_state_runs$exact_agree,
     unresolved = latest_state_runs$unresolved,
     resolved_disagreements = latest_state_runs$resolved_discordant,
-    exact_error_upper_95_ppm = mapply(
+    descriptive_independent_pair_upper_95_ppm = mapply(
       upper95,
       latest_state_runs$n - latest_state_runs$exact_agree,
       latest_state_runs$n
@@ -593,7 +612,7 @@ if (nrow(latest_state_runs)) {
       exact = state_total_exact,
       unresolved = sum(latest_state_runs$unresolved),
       resolved_disagreements = sum(latest_state_runs$resolved_discordant),
-      exact_error_upper_95_ppm = upper95(
+      descriptive_independent_pair_upper_95_ppm = upper95(
         state_total_n - state_total_exact,
         state_total_n
       ) * 1e6,
@@ -607,9 +626,9 @@ if (nrow(latest_state_runs)) {
       scientific = FALSE
     )
   }
-  state_table$exact_error_upper_95_ppm <- sprintf(
+  state_table$descriptive_independent_pair_upper_95_ppm <- sprintf(
     "%.1f",
-    state_table$exact_error_upper_95_ppm
+    state_table$descriptive_independent_pair_upper_95_ppm
   )
   knitr::kable(state_table, row.names = FALSE)
 } else {
@@ -932,7 +951,7 @@ impact_counts$upper95 <- mapply(
   impact_counts$resolved_n
 )
 impact_counts$exact_rate <- percent(impact_counts$exact_agree / impact_counts$n)
-impact_counts$resolved_error_upper_95 <- percent(impact_counts$upper95)
+impact_counts$descriptive_independent_pair_upper_95 <- percent(impact_counts$upper95)
 impact_counts$upper95 <- NULL
 knitr::kable(impact_counts, row.names = FALSE)
 ```
@@ -985,7 +1004,7 @@ if (!is.null(latest_nmd_run_ids) && nrow(latest_nmd_run_ids)) {
   } else {
     nmd_summary$oracle_unresolved <- 0
   }
-  nmd_summary$resolved_error_upper_95 <- percent(mapply(
+  nmd_summary$descriptive_independent_pair_upper_95 <- percent(mapply(
     upper95,
     nmd_summary$resolved_discordant,
     nmd_summary$resolved_n
@@ -998,12 +1017,12 @@ if (!is.null(latest_nmd_run_ids) && nrow(latest_nmd_run_ids)) {
     nmd_summary[, c(
       "revision", "corpus", "model", "exact", "term_mismatch",
       "not_comparable", "oracle_unresolved", "unresolved",
-      "resolved_error_upper_95"
+      "descriptive_independent_pair_upper_95"
     )],
     col.names = c(
       "revision", "corpus", "model", "exact", "mismatches",
       "not comparable", "VEP unresolved", "DuckVEP unresolved",
-      "resolved error upper 95%"
+      "descriptive independent-pair upper 95%"
     ),
     row.names = FALSE
   )

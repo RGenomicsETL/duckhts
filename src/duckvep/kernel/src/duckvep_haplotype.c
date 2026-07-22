@@ -265,6 +265,7 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     duckvep_haplotype_result_t       *result) {
 
     size_t final_len = ref_cds_len;
+    size_t peak_len = ref_cds_len;
     size_t i;
     uint32_t prev_start = UINT32_MAX;
     uint32_t prev_ref_len = 0u;
@@ -357,9 +358,10 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
         }
         new_len = final_len - (size_t)e->ref_len + (size_t)e->alt_len;
         final_len = new_len;
+        if (final_len > peak_len) peak_len = final_len;
     }
 
-    if (final_len > cds_cap) {
+    if (final_len > cds_cap || (ref_cds == cds_out && peak_len > cds_cap)) {
         return haplo_fail(result, cds_len_out, NULL,
                           DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL);
     }

@@ -7855,6 +7855,43 @@ TEST haplotype_apply_and_translate_known_cases(void) {
     ASSERT_EQ(DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL,
               duckvep_haplotype_apply_cds_edits((const uint8_t *)"ATG", 3u, edits, 1u,
                                                 (int8_t)1, cds, 3u, &cds_len, &r));
+
+    /* Exact aliasing must reserve the peak intermediate size, not only the
+     * length after a later lower-coordinate deletion restores the CDS. */
+    {
+        uint8_t alias_small[17];
+        uint8_t alias_large[17];
+        uint8_t before[17];
+
+        memset(edits, 0, sizeof edits);
+        edits[0].cds_start = 11u;
+        edits[0].alt_len = 4u;
+        edits[0].alt = (const uint8_t *)"AAAA";
+        edits[0].variant_strand = (int8_t)1;
+        edits[1].cds_start = 2u;
+        edits[1].ref_len = 4u;
+        edits[1].ref = (const uint8_t *)"CGTA";
+        edits[1].variant_strand = (int8_t)1;
+
+        memset(alias_small, 0xa5, sizeof alias_small);
+        memcpy(alias_small, "ACGTACGTACGT", 12u);
+        memcpy(before, alias_small, sizeof before);
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL,
+                  duckvep_haplotype_apply_cds_edits(
+                      alias_small, 12u, edits, 2u, (int8_t)1,
+                      alias_small, 12u, &cds_len, &r));
+        ASSERT_EQ(0, memcmp(alias_small, before, sizeof before));
+
+        memset(alias_large, 0, sizeof alias_large);
+        memcpy(alias_large, "ACGTACGTACGT", 12u);
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                  duckvep_haplotype_apply_cds_edits(
+                      alias_large, 12u, edits, 2u, (int8_t)1,
+                      alias_large, 16u, &cds_len, &r));
+        ASSERT_EQ(12u, cds_len);
+        ASSERT_STR_EQ("ACGTACAAAAGT", (const char *)alias_large);
+    }
+
     edits[0].cds_start = 2u; edits[0].ref_len = 2u; edits[0].ref = (const uint8_t *)"TG";
     edits[0].alt_len = 1u; edits[0].alt = (const uint8_t *)"C"; edits[0].variant_strand = (int8_t)1;
     edits[1].cds_start = 3u; edits[1].ref_len = 1u; edits[1].ref = (const uint8_t *)"G";

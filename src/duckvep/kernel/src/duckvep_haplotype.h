@@ -83,7 +83,9 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
  * and must not overlap in original CDS space; this mirrors Ensembl's reverse
  * mapping order and permits one linear rebuild without allocation or sorting.
  * `ref_cds == cds_out` remains supported for compatibility, but distinct input
- * and output buffers are the linear streaming path. Partially overlapping
+ * and output buffers are the linear streaming path. Exact aliasing requires
+ * `cds_cap` to cover the largest intermediate sequence produced while applying
+ * the descending edits, not only the final sequence. Partially overlapping
  * buffers are not supported.
  *
  * `ref`/`alt` alleles are oriented from variant_strand to transcript_strand
