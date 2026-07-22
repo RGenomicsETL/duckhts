@@ -1,7 +1,9 @@
 .PHONY: clean clean_all clean_local function_catalog \
 	test-duckvep-kernel test-duckvep-kernel-asan \
 	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
-	duckvep-generated-check test-duckvep-so-conformance \
+	duckvep-generated-check duckvep-upstream-git-check \
+	duckvep-state-current-check \
+	test-duckvep-so-conformance \
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
 	test-duckvep-state-exploration \
@@ -236,6 +238,14 @@ duckvep-generated-check:
 		src/duckvep/kernel/src/duckvep_effect_rules.inc
 	perl test/duckvep/conformance/generate_so_metadata.pl --check \
 		src/duckvep/kernel/src/duckvep_so_metadata.inc
+	perl test/duckvep/conformance/check_state_machine_contract.pl
+	perl test/duckvep/upstream/check_sources.pl
+
+duckvep-upstream-git-check:
+	perl test/duckvep/upstream/check_sources.pl --verify-upstream-git
+
+duckvep-state-current-check:
+	perl test/duckvep/conformance/check_state_machine_contract.pl --require-current
 
 test-duckvep-kernel: duckvep-generated-check
 	@set -e; \
@@ -317,8 +327,11 @@ test-duckvep-state-exploration: release
 	seed=$${DUCKVEP_STATE_SEED:-17}; \
 	max_len=$${DUCKVEP_STATE_MAX_LENGTH:-10}; \
 	trials=$${DUCKVEP_PROP_TRIALS:-100000}; \
-	DUCKVEP_PROP_TRIALS=$$trials DUCKVEP_PROP_SEED=$$seed \
-		$(MAKE) test-duckvep-kernel; \
+	Rscript test/duckvep/conformance/property_history.R \
+		--trials $$trials --seed $$seed \
+		--history test/duckvep/conformance/results/state_exploration_seed_$${seed}_properties.csv \
+		--coverage-history test/duckvep/conformance/results/state_exploration_seed_$${seed}_coverage.csv \
+		--failure-log-dir test/duckvep/conformance/results; \
 	vcf=test/duckvep/conformance/results/state_exploration_seed_$${seed}.vcf; \
 	Rscript test/duckvep/conformance/generate_witnesses.R \
 		--ext build/release/duckhts.duckdb_extension \

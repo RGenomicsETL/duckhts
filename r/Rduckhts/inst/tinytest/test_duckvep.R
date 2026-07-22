@@ -535,6 +535,194 @@ expect_identical(public_rich_annotation$duckvep_status, "supported")
 expect_identical(public_rich_annotation$transcript_hgvs, "n.25A>G")
 expect_true(is.na(public_rich_annotation$protein_hgvs))
 
+# Exercise the rare terminal-CDS states through the public event relation, not
+# only through the kernel and private scalar fixtures. The start-deletion model
+# is synthetic; the terminal-partial model below uses exact remapped Ensembl-116
+# ENST00000650713 exon/CDS/reference data.
+partial_reference <- system.file(
+  "extdata",
+  "duckvep_terminal_partial.fa",
+  package = "Rduckhts",
+  mustWork = TRUE
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_public_partial_regions AS SELECT",
+    "1::UINTEGER seq_region, 54::UBIGINT sequence_length,",
+    "'partial'::VARCHAR seq_region_name"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_public_partial_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "21::UBIGINT transcript_start, 34::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "35::UBIGINT transcript_flags, 21::UBIGINT cds_start,",
+    "34::UBIGINT cds_end, 'ATGCCCAAAGGGTC'::BLOB cds_sequence,",
+    "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence,",
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_public_partial_exons AS SELECT",
+    "0::UINTEGER transcript_index, 21::UBIGINT exon_start,",
+    "34::UBIGINT exon_end, 1::UBIGINT exon_cdna_start,",
+    "14::UBIGINT exon_cdna_end, 0::TINYINT phase,",
+    "2::TINYINT end_phase"
+  )
+)
+expect_true(
+  load_model(
+    "r-public-terminal-partial",
+    c(
+      "SELECT * FROM duckvep_r_public_partial_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_public_partial_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_public_partial_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = partial_reference
+  )$loaded
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_public_partial_events AS SELECT * FROM (VALUES",
+    "(1::UBIGINT, 1::UINTEGER, 21::UBIGINT, 'ATGC'::VARCHAR, 'C'::VARCHAR,",
+    "NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT))",
+    "e(event_index, seq_region, position, reference, alternate, end_position,",
+    "structural_type, copy_change, mate_seq_region, mate_position)"
+  )
+)
+
+clinvar_partial_reference <- system.file(
+  "extdata",
+  "duckvep_clinvar_terminal_partial.fa",
+  package = "Rduckhts",
+  mustWork = TRUE
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_clinvar_partial_regions AS SELECT",
+    "1::UINTEGER seq_region, 2788::UBIGINT sequence_length,",
+    "'clinvar_terminal_partial'::VARCHAR seq_region_name"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_clinvar_partial_transcripts AS SELECT",
+    "0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "1::UBIGINT transcript_start, 1788::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index,",
+    "35::UBIGINT transcript_flags, 1077::UBIGINT cds_start,",
+    "1788::UBIGINT cds_end,",
+    paste0(
+      "'ATGCGCCAGGCAGGCCGTTACTTACCAGAGTTTAGGGAAACCCGGGCTGCCCAGGACTTTTTC",
+      "AGCACGTGTCGCTCTCCTGAGGCCTGCTGTGAACTGACTCTGCAGCCACTGCGTCGCTTCCCT",
+      "CTGGATGCTGCCATCATTTTCTCCGACATCCTTGTTGTACCCCAGGCACTGGGCATGGAGGTG",
+      "ACCATGGTACCTGGCAAAGGACCCAGCTTCCCAGAGCCATTAAGAGAAGAGCAGGACCTAGAAC",
+      "GCCTACGGGATCCAGAAGTGGTAGCCTC'::BLOB cds_sequence,"
+    ),
+    "1::UTINYINT codon_table,",
+    paste0(
+      "'GGCTGGATAAGACTGTTGGTATCATGAGTGGGACTTGCGCCAAGCCTCCGGATACCCAGACTGT",
+      "CAGATGAGAACAAATTCCTCATGTCACCGTAAGATACATTTACAGCGGAGTTTTCTTTTGGGCC",
+      "TTTGTTGTTGCGTCGCTACAGCAAACTTTACGGTGAAAAAAGACCTCAGGGTTTTCCGGAGCTG",
+      "AAGAATGACACATTCCTGCGAGCAGCCTGGGGAGAGGAAACAGACTACACTCCCGTTTGGTGC'",
+      "::BLOB pre_cds_sequence,"
+    ),
+    "''::BLOB post_cds_sequence"
+  )
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_clinvar_partial_exons AS SELECT * FROM (VALUES",
+    "(0::UINTEGER,1::UBIGINT,170::UBIGINT,1::UBIGINT,170::UBIGINT,-1::TINYINT,-1::TINYINT),",
+    "(0::UINTEGER,992::UBIGINT,1104::UBIGINT,171::UBIGINT,283::UBIGINT,-1::TINYINT,1::TINYINT),",
+    "(0::UINTEGER,1221::UBIGINT,1300::UBIGINT,284::UBIGINT,363::UBIGINT,1::TINYINT,0::TINYINT),",
+    "(0::UINTEGER,1377::UBIGINT,1439::UBIGINT,364::UBIGINT,426::UBIGINT,0::TINYINT,0::TINYINT),",
+    "(0::UINTEGER,1679::UBIGINT,1788::UBIGINT,427::UBIGINT,536::UBIGINT,0::TINYINT,2::TINYINT))",
+    "e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)"
+  )
+)
+expect_true(
+  load_model(
+    "r-clinvar-terminal-partial",
+    c(
+      "SELECT * FROM duckvep_r_clinvar_partial_regions ORDER BY seq_region",
+      paste(
+        "SELECT * FROM duckvep_r_clinvar_partial_transcripts",
+        "ORDER BY seq_region, transcript_start, transcript_index"
+      ),
+      paste(
+        "SELECT * FROM duckvep_r_clinvar_partial_exons",
+        "ORDER BY transcript_index, exon_cdna_start"
+      )
+    ),
+    reference_fasta = clinvar_partial_reference
+  )$loaded
+)
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_clinvar_partial_events AS SELECT * FROM (VALUES",
+    "(2::UBIGINT,1::UINTEGER,1786::UBIGINT,'C'::VARCHAR,'CTAG'::VARCHAR,",
+    "NULL::UBIGINT,NULL::VARCHAR,NULL::VARCHAR,NULL::UINTEGER,NULL::UBIGINT))",
+    "e(event_index,seq_region,position,reference,alternate,end_position,",
+    "structural_type,copy_change,mate_seq_region,mate_position)"
+  )
+)
+public_partial <- dbGetQuery(
+  con,
+  paste(
+    "WITH annotations AS (",
+    "SELECT * FROM duckvep_annotate('duckvep_r_public_partial_events',",
+    "'r-public-terminal-partial', hgvs := TRUE, rich := TRUE,",
+    "upstream_distance := 0, downstream_distance := 0)",
+    "UNION ALL BY NAME",
+    "SELECT * FROM duckvep_annotate('duckvep_r_clinvar_partial_events',",
+    "'r-clinvar-terminal-partial', hgvs := TRUE, rich := TRUE,",
+    "upstream_distance := 0, downstream_distance := 0))",
+    "SELECT event_index, consequence, transcript_hgvs, protein_hgvs,",
+    "transcript_hgvs_status, protein_hgvs_status, hgvs_shift",
+    "FROM annotations",
+    "ORDER BY event_index"
+  )
+)
+expect_equal(public_partial$event_index, c(1, 2))
+expect_identical(
+  public_partial$consequence,
+  c(
+    "inframe_deletion",
+    "stop_gained&inframe_insertion&incomplete_terminal_codon_variant"
+  )
+)
+expect_false(grepl("start_lost", public_partial$consequence[[1]], fixed = TRUE))
+expect_identical(public_partial$transcript_hgvs_status, c("supported", "supported"))
+expect_identical(public_partial$protein_hgvs_status, c("supported", "supported"))
+expect_identical(
+  public_partial$transcript_hgvs,
+  c("c.2_4del", "c.280_281insAGT")
+)
+expect_identical(
+  public_partial$protein_hgvs,
+  c("p.Met1_Pro2delinsThr", "p.Ter94=")
+)
+expect_equal(public_partial$hgvs_shift, c(1, 1))
+
 public_annotation_without_hgvs <- dbGetQuery(
   con,
   paste(
@@ -2158,6 +2346,18 @@ expect_true(
   dbGetQuery(
     con,
     "SELECT duckvep_model_drop('r-partial-cds-end') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-public-terminal-partial') AS dropped"
+  )$dropped
+)
+expect_true(
+  dbGetQuery(
+    con,
+    "SELECT duckvep_model_drop('r-clinvar-terminal-partial') AS dropped"
   )$dropped
 )
 expect_true(

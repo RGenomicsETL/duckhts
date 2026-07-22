@@ -864,6 +864,62 @@ Source anchors: Ensembl Variation 116
 `Sequence.pm::trim_sequences`. Keep the deletion and insertion predicates separate;
 making one the length-sign mirror of the other changes VEP results.
 
+## Start loss directly depends on in-frame deletion and 5-prime UTR state
+
+VEP 116 does not evaluate every coding predicate from an immutable biological fact set.
+`VariationEffect::start_lost` directly calls the `inframe_insertion` and
+`inframe_deletion` predicates before it falls back to its generic insertion/deletion start
+test. Its private
+`_inv_start_altered` test is also false unless the transcript has a 5-prime UTR.
+The dependency order inside `start_lost` and transcript UTR state are therefore observable
+parts of the VEP state machine; this is not a claim that the global consequence registry
+must already have cached an in-frame deletion.
+
+The GRCh38 ClinVar deletion
+`1:17053947:CCTGCAGGCAGGCTCCGCCAAGGGTTGTGGCCGGCAACCGGCGCCTCAAGGAGAGGGCGACCACCGCCGCCAT:C`
+deletes the complete first 24 codons from two transcripts that have no 5-prime UTR. VEP
+116 emits `inframe_deletion&splice_region_variant` for `ENST00000485515` and
+`NMD_transcript_variant&inframe_deletion` for `ENST00000714035`, with
+`c.1_72del` and `p.Met1_Gln24del`; it does not add `start_lost`.
+
+DuckVEP's staged classifier consequently resolves deletion shape before its start facts so
+that it can supply the same direct dependency, and gates the offset-based start alteration
+on the presence of a 5-prime UTR. Moving the staged start evaluation ahead of the deletion
+fact, or interpreting absence of `ATG` at the old CDS offset by itself, reintroduces the
+false `start_lost` term. A fixed C witness pins both the dependency and the no-UTR
+condition; the strict executable corpus differential remains the independent acceptance
+gate.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
+`::_inv_start_altered`, and `::inframe_deletion`.
+
+## Terminal partial-codon insertions use distinct consequence and HGVS peptide views
+
+For a pure insertion inside an incomplete terminal codon, VEP 116 does not feed one
+peptide representation to consequence classification and protein HGVS. The consequence
+predicates can observe an empty reference codon allele and translate the inserted allele
+directly. The later HGVSp replay instead uses the codon-rounded edited CDS, including the
+pre-existing terminal partial base.
+
+The GRCh38 ClinVar event `1:45013701:C:CTAG` on `ENST00000650713` has a 281-base CDS with
+`CDS_END_NF`. Its consequence-local codon alleles are `-/TAG`, producing
+`incomplete_terminal_codon_variant&inframe_insertion&stop_gained` without
+`coding_sequence_variant`. After transcript 3-prime placement, HGVSc is
+`c.280_281insAGT`; the HGVS-specific codon-rounded replay compares the incomplete
+reference residue with a translated stop and VEP renders `p.Ter94=`.
+
+DuckVEP therefore retains the codon-rounded edited-CDS cache for HGVS while exposing the
+empty-reference/insertion-only peptide window to consequence predicates. Treating the
+synthetic incomplete reference residue as consequence-level `X` invents
+`coding_sequence_variant`; reusing the consequence-only insertion peptide for HGVSp loses
+`p.Ter94=`. Fixed C, SQL, and R witnesses assert both views and the exact consequence,
+HGVSc, HGVSp, and shift; the strict executable corpus differential remains the independent
+acceptance gate.
+
+Source anchors: Ensembl Variation 116 `VariationEffect.pm::partial_codon`,
+`::inframe_insertion`, `::stop_gained`, `::coding_unknown`, and
+`TranscriptVariationAllele.pm::hgvs_protein`.
+
 ## The NMD plugin projects the full uploaded feature, not the minimized edit
 
 Variant-induced NMD prediction in VEP Plugins release/116 does not consume the same

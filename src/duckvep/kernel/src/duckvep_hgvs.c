@@ -1684,12 +1684,86 @@ static int hgvs_protein_full_window(
     return 1;
 }
 
+static int hgvs_protein_is_terminal_partial_insertion(
+    const duckvep_coding_context_t *context) {
+
+    size_t start0;
+    size_t partial_start0;
+
+    if (context == NULL || !context->has_single_edit ||
+        context->single_edit_ref_len != 0u ||
+        context->single_edit_alt_len == 0u ||
+        context->single_edit_cds_start == 0u ||
+        (context->ref_cds_len % 3u) == 0u) {
+        return 0;
+    }
+    start0 = (size_t)context->single_edit_cds_start - 1u;
+    partial_start0 =
+        context->ref_cds_len - (context->ref_cds_len % 3u);
+    return start0 >= partial_start0 && start0 <= context->ref_cds_len;
+}
+
+static int hgvs_protein_terminal_partial_insertion_window(
+    const duckvep_coding_context_t  *context,
+    duckvep_coding_peptide_window_t *window) {
+
+    size_t start0;
+    size_t nt_offset;
+
+    if (window == NULL ||
+        !hgvs_protein_is_terminal_partial_insertion(context)) {
+        return 0;
+    }
+    start0 = (size_t)context->single_edit_cds_start - 1u;
+    nt_offset = (start0 / 3u) * 3u;
+    if (nt_offset > context->ref_cds_len ||
+        (size_t)context->single_edit_alt_len >
+            SIZE_MAX - (context->ref_cds_len - nt_offset)) {
+        return 0;
+    }
+    memset(window, 0, sizeof *window);
+    window->peptide_offset = nt_offset / 3u;
+    window->ref_nt_length = context->ref_cds_len - nt_offset;
+    window->alt_nt_length =
+        window->ref_nt_length + (size_t)context->single_edit_alt_len;
+    window->ref_whole_length = window->ref_nt_length / 3u;
+    window->alt_whole_length = window->alt_nt_length / 3u;
+    window->ref_partial_x =
+        (uint8_t)((window->ref_nt_length % 3u) != 0u);
+    window->alt_partial_x =
+        (uint8_t)((window->alt_nt_length % 3u) != 0u);
+    if (window->alt_partial_x && window->alt_whole_length == 1u &&
+        duckvep_coding_context_peptide_base(
+            context, 1, window->peptide_offset) == (uint8_t)'*') {
+        window->alt_partial_x = 0u;
+    }
+    window->ref_length =
+        window->ref_whole_length + (size_t)window->ref_partial_x;
+    window->alt_length =
+        window->alt_whole_length + (size_t)window->alt_partial_x;
+    window->reference_span_length = window->ref_length;
+    return 1;
+}
+
 static uint8_t hgvs_protein_window_base(
     const duckvep_coding_context_t        *context,
     const duckvep_coding_peptide_window_t *window,
     int                                    alternate,
     size_t                                 index) {
 
+    if (hgvs_protein_is_terminal_partial_insertion(context) &&
+        window != NULL && window->ref_nt_length != 0u) {
+        size_t whole_length = alternate
+            ? window->alt_whole_length : window->ref_whole_length;
+        size_t length = alternate ? window->alt_length : window->ref_length;
+        uint8_t partial_x = alternate
+            ? window->alt_partial_x : window->ref_partial_x;
+
+        if (index >= length) return 0u;
+        if (index == whole_length && partial_x) return (uint8_t)'X';
+        return duckvep_coding_context_peptide_base(
+            context, alternate, window->peptide_offset + index);
+    }
     return duckvep_coding_context_peptide_window_base(
         context, window, alternate, index);
 }
@@ -2109,7 +2183,8 @@ static duckvep_hgvs_status_t hgvs_protein_insertion_finish(
         /* Perl substr(_peptide, -1, 2) is reached for an insertion clipped to
          * start=1,end=0. It returns the final translated residue and VEP then
          * formats that same residue at positions zero and one. Preserve this
-         * executable oddity rather than imposing valid HGVS coordinates. */
+         * executable VEP-116 compatibility rule rather than imposing valid
+         * HGVS coordinates. */
         if (reference_length == 0u) return DUCKVEP_HGVS_NOT_APPLICABLE;
         terminal_reference = duckvep_coding_context_peptide_base(
             context, 0, reference_length - 1u);
@@ -2190,6 +2265,11 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
     if (!duckvep_coding_context_peptide_window_open(
             context, &fact.window) &&
         !hgvs_protein_full_window(context, &fact.window)) {
+        return DUCKVEP_HGVS_MISSING_PEPTIDE;
+    }
+    if (hgvs_protein_is_terminal_partial_insertion(context) &&
+        !hgvs_protein_terminal_partial_insertion_window(
+            context, &fact.window)) {
         return DUCKVEP_HGVS_MISSING_PEPTIDE;
     }
     if (fact.window.ref_length == 0u && fact.window.alt_length == 0u) {

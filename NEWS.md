@@ -1,6 +1,54 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- close three rare consequence/HGVS states. VEP's start-loss predicate directly evaluates in-frame
+  deletion before its generic start test; DuckVEP's staged classifier now establishes
+  that dependent fact first, and the offset-based start test requires a 5-prime UTR. A pure
+  insertion inside an incomplete terminal codon now exposes the empty-reference,
+  insertion-only peptide to consequence predicates while preserving the codon-rounded
+  edited-CDS view required by HGVSp. Fixed C witnesses plus exact public SQL and R
+  regressions reproduce the remapped `ENST00000650713` state, including
+  `c.280_281insAGT`, `p.Ter94=`, and its one-base 3-prime shift against a reference
+  fixture that preserves the required downstream sequence. The large-corpus harness now
+  spills pair evidence through Parquet,
+  releases the resident model before comparison, asserts pair-key uniqueness, and keeps
+  every HGVS discordance as an unconditional failure. The statistical executable-oracle
+  audit now also fails on every consequence mismatch, missing/extra row, DuckVEP
+  unresolved state, a status outside the explicit
+  `supported`/`not_applicable`/`unresolved` vocabulary, or a status/value/reason
+  inconsistency after preserving the complete pair and summary artifacts. Begin the
+  machine-checkable whole-engine state model with a connected transition inventory that
+  names observed dimensions, implementation and VEP authority, deterministic/property/
+  executable evidence, and honest proof status. The generated check keeps haplotype
+  mechanics and unimplemented combined classification visibly outside independent-event
+  consequence claims. Make rare-state coverage requirements executable: selected
+  statistical states must occur, zero counters require a named fixed C witness, and every
+  failed campaign retains its complete seed-specific log. Treat held-out SV/BND and
+  HPRC/pangenome campaigns as counterexample-guided state exploration rather than optional
+  representativeness checks. Give newly discovered reachable rare classes dedicated
+  generator strata instead of depending on accidental sampling. Document the pinned
+  upstream VEP and Ensembl Variation test lineage as separate oracle-health and extracted-
+  fixture gates. Preserve all 49 release-116 VEP tests, the two release-116 Variation
+  consequence/HGVS authorities, and the five release-89 monolithic VEP tests under
+  repository/ref-preserving paths with exact source commits and per-file SHA-256 receipts;
+  the offline build check rejects changed, omitted, or unreceipted mirrors, while the
+  release-source check compares every byte and complete suite inventory with the exact
+  declared Git objects. Record the reproducible VEP-oracle self-test environment separately:
+  the pinned 49-file suite passes 1,977 assertions with 293 explicit skips under the
+  checksum-pinned Bioconda VEP 116.0 package; optional Perl modules can change the suite's
+  dynamic assertion denominator, so the receipt preserves its package and Perl versions.
+  The smaller
+  legacy monolithic VEP suite is not a hidden conformance authority, and VEP's
+  “subversion” is its point-release number rather than SVN. Split
+  alternative transcript, structural, interval, NMD, HGVS, and haplotype execution paths
+  and require every implemented path's inputs and declared terminal state to be reachable.
+  Resolve randomized properties, executable corpus campaigns, and explicit fail-closed
+  error/status outcomes through checked manifests; report the unimplemented combined
+  haplotype classifier as a structurally connected planned path, never as an executable
+  one. Pin the rare complete-first-codon deletion and terminal partial-codon insertion
+  through the public rich-plus-HGVS relation as well as the kernel and executable
+  differential; the public reduction retains the no-UTR absence of `start_lost` and the
+  apparently contradictory stop-gain consequence with `p.Ter5=` rendering.
 - make HGVS differentials unconditionally fail closed: the corpus harness no longer
   accepts a flag that converts unresolved, mismatched, missing, or extra HGVS rows into a
   successful run. Reproduce two VEP 116 protein-formatting states exposed by the complete

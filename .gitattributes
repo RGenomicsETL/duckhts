@@ -2,3 +2,6 @@ test/data/*.fa text eol=lf
 test/data/*.fai text eol=lf
 r/Rduckhts/inst/extdata/*.fa text eol=lf
 r/Rduckhts/inst/extdata/*.fai text eol=lf
+test/duckvep/upstream/ensembl-tools/** -whitespace
+test/duckvep/upstream/ensembl-variation/** -whitespace
+test/duckvep/upstream/ensembl-vep/** -whitespace

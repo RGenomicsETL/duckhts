@@ -6,7 +6,9 @@
 # engine and VEP consequence stratum, use the UNION of (variant, transcript) pairs
 # that either VEP or the engine emitted, count exact SO-term-set discordance and
 # emission misses/extras, and attach a Clopper-Pearson 95% upper bound via
-# binom.test. This is a report, not a pass/fail gate. VEP remains the sole oracle.
+# binom.test. It writes every pair and summary before failing closed on any
+# consequence discordance, missing/extra row, or DuckVEP unresolved state. VEP
+# remains the sole oracle.
 
 suppressMessages({
   library(optparse)
@@ -47,7 +49,36 @@ op <- add_option(
   default = "",
   help = "source revision recorded with --history [current Git HEAD]"
 )
+op <- add_option(
+  op,
+  "--duckdb-memory-limit",
+  dest = "duckdb_memory_limit",
+  default = "8GB",
+  help = "DuckDB memory cap for spillable pair construction [%default]"
+)
+op <- add_option(
+  op,
+  "--duckdb-threads",
+  dest = "duckdb_threads",
+  type = "integer",
+  default = 4L,
+  help = "DuckDB worker threads for evidence projection [%default]"
+)
+op <- add_option(
+  op,
+  "--pair-level-input",
+  dest = "pair_level_input",
+  action = "store_true",
+  default = FALSE,
+  help = paste(
+    "assert that each source has at most one row per variant/transcript and",
+    "skip legacy consequence-row normalization [%default]"
+  )
+)
 opt <- parse_args(op)
+if (opt$duckdb_threads < 1L) {
+  stop("--duckdb-threads must be positive")
+}
 
 data_dir <- file.path(root, "test", "duckvep", "conformance", "results")
 if (!nzchar(opt$annotations)) {
@@ -89,8 +120,25 @@ upper95 <- function(k, n) {
 }
 
 con <- dbConnect(duckdb())
-on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+spill_dir <- NULL
+on.exit({
+  try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+  if (!is.null(spill_dir)) {
+    unlink(spill_dir, recursive = TRUE, force = TRUE)
+  }
+}, add = TRUE)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
+spill_dir <- tempfile("duckvep-statistical-spill-")
+if (!dir.create(spill_dir)) {
+  stop("cannot create DuckDB spill directory: ", spill_dir)
+}
+invisible(dbExecute(con, glue("SET temp_directory = {sql_q(spill_dir)}")))
+invisible(dbExecute(
+  con,
+  glue("SET memory_limit = {sql_q(opt$duckdb_memory_limit)}")
+))
+invisible(dbExecute(con, glue("SET threads = {opt$duckdb_threads}")))
+invisible(dbExecute(con, "SET preserve_insertion_order = false"))
 
 so_spec_path <- file.path(
   root,
@@ -110,37 +158,86 @@ so_spec <- utils::read.delim(
 )
 invisible(dbWriteTable(con, "so_spec", so_spec, overwrite = TRUE))
 
+ann_columns <- dbGetQuery(
+  con,
+  glue("DESCRIBE SELECT * FROM read_parquet({sql_q(opt$annotations)})")
+)$column_name
+compat_columns <- c(
+  status = "NULL::VARCHAR",
+  reason = "NULL::VARCHAR",
+  model = "NULL::VARCHAR",
+  oracle_version = "NULL::VARCHAR",
+  oracle_build = "NULL::VARCHAR",
+  nmd_prediction = "'not_measured'::VARCHAR"
+)
+missing_compat <- setdiff(names(compat_columns), ann_columns)
+compat_projection <- if (length(missing_compat)) {
+  paste0(
+    ", ",
+    paste(
+      glue("{compat_columns[missing_compat]} AS {missing_compat}"),
+      collapse = ", "
+    )
+  )
+} else {
+  ""
+}
 invisible(dbExecute(
   con,
   glue(
-    "CREATE TABLE ann AS SELECT * FROM read_parquet({sql_q(opt$annotations)})"
+    "CREATE TEMP VIEW ann AS
+     SELECT *{compat_projection}
+     FROM read_parquet({sql_q(opt$annotations)})"
   )
 ))
-ann_columns <- dbListFields(con, "ann")
-if (!("status" %in% ann_columns)) {
-  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN status VARCHAR"))
-}
-if (!("reason" %in% ann_columns)) {
-  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN reason VARCHAR"))
-}
-if (!("model" %in% ann_columns)) {
-  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN model VARCHAR"))
-}
-if (!("oracle_version" %in% ann_columns)) {
-  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN oracle_version VARCHAR"))
-}
-if (!("oracle_build" %in% ann_columns)) {
-  invisible(dbExecute(con, "ALTER TABLE ann ADD COLUMN oracle_build VARCHAR"))
-}
-if (!("nmd_prediction" %in% ann_columns)) {
+if (isTRUE(opt$pair_level_input)) {
+  duplicate_pair <- dbGetQuery(
+    con,
+    "SELECT source, variant_id, coalesce(tx, '') AS tx, count(*) AS n
+     FROM ann
+     GROUP BY source, variant_id, coalesce(tx, '')
+     HAVING count(*) > 1
+     LIMIT 1"
+  )
+  if (nrow(duplicate_pair) != 0L) {
+    stop(glue(
+      "pair-level input is not unique for source={duplicate_pair$source[[1L]]}, ",
+      "variant_id={duplicate_pair$variant_id[[1L]]}, ",
+      "tx={duplicate_pair$tx[[1L]]}: {duplicate_pair$n[[1L]]} rows"
+    ))
+  }
   invisible(dbExecute(
     con,
-    "ALTER TABLE ann ADD COLUMN nmd_prediction VARCHAR DEFAULT 'not_measured'"
+    "CREATE TEMP VIEW ann_pairs AS
+     SELECT
+       source,
+       corpus,
+       coalesce(model, '') AS model,
+       coalesce(oracle_version, '') AS oracle_version,
+       coalesce(oracle_build, '') AS oracle_build,
+       variant_id,
+       coalesce(tx, '') AS tx,
+       chrom,
+       pos,
+       ref,
+       alt,
+       var_type,
+       length_bin,
+       coalesce(consequence, '') AS consequence,
+       impact,
+       CASE
+         WHEN source = 'vep' THEN 'oracle'
+         ELSE coalesce(status, 'unknown')
+       END AS engine_status,
+       reason AS engine_reason,
+       coalesce(nmd_prediction, 'not_measured') AS nmd_prediction
+     FROM ann"
   ))
-}
-invisible(dbExecute(
-  con,
-  "CREATE TABLE ann_pairs AS
+} else {
+  ann_pairs_path <- file.path(spill_dir, "ann_pairs.parquet")
+  invisible(dbExecute(
+    con,
+    glue("COPY (
    SELECT
      source,
      any_value(corpus) AS corpus,
@@ -157,17 +254,29 @@ invisible(dbExecute(
      any_value(length_bin) AS length_bin,
      coalesce(string_agg(DISTINCT nullif(term, ''), '&' ORDER BY nullif(term, '')), '') AS consequence,
      any_value(impact) AS impact,
-     CASE
-       WHEN source = 'vep' THEN 'oracle'
-       WHEN count(*) FILTER (WHERE status = 'unresolved') > 0 THEN 'unresolved'
-       ELSE coalesce(any_value(status), 'unknown')
-     END AS engine_status,
+       CASE
+         WHEN source = 'vep' THEN 'oracle'
+         WHEN count(*) FILTER (
+           WHERE status IS NULL OR status NOT IN ('supported', 'unresolved')
+         ) > 0 THEN 'invalid'
+         WHEN count(*) FILTER (WHERE status = 'unresolved') > 0 THEN 'unresolved'
+         ELSE 'supported'
+       END AS engine_status,
      string_agg(DISTINCT reason, ';' ORDER BY reason) AS engine_reason,
      any_value(coalesce(nmd_prediction, 'not_measured')) AS nmd_prediction
    FROM ann
    LEFT JOIN LATERAL unnest(string_split(coalesce(consequence, ''), '&')) u(term) ON true
-   GROUP BY source, variant_id, coalesce(tx, '')"
-))
+   GROUP BY source, variant_id, coalesce(tx, '')
+   ) TO {sql_q(ann_pairs_path)} (FORMAT parquet, COMPRESSION zstd)")
+  ))
+  invisible(dbExecute(
+    con,
+    glue(
+      "CREATE TEMP VIEW ann_pairs AS
+       SELECT * FROM read_parquet({sql_q(ann_pairs_path)})"
+    )
+  ))
+}
 engines <- dbGetQuery(
   con,
   "SELECT DISTINCT source FROM ann_pairs WHERE source <> 'vep' ORDER BY source"
@@ -182,20 +291,15 @@ pair_queries <- vapply(
     glue(
       "WITH
        v AS (SELECT * FROM ann_pairs WHERE source = 'vep'),
-       e AS (SELECT * FROM ann_pairs WHERE source = {sql_q(engine)}),
-       u AS (
-         SELECT variant_id, tx FROM v
-         UNION
-         SELECT variant_id, tx FROM e
-       )
+       e AS (SELECT * FROM ann_pairs WHERE source = {sql_q(engine)})
        SELECT
          {sql_q(engine)} AS engine,
          coalesce(v.corpus, e.corpus, '') AS corpus,
          coalesce(v.model, e.model, '') AS model,
          coalesce(v.oracle_version, e.oracle_version, '') AS oracle_version,
          coalesce(v.oracle_build, e.oracle_build, '') AS oracle_build,
-         u.variant_id,
-         u.tx,
+         coalesce(v.variant_id, e.variant_id) AS variant_id,
+         coalesce(v.tx, e.tx) AS tx,
          coalesce(v.chrom, e.chrom, '') AS chrom,
          coalesce(v.pos, e.pos) AS pos,
          coalesce(v.ref, e.ref, '') AS ref,
@@ -242,22 +346,33 @@ pair_queries <- vapply(
            WHEN v.consequence = e.consequence THEN 'match'
            ELSE 'term_mismatch'
          END AS comparison
-       FROM u
-       LEFT JOIN v USING (variant_id, tx)
-       LEFT JOIN e USING (variant_id, tx)"
+       FROM v
+       FULL OUTER JOIN e USING (variant_id, tx)"
     )
   },
   character(1)
 )
 invisible(dbExecute(
   con,
-  glue("CREATE TABLE pairs AS {paste(pair_queries, collapse = ' UNION ALL ')}")
+  glue(
+    "CREATE TEMP VIEW pairs_projection AS
+     {paste(pair_queries, collapse = ' UNION ALL ')}"
+  )
 ))
 dir.create(dirname(opt$pairs_out), showWarnings = FALSE, recursive = TRUE)
 invisible(dbExecute(
   con,
   glue(
-    "COPY pairs TO {sql_q(opt$pairs_out)} (FORMAT parquet, COMPRESSION zstd)"
+    "COPY pairs_projection TO {sql_q(opt$pairs_out)}
+     (FORMAT parquet, COMPRESSION zstd)"
+  )
+))
+invisible(dbExecute(con, "DROP VIEW pairs_projection"))
+invisible(dbExecute(
+  con,
+  glue(
+    "CREATE TEMP VIEW pairs AS
+     SELECT * FROM read_parquet({sql_q(opt$pairs_out)})"
   )
 ))
 
@@ -329,15 +444,18 @@ stats <- dbGetQuery(
      count(*) AS n,
      count(*) FILTER (WHERE comparison IN ('match', 'term_match')) AS exact_agree,
      count(*) FILTER (WHERE comparison NOT IN ('match', 'term_match')) AS exact_discordant,
-     count(*) FILTER (WHERE engine_status = 'unresolved') AS unresolved,
-     count(*) FILTER (WHERE engine_status <> 'unresolved') AS resolved_n,
-     count(*) FILTER (
-       WHERE engine_status <> 'unresolved'
-         AND comparison IN ('match', 'term_match')
-     ) AS resolved_agree,
-     count(*) FILTER (
-       WHERE engine_status <> 'unresolved'
-         AND comparison NOT IN ('match', 'term_match')
+       count(*) FILTER (WHERE engine_status = 'unresolved') AS unresolved,
+       count(*) FILTER (
+         WHERE engine_status NOT IN ('supported', 'unresolved')
+       ) AS invalid_status,
+       count(*) FILTER (WHERE engine_status = 'supported') AS resolved_n,
+       count(*) FILTER (
+         WHERE engine_status = 'supported'
+           AND comparison IN ('match', 'term_match')
+       ) AS resolved_agree,
+       count(*) FILTER (
+         WHERE engine_status = 'supported'
+           AND comparison NOT IN ('match', 'term_match')
      ) AS resolved_discordant,
      count(*) FILTER (
        WHERE comparison IN ('term_mismatch', 'term_extra', 'term_missing')
@@ -375,12 +493,15 @@ audit <- dbGetQuery(
      count(*) FILTER (WHERE comparison = 'match') AS exact_agree,
      count(*) FILTER (WHERE comparison <> 'match') AS exact_discordant,
      count(*) FILTER (WHERE engine_status = 'unresolved') AS unresolved,
-     count(*) FILTER (WHERE engine_status <> 'unresolved') AS resolved_n,
      count(*) FILTER (
-       WHERE engine_status <> 'unresolved' AND comparison = 'match'
+       WHERE engine_status NOT IN ('supported', 'unresolved')
+     ) AS invalid_status,
+     count(*) FILTER (WHERE engine_status = 'supported') AS resolved_n,
+     count(*) FILTER (
+       WHERE engine_status = 'supported' AND comparison = 'match'
      ) AS resolved_agree,
      count(*) FILTER (
-       WHERE engine_status <> 'unresolved' AND comparison <> 'match'
+       WHERE engine_status = 'supported' AND comparison <> 'match'
      ) AS resolved_discordant,
      count(*) FILTER (WHERE comparison = 'term_mismatch') AS term_mismatch,
      count(*) FILTER (WHERE comparison = 'engine_extra') AS engine_extra,
@@ -515,6 +636,47 @@ dir.create(dirname(opt$nmd_out), showWarnings = FALSE, recursive = TRUE)
 utils::write.csv(stats, opt$out, row.names = FALSE)
 utils::write.csv(audit, opt$audit_out, row.names = FALSE)
 utils::write.csv(nmd_stats, opt$nmd_out, row.names = FALSE)
+
+core_failure <- audit[
+  audit$exact_discordant != 0L |
+    audit$unresolved != 0L |
+    audit$invalid_status != 0L |
+    audit$engine_extra != 0L |
+    audit$engine_missing != 0L,
+  ,
+  drop = FALSE
+]
+nmd_failure_count <- dbGetQuery(
+  con,
+  "SELECT count(*) AS n
+   FROM pairs
+   WHERE nmd_comparison IN ('mismatch', 'not_comparable')
+      OR (
+        engine_nmd_prediction = 'unresolved' AND
+        vep_nmd_prediction <> 'unresolved'
+      )"
+)$n[[1L]]
+if (nrow(core_failure) != 0L || nmd_failure_count != 0L) {
+  core_detail <- if (nrow(core_failure) == 0L) {
+    "none"
+  } else {
+    paste(
+      glue(
+        "{core_failure$engine}: discord={core_failure$exact_discordant}, ",
+        "unresolved={core_failure$unresolved}, ",
+        "invalid_status={core_failure$invalid_status}, ",
+        "extra={core_failure$engine_extra}, ",
+        "missing={core_failure$engine_missing}"
+      ),
+      collapse = "; "
+    )
+  }
+  stop(glue(
+    "VEP executable audit failed closed ({core_detail}; ",
+    "NMD failures={nmd_failure_count}). Every pair remains in {opt$pairs_out}; ",
+    "summaries remain in {opt$out}, {opt$audit_out}, and {opt$nmd_out}."
+  ))
+}
 
 if (nzchar(opt$history)) {
   if (!nzchar(opt$source_revision)) {

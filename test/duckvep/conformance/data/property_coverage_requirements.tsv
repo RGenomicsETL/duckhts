@@ -1,0 +1,259 @@
+coverage	metric	requirement	evidence
+allele sweep coverage	del	statistical_required	-
+allele sweep coverage	indel	statistical_required	-
+allele sweep coverage	ins	statistical_required	-
+allele sweep coverage	interbase	statistical_required	-
+allele sweep coverage	mnv	statistical_required	-
+allele sweep coverage	prefix	statistical_required	-
+allele sweep coverage	suffix	statistical_required	-
+allele sweep coverage	tail	statistical_required	-
+annotation-shortcut coverage	coding_tx	statistical_required	-
+annotation-shortcut coverage	cursor_splits	statistical_required	-
+annotation-shortcut coverage	far	statistical_required	-
+annotation-shortcut coverage	generalized	statistical_required	-
+annotation-shortcut coverage	mirna_tx	statistical_required	-
+annotation-shortcut coverage	nmd_rows	statistical_required	-
+annotation-shortcut coverage	simple	statistical_required	-
+cds-edit-builder coverage	body	statistical_required	-
+cds-edit-builder coverage	del	statistical_required	-
+cds-edit-builder coverage	fwd	statistical_required	-
+cds-edit-builder coverage	indel	statistical_required	-
+cds-edit-builder coverage	ins	statistical_required	-
+cds-edit-builder coverage	mnv	statistical_required	-
+cds-edit-builder coverage	rev	statistical_required	-
+cds-edit-builder coverage	snv	statistical_required	-
+cds-edit-builder coverage	start	statistical_required	-
+cds-edit-builder coverage	stop	statistical_required	-
+cds-edit-set coverage	body	statistical_required	-
+cds-edit-set coverage	cap0	statistical_required	-
+cds-edit-set coverage	del	statistical_required	-
+cds-edit-set coverage	fwd	statistical_required	-
+cds-edit-set coverage	indel	statistical_required	-
+cds-edit-set coverage	ins	statistical_required	-
+cds-edit-set coverage	mnv	statistical_required	-
+cds-edit-set coverage	rev	statistical_required	-
+cds-edit-set coverage	snv	statistical_required	-
+cds-edit-set coverage	start	statistical_required	-
+cds-edit-set coverage	stop	statistical_required	-
+cds-edit-set-mnv coverage	body	statistical_required	-
+cds-edit-set-mnv coverage	capfail	statistical_required	-
+cds-edit-set-mnv coverage	fwd	statistical_required	-
+cds-edit-set-mnv coverage	multi	statistical_required	-
+cds-edit-set-mnv coverage	rev	statistical_required	-
+cds-edit-set-mnv coverage	start	statistical_required	-
+cds-edit-set-mnv coverage	stop	statistical_required	-
+coding-context coverage	capfail	statistical_required	-
+coding-context coverage	del	statistical_required	-
+coding-context coverage	fwd	statistical_required	-
+coding-context coverage	indel	statistical_required	-
+coding-context coverage	ins	statistical_required	-
+coding-context coverage	mnv	statistical_required	-
+coding-context coverage	pep_diff	statistical_required	-
+coding-context coverage	pep_same	statistical_required	-
+coding-context coverage	rev	statistical_required	-
+coding-context coverage	snv	statistical_required	-
+codon coverage	mis	statistical_required	-
+codon coverage	stop_gained	statistical_required	-
+codon coverage	stop_lost	statistical_required	-
+codon coverage	stop_retained	statistical_required	-
+codon coverage	syn	statistical_required	-
+complete-overlap coverage	forward	statistical_required	-
+complete-overlap coverage	over_5000	statistical_required	-
+complete-overlap coverage	reverse	statistical_required	-
+complete-overlap coverage	right_endpoint	statistical_required	-
+context-delins-shape coverage	forward	statistical_required	-
+context-delins-shape coverage	inframe	statistical_required	-
+context-delins-shape coverage	lengthen	statistical_required	-
+context-delins-shape coverage	protein_altering	statistical_required	-
+context-delins-shape coverage	reverse	statistical_required	-
+context-delins-shape coverage	shorten	statistical_required	-
+context-delta coverage	fwd	statistical_required	-
+context-delta coverage	mis	statistical_required	-
+context-delta coverage	rev	statistical_required	-
+context-delta coverage	stop_gained	statistical_required	-
+context-delta coverage	stop_lost	statistical_required	-
+context-delta coverage	stop_retained	statistical_required	-
+context-delta coverage	syn	statistical_required	-
+context-inframe-deletion coverage	forward	statistical_required	-
+context-inframe-deletion coverage	reverse	statistical_required	-
+context-inframe-insertion coverage	forward	statistical_required	-
+context-inframe-insertion coverage	reverse	statistical_required	-
+cross-mnv coverage	fwd	statistical_required	-
+cross-mnv coverage	len2	statistical_required	-
+cross-mnv coverage	len3	statistical_required	-
+cross-mnv coverage	missense	statistical_required	-
+cross-mnv coverage	rev	statistical_required	-
+cross-mnv coverage	stop_gained	statistical_required	-
+cross-mnv coverage	synonymous	statistical_required	-
+cursor-cross-route coverage	context	statistical_required	-
+cursor-cross-route coverage	fwd	statistical_required	-
+cursor-cross-route coverage	len2	statistical_required	-
+cursor-cross-route coverage	len3	statistical_required	-
+cursor-cross-route coverage	rev	statistical_required	-
+cursor-del-route coverage	forward	statistical_required	-
+cursor-del-route coverage	full	statistical_required	-
+cursor-del-route coverage	reverse	statistical_required	-
+cursor-ins-route coverage	forward	statistical_required	-
+cursor-ins-route coverage	full	statistical_required	-
+cursor-ins-route coverage	reverse	statistical_required	-
+cursor-route coverage	full	statistical_required	-
+cursor-route coverage	fwd	statistical_required	-
+cursor-route coverage	mis	statistical_required	-
+cursor-route coverage	rev	statistical_required	-
+cursor-route coverage	stop_gained	statistical_required	-
+cursor-route coverage	stop_lost	statistical_required	-
+cursor-route coverage	stop_retained	statistical_required	-
+cursor-route coverage	syn	statistical_required	-
+delta-cross-scratch coverage	fwd	statistical_required	-
+delta-cross-scratch coverage	len2	statistical_required	-
+delta-cross-scratch coverage	len3	statistical_required	-
+delta-cross-scratch coverage	missense	statistical_required	-
+delta-cross-scratch coverage	rev	statistical_required	-
+delta-cross-scratch coverage	stop_gained	statistical_required	-
+delta-cross-scratch coverage	synonymous	statistical_required	-
+delta-exon-hint coverage	del	statistical_required	-
+delta-exon-hint coverage	fwd	statistical_required	-
+delta-exon-hint coverage	indel	statistical_required	-
+delta-exon-hint coverage	ins	statistical_required	-
+delta-exon-hint coverage	mnv	statistical_required	-
+delta-exon-hint coverage	rev	statistical_required	-
+delta-exon-hint coverage	snv	statistical_required	-
+delta-scratch coverage	capfail	statistical_required	-
+delta-scratch coverage	fwd	statistical_required	-
+delta-scratch coverage	mis	statistical_required	-
+delta-scratch coverage	rev	statistical_required	-
+delta-scratch coverage	stop_gained	statistical_required	-
+delta-scratch coverage	stop_lost	statistical_required	-
+delta-scratch coverage	stop_retained	statistical_required	-
+delta-scratch coverage	syn	statistical_required	-
+delta-scratch-indel coverage	forward	statistical_required	-
+delta-scratch-indel coverage	lengthen	statistical_required	-
+delta-scratch-indel coverage	reverse	statistical_required	-
+delta-scratch-indel coverage	shorten	statistical_required	-
+delta-wrapper coverage	fwd	statistical_required	-
+delta-wrapper coverage	mis	statistical_required	-
+delta-wrapper coverage	rev	statistical_required	-
+delta-wrapper coverage	stop_gained	statistical_required	-
+delta-wrapper coverage	stop_lost	statistical_required	-
+delta-wrapper coverage	stop_retained	statistical_required	-
+delta-wrapper coverage	syn	statistical_required	-
+event normalization coverage	del	statistical_required	-
+event normalization coverage	indel	statistical_required	-
+event normalization coverage	ins	statistical_required	-
+event normalization coverage	interbase	statistical_required	-
+event normalization coverage	prefix	statistical_required	-
+event normalization coverage	prefix0_interbase	statistical_required	-
+event normalization coverage	sub	statistical_required	-
+event normalization coverage	suffix	statistical_required	-
+frameshift coverage	-1	statistical_required	-
+frameshift coverage	-2	statistical_required	-
+frameshift coverage	+1	statistical_required	-
+frameshift coverage	+2	statistical_required	-
+frameshift coverage	del	statistical_required	-
+frameshift coverage	delins	statistical_required	-
+frameshift coverage	ins	statistical_required	-
+frameshift coverage	reverse	statistical_required	-
+frameshift coverage	stop_gained	statistical_required	-
+frameshift coverage	terminal_cil_protein_altering	statistical_required	-
+frameshift coverage	terminal_cil_retained	statistical_required	-
+frameshift coverage	terminal_endpoint	statistical_required	-
+frameshift coverage	terminal_missing_tail	statistical_required	-
+frameshift coverage	terminal_nonstop	statistical_required	-
+frameshift coverage	terminal_reverse	statistical_required	-
+frameshift length-oracle coverage	frameshift	statistical_required	-
+frameshift length-oracle coverage	inframe_len	statistical_required	-
+frameshift length-oracle coverage	stop_gained	statistical_required	-
+haplotype-MNV equivalence coverage	body	statistical_required	-
+haplotype-MNV equivalence coverage	fwd	statistical_required	-
+haplotype-MNV equivalence coverage	one_codon	statistical_required	-
+haplotype-MNV equivalence coverage	rev	statistical_required	-
+haplotype-MNV equivalence coverage	several_codons	statistical_required	-
+haplotype-MNV equivalence coverage	start	statistical_required	-
+haplotype-MNV equivalence coverage	stop	statistical_required	-
+HGVS shift coverage	at_vep_limit	fixed_witness	hgvs_shift_stops_at_vep_1000_base_cap
+HGVS shift coverage	composed	statistical_required	-
+HGVS shift coverage	del	statistical_required	-
+HGVS shift coverage	dup	statistical_required	-
+HGVS shift coverage	fwd	statistical_required	-
+HGVS shift coverage	ins	statistical_required	-
+HGVS shift coverage	nonlocal_ref_replay	statistical_required	-
+HGVS shift coverage	protein	statistical_required	-
+HGVS shift coverage	rev	statistical_required	-
+HGVS shift coverage	rotated	statistical_required	-
+HGVS shift coverage	terminal_duplication	statistical_required	-
+HGVSp frameshift coverage	del	statistical_required	-
+HGVSp frameshift coverage	delins	statistical_required	-
+HGVSp frameshift coverage	eligible	statistical_required	-
+HGVSp frameshift coverage	equal_stop	statistical_required	-
+HGVSp frameshift coverage	fs	statistical_required	-
+HGVSp frameshift coverage	fwd	statistical_required	-
+HGVSp frameshift coverage	immediate_stop	statistical_required	-
+HGVSp frameshift coverage	ins	statistical_required	-
+HGVSp frameshift coverage	non_fs	statistical_required	-
+HGVSp frameshift coverage	rev	statistical_required	-
+HGVSp frameshift coverage	shortened	fixed_witness	hgvs_short_alternate_cds_reproduces_vep_trim_assignment
+HGVSp frameshift coverage	ter_known	statistical_required	-
+HGVSp frameshift coverage	ter_unknown	statistical_required	-
+HGVSp replay coverage	del	statistical_required	-
+HGVSp replay coverage	delins	statistical_required	-
+HGVSp replay coverage	dup	statistical_required	-
+HGVSp replay coverage	equal	statistical_required	-
+HGVSp replay coverage	fwd	statistical_required	-
+HGVSp replay coverage	ins	statistical_required	-
+HGVSp replay coverage	replayed	statistical_required	-
+HGVSp replay coverage	rev	statistical_required	-
+HGVSp replay coverage	special	statistical_required	-
+HGVSp replay coverage	sub	statistical_required	-
+HGVSp replay coverage	terminal_not_applicable	statistical_required	-
+HGVSp replay coverage	vep_position_zero	statistical_required	-
+HGVSp replay coverage	vep_stop_equal	fixed_witness	coding_context_delta_cds_end_nf_known_scene
+inframe_deletion coverage	forward	statistical_required	-
+inframe_deletion coverage	reverse	statistical_required	-
+inframe_insertion coverage	forward	statistical_required	-
+inframe_insertion coverage	reverse	statistical_required	-
+mnv coverage	len2	statistical_required	-
+mnv coverage	len3	statistical_required	-
+non-boundary insertion coverage	forward	statistical_required	-
+non-boundary insertion coverage	inframe_insertion	statistical_required	-
+non-boundary insertion coverage	protein_altering	statistical_required	-
+non-boundary insertion coverage	reverse	statistical_required	-
+simple-indel equivalence coverage	del	statistical_required	-
+simple-indel equivalence coverage	delins	statistical_required	-
+simple-indel equivalence coverage	fallback	statistical_required	-
+simple-indel equivalence coverage	fast	statistical_required	-
+simple-indel equivalence coverage	frameshift	statistical_required	-
+simple-indel equivalence coverage	fwd	statistical_required	-
+simple-indel equivalence coverage	inframe_del	statistical_required	-
+simple-indel equivalence coverage	inframe_ins	statistical_required	-
+simple-indel equivalence coverage	ins	statistical_required	-
+simple-indel equivalence coverage	rev	statistical_required	-
+start-codon coverage	co_stop_gained	statistical_required	-
+start-codon coverage	co_synonymous	statistical_required	-
+start-codon coverage	lost_and_retained	statistical_required	-
+start-codon coverage	start_lost	statistical_required	-
+start-codon coverage	start_retained	statistical_required	-
+start-codon coverage	synonymous	statistical_required	-
+terminal-partial-insertion coverage	after_tail_rejected	statistical_required	-
+terminal-partial-insertion coverage	length_mod0	statistical_required	-
+terminal-partial-insertion coverage	length_mod1	statistical_required	-
+terminal-partial-insertion coverage	length_mod2	statistical_required	-
+terminal-partial-insertion coverage	mitochondrial	statistical_required	-
+terminal-partial-insertion coverage	nonstop	statistical_required	-
+terminal-partial-insertion coverage	reverse_orientation	statistical_required	-
+terminal-partial-insertion coverage	same_orientation	statistical_required	-
+terminal-partial-insertion coverage	site_first	statistical_required	-
+terminal-partial-insertion coverage	site_internal	statistical_required	-
+terminal-partial-insertion coverage	standard	statistical_required	-
+terminal-partial-insertion coverage	stop	statistical_required	-
+terminal-partial-insertion coverage	tail1	statistical_required	-
+terminal-partial-insertion coverage	tail2	statistical_required	-
+variant-coding-context coverage	capfail	statistical_required	-
+variant-coding-context coverage	del	statistical_required	-
+variant-coding-context coverage	fwd	statistical_required	-
+variant-coding-context coverage	indel	statistical_required	-
+variant-coding-context coverage	ins	statistical_required	-
+variant-coding-context coverage	mnv	statistical_required	-
+variant-coding-context coverage	pep_diff	statistical_required	-
+variant-coding-context coverage	pep_same	statistical_required	-
+variant-coding-context coverage	rev	statistical_required	-
+variant-coding-context coverage	snv	statistical_required	-

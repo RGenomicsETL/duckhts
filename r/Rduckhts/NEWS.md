@@ -1,5 +1,14 @@
 
 # Rduckhts 1.5.0-0.1.0
+- bundle VEP-116 compatibility fixes for complete first-codon in-frame deletions on
+  transcripts without a 5-prime UTR and for pure insertions in incomplete terminal codons.
+  The latter can now return the exact VEP combination
+  `incomplete_terminal_codon_variant&inframe_insertion&stop_gained` together with
+  `c.280_281insAGT` and the apparently contradictory `p.Ter94=` protein rendering.
+  A bundled DBI regression exercises both rare states through the public
+  `duckvep_annotate(..., rich = TRUE, hgvs = TRUE)` relation; its terminal-codon case
+  uses an exact remapped GRCh38 transcript/reference fixture with enough downstream
+  sequence to pin the one-base VEP 3-prime shift
 - make bundled mitochondrial HGVSp reproduce VEP 116's late termination search, which
   uses the standard codon table even when ordinary transcript translation uses
   mitochondrial table 2, and render a combined frame-changing terminal deletion plus

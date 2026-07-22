@@ -1,0 +1,5 @@
+outcome_id	outcome_class	semantics	implementation	fixed_test
+invalid_input_error	error	Malformed model, allele shape, ordering, or result builder is rejected without publishing rows.	src/duckvep/kernel/src/duckvep_kernel.c	annotate_rejects_kind_allele_shape_mismatch
+resource_error	error	A caller-controlled result or scratch capacity failure is returned explicitly and does not silently truncate output.	src/duckvep/kernel/src/duckvep_kernel.c	annotate_rejects_result_count_past_capacity
+unresolved_result	status	Missing, ambiguous, mismatching, or unprojectable sequence remains an emitted unresolved status with a reason.	src/duckvep/kernel/src/duckvep_delta.c;src/duckvep/duckvep_annotate.c	feature_substitution_window_fails_closed_known_scene
+not_applicable_result	status	An HGVS component outside its defined coordinate or consequence domain is absent with not_applicable status.	src/duckvep/kernel/src/duckvep_hgvs.c;src/duckvep/duckvep_annotate.c	hgvs_protein_mapper_endpoints_define_applicability

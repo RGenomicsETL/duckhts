@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 # Run the pure-C randomized properties and record every theft target reported by
-# the executable. A failed process records nothing.
+# the executable. Failed campaigns retain their complete seed-specific log.
 
 suppressMessages({
   library(blit)
@@ -10,10 +10,67 @@ suppressMessages({
 })
 options(rlang_backtrace_on_error = "none")
 
+main <- function() {
 root <- tryCatch(
   system2("git", c("rev-parse", "--show-toplevel"), stdout = TRUE),
   error = function(e) "."
 )
+campaign_started <- FALSE
+campaign_complete <- FALSE
+log_path <- NULL
+failure_log_path <- NULL
+failure_log_reported <- FALSE
+preserve_failure_log <- function() {
+  if (!isTRUE(campaign_started) || is.null(log_path) || !file.exists(log_path)) {
+    return(NULL)
+  }
+  if (!is.null(failure_log_path)) {
+    return(failure_log_path)
+  }
+  dir.create(opt$failure_log_dir, recursive = TRUE, showWarnings = FALSE)
+  safe_seed <- gsub("[^A-Za-z0-9_.-]", "_", opt$seed)
+  stamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  failure_log_path <<- file.path(
+    opt$failure_log_dir,
+    paste0(
+      "property_failure_seed_",
+      safe_seed,
+      "_trials_",
+      configured_trials,
+      "_",
+      stamp,
+      "_pid_",
+      Sys.getpid(),
+      ".log"
+    )
+  )
+  if (!file.copy(log_path, failure_log_path, overwrite = FALSE)) {
+    failure_log_path <<- NULL
+  }
+  failure_log_path
+}
+die <- function(...) {
+  message <- as.character(glue(..., .envir = parent.frame()))
+  preserved <- preserve_failure_log()
+  if (!is.null(preserved)) {
+    message <- paste0(message, "\nfull property log: ", preserved)
+    failure_log_reported <<- TRUE
+  }
+  stop(message, call. = FALSE)
+}
+
+on.exit({
+  if (isTRUE(campaign_started) && !isTRUE(campaign_complete)) {
+    preserved <- preserve_failure_log()
+    if (!is.null(preserved) && !isTRUE(failure_log_reported)) {
+      message("full property log: ", preserved)
+    }
+  }
+  if (!is.null(log_path)) {
+    unlink(log_path)
+  }
+}, add = TRUE)
+
 op <- OptionParser()
 op <- add_option(op, "--trials", type = "double", default = 100000)
 op <- add_option(op, "--seed", default = "0xd0c0ffee12345678")
@@ -28,6 +85,25 @@ op <- add_option(
     "data",
     "property_history.csv"
   )
+)
+op <- add_option(
+  op,
+  "--coverage-requirements",
+  dest = "coverage_requirements",
+  default = file.path(
+    root,
+    "test",
+    "duckvep",
+    "conformance",
+    "data",
+    "property_coverage_requirements.tsv"
+  )
+)
+op <- add_option(
+  op,
+  "--failure-log-dir",
+  dest = "failure_log_dir",
+  default = file.path(root, "test", "duckvep", "conformance", "results")
 )
 op <- add_option(
   op,
@@ -50,7 +126,6 @@ op <- add_option(
 )
 opt <- parse_args(op)
 
-die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
 if (
   !is.finite(opt$trials) || opt$trials < 1 || opt$trials != floor(opt$trials)
 ) {
@@ -64,14 +139,50 @@ if (utils::packageVersion("blit") < "0.2.0.9000") {
   die("the current WangLabCSU/blit checkout is required")
 }
 
+git_head <- suppressWarnings(system2(
+  "git",
+  c("-C", root, "rev-parse", "HEAD"),
+  stdout = TRUE,
+  stderr = FALSE
+))
+git_head_status <- attr(git_head, "status")
+if ((!is.null(git_head_status) && git_head_status != 0L) || length(git_head) != 1L) {
+  die("cannot determine source revision")
+}
+git_head <- trimws(git_head[[1L]])
+tracked_changes <- suppressWarnings(system2(
+  "git",
+  c("-C", root, "status", "--porcelain", "--untracked-files=no"),
+  stdout = TRUE,
+  stderr = FALSE
+))
+tracked_status <- attr(tracked_changes, "status")
+if (!is.null(tracked_status) && tracked_status != 0L) {
+  die("cannot inspect tracked worktree state")
+}
+if (length(tracked_changes)) {
+  die(
+    "refusing to publish property evidence from a dirty tracked worktree; ",
+    "commit the source first and rerun"
+  )
+}
+if (!nzchar(opt$source_revision)) {
+  opt$source_revision <- git_head
+} else if (!identical(opt$source_revision, git_head)) {
+  die(
+    "--source-revision {opt$source_revision} does not match checked-out HEAD ",
+    "{git_head}"
+  )
+}
+
 log_path <- tempfile(fileext = ".log")
-on.exit(unlink(log_path), add = TRUE)
 command <- blit::exec("make", "test-duckvep-kernel") |>
   blit::cmd_wd(root) |>
   blit::cmd_envvar(
     DUCKVEP_PROP_TRIALS = configured_trials,
     DUCKVEP_PROP_SEED = opt$seed
   )
+campaign_started <- TRUE
 status <- suppressWarnings(blit::cmd_run(
   command,
   stdout = log_path,
@@ -161,6 +272,164 @@ if (anyDuplicated(paste(coverage$coverage, coverage$metric))) {
   die("property log contains duplicate distribution coverage counters")
 }
 
+if (!file.exists(opt$coverage_requirements)) {
+  die("coverage requirement manifest does not exist: {opt$coverage_requirements}")
+}
+root_path <- normalizePath(root, mustWork = TRUE)
+requirements_path <- normalizePath(opt$coverage_requirements, mustWork = TRUE)
+root_prefix <- paste0(root_path, .Platform$file.sep)
+if (!startsWith(requirements_path, root_prefix)) {
+  die("coverage requirement manifest must be inside the source repository")
+}
+requirements_relative <- substring(requirements_path, nchar(root_prefix) + 1L)
+requirements_tracked <- suppressWarnings(system2(
+  "git",
+  c(
+    "-C",
+    root,
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    requirements_relative
+  ),
+  stdout = FALSE,
+  stderr = FALSE
+))
+if (!identical(requirements_tracked, 0L)) {
+  die(
+    "coverage requirement manifest is not tracked at the recorded source revision: ",
+    "{requirements_relative}"
+  )
+}
+requirements <- utils::read.delim(
+  requirements_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  quote = "",
+  comment.char = ""
+)
+required_columns <- c("coverage", "metric", "requirement", "evidence")
+if (!identical(names(requirements), required_columns)) {
+  die("coverage requirement manifest has an unexpected schema")
+}
+if (!nrow(requirements) || anyNA(requirements) || any(!nzchar(as.matrix(requirements)))) {
+  die("coverage requirement manifest contains an empty field")
+}
+allowed_requirements <- c("statistical_required", "fixed_witness")
+if (any(!requirements$requirement %in% allowed_requirements)) {
+  die("coverage requirement manifest contains an unknown requirement class")
+}
+requirement_key <- paste(requirements$coverage, requirements$metric, sep = "\r")
+coverage_key <- paste(coverage$coverage, coverage$metric, sep = "\r")
+if (anyDuplicated(requirement_key)) {
+  die("coverage requirement manifest contains duplicate coverage/metric keys")
+}
+requirement_index <- match(requirement_key, coverage_key)
+if (anyNA(requirement_index)) {
+  missing <- paste(
+    paste0(requirements$coverage[is.na(requirement_index)], "/",
+           requirements$metric[is.na(requirement_index)]),
+    collapse = ", "
+  )
+  die("property log omitted required coverage counters: {missing}")
+}
+unmanifested_index <- which(!coverage_key %in% requirement_key)
+if (length(unmanifested_index)) {
+  unmanifested <- paste(
+    paste0(
+      coverage$coverage[unmanifested_index],
+      "/",
+      coverage$metric[unmanifested_index]
+    ),
+    collapse = ", "
+  )
+  die("property log contains unmanifested coverage counters: {unmanifested}")
+}
+required_counts <- coverage$count[requirement_index]
+missing_statistical <- requirements$requirement == "statistical_required" &
+  required_counts < 1
+if (any(missing_statistical)) {
+  missing <- paste(
+    paste0(requirements$coverage[missing_statistical], "/",
+           requirements$metric[missing_statistical]),
+    collapse = ", "
+  )
+  die("statistically required states received zero observations: {missing}")
+}
+
+zero_index <- which(coverage$count == 0)
+if (length(zero_index)) {
+  zero_requirement_index <- match(coverage_key[zero_index], requirement_key)
+  allowed_zero <- !is.na(zero_requirement_index) &
+    requirements$requirement[zero_requirement_index] == "fixed_witness"
+  if (any(!allowed_zero)) {
+    missing <- paste(
+      paste0(coverage$coverage[zero_index[!allowed_zero]], "/",
+             coverage$metric[zero_index[!allowed_zero]]),
+      collapse = ", "
+    )
+    die("coverage counters reached zero without a fixed-witness declaration: {missing}")
+  }
+}
+
+fixed_requirements <- requirements$requirement == "fixed_witness"
+if (any(requirements$requirement == "statistical_required" & requirements$evidence != "-")) {
+  die("statistically required counters must use '-' evidence")
+}
+if (any(fixed_requirements)) {
+  evidence <- requirements$evidence[fixed_requirements]
+  if (any(!grepl("^[A-Za-z_][A-Za-z0-9_]*$", evidence))) {
+    die("fixed-witness evidence names must be C test identifiers")
+  }
+  property_source_path <- file.path(
+    root,
+    "test",
+    "duckvep",
+    "property",
+    "duckvep_kernel_prop.c"
+  )
+  property_source <- paste(readLines(property_source_path, warn = FALSE), collapse = "\n")
+  witness_tags <- paste0(
+    "COVERAGE_WITNESS: ",
+    requirements$coverage[fixed_requirements],
+    "/",
+    requirements$metric[fixed_requirements]
+  )
+  for (index in seq_along(evidence)) {
+    test_name <- evidence[[index]]
+    start <- regexpr(
+      paste0(
+        "(^|\\n)TEST[[:space:]]+",
+        test_name,
+        "[[:space:]]*\\([^)]*\\)[[:space:]]*\\{"
+      ),
+      property_source,
+      perl = TRUE
+    )
+    if (start[[1L]] < 0L) {
+      die("coverage requirement manifest names absent fixed witness: {test_name}")
+    }
+    block_start <- start[[1L]] + attr(start, "match.length")
+    remainder <- substring(property_source, block_start)
+    next_test <- regexpr(
+      "\\nTEST[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\\(",
+      remainder,
+      perl = TRUE
+    )
+    test_block <- if (next_test[[1L]] < 0L) {
+      remainder
+    } else {
+      substring(remainder, 1L, next_test[[1L]] - 1L)
+    }
+    if (!grepl(witness_tags[[index]], test_block, fixed = TRUE)) {
+      die(
+        "fixed witness {test_name} lacks its direct coverage tag: ",
+        "{witness_tags[[index]]}"
+      )
+    }
+  }
+}
+
 total <- capture(
   log,
   "^Total: ([0-9]+) tests .* ([0-9.]+) sec\\), ([0-9]+) assertions$",
@@ -177,19 +446,6 @@ if (
   die("unexpected greatest summary")
 }
 
-if (!nzchar(opt$source_revision)) {
-  revision <- suppressWarnings(system2(
-    "git",
-    c("-C", root, "rev-parse", "HEAD"),
-    stdout = TRUE,
-    stderr = FALSE
-  ))
-  revision_status <- attr(revision, "status")
-  if (!is.null(revision_status) && revision_status != 0L) {
-    die("cannot determine source revision")
-  }
-  opt$source_revision <- trimws(revision[[1L]])
-}
 cc <- Sys.getenv("CC", "cc")
 cc_version <- suppressWarnings(system2(
   cc,
@@ -234,88 +490,349 @@ coverage_rows <- coverage_rows[
   drop = FALSE
 ]
 
-dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
-if (file.exists(opt$history)) {
-  old <- utils::read.csv(
-    opt$history,
-    stringsAsFactors = FALSE,
-    check.names = FALSE,
-    colClasses = c(source_revision = "character", seed = "character")
-  )
-  if (!identical(names(old), names(rows))) {
-    die("history schema does not match: {opt$history}")
-  }
-  run_key <- paste(
-    rows$source_revision[[1L]],
-    rows$seed[[1L]],
-    rows$configured_trials[[1L]]
-  )
-  old_key <- paste(old$source_revision, old$seed, old$configured_trials)
-  rows <- rbind(old[old_key != run_key, , drop = FALSE], rows)
-}
-rows <- rows[
-  order(rows$run_date, rows$source_revision, rows$seed, rows$target),
-  ,
-  drop = FALSE
-]
-tmp <- tempfile("duckvep-properties-", dirname(opt$history), ".csv")
-utils::write.csv(rows, tmp, row.names = FALSE)
-if (!file.rename(tmp, opt$history)) {
-  unlink(tmp)
-  die("cannot replace history: {opt$history}")
+if (normalizePath(opt$history, mustWork = FALSE) ==
+    normalizePath(opt$coverage_history, mustWork = FALSE)) {
+  die("property and coverage histories must be different files")
 }
 
-dir.create(
-  dirname(opt$coverage_history),
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-if (file.exists(opt$coverage_history)) {
-  old_coverage <- utils::read.csv(
-    opt$coverage_history,
+campaign_key <- function(data) {
+  paste(
+    data$source_revision,
+    data$seed,
+    format(
+      as.numeric(data$configured_trials),
+      scientific = FALSE,
+      trim = TRUE
+    ),
+    sep = "\r"
+  )
+}
+
+read_existing <- function(path, expected_names) {
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  existing <- utils::read.csv(
+    path,
     stringsAsFactors = FALSE,
     check.names = FALSE,
     colClasses = c(source_revision = "character", seed = "character")
   )
-  if (!identical(names(old_coverage), names(coverage_rows))) {
-    die("coverage history schema does not match: {opt$coverage_history}")
+  if (!identical(names(existing), expected_names)) {
+    die("history schema does not match: {path}")
   }
-  coverage_run_key <- paste(
-    coverage_rows$source_revision[[1L]],
-    coverage_rows$seed[[1L]],
-    coverage_rows$configured_trials[[1L]]
-  )
-  old_coverage_key <- paste(
-    old_coverage$source_revision,
-    old_coverage$seed,
-    old_coverage$configured_trials
-  )
-  coverage_rows <- rbind(
-    old_coverage[old_coverage_key != coverage_run_key, , drop = FALSE],
-    coverage_rows
-  )
+  existing
 }
-coverage_rows <- coverage_rows[
-  order(
-    coverage_rows$run_date,
-    coverage_rows$source_revision,
-    coverage_rows$seed,
-    coverage_rows$coverage,
-    coverage_rows$metric
-  ),
-  ,
-  drop = FALSE
-]
-coverage_tmp <- tempfile(
-  "duckvep-property-coverage-",
-  dirname(opt$coverage_history),
-  ".csv"
-)
-utils::write.csv(coverage_rows, coverage_tmp, row.names = FALSE)
-if (!file.rename(coverage_tmp, opt$coverage_history)) {
-  unlink(coverage_tmp)
-  die("cannot replace coverage history: {opt$coverage_history}")
+
+publish_histories <- function() {
+  dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
+  dir.create(dirname(opt$coverage_history), recursive = TRUE, showWarnings = FALSE)
+  history_dir <- normalizePath(dirname(opt$history), mustWork = TRUE)
+  coverage_dir <- normalizePath(dirname(opt$coverage_history), mustWork = TRUE)
+  if (!identical(history_dir, coverage_dir)) {
+    die("property and coverage histories must share one publication directory")
+  }
+  history_path <- file.path(history_dir, basename(opt$history))
+  coverage_history_path <- file.path(
+    coverage_dir,
+    basename(opt$coverage_history)
+  )
+  lock_dir <- file.path(history_dir, ".duckvep-property-history.lock")
+  recovery_dir <- file.path(
+    history_dir,
+    ".duckvep-property-history-recovery.lock"
+  )
+  owner_path <- file.path(lock_dir, "owner")
+  journal_path <- file.path(lock_dir, "journal.rds")
+  property_backup <- file.path(lock_dir, "property_history.backup")
+  coverage_backup <- file.path(lock_dir, "property_coverage_history.backup")
+
+  restore_interrupted_publication <- function(interrupted_lock_dir) {
+    interrupted_journal <- file.path(interrupted_lock_dir, "journal.rds")
+    interrupted_property_backup <- file.path(
+      interrupted_lock_dir,
+      "property_history.backup"
+    )
+    interrupted_coverage_backup <- file.path(
+      interrupted_lock_dir,
+      "property_coverage_history.backup"
+    )
+    if (!file.exists(interrupted_journal)) {
+      return(invisible(TRUE))
+    }
+    journal <- tryCatch(
+      readRDS(interrupted_journal),
+      error = function(e) {
+        stop(
+          "cannot read interrupted property-history journal in ",
+          interrupted_lock_dir,
+          call. = FALSE
+        )
+      }
+    )
+    expected_journal_names <- c(
+      "had_properties",
+      "had_coverage",
+      "history_path",
+      "coverage_history_path"
+    )
+    if (!identical(names(journal), expected_journal_names) ||
+        !is.character(journal$history_path) ||
+        length(journal$history_path) != 1L ||
+        !is.character(journal$coverage_history_path) ||
+        length(journal$coverage_history_path) != 1L) {
+      stop(
+        "invalid interrupted property-history journal in ",
+        interrupted_lock_dir,
+        call. = FALSE
+      )
+    }
+    interrupted_history <- normalizePath(
+      journal$history_path,
+      mustWork = FALSE
+    )
+    interrupted_coverage <- normalizePath(
+      journal$coverage_history_path,
+      mustWork = FALSE
+    )
+    if (!identical(interrupted_history, history_path) ||
+        !identical(interrupted_coverage, coverage_history_path)) {
+      stop(
+        "interrupted property-history journal names invalid destinations",
+        call. = FALSE
+      )
+    }
+    ok <- TRUE
+    if (isTRUE(journal$had_properties)) {
+      ok <- file.copy(
+        interrupted_property_backup,
+        interrupted_history,
+        overwrite = TRUE
+      ) && ok
+    } else if (file.exists(interrupted_history)) {
+      ok <- unlink(interrupted_history) == 0L && ok
+    }
+    if (isTRUE(journal$had_coverage)) {
+      ok <- file.copy(
+        interrupted_coverage_backup,
+        interrupted_coverage,
+        overwrite = TRUE
+      ) && ok
+    } else if (file.exists(interrupted_coverage)) {
+      ok <- unlink(interrupted_coverage) == 0L && ok
+    }
+    if (!ok) {
+      stop(
+        "cannot recover interrupted property-history publication in ",
+        lock_dir,
+        call. = FALSE
+      )
+    }
+    invisible(TRUE)
+  }
+
+  lock_owner_state <- function(candidate_lock_dir) {
+    candidate_owner_path <- file.path(candidate_lock_dir, "owner")
+    owner <- suppressWarnings(readLines(
+      candidate_owner_path,
+      n = 1L,
+      warn = FALSE
+    ))
+    owner_pid <- suppressWarnings(as.integer(owner))
+    lock_info <- file.info(candidate_lock_dir)
+    lock_age <- suppressWarnings(as.numeric(difftime(
+      Sys.time(), lock_info$mtime, units = "secs"
+    )))
+    owner_alive <- length(owner_pid) == 1L && !is.na(owner_pid) &&
+      isTRUE(tryCatch(
+        {
+          tools::pskill(owner_pid, signal = 0L)
+          TRUE
+        },
+        error = function(e) FALSE,
+        warning = function(w) FALSE
+      ))
+    list(pid = owner_pid, alive = owner_alive, age = lock_age)
+  }
+
+  recovery_owned <- FALSE
+  on.exit({
+    if (isTRUE(recovery_owned)) {
+      unlink(recovery_dir, recursive = TRUE)
+    }
+  }, add = TRUE)
+  if (dir.exists(recovery_dir)) {
+    recovery_state <- lock_owner_state(recovery_dir)
+    if (recovery_state$alive) {
+      die("property-history recovery is active in process {recovery_state$pid}")
+    }
+    if ((length(recovery_state$pid) != 1L || is.na(recovery_state$pid)) &&
+        (length(recovery_state$age) != 1L || is.na(recovery_state$age) ||
+         recovery_state$age < 60)) {
+      die("property-history recovery lock is still initializing: {recovery_dir}")
+    }
+    if (unlink(recovery_dir, recursive = TRUE) != 0L) {
+      die("cannot remove stale property-history recovery lock: {recovery_dir}")
+    }
+  }
+  if (dir.exists(lock_dir)) {
+    owner_state <- lock_owner_state(lock_dir)
+    if (owner_state$alive) {
+      die("property-history publication is locked by process {owner_state$pid}")
+    }
+    # mkdir is the atomic lock acquisition. A second process can observe the
+    # directory during the tiny interval before its owner file is complete;
+    # do not mistake that live initialization window for a stale lock.
+    if ((length(owner_state$pid) != 1L || is.na(owner_state$pid)) &&
+        (length(owner_state$age) != 1L || is.na(owner_state$age) ||
+         owner_state$age < 60)) {
+      die("property-history publication lock is still initializing: {lock_dir}")
+    }
+    if (!dir.create(recovery_dir, showWarnings = FALSE)) {
+      die("cannot acquire property-history recovery lock: {recovery_dir}")
+    }
+    recovery_owned <- TRUE
+    writeLines(
+      as.character(Sys.getpid()),
+      file.path(recovery_dir, "owner"),
+      useBytes = TRUE
+    )
+    owner_state <- lock_owner_state(lock_dir)
+    if (owner_state$alive) {
+      die("property-history publication is locked by process {owner_state$pid}")
+    }
+    restore_interrupted_publication(lock_dir)
+    if (unlink(lock_dir, recursive = TRUE) != 0L) {
+      die("cannot remove stale property-history lock: {lock_dir}")
+    }
+  }
+  if (dir.exists(recovery_dir) && !isTRUE(recovery_owned)) {
+    die("property-history recovery is already active: {recovery_dir}")
+  }
+  if (!dir.create(lock_dir, showWarnings = FALSE)) {
+    die("cannot acquire property-history publication lock: {lock_dir}")
+  }
+  writeLines(as.character(Sys.getpid()), owner_path, useBytes = TRUE)
+  if (isTRUE(recovery_owned)) {
+    if (unlink(recovery_dir, recursive = TRUE) != 0L) {
+      die("cannot release property-history recovery lock: {recovery_dir}")
+    }
+    recovery_owned <- FALSE
+  }
+  publication_complete <- FALSE
+  on.exit({
+    if (!isTRUE(publication_complete)) {
+      restore_interrupted_publication(lock_dir)
+    }
+    unlink(lock_dir, recursive = TRUE)
+  }, add = TRUE)
+
+  old <- read_existing(history_path, names(rows))
+  old_coverage <- read_existing(coverage_history_path, names(coverage_rows))
+  new_run_key <- unique(campaign_key(rows))
+  new_coverage_key <- unique(campaign_key(coverage_rows))
+  if (length(new_run_key) != 1L || !identical(new_run_key, new_coverage_key)) {
+    die("property and coverage rows do not describe one identical campaign")
+  }
+  if (!is.null(old) && new_run_key %in% campaign_key(old)) {
+    die("property campaign already exists in immutable history: {new_run_key}")
+  }
+  if (!is.null(old_coverage) && new_run_key %in% campaign_key(old_coverage)) {
+    die("property campaign already exists in immutable coverage history: {new_run_key}")
+  }
+  if (!is.null(old)) {
+    rows <- rbind(old, rows)
+  }
+  rows <- rows[
+    order(rows$run_date, rows$source_revision, rows$seed, rows$target),
+    ,
+    drop = FALSE
+  ]
+  if (!is.null(old_coverage)) {
+    coverage_rows <- rbind(old_coverage, coverage_rows)
+  }
+  coverage_rows <- coverage_rows[
+    order(
+      coverage_rows$run_date,
+      coverage_rows$source_revision,
+      coverage_rows$seed,
+      coverage_rows$coverage,
+      coverage_rows$metric
+    ),
+    ,
+    drop = FALSE
+  ]
+
+  property_tmp <- tempfile("duckvep-properties-", history_dir, ".csv")
+  coverage_tmp <- tempfile(
+    "duckvep-property-coverage-",
+    coverage_dir,
+    ".csv"
+  )
+  on.exit(unlink(c(property_tmp, coverage_tmp)), add = TRUE)
+
+  utils::write.csv(rows, property_tmp, row.names = FALSE)
+  utils::write.csv(coverage_rows, coverage_tmp, row.names = FALSE)
+  staged_properties <- utils::read.csv(
+    property_tmp,
+    stringsAsFactors = FALSE,
+    check.names = FALSE,
+    colClasses = c(source_revision = "character", seed = "character")
+  )
+  staged_coverage <- utils::read.csv(
+    coverage_tmp,
+    stringsAsFactors = FALSE,
+    check.names = FALSE,
+    colClasses = c(source_revision = "character", seed = "character")
+  )
+  if (!identical(names(staged_properties), names(rows)) ||
+      nrow(staged_properties) != nrow(rows) ||
+      !identical(names(staged_coverage), names(coverage_rows)) ||
+      nrow(staged_coverage) != nrow(coverage_rows)) {
+    die("staged property histories failed round-trip validation")
+  }
+
+  had_properties <- file.exists(history_path)
+  had_coverage <- file.exists(coverage_history_path)
+  if (had_properties &&
+      !file.copy(history_path, property_backup, overwrite = FALSE)) {
+    die("cannot back up existing history: {history_path}")
+  }
+  if (had_coverage &&
+      !file.copy(coverage_history_path, coverage_backup, overwrite = FALSE)) {
+    die("cannot back up existing coverage history: {coverage_history_path}")
+  }
+  journal_tmp <- tempfile("journal-", lock_dir, ".rds")
+  saveRDS(
+    list(
+      had_properties = had_properties,
+      had_coverage = had_coverage,
+      history_path = history_path,
+      coverage_history_path = coverage_history_path
+    ),
+    journal_tmp
+  )
+  if (!file.rename(journal_tmp, journal_path)) {
+    die("cannot publish recovery journal: {journal_path}")
+  }
+
+  # The temporary files are in the destination directories. POSIX rename(2)
+  # therefore replaces each canonical ledger atomically. The journal and
+  # backups recover the pair if the process exits between the two renames;
+  # the lock prevents concurrent campaigns from overwriting one another.
+  if (!file.rename(property_tmp, history_path)) {
+    die("cannot publish history: {history_path}")
+  }
+  if (!file.rename(coverage_tmp, coverage_history_path)) {
+    die("cannot publish coverage history: {coverage_history_path}")
+  }
+  publication_complete <- TRUE
+  unlink(c(property_backup, coverage_backup, journal_path))
 }
+
+publish_histories()
+
+campaign_complete <- TRUE
 
 cat(
   glue(
@@ -328,3 +845,6 @@ cat(
 )
 cat(glue("history -> {opt$history}"), "\n", sep = "")
 cat(glue("coverage history -> {opt$coverage_history}"), "\n", sep = "")
+}
+
+main()

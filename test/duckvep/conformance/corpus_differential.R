@@ -280,6 +280,24 @@ op <- add_option(
     "DuckVEP variant-induced NMD predictions with the executable plugin"
   )
 )
+op <- add_option(
+  op,
+  "--duckdb-memory-limit",
+  dest = "duckdb_memory_limit",
+  default = "8GB",
+  help = paste(
+    "DuckDB memory cap for the spillable oracle comparison and evidence",
+    "projection; resident DuckVEP model allocations are separate [%default]"
+  )
+)
+op <- add_option(
+  op,
+  "--duckdb-threads",
+  dest = "duckdb_threads",
+  type = "integer",
+  default = 4L,
+  help = "DuckDB worker threads for evidence projection [%default]"
+)
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
@@ -413,6 +431,9 @@ if (opt$distance < 0L) {
 }
 if (opt$vep_buffer_size < 1L) {
   die("--vep-buffer-size must be positive")
+}
+if (opt$duckdb_threads < 1L) {
+  die("--duckdb-threads must be positive")
 }
 if (
   !is.finite(opt$max_sv_size) ||
@@ -581,6 +602,11 @@ if (length(colliding_outputs) != 0L) {
 temporary_files <- character()
 cleanup <- function() unlink(temporary_files, recursive = TRUE, force = TRUE)
 on.exit(cleanup(), add = TRUE)
+duckdb_temp_dir <- tempfile(pattern = "duckvep-differential-spill-")
+if (!dir.create(duckdb_temp_dir)) {
+  die("cannot create DuckDB spill directory: {duckdb_temp_dir}")
+}
+temporary_files <- c(temporary_files, duckdb_temp_dir)
 nmd_plugin_run_dir <- opt$nmd_plugin_dir
 if (nmd_oracle_enabled) {
   nmd_plugin_run_dir <- tempfile(pattern = "duckvep-nmd-plugins-")
@@ -605,6 +631,16 @@ drv <- duckdb(
 con <- dbConnect(drv)
 on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
+invisible(dbExecute(
+  con,
+  glue("SET temp_directory = {sql_q(duckdb_temp_dir)}")
+))
+invisible(dbExecute(
+  con,
+  glue("SET memory_limit = {sql_q(opt$duckdb_memory_limit)}")
+))
+invisible(dbExecute(con, glue("SET threads = {opt$duckdb_threads}")))
+invisible(dbExecute(con, "SET preserve_insertion_order = false"))
 invisible(dbExecute(con, glue("LOAD {sql_q(normalizePath(opt$extension))}")))
 invisible(tryCatch(
   dbExecute(con, "LOAD json"),
@@ -2884,9 +2920,18 @@ run_date <- as.character(Sys.Date())
 invisible(dbExecute(
   con,
   glue(
-    "CREATE OR REPLACE TEMP TABLE duckvep_annotation_dump AS
+    "CREATE OR REPLACE TEMP VIEW duckvep_annotation_dump AS
      SELECT
        {sql_q(run_date)} AS run_date,
+       {sql_q(source_revision)} AS source_revision,
+       {sql_q(extension_build_binding)} AS extension_build_binding,
+       {sql_q(extension_sha256)} AS extension_sha256,
+       {sql_q(model_artifact_kind)} AS model_artifact_kind,
+       {sql_q(model_artifact_sha256)} AS model_artifact_sha256,
+       {sql_q(reference_fasta_sha256)} AS reference_fasta_sha256,
+       {sql_q(reference_fai_sha256)} AS reference_fai_sha256,
+       {sql_q(source_sha256)} AS source_vcf_sha256,
+       {sql_q(input_vcf_sha256)} AS input_vcf_sha256,
        {sql_q(opt$corpus)} AS corpus,
        {sql_q(opt$model_name)} AS model,
        {sql_q(oracle_version)} AS oracle_version,
@@ -2915,7 +2960,12 @@ invisible(dbExecute(
      FROM vep_annotation a JOIN {sample_event_relation} v USING (variant_id)
      UNION ALL
      SELECT
-       {sql_q(run_date)}, {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
+       {sql_q(run_date)}, {sql_q(source_revision)},
+       {sql_q(extension_build_binding)}, {sql_q(extension_sha256)},
+       {sql_q(model_artifact_kind)}, {sql_q(model_artifact_sha256)},
+       {sql_q(reference_fasta_sha256)}, {sql_q(reference_fai_sha256)},
+       {sql_q(source_sha256)}, {sql_q(input_vcf_sha256)},
+       {sql_q(opt$corpus)}, {sql_q(opt$model_name)},
        {sql_q(oracle_version)}, {sql_q(oracle_build)}, 'duckvep',
        a.variant_id, v.chrom, v.position, v.reference, v.alternate,
        v.var_type, v.length_bin, a.tx, a.consequence, a.impact, a.status, a.reason,
@@ -2932,16 +2982,45 @@ invisible(dbExecute(
      (FORMAT parquet, COMPRESSION zstd)"
   )
 ))
+invisible(dbExecute(con, "DROP VIEW duckvep_annotation_dump"))
+invisible(dbExecute(con, "DROP TABLE vep_annotation"))
+invisible(dbExecute(con, "DROP TABLE duckvep_annotation"))
+invisible(dbGetQuery(
+  con,
+  glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
+))
+
+duplicate_annotation_pair <- dbGetQuery(
+  con,
+  glue(
+    "SELECT source, variant_id, coalesce(tx, '') AS tx, count(*) AS n
+     FROM read_parquet({sql_q(opt$annotations_out)})
+     GROUP BY source, variant_id, coalesce(tx, '')
+     HAVING count(*) > 1
+     LIMIT 1"
+  )
+)
+if (nrow(duplicate_annotation_pair) != 0L) {
+  die(
+    "annotation dump is not unique for source=",
+    duplicate_annotation_pair$source[[1L]],
+    ", variant_id=", duplicate_annotation_pair$variant_id[[1L]],
+    ", tx=", duplicate_annotation_pair$tx[[1L]],
+    ": ", duplicate_annotation_pair$n[[1L]], " rows"
+  )
+}
 
 if (isTRUE(opt$hgvs)) {
   invisible(dbExecute(
     con,
     glue(
-      "CREATE OR REPLACE TEMP TABLE duckvep_hgvs_pairs AS
-       WITH pair_keys AS (
-         SELECT variant_id, tx FROM vep_annotation
-         UNION
-         SELECT variant_id, tx FROM duckvep_annotation
+      "CREATE OR REPLACE TEMP VIEW duckvep_hgvs_pairs AS
+       WITH annotations AS (
+         SELECT * FROM read_parquet({sql_q(opt$annotations_out)})
+       ), v AS (
+         SELECT * FROM annotations WHERE source = 'vep'
+       ), d AS (
+         SELECT * FROM annotations WHERE source = 'duckvep'
        )
        SELECT
          {sql_q(run_date)} AS run_date,
@@ -2958,14 +3037,14 @@ if (isTRUE(opt$hgvs)) {
          {sql_q(opt$model_name)} AS model,
          {sql_q(oracle_version)} AS oracle_version,
          {sql_q(oracle_build)} AS oracle_build,
-         k.variant_id,
-         k.tx,
-         s.chrom,
-         s.position AS pos,
-         s.reference AS ref,
-         s.alternate AS alt,
-         s.var_type,
-         s.length_bin,
+         coalesce(v.variant_id, d.variant_id) AS variant_id,
+         coalesce(v.tx, d.tx) AS tx,
+         coalesce(v.chrom, d.chrom) AS chrom,
+         coalesce(v.pos, d.pos) AS pos,
+         coalesce(v.ref, d.ref) AS ref,
+         coalesce(v.alt, d.alt) AS alt,
+         coalesce(v.var_type, d.var_type) AS var_type,
+         coalesce(v.length_bin, d.length_bin) AS length_bin,
          v.consequence AS vep_consequence,
          d.consequence AS duckvep_consequence,
          v.hgvsc AS vep_hgvsc,
@@ -2980,6 +3059,21 @@ if (isTRUE(opt$hgvs)) {
          CASE
            WHEN v.variant_id IS NULL THEN 'engine_extra_row'
            WHEN d.variant_id IS NULL THEN 'engine_missing_row'
+           WHEN d.hgvsc_status IS NULL OR
+                d.hgvsc_status NOT IN ('supported', 'not_applicable', 'unresolved')
+             THEN 'engine_invalid_status'
+           WHEN d.hgvsc_status = 'supported' AND
+                (d.hgvsc IS NULL OR d.hgvsc = '')
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsc_status IN ('not_applicable', 'unresolved') AND
+                d.hgvsc IS NOT NULL
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsc_status IN ('supported', 'not_applicable') AND
+                d.hgvsc_reason IS NOT NULL
+             THEN 'engine_invalid_reason'
+           WHEN d.hgvsc_status = 'unresolved' AND
+                (d.hgvsc_reason IS NULL OR d.hgvsc_reason = '')
+             THEN 'engine_invalid_reason'
            WHEN d.hgvsc_status = 'unresolved' THEN 'engine_unresolved'
            WHEN v.hgvsc IS NULL AND d.hgvsc IS NULL THEN 'both_absent'
            WHEN v.hgvsc IS NULL THEN 'engine_extra'
@@ -2990,6 +3084,21 @@ if (isTRUE(opt$hgvs)) {
          CASE
            WHEN v.variant_id IS NULL THEN 'engine_extra_row'
            WHEN d.variant_id IS NULL THEN 'engine_missing_row'
+           WHEN d.hgvsp_status IS NULL OR
+                d.hgvsp_status NOT IN ('supported', 'not_applicable', 'unresolved')
+             THEN 'engine_invalid_status'
+           WHEN d.hgvsp_status = 'supported' AND
+                (d.hgvsp IS NULL OR d.hgvsp = '')
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsp_status IN ('not_applicable', 'unresolved') AND
+                d.hgvsp IS NOT NULL
+             THEN 'engine_invalid_value'
+           WHEN d.hgvsp_status IN ('supported', 'not_applicable') AND
+                d.hgvsp_reason IS NOT NULL
+             THEN 'engine_invalid_reason'
+           WHEN d.hgvsp_status = 'unresolved' AND
+                (d.hgvsp_reason IS NULL OR d.hgvsp_reason = '')
+             THEN 'engine_invalid_reason'
            WHEN d.hgvsp_status = 'unresolved' THEN 'engine_unresolved'
            WHEN v.hgvsp IS NULL AND d.hgvsp IS NULL THEN 'both_absent'
            WHEN v.hgvsp IS NULL THEN 'engine_extra'
@@ -2997,19 +3106,10 @@ if (isTRUE(opt$hgvs)) {
            WHEN v.hgvsp = d.hgvsp THEN 'match'
            ELSE 'mismatch'
          END AS hgvsp_comparison
-       FROM pair_keys k
-       LEFT JOIN vep_annotation v USING (variant_id, tx)
-       LEFT JOIN duckvep_annotation d USING (variant_id, tx)
-       JOIN {sample_event_relation} s USING (variant_id)"
+       FROM v
+       FULL OUTER JOIN d USING (variant_id, tx)"
     )
   ))
-  hgvs_pair_count <- dbGetQuery(
-    con,
-    "SELECT count(*) AS n FROM duckvep_hgvs_pairs"
-  )$n[[1L]]
-  if (hgvs_pair_count == 0) {
-    die("HGVS differential produced no transcript pairs")
-  }
   dir.create(
     dirname(opt$hgvs_pairs_out),
     recursive = TRUE,
@@ -3019,12 +3119,20 @@ if (isTRUE(opt$hgvs)) {
     con,
     glue(
       "COPY duckvep_hgvs_pairs TO {sql_q(opt$hgvs_pairs_out)}
-       (FORMAT parquet, COMPRESSION zstd)"
+      (FORMAT parquet, COMPRESSION zstd)"
     )
   ))
+  hgvs_pair_relation <- glue("read_parquet({sql_q(opt$hgvs_pairs_out)})")
+  hgvs_pair_count <- dbGetQuery(
+    con,
+    glue("SELECT count(*) AS n FROM {hgvs_pair_relation}")
+  )$n[[1L]]
+  if (hgvs_pair_count == 0) {
+    die("HGVS differential produced no transcript pairs")
+  }
   hgvs_summary <- dbGetQuery(
     con,
-    "WITH comparisons AS (
+    glue("WITH comparisons AS (
        SELECT
          'hgvsc'::VARCHAR AS metric,
          hgvsc_comparison AS comparison,
@@ -3033,14 +3141,14 @@ if (isTRUE(opt$hgvs)) {
          coalesce(vep_consequence, '(no_vep_emission)') AS consequence_class,
          duckvep_hgvsc_status AS engine_status,
          coalesce(duckvep_hgvsc_reason, '') AS engine_reason
-       FROM duckvep_hgvs_pairs
+       FROM {hgvs_pair_relation}
        UNION ALL
        SELECT
          'hgvsp', hgvsp_comparison, var_type, length_bin,
          coalesce(vep_consequence, '(no_vep_emission)'),
          duckvep_hgvsp_status,
          coalesce(duckvep_hgvsp_reason, '')
-       FROM duckvep_hgvs_pairs
+       FROM {hgvs_pair_relation}
      )
      SELECT
        metric,
@@ -3054,34 +3162,32 @@ if (isTRUE(opt$hgvs)) {
      FROM comparisons
      GROUP BY ALL
      ORDER BY metric, comparison, n DESC, var_type, length_bin,
-              consequence_class, engine_status, engine_reason"
+              consequence_class, engine_status, engine_reason")
   )
   dir.create(dirname(opt$hgvs_out), recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(hgvs_summary, opt$hgvs_out, row.names = FALSE)
   hgvs_discordance_count <- dbGetQuery(
     con,
-    "SELECT count(*) AS n
+    glue("SELECT count(*) AS n
      FROM (
-       SELECT hgvsc_comparison AS comparison FROM duckvep_hgvs_pairs
+       SELECT hgvsc_comparison AS comparison FROM {hgvs_pair_relation}
        UNION ALL
-       SELECT hgvsp_comparison FROM duckvep_hgvs_pairs
+       SELECT hgvsp_comparison FROM {hgvs_pair_relation}
      )
      WHERE comparison IN (
+       'engine_invalid_status', 'engine_invalid_value', 'engine_invalid_reason',
        'engine_unresolved', 'mismatch', 'engine_extra', 'engine_missing',
        'engine_extra_row', 'engine_missing_row'
-     )"
+     )")
   )$n[[1L]]
 }
 
 counts <- dbGetQuery(
   con,
-  "SELECT source, count(*) AS annotation_rows
-   FROM duckvep_annotation_dump GROUP BY source ORDER BY source"
+  glue("SELECT source, count(*) AS annotation_rows
+   FROM read_parquet({sql_q(opt$annotations_out)})
+   GROUP BY source ORDER BY source")
 )
-invisible(dbGetQuery(
-  con,
-  glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
-))
 
 cat(glue("sampled variants: {sample_count}"), "\n", sep = "")
 for (i in seq_len(nrow(counts))) {
@@ -3129,14 +3235,24 @@ report <- file.path(
   "conformance",
   "statistical_conformance.R"
 )
-rc <- system2("Rscript", c(report, "--annotations", opt$annotations_out))
+rc <- system2(
+  "Rscript",
+  c(
+    report,
+    "--annotations", opt$annotations_out,
+    "--pair-level-input",
+    "--duckdb-memory-limit", opt$duckdb_memory_limit,
+    "--duckdb-threads", as.character(opt$duckdb_threads)
+  )
+)
 if (rc != 0L) {
   die("statistical report failed with exit status {rc}")
 }
 if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L) {
   die(glue(
-    "HGVS differential found {hgvs_discordance_count} unresolved, ",
-    "mismatch, missing, or extra comparisons; inspect {opt$hgvs_pairs_out} ",
+    "HGVS differential found {hgvs_discordance_count} invalid-status/value/reason, ",
+    "unresolved, mismatch, missing, or extra comparisons; inspect ",
+    "{opt$hgvs_pairs_out} ",
     "and {opt$hgvs_out}."
   ))
 }

@@ -1,0 +1,2 @@
+run_date	repository_url	ref	commit	test_selector	module_distribution	module_distribution_sha256	perl_version	files	assertions	skipped_assertions	skip_reasons	result
+2026-07-22	https://github.com/Ensembl/ensembl-vep	release/116	57ea5c52340acc1f156267f810ad162e26597082	t/*.t	bioconda::ensembl-vep=116.0=pl5321h2a3209d_0	a58cfc1209f55b0a6b63f56b3808b963a36290fb0c5b7f719c0205725fe0cdd3	5.32.1	49	1977	293	No local database configured:281;No local database configured or Set::IntervalTree not installed:11;HTML::Lint not installed:1	PASS
