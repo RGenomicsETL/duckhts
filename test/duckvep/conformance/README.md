@@ -21,7 +21,15 @@ The runner uses the current `WangLabCSU/blit` command API (tested at
 `/root/miniconda3/envs/vep`; override `VEP_PREFIX` for another VEP 116 environment.
 Install that `blit` checkout with `R CMD INSTALL /path/to/blit`. A matching VEP
 environment can be created with `micromamba create -p "$VEP_PREFIX"
-bioconda::ensembl-vep=116.0`.
+--file test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt` on
+Linux-64.
+
+Large input digests are read completely on first observation and then reused from the
+local evidence cache only while canonical path, byte size, modification time, and change
+time are unchanged. This avoids rereading an unchanged multi-gigabyte model, reference, or
+corpus before every campaign. Set `DUCKVEP_ARTIFACT_VERIFY=full` when acquiring,
+transferring, or publishing artifacts, or for a deliberate full-byte release audit;
+`DUCKVEP_EVIDENCE_DIGEST_CACHE` overrides the XDG/user-cache location.
 
 The validation gates have independent jobs:
 
@@ -68,7 +76,28 @@ and validates their all-row and mismatch counters; it never treats a corpus-name
 as evidence. `make duckvep-state-current-check` is the stricter release audit: it fails
 until every executable campaign named by the state relation has evidence at current HEAD.
 Historical successful evidence remains useful for lineage, but cannot satisfy that
-current-release gate after implementation changes.
+current-release gate after implementation or executable-conformance-input changes. A
+campaign need not name the later evidence-only commit that records its result: the strict
+check instead proves that its source commit is an ancestor of `HEAD` and that the DuckVEP
+sources, build/catalog inputs, property harness, vendored property library, executable
+conformance inputs, transition relation, and outcome relation are byte-unchanged since
+measurement. Evidence histories, generated result artifacts, the campaign receipt
+manifest, and documentation are excluded from that comparison so committing a receipt
+does not immediately make the receipt stale. The strict check also rejects staged,
+unstaged, or untracked semantic inputs; release evidence is evaluated only from a clean,
+committed implementation and harness.
+
+Property and distribution histories recover an interrupted journal before enforcing the
+clean-worktree gate, then use one publication lock per destination directory,
+which prevents concurrent publication of overlapping custom ledger pairs such as `(A, B)`
+and `(A, C)`.
+Publication is recoverable across process termination between the two POSIX renames;
+removing the journal commits the pair before rollback copies are deleted. This is not a
+claim of power-loss durability on filesystems that have not persisted file and directory
+metadata. The campaign invokes the committed root `Makefile` explicitly, clears inherited
+GNU Make control variables and optional property compiler flags, and rechecks all tracked
+and untracked source inputs—including ignored compiler inputs in the complete C property
+source/vendor closure—after the final evidence input has been consumed.
 
 ## Upstream Ensembl test lineage
 

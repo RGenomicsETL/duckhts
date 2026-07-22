@@ -5,3 +5,4 @@ r/Rduckhts/inst/extdata/*.fai text eol=lf
 test/duckvep/upstream/ensembl-tools/** -whitespace
 test/duckvep/upstream/ensembl-variation/** -whitespace
 test/duckvep/upstream/ensembl-vep/** -whitespace
+test/duckvep/upstream/receipts/*.tap -whitespace

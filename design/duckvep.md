@@ -1003,7 +1003,12 @@ rejects a nonzero discordance/missing/extra counter, a non-exact all-row, or an 
 comparison other than match/both-absent; a corpus-name substring cannot certify a failed
 campaign. Historical campaign evidence remains source-pinned. Before a release,
 `make duckvep-state-current-check` additionally requires every named executable campaign
-to have been rerun at the checked-out HEAD. `state_machine_outcomes.tsv` names fail-closed input/resource
+to have been run on an ancestor of the checked-out `HEAD` with no intervening change to
+the complete extension source/vendor closure, VCF/FASTA readers, DuckVEP implementation,
+build/catalog inputs and pinned build submodule, property harness, upstream semantic
+mirrors, or executable conformance inputs. Compiler-like untracked inputs and a dirty
+build submodule are also fatal. Evidence-only commits do not invalidate the campaign they record.
+`state_machine_outcomes.tsv` names fail-closed input/resource
 errors and unresolved/not-applicable result statuses, with their implementations and fixed
 witnesses; transitions declare which terminal outcomes they can produce. A `+` in
 `input_states` denotes

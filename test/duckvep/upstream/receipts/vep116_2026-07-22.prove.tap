@@ -1,0 +1,2142 @@
+t/AnnotationSource.t ............................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - info
+ok 6 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 7 - get parser object
+ok 8 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 9 - check class
+ok 10 - check buffer next
+ok 11 - get_all_regions_by_InputBuffer
+ok 12 - InputBuffer min_max
+ok 13 - before boundary 1
+ok 14 - before boundary 2
+ok 15 - after boundary
+ok 16 - across boundary
+ok 17 - across boundary insertion
+ok 18 - spans mulitple
+ok 19 - one before, one after
+1..19
+ok
+t/AnnotationSourceAdaptor.t ........................ 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSourceAdaptor;
+ok 2 - new is defined
+ok 3 - check class
+ok 4 - use Bio::EnsEMBL::VEP::Config;
+ok 5 - get new config object
+ok 6 - new with config
+ok 7 - get_all_from_cache
+ok 8 - get_all
+ok 9 - get_all - var comes first
+ok 10 - get_all_custom - invalid file
+ok 11 - get_all_custom - invalid format
+ok 12 - get_all_custom - invalid format value
+ok 13 - get_all_custom - invalid options
+ok 14 - get_all_custom - no_remote
+ok 15 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 16 - get_all_custom
+ok 17 - get_all_custom - default overlap type
+ok 18 - get_all_custom - report_coords
+ok 19 - get_all_custom - fields
+ok 20 - get_all_custom - automated \#\#\#CHR\#\#\#
+ok 21 # skip No local database configured
+ok 22 # skip No local database configured
+ok 23 # skip No local database configured
+ok 24 # skip No local database configured
+ok 25 # skip No local database configured
+ok 26 # skip No local database configured
+ok 27 # skip No local database configured
+ok 28 # skip No local database configured
+ok 29 # skip No local database configured
+1..29
+ok
+t/AnnotationSource_Cache.t ......................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Cache;
+ok 2 - new is defined
+ok 3 - dir get
+ok 4 - dir set
+1..4
+ok
+t/AnnotationSource_Cache_RegFeat.t ................. 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Cache::RegFeat;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - serializer_type
+ok 6 - file_suffix
+ok 7 - get_dump_file_name
+ok 8 - get_dump_file_name with end
+ok 9 - get_dump_file_name no chromosome
+ok 10 - get_dump_file_name no region
+ok 11 - get_available_cell_types - empty
+ok 12 - check_cell_types
+ok 13 - check_cell_types - fail
+ok 14 - deserialize_from_file ref 1
+ok 15 - deserialize_from_file ref 2
+ok 16 - deserialize_from_file keys
+ok 17 - deserialize_from_file ref 3
+ok 18 - deserialize_from_file ref 4
+ok 19 - deserialized_object_to_features ref 1
+ok 20 - deserialized_object_to_features ref 2
+ok 21 - deserialized_object_to_features ref 3
+ok 22 - deserialized_object_to_features count
+ok 23 - merge_features count
+ok 24 - get_features_by_regions_from_disk ref 1
+ok 25 - get_features_by_regions_from_disk ref 2
+ok 26 - get_features_by_regions_from_disk stable_id
+ok 27 - get_features_by_regions_from_memory ref 1
+ok 28 - get_features_by_regions_from_memory ref 2
+ok 29 - get_features_by_regions_from_memory stable_id
+ok 30 - clean_cache
+ok 31 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 32 - get parser object
+ok 33 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 34 - check class
+ok 35 - check buffer next
+ok 36 - get_all_regions_by_InputBuffer
+ok 37 - get_all_features_by_InputBuffer ref 1
+ok 38 - get_all_features_by_InputBuffer ref 2
+ok 39 - get_all_features_by_InputBuffer ref 3
+ok 40 - get_all_features_by_InputBuffer stable_id
+ok 41 - get_all_features_by_InputBuffer count
+ok 42 - get_all_features_by_InputBuffer again
+ok 43 - get_all_features_by_InputBuffer on empty buffer
+ok 44 - annotate_InputBuffer - get_all_RegulatoryFeatureVariations count
+ok 45 - annotate_InputBuffer - display_consequence
+ok 46 - sereal - serializer_type
+ok 47 - file_suffix
+ok 48 - sereal - deserialize_from_file ref 1
+ok 49 - sereal - deserialize_from_file ref 2
+ok 50 - sereal - deserialize_from_file keys
+ok 51 - sereal - deserialize_from_file ref 3
+ok 52 - sereal - deserialize_from_file ref 4
+ok 53 - sereal - deserialize_from_file stable_id
+1..53
+ok
+t/AnnotationSource_Cache_Transcript.t .............. 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Cache::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - serializer_type
+ok 6 - file_suffix
+ok 7 - valid_chromosomes
+ok 8 - get_dump_file_name
+ok 9 - get_dump_file_name with end
+ok 10 - get_dump_file_name no chromosome
+ok 11 - get_dump_file_name no region
+ok 12 - check_sift_polyphen
+ok 13 - check_sift_polyphen - everything 1
+ok 14 - check_sift_polyphen - everything 2
+ok 15 - check_sift_polyphen - everything status_msg
+ok 16 - check_sift_polyphen - fail
+ok 17 - deserialize_from_file ref 1 - PerlIO::gzip
+ok 18 - deserialize_from_file ref 2 - PerlIO::gzip
+ok 19 - deserialize_from_file ref 3 - PerlIO::gzip
+ok 20 - deserialize_from_file ref 1 - gzip
+ok 21 - deserialize_from_file ref 2 - gzip
+ok 22 - deserialize_from_file ref 3 - gzip
+ok 23 - deserialize_from_file ref 1 - Compress::Zlib
+ok 24 - deserialize_from_file ref 2 - Compress::Zlib
+ok 25 - deserialize_from_file ref 3 - Compress::Zlib
+ok 26 - deserialized_object_to_features ref 1
+ok 27 - deserialized_object_to_features ref 2
+ok 28 - deserialized_object_to_features ref 3
+ok 29 - deserialized_object_to_features count
+ok 30 - filter_transcript pass
+ok 31 - filter_transcript fail gencode_basic
+ok 32 - filter_transcript fail all_refseq
+ok 33 - filter_transcript fail all_refseq merged
+ok 34 - filter_transcript pass all_refseq - feature NR_046198.3
+ok 35 - filter_transcript pass all_refseq - feature 4558
+ok 36 - filter_transcript pass all_refseq - feature rna-TRNK
+ok 37 - filter_transcript pass all_refseq - feature COX3
+ok 38 - deserialized_object_to_features filtered count
+ok 39 - merge_features count
+ok 40 - merge_features restores missing _gene_hgnc_id
+ok 41 - merge_features refseq restores missing _gene_symbol
+ok 42 - merge_features refseq restores missing _gene_symbol_source
+ok 43 - merge_features refseq restores missing _gene_hgnc_id
+ok 44 - merge_features refseq count before merge
+ok 45 - merge_features refseq removes duplicates
+ok 46 - merge_features refseq count before merge (source same)
+ok 47 - merge_features refseq removes duplicates (source same)
+ok 48 - merge features refseq leaves lowest dbID
+ok 49 - get_features_by_regions_uncached ref 1
+ok 50 - get_features_by_regions_uncached ref 2
+ok 51 - get_features_by_regions_uncached stable_id
+ok 52 - get_features_by_regions_cached ref 1
+ok 53 - get_features_by_regions_cached ref 2
+ok 54 - get_features_by_regions_cached stable_id
+ok 55 - clean_cache
+ok 56 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 57 - get parser object
+ok 58 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 59 - check class
+ok 60 - check buffer next
+ok 61 - get_all_regions_by_InputBuffer
+ok 62 - get_all_features_by_InputBuffer ref 1
+ok 63 - get_all_features_by_InputBuffer ref 2
+ok 64 - get_all_features_by_InputBuffer ref 3
+ok 65 - get_all_features_by_InputBuffer stable_id
+ok 66 - get_all_features_by_InputBuffer count
+ok 67 - get_all_features_by_InputBuffer again
+ok 68 - get_all_features_by_InputBuffer on empty buffer
+ok 69 - annotate_InputBuffer - get_all_TranscriptVariations count
+ok 70 - annotate_InputBuffer - display_consequence
+ok 71 - with filter - filtered transcript absent
+ok 72 - with filter - display_consequence
+ok 73 - _tree_coords_filename
+ok 74 - tree_file - generates OK
+ok 75 - tree_file - timestamp before
+ok 76 - tree_file - timestamp same after rerun
+ok 77 - md5_hex of tree_file content
+ok 78 - transcript_tree - ref
+ok 79 - transcript_tree - valid_chromosomes
+ok 80 - get_nearest - no type
+ok 81 - get_nearest - invalid type
+ok 82 - get_nearest - transcript
+ok 83 - get_nearest - gene
+ok 84 - get_nearest - symbol
+ok 85 - get_nearest - no hits
+ok 86 - get_nearest - overlap 1
+ok 87 - get_nearest - overlap 2
+ok 88 - get_nearest - insertion 1
+ok 89 - get_nearest - insertion 2
+ok 90 - nearest - test from annotate_InputBuffer
+ok 91 - sereal - serializer_type
+ok 92 - sereal - file_suffix
+ok 93 - sereal - deserialize_from_file ref 1
+ok 94 - sereal - deserialize_from_file ref 2
+ok 95 - sereal - deserialize_from_file ref 3
+ok 96 - sereal - deserialize_from_file stable_id
+1..96
+ok
+t/AnnotationSource_Cache_Variation.t ............... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Cache::Variation;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - filter_variation pass
+ok 6 - filter_variation fail
+ok 7 - filter_variation pass with failed on
+ok 8 - use Bio::EnsEMBL::Variation::VariationFeature;
+ok 9 - compare_existing exact match
+ok 10 - compare_existing exact match from multiple
+ok 11 - compare_existing alleles dont match with check
+ok 12 - compare_existing alleles dont match with check
+ok 13 - compare_existing rev strand exact match
+ok 14 - compare_existing rev strand alleles dont match with check
+ok 15 - compare_existing rev strand alleles dont match no check
+ok 16 - compare_existing missing alleles
+ok 17 - compare_existing missing alleles no check
+ok 18 - compare_existing missing alleles exclude_null_alleles
+ok 19 - get_dump_file_name
+ok 20 - get_dump_file_name with end
+ok 21 - get_dump_file_name no chromosome
+ok 22 - get_dump_file_name no region
+ok 23 - delimiter
+ok 24 - read_variations_from_file ref
+ok 25 - read_variations_from_file first el
+ok 26 - get_features_by_regions_uncached ref 1
+ok 27 - get_features_by_regions_uncached ref 2
+ok 28 - get_features_by_regions_uncached variation_name
+ok 29 - get_features_by_regions_cached ref 1
+ok 30 - get_features_by_regions_cached ref 2
+ok 31 - get_features_by_regions_cached variation_name
+ok 32 - clean_cache
+ok 33 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 34 - get parser object
+ok 35 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 36 - check class
+ok 37 - check buffer next
+ok 38 - get_all_regions_by_InputBuffer
+ok 39 - get_all_features_by_InputBuffer ref 1
+ok 40 - get_all_features_by_InputBuffer ref 2
+ok 41 - get_all_features_by_InputBuffer variation_name 1
+ok 42 - get_all_features_by_InputBuffer variation_name 2
+ok 43 - get_all_features_by_InputBuffer count
+ok 44 - get_all_features_by_InputBuffer again
+ok 45 - get_all_features_by_InputBuffer on empty buffer
+ok 46 - annotate_InputBuffer
+ok 47 - annotate_InputBuffer count annotated
+ok 48 - annotate_InputBuffer - miss by one
+ok 49 - annotate_InputBuffer - phenotype_or_disease
+ok 50 - nastiness 1
+ok 51 - nastiness 2
+ok 52 - nastiness 3
+ok 53 - nastiness 4
+ok 54 - old_maf
+1..54
+ok
+t/AnnotationSource_Cache_VariationTabix.t .......... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Cache::VariationTabix;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - get_dump_file_name
+ok 6 - get_dump_file_name no chromosome
+ok 7 - delimiter
+ok 8 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 9 - get parser object
+ok 10 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 11 - check class
+ok 12 - check buffer next
+ok 13 - _annotate_cl
+ok 14 - chr synonym
+ok 15 - miss by coord - _annotate_cl
+ok 16 - annotate_InputBuffer
+ok 17 - annotate_InputBuffer count annotated
+ok 18 - annotate_InputBuffer - phenotype_or_disease
+ok 19 - check_frequency_filter
+ok 20 - check_frequency_filter - fails on missing pop
+ok 21 - check_frequency_filter - fails on pop with AF added
+ok 22 - check_frequency_filter - fails on pop for incorrect grouping
+ok 23 - get_frequency_data - _freq_check_freqs
+ok 24 - get_frequency_data - _freq_check_pass
+ok 25 - get_frequency_data - _freq_check_all_failed
+ok 26 - get_frequency_data - gt_lt
+ok 27 - get_frequency_data - gt_lt - _freq_check_all_passed
+ok 28 - get_frequency_data - freq
+ok 29 - get_frequency_data - freq - _freq_check_all_passed
+ok 30 - get_frequency_data - pop _freq_check_freqs
+ok 31 - get_frequency_data - rev strand
+ok 32 - frequency_check_buffer - exclude count
+ok 33 - frequency_check_buffer - include count
+ok 34 - frequency_check_buffer - remove allele 1
+ok 35 - frequency_check_buffer - remove allele 2
+ok 36 - nastiness 1
+ok 37 - nastiness 2
+ok 38 - nastiness 3
+ok 39 - nastiness 4
+ok 40 - get_frequency_data - matched alleles
+ok 41 - _get_tabix_obj - ref
+ok 42 - _get_tabix_obj - cache OK
+ok 43 - _get_tabix_obj - clear cache new obj
+ok 44 - _annotate_pm
+ok 45 - _annotate_pm - chr synonym
+ok 46 - miss by coord - _annotate_pm
+ok 47 - annotate_InputBuffer - _annotate_cl
+ok 48 - annotate_InputBuffer count annotated
+ok 49 - nastiness 1 - _annotate_cl
+ok 50 - nastiness 2 - _annotate_cl
+ok 51 - nastiness 3 - _annotate_cl
+ok 52 - nastiness 4 - _annotate_cl
+1..52
+ok
+t/AnnotationSource_Database_RegFeat.t .............. 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Database::RegFeat;
+ok 2 # skip No local database configured
+ok 3 # skip No local database configured
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+ok 15 # skip No local database configured
+ok 16 # skip No local database configured
+ok 17 # skip No local database configured
+ok 18 # skip No local database configured
+ok 19 # skip No local database configured
+ok 20 # skip No local database configured
+ok 21 # skip No local database configured
+ok 22 # skip No local database configured
+ok 23 # skip No local database configured
+ok 24 # skip No local database configured
+ok 25 # skip No local database configured
+ok 26 # skip No local database configured
+ok 27 # skip No local database configured
+ok 28 # skip No local database configured
+ok 29 # skip No local database configured
+ok 30 # skip No local database configured
+ok 31 # skip No local database configured
+ok 32 # skip No local database configured
+ok 33 # skip No local database configured
+1..33
+ok
+t/AnnotationSource_Database_StructuralVariation.t .. 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Database::StructuralVariation;
+ok 2 # skip No local database configured
+ok 3 # skip No local database configured
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+ok 15 # skip No local database configured
+ok 16 # skip No local database configured
+ok 17 # skip No local database configured
+ok 18 # skip No local database configured
+ok 19 # skip No local database configured
+ok 20 # skip No local database configured
+1..20
+ok
+t/AnnotationSource_Database_Transcript.t ........... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Database::Transcript;
+ok 2 # skip No local database configured
+ok 3 # skip No local database configured
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+ok 15 # skip No local database configured
+ok 16 # skip No local database configured
+ok 17 # skip No local database configured
+ok 18 # skip No local database configured
+ok 19 # skip No local database configured
+ok 20 # skip No local database configured
+ok 21 # skip No local database configured
+ok 22 # skip No local database configured
+ok 23 # skip No local database configured
+ok 24 # skip No local database configured
+ok 25 # skip No local database configured
+ok 26 # skip No local database configured
+ok 27 # skip No local database configured
+ok 28 # skip No local database configured
+ok 29 # skip No local database configured
+ok 30 # skip No local database configured
+ok 31 # skip No local database configured
+ok 32 # skip No local database configured
+ok 33 # skip No local database configured
+ok 34 # skip No local database configured
+ok 35 # skip No local database configured
+ok 36 # skip No local database configured
+ok 37 # skip No local database configured
+ok 38 # skip No local database configured
+ok 39 # skip No local database configured
+ok 40 # skip No local database configured
+ok 41 # skip No local database configured
+ok 42 # skip No local database configured
+ok 43 # skip No local database configured
+ok 44 # skip No local database configured
+ok 45 # skip No local database configured
+ok 46 # skip No local database configured
+ok 47 # skip No local database configured
+ok 48 # skip No local database configured
+ok 49 # skip No local database configured
+ok 50 # skip No local database configured
+ok 51 # skip No local database configured
+ok 52 # skip No local database configured
+ok 53 # skip No local database configured
+ok 54 # skip No local database configured
+ok 55 # skip No local database configured
+ok 56 # skip No local database configured
+ok 57 # skip No local database configured
+ok 58 # skip No local database configured
+ok 59 # skip No local database configured
+ok 60 # skip No local database configured
+ok 61 # skip No local database configured
+ok 62 # skip No local database configured
+ok 63 # skip No local database configured
+ok 64 # skip No local database configured
+ok 65 # skip No local database configured
+ok 66 # skip No local database configured
+ok 67 # skip No local database configured
+ok 68 # skip No local database configured
+ok 69 # skip No local database configured
+ok 70 # skip No local database configured
+ok 71 # skip No local database configured
+ok 72 # skip No local database configured
+ok 73 # skip No local database configured
+ok 74 # skip No local database configured
+ok 75 # skip No local database configured
+ok 76 # skip No local database configured
+ok 77 # skip No local database configured
+ok 78 # skip No local database configured
+ok 79 # skip No local database configured
+ok 80 # skip No local database configured
+ok 81 # skip No local database configured
+ok 82 # skip No local database configured
+ok 83 # skip No local database configured
+ok 84 # skip No local database configured
+ok 85 # skip No local database configured
+ok 86 # skip No local database configured
+ok 87 # skip No local database configured
+ok 88 # skip No local database configured
+ok 89 # skip No local database configured
+1..89
+ok
+t/AnnotationSource_Database_Variation.t ............ 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::Database::Variation;
+ok 2 # skip No local database configured
+ok 3 # skip No local database configured
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+ok 15 # skip No local database configured
+ok 16 # skip No local database configured
+ok 17 # skip No local database configured
+ok 18 # skip No local database configured
+ok 19 # skip No local database configured
+ok 20 # skip No local database configured
+ok 21 # skip No local database configured
+ok 22 # skip No local database configured
+ok 23 # skip No local database configured
+ok 24 # skip No local database configured
+ok 25 # skip No local database configured
+ok 26 # skip No local database configured
+1..26
+ok
+t/AnnotationSource_File.t .......................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - new is defined
+ok 3 - new - test settings
+ok 4 - new - no file
+ok 5 - new - invalid type
+ok 6 - file - get
+ok 7 - file - set
+ok 8 - short_name - get default
+ok 9 - short_name - set
+ok 10 - type - get default
+ok 11 - type - set
+ok 12 - type - invalid set
+ok 13 - report_coords - get default
+ok 14 - report_coords - set
+ok 15 - use Bio::EnsEMBL::VEP::Config;
+ok 16 - new - invalid format
+ok 17 - new with format - BED
+ok 18 - new with format - GFF
+ok 19 - new with format - GTF
+ok 20 - new with format - VCF
+ok 21 - new with format - BigWig
+ok 22 - new - tabix PM unavailable
+ok 23 - new - bigwig PM unavailable
+1..23
+ok
+t/AnnotationSource_File_BED.t ...................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File::BED;
+ok 3 - new is defined
+ok 4 - use Bio::EnsEMBL::VEP::Config;
+ok 5 - get new config object
+ok 6 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 7 - get parser object
+ok 8 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 9 - check class
+ok 10 - check buffer next
+ok 11 - annotate_InputBuffer - overlap
+ok 12 - annotate_InputBuffer - exact, additive
+ok 13 - annotate_InputBuffer - 0 valid name in BED
+ok 14 - annotate_InputBuffer - out by 1 (5')
+ok 15 - annotate_InputBuffer - out by 1 (3')
+ok 16 - annotate_InputBuffer - get scores
+1..16
+ok
+Couldn't open foo
+t/AnnotationSource_File_BigWig.t ................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File::BigWig;
+ok 3 - use Bio::EnsEMBL::VEP::Config;
+ok 4 - get new config object
+ok 5 - new is defined
+ok 6 - new with invalid file throws
+ok 7 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 8 - get parser object
+ok 9 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 10 - check class
+ok 11 - check buffer next
+ok 12 - annotate_InputBuffer - overlap
+ok 13 - annotate_InputBuffer - no summary statistics
+ok 14 - annotate_InputBuffer - exact, additive
+ok 15 - annotate_InputBuffer - single score, summary statistics
+ok 16 - annotate_InputBuffer - overlap, multiple scores
+ok 17 - annotate_InputBuffer - multiple scores, summary statistics
+ok 18 - annotate_InputBuffer - out by 1 (5')
+ok 19 - annotate_InputBuffer - out by 1 (3')
+ok 20 - overlap fixedStep
+ok 21 - get scores even when reporting coords
+1..21
+ok
+WARNING: Setting offline mode. To create database connection use either --database or --cache.
+t/AnnotationSource_File_GFF.t ...................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File::GFF;
+ok 3 - use Bio::EnsEMBL::VEP::Runner;
+ok 4 - get new runner object
+ok 5 - new is defined
+ok 6 - setup fasta_db
+ok 7 - cant use exact type
+ok 8 - _get_records_by_coords - count
+ok 9 - _get_records_by_coords - first content
+ok 10 - _get_records_by_coords - non-overlapping sub-features count
+ok 11 - _create_transcripts - count
+ok 12 - stable_id
+ok 13 - _gene_stable_id
+ok 14 - _gene_symbol
+ok 15 - _protein
+ok 16 - attributes
+ok 17 - count exons
+ok 18 - translateable_seq
+ok 19 - translate
+ok 20 - _create_transcripts - big fetch check biotypes
+ok 21 - gene_stable_id from gene object ID not gene_id
+ok 22 - _get_parent_child_structure - parent not found
+ok 23 - _create_transcripts - unexpected type of child
+ok 24 - no biotype skips transcript
+ok 25 - no biotype warning message
+ok 26 - overlapping exons skips transcript
+ok 27 - overlapping exons warning message
+ok 28 - no exons warning message
+ok 29 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 30 - get parser object
+ok 31 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 32 - check class
+ok 33 - check buffer next
+ok 34 - annotate_InputBuffer - display_consequence
+ok 35 - with filter - filtered transcript absent
+ok 36 - with filter - display_consequence
+ok 37 - load synonyms
+ok 38 - get_source_chr_name - exists, same
+ok 39 - get_source_chr_name - strip chr
+ok 40 - get_source_chr_name - synonyms
+ok 41 - get_source_chr_name - add chr
+ok 42 - load synonyms
+ok 43 - _get_records_by_coords - refseq - count
+ok 44 - _get_records_by_coords - check first
+ok 45 - _create_transcripts - count
+ok 46 - stable_id
+ok 47 - _gene_stable_id
+ok 48 - _gene_symbol
+ok 49 - _protein
+ok 50 - count exons
+ok 51 - translate
+ok 52 - _create_transcripts - big fetch check biotype
+ok 53 - check buffer next
+ok 54 - annotate_InputBuffer - display_consequence
+ok 55 - dont_skip variants which are not in GFF file
+ok 56 - load synonyms
+ok 57 - check buffer RefSeq
+ok 58 - RefSeq GFF annotation
+ok 59 - annotate_InputBuffer - gff_type gencode_promoter
+1..59
+ok
+t/AnnotationSource_File_GTF.t ...................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File::GTF;
+ok 3 - use Bio::EnsEMBL::VEP::Runner;
+ok 4 - get new runner object
+ok 5 - new is defined
+ok 6 - setup fasta_db
+ok 7 - _get_records_by_coords - count
+ok 8 - _get_records_by_coords - first content
+ok 9 - _get_records_by_coords - non-overlapping sub-features count
+ok 10 - _create_transcripts - count
+ok 11 - stable_id
+ok 12 - _gene_stable_id
+ok 13 - _gene_symbol
+ok 14 - _protein
+ok 15 - count exons
+ok 16 - translateable_seq
+ok 17 - translate
+ok 18 - _create_transcripts - big fetch check biotypes
+ok 19 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 20 - get parser object
+ok 21 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 22 - check class
+ok 23 - check buffer next
+ok 24 - annotate_InputBuffer - display_consequence
+ok 25 - check buffer next (MT)
+ok 26 - codon table for MT chromosome is correct
+ok 27 - codon table for MT chromosome - check allele
+1..27
+ok
+t/AnnotationSource_File_VCF.t ...................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File::VCF;
+ok 3 - new is defined
+ok 4 - use Bio::EnsEMBL::VEP::Config;
+ok 5 - get new config object
+ok 6 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 7 - get parser object
+ok 8 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 9 - check class
+ok 10 - check buffer next
+ok 11 - annotate_InputBuffer - overlap
+ok 12 - annotate_InputBuffer - overlap - insertion
+ok 13 - annotate_InputBuffer - VCF score
+ok 14 - annotate_InputBuffer - no VCF score
+ok 15 - annotate_InputBuffer - overlap - no ID reports coords
+ok 16 - annotate_InputBuffer - overlap - report_coords
+ok 17 - annotate_InputBuffer - fields
+ok 18 - annotate_InputBuffer - exact, info keyed on allele
+ok 19 - annotate_InputBuffer - exact, multiple, rev strand input
+ok 20 - annotate_InputBuffer - deletion
+ok 21 - annotate_InputBuffer - mixed - insertion
+ok 22 - annotate_InputBuffer - mixed - snp
+ok 23 - annotate_InputBuffer - trim input - insertion 1
+ok 24 - annotate_InputBuffer - trim input - insertion 2
+ok 25 - annotate_InputBuffer - trim input - snp 1
+ok 26 - annotate_InputBuffer - trim input - snp 2
+ok 27 - annotate_InputBuffer - trim input - snp 3
+ok 28 - annotate_InputBuffer - trim VCF - deletion 1
+ok 29 - annotate_InputBuffer - trim VCF - deletion 2
+ok 30 - annotate_InputBuffer - SV reverts to overlap
+ok 31 - annotate_InputBuffer - REF included in INFO chunks
+ok 32 - annotate_InputBuffer - INFO chunk count doesnt match ALT count
+ok 33 - annotate_InputBuffer - COSMIC id without duplication
+ok 34 - annotate_InputBuffer - FILTER suppression
+ok 35 - annotate_InputBuffer - FILTER suppression off
+1..35
+ok
+t/BaseVEP.t ........................................ 
+ok 1 - use Bio::EnsEMBL::VEP::BaseVEP;
+ok 2 - new is defined
+ok 3 - check class
+ok 4 - new with invalid arg
+ok 5 - new with invalid config object
+ok 6 - use Bio::EnsEMBL::VEP::Config;
+ok 7 - get new config object
+ok 8 - new with config object
+ok 9 - config method
+ok 10 - param get
+ok 11 - param set
+ok 12 - param without key
+ok 13 - species get
+ok 14 - species set
+ok 15 - stats
+ok 16 - get_adaptor - offline
+ok 17 - get_adaptor no group
+ok 18 - get_adaptor no type
+ok 19 - add_shortcuts
+ok 20 - add_shortcuts arrayref
+ok 21 - add_shortcuts overwrite
+ok 22 - fasta_db - no file
+ok 23 - get_slice - no fasta_db or database
+ok 24 - use Bio::EnsEMBL::VEP::Runner;
+ok 25 - fasta_db
+ok 26 - chr lengths
+ok 27 - get_slice - fasta_db
+ok 28 - chromosome_syonyms - empty
+ok 29 - chromosome_syonyms - ref
+ok 30 - chromosome_syonyms - content check
+ok 31 - fasta_dir - fasta_db OK
+ok 32 - fasta_dir - fasta param set
+ok 33 - status_msg
+ok 34 - warning_fh
+ok 35 - warning_msg
+ok 36 - warning_msg in file
+ok 37 - warning_msg to STDERR
+ok 38 - get_database_assembly - no DB
+ok 39 - skipped_variant_msg - warning about invalid variant
+ok 40 - skipped_variant_msg - description
+ok 41 - skipped_variant_msg - line number
+ok 42 - skipped_variant_msg - line content
+ok 43 # skip No local database configured
+ok 44 # skip No local database configured
+ok 45 # skip No local database configured
+ok 46 # skip No local database configured
+ok 47 # skip No local database configured
+ok 48 # skip No local database configured
+ok 49 # skip No local database configured
+ok 50 # skip No local database configured
+1..50
+ok
+t/CacheDir.t ....................................... 
+ok 1 - use Bio::EnsEMBL::VEP::CacheDir;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - check class
+ok 6 - detect synonyms
+ok 7 - detect FASTA
+ok 8 - dont overwrite synonyms param
+ok 9 - dont overwrite fasta param
+ok 10 - switch off detect FASTA
+ok 11 - new with only version
+ok 12 - new with full dir path
+ok 13 - new without root_dir
+ok 14 - new with invalid species
+ok 15 - Not allow homo_sapiens_refseq / homo_sapiens_merged
+ok 16 - new with invalid version
+ok 17 - new with invalid assembly
+ok 18 - new with no assembly, multiple available
+ok 19 - new with assembly, multiple available
+ok 20 - new, mismatch assembly
+ok 21 - root_dir
+ok 22 - dir
+ok 23 - info
+ok 24 - version_data
+ok 25 - get_all_AnnotationSources
+ok 26 - get_all_AnnotationSources return type
+ok 27 - get_all_AnnotationSources count
+ok 28 - first AnnotationSource is Transcript type
+ok 29 - version_data added to annotation source
+ok 30 - new with regulatory
+ok 31 - get_all_AnnotationSources with regulatory
+ok 32 - get_all_AnnotationSources with regulatory count
+ok 33 - second AnnotationSource is RegFeat type
+ok 34 - cell types added from info
+ok 35 - new with variation
+ok 36 - get_all_AnnotationSources with variation
+ok 37 - get_all_AnnotationSources with variation count
+ok 38 - second AnnotationSource is Variation type
+ok 39 - get_all_AnnotationSources - gnomad available
+ok 40 - get_all_AnnotationSources - gnomad not available
+ok 41 - new with both
+ok 42 - get_all_AnnotationSources with both
+ok 43 - get_all_AnnotationSources with both - types
+ok 44 - VariationTabix type
+1..44
+ok
+t/Config.t ......................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Config;
+ok 2 - new is defined
+ok 3 - check class
+ok 4 - new with invalid arg
+ok 5 - param get
+ok 6 - param set
+ok 7 - param without key
+ok 8 - read_config_from_file no file given
+ok 9 - read_config_from_file invalid file given
+ok 10 - read_config_from_file ok
+ok 11 - read_config_from_file basic
+ok 12 - quoted string with spaces
+ok 13 - read_config_from_file flag not allowed multiple
+ok 14 - read_config_from_file flag list preserved comma-separated
+ok 15 - read_config_from_file flag allowed multiple
+ok 16 - read_config_from_file flag multiples added not overwritten
+ok 17 - defaults applied
+ok 18 - empty array ref (cell_type) does not trigger option set
+ok 19 - option sets, one in multiple out
+ok 20 - option sets, multiple in same out 1
+ok 21 - option sets, multiple in same out 2
+ok 22 - option sets, substitution
+ok 23 - option sets, multiple substitution
+ok 24 - config file
+ok 25 - ini file
+ok 26 - list conversion
+ok 27 - individual_zyg - list conversion
+ok 28 - deprecated no replacement
+ok 29 - invalid value for key
+ok 30 - incompatible params
+ok 31 - incompatible pass with safe
+ok 32 - required params
+ok 33 - no database/cache/offline
+2026-07-22 10:28:34 - Read configuration from environment variables
+ok 34 - STDOUT output turns on quiet
+ok 35 - STDOUT output turns off verbose
+ok 36 - everything with database turns off af_1kg
+ok 37 - everything with database turns off af_gnomad
+ok 38 - everything with database turns off pubmed
+1..38
+ok
+t/FilterSet.t ...................................... 
+ok 1 - use Bio::EnsEMBL::VEP::FilterSet;
+ok 2 - new ref
+ok 3 - defined_and_non_empty - 1
+ok 4 - defined_and_non_empty - 0
+ok 5 - defined_and_non_empty - string
+ok 6 - defined_and_non_empty - empty string
+ok 7 - defined_and_non_empty - undef
+ok 8 - defined_and_non_empty - no value
+ok 9 - create_filter_node - no params
+ok 10 - create_filter_node - logic
+ok 11 - create_filter_node - components
+ok 12 - finish_filter_node - basic
+ok 13 - finish_filter_node - dont overwrite op
+ok 14 - finish_filter_node - no value changes op 1
+ok 15 - finish_filter_node - no value changes op 2
+ok 16 - finish_filter_node - parent gets deleted
+ok 17 - finish_filter_node - in operator throws on no value
+ok 18 - finish_filter_node - in operator throws on invalid value
+ok 19 - finish_filter_node - in operator with list
+ok 20 - finish_filter_node - in operator with file
+ok 21 - parse_filters - empty
+ok 22 - parse_filters - basic
+ok 23 - parse_filters - basic not
+ok 24 - parse_filters - basic, two filters
+ok 25 - parse_filters - basic with op and value
+ok 26 - parse_filters - op synonym 1
+ok 27 - parse_filters - op synonym 2
+ok 28 - parse_filters - two with logic (and)
+ok 29 - parse_filters - two with logic (or)
+ok 30 - parse_filters - two, one short one full 1
+ok 31 - parse_filters - two, one short one full 2
+ok 32 - parse_filters - parentheses basic
+ok 33 - parse_filters - parentheses basic with not
+ok 34 - parse_filters - parentheses complex
+ok 35 - parse_filters - incomplete parentheses 1
+ok 36 - parse_filters - incomplete parentheses 2
+ok 37 - parse_filters - incomplete parentheses 3
+ok 38 - parse_filters - incomplete parentheses 4
+ok 39 - parse_filters - invalid operator
+ok 40 - new with filter
+ok 41 - evaluate - ex - pass
+ok 42 - evaluate - ex - pass 0
+ok 43 - evaluate - ex - fail missing
+ok 44 - evaluate - ex - fail undef
+ok 45 - evaluate - nex - pass
+ok 46 - evaluate - nex - fail 0
+ok 47 - evaluate - nex - pass undef
+ok 48 - evaluate - eq - pass
+ok 49 - evaluate - eq - fail with containing
+ok 50 - evaluate - eq - fail 0
+ok 51 - evaluate - eq - fail missing
+ok 52 - evaluate - eq - fail undef
+ok 53 - evaluate - ne - pass
+ok 54 - evaluate - ne - fail 0
+ok 55 - evaluate - ne - fail missing
+ok 56 - evaluate - ne - fail undef
+ok 57 - evaluate - gt - pass
+ok 58 - evaluate - gt - fail 0
+ok 59 - evaluate - gt - fail match
+ok 60 - evaluate - gt - fail negative
+ok 61 - evaluate - gt - fail scientific
+ok 62 - evaluate - gt - pass scientific
+ok 63 - evaluate - gt - fail decimal
+ok 64 - evaluate - gt - pass decimal
+ok 65 - evaluate - gt - fail missing
+ok 66 - evaluate - gt - fail undef
+ok 67 - evaluate - gt - pass multiple values
+ok 68 - evaluate - gt - fail multiple values
+ok 69 - evaluate - gte - pass
+ok 70 - evaluate - gte - fail 0
+ok 71 - evaluate - gte - pass match
+ok 72 - evaluate - gte - fail negative
+ok 73 - evaluate - gte - fail scientific
+ok 74 - evaluate - gte - pass scientific
+ok 75 - evaluate - gte - fail decimal
+ok 76 - evaluate - gte - pass decimal
+ok 77 - evaluate - gte - fail missing
+ok 78 - evaluate - gte - fail undef
+ok 79 - evaluate - lt - pass
+ok 80 - evaluate - lt - pass 0
+ok 81 - evaluate - lt - fail match
+ok 82 - evaluate - lt - pass negative
+ok 83 - evaluate - lt - fail scientific
+ok 84 - evaluate - lt - pass scientific
+ok 85 - evaluate - lt - fail decimal
+ok 86 - evaluate - lt - pass decimal
+ok 87 - evaluate - lt - fail missing
+ok 88 - evaluate - lt - fail undef
+ok 89 - evaluate - lte - pass
+ok 90 - evaluate - lte - pass 0
+ok 91 - evaluate - lte - pass match
+ok 92 - evaluate - lte - pass negative
+ok 93 - evaluate - lte - fail scientific
+ok 94 - evaluate - lte - pass scientific
+ok 95 - evaluate - lte - fail decimal
+ok 96 - evaluate - lte - pass decimal
+ok 97 - evaluate - lte - fail missing
+ok 98 - evaluate - lte - fail undef
+ok 99 - evaluate - re - pass match
+ok 100 - evaluate - re - pass part match 1
+ok 101 - evaluate - re - pass part match 2
+ok 102 - evaluate - re - pass with & character
+ok 103 - evaluate - re - fail
+ok 104 - evaluate - re - fail missing
+ok 105 - evaluate - re - fail undef
+ok 106 - evaluate - re - . wildcard - pass
+ok 107 - evaluate - re - . wildcard - fail no char
+ok 108 - evaluate - re - . wildcard - fail >1 char
+ok 109 - evaluate - re - .* wildcard - pass
+ok 110 - evaluate - re - .* wildcard - pass no char
+ok 111 - evaluate - re - .* wildcard - pass >1 char
+ok 112 - evaluate - re - .+ wildcard - pass
+ok 113 - evaluate - re - .+ wildcard - fail no char
+ok 114 - evaluate - re - .+ wildcard - pass >1 char
+ok 115 - evaluate - re - charset - pass
+ok 116 - evaluate - re - charset - fail no char
+ok 117 - evaluate - re - charset - fail char not in set
+ok 118 - evaluate - re - charset - fail num
+ok 119 - evaluate - nre - pass
+ok 120 - evaluate - nre - fail part match 1
+ok 121 - evaluate - nre - fail part match 2
+ok 122 - evaluate - re - fail with & character
+ok 123 - evaluate - nre - pass near match
+ok 124 - evaluate - nre - fail missing
+ok 125 - evaluate - nre - fail undef
+ok 126 - evaluate - in list - pass 1
+ok 127 - evaluate - in list - pass 2
+ok 128 - evaluate - in list - fail
+ok 129 - evaluate - in list - fail missing
+ok 130 - evaluate - in list - fail undef
+ok 131 - evaluate - in file - pass 1
+ok 132 - evaluate - in file - pass 2
+ok 133 - evaluate - in file - fail
+ok 134 - evaluate - in file - fail missing
+ok 135 - evaluate - in file - fail undef
+ok 136 - evaluate - and - pass
+ok 137 - evaluate - and - fail
+ok 138 - evaluate - or - pass 1
+ok 139 - evaluate - or - pass 2
+ok 140 - evaluate - or - fail
+ok 141 - evaluate - not - pass
+ok 142 - evaluate - not - pass undef
+ok 143 - evaluate - not - fail
+ok 144 - evaluate - synonym - uc
+ok 145 - evaluate - synonym - lc
+ok 146 - evaluate - synonym - underscore
+ok 147 - evaluate - value is field - pass
+ok 148 - evaluate - value is field - pass synonym
+ok 149 - evaluate - value is field - fail
+ok 150 - evaluate - value is field - fail missing
+ok 151 - empty synonyms without limit_synonym_search
+ok 152 - undef synonym with limit_synonym_search
+ok 153 # skip No local database configured
+ok 154 # skip No local database configured
+ok 155 # skip No local database configured
+ok 156 # skip No local database configured
+ok 157 # skip No local database configured
+ok 158 # skip No local database configured
+ok 159 # skip No local database configured
+ok 160 # skip No local database configured
+1..160
+ok
+t/Haplo_AnnotationSource_Cache_Transcript.t ........ 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::Haplo::AnnotationSource::Cache::Transcript;
+ok 3 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+ok 4 - new is defined
+ok 5 - new ref
+ok 6 - fetch before populated empty
+ok 7 - _tree_coords_filename
+ok 8 - fetch after populated
+ok 9 - input buffer next count
+ok 10 - annotate_InputBuffer - ref
+ok 11 - annotate_InputBuffer - stable_ids
+ok 12 - annotate_InputBuffer - TH hexes
+ok 13 - annotate_InputBuffer - PH diffs have sift/poly
+ok 14 - with filter - stable_ids
+1..14
+ok
+t/Haplo_AnnotationSource_Database_Transcript.t ..... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 # skip No local database configured or Set::IntervalTree not installed
+ok 3 # skip No local database configured or Set::IntervalTree not installed
+ok 4 # skip No local database configured or Set::IntervalTree not installed
+ok 5 # skip No local database configured or Set::IntervalTree not installed
+ok 6 # skip No local database configured or Set::IntervalTree not installed
+ok 7 # skip No local database configured or Set::IntervalTree not installed
+ok 8 # skip No local database configured or Set::IntervalTree not installed
+ok 9 # skip No local database configured or Set::IntervalTree not installed
+ok 10 # skip No local database configured or Set::IntervalTree not installed
+ok 11 # skip No local database configured or Set::IntervalTree not installed
+ok 12 # skip No local database configured or Set::IntervalTree not installed
+1..12
+ok
+WARNING: Ignoring 'chromosome' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
+WARNING: Ignoring 'biological_region' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
+WARNING: Ignoring 'three_prime_UTR' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
+WARNING: Ignoring 'five_prime_UTR' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
+t/Haplo_AnnotationSource_File_GFF.t ................ 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 3 - use Bio::EnsEMBL::VEP::Haplo::AnnotationSource::File::GFF;
+ok 4 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+ok 5 - new is defined
+ok 6 - new ref
+ok 7 - get TranscriptTree
+ok 8 - fetch before populated empty
+ok 9 - fetch after populated
+ok 10 - input buffer next count
+ok 11 - annotate_InputBuffer - ref
+ok 12 - annotate_InputBuffer - stable_ids
+ok 13 - annotate_InputBuffer - TH hexes
+1..13
+ok
+WARNING: Ignoring 'three_prime_utr' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gtf.gz GFF/GTF file. This feature_type is not supported in VEP.
+WARNING: Ignoring 'start_codon' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gtf.gz GFF/GTF file. This feature_type is not supported in VEP.
+WARNING: Ignoring 'five_prime_utr' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/test.gtf.gz GFF/GTF file. This feature_type is not supported in VEP.
+t/Haplo_AnnotationSource_File_GTF.t ................ 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 3 - use Bio::EnsEMBL::VEP::Haplo::AnnotationSource::File::GTF;
+ok 4 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+ok 5 - new is defined
+ok 6 - new ref
+ok 7 - get TranscriptTree
+ok 8 - fetch before populated empty
+ok 9 - fetch after populated
+ok 10 - input buffer next count
+ok 11 - annotate_InputBuffer - ref
+ok 12 - annotate_InputBuffer - stable_ids
+ok 13 - annotate_InputBuffer - TH hexes
+1..13
+ok
+t/Haplo_InputBuffer.t .............................. 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::Haplo::InputBuffer;
+ok 3 - new without transcript_tree
+ok 4 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+2026-07-22 10:28:36 - INFO: Scanning cache for transcript coordinates. This may take a while but will only run once per cache.
+ok 5 - new
+ok 6 - transcript_tree
+ok 7 - get_max_from_tree
+ok 8 - get_max_from_tree missed
+ok 9 - next - count
+ok 10 - next - first element
+ok 11 - next - last element
+ok 12 - next again - first element
+ok 13 - next again 2
+ok 14 - next again 3 empty
+ok 15 - The 3 entries from chromosome 21 are in the same buffer
+ok 16 - The entry from chromosome 22 is in a different buffer
+ok 17 - The 3 entries from chr21 are in the same buffer
+ok 18 - The entry from chr22 is in a different buffer
+1..18
+ok
+t/Haplo_Parser_VCF.t ............................... 
+ok 1 - use Bio::EnsEMBL::VEP::Haplo::Parser::VCF;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new
+ok 5 - ref
+ok 6 - no file
+ok 7 - samples
+ok 8 - no samples
+ok 9 - parser ref
+ok 10 - next - accounts for header fetch
+ok 11 - next again
+ok 12 - validate chr - chromosome not in valid list
+ok 13 - validate chr message - chromosome not in valid list
+ok 14 - validate chr - genomic position not valid
+ok 15 - validate chr message - genomic position invalid
+1..15
+ok
+t/Haplo_Runner.t ................................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+ok 3 - new is defined
+ok 4 - check class
+ok 5 - haplo param set by new
+ok 6 - get_all_AnnotationSources
+ok 7 - setup_db_connection
+ok 8 - valid_chromosomes
+ok 9 - get_Parser
+ok 10 - get_TranscriptTree
+ok 11 - get_InputBuffer
+ok 12 - haplotype_frequencies - no hex header found
+ok 13 - haplotype_frequencies - no hex column found
+ok 14 - haplotype_frequencies
+ok 15 - haplotype_frequencies - check data 1
+ok 16 - haplotype_frequencies - check data 2
+ok 17 - haplotype_frequencies - no header
+ok 18 - haplotype_frequencies - no header - check data
+ok 19 - init
+ok 20 - run - check output
+ok 21 - run with haplotype_frequencies
+ok 22 - run with haplotype_frequencies - no header
+ok 23 - run - use input_data
+ok 24 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+ok 25 - JSON output
+ok 26 - warning message because of empty output
+1..26
+ok
+t/InputBuffer.t .................................... 
+ok 1 - use Bio::EnsEMBL::VEP::InputBuffer;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 4 - get new config object
+ok 5 - get parser object
+ok 6 - check class
+ok 7 - _buffer
+ok 8 - pre_buffer
+ok 9 - rejoin_required
+ok 10 - reset_buffer
+ok 11 - reset_pre_buffer
+ok 12 - next ref
+ok 13 - next size
+ok 14 - next first variant
+ok 15 - next again
+ok 16 - next again size
+ok 17 - next again first variant
+ok 18 - A reference of type 'HASH' isa 'HASH'
+ok 19 - min_max
+ok 20 - min_max with insertion
+ok 21 - interval_tree
+ok 22 - interval_tree fetch
+ok 23 - get_overlapping_vfs 1
+ok 24 - get_overlapping_vfs 2
+ok 25 - get_overlapping_vfs 3
+ok 26 - get_overlapping_vfs 4
+ok 27 - get_overlapping_vfs 5
+ok 28 - get_overlapping_vfs 6
+ok 29 - get_overlapping_vfs 7
+ok 30 - get_overlapping_vfs 8
+ok 31 - get_overlapping_vfs - big SV 1
+ok 32 - get_overlapping_vfs - big SV 2
+ok 33 - get_overlapping_vfs - ins 1
+ok 34 - get_overlapping_vfs - ins 2
+ok 35 - get_overlapping_vfs - ins 3
+ok 36 - get_overlapping_vfs no tree 1
+ok 37 - get_overlapping_vfs no tree 2
+ok 38 - get_overlapping_vfs no tree 3
+ok 39 - get_overlapping_vfs no tree 4
+ok 40 - get_overlapping_vfs no tree 5
+ok 41 - get_overlapping_vfs no tree 6
+ok 42 - get_overlapping_vfs no tree 7
+ok 43 - get_overlapping_vfs no tree 8
+ok 44 - get_overlapping_vfs no tree - big SV 1
+ok 45 - get_overlapping_vfs no tree - big SV 2
+ok 46 - get_overlapping_vfs no tree - ins 1
+ok 47 - get_overlapping_vfs no tree - ins 2
+ok 48 - get_overlapping_vfs no tree - ins 3
+ok 49 - new with vfs - check class
+ok 50 - new with vfs - next ref
+ok 51 - new with vfs - next size
+ok 52 - new with vfs - next first variant
+ok 53 - next again
+ok 54 - next again size
+ok 55 - no slice before finish_annotation
+ok 56 - finish_annotation gives intergenic_variant
+ok 57 - finish_annotation adds slice
+ok 58 - next again - finished
+ok 59 - finished buffer empty after reset_buffer
+ok 60 - split buffer at chromosome change - count
+ok 61 - split buffer at chromosome change - check first
+ok 62 - split buffer at chromosome change - check next put into pre_buffer
+ok 63 - split buffer at chromosome change - count 2
+ok 64 - split buffer at chromosome change - check first 2
+ok 65 - split buffer at chromosome change - check next put into pre_buffer 2
+ok 66 - split buffer at chromosome change - count 3
+ok 67 - split buffer at chromosome change - check first 3
+ok 68 - split buffer at chromosome change - check pre_buffer now empty
+ok 69 - split buffer at chromosome change - final next leaves everything empty
+ok 70 - minimal - split_variants
+ok 71 - minimal - rejoin_required
+ok 72 - minimal - doesnt affect non-minimisable
+ok 73 - die - Exiting the program as the maximun number of unsorted variants as been reached (5).
+ok 74 - Skip the count for non ordered variants with the flag 'no_check_variants_order'
+ok 75 - Skip the count for non ordered variants with the flag 'hgvs'
+ok 76 - Pass non ordered variants with location differences larger (100nt)
+1..76
+ok
+t/OutputFactory.t .................................. 
+ok 1 - use Bio::EnsEMBL::VEP::OutputFactory;
+ok 2 - use Bio::EnsEMBL::VEP::Runner;
+ok 3 - new is defined
+ok 4 - check class
+ok 5 - init
+ok 6 - new is defined
+ok 7 - check class
+ok 8 - add_colocated_variant_info
+ok 9 - add_colocated_variant_info - _freq_check_freqs
+ok 10 - add_colocated_variant_info - pheno, clin_sig, multiple
+ok 11 - add_colocated_variant_info - pubmed
+ok 12 - add_colocated_variant_info - somatic
+ok 13 - VariationFeature_to_output_hash
+ok 14 - VariationFeature_to_output_hash - variant_class
+ok 15 - VariationFeature_to_output_hash - overlapping_svs
+ok 16 - VariationFeature_to_output_hash - individual
+ok 17 - VariationFeature_to_output_hash - custom annotations
+ok 18 - VariationFeature_to_output_hash - nearest
+ok 19 - VariationFeature_to_output_hash - ambiguity
+ok 20 - pick_worst_VariationFeatureOverlapAllele - empty list
+ok 21 - pick_worst_VariationFeatureOverlapAllele - default
+ok 22 - pick_worst_VariationFeatureOverlapAllele - rank
+ok 23 - pick_worst_VariationFeatureOverlapAllele - appris
+ok 24 - pick_worst_VariationFeatureOverlapAllele - canonical,biotype
+ok 25 - pick_worst_VariationFeatureOverlapAllele - canonical - bail out
+ok 26 - pick_VariationFeatureOverlapAllele_per_gene
+ok 27 - pick_VariationFeatureOverlapAllele_per_gene - change pick_order
+ok 28 - filter_VariationFeatureOverlapAlleles - empty arrayref
+ok 29 - filter_VariationFeatureOverlapAlleles - no filter
+ok 30 - filter_VariationFeatureOverlapAlleles - pick
+ok 31 - filter_VariationFeatureOverlapAlleles - per_gene
+ok 32 - filter_VariationFeatureOverlapAlleles - flag_pick count
+ok 33 - filter_VariationFeatureOverlapAlleles - flag_pick check
+ok 34 - filter_VariationFeatureOverlapAlleles - pick_allele
+ok 35 - filter_VariationFeatureOverlapAlleles - flag_pick_allele count
+ok 36 - filter_VariationFeatureOverlapAlleles - flag_pick_allele check
+ok 37 - filter_VariationFeatureOverlapAlleles - pick_allele_gene
+ok 38 - filter_VariationFeatureOverlapAlleles - flag_pick_allele_gene count
+ok 39 - filter_VariationFeatureOverlapAlleles - flag_pick_allele_gene check
+ok 40 - get_all_VariationFeatureOverlapAlleles
+ok 41 - get_all_VariationFeatureOverlapAlleles - coding_only
+ok 42 - get_all_VariationFeatureOverlapAlleles - no_intergenic off
+ok 43 - get_all_VariationFeatureOverlapAlleles - no_intergenic on
+ok 44 - get_all_VariationFeatureOverlapAlleles - process_ref_homs off
+ok 45 - get_all_VariationFeatureOverlapAlleles - process_ref_homs on
+ok 46 - summary_only - most_severe
+ok 47 - summary_only - most_severe
+ok 48 - VariationFeatureOverlapAllele_to_output_hash
+ok 49 - VariationFeatureOverlapAllele_to_output_hash - allele_number
+ok 50 - VariationFeatureOverlapAllele_to_output_hash - pick
+ok 51 - VariationFeatureOverlapAllele_to_output_hash - hgvsg
+ok 52 - VariationFeatureOverlapAllele_to_output_hash - custom annotations
+ok 53 - add_colocated_frequency_data - af
+ok 54 - add_colocated_frequency_data - af absent allele
+ok 55 - add_colocated_frequency_data - af other allele
+ok 56 - add_colocated_frequency_data - af_1kg
+ok 57 - add_colocated_frequency_data - rev strand
+ok 58 - add_colocated_frequency_data - af_gnomad
+ok 59 - add_colocated_frequency_data - max_af
+ok 60 - BaseTranscriptVariationAllele_to_output_hash
+ok 61 - BaseTranscriptVariationAllele_to_output_hash
+ok 62 - BaseTranscriptVariationAllele_to_output_hash - check transcript FLAGS
+ok 63 - BaseTranscriptVariationAllele_to_output_hash - exon numbers
+ok 64 - BaseTranscriptVariationAllele_to_output_hash - intron numbers
+ok 65 - BaseTranscriptVariationAllele_to_output_hash - domains
+ok 66 - BaseTranscriptVariationAllele_to_output_hash - symbol
+ok 67 - BaseTranscriptVariationAllele_to_output_hash - gene_phenotype
+ok 68 - BaseTranscriptVariationAllele_to_output_hash - ccds
+ok 69 - BaseTranscriptVariationAllele_to_output_hash - protein
+ok 70 - BaseTranscriptVariationAllele_to_output_hash - canonical
+ok 71 - BaseTranscriptVariationAllele_to_output_hash - biotype
+ok 72 - BaseTranscriptVariationAllele_to_output_hash - tsl
+ok 73 - BaseTranscriptVariationAllele_to_output_hash - xref_refseq
+ok 74 - BaseTranscriptVariationAllele_to_output_hash - uniprot
+ok 75 - BaseTranscriptVariationAllele_to_output_hash - uniprot
+ok 76 - BaseTranscriptVariationAllele_to_output_hash - miRNA stem
+ok 77 - BaseTranscriptVariationAllele_to_output_hash - miRNA stem insertion
+ok 78 - BaseTranscriptVariationAllele_to_output_hash - miRNA loop
+2026-07-22 10:28:48 - INFO: BAM-edited cache detected, enabling --use_transcript_ref; use --use_given_ref to override this
+ok 79 - BaseTranscriptVariationAllele_to_output_hash - REFSEQ_MATCH
+ok 80 - BaseTranscriptVariationAllele_to_output_hash - REFSEQ_MATCH merged
+ok 81 - BaseTranscriptVariationAllele_to_output_hash - merged source 1
+ok 82 - BaseTranscriptVariationAllele_to_output_hash - merged source 2
+ok 83 - TranscriptVariationAllele_to_output_hash
+ok 84 - TranscriptVariationAllele_to_output_hash - total_length
+ok 85 - TranscriptVariationAllele_to_output_hash - HGVSc
+ok 86 - TranscriptVariationAllele_to_output_hash - HGVSp
+ok 87 - TranscriptVariationAllele_to_output_hash - non-coding
+ok 88 - TranscriptVariationAllele_to_output_hash -> shift_length
+ok 89 - TranscriptVariationAllele_to_output_hash - sift p
+ok 90 - TranscriptVariationAllele_to_output_hash - sift s
+ok 91 - TranscriptVariationAllele_to_output_hash - sift b
+ok 92 - TranscriptVariationAllele_to_output_hash - polyphen p
+ok 93 - TranscriptVariationAllele_to_output_hash - polyphen s
+ok 94 - TranscriptVariationAllele_to_output_hash - polyphen b
+ok 95 - RegulatoryFeatureVariationAllele_to_output_hash
+ok 96 - RegulatoryFeatureVariationAllele_to_output_hash - cell_type
+ok 97 - MotifFeatureVariationAllele_to_output_hash
+ok 98 - IntergenicVariationAllele_to_output_hash
+ok 99 - SV - VariationFeature_to_output_hash
+ok 100 - SV - pick_worst_VariationFeatureOverlapAllele
+ok 101 - SV - pick_VariationFeatureOverlapAllele_per_gene
+ok 102 - SV - filter_StructuralVariationOverlapAlleles - no filter
+ok 103 - SV - filter_StructuralVariationOverlapAlleles - pick
+ok 104 - SV - filter_StructuralVariationOverlapAlleles - pic_allele
+ok 105 - SV - filter_StructuralVariationOverlapAlleles - flag_pick count
+ok 106 - SV - filter_StructuralVariationOverlapAlleles - flag_pick check
+ok 107 - SV - filter_StructuralVariationOverlapAlleles - flag_pick_allele count
+ok 108 - SV - filter_StructuralVariationOverlapAlleles - flag_pick_allele check
+ok 109 - SV - filter_StructuralVariationOverlapAlleles - flag_pick_allele_gene count
+ok 110 - SV - filter_StructuralVariationOverlapAlleles - flag_pick_allele_gene check
+ok 111 - SV - get_all_StructuralVariationOverlapAlleles
+ok 112 - SV - get_all_StructuralVariationOverlapAlleles - coding_only
+ok 113 - SV - get_all_StructuralVariationOverlapAlleles - no_intergenic off
+ok 114 - SV - get_all_StructuralVariationOverlapAlleles - no_intergenic on
+ok 115 - SV - BaseStructuralVariationOverlapAllele_to_output_hash
+ok 116 - SV - BaseStructuralVariationOverlapAllele_to_output_hash - allele_number
+ok 117 - SV - StructuralVariationOverlapAllele_to_output_hash
+ok 118 - SV - StructuralVariationOverlapAllele_to_output_hash
+ok 119 - SV - StructuralVariationOverlapAllele_to_output_hash - flag_pick
+ok 120 - SV - StructuralVariationOverlapAllele_to_output_hash - MotifFeature
+ok 121 - SV - StructuralVariationOverlapAllele_to_output_hash - RegulatoryFeature
+ok 122 - SV - StructuralVariationOverlapAllele_to_output_hash - RegulatoryFeature cell_type
+ok 123 - SV - IntergenicStructuralVariationAllele_to_output_hash
+ok 124 - SV - TranscriptStructuralVariationAllele_to_output_hash
+ok 125 - minimal - expanded count
+ok 126 - minimal - expanded first allele string
+ok 127 - minimal - rejoined count
+ok 128 - minimal - rejoined allele string
+ok 129 - minimal - output hashes
+ok 130 - minimal - intergenic - expanded count
+ok 131 - minimal - intergenic - rejoined count
+ok 132 - base_variation_feature_overlap is set after rejoin
+ok 133 - base_variation_feature_overlap is set after rejoin
+ok 134 - base_variation_feature_overlap is set after rejoin
+ok 135 - minimal - intergenic - display_consequence check
+ok 136 - minimal - allele num where two alts resolve to same allele (check allele)
+ok 137 - minimal - allele num where two alts resolve to same allele (frameshift)
+ok 138 - minimal - allele num where two alts resolve to same allele (missense)
+ok 139 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 140 - get_custom_headers
+ok 141 - get_multiple_custom_headers - different short_name
+ok 142 - get_multiple_custom_headers - same short_name
+ok 143 - get_plugin_headers
+ok 144 - run_plugins
+ok 145 - run_plugins - skip
+ok 146 - run_plugins - return is not hash
+ok 147 - run_plugins - return is not hash message
+ok 148 - run_plugins - new fails
+ok 149 - run_plugins - new fails message
+ok 150 - HGVS 3prime shifting - ON
+2026-07-22 10:28:48 - INFO: --shift_hgvs has been set to zero, setting shift_3prime to 0
+ok 151 - HGVS 3prime shifting - OFF
+ok 152 - reset_shifted_positions
+ok 153 - VariationFeature_to_output_hash - individual_zyg
+ok 154 - VariationFeature_to_output_hash - individual_zyg wrong sample name
+ok 155 - VariationFeature_to_output_hash - individual_zyg correct sample name
+ok 156 - VariationFeature_to_output_hash - individual_zyg alt = .
+ok 157 - VariationFeatureOverlapAllele_to_output_hash - hgvsg for multi-allelic
+ok 158 - VariationFeatureOverlapAllele_to_output_hash - hgvsg for multi-allelic
+1..158
+ok
+t/OutputFactory_JSON.t ............................. 
+ok 1 - use Bio::EnsEMBL::VEP::OutputFactory;
+ok 2 - use JSON;
+ok 3 - use Bio::EnsEMBL::VEP::OutputFactory::JSON;
+ok 4 - use Bio::EnsEMBL::VEP::Config;
+ok 5 - use Bio::EnsEMBL::VEP::Runner;
+ok 6 - check class
+ok 7 - headers - empty
+ok 8 - add_VariationFeatureOverlapAllele_info
+ok 9 - add_colocated_variant_info_JSON
+ok 10 - add_colocated_variant_info_JSON_multi
+ok 11 - get_all_lines_by_InputBuffer - count
+ok 12 - get_all_lines_by_InputBuffer - check first
+ok 13 - get_all_lines_by_InputBuffer - regulatory information
+ok 14 - get_all_lines_by_InputBuffer - everything
+ok 15 - minimal - expanded count
+ok 16 - minimal - expanded first allele string
+ok 17 - minimal - rejoined count
+ok 18 - minimal - rejoined allele string
+ok 19 - minimal - get_all_lines_by_InputBuffer
+2026-07-22 10:28:53 - INFO: BAM-edited cache detected, enabling --use_transcript_ref; use --use_given_ref to override this
+ok 20 - get_all_lines_by_InputBuffer - refseq used_ref
+ok 21 - use total_length 1
+ok 22 - check coordinates when variant is outside of feature
+ok 23 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 24 - custom_annotations
+ok 25 - custom_annotations overlap
+1..25
+ok
+t/OutputFactory_Tab.t .............................. 
+ok 1 - use Bio::EnsEMBL::VEP::OutputFactory::Tab;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - use Bio::EnsEMBL::VEP::Runner;
+ok 4 - check class
+ok 5 - fields
+ok 6 - headers
+ok 7 - --merged and --custom dont duplicate SOURCE header
+ok 8 - headers - plugin
+ok 9 - output_hash_to_line - empty
+ok 10 - output_hash_to_line - test 0
+ok 11 - get_all_lines_by_InputBuffer - count
+ok 12 - get_all_lines_by_InputBuffer - check first
+ok 13 - get_all_lines_by_InputBuffer - check last
+ok 14 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 15 - get_all_lines_by_InputBuffer - custom
+ok 16 - get_all_lines_by_InputBuffer - everything
+ok 17 - get_all_lines_by_InputBuffer - configure fields
+1..17
+ok
+t/OutputFactory_VCF.t .............................. 
+ok 1 - use Bio::EnsEMBL::VEP::OutputFactory::VCF;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - use Bio::EnsEMBL::VEP::Runner;
+ok 4 - check class
+ok 5 - headers
+ok 6 - headers - plugin
+ok 7 - headers - BAM_EDIT
+ok 8 - fields - default
+ok 9 - fields - flag on
+ok 10 - fields - --merged and --custom dont duplicate SOURCE
+ok 11 - fields - user-defined
+ok 12 - output_hash_to_vcf_info_chunk - empty
+ok 13 - output_hash_to_vcf_info_chunk
+ok 14 - output_hash_to_vcf_info_chunk - allele revcomped
+ok 15 - output_hash_to_vcf_info_chunk - "-" erased
+ok 16 - output_hash_to_vcf_info_chunk - "-" intact for Allele
+ok 17 - output_hash_to_vcf_info_chunk - ";" uri encoded
+ok 18 - output_hash_to_vcf_info_chunk - "|" converted
+ok 19 - output_hash_to_vcf_info_chunk - "," converted
+ok 20 - output_hash_to_vcf_info_chunk - whitespace converted
+ok 21 - output_hash_to_vcf_info_chunk - '0' kept
+ok 22 - output_hash_to_vcf_info_chunk - 0 kept
+ok 23 - output_hash_to_vcf_info_chunk - empty string provided
+ok 24 - get_all_lines_by_InputBuffer - count
+ok 25 - get_all_lines_by_InputBuffer - check first
+ok 26 - get_all_lines_by_InputBuffer - check last
+ok 27 - get_all_lines_by_InputBuffer - incomplete VCF entry filled out
+ok 28 - get_all_lines_by_InputBuffer - invalid character conversion
+ok 29 - get_all_lines_by_InputBuffer - everything
+ok 30 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 31 - get_all_lines_by_InputBuffer - custom
+ok 32 - get_all_lines_by_InputBuffer - custom overlap
+ok 33 - test uploaded_allele flag
+ok 34 - non-VCF input
+ok 35 - non-VCF input - deletion
+ok 36 - trash existing CSQ 1
+ok 37 - trash existing CSQ 2
+ok 38 - trash existing CSQ 3
+ok 39 - keep existing CSQ
+ok 40 - dont trash BCSQ
+ok 41 - vcf_info_field
+ok 42 - headers (all but VEP) - from input test2
+ok 43 - headers (VEP header) - from input test2
+ok 44 - no consequences added
+ok 45 - SV converted to VCF retains END
+ok 46 - SV overlap percent and length available
+ok 47 - minimal - expanded count
+ok 48 - minimal - expanded first allele string
+ok 49 - minimal - rejoined count
+ok 50 - minimal - rejoined allele string
+ok 51 - headers - from input 1
+ok 52 - headers - from input 2
+ok 53 - headers - from input 3
+ok 54 - web_output - count lines
+ok 55 - web_output - check last
+ok 56 - web_output - allele truncation
+ok 57 - RefSeq MT transcripts are returned
+1..57
+ok
+t/OutputFactory_VEP_output.t ....................... 
+ok 1 - use Bio::EnsEMBL::VEP::OutputFactory::VEP_output;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - use Bio::EnsEMBL::VEP::Runner;
+ok 4 - check class
+ok 5 - fields
+ok 6 - field_order
+ok 7 - field_order - test add flag
+ok 8 - --merged and --custom dont duplicate SOURCE header
+ok 9 - headers
+ok 10 - headers - plugin
+ok 11 - output_hash_to_line - empty
+ok 12 - output_hash_to_line - test 0
+ok 13 - output_hash_to_line - test extra 1
+ok 14 - output_hash_to_line - test extra 2
+ok 15 - get_all_lines_by_InputBuffer - count
+ok 16 - get_all_lines_by_InputBuffer - check first
+ok 17 - get_all_lines_by_InputBuffer - check last
+ok 18 - get_all_lines_by_InputBuffer - everything
+ok 19 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 20 - get_all_lines_by_InputBuffer - custom
+1..20
+ok
+t/Parser.t ......................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser;
+ok 2 - new is defined
+ok 3 - check class
+ok 4 - use Bio::EnsEMBL::VEP::Config;
+ok 5 - file
+ok 6 - file STDIN
+ok 7 - file not exists
+ok 8 - line_number get
+ok 9 - line_number set
+ok 10 - headers
+ok 11 - detect_format - VCF
+ok 12 - gzipped VCF
+ok 13 - detect_format - gzipped VCF
+ok 14 - delimiter - set
+ok 15 - delimiter - get
+ok 16 - valid_chromosomes empty
+ok 17 - valid_chromosomes
+ok 18 - minimal
+ok 19 - minimal - trim both ends
+ok 20 - minimal - long trim
+ok 21 - get_SO_term - insertion
+ok 22 - get_SO_term - deletion
+ok 23 - get_SO_term - inversion
+ok 24 - get_SO_term - tandem_repeat
+ok 25 - get_SO_term - chromosome_breakpoint
+ok 26 - get_SO_term - mobile_element_deletion
+ok 27 - validate_svf - ok
+ok 28 - validate_svf - skip
+ok 29 - validate_vf - ok
+ok 30 - validate_vf - create variation_name
+ok 31 - validate_vf - chr list include
+ok 32 - validate_vf - chr list exclude
+ok 33 - validate_vf - uppercase allele_string
+ok 34 - have_chr - pass
+ok 35 - have_chr - remove chr
+ok 36 - have_chr - add chr
+ok 37 - have_chr - fail
+ok 38 - have_chr - M
+ok 39 - have_chr - convert M to MT
+ok 40 - load chr_synonyms
+ok 41 - have_chr - synonym
+ok 42 - chr unchanged after synonym check
+ok 43 - validate_vf - chromosome not in valid list 1
+ok 44 - validate_vf - chromosome not in valid list 2
+ok 45 - validate_vf - start is not number 1
+ok 46 - validate_vf - start is not number 2
+ok 47 - validate_vf - end is not number 1
+ok 48 - validate_vf - end is not number 2
+ok 49 - validate_vf - start > end+1 1
+ok 50 - validate_vf - start > end+1 2
+ok 51 - validate_vf - invalid allele string 1
+ok 52 - validate_vf - invalid allele string 2
+ok 53 - validate_vf - alleles look like an insertion 1
+ok 54 - validate_vf - alleles look like an insertion 2
+ok 55 - validate_vf - ref allele length doesnt match coords 1
+ok 56 - validate_vf - ref allele length doesnt match coords 1
+ok 57 - validate_vf - check_ref insertion
+ok 58 - validate_vf - check_ref ok
+ok 59 - validate_vf - check_ref fail
+ok 60 - validate_vf - check_ref fail msg
+ok 61 - validate_vf - check_ref long ok
+ok 62 - validate_vf - check_ref_fail_issue
+ok 63 - validate_vf - check_ref fail msg
+ok 64 - validate_vf - lookup_ref pass
+ok 65 - validate_vf - lookup_ref seq OK
+ok 66 - validate_vf - lookup_ref -ve pass
+ok 67 - validate_vf - lookup_ref -ve seq OK
+ok 68 - validate_vf - lookup_ref deletion pass
+ok 69 - validate_vf - lookup_ref deletion seq OK
+ok 70 - validate_vf - lookup_ref insertion
+ok 71 - validate_vf - lookup_ref insertion seq
+ok 72 - detect_format - VCF with *
+ok 73 - detect_format - VCF SV 1
+ok 74 - detect_format - VCF SV 2
+ok 75 - detect_format - VCF with Windows newline
+ok 76 - detect_format - ID
+ok 77 - detect_format - HGVSg
+ok 78 - detect_format - HGVSc
+ok 79 - detect_format - HGVSp
+ok 80 - detect_format - VEP_input
+ok 81 - detect_format - multiple spaces delimiter
+ok 82 - detect_format - VEP_input multiple
+ok 83 - detect_format - VEP_input SV
+ok 84 - detect_format - region
+ok 85 - detect_format - region SV
+ok 86 - detect_format - region chr
+ok 87 - detect_format - region CHR_
+ok 88 - detect_format - region no strand
+ok 89 - detect_format - region +ve strand
+ok 90 - detect_format - region -ve strand
+ok 91 - detect_format - region : separator
+ok 92 - detect_format - incomplete
+ok 93 - use string fed to FH as input data
+ok 94 - detect format of string
+ok 95 - FH position reset
+ok 96 - fail detect format from STDIN
+ok 97 - new with explicit format
+ok 98 - new with unknown format
+ok 99 - new with format detection
+ok 100 # skip No local database configured
+ok 101 # skip No local database configured
+ok 102 # skip No local database configured
+ok 103 # skip No local database configured
+ok 104 # skip No local database configured
+ok 105 # skip No local database configured
+ok 106 # skip No local database configured
+ok 107 # skip No local database configured
+ok 108 # skip No local database configured
+ok 109 # skip No local database configured
+ok 110 # skip No local database configured
+1..110
+ok
+t/Parser_CAID.t .................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::CAID;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - throw without DB
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+1..11
+ok
+t/Parser_HGVS.t .................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::HGVS;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - throw without DB
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+ok 15 # skip No local database configured
+ok 16 # skip No local database configured
+ok 17 # skip No local database configured
+ok 18 # skip No local database configured
+ok 19 # skip No local database configured
+ok 20 # skip No local database configured
+ok 21 # skip No local database configured
+ok 22 # skip No local database configured
+ok 23 # skip No local database configured
+ok 24 # skip No local database configured
+ok 25 # skip No local database configured
+ok 26 # skip No local database configured
+ok 27 # skip No local database configured
+1..27
+ok
+t/Parser_ID.t ...................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::ID;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - throw without DB
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+1..14
+ok
+t/Parser_Region.t .................................. 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::Region;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - new with --offline no --fasta fails
+ok 6 - new with --check_ref fails
+ok 7 - check class
+ok 8 - basic next test
+ok 9 - no strand
+ok 10 - negative strand (-1)
+ok 11 - insertion
+ok 12 - deletion
+ok 13 - SV dup
+ok 14 - SV inv
+ok 15 - SV del
+ok 16 - skip VF that fails validation
+ok 17 - dont skip VF that fails validation with dont_skip
+1..17
+ok
+t/Parser_SPDI.t .................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::SPDI;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - throw without DB
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+1..6
+ok
+t/Parser_VCF.t ..................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::VCF;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - check class
+ok 6 - parser
+ok 7 - headers
+ok 8 - next
+ok 9 - next again
+ok 10 - no shorting out 1
+ok 11 - no shorting out 2
+ok 12 - deletion
+ok 13 - insertion
+ok 14 - deletion ignore SVTYPE
+ok 15 - insertion ignore SVLEN
+ok 16 - multiple alts
+ok 17 - mixed types - different first base
+ok 18 - mixed types - same first base
+ok 19 - stubby
+ok 20 - non-variant
+ok 21 - non-variant without allow_non_variant
+ok 22 - *-type 1
+ok 23 - *-type 2 
+ok 24 - *-type with deletion
+ok 25 - *-type with insertion
+ok 26 - minimal
+ok 27 - minimal - multiple alts pass through here
+ok 28 - StructuralVariationFeature 1
+ok 29 - StructuralVariationFeature 2
+ok 30 - StructuralVariationFeature no SVTYPE
+ok 31 - StructuralVariationFeature SVLEN
+ok 32 - StructuralVariationFeature fuzzy
+ok 33 - StructuralVariationFeature del
+ok 34 - StructuralVariationFeature del without end or length
+ok 35 - StructuralVariationFeature del without end or length (2 variants)
+ok 36 - VariationFeature - SV skipped and SNV variant not skipped
+ok 37 - StructuralVariationFeature - longer than specified maximum
+ok 38 - StructuralVariationFeature - variant not skipped
+ok 39 - StructuralVariationFeature - skip CPX warning
+ok 40 - StructuralVariationFeature - Alu insertion
+ok 41 - StructuralVariationFeature - Mobile element insertion
+ok 42 - StructuralVariationFeature - Mobile element deletion
+ok 43 - StructuralVariationFeature - LINE1 deletion
+ok 44 - StructuralVariationFeature - CNV with only deletion allele
+ok 45 - StructuralVariationFeature - CNV with only duplication allele
+ok 46 - StructuralVariationFeature - CNV with multiple alleles
+ok 47 - StructuralVariationFeature - generic CNV
+ok 48 - StructuralVariationFeature - BND with unsupported INFO/END field
+ok 49 - StructuralVariationFeature - BND with information in ALT field
+ok 50 - StructuralVariationFeature - BND with information in INFO field
+ok 51 - StructuralVariationFeature - BND with incorrect INFO/END field
+ok 52 - StructuralVariationFeature - BND with undefined INFO/END field
+ok 53 - StructuralVariationFeature - generic tandem repeat
+ok 54 - VariationFeature - tandem repeat using RUC
+ok 55 - VariationFeature - tandem repeat using RB
+ok 56 - VariationFeature - tandem repeat with missing sequence
+ok 57 - VariationFeature - tandem repeat with missing END but with SVLEN
+ok 58 - VariationFeature - tandem repeat with missing END and multiple non-unique SVLEN
+ok 59 - VariationFeature - tandem repeat with missing END and multiple non-unique SVLEN warning
+ok 60 - VariationFeature - tandem repeat with missing END and SVLEN
+ok 61 - VariationFeature - tandem repeat omitting RN
+ok 62 - StructuralVariationFeature - tandem repeat is too large
+ok 63 - gp
+ok 64 - gp - not found
+ok 65 - individual 1
+ok 66 - individual 2
+ok 67 - individual 3
+ok 68 - individual - process_ref_homs
+ok 69 - individual - pass over entries with no valid GTs
+ok 70 - individual - insertion alleles mapped
+ok 71 - individual - deletion alleles mapped
+ok 72 - individual_zyg
+ok 73 - individual_zyg - return output even for lines with no valid GTs
+ok 74 - individual_zyg - return output for lines with valid GTs
+ok 75 - individual_zyg - return genotype_ind for lines with valid GTs
+ok 76 - individual_zyg - return genotype_ind for lines with homozygous ref GTs
+ok 77 - skip VF that fails validation
+ok 78 - dont skip VF that fails validation with dont_skip
+1..78
+ok
+t/Parser_VEP_input.t ............................... 
+ok 1 - use Bio::EnsEMBL::VEP::Parser::VEP_input;
+ok 2 - use Bio::EnsEMBL::VEP::Config;
+ok 3 - get new config object
+ok 4 - new is defined
+ok 5 - check class
+ok 6 - basic next test
+ok 7 - negative strand (-)
+ok 8 - negative strand (-1)
+ok 9 - stubby
+ok 10 - SV dup
+ok 11 - SV inv
+ok 12 - SV del 1
+ok 13 - SV del 2
+ok 14 - SV CN0
+ok 15 - SV CN2
+ok 16 - SV CN3
+ok 17 - skip VF that fails validation
+ok 18 - dont skip VF that fails validation with dont_skip
+1..18
+ok
+t/Runner.t ......................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Runner;
+ok 2 - new is defined
+ok 3 - check class
+ok 4 - get_all_AnnotationSources
+ok 5 - setup_db_connection
+ok 6 - valid_chromosomes
+ok 7 - get_Parser
+ok 8 - get_InputBuffer
+ok 9 - get_output_header_info - time
+ok 10 - get_output_header_info - api_version
+ok 11 - get_output_header_info - vep_version
+ok 12 - get_output_header_info - input_headers
+ok 13 - get_output_header_info - version_data
+ok 14 - get_OutputFactory
+ok 15 - init
+ok 16 - _buffer_to_output
+ok 17 - next_output_line
+ok 18 - get_output_file_handle - ref
+ok 19 - get_output_file_handle - fail on existing
+ok 20 - get_output_file_handle - stdout
+ok 21 - get_output_file_handle - compressed - missing binary
+ok 22 - use Bio::EnsEMBL::VEP::Utils;
+ok 23 - get_output_file_handle - compressed - ref
+ok 24 - get_output_file_handle - compressed - file exists
+ok 25 - get_output_file_handle - compressed - file is binary
+ok 26 - get_output_file_handle - compressed - file content
+ok 27 - get_output_file_handle - compressed stdout - ref
+ok 28 - get_output_file_handle - compressed stdout - wrote OK
+ok 29 - get_stats_file_handle - txt ref
+ok 30 - get_stats_file_handle - txt file exists
+ok 31 - get_stats_file_handle - fail on existing
+ok 32 - get_stats_file_handle - html ref
+ok 33 - get_stats_file_handle - html file exists
+ok 34 - get_stats_file_handle - extension handling 1
+ok 35 - get_stats_file_handle - extension handling 2
+ok 36 - get_stats_file_handle - extension handling 3
+ok 37 - get_stats_file_handle - extension handling 4
+ok 38 - get_skipped_variants_file_handle
+ok 39 - get_skipped_variants_file_handle - file created
+ok 40 - get_skipped_variants_file_handle - fail if files already exists
+ok 41 - get_skipped_variants_file_handle - force overwrite
+ok 42 - skipped_variants_file - run
+ok 43 - skipped_variants_file - warnings
+ok 44 - skipped_variants_file - count lines
+ok 45 - skipped_variants_file - lines content
+ok 46 - run - ok
+ok 47 - run - count lines
+ok 48 - run - lines content
+ok 49 - dump_stats - text exists
+ok 50 - run - count up/downstream (default)
+ok 51 - run - count up/downstream (10000)
+ok 52 - run - check distance
+ok 53 - run - count up/downstream (1000,2000)
+ok 54 - dump_stats - html exists
+ok 55 - Slice::seq after init
+ok 56 - Slice::seq after finish
+ok 57 - run with filter check pass over empty buffer
+ok 58 - run with filter check pass over empty buffer - forked
+ok 59 - get_all_Plugins - plugins may be undefined
+ok 60 - get_all_Plugins
+ok 61 - get_all_Plugins - failed to compile
+ok 62 - get_all_Plugins - failed to compile message
+ok 63 - get_all_Plugins - new fails
+ok 64 - get_all_Plugins - new fails message
+ok 65 - get_all_Plugins - new fails safe die
+ok 66 - get_all_Plugins - missing methods
+ok 67 - get_all_Plugins - missing methods message
+ok 68 - get_all_Plugins - missing methods safe die
+ok 69 - get_all_Plugins - switch on regulatory 1
+ok 70 - get_all_Plugins - switch on regulatory 2
+ok 71 - post_setup_checks - hgvs + offline with no fasta
+ok 72 - post_setup_checks - check_ref + offline with no fasta
+ok 73 - post_setup_checks - use_transcript_ref + offline with no fasta
+ok 74 - post_setup_checks - everything + offline with no fasta disables hgvs - before
+ok 75 - post_setup_checks - everything + offline with no fasta disables hgvs - after
+ok 76 - post_setup_checks - status_msg for above
+ok 77 - post_setup_checks - info - lrg
+ok 78 - post_setup_checks - info - check_sv
+ok 79 - post_setup_checks - info - check_ref
+ok 80 - post_setup_checks - info - hgvs
+ok 81 - bam-edited transcript ref match passes through
+ok 82 - fork - check no fork
+ok 83 - fork - check fork (2)
+ok 84 - fork - check fork (4)
+ok 85 - fork - full file check (2)
+ok 86 - fork - stats (2)
+ok 87 - fork - full file check (4)
+ok 88 - fork - stats (4)
+ok 89 - fork - plugin cache exists
+ok 90 - fork - plugin cache check
+ok 91 - fork - test warning
+ok 92 - fork - test die
+ok 93 - fork - kill child
+ok 94 - fork - child kill self
+ok 95 - warnings - empty
+ok 96 - warnings - with multiple
+ok 97 - run - ok
+ok 98 - run - individual all
+ok 99 - run - ok
+ok 100 - run - ref and alt are the same
+ok 101 - run - ok
+ok 102 - run - individual_zyg all (homozygous)
+ok 103 - run - individual_zyg all (heterozygous)
+ok 104 - run_rest
+ok 105 # skip No local database configured
+ok 106 # skip No local database configured
+ok 107 # skip No local database configured
+ok 108 # skip No local database configured
+ok 109 # skip No local database configured
+ok 110 # skip No local database configured
+1..110
+ok
+t/Stats.t .......................................... 
+ok 1 - use Bio::EnsEMBL::VEP::Stats;
+ok 2 - use Bio::EnsEMBL::VEP::Runner;
+ok 3 - new is defined
+ok 4 - check object
+ok 5 - info
+ok 6 - start_time
+ok 7 - run_time_start
+ok 8 - run_time
+ok 9 - end_time
+ok 10 - log_lines_read
+ok 11 - increment_filtered_variants
+ok 12 - log_VariationFeature 1
+ok 13 - log_VariationFeature 2
+ok 14 - log_VariationFeature 3
+ok 15 - log_TranscriptVariationAllele
+ok 16 - log_VariationFeatureOverlapAllele
+ok 17 - log_TranscriptStructuralVariationAllele
+ok 18 - log_VariationFeatureOverlapAllele - SV
+ok 19 - log_VariationFeatureOverlapAllele - intergenic
+ok 20 - log_sift_polyphen
+ok 21 - finished_stats - general_stats
+ok 22 - finished_stats - charts data
+ok 23 - finished_stats - run_stats - version
+ok 24 - finished_stats - run_stats - remaining headers
+ok 25 - dump_text
+ok 26 - dump_text - content
+ok 27 - dump_html
+ok 28 - dump_html - content
+ok 29 # skip HTML::Lint not installed
+1..29
+ok
+t/TranscriptTree.t ................................. 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationType::Transcript;
+ok 2 - use Bio::EnsEMBL::VEP::TranscriptTree;
+ok 3 - new - no annotation source
+ok 4 - new - wrong class
+ok 5 - use Bio::EnsEMBL::VEP::Haplo::Runner;
+ok 6 - get runner
+ok 7 - new
+ok 8 - check class
+ok 9 - valid_chromosomes - get
+ok 10 - valid_chromosomes - set
+ok 11 - get_chr_tree - ref
+ok 12 - fetch 1
+ok 13 - fetch 2
+ok 14 - fetch 3
+ok 15 - fetch 4
+ok 16 - fetch 5
+ok 17 - fetch after update 1
+ok 18 - fetch after update 2
+ok 19 - load synonyms
+ok 20 - fetch - use synonyms
+ok 21 - fetch - remove chr
+ok 22 - fetch - add chr
+ok 23 - insert and fetch object
+ok 24 - insert another doesn't merge
+ok 25 - _get_obj_start_end - arrayref
+ok 26 - _get_obj_start_end - hashref 1
+ok 27 - _get_obj_start_end - hashref 2
+ok 28 - _get_obj_start_end - no end
+ok 29 - _get_obj_start_end throws no start
+ok 30 - _get_dist arrayref 1
+ok 31 - _get_dist arrayref 2
+ok 32 - _get_dist arrayref overlap 0
+ok 33 - _get_dist arrayref negative
+ok 34 - nearest - no result
+ok 35 - nearest - left
+ok 36 - nearest - right
+ok 37 - nearest - 2 hits
+ok 38 - nearest - 2 hits input not length 1
+1..38
+ok
+t/Utils.t .......................................... 
+ok 1 - format_coords - same
+ok 2 - format_coords - diff 1
+ok 3 - format_coords - diff 2
+ok 4 - format_coords - missing 1
+ok 5 - format_coords - missing 2
+ok 6 - format_coords - missing 3
+ok 7 - convert_arrayref - scalar
+ok 8 - convert_arrayref - arrayref
+ok 9 - convert_arrayref - arrayref with separator
+ok 10 - numberify - arrayref
+ok 11 - numberify - hashref
+ok 12 - numberify - mixed
+ok 13 - numberify - float
+ok 14 - numberify - exponential
+ok 15 - numberify - exempt keys intact
+ok 16 - merge_hashes - simple
+ok 17 - merge_hashes - complex
+ok 18 - merge_hashes - complex inverted
+ok 19 - merge_hashes - overwrite
+ok 20 - merge_hashes - add
+ok 21 - merge_hashes - array
+ok 22 - merge_arrays - simple
+ok 23 - merge_arrays - duplicates
+ok 24 - merge_arrays - order
+ok 25 - find_in_ref - simple
+ok 26 - find_in_ref - two keys
+ok 27 - find_in_ref - multiple values
+ok 28 - find_in_ref - multiple values in arrayref
+ok 29 - find_in_ref - dont get non-scalars
+ok 30 - get_compressed_filehandle
+ok 31 - get_compressed_filehandle - no file
+ok 32 - get_compressed_filehandle - file does not exist
+ok 33 - get_compressed_filehandle - file not compressed
+ok 34 - get_compressed_filehandle - PerlIO::Gzip
+ok 35 - get_compressed_filehandle - PerlIO::Gzip with multistream uses gzip
+ok 36 - get_compressed_filehandle - gzip
+ok 37 - get_compressed_filehandle - IO::Uncompress::Gunzip
+ok 38 - get_compressed_filehandle - no available library
+ok 39 - get_time
+ok 40 - get_version_data - ensembl-vep hashref
+ok 41 - get_version_data - ensembl-vep release
+ok 42 - get_version_data - ensembl-vep sub
+ok 43 - get_version_data - the rest
+ok 44 - get_version_string
+1..44
+ok
+t/VariantRecoder.t ................................. 
+ok 1 - use Bio::EnsEMBL::VEP::VariantRecoder;
+ok 2 # skip No local database configured
+ok 3 # skip No local database configured
+ok 4 # skip No local database configured
+ok 5 # skip No local database configured
+ok 6 # skip No local database configured
+ok 7 # skip No local database configured
+ok 8 # skip No local database configured
+ok 9 # skip No local database configured
+ok 10 # skip No local database configured
+ok 11 # skip No local database configured
+ok 12 # skip No local database configured
+ok 13 # skip No local database configured
+ok 14 # skip No local database configured
+ok 15 # skip No local database configured
+ok 16 # skip No local database configured
+ok 17 # skip No local database configured
+ok 18 # skip No local database configured
+ok 19 # skip No local database configured
+ok 20 # skip No local database configured
+ok 21 # skip No local database configured
+ok 22 # skip No local database configured
+ok 23 # skip No local database configured
+ok 24 # skip No local database configured
+ok 25 # skip No local database configured
+ok 26 # skip No local database configured
+ok 27 # skip No local database configured
+ok 28 # skip No local database configured
+ok 29 # skip No local database configured
+ok 30 # skip No local database configured
+1..30
+ok
+WARNING: Ignoring 'cDNA_match' feature_type from /root/duckhts/.sync/ensembl-vep/t/testdata/custom/bam_edit.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
+t/bam_edit.t ....................................... 
+ok 1 - use Bio::EnsEMBL::VEP::AnnotationSource::File;
+ok 2 - use Bio::EnsEMBL::VEP::AnnotationSource::File::GFF;
+ok 3 - use Bio::EnsEMBL::VEP::Runner;
+ok 4 - get new runner object
+ok 5 - new is defined
+ok 6 - no bam provided
+ok 7 - apply_edits - no bam fails
+ok 8 - bam - no HTS installed
+ok 9 - bam - give filename
+ok 10 - bam - give filename at new()
+ok 11 - setup fasta_db
+ok 12 - load synonyms
+ok 13 - get transcripts
+ok 14 - apply_edits - _bam_edit_status already set
+ok 15 - apply_edits
+ok 16 - apply_edits - spliced_seq
+ok 17 - apply_edits - edit attribs
+ok 18 - apply_edits - _bam_edit_status
+ok 19 - NM_001286476.1 - get
+ok 20 - NM_001286476.1 - apply_edits
+ok 21 - NM_001286476.1 - apply_edits - edit attribs
+ok 22 - apply_edits - check all
+ok 23 - NM_032195.2 - get
+ok 24 - NM_032195.2 - apply_edits
+ok 25 - NM_032195.2 - apply edits - edit attribs - include S
+ok 26 - apply_edits - rseq_mrna_match returns ok
+ok 27 - apply_edits - rseq_mrna_match no _bam_edit_status
+ok 28 - apply_edits - sequences match anyway
+ok 29 - fail - NM_001286476.1 - apply_edits returns undef
+ok 30 - fail - NM_001286476.1 - _bam_edit_status failed
+ok 31 - fail - NM_001286476.1 - no edit attribs
+ok 32 - fail - no alignment
+1..32
+ok
+t/version.t ........................................ 
+ok 1 - get current git branch
+1..1
+ok
+All tests successful.
+Files=49, Tests=1977, 53 wallclock secs ( 0.11 usr  0.05 sys + 49.72 cusr  2.45 csys = 52.33 CPU)
+Result: PASS

@@ -2,7 +2,7 @@
 	test-duckvep-kernel test-duckvep-kernel-asan \
 	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
 	duckvep-generated-check duckvep-upstream-git-check \
-	duckvep-state-current-check \
+	duckvep-state-current-check duckvep-release-conformance-audit \
 	test-duckvep-so-conformance \
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
@@ -246,6 +246,9 @@ duckvep-upstream-git-check:
 
 duckvep-state-current-check:
 	perl test/duckvep/conformance/check_state_machine_contract.pl --require-current
+
+duckvep-release-conformance-audit: duckvep-generated-check \
+		duckvep-upstream-git-check duckvep-state-current-check
 
 test-duckvep-kernel: duckvep-generated-check
 	@set -e; \

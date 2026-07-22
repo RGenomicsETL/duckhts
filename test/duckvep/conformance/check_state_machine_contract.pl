@@ -228,12 +228,98 @@ my %campaign;
 my $campaign_line = 1;
 my %evidence_cache;
 my $head;
+my @current_evidence_inputs = (
+    'Makefile',
+    'GNUmakefile',
+    'makefile',
+    'CMakeLists.txt',
+    'extension_config.cmake',
+    'description.yml',
+    'functions.yaml',
+    'extension-ci-tools',
+    'duckdb_capi',
+    'scripts/duckvep_evidence.R',
+    'src',
+    'third_party',
+    ':(top,exclude)third_party/distfiles/**',
+    ':(top,exclude)third_party/licenses/**',
+    'test/duckvep/property',
+    'test/duckvep/vendor',
+    'test/duckvep/conformance',
+    ':(top,exclude)test/duckvep/conformance/README.md',
+    ':(top,exclude)test/duckvep/conformance/data/*history.csv',
+    ':(top,exclude)test/duckvep/conformance/data/state_machine_campaigns.tsv',
+    ':(top,exclude)test/duckvep/conformance/results/**',
+    'test/duckvep/upstream/check_sources.pl',
+    'test/duckvep/upstream/sources.tsv',
+    'test/duckvep/upstream/ensembl-tools',
+    'test/duckvep/upstream/ensembl-variation',
+    'test/duckvep/upstream/ensembl-vep',
+);
 if ($require_current) {
     open my $git, '-|', 'git', 'rev-parse', 'HEAD'
         or die "cannot start git rev-parse: $!\n";
     $head = <$git>;
     close $git or die "cannot determine current Git revision\n";
     chomp $head;
+    for my $index_mode ([], ['--cached']) {
+        system(
+            'git', 'diff', @$index_mode, '--quiet', '--',
+            @current_evidence_inputs
+        );
+        my $worktree_status = $?;
+        if ($worktree_status == -1 || ($worktree_status & 127)) {
+            die "cannot inspect current DuckVEP semantic inputs\n";
+        }
+        my $worktree_exit = $worktree_status >> 8;
+        if ($worktree_exit == 1) {
+            die "current DuckVEP semantic inputs are not committed\n";
+        }
+        $worktree_exit == 0
+            or die "git diff failed with exit $worktree_exit\n";
+    }
+    open my $untracked, '-|',
+        'git', 'ls-files', '--others', '--',
+        @current_evidence_inputs
+        or die "cannot inspect untracked DuckVEP semantic inputs: $!\n";
+    my @untracked = <$untracked>;
+    close $untracked or die "cannot inspect untracked DuckVEP semantic inputs\n";
+    chomp @untracked;
+    my %generated_build_input = map { $_ => 1 } qw(
+        third_party/htslib/config.h
+        third_party/htslib/config_vars.h
+        third_party/htslib/version.h
+    );
+    @untracked = grep {
+        !$generated_build_input{$_} &&
+        (/(?:\.(?:c|cc|cpp|h|hpp|inc|def|gch|pch|patch|pl|pm|R|r|sql|t|tsv|cmake)|
+            (?:^|\/)(?:Makefile|GNUmakefile|makefile|configure|CMakeLists[.]txt))\z/x)
+    } @untracked;
+    @untracked == 0
+        or die "current DuckVEP semantic inputs include untracked paths: " .
+            join(', ', @untracked) . "\n";
+    open my $gitlink, '-|', 'git', 'rev-parse', "$head:extension-ci-tools"
+        or die "cannot inspect extension-ci-tools gitlink: $!\n";
+    my $expected_extension_ci = <$gitlink>;
+    close $gitlink or die "cannot inspect extension-ci-tools gitlink\n";
+    chomp $expected_extension_ci;
+    open my $submodule, '-|',
+        'git', '-C', 'extension-ci-tools', 'rev-parse', 'HEAD'
+        or die "cannot inspect extension-ci-tools checkout: $!\n";
+    my $actual_extension_ci = <$submodule>;
+    close $submodule or die "cannot inspect extension-ci-tools checkout\n";
+    chomp $actual_extension_ci;
+    $actual_extension_ci eq $expected_extension_ci
+        or die "extension-ci-tools checkout is not at the committed gitlink\n";
+    open my $submodule_status, '-|',
+        'git', '-C', 'extension-ci-tools', 'status', '--porcelain=v1',
+        '--untracked-files=all'
+        or die "cannot inspect extension-ci-tools worktree: $!\n";
+    my @submodule_changes = <$submodule_status>;
+    close $submodule_status
+        or die "cannot inspect extension-ci-tools worktree\n";
+    @submodule_changes == 0
+        or die "extension-ci-tools worktree is not clean\n";
 }
 while (my $line = <$cfh>) {
     $campaign_line++;
@@ -262,9 +348,29 @@ while (my $line = <$cfh>) {
         or die "cannot start git cat-file for $source_revision: $!\n";
     close $commit
         or die "$campaign_path:$campaign_line source revision is absent from Git\n";
-    if ($require_current && $source_revision ne $head) {
-        die "$campaign_path:$campaign_line campaign $id was measured at " .
-            "$source_revision, not current HEAD $head\n";
+    if ($require_current) {
+        system('git', 'merge-base', '--is-ancestor', $source_revision, $head);
+        my $ancestor_status = $?;
+        $ancestor_status == 0
+            or die "$campaign_path:$campaign_line campaign $id source " .
+                "$source_revision is not an ancestor of current HEAD $head\n";
+        system(
+            'git', 'diff', '--quiet', $source_revision, $head, '--',
+            @current_evidence_inputs
+        );
+        my $diff_status = $?;
+        if ($diff_status == -1 || ($diff_status & 127)) {
+            die "$campaign_path:$campaign_line cannot compare semantic inputs " .
+                "between $source_revision and $head\n";
+        }
+        my $diff_exit = $diff_status >> 8;
+        if ($diff_exit == 1) {
+            die "$campaign_path:$campaign_line campaign $id predates a change " .
+                "to DuckVEP implementation or conformance inputs; rerun it\n";
+        }
+        $diff_exit == 0
+            or die "$campaign_path:$campaign_line git diff failed with exit " .
+                "$diff_exit\n";
     }
 
     if (!exists $evidence_cache{$evidence_path}) {

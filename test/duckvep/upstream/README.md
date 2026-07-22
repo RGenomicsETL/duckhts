@@ -45,13 +45,23 @@ against local Git objects at the declared commits:
 DUCKVEP_ENSEMBL_VEP_GIT=/path/to/ensembl-vep \
 DUCKVEP_ENSEMBL_VARIATION_GIT=/path/to/ensembl-variation \
 DUCKVEP_ENSEMBL_TOOLS_GIT=/path/to/ensembl-tools \
-  make duckvep-upstream-git-check
+  make -f Makefile duckvep-upstream-git-check
+```
+
+The Git-backed target requires local exact-commit mirrors and is therefore not part of the
+network-free ordinary build. It is mandatory in the release evidence audit:
+
+```bash
+DUCKVEP_ENSEMBL_VEP_GIT=/path/to/ensembl-vep \
+DUCKVEP_ENSEMBL_VARIATION_GIT=/path/to/ensembl-variation \
+DUCKVEP_ENSEMBL_TOOLS_GIT=/path/to/ensembl-tools \
+  make -f Makefile duckvep-release-conformance-audit
 ```
 
 The Git-backed check prevents a coordinated local file/manifest rewrite from pretending
 to be the pinned upstream commit. It also proves that all `.t` files in the VEP-116 and
 legacy-tools suite directories are present; the Variation authority is deliberately the
-three named semantic files rather than its entire module test tree. Updating a mirror is
+two named semantic files rather than its entire module test tree. Updating a mirror is
 an explicit compatibility-source change: copy from the new exact upstream commit,
 regenerate `sources.tsv`, inspect the diff, and rerun the extracted DuckVEP witnesses and
 executable differentials affected by the source change.
@@ -66,13 +76,21 @@ executable differentials affected by the source change.
 
 The full upstream suites depend on Perl modules, databases, caches, and fixture files that
 are intentionally not vendored wholesale here. The exact VEP release-116 source commit was
-run with the checksum-pinned Bioconda VEP 116.0 package described in
-[`self_test_receipts.tsv`](self_test_receipts.tsv). That run passed all 49 files and 1,977
+run with the Linux-64 Conda environment in
+[`vep116_2026-07-22.conda-explicit.txt`](receipts/vep116_2026-07-22.conda-explicit.txt),
+linked from [`self_test_receipts.tsv`](self_test_receipts.tsv). The lock records the complete
+solved package environment, including VEP 116.0, Perl 5.32.1, and BioPerl 1.7.8; Git already
+identifies this small manifest, so it is not wrapped in a redundant second digest. That run
+passed all 49 files and 1,977
 assertions; 293 assertions were explicitly skipped (281 without a local database, 11
 without a local database or `Set::IntervalTree`, and one without `HTML::Lint`). Optional
 Perl modules can change upstream's dynamic plan, so the receipt records the measured
 denominator rather than treating an environment-dependent 1,979-assertion count as a
-constant. This establishes oracle health only. DuckVEP conformance remains established by
+constant. The receipt names and hashes the committed verbose TAP output. The offline
+checker requires the VEP authority and exact 49-file pinned inventory, rejects every
+`not ok` or TAP bailout, validates per-file assertion numbering, plan and terminal state,
+and recomputes the assertion, skip-reason, success-summary, and result counters.
+This establishes oracle health only. DuckVEP conformance remains established by
 DuckVEP-native fixed/property tests and by differentials that execute both engines on the
 same declared model and allele corpus.
 
@@ -80,7 +98,9 @@ The recorded self-test was reproduced from a clean `t/` tree with:
 
 ```bash
 VEP_GIT=/path/to/ensembl-vep-at-57ea5c52340acc1f156267f810ad162e26597082
-VEP_ENV=/path/to/conda-env-containing-ensembl-vep-116.0-pl5321h2a3209d_0
+VEP_ENV=/path/to/new/vep116-environment
+micromamba create -y -p "$VEP_ENV" \
+  --file test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt
 (
   cd "$VEP_GIT"
   PERL5LIB="$PWD/modules:$VEP_ENV/share/ensembl-vep-116.0-0" \

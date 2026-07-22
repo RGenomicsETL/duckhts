@@ -139,6 +139,194 @@ if (utils::packageVersion("blit") < "0.2.0.9000") {
   die("the current WangLabCSU/blit checkout is required")
 }
 
+if (normalizePath(opt$history, mustWork = FALSE) ==
+    normalizePath(opt$coverage_history, mustWork = FALSE)) {
+  die("property and coverage histories must be different files")
+}
+dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
+dir.create(dirname(opt$coverage_history), recursive = TRUE, showWarnings = FALSE)
+history_dir <- normalizePath(dirname(opt$history), mustWork = TRUE)
+coverage_dir <- normalizePath(dirname(opt$coverage_history), mustWork = TRUE)
+if (!identical(history_dir, coverage_dir)) {
+  die("property and coverage histories must share one publication directory")
+}
+history_path <- file.path(history_dir, basename(opt$history))
+coverage_history_path <- file.path(
+  coverage_dir,
+  basename(opt$coverage_history)
+)
+# All publications in one directory share a lock. Pair-specific locks do not
+# protect overlapping pairs such as (A, B) and (A, C), both of which replace A.
+lock_dir <- file.path(history_dir, ".duckvep-property-history.lock")
+recovery_dir <- file.path(
+  history_dir,
+  ".duckvep-property-history-recovery.lock"
+)
+owner_path <- file.path(lock_dir, "owner")
+journal_path <- file.path(lock_dir, "journal.rds")
+property_backup <- file.path(lock_dir, "property_history.backup")
+coverage_backup <- file.path(lock_dir, "property_coverage_history.backup")
+
+restore_interrupted_publication <- function(interrupted_lock_dir) {
+  interrupted_journal <- file.path(interrupted_lock_dir, "journal.rds")
+  interrupted_property_backup <- file.path(
+    interrupted_lock_dir,
+    "property_history.backup"
+  )
+  interrupted_coverage_backup <- file.path(
+    interrupted_lock_dir,
+    "property_coverage_history.backup"
+  )
+  if (!file.exists(interrupted_journal)) {
+    return(invisible(TRUE))
+  }
+  journal <- tryCatch(
+    readRDS(interrupted_journal),
+    error = function(e) {
+      stop(
+        "cannot read interrupted property-history journal in ",
+        interrupted_lock_dir,
+        call. = FALSE
+      )
+    }
+  )
+  expected_journal_names <- c(
+    "had_properties",
+    "had_coverage",
+    "history_path",
+    "coverage_history_path"
+  )
+  if (!identical(names(journal), expected_journal_names) ||
+      !is.character(journal$history_path) ||
+      length(journal$history_path) != 1L ||
+      !is.character(journal$coverage_history_path) ||
+      length(journal$coverage_history_path) != 1L) {
+    stop(
+      "invalid interrupted property-history journal in ",
+      interrupted_lock_dir,
+      call. = FALSE
+    )
+  }
+  interrupted_history <- normalizePath(journal$history_path, mustWork = FALSE)
+  interrupted_coverage <- normalizePath(
+    journal$coverage_history_path,
+    mustWork = FALSE
+  )
+  if (!identical(dirname(interrupted_history), history_dir) ||
+      !identical(dirname(interrupted_coverage), history_dir) ||
+      identical(interrupted_history, interrupted_coverage)) {
+    stop(
+      "interrupted property-history journal names invalid destinations",
+      call. = FALSE
+    )
+  }
+  ok <- TRUE
+  if (isTRUE(journal$had_properties)) {
+    ok <- file.copy(
+      interrupted_property_backup,
+      interrupted_history,
+      overwrite = TRUE
+    ) && ok
+  } else if (file.exists(interrupted_history)) {
+    ok <- unlink(interrupted_history) == 0L && ok
+  }
+  if (isTRUE(journal$had_coverage)) {
+    ok <- file.copy(
+      interrupted_coverage_backup,
+      interrupted_coverage,
+      overwrite = TRUE
+    ) && ok
+  } else if (file.exists(interrupted_coverage)) {
+    ok <- unlink(interrupted_coverage) == 0L && ok
+  }
+  if (!ok) {
+    stop(
+      "cannot recover interrupted property-history publication in ",
+      interrupted_lock_dir,
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+lock_owner_state <- function(candidate_lock_dir) {
+  candidate_owner_path <- file.path(candidate_lock_dir, "owner")
+  owner <- suppressWarnings(readLines(
+    candidate_owner_path,
+    n = 1L,
+    warn = FALSE
+  ))
+  owner_pid <- suppressWarnings(as.integer(owner))
+  lock_info <- file.info(candidate_lock_dir)
+  lock_age <- suppressWarnings(as.numeric(difftime(
+    Sys.time(), lock_info$mtime, units = "secs"
+  )))
+  owner_alive <- length(owner_pid) == 1L && !is.na(owner_pid) &&
+    isTRUE(tryCatch(
+      tools::pskill(owner_pid, signal = 0L),
+      error = function(e) FALSE,
+      warning = function(w) FALSE
+    ))
+  list(pid = owner_pid, alive = owner_alive, age = lock_age)
+}
+
+recover_stale_publication <- function() {
+  recovery_owned <- FALSE
+  on.exit({
+    if (isTRUE(recovery_owned)) {
+      unlink(recovery_dir, recursive = TRUE)
+    }
+  }, add = TRUE)
+  if (dir.exists(recovery_dir)) {
+    recovery_state <- lock_owner_state(recovery_dir)
+    if (recovery_state$alive) {
+      die("property-history recovery is active in process {recovery_state$pid}")
+    }
+    if ((length(recovery_state$pid) != 1L || is.na(recovery_state$pid)) &&
+        (length(recovery_state$age) != 1L || is.na(recovery_state$age) ||
+         recovery_state$age < 60)) {
+      die("property-history recovery lock is still initializing: {recovery_dir}")
+    }
+    if (unlink(recovery_dir, recursive = TRUE) != 0L) {
+      die("cannot remove stale property-history recovery lock: {recovery_dir}")
+    }
+  }
+  if (!dir.exists(lock_dir)) {
+    return(invisible(TRUE))
+  }
+  owner_state <- lock_owner_state(lock_dir)
+  if (owner_state$alive) {
+    die("property-history publication is locked by process {owner_state$pid}")
+  }
+  if ((length(owner_state$pid) != 1L || is.na(owner_state$pid)) &&
+      (length(owner_state$age) != 1L || is.na(owner_state$age) ||
+       owner_state$age < 60)) {
+    die("property-history publication lock is still initializing: {lock_dir}")
+  }
+  if (!dir.create(recovery_dir, showWarnings = FALSE)) {
+    die("cannot acquire property-history recovery lock: {recovery_dir}")
+  }
+  recovery_owned <- TRUE
+  writeLines(
+    as.character(Sys.getpid()),
+    file.path(recovery_dir, "owner"),
+    useBytes = TRUE
+  )
+  owner_state <- lock_owner_state(lock_dir)
+  if (owner_state$alive) {
+    die("property-history publication is locked by process {owner_state$pid}")
+  }
+  restore_interrupted_publication(lock_dir)
+  if (unlink(lock_dir, recursive = TRUE) != 0L) {
+    die("cannot remove stale property-history lock: {lock_dir}")
+  }
+  invisible(TRUE)
+}
+
+# Recovery precedes the cleanliness gate because an interrupted two-file rename
+# necessarily leaves at least one tracked ledger dirty until the journal rolls it back.
+recover_stale_publication()
+
 git_head <- suppressWarnings(system2(
   "git",
   c("-C", root, "rev-parse", "HEAD"),
@@ -150,22 +338,65 @@ if ((!is.null(git_head_status) && git_head_status != 0L) || length(git_head) != 
   die("cannot determine source revision")
 }
 git_head <- trimws(git_head[[1L]])
-tracked_changes <- suppressWarnings(system2(
-  "git",
-  c("-C", root, "status", "--porcelain", "--untracked-files=no"),
-  stdout = TRUE,
-  stderr = FALSE
-))
-tracked_status <- attr(tracked_changes, "status")
-if (!is.null(tracked_status) && tracked_status != 0L) {
-  die("cannot inspect tracked worktree state")
+source_input_paths <- c(
+  "Makefile",
+  "src/duckvep",
+  "test/duckvep/property",
+  "test/duckvep/vendor"
+)
+check_source_tree <- function(expected_head) {
+  current_head <- suppressWarnings(system2(
+    "git",
+    c("-C", root, "rev-parse", "HEAD"),
+    stdout = TRUE,
+    stderr = FALSE
+  ))
+  current_head_status <- attr(current_head, "status")
+  if ((!is.null(current_head_status) && current_head_status != 0L) ||
+      length(current_head) != 1L || trimws(current_head[[1L]]) != expected_head) {
+    die("source revision changed during the property campaign")
+  }
+  tracked_changes <- suppressWarnings(system2(
+    "git",
+    c("-C", root, "status", "--porcelain", "--untracked-files=no"),
+    stdout = TRUE,
+    stderr = FALSE
+  ))
+  tracked_status <- attr(tracked_changes, "status")
+  if (!is.null(tracked_status) && tracked_status != 0L) {
+    die("cannot inspect tracked worktree state")
+  }
+  if (length(tracked_changes)) {
+    die(
+      "refusing to publish property evidence from a dirty tracked worktree; ",
+      "commit the source first and rerun"
+    )
+  }
+  untracked_inputs <- suppressWarnings(system2(
+    "git",
+    c(
+      "-C",
+      root,
+      "ls-files",
+      "--others",
+      "--",
+      source_input_paths
+    ),
+    stdout = TRUE,
+    stderr = FALSE
+  ))
+  untracked_status <- attr(untracked_inputs, "status")
+  if (!is.null(untracked_status) && untracked_status != 0L) {
+    die("cannot inspect untracked property-build inputs")
+  }
+  if (length(untracked_inputs)) {
+    die(
+      "refusing to publish property evidence with untracked build inputs: ",
+      "{paste(untracked_inputs, collapse = ', ')}"
+    )
+  }
 }
-if (length(tracked_changes)) {
-  die(
-    "refusing to publish property evidence from a dirty tracked worktree; ",
-    "commit the source first and rerun"
-  )
-}
+check_source_tree(git_head)
 if (!nzchar(opt$source_revision)) {
   opt$source_revision <- git_head
 } else if (!identical(opt$source_revision, git_head)) {
@@ -176,9 +407,20 @@ if (!nzchar(opt$source_revision)) {
 }
 
 log_path <- tempfile(fileext = ".log")
-command <- blit::exec("make", "test-duckvep-kernel") |>
+command <- blit::exec(
+  "make",
+  "-f",
+  file.path(root, "Makefile"),
+  "DUCKVEP_PROPERTY_ARGS=",
+  "DUCKVEP_PROPERTY_CPPFLAGS=",
+  "test-duckvep-kernel"
+) |>
   blit::cmd_wd(root) |>
   blit::cmd_envvar(
+    MAKEFLAGS = "",
+    GNUMAKEFLAGS = "",
+    MAKEFILES = "",
+    MFLAGS = "",
     DUCKVEP_PROP_TRIALS = configured_trials,
     DUCKVEP_PROP_SEED = opt$seed
   )
@@ -490,11 +732,6 @@ coverage_rows <- coverage_rows[
   drop = FALSE
 ]
 
-if (normalizePath(opt$history, mustWork = FALSE) ==
-    normalizePath(opt$coverage_history, mustWork = FALSE)) {
-  die("property and coverage histories must be different files")
-}
-
 campaign_key <- function(data) {
   paste(
     data$source_revision,
@@ -525,200 +762,11 @@ read_existing <- function(path, expected_names) {
 }
 
 publish_histories <- function() {
-  dir.create(dirname(opt$history), recursive = TRUE, showWarnings = FALSE)
-  dir.create(dirname(opt$coverage_history), recursive = TRUE, showWarnings = FALSE)
-  history_dir <- normalizePath(dirname(opt$history), mustWork = TRUE)
-  coverage_dir <- normalizePath(dirname(opt$coverage_history), mustWork = TRUE)
-  if (!identical(history_dir, coverage_dir)) {
-    die("property and coverage histories must share one publication directory")
-  }
-  history_path <- file.path(history_dir, basename(opt$history))
-  coverage_history_path <- file.path(
-    coverage_dir,
-    basename(opt$coverage_history)
-  )
-  lock_dir <- file.path(history_dir, ".duckvep-property-history.lock")
-  recovery_dir <- file.path(
-    history_dir,
-    ".duckvep-property-history-recovery.lock"
-  )
-  owner_path <- file.path(lock_dir, "owner")
-  journal_path <- file.path(lock_dir, "journal.rds")
-  property_backup <- file.path(lock_dir, "property_history.backup")
-  coverage_backup <- file.path(lock_dir, "property_coverage_history.backup")
-
-  restore_interrupted_publication <- function(interrupted_lock_dir) {
-    interrupted_journal <- file.path(interrupted_lock_dir, "journal.rds")
-    interrupted_property_backup <- file.path(
-      interrupted_lock_dir,
-      "property_history.backup"
-    )
-    interrupted_coverage_backup <- file.path(
-      interrupted_lock_dir,
-      "property_coverage_history.backup"
-    )
-    if (!file.exists(interrupted_journal)) {
-      return(invisible(TRUE))
-    }
-    journal <- tryCatch(
-      readRDS(interrupted_journal),
-      error = function(e) {
-        stop(
-          "cannot read interrupted property-history journal in ",
-          interrupted_lock_dir,
-          call. = FALSE
-        )
-      }
-    )
-    expected_journal_names <- c(
-      "had_properties",
-      "had_coverage",
-      "history_path",
-      "coverage_history_path"
-    )
-    if (!identical(names(journal), expected_journal_names) ||
-        !is.character(journal$history_path) ||
-        length(journal$history_path) != 1L ||
-        !is.character(journal$coverage_history_path) ||
-        length(journal$coverage_history_path) != 1L) {
-      stop(
-        "invalid interrupted property-history journal in ",
-        interrupted_lock_dir,
-        call. = FALSE
-      )
-    }
-    interrupted_history <- normalizePath(
-      journal$history_path,
-      mustWork = FALSE
-    )
-    interrupted_coverage <- normalizePath(
-      journal$coverage_history_path,
-      mustWork = FALSE
-    )
-    if (!identical(interrupted_history, history_path) ||
-        !identical(interrupted_coverage, coverage_history_path)) {
-      stop(
-        "interrupted property-history journal names invalid destinations",
-        call. = FALSE
-      )
-    }
-    ok <- TRUE
-    if (isTRUE(journal$had_properties)) {
-      ok <- file.copy(
-        interrupted_property_backup,
-        interrupted_history,
-        overwrite = TRUE
-      ) && ok
-    } else if (file.exists(interrupted_history)) {
-      ok <- unlink(interrupted_history) == 0L && ok
-    }
-    if (isTRUE(journal$had_coverage)) {
-      ok <- file.copy(
-        interrupted_coverage_backup,
-        interrupted_coverage,
-        overwrite = TRUE
-      ) && ok
-    } else if (file.exists(interrupted_coverage)) {
-      ok <- unlink(interrupted_coverage) == 0L && ok
-    }
-    if (!ok) {
-      stop(
-        "cannot recover interrupted property-history publication in ",
-        lock_dir,
-        call. = FALSE
-      )
-    }
-    invisible(TRUE)
-  }
-
-  lock_owner_state <- function(candidate_lock_dir) {
-    candidate_owner_path <- file.path(candidate_lock_dir, "owner")
-    owner <- suppressWarnings(readLines(
-      candidate_owner_path,
-      n = 1L,
-      warn = FALSE
-    ))
-    owner_pid <- suppressWarnings(as.integer(owner))
-    lock_info <- file.info(candidate_lock_dir)
-    lock_age <- suppressWarnings(as.numeric(difftime(
-      Sys.time(), lock_info$mtime, units = "secs"
-    )))
-    owner_alive <- length(owner_pid) == 1L && !is.na(owner_pid) &&
-      isTRUE(tryCatch(
-        {
-          tools::pskill(owner_pid, signal = 0L)
-          TRUE
-        },
-        error = function(e) FALSE,
-        warning = function(w) FALSE
-      ))
-    list(pid = owner_pid, alive = owner_alive, age = lock_age)
-  }
-
-  recovery_owned <- FALSE
-  on.exit({
-    if (isTRUE(recovery_owned)) {
-      unlink(recovery_dir, recursive = TRUE)
-    }
-  }, add = TRUE)
-  if (dir.exists(recovery_dir)) {
-    recovery_state <- lock_owner_state(recovery_dir)
-    if (recovery_state$alive) {
-      die("property-history recovery is active in process {recovery_state$pid}")
-    }
-    if ((length(recovery_state$pid) != 1L || is.na(recovery_state$pid)) &&
-        (length(recovery_state$age) != 1L || is.na(recovery_state$age) ||
-         recovery_state$age < 60)) {
-      die("property-history recovery lock is still initializing: {recovery_dir}")
-    }
-    if (unlink(recovery_dir, recursive = TRUE) != 0L) {
-      die("cannot remove stale property-history recovery lock: {recovery_dir}")
-    }
-  }
-  if (dir.exists(lock_dir)) {
-    owner_state <- lock_owner_state(lock_dir)
-    if (owner_state$alive) {
-      die("property-history publication is locked by process {owner_state$pid}")
-    }
-    # mkdir is the atomic lock acquisition. A second process can observe the
-    # directory during the tiny interval before its owner file is complete;
-    # do not mistake that live initialization window for a stale lock.
-    if ((length(owner_state$pid) != 1L || is.na(owner_state$pid)) &&
-        (length(owner_state$age) != 1L || is.na(owner_state$age) ||
-         owner_state$age < 60)) {
-      die("property-history publication lock is still initializing: {lock_dir}")
-    }
-    if (!dir.create(recovery_dir, showWarnings = FALSE)) {
-      die("cannot acquire property-history recovery lock: {recovery_dir}")
-    }
-    recovery_owned <- TRUE
-    writeLines(
-      as.character(Sys.getpid()),
-      file.path(recovery_dir, "owner"),
-      useBytes = TRUE
-    )
-    owner_state <- lock_owner_state(lock_dir)
-    if (owner_state$alive) {
-      die("property-history publication is locked by process {owner_state$pid}")
-    }
-    restore_interrupted_publication(lock_dir)
-    if (unlink(lock_dir, recursive = TRUE) != 0L) {
-      die("cannot remove stale property-history lock: {lock_dir}")
-    }
-  }
-  if (dir.exists(recovery_dir) && !isTRUE(recovery_owned)) {
-    die("property-history recovery is already active: {recovery_dir}")
-  }
+  recover_stale_publication()
   if (!dir.create(lock_dir, showWarnings = FALSE)) {
     die("cannot acquire property-history publication lock: {lock_dir}")
   }
   writeLines(as.character(Sys.getpid()), owner_path, useBytes = TRUE)
-  if (isTRUE(recovery_owned)) {
-    if (unlink(recovery_dir, recursive = TRUE) != 0L) {
-      die("cannot release property-history recovery lock: {recovery_dir}")
-    }
-    recovery_owned <- FALSE
-  }
   publication_complete <- FALSE
   on.exit({
     if (!isTRUE(publication_complete)) {
@@ -826,10 +874,18 @@ publish_histories <- function() {
   if (!file.rename(coverage_tmp, coverage_history_path)) {
     die("cannot publish coverage history: {coverage_history_path}")
   }
+  # Removing the journal commits the pair. If the process dies after this
+  # unlink, stale-lock cleanup preserves both published ledgers and discards
+  # any remaining backups. Removing backups while the journal still existed
+  # would make rollback incomplete after a process crash.
+  if (unlink(journal_path) != 0L) {
+    die("cannot commit property-history publication: {journal_path}")
+  }
   publication_complete <- TRUE
-  unlink(c(property_backup, coverage_backup, journal_path))
+  unlink(c(property_backup, coverage_backup))
 }
 
+check_source_tree(git_head)
 publish_histories()
 
 campaign_complete <- TRUE

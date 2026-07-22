@@ -1,6 +1,17 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- document the end-to-end DuckVEP corpus and release-upgrade workflow: separate source,
+  model, oracle, and comparison identities; preserve original-record-to-analysis-allele
+  lineage and every pair denominator; inventory the generated, GIAB, ClinVar, GRCh37,
+  non-human, regulatory, SV/BND, official Ensembl release-VCF, and HPRC lanes; and state
+  exactly what is portable today versus what still needs a published external model/corpus
+  pack. Limit large-artifact byte hashing to acquisition, publication, transfer, or an
+  explicit release audit rather than presenting repeated full-file hashing as biological
+  rigor; ordinary reuse consumes the acquisition receipt and logical model identity. Cache
+  a full digest after its first observation and reuse it only while canonical path, byte
+  size, modification time, and change time remain identical; provide
+  `DUCKVEP_ARTIFACT_VERIFY=full` for deliberate byte re-verification
 - close three rare consequence/HGVS states. VEP's start-loss predicate directly evaluates in-frame
   deletion before its generic start test; DuckVEP's staged classifier now establishes
   that dependent fact first, and the offset-based start test requires a 5-prime UTR. A pure
@@ -34,9 +45,38 @@
   the offline build check rejects changed, omitted, or unreceipted mirrors, while the
   release-source check compares every byte and complete suite inventory with the exact
   declared Git objects. Record the reproducible VEP-oracle self-test environment separately:
-  the pinned 49-file suite passes 1,977 assertions with 293 explicit skips under the
-  checksum-pinned Bioconda VEP 116.0 package; optional Perl modules can change the suite's
-  dynamic assertion denominator, so the receipt preserves its package and Perl versions.
+  the pinned 49-file suite passes 1,977 assertions with 293 explicit skips under a
+  checked-in Linux-64 explicit Conda lock containing VEP 116.0, Perl 5.32.1, and BioPerl
+  1.7.8; optional Perl modules can change the suite's dynamic assertion denominator, so the
+  receipt preserves the complete solved environment without redundantly hashing its
+  Git-tracked lock file.
+  Add one explicit release-conformance audit target that requires the exact Git-backed
+  mirror check as well as current executable-campaign evidence; the ordinary build remains
+  network-free. Pin the two Variation semantic-source filenames rather than accepting any
+  two tests from that release. Commit the verbose upstream TAP receipt and make its exact
+  executed-file inventory, plans, assertions, per-file passes, skip reasons, and final
+  result checksum- and content-verified; any `not ok` is fatal. Harden statistical
+  history publication against excluded tests, untracked or mid-run source changes,
+  concurrent campaigns with different ledger names, and process termination during
+  journal cleanup; stale journals are recovered before the clean-worktree gate and one
+  recoverable lock per destination directory prevents concurrent
+  custom ledger pairs from replacing a shared output file. Official campaigns invoke the
+  committed root Makefile with inherited GNU Make controls and optional property compiler
+  flags cleared, then recheck source provenance after consuming the final evidence input. Dead
+  publication owners are now detected from `pskill(..., signal = 0)`'s returned status,
+  so their journals can actually be recovered.
+  Define current campaign evidence by unchanged implementation and executable-conformance
+  inputs since the measured ancestor revision, so the later commit that records a receipt
+  does not make that receipt stale while any semantic source or harness change still does;
+  the comparison now covers the complete extension/readers/vendor/build-helper closure,
+  upstream semantic mirrors, and pinned build submodule. Staged, unstaged, compiler-like
+  untracked inputs or a dirty build submodule make the strict audit fail.
+  Checked executable campaigns likewise invoke explicit committed Makefiles with inherited
+  GNU Make controls cleared, distclean vendored htslib, and reject ignored or untracked
+  compiler inputs before rebuilding the receipt-bound extension.
+  Clear inherited compiler, CMake, DuckDB, vcpkg, and toolchain controls from the checked
+  build and regenerate its platform/version metadata through the committed configure helper
+  before compilation.
   The smaller
   legacy monolithic VEP suite is not a hidden conformance authority, and VEP's
   “subversion” is its point-release number rather than SVN. Split
