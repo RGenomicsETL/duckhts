@@ -16,8 +16,9 @@
   mutable handle and iterator per worker. Vendor libBigWig 0.4.8 at commit
   `43c294ef1721a73b760803ca5e9410d581b98f17`, route its read-only I/O through DuckHTS's
   htslib `hFILE` transport for local, native remote, and browser-wasm access, and retain
-  libBigWig's upstream correctness fixture and license. Malformed chromosome-tree IDs
-  and truncated data blocks are rejected before indexed storage or interval decoding
+  libBigWig's upstream correctness fixture and license. Malformed chromosome-tree IDs,
+  unreadable R-tree indexes, and truncated data blocks are rejected before indexed
+  storage or interval decoding
 - correct the real-WGS regulatory-provider plan after `EXPLAIN` showed that the
   documented chromosome equality forced a hash join with range residuals rather than
   IEJoin. Two packed RegionKey inequalities encode chromosome plus half-open coordinates

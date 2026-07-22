@@ -530,8 +530,9 @@ bigwig_claim_job(bigwig_local_data_t *local, bigwig_global_data_t *global)
         local->bind->blocks_per_iteration);
     if (local->iterator == NULL)
         return -1;
-    if (local->iterator->blocks != NULL &&
-        ((bwOverlapBlock_t *)local->iterator->blocks)->n != 0u &&
+    if (local->iterator->blocks == NULL)
+        return -1;
+    if (((bwOverlapBlock_t *)local->iterator->blocks)->n != 0u &&
         local->iterator->data == NULL)
         return -1;
     return 1;
