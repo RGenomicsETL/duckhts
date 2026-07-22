@@ -851,7 +851,7 @@ dbGetQuery(con, "SELECT duckvep_model_drop('readme') AS dropped")
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
-#>   success                                      index_path
+#>   success                                        index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
@@ -1074,9 +1074,9 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                 summary_path
+#>                                                                  summary_path
 #> 1 <tempfile>
-#>                                                           regions_path
+#>                                                            regions_path
 #> 1 <tempfile>
 
 utils::read.delim(
@@ -1131,10 +1131,10 @@ writeLines(c(
 ), lift_chain)
 
 rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-#>   success                                                index_path
+#>   success                                                 index_path
 #> 1    TRUE <tempfile>
 rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
-#>   success                                                index_path
+#>   success                                                 index_path
 #> 1    TRUE <tempfile>
 
 lifted <- rduckhts_liftover(
@@ -1179,7 +1179,7 @@ writeLines(c(
   "ACGTACGTAA"
 ), munge_fasta)
 rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
-#>   success                                         index_path
+#>   success                                          index_path
 #> 1    TRUE <tempfile>
 
 munge_out <- rduckhts_munge(
@@ -1287,7 +1287,7 @@ bgzip_meta <- rduckhts_bgzip(
   overwrite = TRUE
 )
 bgzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                          output_path bytes_out
+#>   success                                           output_path bytes_out
 #> 1    TRUE <tempfile>       169
 
 bgunzip_meta <- rduckhts_bgunzip(
@@ -1298,8 +1298,10 @@ bgunzip_meta <- rduckhts_bgunzip(
   overwrite = TRUE
 )
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
-#>   success                                                 output_path bytes_out
-#> 1    TRUE <tempfile>       194
+#>   success                                                  output_path
+#> 1    TRUE <tempfile>
+#>   bytes_out
+#> 1       194
 
 bam_index_meta <- rduckhts_bam_index(
   con, bam_src,
@@ -1307,7 +1309,7 @@ bam_index_meta <- rduckhts_bam_index(
   threads = 1
 )
 bam_index_meta
-#>   success                                         index_path index_format
+#>   success                                           index_path index_format
 #> 1    TRUE <tempfile>          BAI
 
 bcf_index_meta <- rduckhts_bcf_index(
@@ -1316,7 +1318,7 @@ bcf_index_meta <- rduckhts_bcf_index(
   threads = 1
 )
 bcf_index_meta
-#>   success                                             index_path index_format
+#>   success                                              index_path index_format
 #> 1    TRUE <tempfile>          CSI
 
 tabix_meta <- rduckhts_tabix_index(
@@ -1326,8 +1328,10 @@ tabix_meta <- rduckhts_tabix_index(
   threads = 1
 )
 tabix_meta
-#>   success                                               index_path index_format
-#> 1    TRUE <tempfile>          TBI
+#>   success                                                index_path
+#> 1    TRUE <tempfile>
+#>   index_format
+#> 1          TBI
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -1392,7 +1396,7 @@ dbGetQuery(
 fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
-#>   success                                       index_path
+#>   success                                        index_path
 #> 1    TRUE <tempfile>
 
 rduckhts_fasta(
