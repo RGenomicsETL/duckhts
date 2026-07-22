@@ -1503,17 +1503,17 @@ The source revision must be the current checkout; the history row records the
 extension binary, physical/logical model, model source, reference, staged
 corpus, original source, and public-row fingerprint receipts.
 
-## Real chromosome-22 composition smoke
+## Real whole-genome composition run
 
 The resident-engine tables above isolate comparable annotation surfaces. The
-following separate smoke run verifies the complete relational composition shown
-in the root README on real human data. It scans the public GIAB HG002 v4.2.1
-chromosome-1--22 VCF sequentially, retains its chromosome-22 literal alleles,
-loads the complete Ensembl 116 GRCh38 transcript plus regulation/motif model,
-requests rich consequence and HGVSc/HGVSp, and joins dated ClinVar,
-ClinvArbitration, AlphaMissense, gnomAD v2.1.1 gene constraint, and an Ensembl
-regulatory interval Parquet relation. The final relation is written as ZSTD
-Parquet rather than reduced to a checksum.
+following separate run verifies the complete relational composition shown in
+the root README on real human data. It scans the public HG002 40x PCR-free
+DeepVariant GRCh38 WGS callset sequentially, retains literal alleles on
+chromosomes 1--22, X, Y, and MT, loads the complete Ensembl 116 GRCh38
+transcript plus regulation/motif model, requests rich consequence and
+HGVSc/HGVSp, and joins dated ClinVar, ClinvArbitration, AlphaMissense, gnomAD
+v2.1.1 gene constraint, and an Ensembl regulatory interval Parquet relation.
+The final relation is written as ZSTD Parquet rather than reduced to a scalar.
 
 ```{r human-composition}
 human_composition <- read.csv(
@@ -1549,7 +1549,7 @@ names(human_table) <- c("stage", "result rows", "seconds", "threads")
 knitr::kable(human_table, row.names = FALSE)
 ```
 
-This is a one-pass, warm-page-cache, unpinned integration smoke, not a new
+This is a one-pass, warm-page-cache, unpinned integration run, not a new
 controlled throughput comparison. DuckDB CLI `.timer on` records each statement
 and GNU `/usr/bin/time -v` records the whole process. The run retained
 `r format(unique(human_composition$input_alleles), big.mark = ",")` real alleles,
@@ -1557,8 +1557,12 @@ materialized `r format(human_composition$result_rows[human_composition$stage == 
 consequence/core-feature rows, and wrote
 `r format(human_composition$output_bytes[human_composition$stage == "whole_process_warm_page_cache"], big.mark = ",")`
 bytes. Peak process RSS was
-`r sprintf("%.2f GiB", human_composition$max_rss_kb[1L] / 1024^2)`; that includes
-the DuckDB process, model loading, provider join state, and the output pipeline.
-The checked CSV retains the source revision, DuckDB version, thread count, cache
+`r sprintf("%.2f GiB", human_composition$max_rss_kb[human_composition$stage == "whole_process_warm_page_cache"] / 1024^2)`.
+That peak is materially higher than the resident-engine footprint because this
+single query sequence also retains the whole allele, interval-match, and
+88-million-row consequence relations before the final ordered write. It proves
+the SQL composition and exposes the current memory cost; a bounded-memory
+production pipeline should persist or consume these stages incrementally. The
+checked CSV retains the source revision, DuckDB version, thread count, cache
 state, row denominators, and raw elapsed measurements. Controlled resident and
 FastVEP comparisons remain the authorities above.

@@ -2,14 +2,19 @@
 
 # duckhts 1.5.0
 - replace the root DuckVEP fixture-led narrative with a real human annotation flow over
-  GIAB HG002, the complete Ensembl 116 GRCh38 transcript/regulation model, collision-safe
-  ClinVar and ClinvArbitration joins, AlphaMissense, gnomAD gene constraint, and an
-  IEJoin-compatible regulatory interval provider. The rendered README now explains the
-  continuing sorted transcript/feature sweep, immutable-model versus per-worker memory,
+  a public HG002 40x DeepVariant GRCh38 whole-genome callset, the complete Ensembl 116
+  GRCh38 transcript/regulation model, collision-safe ClinVar and ClinvArbitration joins,
+  AlphaMissense, gnomAD gene constraint, and an
+  IEJoin-compatible regulatory interval provider. Show how each reusable provider Parquet
+  relation is built from its declared release artifact, then present the case workflow as
+  separately timed literate SQL stages and tabulate the resident-engine and FastVEP
+  comparisons. Explain the continuing sorted transcript/feature sweep, immutable-model
+  versus per-worker memory,
   relation-native supplementary-provider contract, and the fixed/property/statistical/
-  executable/corpus conformance ladder. Record a timed materialized chromosome-22 smoke in
-  the rendered throughput report, and distinguish extension-build, README-render, and
-  optional VEP-oracle prerequisites
+  executable/corpus conformance ladder. Record a timed materialized whole-genome run over
+  chromosomes 1--22, X, Y, and MT in the rendered throughput report, including its peak
+  process memory, and distinguish extension-build, README-render, and optional VEP-oracle
+  prerequisites
 - document the end-to-end DuckVEP corpus and release-upgrade workflow: separate source,
   model, oracle, and comparison identities; preserve original-record-to-analysis-allele
   lineage and every pair denominator; inventory the generated, GIAB, ClinVar, GRCh37,

@@ -68,10 +68,12 @@ What this means in practice:
   `.csi` `404` is not a regression if the `.tbi` path succeeds.
 - `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR
   backend.
-- The simple local `python3 -m http.server` setup ignores HTTP `Range`;
-  in that case the backend warns and falls back to full-object fetch +
-  local byte slicing. This is acceptable for small smoke tests, but
-  production servers should support `Range`.
+- Local test servers should return `Accept-Ranges: bytes` and
+  `206 Partial   Content` for both the data file and its index sidecars.
+  An R-native option is
+  [`goserveR`](https://github.com/sounkou-bioinfo/goserveR). Without
+  byte-range support the backend warns and falls back to fetching the
+  complete object before slicing it locally.
 
 ### `Module.duckhtsWasmHttpConfig`
 
@@ -270,8 +272,8 @@ fq_files <- c(
 rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
 dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL")
 #>                                               filename n
-#> 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5
-#> 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5
+#> 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5
+#> 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a
@@ -635,10 +637,10 @@ snapshot, VCF/BCF, tabix text, or an attached database–can provide exact
 allele, interval, gene, or disease annotations through ordinary joins.
 The root [DuckHTS
 README](https://github.com/RGenomicsETL/duckhts#duckvep-a-resident-ensembl-vep-consequence-engine)
-shows the complete real GIAB HG002 + Ensembl 116 +
+shows the complete real HG002 WGS + Ensembl 116 +
 ClinVar/ClinvArbitration + AlphaMissense + gnomAD + interval workflow
 and its materialized timing evidence; the small example below remains
-only the CRAN/offline executable smoke.
+only the CRAN/offline executable check.
 
 The release gate combines pure-C property/statistical tests, SQL and R
 end-to-end tests, source-labelled Ensembl fixtures, and fail-closed
@@ -979,9 +981,9 @@ mos_out <- rduckhts_mosdepth(
 )
 
 mos_out[, c("summary_path", "regions_path")]
-#>                                                                summary_path
+#>                                                                 summary_path
 #> 1 <tempfile>
-#>                                                          regions_path
+#>                                                           regions_path
 #> 1 <tempfile>
 
 utils::read.delim(

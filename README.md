@@ -577,38 +577,225 @@ reference mismatch); they are not Ensembl CSQ fields.
 
 #### Real human annotation and supplementary providers
 
-The following is the production shape, using the public GIAB HG002
-v4.2.1 GRCh38 benchmark VCF, an Ensembl 116 GRCh38 model, dated
-ClinVar/ClinvArbitration, AlphaMissense v2, gnomAD v2.1.1 gene
-constraint, and an Ensembl regulatory Parquet relation. The provider
-files are ordinary typed Parquet; equivalent HTTP/S3 paths or DuckLake
-tables can replace them. Run the statements in one DuckDB CLI session so
-`.timer on` reports model load, VCF staging, the consequence sweep,
-provider joins, and final Parquet materialization separately.
+The following is the production shape, using the public HG002 40x
+PCR-free [DeepVariant GRCh38 WGS
+callset](https://storage.googleapis.com/brain-genomics-public/research/sequencing/grch38/vcf/hiseqx/wgs_pcr_free/40x/HG002.hiseqx.pcr-free.40x.deepvariant-v1.0.grch38.vcf.gz),
+an Ensembl 116 GRCh38 model, dated ClinVar/ClinvArbitration,
+AlphaMissense v2, gnomAD v2.1.1 gene constraint, and an Ensembl
+regulatory Parquet relation. This callset contains chromosomes 1–22, X,
+Y, and MT; it is an annotation workload, not a GIAB truth set. The
+provider files are ordinary typed Parquet; equivalent HTTP/S3 paths or
+DuckLake tables can replace them. Run the statements in one DuckDB CLI
+session so `.timer on` reports model load, VCF staging, the consequence
+sweep, provider joins, and final Parquet materialization separately.
+
+##### Build the provider relations once
+
+The `providers/*.parquet` paths below are not special DuckHTS files.
+They are release-specific projections built with DuckDB from the
+declared upstream artifacts:
+
+| Provider relation                       | Upstream artifact                                                                                               |
+|:----------------------------------------|:----------------------------------------------------------------------------------------------------------------|
+| `clinvar_20260706_grch38_keyed.parquet` | [ClinVar GRCh38 VCF](https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/), dated 2026-07-06                    |
+| `clinvarbitration_grch38_keyed.parquet` | [ClinvArbitration record 16792026](https://zenodo.org/records/16792026), whose release contract declares GRCh38 |
+| `alphamissense_hg38_variantkey.parquet` | [AlphaMissense v2 GRCh38](https://zenodo.org/records/8360242)                                                   |
+| `ensembl116_grch38_regulatory.parquet`  | `grch38_regulation`, compiled above from the Ensembl 116 funcgen tables                                         |
+| `gnomad_v211_constraint_gene.parquet`   | [gnomAD v2.1.1 gene constraint](https://gnomad.broadinstitute.org/downloads#v2-constraint)                      |
+
+VariantKey is an exact key over a normalized allele representation.
+Normalize arbitrary VCF inputs with `duckhts_bcftools_norm(...)` or an
+equivalent pinned normalizer before building either side of the join;
+keep the untouched record, genotype arrays and normalization lineage in
+their source relations.
+
+ClinVar is already VCF, so `read_bcf()` supplies typed INFO fields while
+ALT ordinal expansion produces the allele relation.
+
+``` sql
+COPY (
+  WITH alleles AS (
+    SELECT duckhts_contig_key(CHROM) AS chrom, POS::BIGINT AS pos,
+           upper(REF) AS ref, upper(a.alt) AS alt,
+           INFO_ALLELEID AS allele_id,
+           INFO_CLNSIG AS clinical_significance
+    FROM read_bcf('source/clinvar_20260706.vcf.gz', scan_mode := 'sequential')
+    CROSS JOIN unnest(ALT) AS a(alt)
+  ), keyed AS (
+    SELECT *, variantkey(chrom, pos, ref, alt) AS vk FROM alleles
+  )
+  SELECT chrom, pos, ref, alt, vk,
+         mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,
+         allele_id, clinical_significance
+  FROM keyed WHERE vk IS NOT NULL
+  ORDER BY vk
+) TO 'providers/clinvar_20260706_grch38_keyed.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 122880);
+```
+
+ClinvArbitration publishes an aggregate decision table. Its assembly is
+a declared GRCh38 release fact; it is not inferred from `chr`-prefixed
+strings.
+
+``` sql
+COPY (
+  WITH source AS (
+    SELECT duckhts_contig_key(contig) AS chrom,
+           try_cast(position AS BIGINT) AS pos,
+           upper(reference) AS ref, upper(alternate) AS alt,
+           clinical_significance,
+           try_cast(gold_stars AS UTINYINT) AS gold_stars,
+           try_cast(allele_id AS BIGINT) AS allele_id
+    FROM read_csv_auto(
+      'source/clinvarbitration_16792026.tsv',
+      delim := '\t', header := TRUE, all_varchar := TRUE
+    )
+  ), keyed AS (
+    SELECT *, variantkey(chrom, pos, ref, alt) AS vk FROM source
+  )
+  SELECT *, mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash
+  FROM keyed WHERE vk IS NOT NULL
+  ORDER BY vk
+) TO 'providers/clinvarbitration_grch38_keyed.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 122880);
+```
+
+The official AlphaMissense `.tsv.gz` is BGZF-compressed. DuckHTS can
+build its coordinate index directly, then use the same file for indexed
+regional queries or, as below, stream all 71.7 million rows once to
+build the reusable pack.
+
+``` sql
+SELECT * FROM tabix_index(
+  'source/AlphaMissense_hg38.tsv.gz',
+  preset := 'gff', seq_col := 1, start_col := 2, end_col := 2,
+  comment_char := '#', skip_lines := 4, threads := 4
+);
+
+COPY (
+  WITH keyed AS (
+    SELECT variantkey(duckhts_contig_key(chrom), pos, ref, alt) AS vk,
+           am_pathogenicity, am_class
+    FROM read_tabix(
+      'source/AlphaMissense_hg38.tsv.gz',
+      header_names := [
+        'chrom', 'pos', 'ref', 'alt', 'genome', 'uniprot_id',
+        'transcript_id', 'protein_variant', 'am_pathogenicity', 'am_class'
+      ],
+      column_types := [
+        'VARCHAR', 'BIGINT', 'VARCHAR', 'VARCHAR', 'VARCHAR', 'VARCHAR',
+        'VARCHAR', 'VARCHAR', 'DOUBLE', 'VARCHAR'
+      ],
+      scan_mode := 'sequential'
+    )
+  )
+  SELECT vk, am_pathogenicity, am_class
+  FROM keyed WHERE vk IS NOT NULL
+  ORDER BY vk
+) TO 'providers/alphamissense_hg38_variantkey.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 122880);
+```
+
+The Ensembl provider is projected from the same release-116 funcgen
+relation that supplies the resident core features. Identifiers and SO
+metadata remain in Parquet; only compact feature geometry enters the C
+model.
+
+``` sql
+COPY (
+  WITH source AS (
+    SELECT f.stable_id, f.feature_class,
+           coalesce(f.feature_so_term, f.feature_class) AS so_term,
+           r.seq_region_name AS chrom,
+           f.feature_start::BIGINT - 1 AS start0,
+           f.feature_end::BIGINT AS end0
+    FROM grch38_regulation f
+    JOIN grch38_regions r USING (seq_region)
+  ), keyed AS (
+    SELECT *, regionkey(chrom, start0, end0) AS rk FROM source
+  )
+  SELECT *, rk >> 31 AS rk_chrom_start,
+         regionkey(chrom, end0, end0) >> 31 AS rk_chrom_end
+  FROM keyed WHERE rk IS NOT NULL
+  ORDER BY rk
+) TO 'providers/ensembl116_grch38_regulatory.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 122880);
+```
+
+Gene constraint joins by stable Ensembl gene identifier and therefore
+needs no genomic key.
+
+``` sql
+COPY (
+  SELECT gene_id, gene AS gene_symbol, transcript,
+         try_cast(pLI AS DOUBLE) AS pLI,
+         try_cast(oe_lof_upper AS DOUBLE) AS oe_lof_upper
+  FROM read_csv_auto(
+    'source/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz',
+    delim := '\t', header := TRUE, nullstr := 'NA'
+  )
+  WHERE gene_id IS NOT NULL
+) TO 'providers/gnomad_v211_constraint_gene.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD);
+```
+
+The resulting files are reusable annotation-pack relations. Sorting
+exact providers by `vk` and interval providers by `rk` gives Parquet
+zonemaps useful ordering information; DuckDB still performs the final
+collision or overlap predicate. The full provider preparation and join
+measurements are in the [supplementary annotation
+benchmark](benchmarks/benchmark_variantkey_join_overlap.md).
+
+##### Session and resident model
+
+`.timer on` makes the DuckDB CLI report every following statement
+separately. Keep the thread count fixed for the complete run. Execute
+the `duckvep_model_load(...)` statement above in this session before
+staging the alleles; the checked run loaded the full Ensembl 116 model
+in 2.398 seconds; 644,427 transcripts.
 
 ``` sql
 .timer on
 SET threads = 4;
+```
 
--- One row per real ALT allele; retain record/sample/genotype provenance in a
--- separate source relation and join it back with record_index + alt_index.
+##### Canonical allele relation
+
+The input VCF is a record relation, while the consequence engine accepts
+an event relation with one row per ALT. `record_index` and the one-based
+`alt_index` preserve the route back to the original record and its
+genotype arrays. This small-variant lane admits literal nucleotide
+alleles only; exact SVs and paired breakends use the same event schema
+through the typed columns that are `NULL` below.
+
+``` sql
 CREATE TABLE case_alleles AS
 WITH records AS (
+  -- Sequential mode streams the complete file. Keep the raw VCF record number
+  -- because multiallelic expansion deliberately does not rewrite genotypes.
   SELECT row_number() OVER ()::UBIGINT AS record_index,
          CHROM, POS::BIGINT AS pos, REF AS ref, ALT
   FROM read_bcf(
-    'case/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz',
+    'case/HG002.hiseqx.pcr-free.40x.deepvariant-v1.0.grch38.vcf.gz',
     scan_mode := 'sequential', decompression_threads := 0
   )
 ), alleles AS (
+  -- WITH ORDINALITY preserves VCF ALT numbering: ALT[1] is genotype allele 1.
+  -- Contig aliases are canonicalized before matching the Ensembl model.
   SELECT record_index, a.alt_index, duckhts_contig_key(CHROM) AS chrom,
          pos, upper(ref) AS ref, upper(a.alt) AS alt
   FROM records
   CROSS JOIN unnest(ALT) WITH ORDINALITY AS a(alt, alt_index)
+  -- Symbolic/BND records belong in the typed SV lane, not the literal allele
+  -- key used by the exact SNV/indel providers below.
   WHERE regexp_full_match(ref, '[ACGTNacgtn]+')
     AND regexp_full_match(a.alt, '[ACGTNacgtn]+')
     AND upper(ref) <> upper(a.alt)
 ), keyed AS (
+  -- VCF POS is one-based. Provider intervals are zero-based, half-open:
+  -- [POS - 1, POS - 1 + length(REF)).
+  -- VariantKey accelerates exact normalized-allele joins; RegionKey supplies
+  -- coarse ordered bounds for the interval join.
   SELECT a.*, r.seq_region,
          variantkey(chrom, pos, ref, alt) AS vk,
          regionkey(chrom, pos - 1, pos - 1 + length(ref)) AS rk
@@ -632,10 +819,22 @@ SELECT row_number() OVER (
        NULL::UBIGINT AS mate_position
 FROM keyed
 WHERE vk IS NOT NULL AND rk IS NOT NULL
+-- Coordinate order is a kernel input contract. It lets each worker advance a
+-- transcript/feature sweep instead of searching the whole model per allele.
 ORDER BY seq_region, position, event_index;
+```
 
--- One native pass performs transcript + core regulation/motif candidate
--- discovery, rich consequence projection, NMD, and independent-event HGVS.
+Measured VCF decoding, ALT expansion, keying and ordering: 12.200
+seconds; 7,378,240 alleles staged.
+
+##### Consequence and HGVS
+
+The resident model contains only the hot transcript, exon, sequence and
+core feature fields. Stable identifiers and supplementary provider
+payloads remain in DuckDB and are joined later. `hgvs` and `rich` change
+output projection; they do not cause a second candidate-discovery pass.
+
+``` sql
 CREATE TABLE case_consequence AS
 SELECT *
 FROM duckvep_annotate(
@@ -643,9 +842,21 @@ FROM duckvep_annotate(
   hgvs := TRUE, rich := TRUE,
   upstream_distance := 5000, downstream_distance := 5000
 );
+```
 
--- Exact providers stay allele-level. Hashed/nonreversible VariantKeys are
--- refined with the literal allele so a hash collision cannot become evidence.
+Measured transcript/core-feature sweep, consequence classification, NMD
+and HGVS rendering: 142.672 seconds; 88,392,840 annotation rows.
+
+##### Exact allele providers
+
+All three providers share the same exact normalized-allele join.
+VariantKey can encode short alleles reversibly or store a hash for
+longer alleles. The `is_hash` equality prevents mixing those
+representations; hashed matches are then checked against the literal
+contig, position, REF and ALT so a collision cannot become clinical
+evidence.
+
+``` sql
 CREATE TABLE case_clinvar AS
 SELECT q.event_index, min(p.allele_id) AS clinvar_allele_id,
        list_distinct(flatten(list(p.clinical_significance)))
@@ -657,7 +868,11 @@ JOIN read_parquet('providers/clinvar_20260706_grch38_keyed.parquet') p
       (q.chrom = p.chrom AND q.position = p.pos AND
        q.reference = p.ref AND q.alternate = p.alt))
 GROUP BY q.event_index;
+```
 
+Measured dated ClinVar join: 0.259 seconds; 50,749 matched alleles.
+
+``` sql
 CREATE TABLE case_clinvarbitration AS
 SELECT q.event_index,
        arg_max(p.clinical_significance, p.gold_stars) AS classification,
@@ -669,7 +884,15 @@ JOIN read_parquet('providers/clinvarbitration_grch38_keyed.parquet') p
       (q.chrom = p.chrom AND q.position = p.pos AND
        q.reference = p.ref AND q.alternate = p.alt))
 GROUP BY q.event_index;
+```
 
+Measured ClinvArbitration join: 0.176 seconds; 45,232 matched alleles.
+
+AlphaMissense contains single-nucleotide substitutions, whose
+VariantKeys are reversible, so hashed events are excluded rather than
+subjected to a literal fallback comparison.
+
+``` sql
 CREATE TABLE case_alphamissense AS
 SELECT q.event_index,
        max(p.am_pathogenicity) AS am_pathogenicity,
@@ -679,10 +902,19 @@ JOIN read_parquet('providers/alphamissense_hg38_variantkey.parquet') p
   ON q.vk = p.vk
 WHERE NOT q.is_hash
 GROUP BY q.event_index;
+```
 
--- A real interval provider: RegionKey bounds cheaply reject distant rows;
--- the final half-open inequalities are the exact overlap predicate. DuckDB
--- may plan the two inequalities as IEJoin.
+Measured AlphaMissense join: 0.523 seconds; 14,850 matched alleles.
+
+##### Interval provider
+
+RegionKey bounds provide a cheap ordered rejection before exact
+half-open coordinate comparison. The chromosome equality is still
+explicit: encoded bounds accelerate the plan but do not define
+biological overlap. DuckDB may execute the two range inequalities with
+[IEJoin](https://duckdb.org/2022/05/27/iejoin).
+
+``` sql
 CREATE TABLE case_interval AS
 SELECT q.event_index,
        list_distinct(list(p.stable_id)) AS stable_ids,
@@ -694,9 +926,21 @@ JOIN read_parquet('providers/ensembl116_grch38_regulatory.parquet') p
  AND q.chrom = p.chrom
  AND q.start0 < p.end0 AND q.end0 > p.start0
 GROUP BY q.event_index;
+```
 
--- Join cold transcript identifiers and gene-level providers only after the
--- consequence relation exists. No provider payload is copied into the C model.
+Measured Ensembl regulatory interval join: 83.960 seconds; 414,813
+matched alleles.
+
+##### Materialized result
+
+Transcript indices are compact model-local ordinals. Resolve them to
+stable transcript/gene identifiers only after annotation, then attach
+gene-level and event-level payloads. This keeps provider strings out of
+the shared C model and lets DuckDB project or omit them normally. The
+final `ORDER BY` makes the Parquet row order deterministic; ZSTD
+compression and file writing are included in this stage’s measurement.
+
+``` sql
 COPY (
   SELECT q.chrom, q.position, q.reference, q.alternate,
          a.consequence, a.impact, a.cdna_position, a.cds_position,
@@ -721,26 +965,24 @@ COPY (
   LEFT JOIN case_interval ri USING (event_index)
   ORDER BY q.seq_region, q.position, q.event_index,
            a.transcript_index, a.regulation_feature_index
-) TO 'case/HG002.duckvep.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO 'case/HG002.deepvariant-v1.0.duckvep.parquet'
+  (FORMAT PARQUET, COMPRESSION ZSTD);
 ```
 
-The checked real-data smoke retained 50,861 chromosome-22 alleles and
-materialized 943,901 consequence/core-feature rows. It was deliberately
-run as one warm-page-cache, unpinned integration pass, so it validates
-composition and materialized output rather than replacing the pinned
-performance tables below.
+Measured late joins and ZSTD Parquet materialization: 41.004 seconds;
+88,392,840 annotation rows written.
 
-| stage                                     | result rows | seconds |
-|:------------------------------------------|:------------|--------:|
-| load Ensembl 116 model                    | 644,427     |   2.409 |
-| read VCF, canonicalize and sort           | 50,861      |   4.303 |
-| ClinVar exact join                        | 1,058       |   0.012 |
-| ClinvArbitration exact join               | 974         |   0.011 |
-| AlphaMissense exact join                  | 204         |   0.012 |
-| regulatory interval IEJoin                | 4,680       |   0.751 |
-| DuckVEP rich + HGVS + core regulation     | 943,901     |   0.807 |
-| join gene payloads and write ZSTD Parquet | 943,901     |   0.369 |
-| whole DuckDB process                      | 943,901     |   8.850 |
+##### Whole-genome measurement
+
+The checked real-data integration run retained 7,378,240 alleles from
+chromosomes 1–22, X, Y, and MT and materialized 88,392,840
+consequence/core-feature rows. It was deliberately run as one
+warm-page-cache, unpinned integration pass and completed in 284.890
+seconds; 88,392,840 annotation rows written. Peak process RSS was 46.87
+GiB because this pass retained the allele, interval-match, and complete
+consequence relations before the ordered write. It validates composition
+and exposes the current materialization cost rather than replacing the
+pinned engine tables below.
 
 The exact-source benchmark separately measures the complete
 4.0-million-allele GIAB probe against ClinVar, ClinvArbitration,
@@ -749,7 +991,7 @@ one-, four-, and twelve-provider plans, Parquet row-group pruning,
 materialized output, and peak RSS. See the [supplementary annotation
 benchmark](benchmarks/benchmark_variantkey_join_overlap.md).
 
-#### Bundled smoke-test model
+#### Bundled offline lifecycle model
 
 The deterministic fixture below remains deliberately small so every
 README render can execute it offline. It checks the public
@@ -915,32 +1157,47 @@ release.
 
 #### Measured performance and FastVEP comparison
 
-On the complete GIAB HG002 v4.2.1 input, 4,095,611 model-addressable
-literal alleles staged from 4,096,123 ALT alleles emit 47,835,851
-annotation rows against the complete Ensembl 116 GRCh38 model, including
-all 1,383,580 resident regulatory and motif features. At a 5,000-base
-transcript window, the checked public relation records 961,411 compact,
-430,211 rich, 236,385 HGVS, and 179,861 fused rich-plus-HGVS alleles/s
-on one pinned physical core. Four pinned physical cores record
-3,172,433, 1,527,643, 838,749, and 631,357 alleles/s respectively. Input
-staging and model load are outside this resident-engine measurement;
-every pass checksum-validates the complete output relation, and a
-separate full-row fingerprint proves one-thread/four-thread equality for
-every output contract. The exact revision (ca35fd7b), hashes, core
-affinity, and workload are in
+The resident-engine benchmark uses the complete GIAB HG002 v4.2.1 input
+and the complete Ensembl 116 GRCh38 transcript and core-feature model.
+
+| measure                            | value       |
+|:-----------------------------------|:------------|
+| source ALT alleles                 | 4,096,123   |
+| model-addressable literal alleles  | 4,095,611   |
+| annotation rows                    | 47,835,851  |
+| resident regulatory/motif features | 1,383,580   |
+| transcript flank distance          | 5,000 bases |
+| source revision                    | ca35fd7b    |
+
+Throughput is input alleles per second:
+
+| projection  | one pinned core | four pinned cores |
+|:------------|----------------:|------------------:|
+| compact     |         961,411 |         3,172,433 |
+| rich        |         430,211 |         1,527,643 |
+| HGVS        |         236,385 |           838,749 |
+| rich + HGVS |         179,861 |           631,357 |
+
+Input staging and model load are outside this resident-engine
+measurement. Each pass validates the complete output relation, and a
+full-row fingerprint checks one-core/four-core equality for every
+projection. Commands, CPU affinity and the complete evidence are in
 [benchmarks/duckvep_throughput.md](benchmarks/duckvep_throughput.md).
 
-The separate end-to-end comparison includes VCF decoding, DuckVEP’s
-explicit coordinate sort, annotation, and real uncompressed tabular
-output. On one pinned core DuckVEP completed in 64.54 seconds versus
-164.38 seconds for the current native-compiled
-[FastVEP](https://github.com/Huang-lab/fastVEP) checkout (2.55-fold
-wall-time ratio); at four pinned cores the measured times were 32.06 and
-68.09 seconds (2.12-fold). The tools emit different native tab schemas,
-so the report preserves row/byte denominators and separately compares
-both against VEP rather than presenting this as an isolated-kernel
-speedup. Build flags, source commits, rebuilt cache receipt, commands,
-and output hashes are in
+The end-to-end comparison includes VCF decoding, DuckVEP’s coordinate
+sort, annotation, and uncompressed tabular output for both DuckVEP and
+the current native-compiled
+[FastVEP](https://github.com/Huang-lab/fastVEP) checkout.
+
+| pinned physical cores | DuckVEP seconds | FastVEP seconds | FastVEP / DuckVEP |
+|----------------------:|----------------:|----------------:|------------------:|
+|                     1 |           64.54 |          164.38 |             2.55x |
+|                     4 |           32.06 |           68.09 |             2.12x |
+
+The tools emit different native tabular schemas. The comparison
+therefore keeps the row and byte denominators and separately checks each
+result against VEP. Build flags, source revisions, cache construction,
+commands and output evidence are in
 [benchmarks/benchmark_duckvep_fastvep.md](benchmarks/benchmark_duckvep_fastvep.md).
 
 #### Current scope and explicit gaps
@@ -1949,7 +2206,7 @@ http://127.0.0.1:8001/scripts/duckdb-wasm-local-test.html
 ```
 
 This setup loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs
-local HTTP reader smoke tests, and lets you set/clear
+local HTTP reader checks, and lets you set/clear
 `Module.duckhtsWasmHttpConfig` directly in the browser host runtime.
 
 The setup stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`,
