@@ -7,7 +7,8 @@
   htslib linking receipt with exact headers/library paths, static dependencies,
   configured features, and source/build identity; its public accessor rejects
   source/header/runtime version disagreement and is exercised by an in-memory
-  Rtinycc-built downstream C consumer that opens bundled BAM, CRAM, BCF, and VCF files
+  Rtinycc-built downstream C consumer that opens bundled BAM, CRAM, BCF, and VCF files,
+  using the active SDK system headers on macOS
 - add `read_bigwig(path, region := NULL, blocks_per_iteration := 64)` for
   projection-aware scans of stored zero-based, half-open BigWig signal intervals.
   Comma-separated htslib-style regions are merged and deduplicated; full scans claim

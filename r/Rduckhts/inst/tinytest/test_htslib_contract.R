@@ -101,9 +101,38 @@ test_htslib_contract <- function() {
     "}"
   ), collapse = "\n")
 
+  system_include_paths <- character()
+  if (identical(Sys.info()[["sysname"]], "Darwin")) {
+    sdk_root <- Sys.getenv("SDKROOT")
+    if (!nzchar(sdk_root)) {
+      xcrun <- Sys.which("xcrun")
+      if (nzchar(xcrun)) {
+        sdk_root <- suppressWarnings(system2(
+          xcrun,
+          c("--sdk", "macosx", "--show-sdk-path"),
+          stdout = TRUE,
+          stderr = FALSE
+        ))
+      }
+    }
+    sdk_root <- sdk_root[nzchar(sdk_root)][1L]
+    sdk_include <- if (length(sdk_root)) {
+      file.path(sdk_root, "usr", "include")
+    } else {
+      ""
+    }
+    expect_true(dir.exists(sdk_include))
+    if (!dir.exists(sdk_include)) return(invisible(NULL))
+    system_include_paths <- sdk_include
+  }
+
   state <- Rtinycc::tcc_state(
     output = "memory",
-    include_path = c(Rtinycc::tcc_include_paths(), config$include_dir),
+    include_path = c(
+      Rtinycc::tcc_include_paths(),
+      system_include_paths,
+      config$include_dir
+    ),
     lib_path = c(Rtinycc::tcc_lib_paths(), config$lib_dir)
   )
   link_status <- Rtinycc::tcc_add_library(state, "hts")
