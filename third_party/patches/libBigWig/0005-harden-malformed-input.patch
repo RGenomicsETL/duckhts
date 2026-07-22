@@ -1,0 +1,122 @@
+diff --git a/bwRead.c b/bwRead.c
+--- a/bwRead.c
++++ b/bwRead.c
+@@ -57,6 +57,6 @@ static bwZoomHdr_t *bwReadZoomHdrs(bigWigFile_t *bw) {
+     if(bw->isWrite) return NULL;
+     uint16_t i;
+-    bwZoomHdr_t *zhdr = malloc(sizeof(bwZoomHdr_t));
++    bwZoomHdr_t *zhdr = calloc(1, sizeof(bwZoomHdr_t));
+     if(!zhdr) return NULL;
+     uint32_t *level = malloc(bw->hdr->nLevels * sizeof(uint64_t));
+     if(!level) {
+@@ -97,6 +97,8 @@ static bwZoomHdr_t *bwReadZoomHdrs(bigWigFile_t *bw) {
+ error:
+-    for(i=0; i<bw->hdr->nLevels; i++) {
+-        if(zhdr->idx[i]) bwDestroyIndex(zhdr->idx[i]);
++    if(zhdr->idx) {
++        for(i=0; i<bw->hdr->nLevels; i++) {
++            if(zhdr->idx[i]) bwDestroyIndex(zhdr->idx[i]);
++        }
+     }
+     free(zhdr);
+     free(level);
+@@ -192,6 +192,8 @@ static uint64_t readChromLeaf(bigWigFile_t *bw, chromList_t *cl, uint32_t value
+     for(i=0; i<nVals; i++) {
+         if(bwRead((void*) chrom, sizeof(char), valueSize, bw) != valueSize) goto error;
+         if(bwRead((void*) &idx, sizeof(uint32_t), 1, bw) != 1) goto error;
++        if((uint64_t) idx >= (uint64_t) cl->nKeys) goto error;
++        if(cl->chrom[idx] != NULL) goto error;
+         if(bwRead((void*) &(cl->len[idx]), sizeof(uint32_t), 1, bw) != 1) goto error;
+         cl->chrom[idx] = bwStrdup(chrom);
+         if(!(cl->chrom[idx])) goto error;
+@@ -253,6 +255,11 @@ static chromList_t *bwReadChromList(bigWigFile_t *bw) {
+     if(bwRead((void*) &keySize, sizeof(uint32_t), 1, bw) != 1) goto error;
+     if(bwRead((void*) &valueSize, sizeof(uint32_t), 1, bw) != 1) goto error;
+     if(bwRead((void*) &itemCount, sizeof(uint64_t), 1, bw) != 1) goto error;
++    if(!keySize || keySize > 1048576U || valueSize != 8U) goto error;
++    if(itemCount > 1048576U) goto error;
++    if(itemCount > UINT32_MAX) goto error;
++    if(itemCount > SIZE_MAX / sizeof(char*)) goto error;
++    if(itemCount > SIZE_MAX / sizeof(uint32_t)) goto error;
+
+     cl->nKeys = itemCount;
+     cl->chrom = calloc(itemCount, sizeof(char*));
+diff --git a/bwValues.c b/bwValues.c
+--- a/bwValues.c
++++ b/bwValues.c
+@@ -6,6 +6,8 @@
+ #include <zlib.h>
+ #include <errno.h>
+
++#define DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES (64U * 1024U * 1024U)
++
+ static uint32_t roundup(uint32_t v) {
+     v--;
+     v |= v >> 1;
+@@ -391,8 +393,10 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+     uint64_t i;
+     uint16_t j;
+     int compressed = 0, rv;
+-    uLongf sz = fp->hdr->bufSize, tmp;
++    uLongf sz = fp->hdr->bufSize, tmp = 0;
+     void *buf = NULL, *compBuf = NULL;
++    uint64_t blockSize;
++    uint32_t itemSize;
+     uint32_t start = 0, end , *p;
+     float value;
+     bwDataHeader_t hdr;
+@@ -399,6 +403,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+     bwOverlappingIntervals_t *output = calloc(1, sizeof(bwOverlappingIntervals_t));
+
+     if(!output) goto error;
++    if((uint64_t) sz > DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES) goto error;
+
+     if(!o) return output;
+     if(!o->n) return output;
+@@ -411,6 +416,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+
+     for(i=0; i<o->n; i++) {
+         if(bwSetPos(fp, o->offset[i])) goto error;
++        if(o->size[i] > DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES) goto error;
+
+         if(sz < o->size[i]) {
+             compBuf = realloc(compBuf, o->size[i]);
+@@ -423,13 +429,29 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+             tmp = fp->hdr->bufSize; //This gets over-written by uncompress
+             rv = uncompress(buf, (uLongf *) &tmp, compBuf, o->size[i]);
+             if(rv != Z_OK) goto error;
++            blockSize = tmp;
+         } else {
+             buf = compBuf;
++            blockSize = o->size[i];
+         }
+
+-        //TODO: ensure that tmp is large enough!
++        if(blockSize < 24U) goto error;
+         bwFillDataHdr(&hdr, buf);
++        switch(hdr.type) {
++        case 1:
++            itemSize = 12U;
++            break;
++        case 2:
++            itemSize = 8U;
++            break;
++        case 3:
++            itemSize = 4U;
++            break;
++        default:
++            goto error;
++        }
++        if((uint64_t) hdr.nItems > (blockSize - 24U) / itemSize) goto error;
+
+         p = ((uint32_t*) buf);
+         p += 6;
+         if(hdr.tid != tid) continue;
+@@ -436,7 +455,6 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+
+         if(hdr.type == 3) start = hdr.start - hdr.step;
+
+-        //FIXME: We should ensure that sz is large enough to hold nItems of the given type
+         for(j=0; j<hdr.nItems; j++) {
+             switch(hdr.type) {
+             case 1:

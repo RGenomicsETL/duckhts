@@ -17,6 +17,12 @@ VariantKey / RegionKey C API
 	License: MIT
 	Reference: inst/duckhts_extension/include/variantkey/variantkey.h and inst/duckhts_extension/include/variantkey/regionkey.h
 
+libBigWig
+	Source: inst/duckhts_extension/libBigWig
+	Author: Devon Ryan
+	License: MIT
+	Reference: inst/duckhts_extension/libBigWig/LICENSE
+
 Mosdepth test fixtures
 	Source: inst/extdata/{bad.bed,big.bam,empty-tids.*,full-fragment-pairs.*,missing.bed,nanopore.*,overlapping-pairs.*,ovl.*,track.bed,unordered.bed}
 	Authors: Brent Pedersen and mosdepth contributors

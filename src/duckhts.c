@@ -7,6 +7,8 @@
 #define DUCKDB_EXTENSION_NAME duckhts
 
 #include "duckdb_extension.h"
+#include <htslib/hts.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +35,8 @@ extern void register_duckhts_fastq_qc_function(duckdb_connection connection);
 /* interval_udf.c */
 extern void register_read_bed_function(duckdb_connection connection);
 extern void register_fasta_nuc_function(duckdb_connection connection);
+/* bigwig_reader.c */
+extern void register_read_bigwig_function(duckdb_connection connection);
 /* bgzip.c */
 extern void register_bgzip_function(duckdb_connection connection);
 extern void register_bgunzip_function(duckdb_connection connection);
@@ -78,6 +82,95 @@ extern bool register_duckvep_sql_functions(duckdb_connection connection);
 extern void register_variantkey_functions(duckdb_connection connection);
 /* simd/duckhts_simd_dispatch.c */
 extern void register_duckhts_simd_functions(duckdb_connection connection);
+
+static const char *duckhts_loaded_htslib_version = "";
+static unsigned int duckhts_loaded_htslib_features = 0;
+static char duckhts_loaded_htslib_feature_string[1200];
+static pthread_once_t duckhts_htslib_snapshot_once = PTHREAD_ONCE_INIT;
+
+static void duckhts_snapshot_htslib(void) {
+    const char *version = hts_version();
+    const char *feature_string = hts_feature_string();
+
+    duckhts_loaded_htslib_version = version ? version : "";
+    duckhts_loaded_htslib_features = hts_features();
+    snprintf(duckhts_loaded_htslib_feature_string,
+             sizeof(duckhts_loaded_htslib_feature_string), "%s",
+             feature_string ? feature_string : "");
+}
+
+static void duckhts_htslib_version_scalar(duckdb_function_info info,
+                                           duckdb_data_chunk input,
+                                           duckdb_vector output) {
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    idx_t row;
+    (void)info;
+
+    for (row = 0; row < row_count; row++) {
+        duckdb_vector_assign_string_element(output, row, duckhts_loaded_htslib_version);
+    }
+}
+
+static void duckhts_htslib_feature_string_scalar(duckdb_function_info info,
+                                                  duckdb_data_chunk input,
+                                                  duckdb_vector output) {
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    idx_t row;
+    (void)info;
+
+    for (row = 0; row < row_count; row++) {
+        duckdb_vector_assign_string_element(output, row, duckhts_loaded_htslib_feature_string);
+    }
+}
+
+static void duckhts_htslib_features_scalar(duckdb_function_info info,
+                                            duckdb_data_chunk input,
+                                            duckdb_vector output) {
+    uint32_t *values = (uint32_t *)duckdb_vector_get_data(output);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    idx_t row;
+    (void)info;
+
+    for (row = 0; row < row_count; row++) {
+        values[row] = (uint32_t)duckhts_loaded_htslib_features;
+    }
+}
+
+static void register_duckhts_htslib_string_function(duckdb_connection connection,
+                                                     const char *name,
+                                                     duckdb_scalar_function_t callback) {
+    duckdb_scalar_function function = duckdb_create_scalar_function();
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+
+    duckdb_scalar_function_set_name(function, name);
+    duckdb_scalar_function_set_return_type(function, varchar_type);
+    duckdb_scalar_function_set_function(function, callback);
+    duckdb_register_scalar_function(connection, function);
+
+    duckdb_destroy_logical_type(&varchar_type);
+    duckdb_destroy_scalar_function(&function);
+}
+
+static void register_duckhts_htslib_functions(duckdb_connection connection) {
+    duckdb_scalar_function function;
+    duckdb_logical_type uinteger_type;
+
+    pthread_once(&duckhts_htslib_snapshot_once, duckhts_snapshot_htslib);
+
+    register_duckhts_htslib_string_function(connection, "duckhts_htslib_version",
+                                             duckhts_htslib_version_scalar);
+    register_duckhts_htslib_string_function(connection, "duckhts_htslib_feature_string",
+                                             duckhts_htslib_feature_string_scalar);
+
+    function = duckdb_create_scalar_function();
+    uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+    duckdb_scalar_function_set_name(function, "duckhts_htslib_features");
+    duckdb_scalar_function_set_return_type(function, uinteger_type);
+    duckdb_scalar_function_set_function(function, duckhts_htslib_features_scalar);
+    duckdb_register_scalar_function(connection, function);
+    duckdb_destroy_logical_type(&uinteger_type);
+    duckdb_destroy_scalar_function(&function);
+}
 
 static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
     duckdb_result result;
@@ -131,6 +224,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_wasm_http_hfile_backend();
     duckhts_simd_init();
 
+    register_duckhts_htslib_functions(connection);
     register_duckhts_simd_functions(connection);
     register_read_bcf_function(connection);
     register_read_bcf_v2_function(connection);
@@ -143,6 +237,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_duckhts_fastq_qc_function(connection);
     register_fasta_index_function(connection);
     register_read_bed_function(connection);
+    register_read_bigwig_function(connection);
     register_fasta_nuc_function(connection);
     register_bgzip_function(connection);
     register_bgunzip_function(connection);

@@ -1,0 +1,28 @@
+diff --git a/bwRead.c b/bwRead.c
+index 940c4a2..cdff15a 100644
+--- a/bwRead.c
++++ b/bwRead.c
+@@ -129,6 +129,7 @@ static void bwHdrRead(bigWigFile_t *bw) {
+
+     if(bwRead((void*) &magic, sizeof(uint32_t), 1, bw) != 1) goto error; //0x0
+     if(magic != BIGWIG_MAGIC && magic != BIGBED_MAGIC) goto error;
++    bw->type = magic == BIGBED_MAGIC;
+
+     if(bwRead((void*) &(bw->hdr->version), sizeof(uint16_t), 1, bw) != 1) goto error; //0x4
+     if(bwRead((void*) &(bw->hdr->nLevels), sizeof(uint16_t), 1, bw) != 1) goto error; //0x6
+@@ -359,6 +360,7 @@ bigWigFile_t *bwOpen(const char *fname, CURLcode (*callBack) (CURL*), const cha
+             fprintf(stderr, "[bwOpen] bwg->hdr is NULL!\n");
+             goto error;
+         }
++        if(bwg->type != 0) goto error;
+
+         //Read in the chromosome list
+         bwg->cl = bwReadChromList(bwg);
+@@ -411,6 +413,7 @@ bigWigFile_t *bbOpen(const char *fname, CURLcode (*callBack) (CURL*)) {
+     //Attempt to read in the fixed header
+     bwHdrRead(bb);
+     if(!bb->hdr) goto error;
++    if(bb->type != 1) goto error;
+
+     //Read in the chromosome list
+     bb->cl = bwReadChromList(bb);

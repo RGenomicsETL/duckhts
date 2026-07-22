@@ -59,6 +59,7 @@ R package changelog scope is strict:
 - After adding/removing/renaming public functions or changing signatures/descriptions: update `functions.yaml`, run `python3 scripts/render_function_catalog.py`, bootstrap the R package, and verify generated files under `r/Rduckhts/inst/function_catalog/` and `community-extensions/extensions/duckhts/description.yml`.
 - `community-extensions/` is a local sync copy only — do not commit it here; copy `description.yml` manually to the community-extensions repo after regenerating.
 - `r/Rduckhts/README.Rmd` consumes generated catalog output; do not hand-maintain duplicated function lists.
+- Render each `README.md` only from its corresponding `README.Rmd`; never hand-edit or cosmetically normalize rendered output.
 - Keep benchmark `.Rmd` / `.md` files under `benchmarks/`, not the repo root.
 - Design docs must start with a status line that says whether they are current implementation guidance, open design, future proposal, or historical review.
 

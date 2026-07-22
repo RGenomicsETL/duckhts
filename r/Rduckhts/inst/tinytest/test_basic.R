@@ -21,6 +21,10 @@ expect_true(exists("rduckhts_samtools_idxstats"))
 expect_true(exists("rduckhts_fasta"))
 expect_true(exists("rduckhts_fasta_index"))
 expect_true(exists("rduckhts_fastq"))
+expect_true(exists("rduckhts_bigwig"))
+expect_true(exists("rduckhts_htslib_config"))
+expect_true(exists("rduckhts_htslib_info"))
+expect_true(exists("rduckhts_htslib_version"))
 expect_true(exists("rduckhts_detect_quality_encoding"))
 expect_true(exists("rduckhts_gff"))
 expect_true(exists("rduckhts_gtf"))
@@ -111,6 +115,16 @@ expect_identical(
     "sequence_encoding", "quality_representation", "input_quality_encoding",
     "scan_mode", "overwrite")
 )
+expect_identical(
+  names(formals(rduckhts_bigwig)),
+  c("con", "table_name", "path", "region", "blocks_per_iteration", "overwrite")
+)
+expect_identical(
+  names(formals(rduckhts_htslib_config)),
+  c("link", "validate")
+)
+expect_identical(names(formals(rduckhts_htslib_info)), "con")
+expect_identical(names(formals(rduckhts_htslib_version)), "con")
 expect_identical(
   names(formals(rduckhts_detect_quality_encoding)),
   c("con", "path", "max_records")

@@ -1,0 +1,320 @@
+---
+title: "BigWig reader benchmark"
+output:
+  github_document:
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+This report measures `read_bigwig(...)` on a dense, real conservation track.
+The input is a local 10 Mb slice of the UCSC GRCh38 phyloP 100-way BigWig.
+Network transfer and slice construction are staging work and are outside every
+timed interval.
+
+There is no earlier checked-in DuckHTS BigWig benchmark. The indexed
+multi-region BCF/VCF report in
+[`benchmark_multi_region_readers.md`](benchmark_multi_region_readers.md) is the
+nearest reader benchmark, but it exercises htslib variant iterators and is not
+numerically comparable.
+
+## Reproduction
+
+Stage the real track with the UCSC utilities. Their interval flags are
+zero-based and half-open, matching the stored BigWig coordinates.
+
+```bash
+mkdir -p /tmp/ucsc-bigwig-bench
+curl -fsSL https://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bigWigToBedGraph \
+  -o /tmp/ucsc-bigwig-bench/bigWigToBedGraph
+curl -fsSL https://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedGraphToBigWig \
+  -o /tmp/ucsc-bigwig-bench/bedGraphToBigWig
+chmod +x /tmp/ucsc-bigwig-bench/bigWigToBedGraph \
+  /tmp/ucsc-bigwig-bench/bedGraphToBigWig
+
+/tmp/ucsc-bigwig-bench/bigWigToBedGraph \
+  -chrom=chr22 -start=20000000 -end=30000000 \
+  https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw \
+  /tmp/ucsc-bigwig-bench/chr22_20m_30m.bedGraph
+printf 'chr22\t50818468\n' > /tmp/ucsc-bigwig-bench/hg38.chr22.sizes
+/tmp/ucsc-bigwig-bench/bedGraphToBigWig \
+  /tmp/ucsc-bigwig-bench/chr22_20m_30m.bedGraph \
+  /tmp/ucsc-bigwig-bench/hg38.chr22.sizes \
+  /tmp/ucsc-bigwig-bench/hg38_chr22_20m_30m_phyloP100way.bw
+```
+
+Build and install `Rduckhts` from the source revision under test, then render:
+
+```bash
+DUCKHTS_BIGWIG_BENCHMARK_INPUT=/tmp/ucsc-bigwig-bench/hg38_chr22_20m_30m_phyloP100way.bw \
+  Rscript -e "rmarkdown::render('benchmarks/benchmark_bigwig_reader.Rmd', output_format='github_document')"
+```
+
+The benchmark pins the one-thread condition to CPU 12 and the four-thread
+condition to physical CPUs 12--15 on the recorded host. Input construction,
+extension loading, connection setup, warm-up, result verification, and removal
+of the previous Parquet output are excluded from timing.
+
+```{r benchmark, echo=FALSE}
+suppressPackageStartupMessages({
+  library(DBI)
+  library(duckdb)
+  library(Rduckhts)
+})
+
+sql_string <- function(x) {
+  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+}
+
+command_output <- function(command, args = character()) {
+  paste(system2(command, args, stdout = TRUE, stderr = TRUE), collapse = " ")
+}
+
+input_path <- Sys.getenv(
+  "DUCKHTS_BIGWIG_BENCHMARK_INPUT",
+  "/tmp/ucsc-bigwig-bench/hg38_chr22_20m_30m_phyloP100way.bw"
+)
+if (!file.exists(input_path)) {
+  stop("Stage DUCKHTS_BIGWIG_BENCHMARK_INPUT using the commands above")
+}
+input_path <- normalizePath(input_path, mustWork = TRUE)
+
+source_revision <- command_output("git", c("rev-parse", "--short=12", "HEAD"))
+tracked_dirty <- length(system2(
+  "git", c("status", "--porcelain", "--untracked-files=no"), stdout = TRUE
+)) > 0L
+if (tracked_dirty) {
+  stop("Render the benchmark from a tracked-clean source revision")
+}
+
+con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
+invisible(rduckhts_load(con))
+
+aggregate_sql <- function(region = NULL, relation = NULL) {
+  source <- if (is.null(relation)) {
+    region_argument <- if (is.null(region)) "" else {
+      paste0(", region := ", sql_string(region))
+    }
+    sprintf(
+      "read_bigwig(%s%s, blocks_per_iteration := 64)",
+      sql_string(input_path), region_argument
+    )
+  } else {
+    relation
+  }
+  sprintf(
+    paste0(
+      "SELECT count(*)::UBIGINT AS rows, ",
+      "hex(bit_xor(hash(CHROM, START0, END0, VALUE))) AS fingerprint, ",
+      "sum(VALUE)::DOUBLE AS value_sum FROM %s"
+    ),
+    source
+  )
+}
+
+full_expected <- dbGetQuery(con, aggregate_sql())
+stopifnot(as.double(full_expected$rows[[1L]]) > 1000000)
+
+# Twenty separated 250 kb ranges expose multiple indexed work items while
+# selecting half of the 10 Mb slice.
+region_starts <- seq.int(20000001L, 29750001L, by = 500000L)
+regions <- sprintf("chr22:%d-%d", region_starts, region_starts + 249999L)
+region_spec <- paste(regions, collapse = ",")
+region_expected <- dbGetQuery(con, aggregate_sql(region_spec))
+
+same_answer <- function(observed, expected) {
+  identical(as.character(observed$rows[[1L]]), as.character(expected$rows[[1L]])) &&
+    identical(observed$fingerprint[[1L]], expected$fingerprint[[1L]]) &&
+    isTRUE(all.equal(
+      observed$value_sum[[1L]], expected$value_sum[[1L]],
+      tolerance = 1e-12
+    ))
+}
+
+set_affinity <- function(cpus) {
+  output <- system2(
+    "taskset", c("-pc", cpus, Sys.getpid()),
+    stdout = TRUE, stderr = TRUE
+  )
+  if (!is.null(attr(output, "status"))) stop(paste(output, collapse = " "))
+  invisible(output)
+}
+
+measure_aggregate <- function(workload, region, expected, threads, cpus,
+                              repetitions = 9L) {
+  set_affinity(cpus)
+  invisible(dbExecute(con, sprintf("SET threads = %d", threads)))
+  sql <- aggregate_sql(region)
+  for (i in seq_len(2L)) stopifnot(same_answer(dbGetQuery(con, sql), expected))
+  seconds <- numeric(repetitions)
+  for (i in seq_len(repetitions)) {
+    started <- proc.time()[["elapsed"]]
+    observed <- dbGetQuery(con, sql)
+    seconds[[i]] <- proc.time()[["elapsed"]] - started
+    stopifnot(same_answer(observed, expected))
+  }
+  data.frame(
+    workload = workload,
+    threads = threads,
+    affinity = cpus,
+    repetitions = repetitions,
+    output_rows = as.double(expected$rows[[1L]]),
+    output_bytes = NA_real_,
+    min_seconds = min(seconds),
+    median_seconds = median(seconds),
+    max_seconds = max(seconds),
+    median_rows_per_second = as.double(expected$rows[[1L]]) / median(seconds),
+    fingerprint = expected$fingerprint[[1L]],
+    value_sum = expected$value_sum[[1L]],
+    stringsAsFactors = FALSE
+  )
+}
+
+measure_parquet <- function(threads, cpus, repetitions = 5L) {
+  set_affinity(cpus)
+  invisible(dbExecute(con, sprintf("SET threads = %d", threads)))
+  output_path <- tempfile(sprintf("bigwig-t%d-", threads), fileext = ".parquet")
+  copy_sql <- sprintf(
+    paste0(
+      "COPY (SELECT * FROM read_bigwig(%s, blocks_per_iteration := 64)) ",
+      "TO %s (FORMAT PARQUET, COMPRESSION ZSTD)"
+    ),
+    sql_string(input_path), sql_string(output_path)
+  )
+  seconds <- numeric(repetitions)
+  output_bytes <- numeric(repetitions)
+  for (i in seq_len(repetitions)) {
+    unlink(output_path)
+    started <- proc.time()[["elapsed"]]
+    invisible(dbExecute(con, copy_sql))
+    seconds[[i]] <- proc.time()[["elapsed"]] - started
+    output_bytes[[i]] <- file.info(output_path)$size
+    observed <- dbGetQuery(
+      con,
+      aggregate_sql(relation = sprintf("read_parquet(%s)", sql_string(output_path)))
+    )
+    stopifnot(same_answer(observed, full_expected))
+  }
+  unlink(output_path)
+  data.frame(
+    workload = "full scan + ZSTD Parquet",
+    threads = threads,
+    affinity = cpus,
+    repetitions = repetitions,
+    output_rows = as.double(full_expected$rows[[1L]]),
+    output_bytes = median(output_bytes),
+    min_seconds = min(seconds),
+    median_seconds = median(seconds),
+    max_seconds = max(seconds),
+    median_rows_per_second = as.double(full_expected$rows[[1L]]) / median(seconds),
+    fingerprint = full_expected$fingerprint[[1L]],
+    value_sum = full_expected$value_sum[[1L]],
+    stringsAsFactors = FALSE
+  )
+}
+
+results <- rbind(
+  measure_aggregate("full scan + aggregate", NULL, full_expected, 1L, "12"),
+  measure_aggregate("full scan + aggregate", NULL, full_expected, 4L, "12-15"),
+  measure_aggregate(
+    "20 indexed ranges + aggregate", region_spec, region_expected, 1L, "12"
+  ),
+  measure_aggregate(
+    "20 indexed ranges + aggregate", region_spec, region_expected, 4L, "12-15"
+  ),
+  measure_parquet(1L, "12"),
+  measure_parquet(4L, "12-15")
+)
+
+results$source_revision <- source_revision
+results$run_date <- as.character(Sys.Date())
+results$input_path <- input_path
+results$input_bytes <- file.info(input_path)$size
+results$input_span_bases <- 10000000
+results$duckdb_version <- dbGetQuery(con, "SELECT version() AS v")$v[[1L]]
+results$htslib_version <- rduckhts_htslib_version(con)
+
+dir.create("benchmarks/data", showWarnings = FALSE, recursive = TRUE)
+write.csv(
+  results,
+  "benchmarks/data/bigwig_reader.csv",
+  row.names = FALSE,
+  na = ""
+)
+
+cpu_model <- sub(
+  "^model name[[:space:]]*:[[:space:]]*", "",
+  grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1L]]
+)
+metadata <- data.frame(
+  property = c(
+    "source revision", "run date", "input source", "input interval",
+    "local BigWig bytes", "full-scan stored intervals", "full-scan value sum",
+    "full-scan fingerprint", "indexed ranges", "indexed output intervals",
+    "DuckDB version", "htslib version", "CPU"
+  ),
+  value = c(
+    source_revision,
+    as.character(Sys.Date()),
+    "UCSC hg38.phyloP100way.bw",
+    "chr22:[20,000,000, 30,000,000)",
+    format(file.info(input_path)$size, big.mark = ",", scientific = FALSE),
+    format(as.double(full_expected$rows[[1L]]), big.mark = ",", scientific = FALSE),
+    sprintf("%.12g", full_expected$value_sum[[1L]]),
+    full_expected$fingerprint[[1L]],
+    as.character(length(regions)),
+    format(as.double(region_expected$rows[[1L]]), big.mark = ",", scientific = FALSE),
+    results$duckdb_version[[1L]],
+    results$htslib_version[[1L]],
+    cpu_model
+  ),
+  stringsAsFactors = FALSE
+)
+
+knitr::kable(metadata, col.names = c("Property", "Recorded value"))
+invisible(dbDisconnect(con, shutdown = TRUE))
+```
+
+## Results
+
+The aggregate workloads decode the reader output but return one row to R. The
+Parquet workload decodes and writes every interval as a real ZSTD-compressed
+four-column relation. Every timed pass is followed by exact row-count and
+order-independent full-row fingerprint validation; floating-point sums are
+also checked to a relative tolerance of `1e-12`.
+
+```{r results, echo=FALSE}
+display <- results[c(
+  "workload", "threads", "affinity", "repetitions", "output_rows",
+  "output_bytes", "min_seconds", "median_seconds", "max_seconds",
+  "median_rows_per_second"
+)]
+display$output_rows <- format(
+  display$output_rows, big.mark = ",", scientific = FALSE
+)
+display$output_bytes <- ifelse(
+  is.na(display$output_bytes), "--",
+  format(display$output_bytes, big.mark = ",", scientific = FALSE)
+)
+for (column in c("min_seconds", "median_seconds", "max_seconds")) {
+  display[[column]] <- sprintf("%.3f", display[[column]])
+}
+display$median_rows_per_second <- format(
+  round(display$median_rows_per_second), big.mark = ",", scientific = FALSE
+)
+names(display) <- c(
+  "Workload", "Threads", "CPU affinity", "Runs", "Output intervals",
+  "Parquet bytes", "Minimum seconds", "Median seconds", "Maximum seconds",
+  "Median intervals/s"
+)
+knitr::kable(display, align = c("l", rep("r", 9)))
+```
+
+The full scan contains one nonempty contig, so it deliberately tests whether
+threading overhead remains bounded when contig-level parallel work is absent.
+The separated indexed ranges expose independent tasks. The measurement does
+not include remote latency, BigWig construction, extension loading, or a
+downstream conservation reduction over variant spans.

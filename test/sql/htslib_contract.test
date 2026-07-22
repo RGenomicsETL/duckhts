@@ -1,0 +1,25 @@
+# Runtime htslib identity and compiled feature diagnostics.
+
+require duckhts
+
+query T
+SELECT duckhts_htslib_version();
+----
+1.24
+
+query I
+SELECT duckhts_htslib_features() > 0;
+----
+1
+
+query I
+SELECT contains(duckhts_htslib_feature_string(), 'libcurl=');
+----
+1
+
+query I
+SELECT duckhts_htslib_version() = duckhts_htslib_version()
+   AND duckhts_htslib_features() = duckhts_htslib_features()
+   AND duckhts_htslib_feature_string() = duckhts_htslib_feature_string();
+----
+1

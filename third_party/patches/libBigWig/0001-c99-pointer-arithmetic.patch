@@ -1,0 +1,12 @@
+diff --git a/bwRead.c b/bwRead.c
+index d07e2f3..edcb434 100644
+--- a/bwRead.c
++++ b/bwRead.c
+@@ -26,6 +26,6 @@ size_t bwRead(void *data, size_t sz, size_t nmemb, bigWigFile_t *fp) {
+     size_t i, rv;
+     for(i=0; i<nmemb; i++) {
+-        rv = urlRead(fp->URL, data+i*sz, sz);
++        rv = urlRead(fp->URL, (char *)data+i*sz, sz);
+         if(rv != sz) return i;
+     }
+     return nmemb;

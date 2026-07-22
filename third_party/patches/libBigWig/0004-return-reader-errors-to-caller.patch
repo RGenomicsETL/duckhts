@@ -1,0 +1,48 @@
+--- a/bwRead.c
++++ b/bwRead.c
+@@ -164,7 +164,6 @@
+
+ error:
+     bwHdrDestroy(bw->hdr);
+-    fprintf(stderr, "[bwHdrRead] There was an error while reading in the header!\n");
+     bw->hdr = NULL;
+ }
+
+@@ -345,21 +344,18 @@
+ bigWigFile_t *bwOpen(const char *fname, CURLcode (*callBack) (CURL*), const char *mode) {
+     bigWigFile_t *bwg = calloc(1, sizeof(bigWigFile_t));
+     if(!bwg) {
+-        fprintf(stderr, "[bwOpen] Couldn't allocate space to create the output object!\n");
+         return NULL;
+     }
+     if((!mode) || (strchr(mode, 'w') == NULL)) {
+         bwg->isWrite = 0;
+         bwg->URL = urlOpen(fname, *callBack, NULL);
+         if(!bwg->URL) {
+-            fprintf(stderr, "[bwOpen] urlOpen is NULL!\n");
+             goto error;
+         }
+
+         //Attempt to read in the fixed header
+         bwHdrRead(bwg);
+         if(!bwg->hdr) {
+-            fprintf(stderr, "[bwOpen] bwg->hdr is NULL!\n");
+             goto error;
+         }
+         if(bwg->type != 0) goto error;
+@@ -367,7 +363,6 @@
+         //Read in the chromosome list
+         bwg->cl = bwReadChromList(bwg);
+         if(!bwg->cl) {
+-            fprintf(stderr, "[bwOpen] bwg->cl is NULL (%s)!\n", fname);
+             goto error;
+         }
+
+@@ -375,7 +370,6 @@
+         if(bwg->hdr->indexOffset) {
+             bwg->idx = bwReadIndex(bwg, 0);
+             if(!bwg->idx) {
+-                fprintf(stderr, "[bwOpen] bwg->idx is NULL bwg->hdr->dataOffset 0x%"PRIx64"!\n", bwg->hdr->dataOffset);
+                 goto error;
+             }
+         }

@@ -1,57 +1,137 @@
-## htslib_config.R.in -- template substituted by configure / configure.win
+## htslib_config.R.in -- substituted by configure / configure.win
 ##
-## Downstream R packages that need to compile against the htslib bundled in
-## Rduckhts can source this file (after installation) to obtain the correct
-## compiler and linker flags.
-##
-## Usage from another package's configure or Makevars:
-##   Rscript -e "source(system.file('htslib_config.R', package='Rduckhts')); cat(htslib_cflags())"
-##   Rscript -e "source(system.file('htslib_config.R', package='Rduckhts')); cat(htslib_libs())"
+## This installed file is intentionally source-able from another package's
+## configure script. Prefer Rduckhts::rduckhts_htslib_config(), which also
+## compares this receipt with duckhts_htslib_version() from the loaded extension.
 
-htslib_cflags <- function() {
+.rduckhts_htslib_root <- function() {
     pkg_dir <- system.file(package = "Rduckhts")
-    include_dir <- file.path(pkg_dir, "duckhts_extension", "htslib", "include")
-    if (!dir.exists(include_dir)) {
-        stop("Rduckhts htslib headers not found at ", include_dir,
-             ". Was the package installed correctly?")
+    if (!nzchar(pkg_dir)) {
+        stop("Rduckhts is not installed")
     }
-    paste0("-I", shQuote(include_dir))
+    file.path(pkg_dir, "duckhts_extension", "htslib")
 }
 
-htslib_libs <- function(static = @HTSLIB_STATIC_DEFAULT@) {
-    pkg_dir <- system.file(package = "Rduckhts")
-    lib_dir <- file.path(pkg_dir, "duckhts_extension", "htslib", "lib")
-    if (!dir.exists(lib_dir)) {
-        stop("Rduckhts htslib libraries not found at ", lib_dir,
-             ". Was the package installed correctly?")
-    }
-    if (static) {
-        libhts_a <- file.path(lib_dir, "libhts.a")
-        if (!file.exists(libhts_a)) {
-            stop("Static libhts.a not found at ", libhts_a)
-        }
-        dep_libs <- "@HTSLIB_DEP_LIBS@"
-        paste(shQuote(libhts_a), dep_libs)
+.rduckhts_htslib_shared_library <- function(lib_dir) {
+    candidates <- if (.Platform$OS.type == "windows") {
+        c(file.path(lib_dir, "hts-3.dll"), file.path(lib_dir, "libhts.dll"))
+    } else if (identical(Sys.info()[["sysname"]], "Darwin")) {
+        c(file.path(lib_dir, "libhts.dylib"), file.path(lib_dir, "libhts.3.dylib"))
     } else {
-        paste0("-L", shQuote(lib_dir), " -lhts @HTSLIB_DEP_LIBS@")
+        c(file.path(lib_dir, "libhts.so"), file.path(lib_dir, "libhts.so.3"))
     }
+    candidates[file.exists(candidates)][1L]
 }
 
-htslib_rpath <- function() {
-    pkg_dir <- system.file(package = "Rduckhts")
-    lib_dir <- file.path(pkg_dir, "duckhts_extension", "htslib", "lib")
-    if (.Platform$OS.type == "unix") {
-        if (Sys.info()[["sysname"]] == "Darwin") {
+.rduckhts_htslib_header_number <- function(include_dir) {
+    header <- file.path(include_dir, "htslib", "hts.h")
+    if (!file.exists(header)) {
+        return(NA_integer_)
+    }
+    line <- grep("^#define[[:space:]]+HTS_VERSION[[:space:]]+[0-9]+",
+                 readLines(header, warn = FALSE), value = TRUE)
+    if (!length(line)) {
+        return(NA_integer_)
+    }
+    as.integer(sub(".*HTS_VERSION[[:space:]]+([0-9]+).*", "\\1", line[[1L]]))
+}
+
+htslib_default_link <- function() {
+    if (isTRUE(@HTSLIB_STATIC_DEFAULT@)) "static" else "shared"
+}
+
+htslib_config <- function(link = htslib_default_link(), validate = TRUE,
+                          root = .rduckhts_htslib_root()) {
+    link <- match.arg(link, c("shared", "static"))
+    include_dir <- file.path(root, "include")
+    lib_dir <- file.path(root, "lib")
+    static_library <- file.path(lib_dir, "libhts.a")
+    shared_library <- .rduckhts_htslib_shared_library(lib_dir)
+    library_file <- if (identical(link, "static")) static_library else shared_library
+    plugin_dir <- file.path(root, "libexec", "htslib")
+    if (!dir.exists(plugin_dir)) {
+        plugin_dir <- NA_character_
+    }
+
+    rpath <- ""
+    if (identical(link, "shared") && .Platform$OS.type == "unix") {
+        rpath <- if (identical(Sys.info()[["sysname"]], "Darwin")) {
             paste0("-Wl,-rpath,", shQuote(lib_dir))
         } else {
-            paste0("-Wl,-rpath,", shQuote(lib_dir),
-                   " -Wl,--disable-new-dtags")
+            paste0("-Wl,-rpath,", shQuote(lib_dir), " -Wl,--disable-new-dtags")
         }
-    } else {
-        ""
     }
+
+    static_dependencies <- "@HTSLIB_STATIC_DEP_LIBS@"
+    libs <- if (identical(link, "static")) {
+        paste(shQuote(static_library), static_dependencies)
+    } else {
+        paste(shQuote(shared_library), rpath)
+    }
+
+    config <- list(
+        contract_version = 1L,
+        htslib_version = "@HTSLIB_VERSION@",
+        htslib_header_version = @HTSLIB_VERSION_NUMBER@L,
+        runtime_version = NA_character_,
+        source_id = "htslib-release-@HTSLIB_VERSION@",
+        build_id = "Rduckhts-@RDUCKHTS_VERSION@-@DUCKDB_PLATFORM@",
+        link = link,
+        include_dir = include_dir,
+        lib_dir = lib_dir,
+        library_file = library_file,
+        plugin_dir = plugin_dir,
+        cppflags = paste0("-I", shQuote(include_dir)),
+        ldflags = libs,
+        rpath = rpath,
+        static_dependencies = static_dependencies,
+        shared_available = !is.na(shared_library),
+        static_available = file.exists(static_library),
+        features = list(
+            cram = TRUE,
+            zlib = @HTSLIB_HAS_ZLIB@,
+            bzip2 = @HTSLIB_HAS_BZ2@,
+            lzma = @HTSLIB_HAS_LZMA@,
+            libdeflate = @HTSLIB_HAS_LIBDEFLATE@,
+            curl = @HTSLIB_HAS_CURL@,
+            openssl = @HTSLIB_HAS_OPENSSL@,
+            plugins = @HTSLIB_HAS_PLUGINS@,
+            s3 = @HTSLIB_HAS_S3@,
+            gcs = @HTSLIB_HAS_GCS@
+        ),
+        static_license_note = paste(
+            "Rduckhts is GPL-3; bundled htslib is distributed under its",
+            "permissive MIT/Expat-style license. Downstream packages remain",
+            "responsible for the licenses of their complete static link."
+        )
+    )
+    class(config) <- c("rduckhts_htslib_config", "list")
+
+    if (isTRUE(validate)) {
+        missing <- c(include_dir, lib_dir, library_file)
+        missing <- missing[is.na(missing) | !file.exists(missing)]
+        if (length(missing)) {
+            stop("Rduckhts htslib contract is incomplete: missing ",
+                 paste(missing, collapse = ", "))
+        }
+        header_version <- .rduckhts_htslib_header_number(include_dir)
+        if (is.na(header_version) ||
+            !identical(header_version, config$htslib_header_version)) {
+            stop("Rduckhts htslib header/receipt version mismatch: header=",
+                 header_version, ", receipt=", config$htslib_header_version)
+        }
+        if (!nzchar(config$htslib_version)) {
+            stop("Rduckhts htslib receipt has an empty semantic version")
+        }
+    }
+
+    config
 }
 
-htslib_version <- function() {
-    "@HTSLIB_VERSION@"
+## Compatibility helpers retained for downstream configure scripts.
+htslib_cflags <- function() htslib_config(validate = TRUE)$cppflags
+htslib_libs <- function(static = @HTSLIB_STATIC_DEFAULT@) {
+    htslib_config(if (isTRUE(static)) "static" else "shared", validate = TRUE)$ldflags
 }
+htslib_rpath <- function() htslib_config(validate = TRUE)$rpath
+htslib_version <- function() "@HTSLIB_VERSION@"

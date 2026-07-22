@@ -45,9 +45,16 @@ CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
 HTSLIB_CFLAGS="${CFLAGS} -std=gnu17"
 # Keep stricter diagnostics on DuckHTS extension sources without applying them
 # to the vendored htslib build.
-EXT_CFLAGS="${CFLAGS} -Wpedantic"
+EXT_CFLAGS="${CFLAGS} -Wpedantic -DNOCURL=1"
 CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
 LDFLAGS="${R_LDFLAGS}"
+
+HTSLIB_VERSION_STR=`tr -d '\r\n' < "${HTSLIB_DIR}/VERSION" 2>/dev/null || true`
+HTSLIB_VERSION_NUMBER=`awk '/^#define[[:space:]]+HTS_VERSION[[:space:]]+[0-9]+/ {print $3; exit}' "${HTSLIB_DIR}/htslib/hts.h" 2>/dev/null || true`
+if [ -z "${HTSLIB_VERSION_STR}" ] || [ -z "${HTSLIB_VERSION_NUMBER}" ]; then
+    echo "ERROR: failed to read the vendored htslib version receipt"
+    exit 1
+fi
 
 if [ ! -f "${DUCKDB_CAPI_HEADER}" ]; then
     echo "ERROR: DuckDB C API header not found at ${DUCKDB_CAPI_HEADER}"
@@ -316,6 +323,14 @@ fi
     ${CONFIGURE_BUILD_HOST} \
     ${HTSLIB_CONFIGURE_FLAGS}
 
+HTSLIB_STATIC_DEP_LIBS=`sed -n 's/^LIBS[[:space:]]*=[[:space:]]*//p' config.mk | head -n 1`
+HTSLIB_HAS_PLUGINS=no
+HTSLIB_HAS_S3=no
+HTSLIB_HAS_GCS=no
+grep -q '^#define ENABLE_PLUGINS 1' config.h && HTSLIB_HAS_PLUGINS=yes || true
+grep -q '^#define ENABLE_S3 1' config.h && HTSLIB_HAS_S3=yes || true
+grep -q '^#define ENABLE_GCS 1' config.h && HTSLIB_HAS_GCS=yes || true
+
 echo "---------- Building htslib (static) ----------"
 HTSLIB_BUILD_TARGETS="lib-static"
 if [ "${HTSLIB_ENABLE_PLUGINS_WINDOWS}" = "1" ]; then
@@ -353,8 +368,8 @@ echo "---------- Building DuckHTS extension (Windows) ----------"
 # Build the extension
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c simd/duckhts_simd_dispatch.c simd/duckhts_simd_scalar.c simd/duckhts_simd_avx2.c simd/duckhts_simd_avx512.c simd/duckhts_simd_neon.c simd/duckhts_simd_wasm_simd128.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c fastq_qc.c interval_udf.c tabix_reader.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c variantkey_udf.c cgranges.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c duckvep/kernel/src/duckvep_kernel.c duckvep/kernel/src/duckvep_so.c duckvep/kernel/src/duckvep_sweep.c duckvep/kernel/src/duckvep_classify.c duckvep/kernel/src/duckvep_effect.c duckvep/kernel/src/duckvep_sv.c duckvep/kernel/src/duckvep_delta.c duckvep/kernel/src/duckvep_projection.c duckvep/kernel/src/duckvep_transcript_edit.c duckvep/kernel/src/duckvep_hgvs.c duckvep/kernel/src/duckvep_codon.c duckvep/kernel/src/duckvep_coding.c duckvep/kernel/src/duckvep_haplotype.c duckvep/duckvep_variant_tile.c duckvep/duckvep_model.c duckvep/duckvep_annotate.c duckvep/duckvep_ensembl.c duckvep/duckvep_sql.c kmer_udf.c wasm_http_hfile.c"
-INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./duckvep/kernel/include -I./duckvep/kernel/src"
+C_SOURCES="duckhts.c simd/duckhts_simd_dispatch.c simd/duckhts_simd_scalar.c simd/duckhts_simd_avx2.c simd/duckhts_simd_avx512.c simd/duckhts_simd_neon.c simd/duckhts_simd_wasm_simd128.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c fastq_qc.c interval_udf.c tabix_reader.c bigwig_reader.c libbigwig_hfile_io.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c variantkey_udf.c cgranges.c libBigWig/bwRead.c libBigWig/bwValues.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c duckvep/kernel/src/duckvep_kernel.c duckvep/kernel/src/duckvep_so.c duckvep/kernel/src/duckvep_sweep.c duckvep/kernel/src/duckvep_classify.c duckvep/kernel/src/duckvep_effect.c duckvep/kernel/src/duckvep_sv.c duckvep/kernel/src/duckvep_delta.c duckvep/kernel/src/duckvep_projection.c duckvep/kernel/src/duckvep_transcript_edit.c duckvep/kernel/src/duckvep_hgvs.c duckvep/kernel/src/duckvep_codon.c duckvep/kernel/src/duckvep_coding.c duckvep/kernel/src/duckvep_haplotype.c duckvep/duckvep_variant_tile.c duckvep/duckvep_model.c duckvep/duckvep_annotate.c duckvep/duckvep_ensembl.c duckvep/duckvep_sql.c kmer_udf.c wasm_http_hfile.c"
+INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./libBigWig -I./duckvep/kernel/include -I./duckvep/kernel/src"
 
 echo "Compiling extension sources for Windows..."
 OBJECT_FILES=""
@@ -414,15 +429,24 @@ HTSLIB_CONFIG_IN="${THIS_DIR}/inst/htslib_config.R.in"
 HTSLIB_CONFIG_OUT="${THIS_DIR}/inst/htslib_config.R"
 if [ -f "${HTSLIB_CONFIG_IN}" ]; then
   HTSLIB_STATIC_DEFAULT="TRUE"
-  HTSLIB_DEP_LIBS_ESCAPED=`echo "${LIBS}" | sed 's/[&/\\\\]/\\\\&/g'`
-  HTSLIB_VERSION_STR=""
-  if [ -f "${HTSLIB_DIR}/include/htslib/hts.h" ]; then
-    HTSLIB_VERSION_STR=`awk -F'"' '/HTS_VERSION_TEXT/ {print $2; exit}' "${HTSLIB_DIR}/include/htslib/hts.h" 2>/dev/null || true`
-  fi
+  HTSLIB_STATIC_DEP_LIBS_ESCAPED=`echo "${HTSLIB_STATIC_DEP_LIBS}" | sed 's/[&/\\\\]/\\\\&/g'`
+  to_r_bool() { if [ "$1" = "yes" ]; then echo TRUE; else echo FALSE; fi; }
   sed \
     -e "s/@HTSLIB_STATIC_DEFAULT@/${HTSLIB_STATIC_DEFAULT}/g" \
-    -e "s/@HTSLIB_DEP_LIBS@/${HTSLIB_DEP_LIBS_ESCAPED}/g" \
+    -e "s/@HTSLIB_STATIC_DEP_LIBS@/${HTSLIB_STATIC_DEP_LIBS_ESCAPED}/g" \
     -e "s/@HTSLIB_VERSION@/${HTSLIB_VERSION_STR}/g" \
+    -e "s/@HTSLIB_VERSION_NUMBER@/${HTSLIB_VERSION_NUMBER}/g" \
+    -e "s/@RDUCKHTS_VERSION@/${EXT_VERSION}/g" \
+    -e "s/@DUCKDB_PLATFORM@/${DUCKDB_PLATFORM}/g" \
+    -e "s/@HTSLIB_HAS_ZLIB@/`to_r_bool "${HAS_ZLIB}"`/g" \
+    -e "s/@HTSLIB_HAS_BZ2@/`to_r_bool "${HAS_BZ2}"`/g" \
+    -e "s/@HTSLIB_HAS_LZMA@/`to_r_bool "${HAS_LZMA}"`/g" \
+    -e "s/@HTSLIB_HAS_LIBDEFLATE@/`to_r_bool "${HAS_LIBDEFLATE}"`/g" \
+    -e "s/@HTSLIB_HAS_CURL@/`to_r_bool "${HAS_CURL}"`/g" \
+    -e "s/@HTSLIB_HAS_OPENSSL@/`to_r_bool "${HAS_OPENSSL}"`/g" \
+    -e "s/@HTSLIB_HAS_PLUGINS@/`to_r_bool "${HTSLIB_HAS_PLUGINS}"`/g" \
+    -e "s/@HTSLIB_HAS_S3@/`to_r_bool "${HTSLIB_HAS_S3}"`/g" \
+    -e "s/@HTSLIB_HAS_GCS@/`to_r_bool "${HTSLIB_HAS_GCS}"`/g" \
     "${HTSLIB_CONFIG_IN}" > "${HTSLIB_CONFIG_OUT}"
   echo "Generated inst/htslib_config.R"
 fi
