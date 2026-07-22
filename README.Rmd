@@ -775,8 +775,8 @@ GNU `time -v` recorded
 `r sprintf("%.2f GiB", human_evidence$max_rss_kb[human_evidence$stage == "compose_all_providers_parallel_stream_4GB"] / 1024^2)`
 peak process RSS. That high-water mark includes the transient full-model load;
 the immutable C model is allocated outside DuckDB's buffer-manager limit. The
-checked fingerprint matches the earlier retained-intermediate result over all
-88 million rows, while avoiding its 46.87 GiB process peak.
+checked full-row fingerprint matches the reference output across all
+88,392,840 rows.
 
 ```{r duckvep-human-measured-results, echo=FALSE}
 measured_stages <- c(

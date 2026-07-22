@@ -994,9 +994,8 @@ model-load plus annotation/composition stream completed in 28.841
 seconds; 88,392,840 annotation rows written. GNU `time -v` recorded 5.31
 GiB peak process RSS. That high-water mark includes the transient
 full-model load; the immutable C model is allocated outside DuckDB’s
-buffer-manager limit. The checked fingerprint matches the earlier
-retained-intermediate result over all 88 million rows, while avoiding
-its 46.87 GiB process peak.
+buffer-manager limit. The checked full-row fingerprint matches the
+reference output across all 88,392,840 rows.
 
 | measured stage                              | rows       | seconds | peak RSS (GiB) | output bytes |
 |:--------------------------------------------|:-----------|--------:|:---------------|:-------------|
