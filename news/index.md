@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.5.0-0.1.0
 
+- bundle peak-capacity preflight for exact-alias multi-edit CDS
+  application. A length-neutral edit set whose first applied insertion
+  temporarily grows the CDS now returns `BUFFER_TOO_SMALL` before
+  changing the caller buffer when that intermediate sequence exceeds its
+  capacity
 - add
   [`rduckhts_htslib_config()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_config.md)
   as the versioned installed-package contract for downstream C/C++
