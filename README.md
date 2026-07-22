@@ -749,14 +749,16 @@ benchmark](benchmarks/benchmark_variantkey_join_overlap.md).
 ##### Session and resident model
 
 `.timer on` makes the DuckDB CLI report every following statement
-separately. Keep the thread count fixed for the complete run. Execute
-the `duckvep_model_load(...)` statement above in this session before
-staging the alleles; the checked run loaded the full Ensembl 116 model
-in 2.398 seconds; 644,427 transcripts.
+separately. Keep the thread count and memory limit fixed for the
+complete run. Execute the `duckvep_model_load(...)` statement above in
+this session before staging the alleles; the checked run loaded the full
+Ensembl 116 model in 2.398 seconds; 644,427 transcripts.
 
 ``` sql
 .timer on
 SET threads = 4;
+SET memory_limit = '4GB';
+SET temp_directory = 'case/duckdb-tmp';
 ```
 
 ##### Canonical allele relation
@@ -794,8 +796,8 @@ WITH records AS (
 ), keyed AS (
   -- VCF POS is one-based. Provider intervals are zero-based, half-open:
   -- [POS - 1, POS - 1 + length(REF)).
-  -- VariantKey accelerates exact normalized-allele joins; RegionKey supplies
-  -- coarse ordered bounds for the interval join.
+  -- VariantKey accelerates exact normalized-allele joins. For canonical human
+  -- contigs, RegionKey supplies exact ordered (chromosome, coordinate) bounds.
   SELECT a.*, r.seq_region,
          variantkey(chrom, pos, ref, alt) AS vk,
          regionkey(chrom, pos - 1, pos - 1 + length(ref)) AS rk
@@ -834,18 +836,11 @@ core feature fields. Stable identifiers and supplementary provider
 payloads remain in DuckDB and are joined later. `hgvs` and `rich` change
 output projection; they do not cause a second candidate-discovery pass.
 
-``` sql
-CREATE TABLE case_consequence AS
-SELECT *
-FROM duckvep_annotate(
-  'case_alleles', 'human_116_grch38',
-  hgvs := TRUE, rich := TRUE,
-  upstream_distance := 5000, downstream_distance := 5000
-);
-```
-
-Measured transcript/core-feature sweep, consequence classification, NMD
-and HGVS rendering: 142.672 seconds; 88,392,840 annotation rows.
+Do not retain the complete result of `duckvep_annotate(...)` before
+writing it: this WGS emits 88 million rows. The final query below
+consumes the annotator directly. In isolation, the same four-thread
+rich/HGVS stream writes all rows in 24.524 seconds; 88,392,840
+annotation rows.
 
 ##### Exact allele providers
 
@@ -908,11 +903,21 @@ Measured AlphaMissense join: 0.523 seconds; 14,850 matched alleles.
 
 ##### Interval provider
 
-RegionKey bounds provide a cheap ordered rejection before exact
-half-open coordinate comparison. The chromosome equality is still
-explicit: encoded bounds accelerate the plan but do not define
-biological overlap. DuckDB may execute the two range inequalities with
-[IEJoin](https://duckdb.org/2022/05/27/iejoin).
+For RegionKey-supported contigs, shifting a RegionKey right by 31 bits
+produces an exact ordered `(chromosome code, start)` value. Constructing
+the same value at the half-open end gives an exact
+`(chromosome code, end)` value. The two inequalities below therefore
+express both chromosome identity and half-open overlap, and DuckDB plans
+them as [IEJoin](https://duckdb.org/2022/05/27/iejoin).
+
+Do not add `q.chrom = p.chrom` to this plan. DuckDB then chooses a
+chromosome hash join and tests the range predicates across enormous
+same-chromosome candidate sets. On this workload that physical-plan
+change was more than two orders of magnitude slower. Use `EXPLAIN` to
+confirm `IE_JOIN`. For accessions, patches, or arbitrary species contigs
+outside RegionKey’s encoding domain, use
+`duckhts_cgranges_overlaps_bulk(...)` instead; it preserves literal
+contig identity and has its own measured memory/speed tradeoff.
 
 ``` sql
 CREATE TABLE case_interval AS
@@ -923,22 +928,26 @@ FROM case_alleles q
 JOIN read_parquet('providers/ensembl116_grch38_regulatory.parquet') p
   ON q.rk_chrom_start < p.rk_chrom_end
  AND q.rk_chrom_end > p.rk_chrom_start
- AND q.chrom = p.chrom
- AND q.start0 < p.end0 AND q.end0 > p.start0
 GROUP BY q.event_index;
 ```
 
-Measured Ensembl regulatory interval join: 83.960 seconds; 414,813
-matched alleles.
+Measured Ensembl regulatory interval join: 0.770 seconds; 414,813
+matched alleles. The complete cgranges build, bulk query, aggregation,
+and write takes 1.144 seconds; 414,813 matched alleles.
 
-##### Materialized result
+##### Streamed result
 
 Transcript indices are compact model-local ordinals. Resolve them to
 stable transcript/gene identifiers only after annotation, then attach
 gene-level and event-level payloads. This keeps provider strings out of
-the shared C model and lets DuckDB project or omit them normally. The
-final `ORDER BY` makes the Parquet row order deterministic; ZSTD
-compression and file writing are included in this stage’s measurement.
+the shared C model and lets DuckDB project or omit them normally.
+
+The query streams annotation into the joins and uses one Parquet writer
+per DuckDB worker. `event_index` is the stable identity and ordering
+key; forcing a global `ORDER BY` or a single output file serializes the
+writer and requires a large sort/materialization. Query the resulting
+Parquet dataset with an explicit `ORDER BY` only when a consumer
+actually requires ordered rows.
 
 ``` sql
 COPY (
@@ -954,7 +963,11 @@ COPY (
          gc.pLI, gc.oe_lof_upper,
          ri.stable_ids AS interval_ids, ri.so_terms AS interval_terms,
          a.overlap_object, a.duckvep_status, a.duckvep_reason
-  FROM case_consequence a
+  FROM duckvep_annotate(
+    'case_alleles', 'human_116_grch38',
+    hgvs := TRUE, rich := TRUE,
+    upstream_distance := 5000, downstream_distance := 5000
+  ) a
   JOIN case_alleles q USING (event_index)
   LEFT JOIN grch38_transcripts t USING (transcript_index)
   LEFT JOIN read_parquet('providers/gnomad_v211_constraint_gene.parquet') gc
@@ -963,26 +976,34 @@ COPY (
   LEFT JOIN case_clinvarbitration ca USING (event_index)
   LEFT JOIN case_alphamissense am USING (event_index)
   LEFT JOIN case_interval ri USING (event_index)
-  ORDER BY q.seq_region, q.position, q.event_index,
-           a.transcript_index, a.regulation_feature_index
-) TO 'case/HG002.deepvariant-v1.0.duckvep.parquet'
-  (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO 'case/HG002.deepvariant-v1.0.duckvep'
+  (FORMAT PARQUET, COMPRESSION ZSTD, PER_THREAD_OUTPUT TRUE);
 ```
 
-Measured late joins and ZSTD Parquet materialization: 41.004 seconds;
-88,392,840 annotation rows written.
+Measured model load, fused consequence/HGVS, all late joins, and
+four-writer ZSTD Parquet output: 28.841 seconds; 88,392,840 annotation
+rows written.
 
 ##### Whole-genome measurement
 
 The checked real-data integration run retained 7,378,240 alleles from
-chromosomes 1–22, X, Y, and MT and materialized 88,392,840
-consequence/core-feature rows. It was deliberately run as one
-warm-page-cache, unpinned integration pass and completed in 284.890
-seconds; 88,392,840 annotation rows written. Peak process RSS was 46.87
-GiB because this pass retained the allele, interval-match, and complete
-consequence relations before the ordered write. It validates composition
-and exposes the current materialization cost rather than replacing the
-pinned engine tables below.
+chromosomes 1–22, X, Y, and MT and emitted 88,392,840
+consequence/core-feature rows. With a 4 GB DuckDB memory limit, four
+unpinned workers, warm input pages, and four Parquet writers, the
+model-load plus annotation/composition stream completed in 28.841
+seconds; 88,392,840 annotation rows written. GNU `time -v` recorded 5.31
+GiB peak process RSS. That high-water mark includes the transient
+full-model load; the immutable C model is allocated outside DuckDB’s
+buffer-manager limit. The checked fingerprint matches the earlier
+retained-intermediate result over all 88 million rows, while avoiding
+its 46.87 GiB process peak.
+
+| measured stage                              | rows       | seconds | peak RSS (GiB) | output bytes |
+|:--------------------------------------------|:-----------|--------:|:---------------|:-------------|
+| RegionKey IEJoin + interval result          | 414,813    |   0.770 | 1.52           | 4,262,629    |
+| cgranges build/query + interval result      | 414,813    |   1.144 | 0.79           | 4,451,147    |
+| rich + HGVS + core regulation, four writers | 88,392,840 |  24.524 | 4.98           | 274,046,172  |
+| rich + HGVS + all providers, four writers   | 88,392,840 |  28.841 | 5.31           | 285,798,217  |
 
 The exact-source benchmark separately measures the complete
 4.0-million-allele GIAB probe against ClinVar, ClinvArbitration,

@@ -1523,46 +1523,142 @@ human_composition <- read.csv(
   colClasses = c(source_revision = "character")
 )
 stopifnot(
-  nrow(human_composition) == 9L,
-  length(unique(human_composition$source_revision)) == 1L,
+  nrow(human_composition) == 13L,
   length(unique(human_composition$input_alleles)) == 1L,
   length(unique(human_composition$threads)) == 1L
 )
-human_table <- human_composition[, c(
-  "stage", "result_rows", "seconds", "threads"
-)]
+selected_stages <- c(
+  "model_load",
+  "vcf_decode_canonicalize_sort",
+  "ClinVar_exact_collision_safe",
+  "ClinvArbitration_exact_collision_safe",
+  "AlphaMissense_exact",
+  "Ensembl_regulatory_RegionKey_IEJoin_stream",
+  "Ensembl_regulatory_cgranges_bulk_stream",
+  "DuckVEP_rich_HGVS_regulatory_parallel_stream_4GB",
+  "compose_all_providers_parallel_stream_4GB"
+)
+human_table <- human_composition[
+  match(selected_stages, human_composition$stage),
+  c("stage", "result_rows", "seconds", "threads", "max_rss_kb")
+]
+stopifnot(!anyNA(human_table$stage))
 human_table$stage <- c(
   "load Ensembl 116 model",
   "read VCF, canonicalize and sort",
   "ClinVar exact join",
   "ClinvArbitration exact join",
   "AlphaMissense exact join",
-  "regulatory interval IEJoin",
-  "DuckVEP rich + HGVS + core regulation",
-  "join gene payloads and write ZSTD Parquet",
-  "whole DuckDB process"
+  "regulatory RegionKey IEJoin + write",
+  "regulatory cgranges build/query + write",
+  "rich + HGVS + core regulation, four writers",
+  "rich + HGVS + all providers, four writers"
 )
 human_table$result_rows <- format(
   human_table$result_rows, big.mark = ",", scientific = FALSE
 )
-names(human_table) <- c("stage", "result rows", "seconds", "threads")
+human_table$max_rss_kb <- ifelse(
+  is.na(human_table$max_rss_kb),
+  "",
+  sprintf("%.2f", human_table$max_rss_kb / 1024^2)
+)
+names(human_table) <- c(
+  "stage", "result rows", "seconds", "threads", "peak RSS (GiB)"
+)
 knitr::kable(human_table, row.names = FALSE)
 ```
 
-This is a one-pass, warm-page-cache, unpinned integration run, not a new
-controlled throughput comparison. DuckDB CLI `.timer on` records each statement
-and GNU `/usr/bin/time -v` records the whole process. The run retained
-`r format(unique(human_composition$input_alleles), big.mark = ",")` real alleles,
-materialized `r format(human_composition$result_rows[human_composition$stage == "DuckVEP_rich_HGVS_regulatory"], big.mark = ",")`
-consequence/core-feature rows, and wrote
-`r format(human_composition$output_bytes[human_composition$stage == "whole_process_warm_page_cache"], big.mark = ",")`
-bytes. Peak process RSS was
+These are warm-page-cache, unpinned integration measurements, not replacements
+for the pinned resident-engine comparisons above. DuckDB CLI `.timer on` records
+the statements and GNU `/usr/bin/time -v` records process high-water RSS. The
+corrected production query sets a 4 GB DuckDB memory limit and writes one Parquet
+file per worker so the complete consequence relation is never retained or
+globally sorted.
+
+```{r human-interval-validation}
+interval_validation <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_human_interval_validation.csv"),
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character")
+)
+stopifnot(
+  nrow(interval_validation) == 3L,
+  length(unique(interval_validation$matched_events)) == 1L,
+  length(unique(interval_validation$overlap_pairs)) == 1L,
+  length(unique(interval_validation$stable_ids)) == 1L,
+  length(unique(interval_validation$so_terms)) == 1L,
+  all(interval_validation$mismatched_event_rows == 0L)
+)
+interval_table <- interval_validation[, c(
+  "method", "matched_events", "overlap_pairs", "seconds", "max_rss_kb"
+)]
+interval_table$method <- c(
+  "chromosome hash join + range residuals",
+  "two packed RegionKey inequalities (IEJoin)",
+  "cgranges bulk index + query"
+)
+interval_table$matched_events <- format(
+  interval_table$matched_events, big.mark = ",", scientific = FALSE
+)
+interval_table$overlap_pairs <- format(
+  interval_table$overlap_pairs, big.mark = ",", scientific = FALSE
+)
+interval_table$max_rss_kb <- ifelse(
+  is.na(interval_table$max_rss_kb),
+  "",
+  sprintf("%.0f", interval_table$max_rss_kb / 1024)
+)
+names(interval_table) <- c(
+  "method", "matched alleles", "overlap pairs", "seconds", "peak RSS (MiB)"
+)
+knitr::kable(interval_table, row.names = FALSE)
+```
+
+The first query was mislabeled as IEJoin in the initial receipt. `EXPLAIN`
+showed a chromosome `HASH_JOIN` with all four range predicates applied to the
+same-chromosome candidate products. The receipt remains above rather than being
+hidden. Removing the redundant string equality lets the two packed RegionKey
+inequalities encode both chromosome and half-open overlap and selects
+`IE_JOIN`. It returns the same
+`r format(unique(interval_validation$overlap_pairs), big.mark = ",")` pairs and
+`r format(unique(interval_validation$matched_events), big.mark = ",")` matched
+alleles in
+`r sprintf("%.2fx", interval_validation$seconds[1] / interval_validation$seconds[2])`
+less wall time. The cgranges path is slightly slower here but uses roughly half
+the process memory and supports arbitrary literal contig names.
+
+The bounded four-writer composition emits
+`r format(human_composition$result_rows[human_composition$stage == "compose_all_providers_parallel_stream_4GB"], big.mark = ",")`
+rows in
+`r sprintf("%.3f", human_composition$seconds[human_composition$stage == "compose_all_providers_parallel_stream_4GB"])`
+seconds and writes
+`r format(human_composition$output_bytes[human_composition$stage == "compose_all_providers_parallel_stream_4GB"], big.mark = ",")`
+bytes. Peak RSS is
+`r sprintf("%.2f GiB", human_composition$max_rss_kb[human_composition$stage == "compose_all_providers_parallel_stream_4GB"] / 1024^2)`;
+the high-water mark includes transient construction of the complete immutable
+Ensembl model, whose C allocations are outside DuckDB's 4 GB buffer-manager
+limit.
+
+```{r human-composition-fingerprint, include=FALSE}
+human_fingerprint <- read.csv(
+  file.path(root, "benchmarks", "data", "duckvep_human_annotation_fingerprint.csv"),
+  stringsAsFactors = FALSE,
+  colClasses = "character"
+)
+stopifnot(
+  nrow(human_fingerprint) == 2L,
+  length(unique(human_fingerprint$rows)) == 1L,
+  length(unique(human_fingerprint$xor64)) == 1L,
+  length(unique(human_fingerprint$sum64)) == 1L
+)
+```
+
+The earlier retained-intermediate/single-file run is also preserved in the CSV:
+it took
+`r sprintf("%.3f", human_composition$seconds[human_composition$stage == "whole_process_warm_page_cache"])`
+seconds and peaked at
 `r sprintf("%.2f GiB", human_composition$max_rss_kb[human_composition$stage == "whole_process_warm_page_cache"] / 1024^2)`.
-That peak is materially higher than the resident-engine footprint because this
-single query sequence also retains the whole allele, interval-match, and
-88-million-row consequence relations before the final ordered write. It proves
-the SQL composition and exposes the current memory cost; a bounded-memory
-production pipeline should persist or consume these stages incrementally. The
-checked CSV retains the source revision, DuckDB version, thread count, cache
-state, row denominators, and raw elapsed measurements. Controlled resident and
-FastVEP comparisons remain the authorities above.
+The bounded output has the same row count and the same order-independent XOR and
+sum fingerprints over every projected column. Controlled resident and FastVEP
+comparisons remain the authorities above.

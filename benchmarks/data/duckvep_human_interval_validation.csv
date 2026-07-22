@@ -1,0 +1,4 @@
+source_revision,method,threads,matched_events,overlap_pairs,stable_ids,so_terms,mismatched_event_rows,seconds,max_rss_kb,output_bytes
+60871026cf819df0c8f13e7979918417852d4a26,chrom_hash_with_range_residuals,4,414813,745252,745252,745250,0,83.960,,
+79cf706cf417c4dc1f59015cd982ac42b3475492,regionkey_iejoin,4,414813,745252,745252,745250,0,0.770,1594188,4262629
+79cf706cf417c4dc1f59015cd982ac42b3475492,cgranges_bulk,4,414813,745252,745252,745250,0,1.144,831300,4451147

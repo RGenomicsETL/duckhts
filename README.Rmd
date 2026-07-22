@@ -186,7 +186,7 @@ Ensembl MySQL database through DuckDB's `mysql` extension. The compiler is not a
 downloader: source retrieval and dump-to-table typing are explicit staging steps,
 while the same validation and model receipt apply to either transport.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 -- Reference chunks are zero-based, half-open and sequence-bearing.
 CREATE TABLE grch38_reference_chunks AS
 SELECT chrom, start, "end", seq
@@ -238,7 +238,7 @@ load their sorted hot projections into a named resident model with
 VEP-compatible three-prime HGVS shifting; `transcript_coverage_complete := TRUE`
 permits a no-transcript hit to become a supported `intergenic_variant`.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 SELECT loaded
 FROM duckvep_model_load(
   'human_116_grch38',
@@ -358,7 +358,7 @@ genotype arrays and normalization lineage in their source relations.
 ClinVar is already VCF, so `read_bcf()` supplies typed INFO fields while ALT
 ordinal expansion produces the allele relation.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 COPY (
   WITH alleles AS (
     SELECT duckhts_contig_key(CHROM) AS chrom, POS::BIGINT AS pos,
@@ -382,7 +382,7 @@ COPY (
 ClinvArbitration publishes an aggregate decision table. Its assembly is a
 declared GRCh38 release fact; it is not inferred from `chr`-prefixed strings.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 COPY (
   WITH source AS (
     SELECT duckhts_contig_key(contig) AS chrom,
@@ -409,7 +409,7 @@ The official AlphaMissense `.tsv.gz` is BGZF-compressed. DuckHTS can build its
 coordinate index directly, then use the same file for indexed regional queries
 or, as below, stream all 71.7 million rows once to build the reusable pack.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 SELECT * FROM tabix_index(
   'source/AlphaMissense_hg38.tsv.gz',
   preset := 'gff', seq_col := 1, start_col := 2, end_col := 2,
@@ -444,7 +444,7 @@ The Ensembl provider is projected from the same release-116 funcgen relation
 that supplies the resident core features. Identifiers and SO metadata remain in
 Parquet; only compact feature geometry enters the C model.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 COPY (
   WITH source AS (
     SELECT f.stable_id, f.feature_class,
@@ -468,7 +468,7 @@ COPY (
 Gene constraint joins by stable Ensembl gene identifier and therefore needs no
 genomic key.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 COPY (
   SELECT gene_id, gene AS gene_symbol, transcript,
          try_cast(pLI AS DOUBLE) AS pLI,
@@ -496,10 +496,20 @@ human_evidence <- read.csv(
   colClasses = c(source_revision = "character")
 )
 stopifnot(
-  nrow(human_evidence) == 9L,
-  length(unique(human_evidence$source_revision)) == 1L,
+  nrow(human_evidence) == 13L,
   length(unique(human_evidence$input_alleles)) == 1L,
   length(unique(human_evidence$threads)) == 1L
+)
+human_fingerprint <- read.csv(
+  "benchmarks/data/duckvep_human_annotation_fingerprint.csv",
+  stringsAsFactors = FALSE,
+  colClasses = "character"
+)
+stopifnot(
+  nrow(human_fingerprint) == 2L,
+  length(unique(human_fingerprint$rows)) == 1L,
+  length(unique(human_fingerprint$xor64)) == 1L,
+  length(unique(human_fingerprint$sum64)) == 1L
 )
 human_measure <- function(stage, denominator) {
   row <- human_evidence[human_evidence$stage == stage, , drop = FALSE]
@@ -516,14 +526,16 @@ human_measure <- function(stage, denominator) {
 ##### Session and resident model
 
 `.timer on` makes the DuckDB CLI report every following statement separately.
-Keep the thread count fixed for the complete run. Execute the
+Keep the thread count and memory limit fixed for the complete run. Execute the
 `duckvep_model_load(...)` statement above in this session before staging the
 alleles; the checked run loaded the full Ensembl 116 model in
 `r human_measure("model_load", "transcripts")`.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 .timer on
 SET threads = 4;
+SET memory_limit = '4GB';
+SET temp_directory = 'case/duckdb-tmp';
 ```
 
 ##### Canonical allele relation
@@ -535,7 +547,7 @@ arrays. This small-variant lane admits literal nucleotide alleles only; exact
 SVs and paired breakends use the same event schema through the typed columns
 that are `NULL` below.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 CREATE TABLE case_alleles AS
 WITH records AS (
   -- Sequential mode streams the complete file. Keep the raw VCF record number
@@ -561,8 +573,8 @@ WITH records AS (
 ), keyed AS (
   -- VCF POS is one-based. Provider intervals are zero-based, half-open:
   -- [POS - 1, POS - 1 + length(REF)).
-  -- VariantKey accelerates exact normalized-allele joins; RegionKey supplies
-  -- coarse ordered bounds for the interval join.
+  -- VariantKey accelerates exact normalized-allele joins. For canonical human
+  -- contigs, RegionKey supplies exact ordered (chromosome, coordinate) bounds.
   SELECT a.*, r.seq_region,
          variantkey(chrom, pos, ref, alt) AS vk,
          regionkey(chrom, pos - 1, pos - 1 + length(ref)) AS rk
@@ -601,18 +613,10 @@ feature fields. Stable identifiers and supplementary provider payloads remain
 in DuckDB and are joined later. `hgvs` and `rich` change output projection; they
 do not cause a second candidate-discovery pass.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
-CREATE TABLE case_consequence AS
-SELECT *
-FROM duckvep_annotate(
-  'case_alleles', 'human_116_grch38',
-  hgvs := TRUE, rich := TRUE,
-  upstream_distance := 5000, downstream_distance := 5000
-);
-```
-
-Measured transcript/core-feature sweep, consequence classification, NMD and
-HGVS rendering: `r human_measure("DuckVEP_rich_HGVS_regulatory", "annotation rows")`.
+Do not retain the complete result of `duckvep_annotate(...)` before writing it:
+this WGS emits 88 million rows. The final query below consumes the annotator
+directly. In isolation, the same four-thread rich/HGVS stream writes all rows in
+`r human_measure("DuckVEP_rich_HGVS_regulatory_parallel_stream_4GB", "annotation rows")`.
 
 ##### Exact allele providers
 
@@ -622,7 +626,7 @@ encode short alleles reversibly or store a hash for longer alleles. The
 then checked against the literal contig, position, REF and ALT so a collision
 cannot become clinical evidence.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 CREATE TABLE case_clinvar AS
 SELECT q.event_index, min(p.allele_id) AS clinvar_allele_id,
        list_distinct(flatten(list(p.clinical_significance)))
@@ -639,7 +643,7 @@ GROUP BY q.event_index;
 Measured dated ClinVar join:
 `r human_measure("ClinVar_exact_collision_safe", "matched alleles")`.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 CREATE TABLE case_clinvarbitration AS
 SELECT q.event_index,
        arg_max(p.clinical_significance, p.gold_stars) AS classification,
@@ -660,7 +664,7 @@ AlphaMissense contains single-nucleotide substitutions, whose VariantKeys are
 reversible, so hashed events are excluded rather than subjected to a literal
 fallback comparison.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```sql
 CREATE TABLE case_alphamissense AS
 SELECT q.event_index,
        max(p.am_pathogenicity) AS am_pathogenicity,
@@ -677,13 +681,22 @@ Measured AlphaMissense join:
 
 ##### Interval provider
 
-RegionKey bounds provide a cheap ordered rejection before exact half-open
-coordinate comparison. The chromosome equality is still explicit: encoded
-bounds accelerate the plan but do not define biological overlap. DuckDB may
-execute the two range inequalities with
+For RegionKey-supported contigs, shifting a RegionKey right by 31 bits produces
+an exact ordered `(chromosome code, start)` value. Constructing the same value
+at the half-open end gives an exact `(chromosome code, end)` value. The two
+inequalities below therefore express both chromosome identity and half-open
+overlap, and DuckDB plans them as
 [IEJoin](https://duckdb.org/2022/05/27/iejoin).
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+Do not add `q.chrom = p.chrom` to this plan. DuckDB then chooses a chromosome
+hash join and tests the range predicates across enormous same-chromosome
+candidate sets. On this workload that physical-plan change was more than two
+orders of magnitude slower. Use `EXPLAIN` to confirm `IE_JOIN`. For accessions,
+patches, or arbitrary species contigs outside RegionKey's encoding domain, use
+`duckhts_cgranges_overlaps_bulk(...)` instead; it preserves literal contig
+identity and has its own measured memory/speed tradeoff.
+
+```sql
 CREATE TABLE case_interval AS
 SELECT q.event_index,
        list_distinct(list(p.stable_id)) AS stable_ids,
@@ -692,24 +705,28 @@ FROM case_alleles q
 JOIN read_parquet('providers/ensembl116_grch38_regulatory.parquet') p
   ON q.rk_chrom_start < p.rk_chrom_end
  AND q.rk_chrom_end > p.rk_chrom_start
- AND q.chrom = p.chrom
- AND q.start0 < p.end0 AND q.end0 > p.start0
 GROUP BY q.event_index;
 ```
 
 Measured Ensembl regulatory interval join:
-`r human_measure("Ensembl_regulatory_IEJoin", "matched alleles")`.
+`r human_measure("Ensembl_regulatory_RegionKey_IEJoin_stream", "matched alleles")`.
+The complete cgranges build, bulk query, aggregation, and write takes
+`r human_measure("Ensembl_regulatory_cgranges_bulk_stream", "matched alleles")`.
 
-##### Materialized result
+##### Streamed result
 
 Transcript indices are compact model-local ordinals. Resolve them to stable
 transcript/gene identifiers only after annotation, then attach gene-level and
 event-level payloads. This keeps provider strings out of the shared C model and
-lets DuckDB project or omit them normally. The final `ORDER BY` makes the
-Parquet row order deterministic; ZSTD compression and file writing are included
-in this stage's measurement.
+lets DuckDB project or omit them normally.
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+The query streams annotation into the joins and uses one Parquet writer per
+DuckDB worker. `event_index` is the stable identity and ordering key; forcing a
+global `ORDER BY` or a single output file serializes the writer and requires a
+large sort/materialization. Query the resulting Parquet dataset with an
+explicit `ORDER BY` only when a consumer actually requires ordered rows.
+
+```sql
 COPY (
   SELECT q.chrom, q.position, q.reference, q.alternate,
          a.consequence, a.impact, a.cdna_position, a.cds_position,
@@ -723,7 +740,11 @@ COPY (
          gc.pLI, gc.oe_lof_upper,
          ri.stable_ids AS interval_ids, ri.so_terms AS interval_terms,
          a.overlap_object, a.duckvep_status, a.duckvep_reason
-  FROM case_consequence a
+  FROM duckvep_annotate(
+    'case_alleles', 'human_116_grch38',
+    hgvs := TRUE, rich := TRUE,
+    upstream_distance := 5000, downstream_distance := 5000
+  ) a
   JOIN case_alleles q USING (event_index)
   LEFT JOIN grch38_transcripts t USING (transcript_index)
   LEFT JOIN read_parquet('providers/gnomad_v211_constraint_gene.parquet') gc
@@ -732,29 +753,61 @@ COPY (
   LEFT JOIN case_clinvarbitration ca USING (event_index)
   LEFT JOIN case_alphamissense am USING (event_index)
   LEFT JOIN case_interval ri USING (event_index)
-  ORDER BY q.seq_region, q.position, q.event_index,
-           a.transcript_index, a.regulation_feature_index
-) TO 'case/HG002.deepvariant-v1.0.duckvep.parquet'
-  (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO 'case/HG002.deepvariant-v1.0.duckvep'
+  (FORMAT PARQUET, COMPRESSION ZSTD, PER_THREAD_OUTPUT TRUE);
 ```
 
-Measured late joins and ZSTD Parquet materialization:
-`r human_measure("compose_gene_constraint_and_write_ZSTD_Parquet", "annotation rows written")`.
+Measured model load, fused consequence/HGVS, all late joins, and four-writer
+ZSTD Parquet output:
+`r human_measure("compose_all_providers_parallel_stream_4GB", "annotation rows written")`.
 
 ##### Whole-genome measurement
 
 The checked real-data integration run retained
 `r format(unique(human_evidence$input_alleles), big.mark = ",")` alleles from
-chromosomes 1--22, X, Y, and MT and materialized
-`r format(human_evidence$result_rows[human_evidence$stage == "DuckVEP_rich_HGVS_regulatory"], big.mark = ",")`
-consequence/core-feature rows. It was deliberately run as one warm-page-cache,
-unpinned integration pass and completed in
-`r human_measure("whole_process_warm_page_cache", "annotation rows written")`.
-Peak process RSS was
-`r sprintf("%.2f GiB", human_evidence$max_rss_kb[human_evidence$stage == "whole_process_warm_page_cache"] / 1024^2)`
-because this pass retained the allele, interval-match, and complete consequence
-relations before the ordered write. It validates composition and exposes the
-current materialization cost rather than replacing the pinned engine tables below.
+chromosomes 1--22, X, Y, and MT and emitted
+`r format(human_evidence$result_rows[human_evidence$stage == "compose_all_providers_parallel_stream_4GB"], big.mark = ",")`
+consequence/core-feature rows. With a 4 GB DuckDB memory limit, four unpinned
+workers, warm input pages, and four Parquet writers, the model-load plus
+annotation/composition stream completed in
+`r human_measure("compose_all_providers_parallel_stream_4GB", "annotation rows written")`.
+GNU `time -v` recorded
+`r sprintf("%.2f GiB", human_evidence$max_rss_kb[human_evidence$stage == "compose_all_providers_parallel_stream_4GB"] / 1024^2)`
+peak process RSS. That high-water mark includes the transient full-model load;
+the immutable C model is allocated outside DuckDB's buffer-manager limit. The
+checked fingerprint matches the earlier retained-intermediate result over all
+88 million rows, while avoiding its 46.87 GiB process peak.
+
+```{r duckvep-human-measured-results, echo=FALSE}
+measured_stages <- c(
+  "Ensembl_regulatory_RegionKey_IEJoin_stream",
+  "Ensembl_regulatory_cgranges_bulk_stream",
+  "DuckVEP_rich_HGVS_regulatory_parallel_stream_4GB",
+  "compose_all_providers_parallel_stream_4GB"
+)
+measured <- human_evidence[
+  match(measured_stages, human_evidence$stage),
+  c("stage", "result_rows", "seconds", "max_rss_kb", "output_bytes")
+]
+stopifnot(!anyNA(measured$stage))
+measured$stage <- c(
+  "RegionKey IEJoin + interval result",
+  "cgranges build/query + interval result",
+  "rich + HGVS + core regulation, four writers",
+  "rich + HGVS + all providers, four writers"
+)
+measured$result_rows <- format(
+  measured$result_rows, big.mark = ",", scientific = FALSE
+)
+measured$max_rss_kb <- sprintf("%.2f", measured$max_rss_kb / 1024^2)
+measured$output_bytes <- format(
+  measured$output_bytes, big.mark = ",", scientific = FALSE
+)
+names(measured) <- c(
+  "measured stage", "rows", "seconds", "peak RSS (GiB)", "output bytes"
+)
+knitr::kable(measured, row.names = FALSE)
+```
 
 The exact-source benchmark separately measures the complete 4.0-million-allele
 GIAB probe against ClinVar, ClinvArbitration, AlphaMissense, REVEL, gene constraint,

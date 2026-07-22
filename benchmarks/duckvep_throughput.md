@@ -634,29 +634,49 @@ AlphaMissense, gnomAD v2.1.1 gene constraint, and an Ensembl regulatory
 interval Parquet relation. The final relation is written as ZSTD Parquet
 rather than reduced to a scalar.
 
-| stage                                     | result rows | seconds | threads |
-|:------------------------------------------|:------------|--------:|--------:|
-| load Ensembl 116 model                    | 644,427     |   2.398 |       4 |
-| read VCF, canonicalize and sort           | 7,378,240   |  12.200 |       4 |
-| ClinVar exact join                        | 50,749      |   0.259 |       4 |
-| ClinvArbitration exact join               | 45,232      |   0.176 |       4 |
-| AlphaMissense exact join                  | 14,850      |   0.523 |       4 |
-| regulatory interval IEJoin                | 414,813     |  83.960 |       4 |
-| DuckVEP rich + HGVS + core regulation     | 88,392,840  | 142.672 |       4 |
-| join gene payloads and write ZSTD Parquet | 88,392,840  |  41.004 |       4 |
-| whole DuckDB process                      | 88,392,840  | 284.890 |       4 |
+| stage                                       | result rows | seconds | threads | peak RSS (GiB) |
+|:--------------------------------------------|:------------|--------:|--------:|:---------------|
+| load Ensembl 116 model                      | 644,427     |   2.398 |       4 |                |
+| read VCF, canonicalize and sort             | 7,378,240   |  12.200 |       4 |                |
+| ClinVar exact join                          | 50,749      |   0.259 |       4 |                |
+| ClinvArbitration exact join                 | 45,232      |   0.176 |       4 |                |
+| AlphaMissense exact join                    | 14,850      |   0.523 |       4 |                |
+| regulatory RegionKey IEJoin + write         | 414,813     |   0.770 |       4 | 1.52           |
+| regulatory cgranges build/query + write     | 414,813     |   1.144 |       4 | 0.79           |
+| rich + HGVS + core regulation, four writers | 88,392,840  |  24.524 |       4 | 4.98           |
+| rich + HGVS + all providers, four writers   | 88,392,840  |  28.841 |       4 | 5.31           |
 
-This is a one-pass, warm-page-cache, unpinned integration run, not a new
-controlled throughput comparison. DuckDB CLI `.timer on` records each
-statement and GNU `/usr/bin/time -v` records the whole process. The run
-retained 7,378,240 real alleles, materialized 88,392,840
-consequence/core-feature rows, and wrote 275,600,689 bytes. Peak process
-RSS was 46.87 GiB. That peak is materially higher than the
-resident-engine footprint because this single query sequence also
-retains the whole allele, interval-match, and 88-million-row consequence
-relations before the final ordered write. It proves the SQL composition
-and exposes the current memory cost; a bounded-memory production
-pipeline should persist or consume these stages incrementally. The
-checked CSV retains the source revision, DuckDB version, thread count,
-cache state, row denominators, and raw elapsed measurements. Controlled
-resident and FastVEP comparisons remain the authorities above.
+These are warm-page-cache, unpinned integration measurements, not
+replacements for the pinned resident-engine comparisons above. DuckDB
+CLI `.timer on` records the statements and GNU `/usr/bin/time -v`
+records process high-water RSS. The corrected production query sets a 4
+GB DuckDB memory limit and writes one Parquet file per worker so the
+complete consequence relation is never retained or globally sorted.
+
+| method                                     | matched alleles | overlap pairs | seconds | peak RSS (MiB) |
+|:-------------------------------------------|:----------------|:--------------|--------:|:---------------|
+| chromosome hash join + range residuals     | 414,813         | 745,252       |  83.960 |                |
+| two packed RegionKey inequalities (IEJoin) | 414,813         | 745,252       |   0.770 | 1557           |
+| cgranges bulk index + query                | 414,813         | 745,252       |   1.144 | 812            |
+
+The first query was mislabeled as IEJoin in the initial receipt.
+`EXPLAIN` showed a chromosome `HASH_JOIN` with all four range predicates
+applied to the same-chromosome candidate products. The receipt remains
+above rather than being hidden. Removing the redundant string equality
+lets the two packed RegionKey inequalities encode both chromosome and
+half-open overlap and selects `IE_JOIN`. It returns the same 745,252
+pairs and 414,813 matched alleles in 109.04x less wall time. The
+cgranges path is slightly slower here but uses roughly half the process
+memory and supports arbitrary literal contig names.
+
+The bounded four-writer composition emits 88,392,840 rows in 28.841
+seconds and writes 285,798,217 bytes. Peak RSS is 5.31 GiB; the
+high-water mark includes transient construction of the complete
+immutable Ensembl model, whose C allocations are outside DuckDB’s 4 GB
+buffer-manager limit.
+
+The earlier retained-intermediate/single-file run is also preserved in
+the CSV: it took 284.890 seconds and peaked at 46.87 GiB. The bounded
+output has the same row count and the same order-independent XOR and sum
+fingerprints over every projected column. Controlled resident and
+FastVEP comparisons remain the authorities above.

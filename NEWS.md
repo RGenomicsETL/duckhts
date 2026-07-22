@@ -1,17 +1,30 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- correct the real-WGS regulatory-provider plan after `EXPLAIN` showed that the
+  documented chromosome equality forced a hash join with range residuals rather than
+  IEJoin. Two packed RegionKey inequalities encode chromosome plus half-open coordinates
+  exactly for the supported contigs and produce the identical 745,252 overlap pairs and
+  414,813 matched alleles in 0.770 seconds instead of 83.960 seconds; the measured
+  cgranges bulk alternative takes 1.144 seconds with lower peak RSS and remains the path
+  for arbitrary contig names. Replace the 88-million-row retained consequence table and
+  global ordered write with a direct four-writer Parquet stream under a 4 GB DuckDB memory
+  limit. The full rich/HGVS plus ClinVar, ClinvArbitration, AlphaMissense, gene-constraint,
+  and regulatory composition now writes 88,392,840 rows in 28.841 seconds with 5.31 GiB
+  process high-water RSS; an order-independent full-row fingerprint matches the earlier
+  46.87 GiB retained-intermediate run, which remains in the benchmark receipt as the
+  diagnosed failure
 - replace the root DuckVEP fixture-led narrative with a real human annotation flow over
   a public HG002 40x DeepVariant GRCh38 whole-genome callset, the complete Ensembl 116
   GRCh38 transcript/regulation model, collision-safe ClinVar and ClinvArbitration joins,
   AlphaMissense, gnomAD gene constraint, and an
   IEJoin-compatible regulatory interval provider. Show how each reusable provider Parquet
   relation is built from its declared release artifact, then present the case workflow as
-  separately timed literate SQL stages and tabulate the resident-engine and FastVEP
+  separately timed SQL stages and tabulate the resident-engine and FastVEP
   comparisons. Explain the continuing sorted transcript/feature sweep, immutable-model
   versus per-worker memory,
   relation-native supplementary-provider contract, and the fixed/property/statistical/
-  executable/corpus conformance ladder. Record a timed materialized whole-genome run over
+  executable/corpus conformance ladder. Record a timed whole-genome run over
   chromosomes 1--22, X, Y, and MT in the rendered throughput report, including its peak
   process memory, and distinguish extension-build, README-render, and optional VEP-oracle
   prerequisites
