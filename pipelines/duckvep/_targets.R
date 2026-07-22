@@ -106,14 +106,25 @@ list(
     format = "file"
   ),
   tar_target(
+    duckvep_cache_state,
+    duckvep_targets_cache_state(duckvep_campaign),
+    pattern = map(duckvep_campaign),
+    cue = tar_cue(mode = "always")
+  ),
+  tar_target(
     duckvep_campaign_evidence,
     duckvep_targets_run_campaign(
       duckvep_campaign,
       duckvep_campaign_inputs,
+      duckvep_cache_state,
       duckvep_extension_bundle,
       duckvep_root
     ),
-    pattern = map(duckvep_campaign, duckvep_campaign_inputs),
+    pattern = map(
+      duckvep_campaign,
+      duckvep_campaign_inputs,
+      duckvep_cache_state
+    ),
     format = "file"
   )
 )

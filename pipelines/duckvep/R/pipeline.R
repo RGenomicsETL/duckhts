@@ -73,7 +73,7 @@ duckvep_targets_read_campaigns <- function(
   allowed <- c(
     "id", "enabled", "corpus", "event_mode", "vcf", "gff",
     "gff_index_policy", "cache_dir",
-    "cache_info", "assembly", "species", "cache_version", "fasta",
+    "cache_info", "cache_receipt", "assembly", "species", "cache_version", "fasta",
     "database", "model_sql", "model_name", "sample_per_shape",
     "max_allele_length", "split_multiallelic", "stratify_raw_allele_length",
     "seed", "chrom", "distance", "max_sv_size", "regulatory", "hgvs",
@@ -105,7 +105,7 @@ duckvep_targets_read_campaigns <- function(
   }
   path_fields <- intersect(
     c(
-      "vcf", "gff", "cache_dir", "cache_info", "fasta", "database",
+      "vcf", "gff", "cache_dir", "cache_info", "cache_receipt", "fasta", "database",
       "model_sql", "nmd_plugin_dir", "oracle_environment_receipt",
       "vep_prefix"
     ),
@@ -250,6 +250,7 @@ duckvep_targets_campaign_inputs <- function(campaign) {
   add_file(campaign$database %||% "", "model database")
   add_file(campaign$model_sql %||% "", "model SQL")
   add_file(campaign$cache_info %||% "", "VEP cache info")
+  add_file(campaign$cache_receipt %||% "", "VEP cache receipt")
   add_file(
     campaign$oracle_environment_receipt %||% "",
     "VEP environment receipt"
@@ -265,8 +266,12 @@ duckvep_targets_campaign_inputs <- function(campaign) {
     add_file(file.path(campaign$nmd_plugin_dir, "NMD.pm"), "NMD plugin")
   }
   if (nzchar(campaign$cache_dir %||% "") &&
-      !nzchar(campaign$cache_info %||% "")) {
-    stop("cache-backed campaigns must declare cache_info", call. = FALSE)
+      (!nzchar(campaign$cache_info %||% "") ||
+        !nzchar(campaign$cache_receipt %||% ""))) {
+    stop(
+      "cache-backed campaigns must declare cache_info and cache_receipt",
+      call. = FALSE
+    )
   }
   if (nzchar(campaign$cache_dir %||% "")) {
     expected_cache_info <- duckvep_evidence_cache_info_path(
@@ -287,6 +292,24 @@ duckvep_targets_campaign_inputs <- function(campaign) {
     }
   }
   unique(inputs)
+}
+
+duckvep_targets_cache_state <- function(campaign) {
+  if (!nzchar(campaign$cache_dir %||% "")) return("gff")
+  state <- duckvep_evidence_validate_cache_receipt(
+    campaign$cache_receipt,
+    campaign$cache_dir,
+    campaign$species %||% "homo_sapiens",
+    campaign$cache_version %||% "116",
+    campaign$assembly %||% "GRCh38"
+  )
+  paste(
+    state$receipt_sha256,
+    state$inventory_sha256,
+    state$entries,
+    state$bytes,
+    sep = ":"
+  )
 }
 
 `%||%` <- function(left, right) {
@@ -337,6 +360,7 @@ duckvep_targets_campaign_args <- function(
     gff_index_policy = "gff-index-policy",
     cache_dir = "cache-dir",
     cache_info = "cache-info",
+    cache_receipt = "cache-receipt",
     assembly = "assembly",
     species = "species",
     cache_version = "cache-version",
@@ -582,6 +606,7 @@ duckvep_targets_publish_outputs <- function(stage_directory, final_directory) {
 duckvep_targets_run_campaign <- function(
     campaign,
     campaign_inputs,
+    cache_state,
     extension_bundle,
     root) {
   if (!requireNamespace("blit", quietly = TRUE) ||
@@ -589,6 +614,9 @@ duckvep_targets_run_campaign <- function(
     stop("blit >= 0.2.0.9000 is required", call. = FALSE)
   }
   invisible(campaign_inputs)
+  if (length(cache_state) != 1L || !nzchar(cache_state)) {
+    stop("campaign has no validated cache state", call. = FALSE)
+  }
   extension_paths <- duckvep_targets_extension_paths(extension_bundle)
   outputs <- campaign$outputs
   if (is.null(outputs)) stop("campaign has no validated outputs", call. = FALSE)

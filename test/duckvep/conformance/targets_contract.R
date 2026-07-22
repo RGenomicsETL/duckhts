@@ -177,6 +177,9 @@ cache_root <- file.path(temporary_root, "cache")
 cache_info <- file.path(cache_root, "homo_sapiens", "116_GRCh38", "info.txt")
 dir.create(dirname(cache_info), recursive = TRUE)
 writeLines(c("species\thomo_sapiens", "assembly\tGRCh38"), cache_info)
+cache_shard <- file.path(dirname(cache_info), "1", "1-1000000.gz")
+dir.create(dirname(cache_shard), recursive = TRUE)
+writeBin(charToRaw("AAAA"), cache_shard)
 decoy_info <- file.path(
   cache_root,
   "decoy",
@@ -197,6 +200,69 @@ stopifnot(
     normalizePath(cache_info)
   ),
   !identical(normalizePath(decoy_info), normalizePath(cache_info))
+)
+cache_receipt <- file.path(temporary_root, "vep-cache-receipt.tsv")
+invisible(duckvep_evidence_write_cache_receipt(
+  cache_receipt,
+  cache_root,
+  "homo_sapiens",
+  "116",
+  "GRCh38",
+  "https://example.org/homo_sapiens_vep_116_GRCh38.tar.gz",
+  "http-etag:66fbffe0a-64efc55395049:27644657162"
+))
+cache_state <- duckvep_evidence_validate_cache_receipt(
+  cache_receipt,
+  cache_root,
+  "homo_sapiens",
+  "116",
+  "GRCh38"
+)
+stopifnot(
+  cache_state$entries == 2L,
+  nchar(cache_state$inventory_sha256) == 64L
+)
+original_mtime <- file.info(cache_shard)$mtime
+Sys.sleep(0.01)
+writeBin(charToRaw("BBBB"), cache_shard)
+Sys.setFileTime(cache_shard, original_mtime)
+expect_error(
+  duckvep_evidence_validate_cache_receipt(
+    cache_receipt,
+    cache_root,
+    "homo_sapiens",
+    "116",
+    "GRCh38"
+  ),
+  "differs from its acquisition receipt"
+)
+writeBin(charToRaw("AAAA"), cache_shard)
+Sys.setFileTime(cache_shard, original_mtime)
+invisible(duckvep_evidence_write_cache_receipt(
+  cache_receipt,
+  cache_root,
+  "homo_sapiens",
+  "116",
+  "GRCh38",
+  "https://example.org/homo_sapiens_vep_116_GRCh38.tar.gz",
+  "http-etag:66fbffe0a-64efc55395049:27644657162",
+  overwrite = TRUE
+))
+stopifnot(nzchar(duckvep_evidence_validate_cache_receipt(
+  cache_receipt,
+  cache_root,
+  "homo_sapiens",
+  "116",
+  "GRCh38"
+)$receipt_sha256))
+expect_error(
+  duckvep_evidence_cache_leaf(
+    cache_root,
+    "../outside",
+    "116",
+    "GRCh38"
+  ),
+  "invalid VEP cache path component"
 )
 
 lock_records <- c(

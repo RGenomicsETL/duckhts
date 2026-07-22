@@ -620,3 +620,39 @@ For cumulative HGVS, add `--reference-fasta` and change `--output` to
 row records the extension binary, physical/logical model, model source,
 reference, staged corpus, original source, and public-row fingerprint
 receipts.
+
+## Real chromosome-22 composition smoke
+
+The resident-engine tables above isolate comparable annotation surfaces.
+The following separate smoke run verifies the complete relational
+composition shown in the root README on real human data. It scans the
+public GIAB HG002 v4.2.1 chromosome-1–22 VCF sequentially, retains its
+chromosome-22 literal alleles, loads the complete Ensembl 116 GRCh38
+transcript plus regulation/motif model, requests rich consequence and
+HGVSc/HGVSp, and joins dated ClinVar, ClinvArbitration, AlphaMissense,
+gnomAD v2.1.1 gene constraint, and an Ensembl regulatory interval
+Parquet relation. The final relation is written as ZSTD Parquet rather
+than reduced to a checksum.
+
+| stage                                     | result rows | seconds | threads |
+|:------------------------------------------|:------------|--------:|--------:|
+| load Ensembl 116 model                    | 644,427     |   2.409 |       4 |
+| read VCF, canonicalize and sort           | 50,861      |   4.303 |       4 |
+| ClinVar exact join                        | 1,058       |   0.012 |       4 |
+| ClinvArbitration exact join               | 974         |   0.011 |       4 |
+| AlphaMissense exact join                  | 204         |   0.012 |       4 |
+| regulatory interval IEJoin                | 4,680       |   0.751 |       4 |
+| DuckVEP rich + HGVS + core regulation     | 943,901     |   0.807 |       4 |
+| join gene payloads and write ZSTD Parquet | 943,901     |   0.369 |       4 |
+| whole DuckDB process                      | 943,901     |   8.850 |       4 |
+
+This is a one-pass, warm-page-cache, unpinned integration smoke, not a
+new controlled throughput comparison. DuckDB CLI `.timer on` records
+each statement and GNU `/usr/bin/time -v` records the whole process. The
+run retained 50,861 real alleles, materialized 943,901
+consequence/core-feature rows, and wrote 3,061,473 bytes. Peak process
+RSS was 4.98 GiB; that includes the DuckDB process, model loading,
+provider join state, and the output pipeline. The checked CSV retains
+the source revision, DuckDB version, thread count, cache state, row
+denominators, and raw elapsed measurements. Controlled resident and
+FastVEP comparisons remain the authorities above.

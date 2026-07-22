@@ -59,8 +59,9 @@ Use this policy:
   manifest once. Record the resulting local artifact identity in its staging receipt.
 - **Ordinary reuse:** where an acquisition receipt exists, use it with an
   immutable/content-addressed local object, read-only filesystem snapshot, or equivalently
-  enforced store. Path, byte size, and modification time are cheap cache-validation
-  metadata, not identity. Do not add a second digest cache. The current standalone
+  enforced store. Path, byte size, modification time, and filesystem change time are cheap
+  cache-validation metadata, not identity. Do not add a second digest cache. The current
+  standalone
   evidence runner still reads the model, FASTA, and source bytes once when publishing a
   new physical-artifact receipt; `{targets}` prevents that runner from being reinvoked for
   an unchanged campaign.
@@ -77,7 +78,8 @@ manifest and are then referenced, not recomputed as ceremony.
 
 The optional [`pipelines/duckvep/`](../pipelines/duckvep/README.md) workflow delegates
 incremental execution to `{targets}`. Corpus, reference, model, cache-info, and result
-paths are file targets; unchanged campaigns are not invoked again. Leave
+paths plus the cache acquisition receipt are tracked inputs; unchanged campaigns are not
+invoked again. Leave
 `trust_timestamps` unset so current `{targets}` selects the appropriate behavior for the
 filesystem. DuckVEP retains semantic receipts and full result denominators. The
 conformance runner computes the digests it writes into a new evidence receipt whenever it
@@ -103,6 +105,53 @@ external corpus or model is downloadable on another machine. Cross-machine porta
 a separate release-pack gate that cannot become executable until the external pack is
 published. A historical row remains useful evidence, but it is not portable merely because
 it contains a digest.
+
+## How the mass differential framework closes rare states
+
+The framework is a counterexample loop, not a large random VCF and not a single summary
+percentage:
+
+```text
+declared seed + named strata + model geometry
+        -> generated canonical events
+        -> pure-C reference/optimized comparison
+        -> identical VEP input serialization
+        -> pinned executable VEP + DuckVEP pair relations
+        -> duplicate rejection + full outer comparison
+        -> retained pair artifact and coverage counters
+        -> minimized fixed witness + refined stratum when a counterexample exists
+```
+
+The pure-C level can cheaply execute hundreds of thousands of trials under ASan/UBSan and
+compare a fast local path with a deliberately slower oracle. It covers mechanics whose full
+VEP process cost would otherwise make rare exploration impractical: sweep membership,
+strand projection, exon rank, edit application, translation, terminal codons, NMD gates,
+HGVS shifting, structural geometry, and haplotype edit-set mechanics. Distribution counters
+are part of the acceptance result. A required splice offset, terminal state, shift length,
+event shape, strand, or window distance with zero observations makes the campaign fail even
+when every generated assertion passed.
+
+The executable level is slower and biologically authoritative. It serializes the selected
+events once, runs the exact pinned VEP/cache environment, runs DuckVEP on the same relation,
+rejects duplicate comparison keys, and full-outer-joins every emitted transcript,
+RegulatoryFeature, or MotifFeature object. Missing, extra, unresolved, consequence, NMD,
+HGVSc, HGVSn, and HGVSp outcomes are independent metrics. The runner has no release mode
+that drops a discordant HGVS row or converts an unsupported state into agreement.
+
+Real corpora and generated corpora have different jobs. Complete ClinVar and dense model
+tiles expose clinically common and high-fan-out transcript/HGVS states; whole GIAB exercises
+ordinary callset topology and I/O; GRCh37 and non-human lanes change model/codon facts;
+generated exact SV and BND lanes cross explicit geometry classes; HPRC/pangenome and real SV
+callsets search large-allele and producer-representation states that a hand generator may
+not anticipate. A counterexample discovered in any lane is preserved, minimized, and then
+made a named fixed witness or a required generated stratum. Re-running a broad distribution
+and hoping the state appears again is not regression coverage.
+
+`{targets}` owns only coarse orchestration: dependency invalidation, branch recovery, and
+artifact retention. It does not decide eligibility, sample an undeclared distribution, or
+compare biology. Perl/BioPerl and micromamba define the pinned VEP oracle; `blit` executes
+the non-interactive external process. The C/SQL/R comparison code and pair relation remain
+usable without `{targets}` through the direct Make targets below.
 
 ## Corpus families and what each one searches
 
@@ -259,8 +308,12 @@ non-human campaign uses the VEP-compatible *P. falciparum* cache directory
 `plasmodium_falciparum/63_GCA000002765v3`; retain cache release 63, assembly
 `GCA000002765v3`, and the VEP 116 executable as three separate fields. Preserve each
 cache's `info.txt`: its source genebuild, assembly, variation release, and regulatory flag
-are more informative for biological identity than hashing every chromosome cache shard on
-each run.
+define the biological release identity. After acquisition, create a cache receipt once
+with `make duckvep-cache-receipt`; record the upstream archive checksum when one exists,
+otherwise its immutable HTTP ETag plus byte length. The receipt fingerprints the complete
+installed relative-path/size/modification/change-time inventory. Every targets invocation
+restates that inventory and fails if it changed, while avoiding a repeated 49 GB content-hash pass. The
+cache remains an immutable/read-only staged artifact.
 
 ### 6. Run the oracle and DuckVEP on the same allele relation
 
@@ -274,6 +327,7 @@ make -f Makefile duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --model-sql '' \
   --cache-dir /data/vep-cache \
   --cache-info /data/vep-cache/SPECIES/CACHE_VERSION_ASSEMBLY/info.txt \
+  --cache-receipt /data/receipts/SPECIES-CACHE_VERSION-ASSEMBLY.tsv \
   --fasta /data/reference.fa \
   --assembly ASSEMBLY --species SPECIES \
   --sample-per-shape 0"

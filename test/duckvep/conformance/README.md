@@ -32,7 +32,7 @@ workflow uses `{targets}` for campaign invalidation, branching, resume behavior,
 error workspaces. It builds the release extension once and passes a revision- and
 byte-bound receipt to every campaign branch. `blit` remains the external VEP/micromamba
 process layer; the targets graph does not reconstruct those command lines. Large corpus,
-reference, model, and cache-info paths are file targets, while DuckVEP retains the
+reference, model, cache-info, and cache-receipt paths are tracked inputs, while DuckVEP retains the
 semantic receipts and full comparison denominators. The runner performs its explicit
 receipt hashes whenever it executes, does not accept precomputed artifact digests, and
 does not maintain an independent generic cache.
@@ -202,6 +202,7 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --vcf /data/clinvar.vcf.gz \
   --cache-dir /data/vep-cache \
   --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --database /data/duckvep-model.duckdb \
   --model-sql '' \
@@ -264,6 +265,7 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --model-sql '' \
   --cache-dir /data/vep-cache \
   --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 21 --seed 17 --sample-per-shape 100"
@@ -303,6 +305,7 @@ VEP_PREFIX=/opt/vep Rscript corpus_differential.R \
   --model-sql '' \
   --cache-dir /data/vep-cache \
   --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 21 --sample-per-shape 0 --fork 4
@@ -325,6 +328,7 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --model-sql '' \
   --cache-dir /data/vep-cache \
   --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /data/receipts/homo_sapiens-116-GRCh38.tsv \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 1,2,7,21,X --seed 31 --sample-per-shape 2"

@@ -3,7 +3,7 @@
 	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
 	duckvep-generated-check duckvep-upstream-git-check \
 	duckvep-state-current-check duckvep-release-conformance-audit \
-	test-duckvep-targets-contract duckvep-targets \
+	test-duckvep-targets-contract duckvep-targets duckvep-cache-receipt \
 	test-duckvep-so-conformance \
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
@@ -365,6 +365,11 @@ duckvep-corpus-differential: release
 # resume behavior; corpus_differential.R and blit retain semantic and process ownership.
 duckvep-targets:
 	Rscript pipelines/duckvep/run.R
+
+# Inventory a VEP cache once after checksum-verified acquisition. Runtime
+# campaigns recheck the compact path/size/mtime inventory, not every cache byte.
+duckvep-cache-receipt:
+	Rscript scripts/duckvep_cache_receipt.R $(DUCKVEP_CACHE_RECEIPT_ARGS)
 
 test-duckvep-targets-contract:
 	Rscript test/duckvep/conformance/targets_contract.R

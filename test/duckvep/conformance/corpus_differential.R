@@ -69,6 +69,16 @@ op <- add_option(
     "--cache-dir and recorded in oracle_build [%default]"
   )
 )
+op <- add_option(
+  op,
+  "--cache-receipt",
+  dest = "cache_receipt",
+  default = "",
+  help = paste(
+    "acquisition/install receipt for the complete cache leaf; required with",
+    "--cache-dir and validated without rehashing cache contents [%default]"
+  )
+)
 op <- add_option(op, "--assembly", default = "GRCh38")
 op <- add_option(op, "--species", default = "homo_sapiens")
 op <- add_option(
@@ -385,8 +395,8 @@ if (
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
 if (!isTRUE(opt$source_audit_only) &&
     identical(oracle_mode, "cache") &&
-    !nzchar(opt$cache_info)) {
-  die("--cache-dir requires --cache-info")
+    (!nzchar(opt$cache_info) || !nzchar(opt$cache_receipt))) {
+  die("--cache-dir requires --cache-info and --cache-receipt")
 }
 fasta_index <- paste0(opt$fasta, ".fai")
 external_model_database <- !nzchar(opt$model_sql) &&
@@ -407,7 +417,7 @@ if (!isTRUE(opt$source_audit_only)) {
   required_files <- c(required_files, opt$oracle_environment_receipt)
 }
 if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
-  required_files <- c(required_files, opt$cache_info)
+  required_files <- c(required_files, opt$cache_info, opt$cache_receipt)
 }
 if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
@@ -423,6 +433,10 @@ if (length(missing_files) != 0L) {
 }
 oracle_environment_receipt_sha256 <- ""
 cache_info_sha256 <- ""
+cache_receipt_sha256 <- ""
+cache_inventory_sha256 <- ""
+cache_inventory_entries <- ""
+cache_inventory_bytes <- ""
 if (!isTRUE(opt$source_audit_only)) {
   opt$oracle_environment_receipt <- normalizePath(
     opt$oracle_environment_receipt,
@@ -482,6 +496,18 @@ if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
     die("cache info species/assembly does not match the campaign")
   }
   cache_info_sha256 <- duckvep_evidence_sha256(opt$cache_info)
+  opt$cache_receipt <- normalizePath(opt$cache_receipt, mustWork = TRUE)
+  cache_receipt <- duckvep_evidence_validate_cache_receipt(
+    opt$cache_receipt,
+    cache_root,
+    opt$species,
+    expected_cache_version,
+    opt$assembly
+  )
+  cache_receipt_sha256 <- cache_receipt$receipt_sha256
+  cache_inventory_sha256 <- cache_receipt$inventory_sha256
+  cache_inventory_entries <- as.character(cache_receipt$entries)
+  cache_inventory_bytes <- cache_receipt$bytes
 }
 source_revision <- if (isTRUE(opt$skip_extension_build)) {
   duckvep_evidence_revision(root)
@@ -2713,7 +2739,11 @@ oracle_details <- c(
 if (nzchar(cache_info_sha256)) {
   oracle_details <- c(
     oracle_details,
-    glue("cache_info_sha256={cache_info_sha256}")
+    glue("cache_info_sha256={cache_info_sha256}"),
+    glue("cache_receipt_sha256={cache_receipt_sha256}"),
+    glue("cache_inventory_sha256={cache_inventory_sha256}"),
+    glue("cache_inventory_entries={cache_inventory_entries}"),
+    glue("cache_inventory_bytes={cache_inventory_bytes}")
   )
 }
 if (identical(opt$event_mode, "breakend")) {
@@ -3443,6 +3473,22 @@ if (isTRUE(opt$hgvs) && hgvs_discordance_count != 0L) {
     "{opt$hgvs_pairs_out} ",
     "and {opt$hgvs_out}."
   ))
+}
+
+if (identical(oracle_mode, "cache")) {
+  final_cache_receipt <- duckvep_evidence_validate_cache_receipt(
+    opt$cache_receipt,
+    opt$cache_dir,
+    opt$species,
+    if (nzchar(opt$cache_version)) opt$cache_version else "116",
+    opt$assembly
+  )
+  if (!identical(
+    final_cache_receipt$inventory_sha256,
+    cache_inventory_sha256
+  )) {
+    die("VEP cache state changed during executable conformance")
+  }
 }
 
 if (!isTRUE(opt$skip_extension_build)) {

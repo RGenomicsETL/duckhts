@@ -399,6 +399,7 @@ Rscript test/duckvep/conformance/corpus_differential.R \
   --source-checksum sha256:59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 \
   --cache-dir /root/duckvep/data/vep_cache \
   --cache-info /root/duckvep/data/vep_cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt /root/duckvep/data/receipts/homo_sapiens-116-GRCh38.tsv \
   --assembly GRCh38 --species homo_sapiens \
   --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
   --database /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \

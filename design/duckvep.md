@@ -85,6 +85,55 @@ Five rules keep the design understandable:
    all emitted variant/object pairs; throughput reports count input alleles, candidate
    work, emitted rows, bytes, model, threads, and materialization.
 
+### The continuing sweep, concretely
+
+A per-allele interval lookup would repeatedly search the same chromosome-sized transcript
+index. DuckVEP instead exploits the public input contract: model rows and ALT alleles are
+both nondecreasing by model-local contig and coordinate. At the first allele of one native
+batch, cgranges supplies every transcript whose span plus directional flank can contain the
+event. The workspace then retains three monotone frontiers:
+
+1. the next transcript start not yet admitted;
+2. the active transcript indices not yet expired behind the current event; and
+3. the exon rank last reached for each active transcript on the point and general-feature
+   projection paths.
+
+For each later allele, the worker advances the admission frontier while transcript starts
+are reachable, compacts expired transcripts out of the active set, and projects only the
+survivors. A wide allele may additionally admit transcripts whose starts fall inside its
+full event span; those candidates are unioned with the continuing point active set. The
+regulation/motif relation uses the same general interval-candidate mechanics but a separate
+active set and exact event overlap, because it has no upstream/downstream transcript flank.
+
+```text
+sorted model spans:       [T1---------] [T2---]       [T3-----------]
+sorted event starts:          e1  e2        e3  e4             e5
+                              ^ seed once
+                                 admit newly reachable starts ->
+                                 retire ends left of the event ->
+                                 classify the remaining active set
+```
+
+Ignoring emitted pairs, one monotone run is `O(transcripts admitted + events)` rather than
+`O(events * log(transcripts))` independent searches. Dense regions still cost real work:
+if an event overlaps many transcripts or core features, DuckVEP must emit and classify
+those candidates. There is no reward for selecting sparse windows, and the performance
+suite therefore includes transcript-, exon-, non-coding-RNA-, regulation-, motif-, and
+observed-variant-dense tiles.
+
+The `upstream_distance` and `downstream_distance` values change admission geometry only.
+They are not allocation sizes and do not clip the event. Statistical sweep scenes exercise
+zero, 1, 50, 100, 4,999, 5,000, 5,001, 10,000, 50,000, and 65,535-base distances, including
+alleles wider than the requested flank. The current scalar adapter has no guaranteed state
+across DuckDB vector edges, so it seeds each native vector and continues inside that vector.
+A future stateful table-function adapter may carry the same frontiers across vectors; it
+must not create a second candidate-selection authority.
+
+The resident model is immutable and shared among DuckDB workers. Each checked-out workspace
+owns its active/candidate arrays, exon cursors, result builder, reference window, and faidx
+handle. Partitioning therefore multiplies bounded workspace scratch rather than the whole
+transcript/sequence model, and no mutable iterator or reference cache crosses threads.
+
 Phased haplotypes and structural variants reuse projection, sequence editing, and the SO
 rules, but they are not disguised as independent small variants. Haplotypes group several
 edits before translation; breakends retain two loci. Supplementary annotation and ACMG/AMP

@@ -1,0 +1,10 @@
+source_revision,run_date,workload,stage,threads,cpu_affinity,duckdb_version,page_cache,input_alleles,result_rows,seconds,max_rss_kb,output_bytes
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,model_load,4,unpinned,v1.5.1,warm,50861,644427,2.409,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,vcf_decode_canonicalize_sort,4,unpinned,v1.5.1,warm,50861,50861,4.303,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,ClinVar_exact_collision_safe,4,unpinned,v1.5.1,warm,50861,1058,0.012,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,ClinvArbitration_exact_collision_safe,4,unpinned,v1.5.1,warm,50861,974,0.011,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,AlphaMissense_exact,4,unpinned,v1.5.1,warm,50861,204,0.012,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,Ensembl_regulatory_IEJoin,4,unpinned,v1.5.1,warm,50861,4680,0.751,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,DuckVEP_rich_HGVS_regulatory,4,unpinned,v1.5.1,warm,50861,943901,0.807,5222220,0
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,compose_gene_constraint_and_write_ZSTD_Parquet,4,unpinned,v1.5.1,warm,50861,943901,0.369,5222220,3061473
+e5b95ca3f7b146035bee39e9e3d06803b0cf1d61,2026-07-22,GIAB_HG002_GRCh38_chr22_real_providers,whole_process_warm_page_cache,4,unpinned,v1.5.1,warm,50861,943901,8.850,5222220,3061473

@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.0-0.1.0
+- reorganize the rendered package DuckVEP example into explicit design/validation,
+  supported-scope, current-gap, and executable-example sections. The documentation now
+  distinguishes independent-event consequence/HGVS support from combined haplotypes,
+  imprecise-SV/STR policy, and supplementary provider relations, and links the offline
+  package smoke to the root real-human GIAB/Ensembl/clinical/score/gene/interval workflow
 - bundle VEP-116 compatibility fixes for complete first-codon in-frame deletions on
   transcripts without a 5-prime UTR and for pure insertions in incomplete terminal codons.
   The latter can now return the exact VEP combination

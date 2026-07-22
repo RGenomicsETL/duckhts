@@ -140,6 +140,281 @@ duckvep_evidence_cache_info_path <- function(
   )
 }
 
+duckvep_evidence_cache_leaf <- function(
+    cache_dir,
+    species,
+    cache_version,
+    assembly) {
+  components <- c(
+    species = species,
+    cache_version = cache_version,
+    assembly = assembly
+  )
+  invalid <- names(components)[
+    !grepl("^[A-Za-z0-9][A-Za-z0-9._-]*$", components) |
+      components %in% c(".", "..")
+  ]
+  if (length(invalid)) {
+    stop(
+      "invalid VEP cache path component(s): ",
+      paste(invalid, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  normalizePath(
+    file.path(
+      normalizePath(cache_dir, mustWork = TRUE),
+      species,
+      paste0(cache_version, "_", assembly)
+    ),
+    mustWork = TRUE
+  )
+}
+
+duckvep_evidence_sha256_lines <- function(lines) {
+  path <- tempfile("duckvep-sha256-lines-")
+  on.exit(unlink(path, force = TRUE), add = TRUE)
+  writeLines(enc2utf8(lines), path, useBytes = TRUE)
+  duckvep_evidence_sha256(path)
+}
+
+duckvep_evidence_cache_inventory <- function(
+    cache_dir,
+    species,
+    cache_version,
+    assembly) {
+  leaf <- duckvep_evidence_cache_leaf(
+    cache_dir,
+    species,
+    cache_version,
+    assembly
+  )
+  entries <- list.files(
+    leaf,
+    all.files = TRUE,
+    full.names = TRUE,
+    recursive = TRUE,
+    include.dirs = TRUE,
+    no.. = TRUE
+  )
+  if (!length(entries)) {
+    stop("VEP cache leaf contains no files: ", leaf, call. = FALSE)
+  }
+  if (any(nzchar(Sys.readlink(entries)))) {
+    stop("VEP cache receipts do not admit symbolic links", call. = FALSE)
+  }
+  entry_info <- file.info(entries)
+  if (any(is.na(entry_info$isdir))) {
+    stop("cannot stat every VEP cache entry", call. = FALSE)
+  }
+  paths <- entries[!entry_info$isdir]
+  if (!length(paths)) {
+    stop("VEP cache leaf contains no files: ", leaf, call. = FALSE)
+  }
+  paths <- sort(normalizePath(paths, winslash = "/", mustWork = TRUE))
+  prefix <- paste0(chartr("\\", "/", leaf), "/")
+  if (any(!startsWith(paths, prefix))) {
+    stop("VEP cache inventory escaped its cache leaf", call. = FALSE)
+  }
+  relative <- substring(paths, nchar(prefix) + 1L)
+  if (any(grepl("[\t\r\n]", relative))) {
+    stop("VEP cache paths may not contain tabs or newlines", call. = FALSE)
+  }
+  info <- file.info(paths)
+  if (any(is.na(info$size)) || any(is.na(info$mtime)) ||
+      any(is.na(info$ctime)) || any(info$isdir)) {
+    stop("cannot stat every VEP cache file", call. = FALSE)
+  }
+  size <- format(info$size, scientific = FALSE, trim = TRUE)
+  mtime <- sprintf("%.6f", as.numeric(info$mtime))
+  ctime <- sprintf("%.6f", as.numeric(info$ctime))
+  lines <- paste(relative, size, mtime, ctime, sep = "\t")
+  list(
+    leaf = leaf,
+    entries = length(paths),
+    bytes = format(sum(info$size), scientific = FALSE, trim = TRUE),
+    sha256 = duckvep_evidence_sha256_lines(lines)
+  )
+}
+
+duckvep_evidence_read_cache_receipt <- function(path) {
+  path <- normalizePath(path, mustWork = TRUE)
+  values <- utils::read.delim(
+    path,
+    header = FALSE,
+    col.names = c("field", "value"),
+    colClasses = "character",
+    quote = "",
+    comment.char = "",
+    stringsAsFactors = FALSE
+  )
+  if (!nrow(values) || any(!nzchar(values$field)) || anyDuplicated(values$field)) {
+    stop("invalid VEP cache receipt fields", call. = FALSE)
+  }
+  required <- c(
+    "schema_version", "species", "cache_version", "assembly",
+    "source_url", "source_identity", "cache_info_sha256",
+    "inventory_kind", "inventory_entries", "inventory_bytes",
+    "inventory_sha256"
+  )
+  missing <- setdiff(required, values$field)
+  if (length(missing)) {
+    stop(
+      "VEP cache receipt is missing field(s): ",
+      paste(missing, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  stats::setNames(values$value, values$field)
+}
+
+duckvep_evidence_write_cache_receipt <- function(
+    path,
+    cache_dir,
+    species,
+    cache_version,
+    assembly,
+    source_url,
+    source_identity,
+    overwrite = FALSE) {
+  if (!grepl("^[A-Za-z][A-Za-z0-9+.-]*://[^\t\r\n]+$", source_url)) {
+    stop("cache source_url must be an absolute URL", call. = FALSE)
+  }
+  if (!grepl(
+    paste0(
+      "^(?:sha256:[0-9a-fA-F]{64}|md5:[0-9a-fA-F]{32}|",
+      "bsd-sum:[0-9]+:[0-9]+|http-etag:[0-9a-fA-F-]+:[0-9]+)$"
+    ),
+    source_identity,
+    perl = TRUE
+  )) {
+    stop("invalid cache source_identity", call. = FALSE)
+  }
+  path <- normalizePath(path, mustWork = FALSE)
+  leaf <- duckvep_evidence_cache_leaf(
+    cache_dir,
+    species,
+    cache_version,
+    assembly
+  )
+  path_key <- chartr("\\", "/", path)
+  leaf_key <- paste0(chartr("\\", "/", leaf), "/")
+  if (startsWith(path_key, leaf_key)) {
+    stop("cache receipt must live outside the inventoried cache leaf", call. = FALSE)
+  }
+  if (file.exists(path) && !isTRUE(overwrite)) {
+    stop("cache receipt already exists: ", path, call. = FALSE)
+  }
+  inventory <- duckvep_evidence_cache_inventory(
+    cache_dir,
+    species,
+    cache_version,
+    assembly
+  )
+  info_path <- duckvep_evidence_cache_info_path(
+    cache_dir,
+    species,
+    cache_version,
+    assembly
+  )
+  fields <- c(
+    schema_version = "1",
+    species = species,
+    cache_version = cache_version,
+    assembly = assembly,
+    source_url = source_url,
+    source_identity = tolower(source_identity),
+    cache_info_sha256 = duckvep_evidence_sha256(info_path),
+    inventory_kind = "relative_path_size_mtime_ctime",
+    inventory_entries = as.character(inventory$entries),
+    inventory_bytes = inventory$bytes,
+    inventory_sha256 = inventory$sha256
+  )
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- tempfile(".cache-receipt-", tmpdir = dirname(path))
+  on.exit(unlink(temporary, force = TRUE), add = TRUE)
+  writeLines(paste(names(fields), fields, sep = "\t"), temporary)
+  if (!file.rename(temporary, path)) {
+    stop("cannot publish VEP cache receipt: ", path, call. = FALSE)
+  }
+  normalizePath(path, mustWork = TRUE)
+}
+
+duckvep_evidence_validate_cache_receipt <- function(
+    path,
+    cache_dir,
+    species,
+    cache_version,
+    assembly) {
+  fields <- duckvep_evidence_read_cache_receipt(path)
+  if (!grepl(
+        "^[A-Za-z][A-Za-z0-9+.-]*://[^\t\r\n]+$",
+        fields[["source_url"]]
+      ) ||
+      !grepl(
+        paste0(
+          "^(?:sha256:[0-9a-f]{64}|md5:[0-9a-f]{32}|",
+          "bsd-sum:[0-9]+:[0-9]+|http-etag:[0-9a-f-]+:[0-9]+)$"
+        ),
+        fields[["source_identity"]],
+        perl = TRUE
+      )) {
+    stop("invalid VEP cache receipt source identity", call. = FALSE)
+  }
+  expected <- c(
+    schema_version = "1",
+    species = species,
+    cache_version = cache_version,
+    assembly = assembly,
+    inventory_kind = "relative_path_size_mtime_ctime"
+  )
+  mismatch <- names(expected)[fields[names(expected)] != expected]
+  if (length(mismatch)) {
+    stop(
+      "VEP cache receipt mismatch for field(s): ",
+      paste(mismatch, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  info_path <- duckvep_evidence_cache_info_path(
+    cache_dir,
+    species,
+    cache_version,
+    assembly
+  )
+  info_sha256 <- duckvep_evidence_sha256(info_path)
+  if (!identical(unname(fields[["cache_info_sha256"]]), info_sha256)) {
+    stop("VEP cache info.txt differs from its cache receipt", call. = FALSE)
+  }
+  inventory <- duckvep_evidence_cache_inventory(
+    cache_dir,
+    species,
+    cache_version,
+    assembly
+  )
+  observed <- c(
+    inventory_entries = as.character(inventory$entries),
+    inventory_bytes = inventory$bytes,
+    inventory_sha256 = inventory$sha256
+  )
+  mismatch <- names(observed)[fields[names(observed)] != observed]
+  if (length(mismatch)) {
+    stop(
+      "VEP cache tree differs from its acquisition receipt: ",
+      paste(mismatch, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  list(
+    receipt_sha256 = duckvep_evidence_sha256(path),
+    inventory_sha256 = inventory$sha256,
+    entries = inventory$entries,
+    bytes = inventory$bytes,
+    source_url = unname(fields[["source_url"]]),
+    source_identity = unname(fields[["source_identity"]])
+  )
+}
+
 duckvep_evidence_explicit_packages <- function(lines) {
   records <- trimws(lines)
   records <- records[

@@ -158,12 +158,25 @@ SELECT regionkey_hex(regionkey('X', 1007, 1807, 1)) AS rkx,
 
 ### DuckVEP: a resident Ensembl VEP consequence engine
 
+#### Design and data ownership
+
 DuckVEP compiles Ensembl release relations into an immutable, shared transcript
 and regulation model. Sorted variant alleles then pass through a native C
 candidate sweep, transcript projection, consequence classifier, sequence editor,
 NMD evaluator, and optional HGVS renderer. Stable transcript/gene identifiers and
 supplementary annotations remain ordinary DuckDB relations and are joined only
 after the compact consequence rows have been filtered.
+
+That last sentence is the point of the architecture, not an implementation
+detail. DuckVEP is one fast relation producer inside DuckDB. Anything DuckDB can
+read--Parquet or GeoParquet, VCF/BCF, CSV/TSV, JSON, an attached DuckLake, a local
+DuckDB, HTTP/S3 objects, or a supported external database--can be an annotation
+provider without a new DuckHTS file format or C plugin. Exact allele sources use
+collision-safe VariantKey joins, gene sources use stable identifiers, and interval
+sources use ordinary inequality joins, bounded key prefilters, or cgranges. DuckDB
+can execute two-inequality overlap predicates with its native
+[IEJoin](https://duckdb.org/2022/05/27/iejoin) implementation and can spill large
+join state rather than requiring every provider to live in the resident C model.
 
 The implementation targets executable Ensembl VEP 116 semantics rather than a
 new interpretation of the Sequence Ontology rules. The current differential
@@ -233,6 +246,72 @@ load their sorted hot projections into a named resident model with
 VEP-compatible three-prime HGVS shifting; `transcript_coverage_complete := TRUE`
 permits a no-transcript hit to become a supported `intergenic_variant`.
 
+```{sql eval=FALSE, collapse=FALSE, comment=""}
+SELECT loaded
+FROM duckvep_model_load(
+  'human_116_grch38',
+  'SELECT seq_region, sequence_length, seq_region_name
+     FROM grch38_regions ORDER BY seq_region',
+  'SELECT transcript_index, seq_region, transcript_start, transcript_end,
+          strand, gene_index, transcript_flags, cds_start, cds_end,
+          cds_sequence, codon_table, pre_cds_sequence, post_cds_sequence
+     FROM grch38_transcripts
+    ORDER BY seq_region, transcript_start, transcript_index',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end,
+          exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase
+     FROM grch38_transcripts,
+          LATERAL unnest(exons) AS u(exon)
+    ORDER BY transcript_index, exon.exon_cdna_start',
+  mature_mirna_query :=
+    'SELECT transcript_index, region.mature_mirna_start,
+            region.mature_mirna_end
+       FROM grch38_transcripts,
+            LATERAL unnest(mature_mirna_regions) AS u(region)
+      ORDER BY transcript_index, region.mature_mirna_start',
+  peptide_edit_query :=
+    'SELECT transcript_index, edit.protein_position,
+            edit.alternate_amino_acid
+       FROM grch38_transcripts,
+            LATERAL unnest(peptide_edits) AS u(edit)
+      ORDER BY transcript_index, edit.protein_position',
+  interval_feature_query :=
+    'SELECT regulation_feature_index, seq_region, feature_start, feature_end,
+            feature_kind
+       FROM grch38_regulation
+      ORDER BY seq_region, feature_start, regulation_feature_index',
+  reference_fasta := 'reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa',
+  transcript_coverage_complete := TRUE
+);
+```
+
+#### Why sorted input becomes a sweep
+
+The resident transcript arrays are sorted by `(seq_region, transcript_start)`.
+For the first allele in a DuckDB vector, cgranges supplies a complete seed set.
+As later alleles advance in coordinate order, the worker admits newly reachable
+transcripts from the front of the sorted array and retires transcripts whose end
+plus the requested flank is behind the allele. It classifies only that active set:
+
+```text
+transcripts ordered by start:  T1------T2----------T3-----T4---->
+sorted allele stream:               v1  v2       v3    v4       >
+
+seed once -> admit starts now reachable -> retire expired ends
+          -> project/classify active transcripts -> advance
+```
+
+This is not a 5,000-record or 5,000-base buffer. The default 5,000 bases are only
+the VEP-compatible upstream/downstream candidate distances; zero, 10,000, 50,000,
+or another supported `UINTEGER` distance uses the same algorithm. Long alleles are
+not clipped to that window. Transcript and regulation/motif sweeps own different
+active sets because interval features do not use transcript flanks. The immutable
+model is shared read-only across workers; each worker owns its candidate arrays,
+exon cursors, faidx handle, reference window, edit scratch, and output builder.
+Consequently memory grows with the shared model plus bounded per-worker workspace,
+not with a copy of the model per thread. The current scalar surface reseeds at each
+DuckDB vector; a future stateful table-function surface can preserve the frontier
+across vectors without changing the consequence authority.
+
 #### Canonical event relation and output choices
 
 `duckvep_annotate(...)` consumes one coordinate-ordered row per ALT allele. Its
@@ -253,8 +332,210 @@ direction may be zero or any supported `UINTEGER` distance. Audit columns named
 `duckvep_status` and `duckvep_reason` explain unresolved computation (for example
 missing sequence or a reference mismatch); they are not Ensembl CSQ fields.
 
-This bundled deterministic model demonstrates the load, rich/HGVS annotation,
-SO decoding, and release lifecycle without downloading an Ensembl release.
+#### Real human annotation and supplementary providers
+
+The following is the production shape, using the public GIAB HG002 v4.2.1 GRCh38
+benchmark VCF, an Ensembl 116 GRCh38 model, dated ClinVar/ClinvArbitration,
+AlphaMissense v2, gnomAD v2.1.1 gene constraint, and an Ensembl regulatory
+Parquet relation. The provider files are ordinary typed Parquet; equivalent
+HTTP/S3 paths or DuckLake tables can replace them. Run the statements in one
+DuckDB CLI session so `.timer on` reports model load, VCF staging, the consequence
+sweep, provider joins, and final Parquet materialization separately.
+
+```{sql eval=FALSE, collapse=FALSE, comment=""}
+.timer on
+SET threads = 4;
+
+-- One row per real ALT allele; retain record/sample/genotype provenance in a
+-- separate source relation and join it back with record_index + alt_index.
+CREATE TABLE case_alleles AS
+WITH records AS (
+  SELECT row_number() OVER ()::UBIGINT AS record_index,
+         CHROM, POS::BIGINT AS pos, REF AS ref, ALT
+  FROM read_bcf(
+    'case/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz',
+    scan_mode := 'sequential', decompression_threads := 0
+  )
+), alleles AS (
+  SELECT record_index, a.alt_index, duckhts_contig_key(CHROM) AS chrom,
+         pos, upper(ref) AS ref, upper(a.alt) AS alt
+  FROM records
+  CROSS JOIN unnest(ALT) WITH ORDINALITY AS a(alt, alt_index)
+  WHERE regexp_full_match(ref, '[ACGTNacgtn]+')
+    AND regexp_full_match(a.alt, '[ACGTNacgtn]+')
+    AND upper(ref) <> upper(a.alt)
+), keyed AS (
+  SELECT a.*, r.seq_region,
+         variantkey(chrom, pos, ref, alt) AS vk,
+         regionkey(chrom, pos - 1, pos - 1 + length(ref)) AS rk
+  FROM alleles a
+  JOIN grch38_regions r ON r.seq_region_name = a.chrom
+)
+SELECT row_number() OVER (
+         ORDER BY seq_region, pos, record_index, alt_index
+       )::UBIGINT AS event_index,
+       record_index, alt_index, seq_region, chrom, pos::UBIGINT AS position,
+       ref AS reference, alt AS alternate, vk,
+       mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,
+       pos - 1 AS start0, pos - 1 + length(ref) AS end0,
+       rk >> 31 AS rk_chrom_start,
+       regionkey(chrom, pos - 1 + length(ref),
+                 pos - 1 + length(ref)) >> 31 AS rk_chrom_end,
+       NULL::UBIGINT AS end_position,
+       NULL::VARCHAR AS structural_type,
+       NULL::VARCHAR AS copy_change,
+       NULL::UINTEGER AS mate_seq_region,
+       NULL::UBIGINT AS mate_position
+FROM keyed
+WHERE vk IS NOT NULL AND rk IS NOT NULL
+ORDER BY seq_region, position, event_index;
+
+-- One native pass performs transcript + core regulation/motif candidate
+-- discovery, rich consequence projection, NMD, and independent-event HGVS.
+CREATE TABLE case_consequence AS
+SELECT *
+FROM duckvep_annotate(
+  'case_alleles', 'human_116_grch38',
+  hgvs := TRUE, rich := TRUE,
+  upstream_distance := 5000, downstream_distance := 5000
+);
+
+-- Exact providers stay allele-level. Hashed/nonreversible VariantKeys are
+-- refined with the literal allele so a hash collision cannot become evidence.
+CREATE TABLE case_clinvar AS
+SELECT q.event_index, min(p.allele_id) AS clinvar_allele_id,
+       list_distinct(flatten(list(p.clinical_significance)))
+         AS clinvar_significance
+FROM case_alleles q
+JOIN read_parquet('providers/clinvar_20260706_grch38_keyed.parquet') p
+  ON q.vk = p.vk AND q.is_hash = p.is_hash
+ AND (NOT q.is_hash OR
+      (q.chrom = p.chrom AND q.position = p.pos AND
+       q.reference = p.ref AND q.alternate = p.alt))
+GROUP BY q.event_index;
+
+CREATE TABLE case_clinvarbitration AS
+SELECT q.event_index,
+       arg_max(p.clinical_significance, p.gold_stars) AS classification,
+       max(p.gold_stars) AS gold_stars
+FROM case_alleles q
+JOIN read_parquet('providers/clinvarbitration_grch38_keyed.parquet') p
+  ON q.vk = p.vk AND q.is_hash = p.is_hash
+ AND (NOT q.is_hash OR
+      (q.chrom = p.chrom AND q.position = p.pos AND
+       q.reference = p.ref AND q.alternate = p.alt))
+GROUP BY q.event_index;
+
+CREATE TABLE case_alphamissense AS
+SELECT q.event_index,
+       max(p.am_pathogenicity) AS am_pathogenicity,
+       arg_max(p.am_class, p.am_pathogenicity) AS am_class
+FROM case_alleles q
+JOIN read_parquet('providers/alphamissense_hg38_variantkey.parquet') p
+  ON q.vk = p.vk
+WHERE NOT q.is_hash
+GROUP BY q.event_index;
+
+-- A real interval provider: RegionKey bounds cheaply reject distant rows;
+-- the final half-open inequalities are the exact overlap predicate. DuckDB
+-- may plan the two inequalities as IEJoin.
+CREATE TABLE case_interval AS
+SELECT q.event_index,
+       list_distinct(list(p.stable_id)) AS stable_ids,
+       list_distinct(list(p.so_term)) AS so_terms
+FROM case_alleles q
+JOIN read_parquet('providers/ensembl116_grch38_regulatory.parquet') p
+  ON q.rk_chrom_start < p.rk_chrom_end
+ AND q.rk_chrom_end > p.rk_chrom_start
+ AND q.chrom = p.chrom
+ AND q.start0 < p.end0 AND q.end0 > p.start0
+GROUP BY q.event_index;
+
+-- Join cold transcript identifiers and gene-level providers only after the
+-- consequence relation exists. No provider payload is copied into the C model.
+COPY (
+  SELECT q.chrom, q.position, q.reference, q.alternate,
+         a.consequence, a.impact, a.cdna_position, a.cds_position,
+         a.protein_position, a.reference_amino_acid,
+         a.alternate_amino_acid, a.nmd_prediction,
+         a.transcript_hgvs, a.protein_hgvs,
+         t.transcript_stable_id, t.gene_stable_id, t.mane_select_refseq,
+         cv.clinvar_allele_id, cv.clinvar_significance,
+         ca.classification AS clinvar_class, ca.gold_stars,
+         am.am_pathogenicity, am.am_class,
+         gc.pLI, gc.oe_lof_upper,
+         ri.stable_ids AS interval_ids, ri.so_terms AS interval_terms,
+         a.overlap_object, a.duckvep_status, a.duckvep_reason
+  FROM case_consequence a
+  JOIN case_alleles q USING (event_index)
+  LEFT JOIN grch38_transcripts t USING (transcript_index)
+  LEFT JOIN read_parquet('providers/gnomad_v211_constraint_gene.parquet') gc
+    ON gc.gene_id = t.gene_stable_id
+  LEFT JOIN case_clinvar cv USING (event_index)
+  LEFT JOIN case_clinvarbitration ca USING (event_index)
+  LEFT JOIN case_alphamissense am USING (event_index)
+  LEFT JOIN case_interval ri USING (event_index)
+  ORDER BY q.seq_region, q.position, q.event_index,
+           a.transcript_index, a.regulation_feature_index
+) TO 'case/HG002.duckvep.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+```
+
+```{r duckvep-human-evidence, include=FALSE}
+human_evidence <- read.csv(
+  "benchmarks/data/duckvep_human_annotation.csv",
+  stringsAsFactors = FALSE,
+  check.names = FALSE,
+  colClasses = c(source_revision = "character")
+)
+stopifnot(
+  nrow(human_evidence) == 9L,
+  length(unique(human_evidence$source_revision)) == 1L,
+  length(unique(human_evidence$input_alleles)) == 1L,
+  length(unique(human_evidence$threads)) == 1L
+)
+human_stage <- human_evidence[, c(
+  "stage", "result_rows", "seconds"
+), drop = FALSE]
+human_stage$stage <- c(
+  "load Ensembl 116 model",
+  "read VCF, canonicalize and sort",
+  "ClinVar exact join",
+  "ClinvArbitration exact join",
+  "AlphaMissense exact join",
+  "regulatory interval IEJoin",
+  "DuckVEP rich + HGVS + core regulation",
+  "join gene payloads and write ZSTD Parquet",
+  "whole DuckDB process"
+)
+human_stage$result_rows <- format(
+  human_stage$result_rows, big.mark = ",", scientific = FALSE
+)
+names(human_stage) <- c("stage", "result rows", "seconds")
+```
+
+The checked real-data smoke retained
+`r format(unique(human_evidence$input_alleles), big.mark = ",")` chromosome-22
+alleles and materialized
+`r format(human_evidence$result_rows[human_evidence$stage == "DuckVEP_rich_HGVS_regulatory"], big.mark = ",")`
+consequence/core-feature rows. It was deliberately run as one warm-page-cache,
+unpinned integration pass, so it validates composition and materialized output
+rather than replacing the pinned performance tables below.
+
+```{r duckvep-human-stage-table, echo=FALSE}
+knitr::kable(human_stage, row.names = FALSE)
+```
+
+The exact-source benchmark separately measures the complete 4.0-million-allele
+GIAB probe against ClinVar, ClinvArbitration, AlphaMissense, REVEL, gene constraint,
+and interval providers, including one-, four-, and twelve-provider plans, Parquet
+row-group pruning, materialized output, and peak RSS. See the
+[supplementary annotation benchmark](benchmarks/benchmark_variantkey_join_overlap.md).
+
+#### Bundled smoke-test model
+
+The deterministic fixture below remains deliberately small so every README render
+can execute it offline. It checks the public load/annotate/drop lifecycle; it is not
+the human performance or biological example.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 CREATE OR REPLACE TABLE readme_duckvep_regions AS
@@ -306,14 +587,70 @@ ORDER BY a.event_index, a.transcript_index;
 SELECT duckvep_model_drop('readme') AS dropped;
 ```
 
-For high-cardinality pipelines, filter compact integer masks/codes first and
-decode selected SO bits with `duckvep_so_terms()` afterward. Join
-`transcript_index`, `gene_index`, and `regulation_feature_index` to the prepared
-model relations for stable IDs and cold metadata. Exact/positional resources such
-as ClinVar or population frequencies, interval resources such as constraint or
-regulatory tracks, and gene/disease resources stay as typed Parquet/DuckLake
-relations; DuckDB can apply exact joins, range prefilters, IEJoin, or a declared
-cgranges index without copying those resources into every resident transcript.
+#### Supplementary annotation composition
+
+DuckHTS does not define a closed supplementary-annotation plugin API because
+DuckDB already supplies the larger interface: a relation. For high-cardinality
+pipelines, filter compact integer masks/codes first and decode selected SO bits
+with `duckvep_so_terms()` afterward. Join `transcript_index`, `gene_index`, and
+`regulation_feature_index` to the prepared model relations for stable IDs and
+cold metadata. Exact or positional resources such as ClinVar, population
+frequencies, calibrated pathogenicity scores, and splice scores use collision-safe
+allele keys; protein/domain and regulatory tracks use half-open interval overlap;
+constraint, PanelApp, OMIM, and phenotype resources use stable gene/disease IDs.
+
+Those providers may be local Parquet, partitioned S3 Parquet, DuckLake snapshots,
+attached DuckDB databases, tabix-indexed files, or any other source for which
+DuckDB has a scanner. The optimizer can push columns and predicates into scans,
+prune sorted Parquet row groups, plan several equality joins together, execute
+two-inequality overlaps with
+[IEJoin](https://duckdb.org/2022/05/27/iejoin), and spill join blocks when required.
+cgranges remains useful for a repeatedly queried immutable interval registry;
+it is an execution choice, not a provider format. This makes an annotation-pack
+release a set of versioned relations and provenance, while a new case or cohort
+is only the delta that must be scanned, annotated, and joined.
+
+#### Testing and conformance infrastructure
+
+The test system is deliberately several independent authorities rather than one
+large collection of expected strings:
+
+1. Pure-C unit and property oracles compare the optimized sweep, projection,
+   edit, translation, consequence, HGVS, SV/BND, and workspace paths with slower
+   reference implementations. ASan and UBSan execute the same properties.
+2. Mass statistical campaigns use a declared seed and explicit rare-state strata:
+   strand, exon rank, splice offset, CDS/UTR/start/stop geometry, phase, length
+   change and modulo three, incomplete codons, NMD thresholds, HGVS shift limits,
+   structural containment, BND orientation, and transcript-window distances.
+   Coverage counters are part of the result. A passing campaign with a required
+   zero-count state fails, and every counterexample is retained and minimized into
+   a fixed witness.
+3. The generated finite rule program is exhaustively checked over its Boolean
+   consequence-predicate quotient. A transition manifest then names the wider
+   geometry/state paths and the fixed, statistical, or executable evidence that
+   currently covers each one. This is a compact proof obligation, not a claim that
+   sampling proves an unobserved state.
+4. Executable differentials run the pinned VEP 116/BioPerl environment on the
+   identical allele relation and full-outer-join unique allele/object pairs.
+   Consequence, NMD, HGVSc, HGVSn, HGVSp, unresolved rows, and missing/extra objects
+   remain separate fatal metrics; there is no release option that permits HGVS
+   discordance.
+5. Public corpora search different state distributions: complete/dense ClinVar,
+   whole GIAB, selected GRCh37, non-human codon tables, regulation/motif, exact SV,
+   paired BND, and HPRC/pangenome-derived long alleles. A sparse WGS average cannot
+   replace a dense transcript/HGVS or generated structural campaign.
+
+The repository mirrors the relevant Ensembl VEP and Ensembl Variation self-test
+cases with exact source lineage. The optional `{targets}` project orchestrates
+coarse campaign invalidation, branching, retry, and retained artifacts; it does
+   not replace the biological comparison logic. Perl/BioPerl plus micromamba provide
+   the pinned oracle environment, and [`blit`](https://github.com/WangLabCSU/blit) is the
+non-interactive process runner. Cache-backed campaigns create one acquisition
+receipt and cheaply revalidate the complete installed-file inventory before reuse,
+instead of hashing tens of gigabytes on every invocation. See
+[the corpus workflow](design/duckvep_corpus_workflow.md) for exact commands,
+artifact layers, large-corpus derivation, second-machine reproduction, and the
+procedure for moving from VEP 116 to the next release.
 
 #### Measured performance and FastVEP comparison
 
@@ -469,6 +806,23 @@ report preserves row/byte denominators and separately compares both against VEP
 rather than presenting this as an isolated-kernel speedup. Build flags, source
 commits, rebuilt cache receipt, commands, and output hashes are in
 [benchmarks/benchmark_duckvep_fastvep.md](benchmarks/benchmark_duckvep_fastvep.md).
+
+#### Current scope and explicit gaps
+
+The released claim is independent-event consequence and HGVS parity for the tested VEP
+116 state space. Genotypes and phase sets are preserved by the HTS relations, but combined
+phased transcript edit sets, haplotype consequences, and haplotype HGVS remain separate
+work. Exact span SVs and paired BNDs are implemented; confidence-interval interpretation,
+STR-specific classification, and arbitrary producer-specific symbolic records are not
+silently guessed. GRCh37 uses its native Ensembl release-116 transcript model and carries
+no invented native MANE designation; any MANE projection back to GRCh37 must be a separate
+provenance-labelled mapping.
+
+Supplementary clinical/population scores are deliberately SQL relations rather than
+hard-wired C fields. The measured joins establish the storage and execution primitives,
+not a universal licensed annotation pack. Broader species/codon-table campaigns, mapped
+GRCh37 MANE, combined haplotypes, and the remaining imprecise-SV/STR states stay visible in
+the issue tracker and are not included in the 1.5.0 parity claim.
 
 ### Interval + reference helpers
 
@@ -998,13 +1352,21 @@ Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTo
 
 ### Prerequisites
 
+Building the extension requires:
+
 - C compiler (GCC or Clang)
 - CMake ≥ 3.5
 - Make
 - Python 3 + venv
-- R with the `rmarkdown` and [`duckknit`](https://github.com/rundel/duckknit) packages.
 - Git
 - [htslib](https://github.com/samtools/htslib) build dependencies: zlib, libbz2, liblzma, libdeflate, libcurl, libcrypto (OpenSSL)
+
+Rendering the root documentation additionally requires R with `rmarkdown` and
+[`duckknit`](https://github.com/rundel/duckknit). Rebuilding DuckVEP's executable
+VEP conformance evidence additionally requires R with `{targets}`, Perl/BioPerl,
+micromamba for the pinned oracle environment, and
+[`blit`](https://github.com/WangLabCSU/blit) for non-interactive process execution.
+Those conformance tools are not runtime or extension-build dependencies.
 
 On Debian/Ubuntu:
 

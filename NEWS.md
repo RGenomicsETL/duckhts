@@ -1,6 +1,15 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- replace the root DuckVEP fixture-led narrative with a real human annotation flow over
+  GIAB HG002, the complete Ensembl 116 GRCh38 transcript/regulation model, collision-safe
+  ClinVar and ClinvArbitration joins, AlphaMissense, gnomAD gene constraint, and an
+  IEJoin-compatible regulatory interval provider. The rendered README now explains the
+  continuing sorted transcript/feature sweep, immutable-model versus per-worker memory,
+  relation-native supplementary-provider contract, and the fixed/property/statistical/
+  executable/corpus conformance ladder. Record a timed materialized chromosome-22 smoke in
+  the rendered throughput report, and distinguish extension-build, README-render, and
+  optional VEP-oracle prerequisites
 - document the end-to-end DuckVEP corpus and release-upgrade workflow: separate source,
   model, oracle, and comparison identities; preserve original-record-to-analysis-allele
   lineage and every pair denominator; inventory the generated, GIAB, ClinVar, GRCh37,
@@ -18,7 +27,13 @@
   caller-supplied precomputed digests, and publishes complete campaign outputs through an
   atomic directory replacement with interrupted-run recovery. Add focused contracts for
   traversal/symlink rejection, case-sensitive path identity, two-stage Windows batch
-  quoting, atomic publication, and both recoverable interruption states. Keep the staged
+  quoting, atomic publication, and both recoverable interruption states. Require
+  cache-backed campaigns to carry an acquisition/install receipt for the complete
+  species/release/assembly cache leaf. The receipt binds the upstream checksum or immutable
+  object identity plus `info.txt`, file count, byte total, and a deterministic
+  relative-path/size/modification/change-time inventory. A cue-always cache-state target
+  cheaply restates that inventory before reuse, detecting incomplete, replaced, or ordinarily edited shards
+  without repeatedly hashing the 49 GB cache contents. Keep the staged
   annotation path separate from its stable published identity so methodology audits do
   not retain a temporary path after atomic publication
 - close three rare consequence/HGVS states. VEP's start-loss predicate directly evaluates in-frame
