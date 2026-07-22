@@ -17,6 +17,9 @@
 - **Nicola Asuni**. Copyright holder.  
   Author of the VariantKey and RegionKey C API
 
+- **Devon Ryan**. Copyright holder.  
+  Author of libBigWig
+
 - **DuckDB C Extension API Authors**. Contributor.
 
 ## Citation

@@ -48,6 +48,8 @@
   : BGZF Decompress a File
 - [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgzip.md)
   : BGZF Compress a File
+- [`rduckhts_bigwig()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bigwig.md)
+  : Create a BigWig Signal Table
 - [`rduckhts_detect_quality_encoding()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_detect_quality_encoding.md)
   : Detect FASTQ Quality Encoding
 - [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta.md)
@@ -82,6 +84,12 @@
   : Read Raw HTS Index Blob
 - [`rduckhts_hts_index_spans()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_spans.md)
   : Read HTS Index Spans
+- [`rduckhts_htslib_config()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_config.md)
+  : Get the Installed htslib Linking Contract
+- [`rduckhts_htslib_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_info.md)
+  : Inspect the Loaded htslib Build
+- [`rduckhts_htslib_version()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_version.md)
+  : Return the Loaded htslib Version
 - [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.md)
   : Lift Over Variant Coordinates Against a Query
 - [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)

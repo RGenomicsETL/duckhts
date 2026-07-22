@@ -2,6 +2,34 @@
 
 ## Rduckhts 1.5.0-0.1.0
 
+- add
+  [`rduckhts_htslib_config()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_config.md)
+  as the versioned installed-package contract for downstream C/C++
+  packages linking to the bundled htslib. It resolves exact headers,
+  shared/static libraries, static dependencies, loader flags, plugins
+  and compiled features from the installed package, and rejects
+  receipt/header/runtime version disagreement through the
+  extension-owned htslib diagnostics. Add thin
+  [`rduckhts_htslib_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_info.md)
+  and
+  [`rduckhts_htslib_version()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_version.md)
+  helpers plus an in-memory downstream compile/link test, built through
+  Rtinycc with active-SDK system headers on macOS, that opens bundled
+  BAM, CRAM, BCF, and VCF files. When `link` is omitted, select the
+  shared or static contract chosen during package configuration. The
+  compatibility `htslib_rpath()` helper follows that configured
+  contract, so static-only installations return an empty loader path
+  instead of validating a missing shared library
+- bundle the projection-aware `read_bigwig(...)` table function and
+  [`rduckhts_bigwig()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bigwig.md)
+  materialization/view helper. Region vectors use htslib’s one-based
+  inclusive syntax while returned intervals retain stored zero-based,
+  half-open coordinates. Add the pinned upstream libBigWig fixture, DBI
+  tests, package examples, Devon Ryan’s copyright-holder attribution,
+  and the vendored MIT license. Oversized chromosome tables, malformed
+  chromosome-tree IDs, truncated zoom headers, unreadable R-tree
+  indexes, oversized block allocations, and truncated data blocks return
+  reader errors before indexed storage or interval decoding
 - reorganize the rendered package DuckVEP example into explicit
   design/validation, supported-scope, current-gap, and
   executable-example sections. The documentation now distinguishes

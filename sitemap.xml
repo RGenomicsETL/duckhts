@@ -31,6 +31,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgunzip.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bgzip.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bigwig.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_detect_quality_encoding.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta_index.html</loc></url>
@@ -48,6 +49,9 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_raw.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index_spans.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_config.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_info.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_version.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_liftover.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_mosdepth.html</loc></url>
