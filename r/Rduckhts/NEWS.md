@@ -1,5 +1,17 @@
 
 # Rduckhts 1.5.0-0.1.0
+- add `rduckhts_htslib_config()` as the versioned installed-package contract for
+  downstream C/C++ packages linking to the bundled htslib. It resolves exact headers,
+  shared/static libraries, static dependencies, loader flags, plugins and compiled
+  features from the installed package, and rejects receipt/header/runtime version
+  disagreement through the extension-owned htslib diagnostics. Add thin
+  `rduckhts_htslib_info()` and `rduckhts_htslib_version()` helpers plus a fresh-process
+  downstream compile/link test that opens bundled BAM, CRAM, BCF, and VCF files
+- bundle the projection-aware `read_bigwig(...)` table function and
+  `rduckhts_bigwig()` materialization/view helper. Region vectors use htslib's
+  one-based inclusive syntax while returned intervals retain stored zero-based,
+  half-open coordinates. Add the pinned upstream libBigWig fixture, DBI tests, package
+  examples, Devon Ryan's copyright-holder attribution, and the vendored MIT license
 - reorganize the rendered package DuckVEP example into explicit design/validation,
   supported-scope, current-gap, and executable-example sections. The documentation now
   distinguishes independent-event consequence/HGVS support from combined haplotypes,

@@ -1,0 +1,44 @@
+--- a/bigWigIO.h
++++ b/bigWigIO.h
+@@ -1,5 +1,6 @@
+ #ifndef LIBBIGWIG_IO_H
+ #define LIBBIGWIG_IO_H
++#include <stdint.h>
+
+ #ifndef NOCURL
+ #include <curl/curl.h>
+@@ -79,6 +80,9 @@
+  */
+ CURLcode urlSeek(URL_t *URL, size_t pos);
+
++/* Return the current absolute stream offset, or -1 on error. */
++int64_t urlTell(URL_t *URL);
++
+ /*!
+  *  @brief Open a local or remote file
+  *
+--- a/bwCommon.h
++++ b/bwCommon.h
+@@ -32,7 +32,7 @@
+  * @param fp The file.
+  * @return The position in the file.
+  */
+-long bwTell(bigWigFile_t *fp);
++int64_t bwTell(bigWigFile_t *fp);
+
+ /*!
+  * @brief Reads a data index (either full data or a zoom level) from a bigWig file.
+--- a/bwRead.c
++++ b/bwRead.c
+@@ -8,9 +8,8 @@
+ static uint64_t readChromBlock(bigWigFile_t *bw, chromList_t *cl, uint32_t keySize);
+
+ //Return the position in the file
+-long bwTell(bigWigFile_t *fp) {
+-    if(fp->URL->type == BWG_FILE) return ftell(fp->URL->x.fp);
+-    return (long) (fp->URL->filePos + fp->URL->bufPos);
++int64_t bwTell(bigWigFile_t *fp) {
++    return urlTell(fp->URL);
+ }
+
+ //Seek to a given position, always from the beginning of the file

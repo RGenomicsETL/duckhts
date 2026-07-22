@@ -1,6 +1,21 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- expose `duckhts_htslib_version()`, `duckhts_htslib_features()`, and
+  `duckhts_htslib_feature_string()` as immutable runtime diagnostics for the htslib
+  actually loaded with the extension. Rduckhts now publishes a versioned installed
+  htslib linking receipt with exact headers/library paths, static dependencies,
+  configured features, and source/build identity; its public accessor rejects
+  source/header/runtime version disagreement and is exercised by a fresh downstream C
+  consumer that opens bundled BAM, CRAM, BCF, and VCF files
+- add `read_bigwig(path, region := NULL, blocks_per_iteration := 64)` for
+  projection-aware scans of stored zero-based, half-open BigWig signal intervals.
+  Comma-separated htslib-style regions are merged and deduplicated; full scans claim
+  nonempty contigs and region scans claim merged ranges across DuckDB workers, with one
+  mutable handle and iterator per worker. Vendor libBigWig 0.4.8 at commit
+  `43c294ef1721a73b760803ca5e9410d581b98f17`, route its read-only I/O through DuckHTS's
+  htslib `hFILE` transport for local, native remote, and browser-wasm access, and retain
+  libBigWig's upstream correctness fixture and license
 - correct the real-WGS regulatory-provider plan after `EXPLAIN` showed that the
   documented chromosome equality forced a hash join with range residuals rather than
   IEJoin. Two packed RegionKey inequalities encode chromosome plus half-open coordinates

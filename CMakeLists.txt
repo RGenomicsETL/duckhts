@@ -88,6 +88,8 @@ set(EXTENSION_SOURCES
         src/seq_reader.c
         src/fastq_qc.c
         src/interval_udf.c
+        src/bigwig_reader.c
+        src/libbigwig_hfile_io.c
         src/kmer_udf.c
         src/tabix_reader.c
         src/vep_parser.c
@@ -120,6 +122,8 @@ set(EXTENSION_SOURCES
         src/cgranges_api.c
         src/variantkey_udf.c
         third_party/cgranges/cgranges.c
+        third_party/libBigWig/bwRead.c
+        third_party/libBigWig/bwValues.c
         src/bcftools_filter.c
         src/bcftools_shim.c
         src/wasm_http_hfile.c
@@ -163,7 +167,9 @@ target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
 target_include_directories(${EXTENSION_NAME} PRIVATE src/duckvep/kernel/include)
 target_include_directories(${EXTENSION_NAME} PRIVATE src/duckvep/kernel/src)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/cgranges)
+target_include_directories(${EXTENSION_NAME} PRIVATE third_party/libBigWig)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/variantkey/include)
+target_compile_definitions(${EXTENSION_NAME} PRIVATE NOCURL=1)
 
 # Include DuckDB C API headers
 target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
@@ -461,6 +467,7 @@ if(CURL_FOUND AND NOT DUCKDB_WASM_EXTENSION)
         list(APPEND HTSLIB_LINK_LIBS CURL::libcurl)
     endif()
 endif()
+
 if(OPENSSL_FOUND AND NOT DUCKDB_WASM_EXTENSION)
     list(APPEND HTSLIB_LINK_LIBS OpenSSL::Crypto)
 endif()

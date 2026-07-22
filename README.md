@@ -8,9 +8,9 @@ Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.o
 [![R-universe
 version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
 
-Read VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, BED, and tabix-indexed
-files directly in [DuckDB](https://duckdb.org/). DuckHTS uses
-[htslib](https://github.com/samtools/htslib) for HTS formats and
+Read VCF, BCF, BAM, CRAM, FASTA, FASTQ, BigWig, GTF, GFF, BED, and
+tabix-indexed files directly in [DuckDB](https://duckdb.org/). DuckHTS
+uses [htslib](https://github.com/samtools/htslib) for HTS formats and
 provides SQL functions for consequence annotation, intervals, coverage,
 sequence operations, compression, indexing, and export.
 
@@ -29,6 +29,9 @@ This section is generated from `functions.yaml`.
 
 | Function                             | Kind         | Returns                | R helper                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 |--------------------------------------|--------------|------------------------|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckhts_htslib_version`             | scalar       | VARCHAR                | `rduckhts_htslib_version`             | Return the runtime version reported by the htslib library loaded with DuckHTS. Rduckhts uses this value to reject a downstream linking receipt whose source/header version does not match the loaded library.                                                                                                                                                                                                                                                                                                                                               |
+| `duckhts_htslib_features`            | scalar       | UINTEGER               |                                       | Return the htslib runtime feature bitfield reported by hts_features(). Use duckhts_htslib_feature_string() for the corresponding build description.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `duckhts_htslib_feature_string`      | scalar       | VARCHAR                |                                       | Return htslib’s runtime build-feature description, including configured transports, compression libraries, compiler, and build flags. DuckHTS snapshots it once while loading the extension so parallel SQL calls read immutable text.                                                                                                                                                                                                                                                                                                                      |
 | `duckhts_simd_backend`               | scalar       | VARCHAR                | `rduckhts_simd_backend`               | Return the current DuckHTS SIMD dispatch label. For explicit scalar or concrete backend requests this is the requested policy; for auto it is the single selected backend when all logical kernels resolve to the same backend, or mixed when per-kernel auto-dispatch resolves to multiple backends. Use duckhts_simd_kernel_info() for per-kernel details.                                                                                                                                                                                                |
 | `duckhts_simd_requested_backend`     | scalar       | VARCHAR                | `rduckhts_simd_requested_backend`     | Return the current explicit SIMD backend request, usually auto unless `SELECT backend FROM duckhts_simd_set_backend('auto'\|'scalar'\|backend)` was called. The selected per-kernel backend may differ under auto-dispatch across x86, ARM, wasm, and scalar-only builds.                                                                                                                                                                                                                                                                                   |
 | `duckhts_simd_backend_compiled`      | scalar       | BOOLEAN                | `rduckhts_simd_backend_compiled`      | Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.                                                                                                                                                                                                                                                                                                          |
@@ -66,6 +69,7 @@ This section is generated from `functions.yaml`.
 | `read_bed`               | table        | table   | `rduckhts_bed`                                                                                                                                                         | Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `fasta_nuc`              | table        | table   | `rduckhts_fasta_nuc`                                                                                                                                                   | Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `read_fastq`             | table        | table   | `rduckhts_fastq`                                                                                                                                                       | Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT\[\] and quality_representation := ‘phred’ to return QUALITY as UTINYINT\[\] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’. scan_mode := ‘sequential’ forces raw streaming/counting instead of index-backed count paths.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `read_bigwig`            | table        | table   | `rduckhts_bigwig`                                                                                                                                                      | Read stored BigWig signal intervals as CHROM, START0, END0, and VALUE. Coordinates are zero-based half-open. region uses htslib’s one-based inclusive syntax; comma-separated requests are merged per contig and emit each stored interval once. Full scans claim nonempty contigs across DuckDB workers, and multi-region scans claim merged ranges. Each worker owns its mutable file handle and iterator. blocks_per_iteration controls libBigWig iterator batching, not the number of DuckDB workers. Local, native remote, and browser wasm reads all use DuckHTS’s htslib hFILE transport rather than a second libcurl stack.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `read_gff`               | table        | table   | `rduckhts_gff`                                                                                                                                                         | Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `read_gtf`               | table        | table   | `rduckhts_gtf`                                                                                                                                                         | Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `read_tabix`             | table        | table   | `rduckhts_tabix`                                                                                                                                                       | Read generic tabix-indexed text data with optional header handling and type inference. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -229,11 +233,11 @@ supports typed `standard_tags` and `auxiliary_tags` maps. `read_tabix`
 supports header-aware parsing (`header`, `header_names`) and optional
 type inference (`auto_detect`, `column_types`). Region lists in
 comma-separated form are supported by `read_bam`, `read_bcf`,
-`read_fasta`, `read_gff`, `read_gtf`, and `read_tabix`. Indexed
-`read_bam`, `read_bcf`, `read_gff`, `read_gtf`, and `read_tabix`
-multi-region queries use htslib iterators that emit a matching record
-once when requested regions overlap. `read_fasta` retains its separate
-per-region sequence-row contract.
+`read_fasta`, `read_bigwig`, `read_gff`, `read_gtf`, and `read_tabix`.
+Indexed `read_bam`, `read_bcf`, `read_bigwig`, `read_gff`, `read_gtf`,
+and `read_tabix` multi-region queries emit a matching record once when
+requested regions overlap. `read_fasta` retains its separate per-region
+sequence-row contract.
 
 ## Examples
 
@@ -308,6 +312,60 @@ LIMIT 3;
     │ HS25_09827:2:1201:1505:59795#49 │      2 │ HS25_09827:2:1201:1505:59795#49 │
     │ HS25_09827:2:1201:1559:70726#49 │      1 │ HS25_09827:2:1201:1559:70726#49 │
     └─────────────────────────────────┴────────┴─────────────────────────────────┘
+
+``` sql
+SELECT CHROM, START0, END0, round(VALUE::DOUBLE, 1) AS VALUE
+FROM read_bigwig(
+  'third_party/libBigWig/test/test.bw',
+  region := '1:1-150,10:201-300'
+)
+ORDER BY CHROM, START0;
+```
+
+    ┌─────────┬────────┬────────┬────────┐
+    │  CHROM  │ START0 │  END0  │ VALUE  │
+    │ varchar │ uint32 │ uint32 │ double │
+    ├─────────┼────────┼────────┼────────┤
+    │ 1       │      0 │      1 │    0.1 │
+    │ 1       │      1 │      2 │    0.2 │
+    │ 1       │      2 │      3 │    0.3 │
+    │ 1       │    100 │    150 │    1.4 │
+    │ 10      │    200 │    300 │    2.0 │
+    └─────────┴────────┴────────┴────────┘
+
+### BigWig signal tracks
+
+`read_bigwig()` returns the intervals physically stored in a BigWig as
+zero-based, half-open `(CHROM, START0, END0, VALUE)` rows. Its optional
+`region` uses the same one-based inclusive, comma-separated syntax as
+the indexed HTS readers; overlapping requests are merged and do not
+duplicate a stored interval. Local files, native HTTP/S3 paths, and
+browser HTTP use the same htslib `hFILE` transport already used by
+DuckHTS. A full scan distributes nonempty contigs across DuckDB workers;
+a multi-region scan distributes merged ranges. `blocks_per_iteration`
+controls indexed block batching inside a worker, not the number of
+workers.
+
+This executable query reads a real 100 kb slice of the UCSC GRCh38
+phyloP 100-way track rather than converting it to an intermediate text
+file:
+
+``` sql
+SELECT count(*) AS stored_intervals,
+       min(VALUE)::DOUBLE AS minimum,
+       max(VALUE)::DOUBLE AS maximum
+FROM read_bigwig(
+  'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw',
+  region := 'chr22:20000000-20099999'
+);
+```
+
+    ┌──────────────────┬─────────────────────┬──────────────────┐
+    │ stored_intervals │       minimum       │     maximum      │
+    │      int64       │       double        │      double      │
+    ├──────────────────┼─────────────────────┼──────────────────┤
+    │            96783 │ -10.786999702453613 │ 9.60200023651123 │
+    └──────────────────┴─────────────────────┴──────────────────┘
 
 ### Variant normalization
 
@@ -600,6 +658,7 @@ declared upstream artifacts:
 | `clinvar_20260706_grch38_keyed.parquet` | [ClinVar GRCh38 VCF](https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/), dated 2026-07-06                    |
 | `clinvarbitration_grch38_keyed.parquet` | [ClinvArbitration record 16792026](https://zenodo.org/records/16792026), whose release contract declares GRCh38 |
 | `alphamissense_hg38_variantkey.parquet` | [AlphaMissense v2 GRCh38](https://zenodo.org/records/8360242)                                                   |
+| UCSC `hg38.phyloP100way.bw`             | [GRCh38 phyloP 100-way BigWig](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/)                   |
 | `ensembl116_grch38_regulatory.parquet`  | `grch38_regulation`, compiled above from the Ensembl 116 funcgen tables                                         |
 | `gnomad_v211_constraint_gene.parquet`   | [gnomAD v2.1.1 gene constraint](https://gnomad.broadinstitute.org/downloads#v2-constraint)                      |
 
@@ -900,6 +959,53 @@ GROUP BY q.event_index;
 ```
 
 Measured AlphaMissense join: 0.523 seconds; 14,850 matched alleles.
+
+##### Dense conservation signal
+
+BigWig is already an indexed, compressed genomic signal store, so
+conservation does not need a bespoke DuckVEP cache. Read only the case
+ranges, preserve missing bases explicitly, and reduce overlaps in SQL.
+This example uses the real UCSC phyloP 100-way track and a chromosome-22
+slice; production orchestration can construct comma-separated batches
+from the distinct case spans and combine them with `UNION ALL BY NAME`.
+
+``` sql
+CREATE TABLE case_phylop_chr22 AS
+WITH signal AS (
+  SELECT duckhts_contig_key(CHROM) AS chrom,
+         START0::BIGINT AS start0, END0::BIGINT AS end0,
+         VALUE::DOUBLE AS value
+  FROM read_bigwig(
+    'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw',
+    region := 'chr22:20000000-20099999'
+  )
+), overlaps AS (
+  SELECT q.event_index, q.end0 - q.start0 AS requested_bases,
+         least(q.end0, s.end0) - greatest(q.start0, s.start0)
+           AS observed_bases,
+         s.value
+  FROM case_alleles q
+  JOIN signal s
+    ON q.chrom = s.chrom
+   AND q.start0 < s.end0 AND q.end0 > s.start0
+  WHERE q.chrom = '22'
+    AND q.start0 < 20099999 AND q.end0 > 19999999
+)
+SELECT event_index,
+       sum(observed_bases) AS observed_bases,
+       max(requested_bases) AS requested_bases,
+       sum(observed_bases * value) / sum(observed_bases) AS phyloP_mean,
+       min(value) AS phyloP_min, max(value) AS phyloP_max
+FROM overlaps
+GROUP BY event_index;
+```
+
+The overlap width weights run-length intervals correctly. An absent
+result means the requested span had no observed phyloP value; it is not
+silently converted to zero. Repeated cohort workloads may explicitly
+materialize release-labelled, coordinate-sorted Parquet or DuckLake
+tiles, but BigWig remains a valid provider and precision authority
+without such conversion.
 
 ##### Interval provider
 

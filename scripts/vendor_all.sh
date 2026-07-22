@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$SCRIPT_DIR/vendor_samtools.sh"
 "$SCRIPT_DIR/vendor_cgranges.sh"
 "$SCRIPT_DIR/vendor_variantkey.sh"
+"$SCRIPT_DIR/vendor_libbigwig.sh"
 
 if [[ "${VENDOR_CONFORMANCE:-0}" == "1" ]]; then
   "$SCRIPT_DIR/vendor_conformance_data.sh"

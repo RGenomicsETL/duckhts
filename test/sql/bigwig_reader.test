@@ -1,0 +1,106 @@
+# name: test/sql/bigwig_reader.test
+# description: Indexed local BigWig interval reader
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+# The fixture is the exact test.bw distributed by pinned libBigWig 0.4.8.
+query TIIR
+SELECT CHROM, START0, END0, round(VALUE::DOUBLE, 1)
+FROM read_bigwig('__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw')
+ORDER BY CHROM, START0;
+----
+1	0	1	0.1
+1	1	2	0.2
+1	2	3	0.3
+1	100	150	1.4
+1	150	151	1.5
+10	200	300	2.0
+
+# Regions use htslib's one-based inclusive syntax. Stored intervals retain
+# their original zero-based, half-open coordinates rather than being clipped.
+query TIIR
+SELECT CHROM, START0, END0, round(VALUE::DOUBLE, 1)
+FROM read_bigwig(
+  '__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw',
+  region := '1:1-150,10:201-300'
+)
+ORDER BY CHROM, START0;
+----
+1	0	1	0.1
+1	1	2	0.2
+1	2	3	0.3
+1	100	150	1.4
+10	200	300	2.0
+
+# Overlapping requests merge and an interval spanning both requests is emitted
+# once. Small iterator batches preserve the same result.
+query I
+SELECT count(*)
+FROM read_bigwig(
+  '__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw',
+  region := '1:1-150,1:100-250',
+  blocks_per_iteration := 1
+);
+----
+5
+
+# Projection pushdown must preserve aggregate values when no text column is
+# requested.
+query IR
+SELECT count(*), round(sum(VALUE)::DOUBLE, 1)
+FROM read_bigwig('__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw');
+----
+6	5.5
+
+query I
+SELECT count(*)
+FROM read_bigwig(
+  '__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw',
+  region := '1:51-60'
+);
+----
+0
+
+# A scan result is independent of the number of workers claiming contig jobs.
+statement ok
+PRAGMA threads=1
+
+query III
+SELECT count(*), sum(START0), sum(END0)
+FROM read_bigwig('__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw');
+----
+6	453	607
+
+statement ok
+PRAGMA threads=4
+
+query III
+SELECT count(*), sum(START0), sum(END0)
+FROM read_bigwig('__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw');
+----
+6	453	607
+
+statement error
+SELECT * FROM read_bigwig(
+  '__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw',
+  region := 'unknown:1-10'
+);
+----
+read_bigwig: invalid or unknown region list
+
+statement error
+SELECT * FROM read_bigwig(
+  '__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw',
+  blocks_per_iteration := 0
+);
+----
+read_bigwig: blocks_per_iteration must be between 1 and 1048576
+
+statement error
+SELECT * FROM read_bigwig('__WORKING_DIRECTORY__/test/data/range.bam');
+----
+read_bigwig: failed to open a valid BigWig file

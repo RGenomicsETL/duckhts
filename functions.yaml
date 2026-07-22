@@ -49,6 +49,42 @@
   },
   "functions": [
     {
+      "name": "duckhts_htslib_version",
+      "kind": "scalar",
+      "category": "Diagnostics",
+      "signature": "duckhts_htslib_version()",
+      "returns": "VARCHAR",
+      "r_wrapper": "rduckhts_htslib_version",
+      "description": "Return the runtime version reported by the htslib library loaded with DuckHTS. Rduckhts uses this value to reject a downstream linking receipt whose source/header version does not match the loaded library.",
+      "examples": [
+        "SELECT duckhts_htslib_version();"
+      ]
+    },
+    {
+      "name": "duckhts_htslib_features",
+      "kind": "scalar",
+      "category": "Diagnostics",
+      "signature": "duckhts_htslib_features()",
+      "returns": "UINTEGER",
+      "r_wrapper": "",
+      "description": "Return the htslib runtime feature bitfield reported by hts_features(). Use duckhts_htslib_feature_string() for the corresponding build description.",
+      "examples": [
+        "SELECT duckhts_htslib_features();"
+      ]
+    },
+    {
+      "name": "duckhts_htslib_feature_string",
+      "kind": "scalar",
+      "category": "Diagnostics",
+      "signature": "duckhts_htslib_feature_string()",
+      "returns": "VARCHAR",
+      "r_wrapper": "",
+      "description": "Return htslib's runtime build-feature description, including configured transports, compression libraries, compiler, and build flags. DuckHTS snapshots it once while loading the extension so parallel SQL calls read immutable text.",
+      "examples": [
+        "SELECT duckhts_htslib_feature_string();"
+      ]
+    },
+    {
       "name": "duckhts_simd_backend",
       "kind": "scalar",
       "category": "Diagnostics",
@@ -574,6 +610,18 @@
       "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.",
       "examples": [
         "SELECT NAME, MATE FROM read_fastq('r1.fq', mate_path := 'r2.fq') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_bigwig",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bigwig(path, region := NULL, blocks_per_iteration := 64)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bigwig",
+      "description": "Read stored BigWig signal intervals as CHROM, START0, END0, and VALUE. Coordinates are zero-based half-open. region uses htslib's one-based inclusive syntax; comma-separated requests are merged per contig and emit each stored interval once. Full scans claim nonempty contigs across DuckDB workers, and multi-region scans claim merged ranges. Each worker owns its mutable file handle and iterator. blocks_per_iteration controls libBigWig iterator batching, not the number of DuckDB workers. Local, native remote, and browser wasm reads all use DuckHTS's htslib hFILE transport rather than a second libcurl stack.",
+      "examples": [
+        "SELECT * FROM read_bigwig('scores.bw', region := 'chr1:100000-101000,chr2:200000-201000');"
       ]
     },
     {

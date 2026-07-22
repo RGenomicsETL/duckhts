@@ -69,6 +69,8 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     "seq_reader.c",
     "fastq_qc.c",
     "tabix_reader.c",
+    "bigwig_reader.c",
+    "libbigwig_hfile_io.c",
     "hts_meta_reader.c",
     "quality_encoding.c",
     "quality_encoding_reader.c",
@@ -166,6 +168,29 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   # Vendored cgranges C source
   file.copy(file.path(repo_root, "third_party", "cgranges", "cgranges.c"), dest)
   message("  Copied vendored cgranges source")
+
+  # Vendored read-only libBigWig sources and the upstream correctness fixture.
+  libbigwig_src <- file.path(repo_root, "third_party", "libBigWig")
+  libbigwig_dest <- file.path(dest, "libBigWig")
+  dir.create(file.path(libbigwig_dest, "test"), recursive = TRUE, showWarnings = FALSE)
+  libbigwig_files <- c(
+    "LICENSE", "README.md", "SOURCE_URL", "COMMIT",
+    "bigWig.h", "bigWigIO.h", "bwCommon.h", "bwValues.h",
+    "bwRead.c", "bwValues.c"
+  )
+  file.copy(file.path(libbigwig_src, libbigwig_files), libbigwig_dest)
+  file.copy(
+    file.path(libbigwig_src, "test", "test.bw"),
+    file.path(libbigwig_dest, "test", "test.bw")
+  )
+  extdata_dest <- file.path(pkg_src_dir, "inst", "extdata")
+  dir.create(extdata_dest, recursive = TRUE, showWarnings = FALSE)
+  file.copy(
+    file.path(libbigwig_src, "test", "test.bw"),
+    file.path(extdata_dest, "libbigwig_test.bw"),
+    overwrite = TRUE
+  )
+  message("  Copied vendored read-only libBigWig sources and test fixture")
 
   # DuckDB C API headers
   capi_dest <- file.path(dest, "duckdb_capi")
@@ -339,6 +364,8 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "seq_reader.c",
       "fastq_qc.c",
       "tabix_reader.c",
+      "bigwig_reader.c",
+      "libbigwig_hfile_io.c",
       "hts_meta_reader.c",
       "quality_encoding.c",
       "quality_encoding_reader.c",
@@ -349,6 +376,8 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
       "cgranges_api.c",
       "variantkey_udf.c",
       "cgranges.c",
+      file.path("libBigWig", "bwRead.c"),
+      file.path("libBigWig", "bwValues.c"),
       "bcftools_filter.c",
       "bcftools_shim.c",
       "score_udf.c",
@@ -372,12 +401,16 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
     paste0("-I", file.path(ext_dir, "include")),
     paste0("-I", file.path(ext_dir, "duckdb_capi")),
     paste0("-I", htslib_dir),
+    paste0("-I", file.path(ext_dir, "libBigWig")),
     paste0("-I", file.path(ext_dir, "duckvep", "kernel", "include")),
     paste0("-I", file.path(ext_dir, "duckvep", "kernel", "src"))
   )
 
   for (i in seq_along(c_files)) {
-    cmd <- paste(cc, "-O2 -fPIC -Wpedantic", includes, "-c", c_files[i], "-o", o_files[i])
+    cmd <- paste(
+      cc, "-O2 -fPIC -Wpedantic -DNOCURL=1", includes,
+      "-c", c_files[i], "-o", o_files[i]
+    )
     if (verbose) {
       message("  ", basename(c_files[i]))
     }

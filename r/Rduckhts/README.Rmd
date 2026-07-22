@@ -29,11 +29,11 @@ knitr::knit_hooks$set(output = function(x, options) {
 
 [![CRAN Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)[![R-universe version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
 
-`Rduckhts` provides an R interface to a [DuckDB](https://duckdb.org/) `HTS` (High Throughput Sequencing) file reader extension. This enables reading common bioinformatics file formats such as `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and tabix-indexed files directly from `R` using `SQL` queries via  [`duckhts`](https://github.com/RGenomicsETL/duckhts).
+`Rduckhts` provides an R interface to a [DuckDB](https://duckdb.org/) `HTS` (High Throughput Sequencing) file reader extension. This enables reading common bioinformatics file formats such as `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, BigWig, `GFF`, `GTF`, and tabix-indexed files directly from `R` using `SQL` queries via  [`duckhts`](https://github.com/RGenomicsETL/duckhts).
 
 ## How it works
 
-Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.24 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted [`duckhts`](https://github.com/RGenomicsETL/duckhts) build path.
+Following [RBCFTools](https://github.com/RGenomicsETL/RBCFTools), tables are created and returned instead of data frames. `VCF`/`BCF`, `SAM`/`BAM`/`CRAM`, `FASTA`, `FASTQ`, BigWig, `GFF`, `GTF`, and `tabix` formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. [`htslib`](https://github.com/samtools/htslib) 1.24 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted [`duckhts`](https://github.com/RGenomicsETL/duckhts) build path.
 
 ## Installation
 
@@ -130,11 +130,12 @@ Security behavior of this config:
 
 The extension is loaded with `rduckhts_load(con, extension_path = NULL)`. The wrappers break down into:
 
-- readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`, `rduckhts_fastq()`, `rduckhts_gff()`, `rduckhts_gtf()`, `rduckhts_tabix()`, `rduckhts_bed()`
+- readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`, `rduckhts_fastq()`, `rduckhts_bigwig()`, `rduckhts_gff()`, `rduckhts_gtf()`, `rduckhts_tabix()`, `rduckhts_bed()`
 - multi-file readers: `rduckhts_bam_multi()`, `rduckhts_bcf_multi()`, `rduckhts_fastq_multi()`, `rduckhts_fasta_multi()`, `rduckhts_gff_multi()`, `rduckhts_gtf_multi()`, `rduckhts_tabix_multi()`, `rduckhts_bed_multi()`
 - reference helpers: `rduckhts_fasta_index()`, `rduckhts_fasta_nuc()`
 - compression/indexing: `rduckhts_bgzip()`, `rduckhts_bgunzip()`, `rduckhts_bam_index()`, `rduckhts_bcf_index()`, `rduckhts_tabix_index()`
 - metadata helpers: `rduckhts_hts_header()`, `rduckhts_hts_index()`, `rduckhts_hts_index_spans()`, `rduckhts_hts_index_raw()`
+- htslib diagnostics/linking: `rduckhts_htslib_info()`, `rduckhts_htslib_version()`, `rduckhts_htslib_config()`
 - Parquet converters: `rduckhts_bcf_convert_parquet()`, `rduckhts_bam_convert_parquet()`, `rduckhts_gff_convert_parquet()`, `rduckhts_tabix_convert_parquet()`
 - SIMD diagnostics: `rduckhts_simd_backend()`, `rduckhts_simd_requested_backend()`, `rduckhts_simd_backend_available()`, `rduckhts_simd_set_backend()`
 
@@ -161,6 +162,20 @@ rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM sequences")
 dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 
+```
+
+### Link a downstream package to the bundled htslib
+
+`rduckhts_htslib_config()` returns the exact installed headers, shared or static
+library, required flags, enabled features, and build identity. Validation loads
+DuckHTS and rejects a source/header/runtime version mismatch. A downstream
+`configure` script can emit its `PKG_CPPFLAGS` and `PKG_LIBS` from this one receipt
+instead of guessing paths.
+
+```{r}
+hts_config <- rduckhts_htslib_config("shared")
+hts_config[c("contract_version", "htslib_version", "runtime_version", "link")]
+hts_config$features
 ```
 
 ## SIMD dispatch flow
@@ -273,6 +288,31 @@ rduckhts_bam(
   overwrite = TRUE
 )
 dbGetQuery(con, "SELECT QNAME, FLAG, POS, MAPQ FROM bam_idx_reads")
+```
+
+### BigWig signals
+
+The package bundles libBigWig's upstream test file so the wrapper, stored
+zero-based half-open coordinates, and htslib-style multi-region semantics are
+executable offline. `rduckhts_bigwig()` materializes a table; pass
+`table_name = NULL` to create the `bigwig_data` view instead.
+
+```{r}
+bigwig_path <- system.file(
+  "extdata", "libbigwig_test.bw", package = "Rduckhts", mustWork = TRUE
+)
+rduckhts_bigwig(
+  con, "bigwig_intervals", bigwig_path,
+  region = c("1:1-150", "10:201-300"),
+  overwrite = TRUE
+)
+dbGetQuery(
+  con,
+  paste(
+    "SELECT CHROM, START0, END0, round(VALUE::DOUBLE, 1) AS VALUE",
+    "FROM bigwig_intervals ORDER BY CHROM, START0"
+  )
+)
 ```
 
 ### Variant normalization

@@ -199,6 +199,119 @@ duckhts_htslib_plugins_dir <- function() {
   ""
 }
 
+#' Inspect the Loaded htslib Build
+#'
+#' Returns the version and build features reported by the htslib library that
+#' is actually loaded with DuckHTS.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded.
+#'
+#' @return A one-row data frame with `version`, `feature_bits`, and
+#'   `feature_string` columns.
+#'
+#' @examples
+#' \dontrun{
+#' con <- DBI::dbConnect(
+#'   duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+#' )
+#' rduckhts_load(con)
+#' rduckhts_htslib_info(con)
+#' DBI::dbDisconnect(con, shutdown = TRUE)
+#' }
+#' @export
+rduckhts_htslib_info <- function(con) {
+  DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT duckhts_htslib_version() AS version,",
+      "duckhts_htslib_features() AS feature_bits,",
+      "duckhts_htslib_feature_string() AS feature_string"
+    )
+  )
+}
+
+#' Return the Loaded htslib Version
+#'
+#' @param con A DuckDB connection with DuckHTS loaded.
+#'
+#' @return The runtime htslib semantic version as a character scalar.
+#'
+#' @export
+rduckhts_htslib_version <- function(con) {
+  as.character(rduckhts_htslib_info(con)$version[[1L]])
+}
+
+duckhts_runtime_htslib_info <- function() {
+  con <- DBI::dbConnect(
+    duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
+  )
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  rduckhts_load(con)
+  rduckhts_htslib_info(con)
+}
+
+#' Get the Installed htslib Linking Contract
+#'
+#' Resolves headers, an exact shared or static library, linker flags, enabled
+#' features, and build identity from the installed Rduckhts package. With
+#' validation enabled, the receipt and public headers are also compared with
+#' the htslib version reported by the loaded DuckHTS extension.
+#'
+#' @param link Either `"shared"` (the default) or `"static"`.
+#' @param validate Whether to validate installed files, header identity, and
+#'   the loaded htslib runtime version.
+#'
+#' @return An object of class `rduckhts_htslib_config`. Its `cppflags` and
+#'   `ldflags` elements can be consumed by a downstream package configure
+#'   script; the remaining fields form the versioned build receipt.
+#'
+#' @details
+#' The shared contract is currently available on native Unix builds. MinGW and
+#' browser-wasm builds expose the static contract unless a shared htslib was
+#' explicitly built. Static consumers must review `static_license_note`.
+#'
+#' @examples
+#' \dontrun{
+#' config <- rduckhts_htslib_config("shared")
+#' config$cppflags
+#' config$ldflags
+#' config$features
+#' }
+#' @export
+rduckhts_htslib_config <- function(
+    link = c("shared", "static"),
+    validate = TRUE
+) {
+  link <- match.arg(link)
+  config_path <- system.file("htslib_config.R", package = "Rduckhts")
+  if (!nzchar(config_path) || !file.exists(config_path)) {
+    stop("Rduckhts installed htslib contract was not found", call. = FALSE)
+  }
+
+  contract <- new.env(parent = baseenv())
+  sys.source(config_path, envir = contract)
+  config <- contract$htslib_config(link = link, validate = validate)
+
+  if (isTRUE(validate)) {
+    runtime <- duckhts_runtime_htslib_info()
+    runtime_version <- as.character(runtime$version[[1L]])
+    if (!identical(runtime_version, config$htslib_version)) {
+      stop(
+        "Rduckhts htslib receipt/runtime version mismatch: receipt=",
+        config$htslib_version,
+        ", runtime=",
+        runtime_version,
+        call. = FALSE
+      )
+    }
+    config$runtime_version <- runtime_version
+    config$runtime_feature_bits <- runtime$feature_bits[[1L]]
+    config$runtime_feature_string <- as.character(runtime$feature_string[[1L]])
+  }
+
+  config
+}
+
 #' Load DuckHTS Extension
 #'
 #' Loads the DuckHTS extension into a DuckDB connection. This must be called
@@ -1197,6 +1310,92 @@ rduckhts_fasta <- function(
   }
 
   DBI::dbExecute(con, create_query)
+  invisible(TRUE)
+}
+
+#' Create a BigWig Signal Table
+#'
+#' Materializes stored zero-based, half-open BigWig intervals through the
+#' DuckHTS extension. Region filters use htslib's one-based inclusive syntax;
+#' a character vector is combined into one multi-region request and overlapping
+#' requests emit each stored interval once.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded.
+#' @param table_name Name for the created table, or \code{NULL} to create the
+#'   \code{bigwig_data} view.
+#' @param path Local path or URL to a BigWig file.
+#' @param region Optional character vector of genomic regions such as
+#'   \code{c("chr1:1000-2000", "chr2:1-500")}. A single comma-separated string
+#'   is also accepted.
+#' @param blocks_per_iteration Positive integer number of indexed BigWig data
+#'   blocks decoded per iterator batch.
+#' @param overwrite Logical. If \code{TRUE}, replace an existing table.
+#'
+#' @return Invisibly returns \code{TRUE}.
+#' @export
+rduckhts_bigwig <- function(
+  con,
+  table_name,
+  path,
+  region = NULL,
+  blocks_per_iteration = 64L,
+  overwrite = FALSE
+) {
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+    stop("path must be one non-empty character string", call. = FALSE)
+  }
+  if (!is.null(region)) {
+    if (!is.character(region) || length(region) == 0L ||
+        anyNA(region) || any(!nzchar(region))) {
+      stop("region must contain non-empty character strings", call. = FALSE)
+    }
+    region <- paste(region, collapse = ",")
+  }
+  if (!is.numeric(blocks_per_iteration) ||
+      length(blocks_per_iteration) != 1L ||
+      is.na(blocks_per_iteration) ||
+      blocks_per_iteration < 1 ||
+      blocks_per_iteration > 1048576 ||
+      blocks_per_iteration != floor(blocks_per_iteration)) {
+    stop(
+      "blocks_per_iteration must be a whole number between 1 and 1048576",
+      call. = FALSE
+    )
+  }
+
+  if (!missing(table_name) && !is.null(table_name)) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+      stop(
+        "Table '", table_name,
+        "' already exists. Use overwrite = TRUE to replace it."
+      )
+    }
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
+    }
+  }
+
+  params <- list(
+    blocks_per_iteration = as.character(as.integer(blocks_per_iteration))
+  )
+  if (!is.null(region)) {
+    params$region <- sql_quote_string(region)
+  }
+  query <- sprintf(
+    "SELECT * FROM read_bigwig(%s%s)",
+    sql_quote_string(path),
+    build_param_str(params)
+  )
+  if (is.null(table_name)) {
+    statement <- paste("CREATE VIEW bigwig_data AS", query)
+  } else {
+    statement <- sprintf(
+      "CREATE TABLE %s AS %s",
+      as.character(DBI::dbQuoteIdentifier(con, table_name)),
+      query
+    )
+  }
+  DBI::dbExecute(con, statement)
   invisible(TRUE)
 }
 
