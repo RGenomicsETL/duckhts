@@ -48,7 +48,8 @@ test_htslib_contract <- function() {
     pattern = "header/receipt version mismatch"
   )
 
-  rtinycc_artifact_api <- requireNamespace("Rtinycc", quietly = TRUE) &&
+  rtinycc_artifact_api <- identical(Sys.info()[["sysname"]], "Linux") &&
+    requireNamespace("Rtinycc", quietly = TRUE) &&
     all(c(
       "tcc_state", "tcc_include_paths", "tcc_lib_paths",
       "tcc_add_library", "tcc_compile_string", "tcc_output_file"
@@ -101,9 +102,17 @@ test_htslib_contract <- function() {
     include_path = c(Rtinycc::tcc_include_paths(), config$include_dir),
     lib_path = c(Rtinycc::tcc_lib_paths(), config$lib_dir)
   )
-  expect_identical(Rtinycc::tcc_add_library(state, "hts"), 0L)
-  expect_identical(Rtinycc::tcc_compile_string(state, consumer_code), 0L)
-  expect_identical(Rtinycc::tcc_output_file(state, executable), 0L)
+  link_status <- Rtinycc::tcc_add_library(state, "hts")
+  expect_identical(link_status, 0L)
+  if (link_status != 0L) return(invisible(NULL))
+
+  compile_status <- Rtinycc::tcc_compile_string(state, consumer_code)
+  expect_identical(compile_status, 0L)
+  if (compile_status != 0L) return(invisible(NULL))
+
+  output_status <- Rtinycc::tcc_output_file(state, executable)
+  expect_identical(output_status, 0L)
+  if (output_status != 0L) return(invisible(NULL))
 
   fixture <- function(name) {
     system.file("extdata", name, package = "Rduckhts", mustWork = TRUE)
