@@ -104,6 +104,18 @@ test_bigwig <- function() {
     chrom_tree_offset + 16L,
     8L
   )
+  huge_chrom_count <- write_little_endian(
+    fixture_bytes,
+    chrom_tree_offset + 16L,
+    1048577,
+    8L
+  )
+  corrupt_paths <- c(corrupt_paths, write_bigwig_bytes(huge_chrom_count))
+  expect_error(
+    query_bigwig_count(corrupt_paths[[length(corrupt_paths)]]),
+    "failed to open a valid BigWig file"
+  )
+
   chrom_index_offset <- chrom_tree_offset + 36L + chrom_key_size
   bad_chrom_index <- write_little_endian(
     fixture_bytes,

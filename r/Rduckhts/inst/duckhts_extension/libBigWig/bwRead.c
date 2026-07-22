@@ -258,6 +258,7 @@ static chromList_t *bwReadChromList(bigWigFile_t *bw) {
     if(bwRead((void*) &valueSize, sizeof(uint32_t), 1, bw) != 1) goto error;
     if(bwRead((void*) &itemCount, sizeof(uint64_t), 1, bw) != 1) goto error;
     if(!keySize || keySize > 1048576U || valueSize != 8U) goto error;
+    if(itemCount > 1048576U) goto error;
     if(itemCount > UINT32_MAX) goto error;
     if(itemCount > SIZE_MAX / sizeof(char*)) goto error;
     if(itemCount > SIZE_MAX / sizeof(uint32_t)) goto error;
