@@ -133,5 +133,5 @@ htslib_cflags <- function() htslib_config(validate = TRUE)$cppflags
 htslib_libs <- function(static = @HTSLIB_STATIC_DEFAULT@) {
     htslib_config(if (isTRUE(static)) "static" else "shared", validate = TRUE)$ldflags
 }
-htslib_rpath <- function() htslib_config("shared", validate = TRUE)$rpath
+htslib_rpath <- function() htslib_config(validate = TRUE)$rpath
 htslib_version <- function() "@HTSLIB_VERSION@"

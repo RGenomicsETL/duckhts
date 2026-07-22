@@ -1,7 +1,10 @@
 library(tinytest)
 
 test_htslib_contract <- function() {
-  link <- if (.Platform$OS.type == "windows") "static" else "shared"
+  contract_path <- system.file("htslib_config.R", package = "Rduckhts")
+  contract <- new.env(parent = baseenv())
+  sys.source(contract_path, envir = contract)
+  link <- contract$htslib_default_link()
   default_config <- rduckhts_htslib_config()
   expect_identical(default_config$link, link)
   config <- rduckhts_htslib_config(link)
@@ -26,11 +29,9 @@ test_htslib_contract <- function() {
   expect_true(info$feature_bits[[1L]] > 0)
   expect_true(grepl("libcurl=", info$feature_string[[1L]], fixed = TRUE))
 
-  contract_path <- system.file("htslib_config.R", package = "Rduckhts")
-  contract <- new.env(parent = baseenv())
-  sys.source(contract_path, envir = contract)
   expect_identical(contract$htslib_default_link(), link)
   expect_identical(contract$htslib_config()$link, link)
+  expect_identical(contract$htslib_rpath(), contract$htslib_config()$rpath)
   relocated <- tempfile("rduckhts_htslib_")
   dir.create(file.path(relocated, "lib"), recursive = TRUE)
   expect_true(file.copy(config$include_dir, relocated, recursive = TRUE))
