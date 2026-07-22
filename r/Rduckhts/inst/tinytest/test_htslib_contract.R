@@ -2,6 +2,8 @@ library(tinytest)
 
 test_htslib_contract <- function() {
   link <- if (.Platform$OS.type == "windows") "static" else "shared"
+  default_config <- rduckhts_htslib_config()
+  expect_identical(default_config$link, link)
   config <- rduckhts_htslib_config(link)
   expect_identical(config$contract_version, 1L)
   expect_identical(config$htslib_version, "1.24")
@@ -27,6 +29,8 @@ test_htslib_contract <- function() {
   contract_path <- system.file("htslib_config.R", package = "Rduckhts")
   contract <- new.env(parent = baseenv())
   sys.source(contract_path, envir = contract)
+  expect_identical(contract$htslib_default_link(), link)
+  expect_identical(contract$htslib_config()$link, link)
   relocated <- tempfile("rduckhts_htslib_")
   dir.create(file.path(relocated, "lib"), recursive = TRUE)
   expect_true(file.copy(config$include_dir, relocated, recursive = TRUE))

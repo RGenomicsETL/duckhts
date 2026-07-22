@@ -36,9 +36,13 @@
     as.integer(sub(".*HTS_VERSION[[:space:]]+([0-9]+).*", "\\1", line[[1L]]))
 }
 
-htslib_config <- function(link = c("shared", "static"), validate = TRUE,
+htslib_default_link <- function() {
+    if (isTRUE(@HTSLIB_STATIC_DEFAULT@)) "static" else "shared"
+}
+
+htslib_config <- function(link = htslib_default_link(), validate = TRUE,
                           root = .rduckhts_htslib_root()) {
-    link <- match.arg(link)
+    link <- match.arg(link, c("shared", "static"))
     include_dir <- file.path(root, "include")
     lib_dir <- file.path(root, "lib")
     static_library <- file.path(lib_dir, "libhts.a")

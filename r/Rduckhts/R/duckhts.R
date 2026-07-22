@@ -257,7 +257,8 @@ duckhts_runtime_htslib_info <- function() {
 #' validation enabled, the receipt and public headers are also compared with
 #' the htslib version reported by the loaded DuckHTS extension.
 #'
-#' @param link Either `"shared"` (the default) or `"static"`.
+#' @param link Either `"shared"` or `"static"`. When omitted, use the link
+#'   mode selected when this Rduckhts package was configured.
 #' @param validate Whether to validate installed files, header identity, and
 #'   the loaded htslib runtime version.
 #'
@@ -272,17 +273,16 @@ duckhts_runtime_htslib_info <- function() {
 #'
 #' @examples
 #' \dontrun{
-#' config <- rduckhts_htslib_config("shared")
+#' config <- rduckhts_htslib_config()
 #' config$cppflags
 #' config$ldflags
 #' config$features
 #' }
 #' @export
 rduckhts_htslib_config <- function(
-    link = c("shared", "static"),
+    link = NULL,
     validate = TRUE
 ) {
-  link <- match.arg(link)
   config_path <- system.file("htslib_config.R", package = "Rduckhts")
   if (!nzchar(config_path) || !file.exists(config_path)) {
     stop("Rduckhts installed htslib contract was not found", call. = FALSE)
@@ -290,6 +290,10 @@ rduckhts_htslib_config <- function(
 
   contract <- new.env(parent = baseenv())
   sys.source(config_path, envir = contract)
+  if (is.null(link)) {
+    link <- contract$htslib_default_link()
+  }
+  link <- match.arg(link, c("shared", "static"))
   config <- contract$htslib_config(link = link, validate = validate)
 
   if (isTRUE(validate)) {

@@ -7,7 +7,8 @@
   disagreement through the extension-owned htslib diagnostics. Add thin
   `rduckhts_htslib_info()` and `rduckhts_htslib_version()` helpers plus an in-memory
   downstream compile/link test, built through Rtinycc with active-SDK system headers
-  on macOS, that opens bundled BAM, CRAM, BCF, and VCF files
+  on macOS, that opens bundled BAM, CRAM, BCF, and VCF files. When `link` is omitted,
+  select the shared or static contract chosen during package configuration
 - bundle the projection-aware `read_bigwig(...)` table function and
   `rduckhts_bigwig()` materialization/view helper. Region vectors use htslib's
   one-based inclusive syntax while returned intervals retain stored zero-based,

@@ -4,10 +4,11 @@
 \alias{rduckhts_htslib_config}
 \title{Get the Installed htslib Linking Contract}
 \usage{
-rduckhts_htslib_config(link = c("shared", "static"), validate = TRUE)
+rduckhts_htslib_config(link = NULL, validate = TRUE)
 }
 \arguments{
-\item{link}{Either `"shared"` (the default) or `"static"`.}
+\item{link}{Either `"shared"` or `"static"`. When omitted, use the link
+mode selected when this Rduckhts package was configured.}
 
 \item{validate}{Whether to validate installed files, header identity, and
 the loaded htslib runtime version.}
@@ -30,7 +31,7 @@ explicitly built. Static consumers must review `static_license_note`.
 }
 \examples{
 \dontrun{
-config <- rduckhts_htslib_config("shared")
+config <- rduckhts_htslib_config()
 config$cppflags
 config$ldflags
 config$features

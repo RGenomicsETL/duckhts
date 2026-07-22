@@ -167,13 +167,13 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 ### Link a downstream package to the bundled htslib
 
 `rduckhts_htslib_config()` returns the exact installed headers, shared or static
-library, required flags, enabled features, and build identity. Validation loads
-DuckHTS and rejects a source/header/runtime version mismatch. A downstream
-`configure` script can emit its `PKG_CPPFLAGS` and `PKG_LIBS` from this one receipt
-instead of guessing paths.
+library, required flags, enabled features, and build identity. With no `link`
+argument it selects the mode chosen when Rduckhts was configured. Validation
+loads DuckHTS and rejects a source/header/runtime version mismatch. A downstream
+`configure` script can emit its `PKG_CPPFLAGS` and `PKG_LIBS` from this one receipt.
 
 ```{r}
-hts_config <- rduckhts_htslib_config("shared")
+hts_config <- rduckhts_htslib_config()
 hts_config[c("contract_version", "htslib_version", "runtime_version", "link")]
 hts_config$features
 ```
