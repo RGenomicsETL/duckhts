@@ -3,6 +3,7 @@
 	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
 	duckvep-generated-check duckvep-upstream-git-check \
 	duckvep-state-current-check duckvep-release-conformance-audit \
+	test-duckvep-targets-contract duckvep-targets \
 	test-duckvep-so-conformance \
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
@@ -359,6 +360,14 @@ duckvep-corpus-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--extension build/release/duckhts.duckdb_extension \
 		$(DUCKVEP_DIFFERENTIAL_ARGS)
+
+# Optional coarse-grained campaign orchestration. {targets} owns invalidation and
+# resume behavior; corpus_differential.R and blit retain semantic and process ownership.
+duckvep-targets:
+	Rscript pipelines/duckvep/run.R
+
+test-duckvep-targets-contract:
+	Rscript test/duckvep/conformance/targets_contract.R
 
 # Reads a Parquet annotation dump produced by the corpus differential. This is
 # deliberately not in the ordinary test target because it needs external data.

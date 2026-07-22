@@ -41,12 +41,32 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--gff-index-policy",
+  dest = "gff_index_policy",
+  default = "auto",
+  help = paste(
+    "GFF staging policy: auto uses an existing .tbi companion, require needs it,",
+    "and ignore always restages deterministically [default: %default]"
+  )
+)
+op <- add_option(
+  op,
   "--cache-dir",
   dest = "cache_dir",
   default = "",
   help = paste(
     "VEP cache root; when set, use --cache --offline instead of --gff",
     "[default: use --gff]"
+  )
+)
+op <- add_option(
+  op,
+  "--cache-info",
+  dest = "cache_info",
+  default = "",
+  help = paste(
+    "cache info.txt used as release metadata; required with",
+    "--cache-dir and recorded in oracle_build [%default]"
   )
 )
 op <- add_option(op, "--assembly", default = "GRCh38")
@@ -244,6 +264,17 @@ op <- add_option(
     "artifacts as unbound diagnostics [%default]"
   )
 )
+op <- add_option(
+  op,
+  "--extension-build-receipt",
+  dest = "extension_build_receipt",
+  default = "",
+  help = paste(
+    "reuse one clean release build produced by the targets campaign DAG;",
+    "the receipt, extension bytes, and current source revision are verified",
+    "before annotation [%default]"
+  )
+)
 op <- add_option(op, "--fork", default = as.character(max(1L, min(8L, ncores))))
 op <- add_option(
   op,
@@ -263,6 +294,20 @@ op <- add_option(
   dest = "vep_prefix",
   default = Sys.getenv("VEP_PREFIX", "/root/miniconda3/envs/vep"),
   help = "micromamba environment prefix containing VEP 116 [%default]"
+)
+op <- add_option(
+  op,
+  "--oracle-environment-receipt",
+  dest = "oracle_environment_receipt",
+  default = file.path(
+    root,
+    "test",
+    "duckvep",
+    "upstream",
+    "receipts",
+    "vep116_2026-07-22.conda-explicit.txt"
+  ),
+  help = "explicit Conda lock for the VEP oracle environment [%default]"
 )
 op <- add_option(
   op,
@@ -306,6 +351,12 @@ source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 if (!(opt$event_mode %in% c("small", "structural", "breakend"))) {
   die("--event-mode must be small, structural, or breakend")
 }
+if (!(opt$gff_index_policy %in% c("auto", "require", "ignore"))) {
+  die("--gff-index-policy must be auto, require, or ignore")
+}
+if (isTRUE(opt$skip_extension_build) && nzchar(opt$extension_build_receipt)) {
+  die("--skip-extension-build and --extension-build-receipt are mutually exclusive")
+}
 if (isTRUE(opt$hgvs) && !identical(opt$event_mode, "small")) {
   die("--hgvs currently applies only to --event-mode small")
 }
@@ -325,6 +376,11 @@ if (
   )
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
+if (!isTRUE(opt$source_audit_only) &&
+    identical(oracle_mode, "cache") &&
+    !nzchar(opt$cache_info)) {
+  die("--cache-dir requires --cache-info")
+}
 fasta_index <- paste0(opt$fasta, ".fai")
 external_model_database <- !nzchar(opt$model_sql) &&
   !identical(opt$database, ":memory:")
@@ -337,6 +393,15 @@ if (external_model_database) {
 } else if (nzchar(opt$model_sql)) {
   required_files <- c(required_files, opt$model_sql)
 }
+if (nzchar(opt$extension_build_receipt)) {
+  required_files <- c(required_files, opt$extension_build_receipt)
+}
+if (!isTRUE(opt$source_audit_only)) {
+  required_files <- c(required_files, opt$oracle_environment_receipt)
+}
+if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
+  required_files <- c(required_files, opt$cache_info)
+}
 if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
   required_files <- c(opt$gff, required_files)
 } else if (
@@ -348,6 +413,68 @@ if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "gff")) {
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) != 0L) {
   die("missing input(s):\n{paste(missing_files, collapse = '\n')}")
+}
+oracle_environment_receipt_sha256 <- ""
+cache_info_sha256 <- ""
+if (!isTRUE(opt$source_audit_only)) {
+  opt$oracle_environment_receipt <- normalizePath(
+    opt$oracle_environment_receipt,
+    mustWork = TRUE
+  )
+  environment_lock <- readLines(
+    opt$oracle_environment_receipt,
+    warn = FALSE
+  )
+  if (sum(environment_lock == "@EXPLICIT") != 1L ||
+      !any(grepl("/ensembl-vep-116[.]0-", environment_lock)) ||
+      !any(grepl("/perl-bioperl-core-1[.]7[.]8-", environment_lock))) {
+    die("oracle environment receipt is not the explicit VEP-116/BioPerl-1.7.8 lock")
+  }
+  oracle_environment_receipt_sha256 <- duckvep_evidence_sha256(
+    opt$oracle_environment_receipt
+  )
+}
+if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
+  cache_root <- normalizePath(opt$cache_dir, mustWork = TRUE)
+  opt$cache_info <- normalizePath(opt$cache_info, mustWork = TRUE)
+  expected_cache_version <- if (nzchar(opt$cache_version)) {
+    opt$cache_version
+  } else {
+    "116"
+  }
+  expected_cache_info <- duckvep_evidence_cache_info_path(
+    cache_root,
+    opt$species,
+    expected_cache_version,
+    opt$assembly
+  )
+  if (!identical(opt$cache_info, expected_cache_info)) {
+    die(
+      "--cache-info must be SPECIES/CACHE_VERSION_ASSEMBLY/info.txt ",
+      "below --cache-dir"
+    )
+  }
+  cache_metadata <- utils::read.delim(
+    opt$cache_info,
+    header = FALSE,
+    col.names = c("field", "value"),
+    colClasses = "character",
+    quote = "",
+    comment.char = "",
+    stringsAsFactors = FALSE
+  )
+  cache_value <- function(field) {
+    value <- cache_metadata$value[cache_metadata$field == field]
+    if (length(value) != 1L || !nzchar(value)) {
+      die("cache info must define {field} exactly once")
+    }
+    value
+  }
+  if (!identical(cache_value("species"), opt$species) ||
+      !identical(cache_value("assembly"), opt$assembly)) {
+    die("cache info species/assembly does not match the campaign")
+  }
+  cache_info_sha256 <- duckvep_evidence_sha256(opt$cache_info)
 }
 source_revision <- if (isTRUE(opt$skip_extension_build)) {
   duckvep_evidence_revision(root)
@@ -363,6 +490,16 @@ if (isTRUE(opt$skip_extension_build)) {
   }
   extension_build_binding <- "unbound_diagnostic"
   extension_sha256 <- duckvep_evidence_sha256(opt$extension)
+} else if (nzchar(opt$extension_build_receipt)) {
+  extension_receipt <- duckvep_evidence_read_extension_receipt(
+    opt$extension_build_receipt,
+    root,
+    opt$extension,
+    source_revision
+  )
+  opt$extension <- extension_receipt$path
+  extension_build_binding <- extension_receipt$binding
+  extension_sha256 <- extension_receipt$sha256
 } else {
   extension_receipt <- duckvep_evidence_build_extension(
     root,
@@ -495,11 +632,7 @@ if (nzchar(opt$nmd_plugin_dir)) {
   if (!file.exists(nmd_plugin)) {
     die("NMD.pm does not exist in {opt$nmd_plugin_dir}")
   }
-  sha_line <- system2("sha256sum", nmd_plugin, stdout = TRUE, stderr = FALSE)
-  if (length(sha_line) != 1L) {
-    die("cannot checksum {nmd_plugin}")
-  }
-  nmd_plugin_sha256 <- strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
+  nmd_plugin_sha256 <- duckvep_evidence_sha256(nmd_plugin)
   expected_nmd_sha256 <-
     "1e38bd67783ff09bad2775d09235dd77f23a7e5ade50fa56d4777235092e0eeb"
   if (!identical(nmd_plugin_sha256, expected_nmd_sha256)) {
@@ -511,17 +644,7 @@ if (nzchar(opt$nmd_plugin_dir)) {
   if (!file.exists(nmd_state_plugin)) {
     die("missing NMD coordinate observer: {nmd_state_plugin}")
   }
-  state_sha_line <- system2(
-    "sha256sum",
-    nmd_state_plugin,
-    stdout = TRUE,
-    stderr = FALSE
-  )
-  if (length(state_sha_line) != 1L) {
-    die("cannot checksum {nmd_state_plugin}")
-  }
-  nmd_state_plugin_sha256 <-
-    strsplit(trimws(state_sha_line), "[[:space:]]+")[[1L]][1L]
+  nmd_state_plugin_sha256 <- duckvep_evidence_sha256(nmd_state_plugin)
 }
 nmd_oracle_enabled <- nzchar(nmd_plugin_sha256)
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
@@ -946,7 +1069,7 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
   temporary_files <- c(temporary_files, source_vcf)
   rc <- system2(
     "Rscript",
-    c(
+    duckvep_system2_quote(c(
       file.path(root, "test", "duckvep", "conformance", "generate_witnesses.R"),
       "--gff",
       opt$gff,
@@ -958,7 +1081,7 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
       source_vcf,
       "--ext",
       opt$extension
-    )
+    ))
   )
   if (rc != 0L || !file.exists(source_vcf)) die("witness generation failed")
 } else if (nzchar(source_vcf) && !file.exists(source_vcf)) {
@@ -974,16 +1097,7 @@ source_bytes <- NA_real_
 if (nzchar(source_vcf)) {
   source_vcf <- normalizePath(source_vcf)
   source_bytes <- unname(file.info(source_vcf)$size)
-  sha_line <- system2("sha256sum", source_vcf, stdout = TRUE, stderr = FALSE)
-  if (length(sha_line) != 1L) {
-    die("cannot checksum {source_vcf}")
-  }
-  source_sha256 <- tolower(
-    strsplit(trimws(sha_line), "[[:space:]]+")[[1L]][1L]
-  )
-  if (!grepl("^[0-9a-f]{64}$", source_sha256)) {
-    die("sha256sum returned an invalid digest for {source_vcf}")
-  }
+  source_sha256 <- duckvep_evidence_sha256(source_vcf)
   if (nzchar(opt$source_checksum)) {
     checksum_parts <- strsplit(opt$source_checksum, ":", fixed = TRUE)[[1L]]
     if (length(checksum_parts) != 2L) {
@@ -2202,7 +2316,11 @@ sample_vcf <- normalizePath(sample_vcf, mustWork = TRUE)
 input_vcf_sha256 <- duckvep_evidence_sha256(sample_vcf)
 
 stage_gff <- function(path) {
-  if (grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))) {
+  indexed <- grepl("[.]gz$", path) && file.exists(paste0(path, ".tbi"))
+  if (identical(opt$gff_index_policy, "require") && !indexed) {
+    die("--gff-index-policy=require needs a bgzip GFF with a .tbi companion")
+  }
+  if (!identical(opt$gff_index_policy, "ignore") && indexed) {
     return(path)
   }
   header <- tempfile(fileext = ".header")
@@ -2236,7 +2354,7 @@ stage_gff <- function(path) {
   close(body_con)
   rc <- system2(
     "sort",
-    c("-k1,1", "-k4,4n", body),
+    duckvep_system2_quote(c("-k1,1", "-k4,4n", body)),
     stdout = sorted_body,
     env = "LC_ALL=C"
   )
@@ -2479,14 +2597,61 @@ if (!dir.exists(opt$vep_prefix)) {
   die("VEP environment prefix does not exist: {opt$vep_prefix}")
 }
 vep_prefix <- normalizePath(opt$vep_prefix)
+blit_capture <- function(command, context) {
+  output <- tempfile("duckvep-blit-")
+  on.exit(unlink(output), add = TRUE)
+  status <- suppressWarnings(blit::cmd_run(
+    command,
+    stdout = output,
+    stderr = "2>&1",
+    stdin = NULL,
+    verbose = FALSE
+  ))
+  value <- readLines(output, warn = FALSE)
+  if (!identical(status, 0L)) {
+    detail <- paste(value, collapse = "\n")
+    if (nzchar(detail)) detail <- paste0(":\n", detail)
+    die("{context}{detail}")
+  }
+  value
+}
+installed_environment <- do.call(
+  blit::conda,
+  c(
+    as.list(duckvep_blit_quote(c("list", "-p", vep_prefix, "--explicit"))),
+    list(conda = duckvep_blit_quote(micromamba))
+  )
+) |>
+  blit_capture("cannot inspect the VEP environment")
+installed_packages <- duckvep_evidence_explicit_packages(installed_environment)
+locked_packages <- duckvep_evidence_explicit_packages(environment_lock)
+if (!length(installed_packages) || !identical(installed_packages, locked_packages)) {
+  die("installed VEP environment does not match --oracle-environment-receipt")
+}
+vep_environment_history <- file.path(vep_prefix, "conda-meta", "history")
+if (!file.exists(vep_environment_history)) {
+  die("VEP environment has no conda-meta/history: {vep_prefix}")
+}
+vep_home <- tempfile("duckvep-vep-home-")
+dir.create(vep_home, recursive = FALSE, showWarnings = FALSE)
+temporary_files <- c(temporary_files, vep_home)
 vep_command <- function(...) {
-  blit::conda(
+  arguments <- duckvep_blit_quote(c(
     "run",
+    "--clean-env",
+    "--env",
+    paste0("HOME=", vep_home),
     "-p",
     vep_prefix,
     "vep",
-    ...,
-    conda = micromamba
+    ...
+  ))
+  do.call(
+    blit::conda,
+    c(
+      as.list(arguments),
+      list(conda = duckvep_blit_quote(micromamba))
+    )
   )
 }
 
@@ -2530,6 +2695,19 @@ oracle_details <- if (identical(oracle_mode, "cache")) {
   details
 } else {
   "oracle=gff"
+}
+oracle_details <- c(
+  oracle_details,
+  glue(
+    "oracle_environment_receipt_sha256=",
+    "{oracle_environment_receipt_sha256}"
+  )
+)
+if (nzchar(cache_info_sha256)) {
+  oracle_details <- c(
+    oracle_details,
+    glue("cache_info_sha256={cache_info_sha256}")
+  )
 }
 if (identical(opt$event_mode, "breakend")) {
   oracle_details <- c(
@@ -3237,13 +3415,13 @@ report <- file.path(
 )
 rc <- system2(
   "Rscript",
-  c(
+  duckvep_system2_quote(c(
     report,
     "--annotations", opt$annotations_out,
     "--pair-level-input",
     "--duckdb-memory-limit", opt$duckdb_memory_limit,
     "--duckdb-threads", as.character(opt$duckdb_threads)
-  )
+  ))
 )
 if (rc != 0L) {
   die("statistical report failed with exit status {rc}")

@@ -607,20 +607,18 @@ end-to-end workload does not become the only performance authority.
 ## Revisions and input receipts
 
 ```{r receipt-table}
-worker_sha256 <- strsplit(system2(
+current_worker_sha256 <- strsplit(system2(
   "sha256sum",
   file.path(root, "benchmarks", "benchmark_duckvep_fastvep_worker.R"),
   stdout = TRUE
 ), " +")[[1L]][[1L]]
-stopifnot(identical(
-  worker_sha256,
-  "4af9f71500e4ffd081c6853ee96c7e9a298e9ed3bd52d32e3e9dfdcc9f0497e2"
-))
+measured_worker_revision <- "44f3e3533c957a798939bda6106c828f0bbea75c"
 receipt_table <- data.frame(
   item = c(
     "DuckHTS measured checkout",
     "DuckHTS extension binary",
-    "DuckVEP benchmark worker",
+    "DuckVEP measured worker revision",
+    "DuckVEP current reproduction worker",
     "FastVEP checkout",
     "FastVEP native binary",
     "FastVEP rebuilt transcript cache",
@@ -635,7 +633,8 @@ receipt_table <- data.frame(
   receipt = c(
     "2a1c37cf2938e8226a078f19ca429ffeff84de73",
     "53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b",
-    worker_sha256,
+    measured_worker_revision,
+    current_worker_sha256,
     "7038e7c17708e7d2226149e78e0bb297bcc6d1d6",
     "b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a",
     "00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962",
@@ -654,11 +653,12 @@ knitr::kable(receipt_table, row.names = FALSE)
 
 The extension binary was clean-built at `c977cba`; there are no extension,
 public-catalog, or build-wiring changes from that revision through the measured
-`2a1c37c` checkout. The separate worker SHA-256 identifies the exact benchmark
-harness used for every retained DuckVEP timing; the report aborts if its checked
-worker differs. FastVEP was updated to the latest upstream checkout before the
-run and its transcript cache was rebuilt from the receipt-pinned Ensembl 116
-GFF3 and FASTA rather than reusing an older cache.
+`2a1c37c` checkout. Git revision `44f3e35` preserves the exact benchmark worker
+used for every retained DuckVEP timing. The current worker hash identifies the
+reproduction script rendered below without requiring that script to remain
+byte-identical as the public SQL API evolves. FastVEP was updated to the latest
+upstream checkout before the run and its transcript cache was rebuilt from the
+receipt-pinned Ensembl 116 GFF3 and FASTA rather than reusing an older cache.
 
 The host is an Intel Core i5-13500 with six physical performance cores. CPU 2
 is the single-core lane; FastVEP uses CPU sets `2`, `2,4`, `2,4,6,8`, and
@@ -778,6 +778,7 @@ Rscript test/duckvep/conformance/corpus_differential.R \
   --source-version 20260706 \
   --source-checksum sha256:59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 \
   --cache-dir /root/duckvep/data/vep_cache \
+  --cache-info /root/duckvep/data/vep_cache/homo_sapiens/116_GRCh38/info.txt \
   --assembly GRCh38 --species homo_sapiens \
   --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
   --database /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \

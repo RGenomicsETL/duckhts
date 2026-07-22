@@ -57,11 +57,13 @@ Use this policy:
 
 - **Acquisition:** verify an upstream checksum, immutable object version, or release
   manifest once. Record the resulting local artifact identity in its staging receipt.
-- **Ordinary reuse:** use the acquisition receipt from an immutable/content-addressed local
-  object, read-only filesystem snapshot, or equivalently enforced store. Path, byte size,
-  and modification time are cheap cache-validation metadata, not identity. Do not reread a
-  multi-gigabyte FASTA, VCF, cache, or DuckDB model merely to calculate the same digest
-  again.
+- **Ordinary reuse:** where an acquisition receipt exists, use it with an
+  immutable/content-addressed local object, read-only filesystem snapshot, or equivalently
+  enforced store. Path, byte size, and modification time are cheap cache-validation
+  metadata, not identity. Do not add a second digest cache. The current standalone
+  evidence runner still reads the model, FASTA, and source bytes once when publishing a
+  new physical-artifact receipt; `{targets}` prevents that runner from being reinvoked for
+  an unchanged campaign.
 - **Publication or transfer:** verify the bytes once before publishing and once after
   downloading on another machine. An explicit release-audit mode may deliberately pay this
   I/O cost.
@@ -71,13 +73,17 @@ Use this policy:
 
 Small checked-in authorities and source files may be byte-verified on every audit because
 that cost is negligible. Large-artifact digests belong in one acquisition or publication
-manifest and are then referenced, not recomputed as ceremony. The shared evidence helper
-caches a digest after its first complete read and reuses it only while the canonical path,
-byte size, modification time, and change time are unchanged. Those metadata validate the
-cache entry; they do not replace the digest or create artifact identity. Set
-`DUCKVEP_ARTIFACT_VERIFY=full` for acquisition, transfer, publication, or an explicit
-release audit. `DUCKVEP_EVIDENCE_DIGEST_CACHE` may place the small local cache somewhere
-other than its XDG/user-cache default.
+manifest and are then referenced, not recomputed as ceremony.
+
+The optional [`pipelines/duckvep/`](../pipelines/duckvep/README.md) workflow delegates
+incremental execution to `{targets}`. Corpus, reference, model, cache-info, and result
+paths are file targets; unchanged campaigns are not invoked again. Leave
+`trust_timestamps` unset so current `{targets}` selects the appropriate behavior for the
+filesystem. DuckVEP retains semantic receipts and full result denominators. The
+conformance runner computes the digests it writes into a new evidence receipt whenever it
+is invoked, including from a targets branch; it does not accept caller-supplied digests or
+maintain a second generic digest cache. `{targets}` prevents that runner from being invoked
+for an unchanged campaign.
 
 ## Reproducibility levels
 
@@ -267,6 +273,7 @@ make -f Makefile duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --database /data/model.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/SPECIES/CACHE_VERSION_ASSEMBLY/info.txt \
   --fasta /data/reference.fa \
   --assembly ASSEMBLY --species SPECIES \
   --sample-per-shape 0"

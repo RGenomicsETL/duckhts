@@ -15,6 +15,7 @@ root <- tryCatch(
   system2("git", c("rev-parse", "--show-toplevel"), stdout = TRUE),
   error = function(e) "."
 )
+source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 campaign_started <- FALSE
 campaign_complete <- FALSE
 log_path <- NULL
@@ -329,7 +330,7 @@ recover_stale_publication()
 
 git_head <- suppressWarnings(system2(
   "git",
-  c("-C", root, "rev-parse", "HEAD"),
+  duckvep_system2_quote(c("-C", root, "rev-parse", "HEAD")),
   stdout = TRUE,
   stderr = FALSE
 ))
@@ -347,7 +348,7 @@ source_input_paths <- c(
 check_source_tree <- function(expected_head) {
   current_head <- suppressWarnings(system2(
     "git",
-    c("-C", root, "rev-parse", "HEAD"),
+    duckvep_system2_quote(c("-C", root, "rev-parse", "HEAD")),
     stdout = TRUE,
     stderr = FALSE
   ))
@@ -358,7 +359,9 @@ check_source_tree <- function(expected_head) {
   }
   tracked_changes <- suppressWarnings(system2(
     "git",
-    c("-C", root, "status", "--porcelain", "--untracked-files=no"),
+    duckvep_system2_quote(c(
+      "-C", root, "status", "--porcelain", "--untracked-files=no"
+    )),
     stdout = TRUE,
     stderr = FALSE
   ))
@@ -374,14 +377,14 @@ check_source_tree <- function(expected_head) {
   }
   untracked_inputs <- suppressWarnings(system2(
     "git",
-    c(
+    duckvep_system2_quote(c(
       "-C",
       root,
       "ls-files",
       "--others",
       "--",
       source_input_paths
-    ),
+    )),
     stdout = TRUE,
     stderr = FALSE
   ))
@@ -407,13 +410,16 @@ if (!nzchar(opt$source_revision)) {
 }
 
 log_path <- tempfile(fileext = ".log")
-command <- blit::exec(
-  "make",
-  "-f",
-  file.path(root, "Makefile"),
-  "DUCKVEP_PROPERTY_ARGS=",
-  "DUCKVEP_PROPERTY_CPPFLAGS=",
-  "test-duckvep-kernel"
+command <- do.call(
+  blit::exec,
+  as.list(duckvep_blit_quote(c(
+    Sys.which("make"),
+    "-f",
+    file.path(root, "Makefile"),
+    "DUCKVEP_PROPERTY_ARGS=",
+    "DUCKVEP_PROPERTY_CPPFLAGS=",
+    "test-duckvep-kernel"
+  )))
 ) |>
   blit::cmd_wd(root) |>
   blit::cmd_envvar(
@@ -526,14 +532,14 @@ if (!startsWith(requirements_path, root_prefix)) {
 requirements_relative <- substring(requirements_path, nchar(root_prefix) + 1L)
 requirements_tracked <- suppressWarnings(system2(
   "git",
-  c(
+  duckvep_system2_quote(c(
     "-C",
     root,
     "ls-files",
     "--error-unmatch",
     "--",
     requirements_relative
-  ),
+  )),
   stdout = FALSE,
   stderr = FALSE
 ))

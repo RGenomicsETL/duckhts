@@ -2,6 +2,11 @@
 # Checked evidence is allowed to create declared output files, but the source
 # revision and every other tracked path must remain unchanged while it runs.
 
+duckvep_system2_quote <- function(value) {
+  type <- if (identical(.Platform$OS.type, "windows")) "cmd" else "sh"
+  unname(vapply(as.character(value), shQuote, character(1L), type = type))
+}
+
 duckvep_evidence_command <- function(
     command,
     args,
@@ -9,7 +14,7 @@ duckvep_evidence_command <- function(
     env = character()) {
   value <- suppressWarnings(system2(
     command,
-    args,
+    duckvep_system2_quote(args),
     env = env,
     stdout = TRUE,
     stderr = TRUE
@@ -88,15 +93,7 @@ duckvep_evidence_assert_checkout <- function(
   current
 }
 
-duckvep_evidence_sha256_cache_path <- function() {
-  explicit <- Sys.getenv("DUCKVEP_EVIDENCE_DIGEST_CACHE", "")
-  if (nzchar(explicit)) return(path.expand(explicit))
-  cache_home <- Sys.getenv("XDG_CACHE_HOME", "")
-  if (!nzchar(cache_home)) cache_home <- file.path(path.expand("~"), ".cache")
-  file.path(cache_home, "duckhts", "evidence_sha256.tsv")
-}
-
-duckvep_evidence_sha256_file_state <- function(path) {
+duckvep_evidence_file_state <- function(path) {
   info <- file.info(path)
   if (nrow(info) != 1L || is.na(info$size) || is.na(info$mtime) ||
       is.na(info$ctime) || isTRUE(info$isdir)) {
@@ -109,94 +106,9 @@ duckvep_evidence_sha256_file_state <- function(path) {
   )
 }
 
-duckvep_evidence_sha256_cache_read <- function(path) {
-  if (!file.exists(path)) return(NULL)
-  value <- tryCatch(
-    utils::read.delim(
-      path,
-      colClasses = "character",
-      quote = "",
-      comment.char = "",
-      check.names = FALSE,
-      stringsAsFactors = FALSE
-    ),
-    error = function(e) NULL
-  )
-  expected <- c("path", "size", "mtime", "ctime", "sha256")
-  if (is.null(value) || !identical(names(value), expected)) return(NULL)
-  value
-}
-
-duckvep_evidence_sha256_cache_write <- function(cache_path, row) {
-  tryCatch({
-    old <- duckvep_evidence_sha256_cache_read(cache_path)
-    if (is.null(old)) {
-      old <- data.frame(
-        path = character(),
-        size = character(),
-        mtime = character(),
-        ctime = character(),
-        sha256 = character(),
-        stringsAsFactors = FALSE
-      )
-    }
-    old <- old[old$path != row$path, , drop = FALSE]
-    value <- rbind(old, row)
-    dir.create(dirname(cache_path), recursive = TRUE, showWarnings = FALSE)
-    temporary <- tempfile("evidence_sha256_", tmpdir = dirname(cache_path))
-    on.exit(unlink(temporary), add = TRUE)
-    utils::write.table(
-      value,
-      temporary,
-      sep = "\t",
-      row.names = FALSE,
-      col.names = TRUE,
-      quote = FALSE,
-      na = ""
-    )
-    Sys.chmod(temporary, mode = "0600")
-    if (file.rename(temporary, cache_path)) return(invisible(NULL))
-    warning(
-      paste0("could not update DuckVEP digest cache ", cache_path),
-      call. = FALSE
-    )
-  }, error = function(error) {
-    warning(
-      paste0(
-        "could not update DuckVEP digest cache ",
-        cache_path,
-        ": ",
-        conditionMessage(error)
-      ),
-      call. = FALSE
-    )
-  })
-  invisible(NULL)
-}
-
 duckvep_evidence_sha256 <- function(path) {
   path <- normalizePath(path, mustWork = TRUE)
-  mode <- tolower(Sys.getenv("DUCKVEP_ARTIFACT_VERIFY", "reuse"))
-  if (!(mode %in% c("reuse", "full"))) {
-    stop(
-      "DUCKVEP_ARTIFACT_VERIFY must be reuse or full",
-      call. = FALSE
-    )
-  }
-  state <- duckvep_evidence_sha256_file_state(path)
-  cache_path <- duckvep_evidence_sha256_cache_path()
-  if (identical(mode, "reuse")) {
-    cache <- duckvep_evidence_sha256_cache_read(cache_path)
-    if (!is.null(cache)) {
-      hit <- cache$path == path &
-        cache$size == unname(state[["size"]]) &
-        cache$mtime == unname(state[["mtime"]]) &
-        cache$ctime == unname(state[["ctime"]]) &
-        grepl("^[0-9a-f]{64}$", cache$sha256)
-      hit[is.na(hit)] <- FALSE
-      if (sum(hit) == 1L) return(cache$sha256[hit][[1L]])
-    }
-  }
+  state <- duckvep_evidence_file_state(path)
   value <- duckvep_evidence_command(
     "sha256sum",
     path,
@@ -206,22 +118,61 @@ duckvep_evidence_sha256 <- function(path) {
   if (!grepl("^[0-9a-f]{64}$", digest)) {
     stop(paste0("invalid SHA-256 for ", path), call. = FALSE)
   }
-  state_after <- duckvep_evidence_sha256_file_state(path)
-  if (!identical(state, state_after)) {
+  if (!identical(state, duckvep_evidence_file_state(path))) {
     stop(paste0("artifact changed while hashing: ", path), call. = FALSE)
   }
-  duckvep_evidence_sha256_cache_write(
-    cache_path,
-    data.frame(
-      path = path,
-      size = unname(state[["size"]]),
-      mtime = unname(state[["mtime"]]),
-      ctime = unname(state[["ctime"]]),
-      sha256 = digest,
-      stringsAsFactors = FALSE
-    )
-  )
   digest
+}
+
+duckvep_evidence_cache_info_path <- function(
+    cache_dir,
+    species,
+    cache_version,
+    assembly) {
+  normalizePath(
+    file.path(
+      normalizePath(cache_dir, mustWork = TRUE),
+      species,
+      paste0(cache_version, "_", assembly),
+      "info.txt"
+    ),
+    mustWork = TRUE
+  )
+}
+
+duckvep_evidence_explicit_packages <- function(lines) {
+  records <- trimws(lines)
+  records <- records[
+    nzchar(records) &
+      records != "@EXPLICIT" &
+      !startsWith(records, "#") &
+      !startsWith(records, "List of packages in environment:")
+  ]
+  if (length(records) && any(!grepl(
+    "^[A-Za-z][A-Za-z0-9+.-]*://",
+    records
+  ))) {
+    stop("invalid non-URL record in explicit Conda package set", call. = FALSE)
+  }
+  sort(unique(records))
+}
+
+duckvep_blit_quote <- function(value, os_type = .Platform$OS.type) {
+  if (!identical(os_type, "windows")) {
+    return(unname(vapply(
+      as.character(value),
+      shQuote,
+      character(1L),
+      type = "sh"
+    )))
+  }
+  # blit writes a cmd.exe batch file. Quote first for the target application's
+  # argv parser, then escape that quoted token for cmd.exe itself.
+  unname(vapply(
+    as.character(value),
+    function(item) shQuote(shQuote(item, type = "cmd"), type = "cmd2"),
+    character(1L)
+  ))
 }
 
 duckvep_evidence_untracked_build_inputs <- function(root) {
@@ -435,5 +386,102 @@ duckvep_evidence_build_extension <- function(
     path = expected,
     binding = "htslib_distclean_make_release",
     sha256 = duckvep_evidence_sha256(expected)
+  )
+}
+
+duckvep_evidence_write_extension_receipt <- function(
+    path,
+    source_revision,
+    extension) {
+  if (!grepl("^[0-9a-f]{40}$", source_revision)) {
+    stop("extension receipt needs a full Git object name", call. = FALSE)
+  }
+  required <- c("path", "binding", "sha256")
+  if (!is.list(extension) || !all(required %in% names(extension))) {
+    stop("extension receipt is missing build fields", call. = FALSE)
+  }
+  extension_path <- normalizePath(extension$path, mustWork = TRUE)
+  if (!identical(extension$binding, "htslib_distclean_make_release")) {
+    stop("extension receipt has an unsupported build binding", call. = FALSE)
+  }
+  if (!grepl("^[0-9a-f]{64}$", extension$sha256)) {
+    stop("extension receipt has an invalid SHA-256", call. = FALSE)
+  }
+  value <- data.frame(
+    field = c("source_revision", "path", "binding", "sha256"),
+    value = c(
+      source_revision,
+      extension_path,
+      extension$binding,
+      extension$sha256
+    ),
+    stringsAsFactors = FALSE
+  )
+  path <- normalizePath(path.expand(path), mustWork = FALSE)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- tempfile("duckvep_extension_", tmpdir = dirname(path))
+  on.exit(unlink(temporary), add = TRUE)
+  utils::write.table(
+    value,
+    temporary,
+    sep = "\t",
+    row.names = FALSE,
+    col.names = TRUE,
+    quote = FALSE,
+    na = ""
+  )
+  if (!file.rename(temporary, path)) {
+    stop(paste0("cannot publish extension receipt ", path), call. = FALSE)
+  }
+  path
+}
+
+duckvep_evidence_read_extension_receipt <- function(
+    path,
+    root,
+    extension,
+    source_revision) {
+  path <- normalizePath(path, mustWork = TRUE)
+  value <- utils::read.delim(
+    path,
+    colClasses = "character",
+    quote = "",
+    comment.char = "",
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  fields <- c("source_revision", "path", "binding", "sha256")
+  if (!identical(names(value), c("field", "value")) ||
+      nrow(value) != length(fields) ||
+      !identical(value$field, fields)) {
+    stop("extension receipt has an invalid schema", call. = FALSE)
+  }
+  receipt <- stats::setNames(value$value, value$field)
+  if (!identical(receipt[["source_revision"]], source_revision)) {
+    stop("extension receipt belongs to another source revision", call. = FALSE)
+  }
+  expected <- normalizePath(
+    file.path(root, "build", "release", "duckhts.duckdb_extension"),
+    mustWork = FALSE
+  )
+  requested <- normalizePath(extension, mustWork = FALSE)
+  recorded <- normalizePath(receipt[["path"]], mustWork = FALSE)
+  if (!identical(requested, expected) || !identical(recorded, expected)) {
+    stop("extension receipt does not bind the in-tree release extension", call. = FALSE)
+  }
+  if (!identical(
+      receipt[["binding"]],
+      "htslib_distclean_make_release"
+    )) {
+    stop("extension receipt has an unsupported build binding", call. = FALSE)
+  }
+  observed_sha256 <- duckvep_evidence_sha256(expected)
+  if (!identical(receipt[["sha256"]], observed_sha256)) {
+    stop("extension receipt does not match the built extension", call. = FALSE)
+  }
+  list(
+    path = expected,
+    binding = receipt[["binding"]],
+    sha256 = observed_sha256
   )
 }

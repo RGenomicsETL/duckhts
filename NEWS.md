@@ -8,10 +8,17 @@
   exactly what is portable today versus what still needs a published external model/corpus
   pack. Limit large-artifact byte hashing to acquisition, publication, transfer, or an
   explicit release audit rather than presenting repeated full-file hashing as biological
-  rigor; ordinary reuse consumes the acquisition receipt and logical model identity. Cache
-  a full digest after its first observation and reuse it only while canonical path, byte
-  size, modification time, and change time remain identical; provide
-  `DUCKVEP_ARTIFACT_VERIFY=full` for deliberate byte re-verification
+  rigor. Add an optional `{targets}` campaign DAG that tracks
+  corpus/model/reference/receipt paths, skips unchanged campaigns using its native file
+  tracking, branches at coarse named campaigns, retains saved error workspaces, builds the
+  clean release extension once, and reuses its revision-bound receipt across branches.
+  Keep `blit` as the quoted shell-script execution layer for targets-to-runner and
+  micromamba/VEP commands instead of growing a second command runner or generic digest
+  cache; each executed evidence run hashes the artifacts it actually consumes, rejects
+  caller-supplied precomputed digests, and publishes complete campaign outputs through an
+  atomic directory replacement with interrupted-run recovery. Add focused contracts for
+  traversal/symlink rejection, case-sensitive path identity, two-stage Windows batch
+  quoting, atomic publication, and both recoverable interruption states
 - close three rare consequence/HGVS states. VEP's start-loss predicate directly evaluates in-frame
   deletion before its generic start test; DuckVEP's staged classifier now establishes
   that dependent fact first, and the offset-based start test requires a 5-prime UTR. A pure

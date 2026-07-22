@@ -17,19 +17,25 @@ consequence.
 
 The runner uses the current `WangLabCSU/blit` command API (tested at
 `940c2c1385ba6ad72f0c63b861e90abe8ae6e6f3`) to execute
-`micromamba run -p "$VEP_PREFIX" vep ...` without a shell. The default prefix is
+`micromamba run -p "$VEP_PREFIX" vep ...` through a generated shell script whose dynamic
+tokens are individually quoted. The default prefix is
 `/root/miniconda3/envs/vep`; override `VEP_PREFIX` for another VEP 116 environment.
 Install that `blit` checkout with `R CMD INSTALL /path/to/blit`. A matching VEP
 environment can be created with `micromamba create -p "$VEP_PREFIX"
 --file test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt` on
-Linux-64.
+Linux-64. Before launching VEP, the runner requires the installed explicit package URL set
+to equal that lock exactly; naming a lock file without matching the live environment is
+not accepted as provenance.
 
-Large input digests are read completely on first observation and then reused from the
-local evidence cache only while canonical path, byte size, modification time, and change
-time are unchanged. This avoids rereading an unchanged multi-gigabyte model, reference, or
-corpus before every campaign. Set `DUCKVEP_ARTIFACT_VERIFY=full` when acquiring,
-transferring, or publishing artifacts, or for a deliberate full-byte release audit;
-`DUCKVEP_EVIDENCE_DIGEST_CACHE` overrides the XDG/user-cache location.
+The optional [`../../../pipelines/duckvep/`](../../../pipelines/duckvep/README.md)
+workflow uses `{targets}` for campaign invalidation, branching, resume behavior, and saved
+error workspaces. It builds the release extension once and passes a revision- and
+byte-bound receipt to every campaign branch. `blit` remains the external VEP/micromamba
+process layer; the targets graph does not reconstruct those command lines. Large corpus,
+reference, model, and cache-info paths are file targets, while DuckVEP retains the
+semantic receipts and full comparison denominators. The runner performs its explicit
+receipt hashes whenever it executes, does not accept precomputed artifact digests, and
+does not maintain an independent generic cache.
 
 The validation gates have independent jobs:
 
@@ -195,6 +201,7 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --corpus clinvar \
   --vcf /data/clinvar.vcf.gz \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
   --fasta /data/GRCh38.fa \
   --database /data/duckvep-model.duckdb \
   --model-sql '' \
@@ -256,6 +263,7 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --database /data/homo_sapiens_116_GRCh38.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 21 --seed 17 --sample-per-shape 100"
@@ -294,6 +302,7 @@ VEP_PREFIX=/opt/vep Rscript corpus_differential.R \
   --database /data/homo_sapiens_116_GRCh38.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 21 --sample-per-shape 0 --fork 4
@@ -315,6 +324,7 @@ make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --database /data/homo_sapiens_116_GRCh38.duckdb \
   --model-sql '' \
   --cache-dir /data/vep-cache \
+  --cache-info /data/vep-cache/homo_sapiens/116_GRCh38/info.txt \
   --fasta /data/GRCh38.fa \
   --assembly GRCh38 --species homo_sapiens \
   --chrom 1,2,7,21,X --seed 31 --sample-per-shape 2"
