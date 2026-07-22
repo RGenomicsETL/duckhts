@@ -77,6 +77,22 @@ test_bigwig <- function() {
   corrupt_paths <- character()
   on.exit(unlink(corrupt_paths), add = TRUE)
 
+  truncated_zoom_header <- write_little_endian(
+    fixture_bytes,
+    6L,
+    1,
+    2L
+  )
+  truncated_zoom_header <- truncated_zoom_header[seq_len(68L)]
+  corrupt_paths <- c(
+    corrupt_paths,
+    write_bigwig_bytes(truncated_zoom_header)
+  )
+  expect_error(
+    query_bigwig_count(corrupt_paths[[length(corrupt_paths)]]),
+    "failed to open a valid BigWig file"
+  )
+
   chrom_tree_offset <- read_little_endian(fixture_bytes, 8L, 8L)
   chrom_key_size <- read_little_endian(
     fixture_bytes,

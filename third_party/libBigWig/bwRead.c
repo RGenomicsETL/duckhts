@@ -57,7 +57,7 @@ void bwCleanup() {
 static bwZoomHdr_t *bwReadZoomHdrs(bigWigFile_t *bw) {
     if(bw->isWrite) return NULL;
     uint16_t i;
-    bwZoomHdr_t *zhdr = malloc(sizeof(bwZoomHdr_t));
+    bwZoomHdr_t *zhdr = calloc(1, sizeof(bwZoomHdr_t));
     if(!zhdr) return NULL;
     uint32_t *level = malloc(bw->hdr->nLevels * sizeof(uint64_t));
     if(!level) {
@@ -95,8 +95,10 @@ static bwZoomHdr_t *bwReadZoomHdrs(bigWigFile_t *bw) {
     return zhdr;
 
 error:
-    for(i=0; i<bw->hdr->nLevels; i++) {
-        if(zhdr->idx[i]) bwDestroyIndex(zhdr->idx[i]);
+    if(zhdr->idx) {
+        for(i=0; i<bw->hdr->nLevels; i++) {
+            if(zhdr->idx[i]) bwDestroyIndex(zhdr->idx[i]);
+        }
     }
     free(zhdr);
     free(level);
