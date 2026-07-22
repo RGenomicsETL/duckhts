@@ -125,6 +125,30 @@ test_bigwig <- function() {
     "failed to initialize an indexed range"
   )
 
+  huge_block <- write_little_endian(
+    fixture_bytes,
+    index_root_offset + 28L,
+    64 * 1024^2 + 1,
+    8L
+  )
+  corrupt_paths <- c(corrupt_paths, write_bigwig_bytes(huge_block))
+  expect_error(
+    query_bigwig_count(corrupt_paths[[length(corrupt_paths)]]),
+    "failed to initialize an indexed range"
+  )
+
+  huge_decode_buffer <- write_little_endian(
+    fixture_bytes,
+    52L,
+    64 * 1024^2 + 1,
+    4L
+  )
+  corrupt_paths <- c(corrupt_paths, write_bigwig_bytes(huge_decode_buffer))
+  expect_error(
+    query_bigwig_count(corrupt_paths[[length(corrupt_paths)]]),
+    "failed to initialize an indexed range"
+  )
+
   short_block <- write_little_endian(fixture_bytes, 52L, 0, 4L)
   short_block <- write_little_endian(
     short_block,

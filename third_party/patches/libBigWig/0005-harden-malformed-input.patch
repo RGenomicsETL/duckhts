@@ -24,7 +24,16 @@ diff --git a/bwRead.c b/bwRead.c
 diff --git a/bwValues.c b/bwValues.c
 --- a/bwValues.c
 +++ b/bwValues.c
-@@ -391,8 +391,10 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+@@ -6,6 +6,8 @@
+ #include <zlib.h>
+ #include <errno.h>
+
++#define DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES (64U * 1024U * 1024U)
++
+ static uint32_t roundup(uint32_t v) {
+     v--;
+     v |= v >> 1;
+@@ -391,8 +393,10 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
      uint64_t i;
      uint16_t j;
      int compressed = 0, rv;
@@ -36,15 +45,23 @@ diff --git a/bwValues.c b/bwValues.c
      uint32_t start = 0, end , *p;
      float value;
      bwDataHeader_t hdr;
-@@ -411,6 +413,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+@@ -399,6 +403,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+     bwOverlappingIntervals_t *output = calloc(1, sizeof(bwOverlappingIntervals_t));
+
+     if(!output) goto error;
++    if((uint64_t) sz > DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES) goto error;
+
+     if(!o) return output;
+     if(!o->n) return output;
+@@ -411,6 +416,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
 
      for(i=0; i<o->n; i++) {
          if(bwSetPos(fp, o->offset[i])) goto error;
-+        if(o->size[i] > SIZE_MAX) goto error;
++        if(o->size[i] > DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES) goto error;
 
          if(sz < o->size[i]) {
              compBuf = realloc(compBuf, o->size[i]);
-@@ -423,13 +426,29 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+@@ -423,13 +429,29 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
              tmp = fp->hdr->bufSize; //This gets over-written by uncompress
              rv = uncompress(buf, (uLongf *) &tmp, compBuf, o->size[i]);
              if(rv != Z_OK) goto error;
@@ -75,7 +92,7 @@ diff --git a/bwValues.c b/bwValues.c
          p = ((uint32_t*) buf);
          p += 6;
          if(hdr.tid != tid) continue;
-@@ -436,7 +452,6 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
+@@ -436,7 +455,6 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOve
 
          if(hdr.type == 3) start = hdr.start - hdr.step;
 

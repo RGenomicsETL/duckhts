@@ -6,6 +6,8 @@
 #include <zlib.h>
 #include <errno.h>
 
+#define DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES (64U * 1024U * 1024U)
+
 static uint32_t roundup(uint32_t v) {
     v--;
     v |= v >> 1;
@@ -401,6 +403,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOver
     bwOverlappingIntervals_t *output = calloc(1, sizeof(bwOverlappingIntervals_t));
 
     if(!output) goto error;
+    if((uint64_t) sz > DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES) goto error;
 
     if(!o) return output;
     if(!o->n) return output;
@@ -413,7 +416,7 @@ bwOverlappingIntervals_t *bwGetOverlappingIntervalsCore(bigWigFile_t *fp, bwOver
 
     for(i=0; i<o->n; i++) {
         if(bwSetPos(fp, o->offset[i])) goto error;
-        if(o->size[i] > SIZE_MAX) goto error;
+        if(o->size[i] > DUCKHTS_LIBBIGWIG_MAX_BLOCK_BYTES) goto error;
 
         if(sz < o->size[i]) {
             compBuf = realloc(compBuf, o->size[i]);
