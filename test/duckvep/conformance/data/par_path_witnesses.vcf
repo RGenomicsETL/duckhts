@@ -1,0 +1,9 @@
+##fileformat=VCFv4.2
+##source=DuckVEP-VEP116-PAR-path-witnesses
+##contig=<ID=X,length=156040895,assembly=GRCh38>
+##contig=<ID=Y,length=57227415,assembly=GRCh38>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+X	276322	par_x_utr	G	A	.	.	.
+X	284188	par_x_coding	A	G	.	.	.
+Y	276322	par_y_utr	G	A	.	.	.
+Y	284188	par_y_coding	A	G	.	.	.

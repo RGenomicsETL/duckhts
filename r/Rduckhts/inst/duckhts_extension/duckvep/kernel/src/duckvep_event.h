@@ -26,6 +26,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* VEP's ordinary-allele pre-predicate is computed from feature REF/ALT
+ * lengths before transcript projection.  This can differ from a mapped CDS
+ * edit when the uploaded feature spans an intron. */
+typedef enum duckvep_feature_length_relation {
+    DUCKVEP_FEATURE_LENGTH_UNKNOWN = 0,
+    DUCKVEP_FEATURE_LENGTH_EQUAL,
+    DUCKVEP_FEATURE_LENGTH_INCREASE,
+    DUCKVEP_FEATURE_LENGTH_DECREASE
+} duckvep_feature_length_relation_t;
+
 typedef struct duckvep_event {
     uint16_t chrom_id;
     uint16_t mate_chrom_id;
@@ -49,6 +59,7 @@ typedef struct duckvep_event {
     uint8_t  sv_type;
     uint8_t  copy_change;
     uint8_t  has_mate;
+    uint8_t  feature_length_relation; /* duckvep_feature_length_relation_t */
 } duckvep_event_t;
 
 typedef enum duckvep_event_anchor {
@@ -167,6 +178,8 @@ static inline void duckvep_event_load_raw_interval(
     event->alt_diff_length = 0u;
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
+    event->feature_length_relation =
+        (uint8_t)DUCKVEP_FEATURE_LENGTH_UNKNOWN;
 }
 
 /* Decode one ordinary REF/ALT pair into its lossless effect geometry. This is
@@ -211,6 +224,12 @@ static inline int duckvep_event_prepare_small(
     event->alt_diff_length = 0u;
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
+    event->feature_length_relation =
+        ref_len == alt_len
+        ? (uint8_t)DUCKVEP_FEATURE_LENGTH_EQUAL
+        : alt_len > ref_len
+            ? (uint8_t)DUCKVEP_FEATURE_LENGTH_INCREASE
+            : (uint8_t)DUCKVEP_FEATURE_LENGTH_DECREASE;
 
     while (prefix < ref_len && prefix < alt_len &&
            duckvep_event_ascii_upper(ref[prefix]) ==

@@ -40,7 +40,7 @@ export R_LIBS_USER=/root/R-libs
 
 DEPS_LOG=/tmp/rduckhts-fedora-dependencies.log
 if ! R -q -e '
-    packages <- c("DBI", "duckdb", "tinytest")
+    packages <- c("DBI", "duckdb", "Rtinycc", "tinytest")
     installed <- rownames(installed.packages(lib.loc = Sys.getenv("R_LIBS_USER")))
     needed <- setdiff(packages, installed)
     if (length(needed)) {

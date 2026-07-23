@@ -88,7 +88,7 @@ minimized-edit geometry. Those values still require source anchors and different
 witnesses, but toggling them in `STRICT` would define a different consequence engine
 rather than isolate a Perl/BioPerl leak.
 
-## Ensembl release CSQ is a lossy projection of the complete VE relation
+## Ensembl release VE is a release product, not the VEP executable oracle
 
 The official Ensembl variation release VCF contains both `VE` and `CSQ`. `VE` preserves
 one `Consequence|Index|Feature_type|Feature_id` item for every stored variation-effect
@@ -98,19 +98,88 @@ Assigning `Consequence` to that hash overwrites earlier terms for the same pair.
 non-coding intronic allele can therefore retain both `non_coding_transcript_variant` and
 `intron_variant` in VE while CSQ contains only `intron_variant`.
 
-Consequently the official VCF is a valid precomputed consequence oracle only through VE,
-not by treating its CSQ text as the complete VEP consequence set. CSQ remains useful for
-testing the typed VCF parser and its advertised presentation fields. Release conformance
-must aggregate VE by Index and feature, set transcript flank distances to zero to match
-the variation database's overlap-only dump, and keep the exact producer revision in its
-receipt. For non-SNVs, do not infer ownership by comparing the GVF/CSQ allele text with a
-padded VCF ALT: the producer records `Variant_seq` and Index before
+`VE` is lossless relative to those stored variation-effect rows, but those rows are not
+the output of the VEP command-line executable. The distinction is observable in release
+116 at both `X:276322 G>A` and `Y:276322 G>A`: the published `VE` value is
+`intergenic_variant`, while the pinned VEP 116 executable in cache mode with
+`--distance 0` emits three path-specific `5_prime_UTR_variant` transcript rows on each
+chromosome. DuckVEP emits the same three Y transcript rows as the executable. The
+executable/cache combination therefore remains the compatibility oracle; the official
+VCF is a separate release-product audit that can reveal differences between Ensembl's
+variation release pipeline and VEP.
+
+The release-product audit must aggregate `VE` by Index and feature, set transcript flank
+distances to zero to match the variation database's overlap-only dump, and keep the exact
+producer revision in its receipt. A difference from `VE` is retained and reported, but it
+does not override an exact executable-VEP result. `CSQ` remains useful for testing the
+typed VCF parser and its advertised presentation fields, not for reconstructing the
+complete stored consequence relation. For non-SNVs, do not infer ownership by comparing
+the GVF/CSQ allele text with a padded VCF ALT: the producer records `Variant_seq` and Index
+before
 `VariationFeature->to_VCF_record` constructs the VCF representation.
 
 Source anchor: Ensembl Variation release/116 commit
 `2fb834b987ede3824e200197a838ce11e91aeb4b`,
 `scripts/misc/release/gvf2vcf.pl::parse_consequence_info`, and
 `scripts/export/release/dump_gvf.pl`.
+
+## Assembly paths, PAR, patches, and alternate haplotypes are distinct model inputs
+
+VEP 116 does not reduce every assembly path to one primary chromosome before annotation.
+Its cache contains top-level alternate and patch paths, and an input already named on an
+available annotation path is evaluated on that path. `Parser.pm` transforms an input
+feature to another top-level sequence only when the stated sequence cannot be resolved by
+the configured annotation sources.
+
+Four upstream structures have different roles and must not be collapsed into one alias
+table:
+
+- core `assembly_exception` rows define coordinate projections for `PAR`, `HAP`,
+  `PATCH_FIX`, and `PATCH_NOVEL` regions;
+- `alt_allele` and `alt_allele_attrib` describe gene-equivalence groups, including
+  `IS_PAR` and representative-gene metadata; they do not authorize merging path-specific
+  transcript consequence rows;
+- VEP cache construction explicitly resolves duplicate human Y slices before dumping
+  transcript content;
+- the Ensembl variation FASTA adapter can fetch human Y-PAR reference sequence from the
+  corresponding X interval when the Y representation is unavailable or masked.
+
+This matters beyond contig spelling. X and Y PAR transcripts can share sequence and gene
+equivalence while retaining different transcript stable IDs and sequence-region
+coordinates. MHC alternate haplotypes such as `HSCHR6_MHC_COX_CTG1` are likewise distinct
+top-level annotation paths. A primary chromosome 6 event is not implicitly copied onto
+every MHC path, and an HLA allele name such as `HLA-A*02:01` is not a genomic
+sequence-region identifier.
+
+The current DuckVEP Ensembl preparation macros select exactly the sequence regions present
+in the supplied reference-chunk relation. A primary-assembly FASTA therefore builds a
+primary-path model; adding an alternate-path FASTA makes those exact paths eligible.
+`duckvep_model_load(...)` and `duckvep_annotate(...)` consume the resulting dense
+sequence-region ordinals and do not perform implicit synonym, PAR, patch, haplotype, or
+assembly-exception projection. Callers that accept external contig names must resolve them
+to an exact modeled path before constructing the event relation. Model receipts must state
+the reference path set, transcript-selection policy, and any assembly-exception
+preprocessing.
+
+This exact-path policy is compatible with VEP only for inputs whose path is directly
+available in the prepared model. General unavailable-path transformation and wrapped or
+projected assembly-exception execution remain separate work; returning an ordinary
+intergenic result for an absent path would be incorrect.
+
+The checked `par_path_witnesses.vcf` covers both path admission and sequence-dependent
+annotation. At `X/Y:276322 G>A`, VEP and DuckVEP emit the six path-specific
+`5_prime_UTR_variant` rows that differ from the published release `VE` product. At
+`X/Y:284188 A>G`, both engines emit path-specific PLCXD1 `start_lost` rows with
+`c.1A>G` and `p.Met1?`, including the corresponding NMD and non-coding transcript states.
+The four-event executable differential contains 44 transcript pairs; all 44 consequence
+pairs, all applicable HGVSc values, and all applicable HGVSp values agree exactly, with no
+unresolved, missing, or extra row.
+
+Source anchors: Ensembl release/116
+`modules/Bio/EnsEMBL/VEP/Parser.pm`, VEP cache pipeline
+`modules/Bio/EnsEMBL/VEP/Pipeline/DumpVEP/CreateDumpJobs.pm`, Ensembl Variation
+`modules/Bio/EnsEMBL/Variation/Utils/FastaSequence.pm`, and the core/otherfeatures schema
+fixtures containing `assembly_exception`, `alt_allele`, and `alt_allele_attrib`.
 
 ## VEP removes EMAR rows before regulatory overlap evaluation
 

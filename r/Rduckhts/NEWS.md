@@ -1,5 +1,11 @@
 
 # Rduckhts 1.5.0-0.1.0
+- make the Fedora CRAN-reproduction flow install the suggested `Rtinycc`
+  downstream-linking test dependency before strict package checks
+- clarify in the bundled DuckVEP function catalog that the supplied reference defines the
+  exact modeled sequence paths and that annotation does not implicitly project X/Y PAR,
+  patch, or alternate-haplotype coordinates. Package documentation now distinguishes
+  official Ensembl Variation release-VCF product audits from executable-VEP compatibility
 - bundle the VEP-116 protein-HGVS endpoint fix: a coding insertion that copies
   the final translated residue no longer becomes a protein duplication when
   VEP's post-variant peptide lookup would suppress the 3-prime shift

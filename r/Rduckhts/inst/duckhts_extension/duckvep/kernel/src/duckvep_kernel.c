@@ -1851,6 +1851,8 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     uint16_t projection_exon_rank = UINT16_MAX;
     uint32_t projection_exon_hint = UINT32_MAX;
     int cds_delta_attempted = 0;
+    int feature_endpoints_map_to_cdna;
+    int feature_has_internal_cdna_gap;
     int feature_mapping_blocks_peptide;
     int has_partial_terminal_codon;
     int breakend;
@@ -2060,17 +2062,47 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         duckvep_effect_ctx_apply_sv(&ectx, &sv);
     }
 
-    /* VEP maps an equal-length VariationFeature as one uploaded span. When that
-     * span crosses an intron, the outer 5' transcript boundary, or an ordinary
-     * CDS-to-3'-UTR boundary, one endpoint of BaseTranscriptVariation::cds_coords
-     * is a Mapper::Gap. The peptide path is therefore unavailable even if
-     * semantic trimming leaves a CDS-only mismatch. A partial terminal codon is
+    /* VEP maps an equal-length VariationFeature as one uploaded span. An
+     * internal intron does not by itself suppress sequence predicates: when
+     * both feature endpoints map to CDS, VEP uses those outer CDS coordinates
+     * and retains the internal Mapper::Gap. The peptide path is unavailable
+     * only when an outer endpoint is a Gap, including transcript/5'-UTR and
+     * ordinary CDS-to-3'-UTR cases. Semantic trimming must not turn either
+     * unavailable state into a smaller CDS edit. A partial terminal codon is
      * the 3' exception: VEP can still classify its first mapped coding piece. */
+    feature_endpoints_map_to_cdna = 0;
+    feature_has_internal_cdna_gap = 0;
+    if (have_feature_alleles && !event->interbase &&
+        event->feature_start1 != 0u &&
+        event->feature_end1 >= event->feature_start1) {
+        uint32_t feature_start_cdna;
+        uint32_t feature_end_cdna;
+
+        feature_endpoints_map_to_cdna =
+            duckvep_project_genomic_to_cdna(
+                tx, &c->model->exons, (size_t)tx_idx,
+                event->feature_start1, &feature_start_cdna, NULL) &&
+            duckvep_project_genomic_to_cdna(
+                tx, &c->model->exons, (size_t)tx_idx,
+                event->feature_end1, &feature_end_cdna, NULL);
+        if (feature_endpoints_map_to_cdna) {
+            uint64_t genomic_span =
+                (uint64_t)event->feature_end1 -
+                (uint64_t)event->feature_start1 + 1u;
+            uint64_t cdna_span = feature_start_cdna < feature_end_cdna
+                ? (uint64_t)feature_end_cdna -
+                      (uint64_t)feature_start_cdna + 1u
+                : (uint64_t)feature_start_cdna -
+                      (uint64_t)feature_end_cdna + 1u;
+            feature_has_internal_cdna_gap = genomic_span > cdna_span;
+        }
+    }
     feature_mapping_blocks_peptide =
         ectx.region_state.overlaps_cds &&
         (ectx.region_state.within_frameshift_intron ||
          (have_feature_alleles &&
           feature_ref_length == feature_alt_length &&
+          !feature_has_internal_cdna_gap &&
           ((ectx.region_state.partial_overlap_feature &&
             ectx.region_state.overlaps_utr5) ||
            ectx.region_state.overlaps_intron ||
@@ -2182,6 +2214,9 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                 c->delta_route_stats->ins_context++;
             } else if (route == DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT) {
                 c->delta_route_stats->indel_context++;
+            } else if (route ==
+                       DUCKVEP_DELTA_ROUTE_UPLOADED_FEATURE_CONTEXT) {
+                c->delta_route_stats->uploaded_feature_context++;
             }
         }
         duckvep_effect_ctx_apply_delta(&ectx, &delta);

@@ -484,7 +484,7 @@ dbGetQuery(con, "SELECT duckvep_model_drop('readme') AS dropped")
 
 ```{r}
 bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
-fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+fai_path <- file.path(tempdir(), "duckhts_readme_00000000000000.fai")
 rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 
 rduckhts_bed(con, "targets", bed_path, overwrite = TRUE)
@@ -880,7 +880,7 @@ dbGetQuery(
 `read_fasta` supports indexed region queries via `rduckhts_fasta(..., region = ...)`.
 
 ```{r}
-fai_path <- tempfile("duckhts_readme_", fileext = ".fai")
+fai_path <- file.path(tempdir(), "duckhts_readme_00000000000000.fai")
 fai_info <- rduckhts_fasta_index(con, fasta_path, index_path = fai_path)
 fai_info
 

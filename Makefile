@@ -400,7 +400,7 @@ bench-duckvep-throughput: configure release
 	Rscript benchmarks/duckvep_throughput.R $(DUCKVEP_THROUGHPUT_ARGS)
 
 # Materialize an official Ensembl consequence VCF in both complete typed and
-# narrow oracle projections. The large input and Parquet files remain external.
+# narrow release-product projections. The large input and Parquet files remain external.
 bench-duckvep-release-parquet: release
 	Rscript benchmarks/duckvep_release_parquet.R \
 		--extension build/release/duckhts.duckdb_extension \

@@ -47,6 +47,12 @@ The validation gates have independent jobs:
 - `make test-duckvep-differential` generates boundary, splice, codon, and allele-shape
   witnesses, runs both engines on the same GFF and FASTA, and compares the exact SO term
   set for every `(variant, transcript)` pair.
+- `data/par_path_witnesses.vcf` is the release-116 GRCh38 exact-path PAR witness for a
+  published-release/CLI UTR divergence and a sequence-dependent PLCXD1 start-loss/HGVS
+  case on both X and Y. Run it through `corpus_differential.R` with the complete human
+  cache/model, `--distance 0`, `--hgvs`, and `--sample-per-shape 0`. The retained
+  acceptance denominator is 44 exact transcript pairs with no unresolved, missing, extra,
+  consequence, HGVSc, or HGVSp difference.
 - `--event-mode breakend --regulatory` adds source-derived RegulatoryFeature and
   MotifFeature start/mid/end points in both raw local (`point - 1`, before VEP anchor
   removal) and verbatim mate forms, plus same-object pairs whose local and mate points
@@ -345,9 +351,10 @@ larger BND buffers can therefore make one event gain or lose transcripts because
 neighbors. The isolated five-chromosome run generated 1,004 events and matched all 91,428
 transcript pairs, with no disagreement, extra row, or missing row.
 
-Ensembl also publishes release VCFs whose `VE` and `CSQ` fields contain every consequence
-computed by its variation pipeline. DuckHTS reads their `Format=...` CSQ header directly;
-the full typed record and the narrower consequence-oracle projection can be measured with:
+Ensembl also publishes release VCFs whose `VE` and `CSQ` fields contain consequences
+computed by its variation release pipeline. DuckHTS reads their `Format=...` CSQ header
+directly; the full typed record and the narrower release-product projection can be
+measured with:
 
 ```sh
 make bench-duckvep-release-parquet DUCKVEP_RELEASE_PARQUET_ARGS="\
@@ -361,26 +368,30 @@ The VCF and generated Parquet files remain outside git. The benchmark ledger ret
 SHA-256 checksums, record/allele/CSQ cardinalities, exact byte sizes, compression settings,
 thread count, and source revision.
 
-Small pinned shards of these official release VCFs are suitable for ordinary CI: their
-release-specific `VE` rows are a precomputed oracle, so DuckVEP can compare transcript
-consequences without launching the Perl VEP executable. A release shard is not a substitute
-for the generated witness and corpus lanes because it cannot test alleles or VEP option
-states absent from the published variation set. Full scheduled matrices should obtain the
-matching receipt-hashed DuckDB model from an external release store rather than committing
-multi-gigabyte caches to git. The planned distribution contract is one manifest entry per
-Ensembl/Ensembl Genomes release, species, assembly, model ABI, transcript-filter policy,
-source-relation hash set, and artifact digest; a Zenodo record can provide stable versioned
-storage while every downloaded model still passes normal receipt/model-open validation.
+Small pinned shards of these official release VCFs are suitable for ordinary CI because
+they audit the published Ensembl Variation product without launching Perl VEP. They do not
+certify VEP executable compatibility. In release 116, `X:276322 G>A` and `Y:276322 G>A`
+have published `VE=intergenic_variant`, while cache-mode VEP with `--distance 0` emits
+three path-specific `5_prime_UTR_variant` transcript rows on each chromosome. The
+executable/cache combination remains the semantic authority; product differences remain
+visible instead of being relabelled as DuckVEP conformance failures. Full scheduled
+matrices should obtain the matching receipt-hashed DuckDB model from an external release
+store rather than committing multi-gigabyte caches to git. The planned distribution
+contract is one manifest entry per Ensembl/Ensembl Genomes release, species, assembly,
+model ABI, transcript-filter policy, source-relation hash set, and artifact digest; a
+Zenodo record can provide stable versioned storage while every downloaded model still
+passes normal receipt/model-open validation.
 
-`release_vcf_differential.R` makes that precomputed-oracle lane executable. Its first
+`release_vcf_differential.R` makes that release-product audit executable. Its first
 fail-closed stratum is literal SNVs. The release `VE` field retains
 `Consequence|Index|Feature_type|Feature_id`; its zero-based Index maps each consequence to
 the original GVF `Variant_seq` and corresponding VCF ALT, so multiallelic records remain
 unambiguous. It aggregates the published VE consequence set per ALT/transcript,
 runs the public rich `duckvep_annotate(...)` relation against the receipt-matched model, and
-requires exact transcript/object pairs, no missing/extra rows, no oracle-less input, and no
-unsupported DuckVEP row. Both transcript distances are zero because the variation database
-dump records overlapping feature consequences, not VEP CLI's optional transcript flanks.
+reports exact, missing, extra, and discordant transcript/object pairs without treating
+the release relation as executable VEP. Both transcript distances are zero because the
+variation database dump records overlapping feature consequences, not VEP CLI's optional
+transcript flanks.
 Do not instead map by CSQ allele text for indels. The Ensembl Variation
 release-116 producer at `2fb834b987ede3824e200197a838ce11e91aeb4b` writes a GVF
 `Variant_seq` and `Index` before `gvf2vcf.pl` asks `VariationFeature->to_VCF_record` for the
@@ -388,7 +399,7 @@ padded VCF alleles; the future non-SNV stratum must reproduce that indexed relat
 than equate CSQ allele text with a transformed VCF ALT. `gvf2vcf.pl` also stores
 `Consequence` in a hash keyed only by allele and feature while constructing CSQ, so repeated
 VE terms overwrite one another there; CSQ is a useful typed presentation, not the complete
-consequence-set oracle.
+stored release-product consequence set.
 
 Run it through the repository target so the exact input, model, release, assembly, and
 output receipt remain visible in one command:

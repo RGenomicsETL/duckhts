@@ -18,8 +18,9 @@ Every result has four independent inputs:
 2. **The annotation model** supplies transcripts, exons, sequences, translation metadata,
    mature-miRNA segments, and optionally regulatory and motif features. It is identified by
    species, assembly, Ensembl or Ensembl Genomes release, and transcript-selection policy.
-3. **The oracle** is the exact Ensembl VEP executable/cache combination, a pinned VEP plugin,
-   or an official Ensembl release VCF field. The source corpus is not the oracle.
+3. **The oracle** is the exact Ensembl VEP executable/cache combination or a pinned VEP
+   plugin. An official Ensembl release VCF is a separate release-pipeline product, not a
+   substitute for executing VEP. The source corpus is not the oracle.
 4. **The comparison evidence** is the complete pair relation and its aggregation. A pair is
    keyed by input allele or event plus the transcript, RegulatoryFeature, or MotifFeature
    that VEP annotates. Missing, extra, unresolved, and discordant pairs stay in the
@@ -173,7 +174,7 @@ into this operating contract.
 | Generated exact SV | Real transcript geometry is crossed with exact DEL, DUP, tandem DUP, INV, INS, and CNV relations around transcript, exon, intron, UTR, CDS, and start/stop sites. | `corpus_differential.R --event-mode structural`. |
 | Paired BND | Same- and cross-contig endpoint pairs, four bracket orientations, and transcript/regulatory admission distances. VEP runs with buffer size one to prevent neighboring records changing its coordinate-only candidate tree. | `corpus_differential.R --event-mode breakend`. |
 | Real SV callsets | HPRC carried long alleles, Sniffles2 joint 1000G calls, and dbVar regions check producer encodings and large-event distributions that a generator may miss. | `scripts/stage_duckvep_conformance_corpora.sh`; executable differential after staging. |
-| Official Ensembl release VCF | Ensembl's `VE` index maps published consequence terms to the original GVF allele before VCF padding. Small release-specific shards provide a fast, Perl-free CI oracle for states present in the release. | `release_vcf_differential.R`; current first fail-closed stratum is literal SNV. |
+| Official Ensembl release VCF | Ensembl's `VE` index maps published variation-pipeline consequence terms to the original GVF allele before VCF padding. Small release-specific shards provide a fast, Perl-free audit of that published product, which can differ from the VEP executable. | `release_vcf_differential.R`; current first fail-closed stratum is literal SNV. |
 | HPRC/pangenome long alleles | Carried ALT alleles from four African-ancestry HPRC v2 samples on chromosome 22. This searches long literal and pangenome-derived states; it does not validate graph-coordinate annotation. | Public versioned HPRC object plus the staged sites-only VCF. |
 
 Do not replace the dense ClinVar/HGVS, exact SV/BND, non-human, or GRCh37 lanes with a
@@ -369,13 +370,16 @@ text with VCF ALT text.
 The current release-116 chromosome-22 source and Parquet staging measurements are recorded
 in [`duckvep_release_parquet.csv`](../benchmarks/data/duckvep_release_parquet.csv). Stage it
 with `bench-duckvep-release-parquet`, then run `test-duckvep-release-vcf` as documented in
-the conformance README. The current fail-closed implementation covers literal SNVs. Before
-claiming the release VCF as a general oracle, implement the producer-faithful GVF
-`Variant_seq`/`Index` mapping for indels and other transformed alleles.
+the conformance README. The current fail-closed implementation covers literal SNVs.
+Extending this release-product comparison to indels and other transformed alleles requires
+the producer-faithful GVF `Variant_seq`/`Index` mapping.
 
-Small model-plus-release-VCF shards are the preferred ordinary-CI artifact. They are fast
-and do not start Perl. They complement, rather than replace, executable VEP on generated
-novel states.
+Small model-plus-release-VCF shards are useful ordinary-CI artifacts. They are fast and do
+not start Perl, but they audit the Ensembl Variation release product rather than certify
+VEP executable compatibility. Release 116 demonstrates the distinction at
+`X/Y:276322 G>A`: published `VE` says `intergenic_variant`, while cache-mode VEP with
+`--distance 0` emits three path-specific `5_prime_UTR_variant` transcript rows on each
+chromosome. Executable-VEP differentials therefore remain the semantic gate.
 
 ## Moving from VEP 116 to the next release
 
@@ -413,7 +417,7 @@ Treat a new VEP release as a new authority, not an in-place update of old eviden
 One versioned Zenodo record or equivalent object-store prefix should contain:
 
 - prepared DuckDB models for each release/species/assembly;
-- small official release-VCF/GVF oracle shards for ordinary CI;
+- small official release-VCF/GVF product-audit shards for ordinary CI;
 - public derived corpus shards whose upstream terms permit redistribution;
 - a machine-readable manifest with source release/object, derivation script revision and
   arguments, assembly/species, normalization and contig-alias policy, seed, cardinalities,
@@ -430,7 +434,7 @@ equivalent for the portable gate.
 - Add explicit GIAB and dated-ClinVar modes to the external-corpus staging script, then
   consolidate the historical GRCh37 and *P. falciparum* corpus selection commands into
   equivalent entry points.
-- Publish the Ensembl models and small release-VCF oracle shards outside Git.
+- Publish the Ensembl models and small release-VCF product-audit shards outside Git.
 - Publish a cross-machine release-pack checker; the current state-machine audit establishes
   semantic/current-source evidence, not remote artifact availability.
 - Complete producer-faithful non-SNV mapping for the official release VCF/GVF lane.

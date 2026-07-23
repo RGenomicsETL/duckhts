@@ -523,9 +523,7 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     uint32_t genomic_high1;
     uint32_t genomic_first1;
     uint32_t genomic_last1;
-    uint32_t source_low1;
-    uint32_t source_high1;
-    int terminal_duplication = 0;
+    uint32_t repeat_count = 0u;
     int8_t strand;
 
     if (out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
@@ -589,6 +587,67 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
         (size_t)(genomic_low1 - reference->start1);
     alternate_allele = edit->feature_alt;
 
+    /* hgvs_variant_notation() tests multiplication before _clip_alleles().
+     * That order matters for a feature clamped at a transcript endpoint:
+     * terminal CG>CC is a direct C>CC duplication, while CGT>CAC first
+     * becomes an insertion only after clipping and then has no projectable
+     * second coordinate.  Do not promote the latter from insAC to a
+     * duplication merely because AC happens to copy terminal sequence. */
+    if (reference_length != 0u &&
+        alternate_length > reference_length &&
+        alternate_length % reference_length == 0u) {
+        size_t i;
+        int repeated = 1;
+
+        repeat_count = (uint32_t)(alternate_length / reference_length);
+        for (i = 0u; i < alternate_length; i++) {
+            uint8_t reference_base;
+            uint8_t alternate_base;
+
+            status = hgvs_oriented_allele_base(
+                reference_allele, reference_length, strand, 0u,
+                i % reference_length, &reference_base);
+            if (status != DUCKVEP_HGVS_OK) return status;
+            status = hgvs_oriented_allele_base(
+                alternate_allele, alternate_length, strand, 0u, i,
+                &alternate_base);
+            if (status != DUCKVEP_HGVS_OK) return status;
+            if (reference_base != alternate_base) {
+                repeated = 0;
+                break;
+            }
+        }
+        if (!repeated) repeat_count = 0u;
+    }
+    if (repeat_count >= 2u) {
+        status = hgvs_project_genomic_pair(
+            transcripts, exons, edit->tx_idx, genomic_low1, genomic_high1,
+            strand, &result.first, &result.last);
+        if (status != DUCKVEP_HGVS_OK) return status;
+        result.numbering = result.first.kind ==
+                (uint8_t)DUCKVEP_HGVS_COORDINATE_N
+            ? (uint8_t)DUCKVEP_HGVS_NUMBERING_N
+            : (uint8_t)DUCKVEP_HGVS_NUMBERING_C;
+        if ((result.numbering == (uint8_t)DUCKVEP_HGVS_NUMBERING_N) !=
+            (result.last.kind == (uint8_t)DUCKVEP_HGVS_COORDINATE_N)) {
+            return DUCKVEP_HGVS_INVALID_PROJECTION;
+        }
+        result.ref = reference_allele;
+        result.alt = alternate_allele;
+        result.ref_length = (uint16_t)reference_length;
+        result.alt_length = (uint16_t)alternate_length;
+        result.repeat_count = repeat_count;
+        result.shape = repeat_count == 2u
+            ? (uint8_t)DUCKVEP_HGVS_DNA_DUPLICATION
+            : (uint8_t)DUCKVEP_HGVS_DNA_REPEAT;
+        result.transcript_strand = strand;
+        result.shift_offset = (int32_t)shift_offset;
+        result.placed_start1 = genomic_low1;
+        result.placed_end1 = genomic_high1;
+        *out = result;
+        return DUCKVEP_HGVS_OK;
+    }
+
     while (prefix < reference_length && prefix < alternate_length) {
         uint8_t ref_base;
         uint8_t alt_base;
@@ -641,77 +700,10 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
         duckvep_project_transcript_coordinate(
             transcripts, exons, edit->tx_idx, genomic_last1,
             &last_transcript) != DUCKVEP_TRANSCRIPT_EDIT_OK) {
-        size_t i;
-        int duplicated = reference_length == 0u && alternate_length != 0u &&
-            ((strand > 0 && edit->event.feature_start1 ==
-                 transcripts->end1[edit->tx_idx] &&
-              edit->event.feature_end1 > transcripts->end1[edit->tx_idx]) ||
-             (strand < 0 && edit->event.feature_end1 ==
-                 transcripts->start1[edit->tx_idx] &&
-              edit->event.feature_start1 < transcripts->start1[edit->tx_idx]));
-
-        /* After transcript-slice clamping and allele clipping, an insertion
-         * may sit just beyond the transcript 3-prime endpoint. VEP still
-         * names it when the clamped complete feature is exactly the terminal
-         * transcript base and the remaining ALT copies terminal sequence (for
-         * example terminal CG>CC -> c.*10dup). A longer in-transcript prefix
-         * such as ACG>ACC clips to an out-of-range insertion and remains
-         * absent even though its final ALT byte is also a terminal copy. */
-        source_low1 = source_high1 = 0u;
-        if (duplicated && strand > 0) {
-            source_high1 = transcripts->end1[edit->tx_idx];
-            if ((uint64_t)source_high1 + 1u <
-                (uint64_t)alternate_length) {
-                duplicated = 0;
-            } else {
-                source_low1 = source_high1 -
-                    (uint32_t)alternate_length + 1u;
-            }
-        } else if (duplicated) {
-            source_low1 = transcripts->start1[edit->tx_idx];
-            if ((uint64_t)source_low1 + (uint64_t)alternate_length - 1u >
-                UINT32_MAX) {
-                duplicated = 0;
-            } else {
-                source_high1 = source_low1 +
-                    (uint32_t)alternate_length - 1u;
-            }
-        }
-        for (i = 0u; duplicated && i < alternate_length; i++) {
-            uint8_t alternate_base;
-            uint8_t reference_base;
-            uint32_t reference_position = strand > 0
-                ? source_low1 + (uint32_t)i
-                : source_high1 - (uint32_t)i;
-            status = hgvs_oriented_allele_base(
-                alternate_allele + alternate_offset, alternate_length,
-                strand, 0u, i, &alternate_base);
-            if (status != DUCKVEP_HGVS_OK) return status;
-            status = hgvs_reference_base(
-                reference, reference_position, &reference_base);
-            if (status != DUCKVEP_HGVS_OK) {
-                duplicated = 0;
-                break;
-            }
-            if (strand < 0) {
-                reference_base = (uint8_t)duckvep_dna_complement(
-                    (char)reference_base);
-            }
-            if (alternate_base != reference_base) duplicated = 0;
-        }
-        if (duplicated) {
-            status = hgvs_project_genomic_pair(
-                transcripts, exons, edit->tx_idx, source_low1, source_high1,
-                strand, &result.first, &result.last);
-            if (status != DUCKVEP_HGVS_OK) return status;
-            terminal_duplication = 1;
-        } else {
-            /* look_for_slice_start clamps a partially overlapping feature,
-             * but hgvs_transcript still returns undef when clipping or the
-             * added shift carries the printable edit outside that transcript
-             * slice. */
-            return DUCKVEP_HGVS_NOT_APPLICABLE;
-        }
+        /* look_for_slice_start clamps a partially overlapping feature, but
+         * hgvs_transcript still returns undef when clipping or the added
+         * shift carries the printable edit outside that transcript slice. */
+        return DUCKVEP_HGVS_NOT_APPLICABLE;
     } else {
         status = duckvep_hgvs_coordinate_from_transcript(
             transcripts, exons, edit->tx_idx, &first_transcript,
@@ -734,9 +726,7 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     result.alt = alternate_allele + alternate_offset;
     result.ref_length = (uint16_t)reference_length;
     result.alt_length = (uint16_t)alternate_length;
-    if (terminal_duplication) {
-        result.shape = (uint8_t)DUCKVEP_HGVS_DNA_DUPLICATION;
-    } else if (reference_length == 1u && alternate_length == 1u) {
+    if (reference_length == 1u && alternate_length == 1u) {
         result.shape = (uint8_t)DUCKVEP_HGVS_DNA_SUBSTITUTION;
     } else if (alternate_length == 0u) {
         result.shape = (uint8_t)DUCKVEP_HGVS_DNA_DELETION;
@@ -1337,6 +1327,22 @@ duckvep_hgvs_status_t duckvep_hgvs_shifted_cds_edit_build(
     edit_status = duckvep_cds_edit_build_prepared_allele(
         transcripts, exons, seq, edit->tx_idx, edit->transcript_strand,
         &allele, UINT32_MAX, &result_edit);
+    if (!insertion &&
+        (edit_status == DUCKVEP_CDS_EDIT_OUT_OF_CDS ||
+         edit_status == DUCKVEP_CDS_EDIT_NON_CONTIGUOUS)) {
+        /*
+         * HGVS-only 3-prime placement can move both ends of a deletion into
+         * CDS while leaving one or more introns inside its genomic span.
+         * TranscriptVariationAllele::_get_alternate_cds then replaces the
+         * outer mapped CDS range, exactly like the independent consequence
+         * path. Reuse that compatibility helper so HGVSp does not invent a
+         * second mapper-gap interpretation.
+         */
+        edit_status = duckvep_compat_vep116_outer_cds_edit_build(
+            transcripts, exons, seq, edit->tx_idx,
+            edit->transcript_strand, &event, NULL, 0u,
+            edit->transcript_strand, &result_edit);
+    }
     if (!insertion && edit_status == DUCKVEP_CDS_EDIT_REF_MISMATCH) {
         uint32_t cds_start1;
         uint32_t cds_end1;
@@ -2105,13 +2111,15 @@ static duckvep_hgvs_status_t hgvs_protein_shift_simple(
     }
     context = fact->context;
     post_start0 = (size_t)fact->last_position1;
-    /* TranscriptVariationAllele::_get_surrounding_peptides() reads
-     * TranscriptVariation::_peptide, which excludes the synthetic terminal
-     * stop.  The consequence coding context retains that stop as an ordinary
-     * byte, so using ref_peptide_len here permits one extra rotation and moves
-     * literal indels one residue too far 3-prime. */
-    available = post_start0 < hgvs_protein_reference_length(context)
-        ? hgvs_protein_reference_length(context) - post_start0 : 0u;
+    /* TranscriptVariationAllele::_get_surrounding_peptides() returns undef
+     * when length(_peptide) <= post_pos.  Since post_pos is the one-based
+     * residue after the changed peptide, VEP refuses even the otherwise
+     * matching final residue as a 3-prime shift source.  Preserve that
+     * executable endpoint test as well as excluding the synthetic stop. */
+    available =
+        post_start0 < SIZE_MAX &&
+        hgvs_protein_reference_length(context) > post_start0 + 1u
+            ? hgvs_protein_reference_length(context) - post_start0 : 0u;
     /* _shift_3prime() iterates only through
      * length(post_seq) - length(changed_peptide). When the complete changed
      * peptide is longer than the remaining reference peptide, Perl performs
@@ -2237,18 +2245,19 @@ static duckvep_hgvs_status_t hgvs_protein_insertion_finish(
      * it as the second insertion flank. Without that stop the insertion is
      * absent, not a peptide-data failure. */
     if ((size_t)low == hgvs_protein_reference_length(context)) {
-        size_t terminal_codon_start;
+        uint8_t original_reference_first =
+            fact->window.ref_length == 0u ? 0u :
+            hgvs_protein_window_base(
+                context, &fact->window, 0, 0u);
 
-        /* _get_surrounding_peptides() exposes the stop as an insertion flank
-         * only when Mapper translation coordinates place a pure insertion
-         * inside the terminal codon. An earlier coding insertion can clip to
-         * the same peptide-level shape, but VEP returns no HGVSp for it. */
-        terminal_codon_start = context->ref_cds_len >= 3u
-            ? context->ref_cds_len - 2u : 0u;
-        if (fact->reference_last == 0u || !context->has_single_edit ||
-            context->single_edit_ref_len != 0u ||
-            (size_t)context->single_edit_cds_start <= terminal_codon_start ||
-            (size_t)context->single_edit_cds_start > context->ref_cds_len) {
+        /* _clip_alleles caches the complete local reference peptide before
+         * clipping. _get_surrounding_peptides() appends that cached peptide
+         * to TranscriptVariation::_peptide only when it begins with '*'.
+         * This is what makes the terminal stop available as the second flank,
+         * including a nucleotide delins whose peptide-level edit clips to an
+         * insertion. Length or nucleotide edit kind is not the authority. */
+        if (fact->reference_last == 0u ||
+            original_reference_first != (uint8_t)'*') {
             return DUCKVEP_HGVS_NOT_APPLICABLE;
         }
     }

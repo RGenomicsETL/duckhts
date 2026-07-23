@@ -12,14 +12,17 @@ append-only by source revision, corpus, and resident model. Independent
 frozen distributions and seeds are kept separate so a fix cannot improve
 its own hand-picked witnesses and hide a regression elsewhere.
 
-Official Ensembl variation release VCFs provide a second, precomputed
-oracle lane: their CSQ projection can be compared in ordinary CI without
-starting Perl VEP. Pinned release shards are fast regression evidence
-for known alleles; executable-VEP and generated-corpus lanes remain
-necessary for novel allele states, option-dependent semantics, phased
-combinations, and sampled structural geometry. Matching full models
-belong in receipt-hashed external artifacts (for example a versioned
-Zenodo record), not in git or the network-free extension build step.
+Official Ensembl Variation release VCFs provide a separate product-audit
+lane. Their indexed `VE` relation can be compared in ordinary CI without
+starting Perl VEP; `CSQ` is a lossy presentation of those stored rows.
+This is not an executable-VEP oracle: in release 116, `X/Y:276322 G>A`
+is published as `intergenic_variant`, while cache-mode VEP with
+`--distance 0` emits three path-specific `5_prime_UTR_variant` rows on
+each chromosome. Pinned release shards are therefore useful lineage
+evidence, while the executable/cache combination remains the semantic
+compatibility authority. Matching full models belong in external
+versioned artifacts, not in git or the network-free extension build
+step.
 
 ## Declared conformance closure
 

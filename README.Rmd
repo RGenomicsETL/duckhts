@@ -1128,7 +1128,8 @@ surface_candidates <- surface_history[
     surface_history$threads %in% surface_threads &
     surface_history$input_partitions == 1L &
     surface_history$transcript_distance == 5000L &
-    surface_history$regulation_features == 1383580L,
+    surface_history$regulation_features == 1383580L &
+    !is.na(surface_history$corpus_source_alt_count),
   ,
   drop = FALSE
 ]

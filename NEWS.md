@@ -1,6 +1,15 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- make the Fedora CRAN-reproduction job install the suggested `Rtinycc` package before
+  strict dependency checks instead of failing before Rduckhts is built
+- document DuckVEP's exact sequence-path contract for X/Y pseudoautosomal regions,
+  patches, and alternate haplotypes. Ensembl `assembly_exception` projections,
+  `alt_allele` gene-equivalence metadata, and path-specific transcript rows are distinct;
+  the current model loader performs no implicit path projection. Also reclassify official
+  Ensembl Variation release-VCF `VE` comparisons as release-product audits rather than
+  VEP executable oracles after a release-116 X/Y PAR witness showed the two products can
+  differ while DuckVEP matches the pinned executable
 - reproduce VEP 116's peptide-endpoint test before protein-HGVS 3-prime
   shifting. An in-frame insertion that copies the final translated residue can
   remain an HGVSp insertion rather than being promoted to a protein duplication,
