@@ -1,6 +1,16 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- recast the retained DuckVEP/FastVEP whole-genome comparison as an illustrated,
+  evidence-first report. On the declared complete GIAB HG002 workload, DuckVEP
+  records 2.55-fold and 2.12-fold same-core wall-time advantages at one and four
+  pinned physical cores while matching all 56,998 held-out VEP 116 transcript
+  pairs, consequence sets, and HGVSc/HGVSp suffixes. The report keeps its exact
+  workload, output, run-count, and peak-RSS qualifications, compares both
+  projects' supplementary-annotation routes without timing an asymmetric
+  provider set, and plots the latest checked 5,100,500 randomized property
+  trials plus 100,268-pair generated VEP differential. It does not extend the
+  result to unmeasured predictors
 - bounds-check htslib's in-place `BQ`/`ZQ` tag rename before writing the tag
   name, avoiding GCC 11's zero-size-region diagnostic while preserving BAQ
   behavior

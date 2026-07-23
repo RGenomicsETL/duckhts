@@ -1,5 +1,7 @@
 
 # Rduckhts 1.5.0-0.1.0
+- link the package DuckVEP documentation to the illustrated whole-genome
+  DuckVEP/FastVEP speed, memory, and VEP-conformance report
 - make the in-memory downstream htslib consumer test compatible with both the
   original and argument-capable `Rtinycc::tcc_call_symbol()` APIs, and bundle
   bounds-checked BAQ tag renaming so GCC 11 package builds do not emit the

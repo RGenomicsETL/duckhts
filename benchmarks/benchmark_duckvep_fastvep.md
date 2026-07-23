@@ -1,4 +1,5 @@
-DuckVEP and FastVEP end-to-end comparison
+DuckVEP: the fastest Ensembl VEP-compatible consequence predictor in the
+West?
 ================
 
 <!-- benchmark_duckvep_fastvep.md is generated from benchmark_duckvep_fastvep.Rmd. Do not edit the .md by hand. -->
@@ -10,7 +11,75 @@ for an explicit global coordinate sort. The consequence speed lane
 excludes HGVS, regulatory/motif features, and supplementary annotation
 for both engines.
 
-## Result
+## The short answer
+
+**On this declared test, yes.** DuckVEP is the fastest
+Ensembl-VEP-compatible consequence predictor measured here: it finishes
+the complete GIAB HG002 input **2.55 times faster on one physical core**
+and **2.12 times faster on four physical cores** than the current native
+FastVEP checkout.
+
+The question mark matters. This is not a census of every consequence
+predictor or every machine. FastVEP is the measured speed competitor;
+Ensembl VEP 116 is the behavioral oracle. The useful result is that
+DuckVEP combines the faster same-core pipeline with exact consequence
+and HGVS suffix agreement on the held-out VEP comparison below.
+
+## What was compared
+
+Both tools start from the same compressed, coordinate-sorted GIAB VCF,
+use the same Ensembl 116 GRCh38 reference product and 5,000-base
+transcript window, run on the same pinned physical cores, and finish by
+writing a real uncompressed 17-field tab file. The common denominators
+are 4,048,342 source records and 4,096,123 source ALT alleles.
+
+The comparison retains the work each tool actually requires:
+
+- DuckVEP decodes the VCF through htslib, expands ALT alleles, maps
+  contigs, performs an explicit global coordinate sort under a 4 GB
+  DuckDB memory limit, annotates, joins transcript labels, and writes
+  the result.
+- FastVEP starts from the already sorted VCF, loads its native
+  transcript cache, annotates, coordinates results, and writes its
+  native tab schema.
+- The output schemas have the same width but are not claimed
+  byte-equivalent. FastVEP computes native presentation fields that
+  DuckVEP leaves out; DuckVEP pays for the explicit sort that FastVEP
+  does not perform.
+
+This is therefore an operational pipeline comparison, not an
+isolated-kernel microbenchmark.
+
+### Supplementary annotation: a fair comparison
+
+FastVEP is not consequence-only. The pinned checkout (`7038e7c`) also
+builds native fastSA stores for clinical, population, score, interval,
+and gene data. The timed command does not load them. DuckVEP likewise
+does not load supplementary providers in the timed command: those remain
+ordinary DuckDB relations joined after consequence filtering.
+
+| Provider class  | DuckVEP route                                                                                            | FastVEP route                                                   | In the speed lane?  |
+|:----------------|:---------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------|:--------------------|
+| Exact allele    | VariantKey plus literal-allele SQL joins over VCF, Parquet, DuckLake, or another readable relation       | `.osa`/`.osa2`, with built-in sources and custom VCF conversion | No, for either tool |
+| Sparse interval | Half-open SQL overlap or cgranges over BED, GFF/GTF, Parquet, BAM-derived intervals, and other relations | `.osi`, including custom BED conversion                         | No, for either tool |
+| Gene/transcript | Stable-identifier joins after consequence filtering                                                      | `.oga` gene stores and transcript-attached fields               | No, for either tool |
+| Dense signal    | Direct BigWig/bedGraph reads or tiled Parquet reductions                                                 | fastSA sources for phyloP, GERP, DANN, and related scores       | No, for either tool |
+
+The separate [DuckHTS supplementary-provider
+benchmark](benchmark_variantkey_join_overlap.md) measures real ClinVar,
+prediction-score, gene, and interval composition. It is evidence for
+DuckVEP’s SQL path, not a head-to-head fastSA result. A fair
+supplementary race still needs identical provider releases, requested
+fields, missing-value rules, and final output rows for both tools.
+
+## Wall time: file in, 47 million rows out
+
+| cores | DuckVEP |  FastVEP | FastVEP / DuckVEP |
+|------:|--------:|---------:|------------------:|
+|     1 | 64.54 s | 164.38 s |             2.55x |
+|     4 | 32.06 s |  68.09 s |             2.12x |
+
+<img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-wall-1.png" alt="Whole-genome end-to-end wall time on one and four pinned physical cores; DuckVEP is faster at both core counts." width="1036" />
 
 On one pinned physical performance core, DuckVEP processed the full file
 and wrote 47.63 million annotation rows in a median **64.54 seconds**
@@ -26,6 +95,8 @@ values for native tab fields that the current DuckVEP projection leaves
 as placeholders. The exact times, row counts, and output widths are the
 comparison; the report does not subtract either tool’s required work to
 manufacture an artificial common kernel number.
+
+### One-core details
 
 | engine  | runs | median seconds | minimum seconds | maximum seconds | source records/s | source ALT alleles/s | output rows | output rows/s | median CPU % | maximum RSS GiB |
 |:--------|-----:|---------------:|----------------:|----------------:|-----------------:|---------------------:|:------------|--------------:|-------------:|----------------:|
@@ -67,6 +138,16 @@ workspace. Measured maximum process RSS was 5.57 GiB at four threads,
 versus 5.47 GiB at one. That process-level observation rules out a
 fourfold increase in total RSS; it does not attribute individual
 allocations to the model or worker workspaces.
+
+<img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-rss-1.png" alt="Peak process resident memory for DuckVEP and FastVEP on one and four pinned physical cores." width="1036" />
+
+DuckVEP’s measured advantage is not free: the immutable full transcript
+model, worker state, DuckDB operators, and explicit sort put this
+process near 5.5 GiB, versus 3.17 GiB for FastVEP. The model is shared
+rather than copied per worker, which is why the one- and four-core
+DuckVEP peaks are nearly flat. This report presents that tradeoff
+directly instead of treating the DuckDB buffer-manager limit as total
+process memory.
 
 ### Four-core operator profile
 
@@ -201,6 +282,14 @@ FastVEP ran its current native binary with `--hgvs --output-format vcf`.
 DuckVEP’s oracle Parquet came from the same VEP run and the same
 resident model.
 
+Here a transcript key means the exact
+`(input variant ID, transcript accession)` pair emitted by a tool.
+FastVEP’s internal candidate lookup calls a transcript “overlapping”
+when its inclusive genomic span intersects the variant query expanded by
+5,000 bases; that candidate pool is not the concordance denominator.
+“Shared” below means that both the comparator and executable VEP
+actually emitted the same transcript key.
+
 | engine  | metric                              | result          | percent |
 |:--------|:------------------------------------|:----------------|--------:|
 | duckvep | union_keys                          | 56,998 / 56,998 | 100.000 |
@@ -224,14 +313,88 @@ resident model.
 | fastvep | hgvsp_suffix_exact_including_absent | 46,847 / 56,998 |  82.191 |
 | fastvep | hgvsp_suffix_discordant             | 10,151 / 56,998 |  17.809 |
 
-DuckVEP reproduced all 56,998 VEP transcript pairs, consequence sets,
-HGVSc suffixes, and HGVSp suffixes, including mutually absent HGVS
-values. FastVEP emitted 319 extra transcript keys and no missing VEP
-keys; 54,045 consequence sets were exact on the 57,317-key union. Its
-HGVS suffix comparison is materially less exact, which is why the
-FastVEP native tab speed lane must not be described as VEP HGVS parity.
-Accession and version prefixes are removed before this comparison and
-are not covered by these HGVS metrics.
+<img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-conformance-1.png" alt="Exact transcript keys, consequence sets, HGVSc suffixes, and HGVSp suffixes compared with Ensembl VEP 116 for DuckVEP and FastVEP." width="1120" />
+
+In real counts, executable VEP emitted 56,998 variant/transcript keys.
+DuckVEP emitted exactly those 56,998: none missing, none extra, and all
+56,998 consequence sets exact. FastVEP emitted all 56,998 VEP keys plus
+319 keys VEP did not emit, for a 57,317-key union. On the shared keys,
+54,045 consequence sets matched and 2,953 differed; counting the extra
+keys too gives 54,045 exact sets over the full 57,317-key union.
+
+HGVS is compared only where both tools emitted the same key. FastVEP
+matched 43,149 of 56,998 HGVSc suffixes and 46,847 of 56,998 HGVSp
+suffixes, including mutually absent values. DuckVEP matched all 56,998
+of each. Accession prefixes are removed before comparing suffixes and
+are not covered by these HGVS metrics. The 319 extra FastVEP keys may
+reflect its 1,030 additional cached transcripts, but against this pinned
+executable-VEP contract they remain extra rows rather than being
+silently discarded as “non-overlapping.”
+
+## Statistical fuzzing and generated VEP differential
+
+The held-out ClinVar sample is only one distribution. DuckVEP’s checked
+statistical system also attacks the mechanics with independent
+randomized oracles and then tests generated consequence states against
+the real VEP 116 executable.
+
+<img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-fuzz-1.png" alt="Checked randomized property trials and generated VEP differential pairs, both with zero observed failures or differences." width="1120" />
+
+At tested ancestor 6eebf9b0, 52 randomized properties completed
+5,100,500 trials with zero failures. They compare optimized sweeps,
+projection, sequence editing, translation, HGVS, regulation/BND, and
+multi-edit mechanics with independent or deliberately slower oracles. At
+tested ancestor 05620047, generated state-exploration seed 31415927
+produced 100,268 variant/transcript comparisons against executable VEP
+116: all exact, with no unresolved, missing, or extra rows.
+
+These are targeted state distributions. They demonstrate exercised
+mechanics and executable agreement for the declared seeds; they are not
+a probability sample of future clinical variants and are not presented
+as a population error rate.
+
+## Why this result matters
+
+The headline is not merely that one C engine outran one Rust engine.
+DuckVEP’s output remains a typed DuckDB relation. Transcript
+identifiers, ClinVar, population frequencies, prediction scores, gene
+constraints, conservation signals, BAM-derived evidence, and any other
+source DuckDB can read stay as ordinary late joins instead of becoming
+fields copied into a private annotation cache or another C object model.
+
+This speed lane stops at the common 17-column tabular edge so the tool
+comparison remains legible. The broader DuckVEP workflow can instead
+filter numeric consequence masks first, join only requested provider
+columns, and write Parquet or another DuckDB-supported result. The
+[supplementary-provider benchmark](benchmark_variantkey_join_overlap.md)
+measures those exact-key and interval joins separately; those costs are
+not silently folded into the FastVEP comparison.
+
+## Findings
+
+1.  **DuckVEP wins the declared same-core race.** It is 2.55 times
+    faster at one core and 2.12 times faster at four while paying for an
+    explicit sort and real output.
+2.  **The speed result survives a compatibility check.** DuckVEP is
+    exact on all 56,998 held-out VEP transcript pairs, consequence sets,
+    HGVSc suffixes, and HGVSp suffixes, then adds 5.1 million randomized
+    property trials and 100,268 generated VEP pair comparisons with no
+    observed failure. FastVEP’s speed result does not imply the same
+    HGVS contract.
+3.  **The principal measured costs have moved above the biological
+    kernel.** At four cores the largest operator totals are label
+    joining, tab writing, result-list expansion, and text projection.
+    SQL composability is already fast, and the profile shows where
+    further end-to-end gains remain.
+4.  **Memory is the visible price.** DuckVEP peaks near 5.5 GiB versus
+    FastVEP’s 3.17 GiB. The immutable model is shared across workers, so
+    adding cores does not multiply that peak, but process RSS remains a
+    release metric.
+5.  **“Fastest in the West” stays a measured question.** The answer is
+    yes for this complete GIAB input, these versions, these core counts,
+    and these output contracts. A broader superlative requires adding
+    competitors under an equally explicit protocol rather than
+    extrapolating this ratio.
 
 This held-out differential is a compatibility witness for this
 comparison, not a replacement for DuckVEP’s full multi-corpus

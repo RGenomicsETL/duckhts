@@ -1,12 +1,16 @@
 ---
-title: "DuckVEP and FastVEP end-to-end comparison"
+title: "DuckVEP: the fastest Ensembl VEP-compatible consequence predictor in the West?"
 output: github_document
 ---
 
 <!-- benchmark_duckvep_fastvep.md is generated from benchmark_duckvep_fastvep.Rmd. Do not edit the .md by hand. -->
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(
+  collapse = TRUE, comment = "#>", message = FALSE, warning = FALSE,
+  echo = FALSE, dpi = 140, fig.retina = 2
+)
+library(ggplot2)
 root <- Sys.getenv("DUCKHTS_REPO_ROOT")
 if (!nzchar(root)) {
   root <- system2("git", c("rev-parse", "--show-toplevel"), stdout = TRUE)[[1L]]
@@ -216,6 +220,80 @@ conformance <- read.csv(
   check.names = FALSE
 )
 
+is_tested_ancestor <- function(revision) {
+  identical(
+    system2(
+      "git",
+      c("-C", root, "merge-base", "--is-ancestor", revision, "HEAD"),
+      stdout = FALSE,
+      stderr = FALSE
+    ),
+    0L
+  )
+}
+
+property_history <- read.csv(
+  file.path(
+    root, "test", "duckvep", "conformance", "data", "property_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+property_revisions <- unique(property_history$source_revision)
+property_revisions <- property_revisions[vapply(
+  property_revisions, is_tested_ancestor, logical(1)
+)]
+stopifnot(length(property_revisions) > 0L)
+property_revision <- tail(property_revisions, 1L)
+property_run <- property_history[
+  property_history$source_revision == property_revision,
+  ,
+  drop = FALSE
+]
+stopifnot(
+  nrow(property_run) > 0L,
+  all(property_run$failed == 0),
+  all(property_run$passed == property_run$trials)
+)
+
+differential_history <- read.csv(
+  file.path(
+    root, "test", "duckvep", "conformance", "data",
+    "conformance_history.csv"
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+generated_differentials <- differential_history[
+  differential_history$stratum_kind == "all" &
+    grepl("^state_exploration_seed_", differential_history$corpus),
+  ,
+  drop = FALSE
+]
+differential_revisions <- unique(generated_differentials$source_revision)
+differential_revisions <- differential_revisions[vapply(
+  differential_revisions, is_tested_ancestor, logical(1)
+)]
+stopifnot(length(differential_revisions) > 0L)
+differential_revision <- tail(differential_revisions, 1L)
+generated_differential <- tail(
+  generated_differentials[
+    generated_differentials$source_revision == differential_revision,
+    ,
+    drop = FALSE
+  ],
+  1L
+)
+stopifnot(
+  nrow(generated_differential) == 1L,
+  generated_differential$exact_agree == generated_differential$n,
+  generated_differential$unresolved == 0,
+  generated_differential$resolved_discordant == 0,
+  generated_differential$term_mismatch == 0,
+  generated_differential$engine_extra == 0,
+  generated_differential$engine_missing == 0
+)
+
 source_records <- 4048342
 source_alt_alleles <- 4096123
 duckvep_supported_alt_alleles <- 4095611
@@ -275,6 +353,86 @@ duck_four_speedup_text <- sprintf(
 duck_four_efficiency_text <- sprintf(
   "%.1f", 100 * duck_one$median_seconds / duck_four$median_seconds / 4
 )
+
+headline <- data.frame(
+  cores = c(1L, 4L),
+  DuckVEP = c(duck_one$median_seconds, duck_four$median_seconds),
+  FastVEP = c(fast_one$median_seconds, fast_four$median_seconds),
+  stringsAsFactors = FALSE
+)
+headline$`FastVEP / DuckVEP` <- headline$FastVEP / headline$DuckVEP
+
+wall_plot <- rbind(
+  data.frame(
+    engine = "DuckVEP", cores = headline$cores, seconds = headline$DuckVEP
+  ),
+  data.frame(
+    engine = "FastVEP", cores = headline$cores, seconds = headline$FastVEP
+  )
+)
+wall_plot$engine <- factor(wall_plot$engine, levels = c("DuckVEP", "FastVEP"))
+wall_plot$runs <- c(3L, 3L, 3L, 1L)
+
+rss_plot <- rbind(
+  data.frame(
+    engine = "DuckVEP",
+    cores = c(1L, 4L),
+    rss_gib = c(
+      duck_one$maximum_rss_kib / 1024^2,
+      duck_four$maximum_rss_kib / 1024^2
+    )
+  ),
+  data.frame(
+    engine = "FastVEP",
+    cores = c(1L, 4L),
+    rss_gib = c(
+      fast_one$maximum_rss_kib / 1024^2,
+      fast_four$maximum_rss_kib / 1024^2
+    )
+  )
+)
+rss_plot$engine <- factor(rss_plot$engine, levels = c("DuckVEP", "FastVEP"))
+
+fuzz_evidence <- data.frame(
+  lane = c(
+    "Independent C property oracles",
+    "Generated VEP 116 differential"
+  ),
+  observations = c(
+    sum(property_run$trials),
+    generated_differential$n
+  ),
+  result = c(
+    paste0(
+      nrow(property_run), " targets\n",
+      format(sum(property_run$failed), big.mark = ","), " failures"
+    ),
+    paste0(
+      format(
+        generated_differential$n - generated_differential$exact_agree,
+        big.mark = ","
+      ),
+      " discrepancies"
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+fuzz_evidence$lane <- factor(
+  fuzz_evidence$lane,
+  levels = rev(fuzz_evidence$lane)
+)
+
+bench_palette <- c("DuckVEP" = "#b9760a", "FastVEP" = "#3560c4")
+theme_bench <- theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(color = "grey40", size = 10),
+    legend.position = "top",
+    legend.title = element_blank(),
+    plot.title.position = "plot"
+  )
 ```
 
 Status: current measured comparison of DuckVEP and FastVEP on the complete GIAB
@@ -283,7 +441,99 @@ uncompressed tabular output. DuckVEP additionally pays for an explicit global
 coordinate sort. The consequence speed lane excludes HGVS, regulatory/motif
 features, and supplementary annotation for both engines.
 
-## Result
+## The short answer
+
+**On this declared test, yes.** DuckVEP is the fastest
+Ensembl-VEP-compatible consequence predictor measured here: it finishes the
+complete GIAB HG002 input **`r observed_median_ratio_text` times faster on one
+physical core** and **`r four_core_ratio_text` times faster on four physical
+cores** than the current native FastVEP checkout.
+
+The question mark matters. This is not a census of every consequence predictor
+or every machine. FastVEP is the measured speed competitor; Ensembl VEP 116 is
+the behavioral oracle. The useful result is that DuckVEP combines the faster
+same-core pipeline with exact consequence and HGVS suffix agreement on the
+held-out VEP comparison below.
+
+## What was compared
+
+Both tools start from the same compressed, coordinate-sorted GIAB VCF, use the
+same Ensembl 116 GRCh38 reference product and 5,000-base transcript window, run
+on the same pinned physical cores, and finish by writing a real uncompressed
+17-field tab file. The common denominators are 4,048,342 source records and
+4,096,123 source ALT alleles.
+
+The comparison retains the work each tool actually requires:
+
+- DuckVEP decodes the VCF through htslib, expands ALT alleles, maps contigs,
+  performs an explicit global coordinate sort under a 4 GB DuckDB memory limit,
+  annotates, joins transcript labels, and writes the result.
+- FastVEP starts from the already sorted VCF, loads its native transcript cache,
+  annotates, coordinates results, and writes its native tab schema.
+- The output schemas have the same width but are not claimed byte-equivalent.
+  FastVEP computes native presentation fields that DuckVEP leaves out; DuckVEP
+  pays for the explicit sort that FastVEP does not perform.
+
+This is therefore an operational pipeline comparison, not an isolated-kernel
+microbenchmark.
+
+### Supplementary annotation: a fair comparison
+
+FastVEP is not consequence-only. The pinned checkout
+(`7038e7c`) also builds native fastSA stores for clinical, population, score,
+interval, and gene data. The timed command does not load them. DuckVEP likewise
+does not load supplementary providers in the timed command: those remain
+ordinary DuckDB relations joined after consequence filtering.
+
+| Provider class | DuckVEP route | FastVEP route | In the speed lane? |
+|:--|:--|:--|:--|
+| Exact allele | VariantKey plus literal-allele SQL joins over VCF, Parquet, DuckLake, or another readable relation | `.osa`/`.osa2`, with built-in sources and custom VCF conversion | No, for either tool |
+| Sparse interval | Half-open SQL overlap or cgranges over BED, GFF/GTF, Parquet, BAM-derived intervals, and other relations | `.osi`, including custom BED conversion | No, for either tool |
+| Gene/transcript | Stable-identifier joins after consequence filtering | `.oga` gene stores and transcript-attached fields | No, for either tool |
+| Dense signal | Direct BigWig/bedGraph reads or tiled Parquet reductions | fastSA sources for phyloP, GERP, DANN, and related scores | No, for either tool |
+
+The separate
+[DuckHTS supplementary-provider benchmark](benchmark_variantkey_join_overlap.md)
+measures real ClinVar, prediction-score, gene, and interval composition. It is
+evidence for DuckVEP's SQL path, not a head-to-head fastSA result. A fair
+supplementary race still needs identical provider releases, requested fields,
+missing-value rules, and final output rows for both tools.
+
+## Wall time: file in, 47 million rows out
+
+```{r headline-table}
+headline_table <- headline
+headline_table$DuckVEP <- sprintf("%.2f s", headline_table$DuckVEP)
+headline_table$FastVEP <- sprintf("%.2f s", headline_table$FastVEP)
+headline_table$`FastVEP / DuckVEP` <- sprintf(
+  "%.2fx", headline$`FastVEP / DuckVEP`
+)
+knitr::kable(headline_table, row.names = FALSE, align = "rrrr")
+```
+
+```{r plot-wall, fig.width=7.4, fig.height=4.4, fig.alt="Whole-genome end-to-end wall time on one and four pinned physical cores; DuckVEP is faster at both core counts."}
+ggplot(wall_plot, aes(factor(cores), seconds, fill = engine)) +
+  geom_col(position = position_dodge(width = 0.72), width = 0.62) +
+  geom_text(
+    aes(label = sprintf("%.1f s", seconds)),
+    position = position_dodge(width = 0.72),
+    vjust = -0.35,
+    size = 3.7,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = bench_palette) +
+  scale_y_continuous(
+    limits = c(0, max(wall_plot$seconds) * 1.12),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "Same physical cores, real file in → real tab out",
+    subtitle = "medians of three runs except four-core FastVEP (one observation); lower is faster",
+    x = "pinned physical cores",
+    y = "wall time (seconds)"
+  ) +
+  theme_bench
+```
 
 On one pinned physical performance core, DuckVEP processed the full file and
 wrote 47.63 million annotation rows in a median **`r duck_median_text`
@@ -299,6 +549,8 @@ fields that the current DuckVEP projection leaves as placeholders. The exact
 times, row counts, and output widths are the comparison; the report does not
 subtract either tool's required work to manufacture an artificial common
 kernel number.
+
+### One-core details
 
 ```{r one-core-table}
 one_core <- one_core_summary
@@ -389,6 +641,39 @@ maximum process RSS was
 versus `r sprintf('%.2f', duck_one$maximum_rss_kib / 1024^2)` GiB at one. That
 process-level observation rules out a fourfold increase in total RSS; it does
 not attribute individual allocations to the model or worker workspaces.
+
+```{r plot-rss, fig.width=7.4, fig.height=3.9, fig.alt="Peak process resident memory for DuckVEP and FastVEP on one and four pinned physical cores."}
+ggplot(rss_plot, aes(cores, rss_gib, color = engine)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.8) +
+  geom_text(
+    aes(label = sprintf("%.2f GiB", rss_gib)),
+    nudge_y = 0.18,
+    size = 3.5,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_color_manual(values = bench_palette) +
+  scale_x_continuous(breaks = c(1, 4)) +
+  scale_y_continuous(
+    limits = c(0, max(rss_plot$rss_gib) * 1.12),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "The resident model buys speed with memory",
+    subtitle = "maximum process RSS from GNU time; the DuckDB 4 GB limit is not a process-RSS limit",
+    x = "pinned physical cores",
+    y = "maximum RSS (GiB)"
+  ) +
+  theme_bench
+```
+
+DuckVEP's measured advantage is not free: the immutable full transcript model,
+worker state, DuckDB operators, and explicit sort put this process near 5.5
+GiB, versus 3.17 GiB for FastVEP. The model is shared rather than copied per
+worker, which is why the one- and four-core DuckVEP peaks are nearly flat.
+This report presents that tradeoff directly instead of treating the DuckDB
+buffer-manager limit as total process memory.
 
 ### Four-core operator profile
 
@@ -561,6 +846,13 @@ VEP ran from its indexed cache with HGVS enabled. FastVEP ran its current native
 binary with `--hgvs --output-format vcf`. DuckVEP's oracle Parquet came from the
 same VEP run and the same resident model.
 
+Here a transcript key means the exact `(input variant ID, transcript
+accession)` pair emitted by a tool. FastVEP's internal candidate lookup calls a
+transcript “overlapping” when its inclusive genomic span intersects the variant
+query expanded by 5,000 bases; that candidate pool is not the concordance
+denominator. “Shared” below means that both the comparator and executable VEP
+actually emitted the same transcript key.
+
 ```{r conformance-table}
 wanted_metrics <- c(
   "union_keys", "shared_keys", "missing_keys", "extra_keys",
@@ -584,13 +876,161 @@ conformance_table <- conformance_table[, c(
 knitr::kable(conformance_table, row.names = FALSE)
 ```
 
-DuckVEP reproduced all 56,998 VEP transcript pairs, consequence sets, HGVSc
-suffixes, and HGVSp suffixes, including mutually absent HGVS values. FastVEP
-emitted 319 extra transcript keys and no missing VEP keys; 54,045 consequence
-sets were exact on the 57,317-key union. Its HGVS suffix comparison is
-materially less exact, which is why the FastVEP native tab speed lane must not
-be described as VEP HGVS parity. Accession and version prefixes are removed
-before this comparison and are not covered by these HGVS metrics.
+```{r plot-conformance, fig.width=8.0, fig.height=4.4, fig.alt="Exact transcript keys, consequence sets, HGVSc suffixes, and HGVSp suffixes compared with Ensembl VEP 116 for DuckVEP and FastVEP."}
+metric_labels <- c(
+  shared_keys = "Transcript keys",
+  consequence_exact = "Consequence set",
+  hgvsc_suffix_exact_including_absent = "HGVSc suffix",
+  hgvsp_suffix_exact_including_absent = "HGVSp suffix"
+)
+fidelity <- conformance[
+  conformance$metric %in% names(metric_labels),
+]
+fidelity$engine <- ifelse(
+  fidelity$engine == "duckvep", "DuckVEP", "FastVEP"
+)
+fidelity$contract <- unname(metric_labels[fidelity$metric])
+fidelity$contract <- factor(
+  fidelity$contract,
+  levels = unname(metric_labels)
+)
+fidelity$percent <- 100 * fidelity$n / fidelity$denominator
+fidelity$engine <- factor(fidelity$engine, levels = c("DuckVEP", "FastVEP"))
+
+ggplot(fidelity, aes(contract, percent, fill = engine)) +
+  geom_col(position = position_dodge(width = 0.72), width = 0.62) +
+  geom_text(
+    aes(label = sprintf("%.1f%%", percent)),
+    position = position_dodge(width = 0.72),
+    vjust = -0.35,
+    size = 3.6,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = bench_palette) +
+  scale_y_continuous(
+    limits = c(0, 108),
+    breaks = c(0, 25, 50, 75, 100),
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "VEP agreement without hiding extra transcripts",
+    subtitle = "keys and consequences use the complete key union; HGVS uses the 56,998 shared keys",
+    x = NULL,
+    y = "exact agreement"
+  ) +
+  theme_bench
+```
+
+In real counts, executable VEP emitted 56,998 variant/transcript keys. DuckVEP
+emitted exactly those 56,998: none missing, none extra, and all 56,998
+consequence sets exact. FastVEP emitted all 56,998 VEP keys plus 319 keys VEP
+did not emit, for a 57,317-key union. On the shared keys, 54,045 consequence
+sets matched and 2,953 differed; counting the extra keys too gives 54,045 exact
+sets over the full 57,317-key union.
+
+HGVS is compared only where both tools emitted the same key. FastVEP matched
+43,149 of 56,998 HGVSc suffixes and 46,847 of 56,998 HGVSp suffixes, including
+mutually absent values. DuckVEP matched all 56,998 of each. Accession prefixes
+are removed before comparing suffixes and are not covered by these HGVS
+metrics. The 319 extra FastVEP keys may reflect its 1,030 additional cached
+transcripts, but against this pinned executable-VEP contract they remain extra
+rows rather than being silently discarded as “non-overlapping.”
+
+## Statistical fuzzing and generated VEP differential
+
+The held-out ClinVar sample is only one distribution. DuckVEP's checked
+statistical system also attacks the mechanics with independent randomized
+oracles and then tests generated consequence states against the real VEP 116
+executable.
+
+```{r plot-fuzz, fig.width=8.0, fig.height=3.8, fig.alt="Checked randomized property trials and generated VEP differential pairs, both with zero observed failures or differences."}
+ggplot(fuzz_evidence, aes(lane, observations / 1e6, fill = lane)) +
+  geom_col(width = 0.58, show.legend = FALSE) +
+  geom_text(
+    aes(
+      label = paste0(
+        format(observations, big.mark = ",", scientific = FALSE),
+        "\n", result
+      )
+    ),
+    hjust = -0.04,
+    size = 3.7,
+    fontface = "bold"
+  ) +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "Independent C property oracles" = "#6a3d9a",
+    "Generated VEP 116 differential" = "#16817a"
+  )) +
+  scale_y_continuous(
+    limits = c(0, max(fuzz_evidence$observations / 1e6) * 1.42),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "Millions of generated checks behind the compatibility claim",
+    subtitle = "latest checked ancestor in each append-only ledger; every mismatch fails the run",
+    x = NULL,
+    y = "trials or transcript/object pairs (millions)"
+  ) +
+  theme_bench
+```
+
+At tested ancestor `r substr(property_revision, 1L, 8L)`, 52 randomized
+properties completed `r format(sum(property_run$trials), big.mark = ",")`
+trials with zero failures. They compare optimized sweeps, projection, sequence
+editing, translation, HGVS, regulation/BND, and multi-edit mechanics with
+independent or deliberately slower oracles. At tested ancestor
+`r substr(differential_revision, 1L, 8L)`, generated state-exploration seed
+`r sub("^state_exploration_seed_", "", generated_differential$corpus)`
+produced `r format(generated_differential$n, big.mark = ",")`
+variant/transcript comparisons against executable VEP 116: all exact, with no
+unresolved, missing, or extra rows.
+
+These are targeted state distributions. They demonstrate exercised mechanics
+and executable agreement for the declared seeds; they are not a probability
+sample of future clinical variants and are not presented as a population error
+rate.
+
+## Why this result matters
+
+The headline is not merely that one C engine outran one Rust engine. DuckVEP's
+output remains a typed DuckDB relation. Transcript identifiers, ClinVar,
+population frequencies, prediction scores, gene constraints, conservation
+signals, BAM-derived evidence, and any other source DuckDB can read stay as
+ordinary late joins instead of becoming fields copied into a private annotation
+cache or another C object model.
+
+This speed lane stops at the common 17-column tabular edge so the tool
+comparison remains legible. The broader DuckVEP workflow can instead filter
+numeric consequence masks first, join only requested provider columns, and
+write Parquet or another DuckDB-supported result. The
+[supplementary-provider benchmark](benchmark_variantkey_join_overlap.md)
+measures those exact-key and interval joins separately; those costs are not
+silently folded into the FastVEP comparison.
+
+## Findings
+
+1. **DuckVEP wins the declared same-core race.** It is
+   `r observed_median_ratio_text` times faster at one core and
+   `r four_core_ratio_text` times faster at four while paying for an explicit
+   sort and real output.
+2. **The speed result survives a compatibility check.** DuckVEP is exact on all
+   56,998 held-out VEP transcript pairs, consequence sets, HGVSc suffixes, and
+   HGVSp suffixes, then adds 5.1 million randomized property trials and 100,268
+   generated VEP pair comparisons with no observed failure. FastVEP's speed
+   result does not imply the same HGVS contract.
+3. **The principal measured costs have moved above the biological kernel.** At
+   four cores the largest operator totals are label joining, tab writing,
+   result-list expansion, and text projection. SQL composability is already
+   fast, and the profile shows where further end-to-end gains remain.
+4. **Memory is the visible price.** DuckVEP peaks near 5.5 GiB versus FastVEP's
+   3.17 GiB. The immutable model is shared across workers, so adding cores does
+   not multiply that peak, but process RSS remains a release metric.
+5. **“Fastest in the West” stays a measured question.** The answer is yes for
+   this complete GIAB input, these versions, these core counts, and these output
+   contracts. A broader superlative requires adding competitors under an
+   equally explicit protocol rather than extrapolating this ratio.
 
 This held-out differential is a compatibility witness for this comparison, not
 a replacement for DuckVEP's full multi-corpus conformance ledger or statistical

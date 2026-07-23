@@ -1411,9 +1411,11 @@ the current native-compiled
 
 The tools emit different native tabular schemas. The comparison
 therefore keeps the row and byte denominators and separately checks each
-result against VEP. Build flags, source revisions, cache construction,
-commands and output evidence are in
-[benchmarks/benchmark_duckvep_fastvep.md](benchmarks/benchmark_duckvep_fastvep.md).
+result against VEP. The illustrated [*DuckVEP: the fastest Ensembl
+VEP-compatible consequence predictor in the
+West?*](benchmarks/benchmark_duckvep_fastvep.md) report gives the build
+flags, source revisions, cache construction, commands, speed, memory,
+and output evidence.
 
 #### Current scope and explicit gaps
 
