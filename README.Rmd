@@ -1313,6 +1313,16 @@ silently guessed. GRCh37 uses its native Ensembl release-116 transcript model an
 no invented native MANE designation; any MANE projection back to GRCh37 must be a separate
 provenance-labelled mapping.
 
+The resident kernel accepts any transcript catalog that satisfies its validated model
+contract. The supplied builder currently compiles the Ensembl core transcript set, not
+VEP's `--refseq` or `--merged` sets. It retains GENCODE Basic and Primary flags for SQL
+filtering but does not prefilter the resident model to either set. The builder withholds
+sequence for source rows marked with transcript-level sequence corrections. A model with
+inserted or deleted transcript bases relative to its genomic exons also needs a richer
+coordinate map than the current resident interface. Mitochondrial genetic codes and
+ordinary MT coordinates are supported; events, transcripts, or features that cross a
+circular sequence origin are not.
+
 Supplementary clinical/population scores are deliberately SQL relations rather than
 hard-wired C fields. The measured joins establish the storage and execution primitives,
 not a universal licensed annotation pack. Broader species/codon-table campaigns, mapped
