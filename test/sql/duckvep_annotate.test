@@ -731,6 +731,60 @@ ORDER BY event_index;
 2	small_variant	2048	1
 3	breakend	268435460	1
 
+# VEP omits non-variant records by default and excludes a bare spanning `*`
+# from alternate-overlap output. Its distinct `<*>` catch-all allele remains an
+# overlap allele: coding positions receive the generic sequence consequence,
+# while start/stop codon positions receive their retained-codon consequence.
+# DuckVEP receives one already-expanded ALT per row, so ALT order is irrelevant.
+# A record-level gVCF END on a literal ALT or `<*>` is provenance, not an SV type.
+statement ok
+CREATE TABLE duckvep_gvcf_events AS
+SELECT * FROM (VALUES
+  (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, 'C'::VARCHAR,
+   170::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (2::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, '<NON_REF>'::VARCHAR,
+   170::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (3::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, '<*>'::VARCHAR,
+   170::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (4::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, '*'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (5::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, '.'::VARCHAR,
+   NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (6::UBIGINT, 1::UINTEGER, 120::UBIGINT, 'A'::VARCHAR, '<*>'::VARCHAR,
+   170::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
+  (7::UBIGINT, 1::UINTEGER, 240::UBIGINT, 'A'::VARCHAR, '<*>'::VARCHAR,
+   250::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT)
+) t(event_index, seq_region, position, reference, alternate, end_position,
+    structural_type, copy_change, mate_seq_region, mate_position);
+
+query IT
+SELECT event_index, duckvep_event_kind
+FROM duckvep_annotate(
+  'duckvep_gvcf_events', 'structural',
+  upstream_distance := 0, downstream_distance := 0
+)
+ORDER BY event_index;
+----
+1	small_variant
+3	small_variant
+6	small_variant
+7	small_variant
+
+query ITTTI
+SELECT event_index, duckvep_event_kind, consequence, duckvep_status,
+       transcript_hgvs IS NULL
+FROM duckvep_annotate(
+  'duckvep_gvcf_events', 'structural',
+  hgvs := TRUE, upstream_distance := 0, downstream_distance := 0,
+  rich := TRUE
+)
+ORDER BY event_index;
+----
+1	small_variant	coding_sequence_variant	unresolved	1
+3	small_variant	coding_sequence_variant	supported	1
+6	small_variant	start_retained_variant	supported	1
+7	small_variant	stop_retained_variant	supported	1
+
 # An explicit NULL HGVS selector follows the documented FALSE default instead
 # of filtering small variants out of both native lanes.
 query ITII

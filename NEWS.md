@@ -1,6 +1,14 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0.9000
+- reproduce VEP 116 on expanded gVCF input without per-row SQL regular
+  expressions: omit `<NON_REF>`, bare `*`, and `.` ALT rows; retain real
+  literal ALTs from mixed records; and annotate the distinct `<*>` catch-all
+  allele as `coding_sequence_variant`, `start_retained_variant`, or
+  `stop_retained_variant` without HGVS. Record-level `INFO/END` remains
+  provenance rather than changing a literal ALT or `<*>` into a structural
+  event. An executable differential splits and compares both `T,<*>` and
+  `<*>,T` source orders against VEP 116
 - make pedantic extension builds warning-clean in DuckHTS-owned sources: initialize
   liftover alias storage, remove unused legacy helpers, retain portable allocation
   overflow checks, and omit ELF visibility attributes on MinGW

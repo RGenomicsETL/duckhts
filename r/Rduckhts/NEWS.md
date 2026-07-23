@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.0.9000-0.1.0
+- bundle VEP-116-compatible gVCF event dispatch: expanded `<NON_REF>`, bare
+  `*`, and `.` ALT rows produce no annotations; literal ALTs from mixed records
+  remain small variants; and `<*>` produces the generic coding or retained
+  start/stop consequence with empty HGVS. Record-level `INFO/END` remains
+  provenance for literal ALTs and `<*>`
 - remove the DuckHTS-source diagnostics reported by the Debian and Windows
   win-builder package pretests, including the MinGW hidden-visibility warnings
 - link the package DuckVEP documentation to the illustrated whole-genome
