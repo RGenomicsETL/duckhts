@@ -2,6 +2,30 @@
 
 ## Rduckhts 1.5.0-0.1.0
 
+- make the Fedora CRAN-reproduction flow install the suggested `Rtinycc`
+  downstream-linking test dependency before strict package checks
+- clarify in the bundled DuckVEP function catalog that the supplied
+  reference defines the exact modeled sequence paths and that annotation
+  does not implicitly project X/Y PAR, patch, or alternate-haplotype
+  coordinates. Package documentation now distinguishes official Ensembl
+  Variation release-VCF product audits from executable-VEP compatibility
+- bundle the VEP-116 protein-HGVS endpoint fix: a coding insertion that
+  copies the final translated residue no longer becomes a protein
+  duplication when VEP’s post-variant peptide lookup would suppress the
+  3-prime shift
+- bundle `duckvep_allele_geometry(...)`, which returns the raw VCF span,
+  VEP feature span, minimized edit span, and insertion point used by the
+  consequence engine. The bundled cumulative consequence/HGVS path now
+  reuses one projected transcript edit and one coding fact object per
+  event/transcript pair, with release-specific VEP-116 HGVS behavior
+  selected through a named compatibility policy rather than
+  formatter-local constants. Add DBI coverage for the geometry contract
+  and regenerate the package function catalog
+- make the bundled `duckhts_bcftools_norm(...)` derived-query macro
+  accept the `VARCHAR[]` ALT column returned by `read_bcf()`. The scalar
+  and list forms of `duckhts_alt_to_list(...)` and
+  `bcftools_norm_row(...)` are now registered as DuckDB overload sets,
+  matching the package’s documented normalization workflow
 - bundle peak-capacity preflight for exact-alias multi-edit CDS
   application. A length-neutral edit set whose first applied insertion
   temporarily grows the CDS now returns `BUFFER_TOO_SMALL` before
