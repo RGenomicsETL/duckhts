@@ -131,17 +131,6 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
     validity[row / 64] &= ~((uint64_t)1 << (row % 64));
 }
 
-static char *dup_cstr_bedcov(const char *s) {
-    size_t n;
-    char *out;
-    if (!s) return NULL;
-    n = strlen(s);
-    out = (char *)duckdb_malloc(n + 1);
-    if (!out) return NULL;
-    memcpy(out, s, n + 1);
-    return out;
-}
-
 static int is_meta_bed_line_bedcov(const char *s) {
     if (!s || !*s) return 1;
     if (s[0] == '#') return 1;
@@ -185,26 +174,6 @@ static const char *field_span(const char *s, int idx, int *len) {
     }
     *len = 0;
     return NULL;
-}
-
-static int ensure_region_depth_arrays(bedcov_region_t *region) {
-    if (!region || region->len < 0) return -1;
-    region->depth_pre = (uint32_t *)calloc((size_t)region->len, sizeof(uint32_t));
-    region->depth_post = (uint32_t *)calloc((size_t)region->len, sizeof(uint32_t));
-    region->depth_fwd_post = (uint32_t *)calloc((size_t)region->len, sizeof(uint32_t));
-    region->depth_rev_post = (uint32_t *)calloc((size_t)region->len, sizeof(uint32_t));
-    if (!region->depth_pre || !region->depth_post || !region->depth_fwd_post || !region->depth_rev_post) {
-        free(region->depth_pre);
-        free(region->depth_post);
-        free(region->depth_fwd_post);
-        free(region->depth_rev_post);
-        region->depth_pre = NULL;
-        region->depth_post = NULL;
-        region->depth_fwd_post = NULL;
-        region->depth_rev_post = NULL;
-        return -1;
-    }
-    return 0;
 }
 
 static void destroy_region_depth_arrays(bedcov_region_t *region) {
@@ -493,7 +462,7 @@ static void increment_depth_cap(uint32_t *depth, int64_t idx, int64_t max_depth)
 static void accumulate_record_summary(const bam1_t *rec, const bam_bed_cov_bind_t *bind,
                                       bedcov_region_t *region) {
     uint32_t *cigar;
-    int i;
+    uint32_t i;
     int post_ok;
     int is_rev;
     int64_t ref_pos;
@@ -561,7 +530,7 @@ static void accumulate_record_on_tile(const bam1_t *rec, const bam_bed_cov_bind_
                                       uint32_t *depth_pre, uint32_t *depth_post,
                                       uint32_t *depth_fwd_post, uint32_t *depth_rev_post) {
     uint32_t *cigar;
-    int i;
+    uint32_t i;
     int post_ok;
     int is_rev;
     int64_t ref_pos;

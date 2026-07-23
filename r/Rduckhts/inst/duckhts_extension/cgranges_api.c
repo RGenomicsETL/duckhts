@@ -237,14 +237,6 @@ static duckhts_cgranges_entry_t *lookup_entry_view_locked(duckhts_cgranges_regis
     return NULL;
 }
 
-static duckhts_cgranges_entry_t *lookup_entry(duckhts_cgranges_registry_t *reg, const char *name) {
-    duckhts_cgranges_entry_t *entry;
-    pthread_mutex_lock(&reg->mutex);
-    entry = lookup_entry_locked(reg, name);
-    pthread_mutex_unlock(&reg->mutex);
-    return entry;
-}
-
 static void unlink_entry_locked(duckhts_cgranges_registry_t *reg, duckhts_cgranges_entry_t *target) {
     duckhts_cgranges_entry_t *cur = reg->entries;
     duckhts_cgranges_entry_t *prev = NULL;
@@ -348,115 +340,6 @@ static int ensure_payload_capacity(duckhts_cgranges_payload_t *payload, size_t n
 oom:
     snprintf(err, errlen, "duckhts_cgranges: out of memory");
     return -1;
-}
-
-static duckhts_cgr_label_kind_t label_kind_from_value(duckdb_value val, char *err, size_t errlen) {
-    duckdb_logical_type type;
-    duckdb_type type_id;
-    if (!val || duckdb_is_null_value(val)) return DUCKHTS_CGR_LABEL_ORDINAL;
-    type = duckdb_get_value_type(val);
-    type_id = duckdb_get_type_id(type);
-    duckdb_destroy_logical_type(&type);
-    switch (type_id) {
-        case DUCKDB_TYPE_BIGINT:
-        case DUCKDB_TYPE_INTEGER:
-        case DUCKDB_TYPE_SMALLINT:
-        case DUCKDB_TYPE_TINYINT:
-        case DUCKDB_TYPE_UBIGINT:
-        case DUCKDB_TYPE_UINTEGER:
-        case DUCKDB_TYPE_USMALLINT:
-        case DUCKDB_TYPE_UTINYINT:
-            return DUCKHTS_CGR_LABEL_BIGINT;
-        case DUCKDB_TYPE_DOUBLE:
-        case DUCKDB_TYPE_FLOAT:
-            return DUCKHTS_CGR_LABEL_DOUBLE;
-        case DUCKDB_TYPE_VARCHAR:
-            return DUCKHTS_CGR_LABEL_VARCHAR;
-        case DUCKDB_TYPE_BOOLEAN:
-            return DUCKHTS_CGR_LABEL_BOOLEAN;
-        default:
-            snprintf(err, errlen,
-                     "duckhts_cgranges: label type must be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN");
-            return DUCKHTS_CGR_LABEL_ORDINAL;
-    }
-}
-
-static int append_interval(duckhts_cgranges_entry_t *entry, const char *chrom, int64_t start, int64_t end,
-                           duckdb_value label_val, char *err, size_t errlen) {
-    size_t idx;
-    int32_t ordinal;
-    duckhts_cgr_label_kind_t incoming_kind;
-    if (!entry || !chrom || !*chrom) {
-        snprintf(err, errlen, "duckhts_cgranges_add: chrom must be non-empty");
-        return -1;
-    }
-    if (entry->indexed) {
-        snprintf(err, errlen, "duckhts_cgranges_add: index '%s' is already finalized", entry->name);
-        return -1;
-    }
-    if (start < 0 || end < start || end > INT32_MAX) {
-        snprintf(err, errlen, "duckhts_cgranges_add: interval out of int32 range");
-        return -1;
-    }
-    if (entry->payload.count > INT32_MAX) {
-        snprintf(err, errlen,
-                 "duckhts_cgranges_add: too many intervals for cgranges int32 label space");
-        return -1;
-    }
-
-    incoming_kind = label_kind_from_value(label_val, err, errlen);
-    if (label_val && !duckdb_is_null_value(label_val)) {
-        if (entry->payload.kind == DUCKHTS_CGR_LABEL_ORDINAL) {
-            entry->payload.kind = incoming_kind;
-        } else if (incoming_kind != entry->payload.kind) {
-            snprintf(err, errlen, "duckhts_cgranges_add: label type mismatch within index '%s'", entry->name);
-            return -1;
-        }
-    }
-
-    if (ensure_payload_capacity(&entry->payload, entry->payload.count + 1, err, errlen) != 0) {
-        return -1;
-    }
-    idx = entry->payload.count;
-    ordinal = (int32_t)idx;
-    entry->payload.chroms[idx] = dup_cstr_local(chrom);
-    if (!entry->payload.chroms[idx]) {
-        snprintf(err, errlen, "duckhts_cgranges_add: out of memory");
-        return -1;
-    }
-    entry->payload.starts[idx] = (int32_t)start;
-    entry->payload.ends[idx] = (int32_t)end;
-    entry->payload.label_valid[idx] = (label_val && !duckdb_is_null_value(label_val)) ? 1 : 0;
-
-    switch (entry->payload.kind) {
-        case DUCKHTS_CGR_LABEL_BIGINT:
-            entry->payload.labels.i64[idx] = entry->payload.label_valid[idx] ? duckdb_get_int64(label_val) : ordinal;
-            break;
-        case DUCKHTS_CGR_LABEL_DOUBLE:
-            entry->payload.labels.f64[idx] = entry->payload.label_valid[idx] ? duckdb_get_double(label_val) : (double)ordinal;
-            break;
-        case DUCKHTS_CGR_LABEL_BOOLEAN:
-            entry->payload.labels.b[idx] = entry->payload.label_valid[idx] ? (duckdb_get_bool(label_val) ? 1 : 0) : 0;
-            break;
-        case DUCKHTS_CGR_LABEL_VARCHAR:
-            if (entry->payload.label_valid[idx]) {
-                entry->payload.labels.str[idx] = duckdb_get_varchar(label_val);
-                if (!entry->payload.labels.str[idx]) {
-                    snprintf(err, errlen, "duckhts_cgranges_add: out of memory");
-                    return -1;
-                }
-            } else {
-                entry->payload.labels.str[idx] = NULL;
-            }
-            break;
-        case DUCKHTS_CGR_LABEL_ORDINAL:
-        default:
-            break;
-    }
-
-    cr_add(entry->cr, chrom, (int32_t)start, (int32_t)end, ordinal);
-    entry->payload.count++;
-    return 0;
 }
 
 static bool row_is_null(duckdb_vector vec, idx_t row) {
@@ -957,55 +840,6 @@ static void cgranges_add_scalar(duckdb_function_info info, duckdb_data_chunk inp
     }
 }
 
-static int make_label_value_from_text(const char *label_text, const char *label_type,
-                                      duckdb_value *out, char *err, size_t errlen) {
-    char *endptr = NULL;
-    if (!out) return -1;
-    *out = NULL;
-    if (!label_type || !label_text) return 0;
-    if (strcmp(label_type, "VARCHAR") == 0) {
-        *out = duckdb_create_varchar(label_text);
-        return *out ? 0 : -1;
-    }
-    if (strcmp(label_type, "BOOLEAN") == 0) {
-        if (strcmp(label_text, "true") == 0 || strcmp(label_text, "TRUE") == 0) {
-            *out = duckdb_create_bool(true);
-            return 0;
-        }
-        if (strcmp(label_text, "false") == 0 || strcmp(label_text, "FALSE") == 0) {
-            *out = duckdb_create_bool(false);
-            return 0;
-        }
-        snprintf(err, errlen, "duckhts_cgranges: invalid BOOLEAN label value");
-        return -1;
-    }
-    if (strcmp(label_type, "DOUBLE") == 0 || strcmp(label_type, "FLOAT") == 0 ||
-        strncmp(label_type, "DECIMAL", 7) == 0) {
-        double value = strtod(label_text, &endptr);
-        if (!endptr || *endptr != '\0') {
-            snprintf(err, errlen, "duckhts_cgranges: invalid DOUBLE label value");
-            return -1;
-        }
-        *out = duckdb_create_double(value);
-        return 0;
-    }
-    if (strcmp(label_type, "BIGINT") == 0 || strcmp(label_type, "INTEGER") == 0 ||
-        strcmp(label_type, "SMALLINT") == 0 || strcmp(label_type, "TINYINT") == 0 ||
-        strcmp(label_type, "UBIGINT") == 0 || strcmp(label_type, "UINTEGER") == 0 ||
-        strcmp(label_type, "USMALLINT") == 0 || strcmp(label_type, "UTINYINT") == 0) {
-        long long value = strtoll(label_text, &endptr, 10);
-        if (!endptr || *endptr != '\0') {
-            snprintf(err, errlen, "duckhts_cgranges: invalid BIGINT label value");
-            return -1;
-        }
-        *out = duckdb_create_int64((int64_t)value);
-        return 0;
-    }
-    snprintf(err, errlen,
-             "duckhts_cgranges: label type must be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN");
-    return -1;
-}
-
 static int64_t find_result_col(duckdb_result *res, const char *name) {
     idx_t cols = duckdb_column_count(res);
     idx_t i;
@@ -1014,64 +848,6 @@ static int64_t find_result_col(duckdb_result *res, const char *name) {
         if (col_name && strcmp(col_name, name) == 0) return (int64_t)i;
     }
     return -1;
-}
-
-static duckdb_value chunk_cell_to_value(duckdb_vector vec, idx_t row, duckdb_type type_id) {
-    if (row_is_null(vec, row)) return NULL;
-    switch (type_id) {
-        case DUCKDB_TYPE_VARCHAR:
-        case DUCKDB_TYPE_STRING_LITERAL: {
-            duckdb_string_t *data = (duckdb_string_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_varchar_length(duckdb_string_t_data(&data[row]), duckdb_string_t_length(data[row]));
-        }
-        case DUCKDB_TYPE_BOOLEAN: {
-            bool *data = (bool *)duckdb_vector_get_data(vec);
-            return duckdb_create_bool(data[row]);
-        }
-        case DUCKDB_TYPE_DOUBLE: {
-            double *data = (double *)duckdb_vector_get_data(vec);
-            return duckdb_create_double(data[row]);
-        }
-        case DUCKDB_TYPE_FLOAT: {
-            float *data = (float *)duckdb_vector_get_data(vec);
-            return duckdb_create_double((double)data[row]);
-        }
-        case DUCKDB_TYPE_BIGINT:
-        case DUCKDB_TYPE_INTEGER_LITERAL: {
-            int64_t *data = (int64_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_int64(data[row]);
-        }
-        case DUCKDB_TYPE_INTEGER: {
-            int32_t *data = (int32_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_int64((int64_t)data[row]);
-        }
-        case DUCKDB_TYPE_SMALLINT: {
-            int16_t *data = (int16_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_int64((int64_t)data[row]);
-        }
-        case DUCKDB_TYPE_TINYINT: {
-            int8_t *data = (int8_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_int64((int64_t)data[row]);
-        }
-        case DUCKDB_TYPE_UBIGINT: {
-            uint64_t *data = (uint64_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_uint64(data[row]);
-        }
-        case DUCKDB_TYPE_UINTEGER: {
-            uint32_t *data = (uint32_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_uint64((uint64_t)data[row]);
-        }
-        case DUCKDB_TYPE_USMALLINT: {
-            uint16_t *data = (uint16_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_uint64((uint64_t)data[row]);
-        }
-        case DUCKDB_TYPE_UTINYINT: {
-            uint8_t *data = (uint8_t *)duckdb_vector_get_data(vec);
-            return duckdb_create_uint64((uint64_t)data[row]);
-        }
-        default:
-            return NULL;
-    }
 }
 
 static int64_t chunk_cell_to_int64(duckdb_vector vec, idx_t row, duckdb_type type_id) {
