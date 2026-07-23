@@ -2111,13 +2111,15 @@ static duckvep_hgvs_status_t hgvs_protein_shift_simple(
     }
     context = fact->context;
     post_start0 = (size_t)fact->last_position1;
-    /* TranscriptVariationAllele::_get_surrounding_peptides() reads
-     * TranscriptVariation::_peptide, which excludes the synthetic terminal
-     * stop.  The consequence coding context retains that stop as an ordinary
-     * byte, so using ref_peptide_len here permits one extra rotation and moves
-     * literal indels one residue too far 3-prime. */
-    available = post_start0 < hgvs_protein_reference_length(context)
-        ? hgvs_protein_reference_length(context) - post_start0 : 0u;
+    /* TranscriptVariationAllele::_get_surrounding_peptides() returns undef
+     * when length(_peptide) <= post_pos.  Since post_pos is the one-based
+     * residue after the changed peptide, VEP refuses even the otherwise
+     * matching final residue as a 3-prime shift source.  Preserve that
+     * executable endpoint test as well as excluding the synthetic stop. */
+    available =
+        post_start0 < SIZE_MAX &&
+        hgvs_protein_reference_length(context) > post_start0 + 1u
+            ? hgvs_protein_reference_length(context) - post_start0 : 0u;
     /* _shift_3prime() iterates only through
      * length(post_seq) - length(changed_peptide). When the complete changed
      * peptide is longer than the remaining reference peptide, Perl performs

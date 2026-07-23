@@ -6894,6 +6894,9 @@ TEST hgvs_protein_facts_render_core_vep_shapes(void) {
     static const uint8_t terminal_delins[] = {
         'T','C','A', 'C','G','T', 'C','G','T', 'T','A','A'
     };
+    static const uint8_t terminal_trp_cds[] = {
+        'T','A','T', 'T','G','G', 'T','A','A'
+    };
     static const uint8_t a[] = {'A'};
     static const uint8_t c[] = {'C'};
     static const uint8_t g[] = {'G'};
@@ -7013,6 +7016,19 @@ TEST hgvs_protein_facts_render_core_vep_shapes(void) {
         rendered, sizeof rendered, &shape, &required));
     ASSERT_EQ(DUCKVEP_HGVS_PROTEIN_DUPLICATION, shape);
     ASSERT_EQ(0, strcmp("p.Glu2dup", rendered));
+
+    /* Executable VEP 116 does not shift an inserted Trp across the final
+     * translated Trp: _get_surrounding_peptides() returns undef when its
+     * post-variant position equals the peptide length.  The nucleotide event
+     * can still be c.4_6dup while HGVSp remains an insertion rather than a
+     * peptide duplication.  This is the minimized state discovered by the
+     * held-out seed-161803399 differential (C>CTGG at chrDuck:234). */
+    ASSERT(kprop_hgvs_protein_render_scene(
+        terminal_trp_cds, sizeof terminal_trp_cds, 4u,
+        NULL, 0u, terminal_trp_cds + 3u, 3u, NULL, 0u, 0,
+        rendered, sizeof rendered, &shape, &required));
+    ASSERT_EQ(DUCKVEP_HGVS_PROTEIN_INSERTION, shape);
+    ASSERT_EQ(0, strcmp("p.Tyr1_Trp2insTrp", rendered));
 
     ASSERT(kprop_hgvs_protein_render_scene(
         cds, sizeof cds, 4u, gaa_ttt, 6u, gcc, 3u, NULL, 0u, 0,

@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.0-0.1.0
+- bundle the VEP-116 protein-HGVS endpoint fix: a coding insertion that copies
+  the final translated residue no longer becomes a protein duplication when
+  VEP's post-variant peptide lookup would suppress the 3-prime shift
 - bundle `duckvep_allele_geometry(...)`, which returns the raw VCF span, VEP
   feature span, minimized edit span, and insertion point used by the consequence
   engine. The bundled cumulative consequence/HGVS path now reuses one projected

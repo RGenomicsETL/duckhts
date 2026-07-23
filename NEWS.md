@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- reproduce VEP 116's peptide-endpoint test before protein-HGVS 3-prime
+  shifting. An in-frame insertion that copies the final translated residue can
+  remain an HGVSp insertion rather than being promoted to a protein duplication,
+  even when HGVSc is a transcript duplication. Add the minimized held-out
+  differential witness and record the helper ordering in the compatibility errata
 - make the executable rare-state campaign pass its generated maximum allele length
   through to the VEP differential, including the retained VCF anchor base. A 100-base
   campaign can no longer be reported from the runner's former 50-base default subset;

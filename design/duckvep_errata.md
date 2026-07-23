@@ -1272,6 +1272,13 @@ peptide comparison would choose another representation:
   `length(post_seq) - length(changed_peptide)`. A matching first residue is therefore not
   sufficient when the changed peptide is longer than the suffix; a cyclic-prefix search
   moves valid indels too far.
+- `_get_surrounding_peptides` returns no post-variant sequence when its one-based
+  `post_pos` equals the peptide length, even though that position names the final
+  translated residue. The subsequent 3-prime shift is skipped. A coding insertion that
+  copies that last residue can therefore remain `p.Tyr22_Trp23insTrp` instead of becoming
+  `p.Trp23dup`, even when its transcript DNA form is a duplication. The held-out
+  seed-161803399 campaign exposed this state with `chrDuck:234 C>CTGG`; the minimized C
+  test uses a `YW` peptide and pins the same endpoint comparison.
 - Perl substring semantics leak into two start-of-peptide outputs. When clipping leaves an
   insertion at `start=1,end=0`, `substr(_peptide, -1, 2)` supplies the final reference
   residue and executable VEP can print strings such as
