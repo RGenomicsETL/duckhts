@@ -67,10 +67,30 @@ test_htslib_contract <- function() {
     return(invisible(NULL))
   }
 
+  fixture <- function(name) {
+    system.file("extdata", name, package = "Rduckhts", mustWork = TRUE)
+  }
+  c_string <- function(value) {
+    encodeString(value, quote = "\"")
+  }
   consumer_code <- paste(c(
     "#include <htslib/hts.h>",
     "#include <htslib/sam.h>",
     "#include <htslib/vcf.h>",
+    paste0(
+      "static const char expected_version[] = ",
+      c_string(config$htslib_version),
+      ";"
+    ),
+    paste0("static const char bam_path[] = ", c_string(fixture("range.bam")), ";"),
+    paste0("static const char cram_path[] = ", c_string(fixture("range.cram")), ";"),
+    paste0("static const char reference_path[] = ", c_string(fixture("ce.fa")), ";"),
+    paste0("static const char bcf_path[] = ", c_string(fixture("vcf_file.bcf")), ";"),
+    paste0(
+      "static const char vcf_path[] = ",
+      c_string(fixture("test_vep_tidy.vcf")),
+      ";"
+    ),
     "static int text_equal(const char *left, const char *right) {",
     "    while (*left && *left == *right) { left++; right++; }",
     "    return *left == *right;",
@@ -96,13 +116,12 @@ test_htslib_contract <- function() {
     "    bcf_destroy(record); bcf_hdr_destroy(header); bcf_close(file);",
     "    return result;",
     "}",
-    "void check_consumer(char **version, char **bam, char **cram, char **reference,",
-    "                    char **bcf, char **vcf, int *status) {",
-    "    *status = 0;",
-    "    if (!text_equal(hts_version(), *version)) { *status = 10; return; }",
-    "    if (!alignment_ok(*bam, NULL)) { *status = 11; return; }",
-    "    if (!alignment_ok(*cram, *reference)) { *status = 12; return; }",
-    "    if (!variant_ok(*bcf) || !variant_ok(*vcf)) *status = 13;",
+    "int check_consumer(void) {",
+    "    if (!text_equal(hts_version(), expected_version)) return 10;",
+    "    if (!alignment_ok(bam_path, NULL)) return 11;",
+    "    if (!alignment_ok(cram_path, reference_path)) return 12;",
+    "    if (!variant_ok(bcf_path) || !variant_ok(vcf_path)) return 13;",
+    "    return 0;",
     "}"
   ), collapse = "\n")
 
@@ -152,21 +171,12 @@ test_htslib_contract <- function() {
   expect_identical(relocate_status, 0L)
   if (relocate_status != 0L) return(invisible(NULL))
 
-  fixture <- function(name) {
-    system.file("extdata", name, package = "Rduckhts", mustWork = TRUE)
-  }
   result <- Rtinycc::tcc_call_symbol(
     state,
     "check_consumer",
-    config$htslib_version,
-    fixture("range.bam"),
-    fixture("range.cram"),
-    fixture("ce.fa"),
-    fixture("vcf_file.bcf"),
-    fixture("test_vep_tidy.vcf"),
-    as.integer(0)
+    return = "int"
   )
-  expect_identical(result[[7L]], 0L)
+  expect_identical(result, 0L)
 }
 
 test_htslib_contract()
