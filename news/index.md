@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.5.0-0.1.0
 
+- clarify the bundled DuckVEP catalog and README: the resident kernel is
+  transcript-source-neutral, the package builder currently compiles the
+  Ensembl core set, and transcript-to-genome sequence corrections,
+  circular-origin geometry, implicit path projection, and phased
+  composition remain outside the package surface
 - make the Fedora CRAN-reproduction flow install the suggested `Rtinycc`
   downstream-linking test dependency before strict package checks
 - clarify in the bundled DuckVEP function catalog that the supplied
