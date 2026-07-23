@@ -46,16 +46,17 @@ This section is generated from `functions.yaml`.
 
 ### Variant Annotation
 
-| Function                              | Kind        | Returns               | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-|---------------------------------------|-------------|-----------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `duckvep_ensembl_regions`             | table_macro | table                 |          | Match a tiled reference sequence to one Ensembl core assembly and assign dense DuckVEP sequence-region ordinals. core_schema must contain the Ensembl seq_region and coord_system tables. reference_chunks_table must contain chrom, zero-based start, half-open end, and seq columns, normally materialized from fasta_nuc(…, include_seq := TRUE). Chunks must be contiguous from zero, their sequence lengths must match their intervals, and every FASTA contig must match exactly one same-length Ensembl region. Regions absent from the supplied FASTA are deliberately excluded.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `duckvep_ensembl_transcripts`         | table_macro | table                 |          | Build the validated DuckVEP transcript relation from Ensembl core tables and matching tiled FASTA sequence. The VEP-116 core selection is applied before dense ordinals are assigned: transcripts must be current and have a non-empty stable ID, and artifact-biotype or readthrough_tra transcripts are excluded. The result contains the exact resident-loader columns, stable/source identifiers, biotypes, versioned RefSeq accessions from MANE Select and MANE Plus Clinical attributes when present, a nested ranked-exon projection, mature miRNA cDNA attributes projected into genomic exon segments, and supported Translation SeqEdits. MANE accessions remain cold DuckDB columns while only selection flags enter the resident C model. Prepared sequence contains the phase-adjusted CDS plus the complete transcript-oriented pre-CDS and post-CDS spliced sequence; the legacy post_cds_bases field remains as the first three post-CDS bases. Codon-table IDs come from the Ensembl seq_region_attrib relation and default to table 1 exactly as VEP 116 does; every BioPerl/VEP-supported NCBI table ID is accepted and invalid or conflicting source attributes reject the import. Single-residue initial_met, \_selenocysteine, amino_acid_sub, and \_stop_codon_rt edits are retained as a sparse reference-peptide overlay. Other Translation SeqEdit shapes and transcript-level RNA edits fail closed by withholding sequence with an explicit reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `duckvep_ensembl_regulation_features` | table_macro | table                 |          | Build the VEP-116-compatible interval relation for Ensembl RegulatoryFeature and MotifFeature rows on the sequence regions selected for a DuckVEP model. funcgen_schema must contain regulatory_feature, feature_type, and motif_feature; regions_table is the output of duckvep_ensembl_regions(…). Matching VEP’s database and cache source, epigenetically_modified_region (EMAR) RegulatoryFeature rows are excluded before dense ordinals are assigned. The result maps source sequence-region IDs to model ordinals, validates one-based inclusive coordinates and source feature types, and preserves stable/source IDs, feature metadata, binding-matrix IDs, regulatory-build IDs, and motif scores as cold relation columns. feature_kind is the compact resident code: 1 regulatory region or 2 transcription-factor binding site. Pass the five hot columns regulation_feature_index, seq_region, feature_start, feature_end, and feature_kind to duckvep_model_load(interval_feature_query := …); the remaining columns stay relational for late projection.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `duckvep_model_receipt`               | table_macro | table                 |          | Create one deterministic receipt for prepared DuckVEP region and transcript relations plus an optional prepared regulation-feature relation. The original eight positional arguments remain valid. When regulation_features_table is supplied by name, the receipt also validates its dense ordinals, region agreement, interval geometry, and feature kinds; counts regulatory regions and motif features; and includes their five resident columns in the model hash. It returns the declared provenance as source_name, source_version, assembly, source_manifest_sha256, reference_sha256, and transcript_filter; counts transcript, sequence, mature-miRNA, and peptide-edit content; and hashes every semantic resident-model field in stable ordinal order. source_manifest_sha256 should identify a canonical manifest containing every exact core and funcgen input used. The receipt contains no clock time, so rebuilding identical inputs yields the same model hash.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `duckvep_model_load`                  | table       | table(loaded BOOLEAN) |          | Load one immutable consequence model into the current DuckDB database instance under a caller-chosen name. Three required query strings read committed, non-temporary DuckDB relations: sorted UINTEGER sequence-region ordinals; dense transcript rows with genomic span, strand, gene ordinal, flags, optional CDS span/sequence/codon table; and transcript-ordered exon rows with genomic and cDNA spans plus phase. The optional mature_mirna_query reads transcript_index UINTEGER, mature_mirna_start UBIGINT, and mature_mirna_end UBIGINT ordered by transcript and start. The optional peptide_edit_query reads transcript_index UINTEGER, protein_position UINTEGER, and alternate_amino_acid VARCHAR ordered uniquely by transcript and protein position. The optional interval_feature_query reads regulation_feature_index UINTEGER, seq_region UINTEGER, feature_start UINTEGER, feature_end UINTEGER, and feature_kind UTINYINT ordered by region, start, and index; kind 1 is RegulatoryFeature and kind 2 is MotifFeature. Loading keeps those hot columns in a compact SoA and builds a separate cgranges seed index, while identifiers and funcgen metadata remain ordinary DuckDB columns. The transcript projection accepts 11 base columns, 12 columns with the legacy post_cds_bases BLOB of up to three bases, or 13 columns ending in complete transcript-oriented pre_cds_sequence and post_cds_sequence BLOBs. Complete flanks enable VEP start/stop predicates for length-changing edits that cross a CDS start or end. reference_fasta enables reference-validated, VEP-style 3-prime HGVS shifting. When supplied, the sequence-region query must return seq_region UINTEGER, sequence_length UBIGINT, and seq_region_name VARCHAR; loading requires an existing FASTA index and verifies every declared name and exact length without creating or modifying the index. The named model pins open read descriptors for the validated FASTA, .fai, and optional .gzi. Linux workers reopen those descriptors through /proc/self/fd, Windows retains the resolved source under deny-write sharing, and other POSIX workers use independent resolved-source handles with identity checks rather than shared /dev/fd seek state. Each annotation worker owns its mutable faidx handle, reuses contained sorted reference requests, and rejects detectable replacement or in-place source mutation around a cache-miss fetch. Explicit NULL for any optional query or reference parameter is equivalent to omission. The default is a partial transcript model: a variant with no loaded transcript is unresolved, not intergenic. Setting transcript_coverage_complete := TRUE requires sequence_length UBIGINT and permits supported intergenic results after coordinate bounds checks. Loading validates and narrows the model once and returns one TRUE row. Several named models may coexist.              |
-| `duckvep_model_drop`                  | scalar      | BOOLEAN               |          | Remove a named resident DuckVEP consequence model and release its transcript and regulation-feature interval indexes, sequences, and cached worker state. Returns FALSE when the name is absent or the model is in use by an annotation vector.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `duckvep_annotate`                    | table       | table                 |          | Annotate a narrow canonical event relation against one resident DuckVEP model through one fixed-schema, pipe-friendly surface. events_table names a coordinate-ordered relation with event_index UBIGINT, seq_region UINTEGER, positive one-based position, reference VARCHAR, alternate VARCHAR, end_position UBIGINT, structural_type VARCHAR, copy_change VARCHAR, mate_seq_region UINTEGER, and mate_position UBIGINT. One row represents one ALT allele. Keep genotype, confidence-interval, raw-ALT, orientation, and other provenance in the source relation; join selected annotations back by event_index instead of multiplying wide payloads by transcript count. Literal reference/alternate rows are small variants; a typed end/span or supported symbolic ALT is structural; a complete mate coordinate pair is a breakend. Contradictory or incomplete geometry fails instead of being guessed, including disagreement between supported symbolic ALT and explicit structural_type values. For VCF span SVs, prepare position as POS + 1 after removing the left anchor; insertion position is the interbase site after POS. DEL implies LOSS and DUP/TDUP imply GAIN when copy_change is NULL. Filtering the globally coordinate-ordered event stream preserves the order required by each native transcript and regulation-feature sweep; the macro does not hide a sort. The stable compact contract includes SO/region masks, IMPACT/status/reason codes, one-based cDNA/CDS/protein positions, amino-acid bytes, NMD prediction/escape codes, and overlap-object ordinals. protein_position is the affected one-based protein residue/codon ordinal used by codon-level evidence such as PS1/PM5. rich := TRUE adds Consequence, IMPACT, region, amino-acid, NMD, overlap-object, duckvep_status, and duckvep_reason text from the same native pass while retaining every compact field; FALSE or explicit NULL leaves those presentation columns NULL. hgvs := TRUE fuses independent-event HGVSc/HGVSn/HGVSp into the small-variant lane without repeating candidate discovery; it composes with rich := TRUE in one pass; structural and breakend HGVS remain NULL. DuckHTS audit status/reason fields distinguish an unresolved computation from a genuinely absent consequence and are not Ensembl CSQ fields. Zero disables either directional transcript window. Decode consequence_mask only after filtering by joining duckvep_so_terms(); join transcript_index, gene_index, or regulation_feature_index to the prepared model relations for stable identifiers, biotype, MANE/GENCODE/CCDS flags, and other presentation metadata. This typed rich projection does not claim the complete serialized VEP CSQ vocabulary: exon/intron ordinals, codon strings, distance text, CANONICAL/APPRIS/TSL, existing variation, and supplementary predictors require their declared model or annotation relations. |
-| `duckvep_so_terms`                    | table       | table                 |          | Return the generated Sequence Ontology metadata behind DuckVEP’s stable consequence-mask bits: bit index, single-bit mask, term, impact code and label, VEP severity rank, and evaluator tier. Filter and aggregate compact annotation rows numerically first, then expand only selected mask bits with (annotation.consequence_mask & term.consequence_mask) \<\> 0. The relation is generated from the same pinned VEP-116 class-model metadata as the native consequence engine; it is not a second hand-maintained term inventory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Function                              | Kind        | Returns                                                                                                                                                                                                                                                                                                                                                                                       | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|---------------------------------------|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `duckvep_ensembl_regions`             | table_macro | table                                                                                                                                                                                                                                                                                                                                                                                         |          | Match a tiled reference sequence to one Ensembl core assembly and assign dense DuckVEP sequence-region ordinals. core_schema must contain the Ensembl seq_region and coord_system tables. reference_chunks_table must contain chrom, zero-based start, half-open end, and seq columns, normally materialized from fasta_nuc(…, include_seq := TRUE). Chunks must be contiguous from zero, their sequence lengths must match their intervals, and every FASTA contig must match exactly one same-length Ensembl region. Regions absent from the supplied FASTA are deliberately excluded. The supplied reference therefore defines the exact modeled path set: a primary-assembly FASTA produces a primary-path model, while alternate haplotypes or patches require their named sequence paths in the reference chunks. This macro does not apply Ensembl assembly_exception projections or merge X/Y PAR paths.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `duckvep_ensembl_transcripts`         | table_macro | table                                                                                                                                                                                                                                                                                                                                                                                         |          | Build the validated DuckVEP transcript relation from Ensembl core tables and matching tiled FASTA sequence. The VEP-116 core selection is applied before dense ordinals are assigned: transcripts must be current and have a non-empty stable ID, and artifact-biotype or readthrough_tra transcripts are excluded. The result contains the exact resident-loader columns, stable/source identifiers, biotypes, versioned RefSeq accessions from MANE Select and MANE Plus Clinical attributes when present, a nested ranked-exon projection, mature miRNA cDNA attributes projected into genomic exon segments, and supported Translation SeqEdits. MANE accessions remain cold DuckDB columns while only selection flags enter the resident C model. Prepared sequence contains the phase-adjusted CDS plus the complete transcript-oriented pre-CDS and post-CDS spliced sequence; the legacy post_cds_bases field remains as the first three post-CDS bases. Codon-table IDs come from the Ensembl seq_region_attrib relation and default to table 1 exactly as VEP 116 does; every BioPerl/VEP-supported NCBI table ID is accepted and invalid or conflicting source attributes reject the import. Single-residue initial_met, \_selenocysteine, amino_acid_sub, and \_stop_codon_rt edits are retained as a sparse reference-peptide overlay. Other Translation SeqEdit shapes and transcript-level RNA edits fail closed by withholding sequence with an explicit reason. Transcript rows remain specific to the exact selected sequence path, including separate X/Y PAR and alternate-haplotype stable IDs. The macro does not collapse alt_allele equivalence groups or use IS_PAR metadata to merge consequence rows.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `duckvep_ensembl_regulation_features` | table_macro | table                                                                                                                                                                                                                                                                                                                                                                                         |          | Build the VEP-116-compatible interval relation for Ensembl RegulatoryFeature and MotifFeature rows on the sequence regions selected for a DuckVEP model. funcgen_schema must contain regulatory_feature, feature_type, and motif_feature; regions_table is the output of duckvep_ensembl_regions(…). Matching VEP’s database and cache source, epigenetically_modified_region (EMAR) RegulatoryFeature rows are excluded before dense ordinals are assigned. The result maps source sequence-region IDs to model ordinals, validates one-based inclusive coordinates and source feature types, and preserves stable/source IDs, feature metadata, binding-matrix IDs, regulatory-build IDs, and motif scores as cold relation columns. feature_kind is the compact resident code: 1 regulatory region or 2 transcription-factor binding site. Pass the five hot columns regulation_feature_index, seq_region, feature_start, feature_end, and feature_kind to duckvep_model_load(interval_feature_query := …); the remaining columns stay relational for late projection.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `duckvep_model_receipt`               | table_macro | table                                                                                                                                                                                                                                                                                                                                                                                         |          | Create one deterministic receipt for prepared DuckVEP region and transcript relations plus an optional prepared regulation-feature relation. The original eight positional arguments remain valid. When regulation_features_table is supplied by name, the receipt also validates its dense ordinals, region agreement, interval geometry, and feature kinds; counts regulatory regions and motif features; and includes their five resident columns in the model hash. It returns the declared provenance as source_name, source_version, assembly, source_manifest_sha256, reference_sha256, and transcript_filter; counts transcript, sequence, mature-miRNA, and peptide-edit content; and hashes every semantic resident-model field in stable ordinal order. source_manifest_sha256 should identify a canonical manifest containing every exact core and funcgen input used. The declared transcript_filter or source manifest should also record whether the reference contains only primary paths or includes alternate/patch paths and whether assembly_exception preprocessing was applied. The receipt contains no clock time, so rebuilding identical inputs yields the same model hash.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `duckvep_model_load`                  | table       | table(loaded BOOLEAN)                                                                                                                                                                                                                                                                                                                                                                         |          | Load one immutable consequence model into the current DuckDB database instance under a caller-chosen name. Three required query strings read committed, non-temporary DuckDB relations: sorted UINTEGER sequence-region ordinals; dense transcript rows with genomic span, strand, gene ordinal, flags, optional CDS span/sequence/codon table; and transcript-ordered exon rows with genomic and cDNA spans plus phase. The optional mature_mirna_query reads transcript_index UINTEGER, mature_mirna_start UBIGINT, and mature_mirna_end UBIGINT ordered by transcript and start. The optional peptide_edit_query reads transcript_index UINTEGER, protein_position UINTEGER, and alternate_amino_acid VARCHAR ordered uniquely by transcript and protein position. The optional interval_feature_query reads regulation_feature_index UINTEGER, seq_region UINTEGER, feature_start UINTEGER, feature_end UINTEGER, and feature_kind UTINYINT ordered by region, start, and index; kind 1 is RegulatoryFeature and kind 2 is MotifFeature. Loading keeps those hot columns in a compact SoA and builds a separate cgranges seed index, while identifiers and funcgen metadata remain ordinary DuckDB columns. The transcript projection accepts 11 base columns, 12 columns with the legacy post_cds_bases BLOB of up to three bases, or 13 columns ending in complete transcript-oriented pre_cds_sequence and post_cds_sequence BLOBs. Complete flanks enable VEP start/stop predicates for length-changing edits that cross a CDS start or end. reference_fasta enables reference-validated, VEP-style 3-prime HGVS shifting. When supplied, the sequence-region query must return seq_region UINTEGER, sequence_length UBIGINT, and seq_region_name VARCHAR; loading requires an existing FASTA index and verifies every declared name and exact length without creating or modifying the index. The named model pins open read descriptors for the validated FASTA, .fai, and optional .gzi. Linux workers reopen those descriptors through /proc/self/fd, Windows retains the resolved source under deny-write sharing, and other POSIX workers use independent resolved-source handles with identity checks rather than shared /dev/fd seek state. Each annotation worker owns its mutable faidx handle, reuses contained sorted reference requests, and rejects detectable replacement or in-place source mutation around a cache-miss fetch. Sequence-region ordinals are exact model paths: loading performs no contig-synonym, PAR, patch, haplotype, or assembly_exception projection. Callers must apply any declared path mapping before loading or constructing events. Explicit NULL for any optional query or reference parameter is equivalent to omission. The default is a partial transcript model: a variant with no loaded transcript is unresolved, not intergenic. Setting transcript_coverage_complete := TRUE requires sequence_length UBIGINT and permits supported intergenic results after coordinate bounds checks. Loading validates and narrows the model once and returns one TRUE row. Several named models may coexist.                                               |
+| `duckvep_model_drop`                  | scalar      | BOOLEAN                                                                                                                                                                                                                                                                                                                                                                                       |          | Remove a named resident DuckVEP consequence model and release its transcript and regulation-feature interval indexes, sequences, and cached worker state. Returns FALSE when the name is absent or the model is in use by an annotation vector.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `duckvep_allele_geometry`             | scalar      | STRUCT(kind_code UTINYINT, interbase BOOLEAN, anchor_side_code UTINYINT, raw_start0 UBIGINT, raw_end0 UBIGINT, feature_start0 UBIGINT, feature_end0 UBIGINT, edit_start0 UBIGINT, edit_end0 UBIGINT, insertion_boundary0 UBIGINT, reference_difference_offset USMALLINT, reference_difference_length USMALLINT, alternate_difference_offset USMALLINT, alternate_difference_length USMALLINT) |          | Interpret one literal biallelic allele with the same lossless geometry authority used by DuckVEP. position is positive and one-based; REF and ALT are non-empty A/C/G/T/N strings of at most 65,535 bases and must differ after ASCII case folding. kind_code is stable: 0 SNV, 1 insertion, 2 deletion, 3 length-changing replacement, and 4 multi-base substitution. anchor_side_code is 0 for no retained anchor, 1 for a left anchor, and 2 for a right anchor. All coordinate fields are non-null zero-based half-open intervals except insertion_boundary0, which is non-null only for an interbase insertion. Difference offsets and lengths are non-null indices into the uploaded REF and ALT. The result separates the uploaded REF span, VEP-116 VariationFeature span, and fully minimized semantic reference edit. A pure insertion has equal feature/edit start and end plus insertion_boundary0. This function does not split multiallelic records or left-align alleles: run duckhts_bcftools_norm(…, split_multiallelic := TRUE) first when canonical exact keys or cross-source joins require normalization. Use feature_start0/feature_end0 for VEP consequence feature overlap, edit_start0/edit_end0 for affected-reference supplementary providers, and an explicit insertion-flank policy when interbase is TRUE; the uploaded raw REF span is not a biological affected interval.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `duckvep_annotate`                    | table       | table                                                                                                                                                                                                                                                                                                                                                                                         |          | Annotate a narrow canonical event relation against one resident DuckVEP model through one fixed-schema, pipe-friendly surface. events_table names a coordinate-ordered relation with event_index UBIGINT, seq_region UINTEGER, positive one-based position, reference VARCHAR, alternate VARCHAR, end_position UBIGINT, structural_type VARCHAR, copy_change VARCHAR, mate_seq_region UINTEGER, and mate_position UBIGINT. One row represents one ALT allele. Keep genotype, confidence-interval, raw-ALT, orientation, and other provenance in the source relation; join selected annotations back by event_index instead of multiplying wide payloads by transcript count. Literal reference/alternate rows are small variants; a typed end/span or supported symbolic ALT is structural; a complete mate coordinate pair is a breakend. Contradictory or incomplete geometry fails instead of being guessed, including disagreement between supported symbolic ALT and explicit structural_type values. For VCF span SVs, prepare position as POS + 1 after removing the left anchor; insertion position is the interbase site after POS. DEL implies LOSS and DUP/TDUP imply GAIN when copy_change is NULL. Filtering the globally coordinate-ordered event stream preserves the order required by each native transcript and regulation-feature sweep; the macro does not hide a sort. The event seq_region is an exact ordinal in the loaded model; annotation does not strip contig prefixes or project PAR, patch, or alternate-haplotype coordinates. X/Y PAR and alternate-path transcript rows therefore remain path-specific exactly as prepared. The stable compact contract includes SO/region masks, IMPACT/status/reason codes, one-based cDNA/CDS/protein positions, amino-acid bytes, NMD prediction/escape codes, and overlap-object ordinals. protein_position is the affected one-based protein residue/codon ordinal used by codon-level evidence such as PS1/PM5. rich := TRUE adds Consequence, IMPACT, region, amino-acid, NMD, overlap-object, duckvep_status, and duckvep_reason text from the same native pass while retaining every compact field; FALSE or explicit NULL leaves those presentation columns NULL. hgvs := TRUE fuses independent-event HGVSc/HGVSn/HGVSp into the small-variant lane without repeating candidate discovery; it composes with rich := TRUE in one pass; structural and breakend HGVS remain NULL. DuckHTS audit status/reason fields distinguish an unresolved computation from a genuinely absent consequence and are not Ensembl CSQ fields. Zero disables either directional transcript window. Decode consequence_mask only after filtering by joining duckvep_so_terms(); join transcript_index, gene_index, or regulation_feature_index to the prepared model relations for stable identifiers, biotype, MANE/GENCODE/CCDS flags, and other presentation metadata. This typed rich projection does not claim the complete serialized VEP CSQ vocabulary: exon/intron ordinals, codon strings, distance text, CANONICAL/APPRIS/TSL, existing variation, and supplementary predictors require their declared model or annotation relations. |
+| `duckvep_so_terms`                    | table       | table                                                                                                                                                                                                                                                                                                                                                                                         |          | Return the generated Sequence Ontology metadata behind DuckVEP’s stable consequence-mask bits: bit index, single-bit mask, term, impact code and label, VEP severity rank, and evaluator tier. Filter and aggregate compact annotation rows numerically first, then expand only selected mask bits with (annotation.consequence_mask & term.consequence_mask) \<\> 0. The relation is generated from the same pinned VEP-116 class-model metadata as the native consequence engine; it is not a second hand-maintained term inventory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### Readers
 
@@ -728,6 +729,10 @@ SELECT * FROM tabix_index(
 COPY (
   WITH keyed AS (
     SELECT variantkey(duckhts_contig_key(chrom), pos, ref, alt) AS vk,
+           split_part(transcript_id, '.', 1) AS transcript_stable_id,
+           try_cast(split_part(transcript_id, '.', 2) AS UINTEGER)
+             AS transcript_version,
+           transcript_id, protein_variant, uniprot_id,
            am_pathogenicity, am_class
     FROM read_tabix(
       'source/AlphaMissense_hg38.tsv.gz',
@@ -742,9 +747,11 @@ COPY (
       scan_mode := 'sequential'
     )
   )
-  SELECT vk, am_pathogenicity, am_class
+  SELECT vk, transcript_stable_id, transcript_version,
+         transcript_id, protein_variant, uniprot_id,
+         am_pathogenicity, am_class
   FROM keyed WHERE vk IS NOT NULL
-  ORDER BY vk
+  ORDER BY vk, transcript_stable_id, transcript_version, protein_variant
 ) TO 'providers/alphamissense_hg38_variantkey.parquet'
   (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 122880);
 ```
@@ -757,7 +764,7 @@ model.
 ``` sql
 COPY (
   WITH source AS (
-    SELECT f.stable_id, f.feature_class,
+    SELECT f.regulation_feature_index, f.stable_id, f.feature_class,
            coalesce(f.feature_so_term, f.feature_class) AS so_term,
            r.seq_region_name AS chrom,
            f.feature_start::BIGINT - 1 AS start0,
@@ -824,63 +831,80 @@ alleles only; exact SVs and paired breakends use the same event schema
 through the typed columns that are `NULL` below.
 
 ``` sql
+-- Preserve the original VCF record and ALT numbering before normalization.
+-- The complete sample/FORMAT columns may stay in a wider source relation and
+-- join back through (record_index, alt_index).
+CREATE TABLE case_records AS
+SELECT row_number() OVER ()::UBIGINT AS record_index,
+       CHROM AS source_chrom, duckhts_contig_key(CHROM) AS chrom,
+       POS::BIGINT AS pos, REF AS ref, ALT AS alt
+FROM read_bcf(
+  'case/HG002.hiseqx.pcr-free.40x.deepvariant-v1.0.grch38.vcf.gz',
+  scan_mode := 'sequential', decompression_threads := 0
+);
+```
+
+``` sql
+-- Split ALT with its original one-based ordinal, validate REF against the
+-- release-matched FASTA, and left-align/minimize before any exact key is made.
+CREATE TABLE case_normalized AS
+SELECT record_index, alt_index, source_chrom, chrom,
+       pos_normed AS pos, upper(ref_normed) AS ref,
+       upper(alt_normed) AS alt, norm_status
+FROM duckhts_bcftools_norm(
+  'case_records',
+  'reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa',
+  split_multiallelic := TRUE
+)
+WHERE pos_normed IS NOT NULL
+  AND regexp_full_match(ref_normed, '[ACGTNacgtn]+')
+  AND regexp_full_match(alt_normed, '[ACGTNacgtn]+')
+  AND upper(ref_normed) <> upper(alt_normed);
+```
+
+``` sql
 CREATE TABLE case_alleles AS
-WITH records AS (
-  -- Sequential mode streams the complete file. Keep the raw VCF record number
-  -- because multiallelic expansion deliberately does not rewrite genotypes.
-  SELECT row_number() OVER ()::UBIGINT AS record_index,
-         CHROM, POS::BIGINT AS pos, REF AS ref, ALT
-  FROM read_bcf(
-    'case/HG002.hiseqx.pcr-free.40x.deepvariant-v1.0.grch38.vcf.gz',
-    scan_mode := 'sequential', decompression_threads := 0
-  )
-), alleles AS (
-  -- WITH ORDINALITY preserves VCF ALT numbering: ALT[1] is genotype allele 1.
-  -- Contig aliases are canonicalized before matching the Ensembl model.
-  SELECT record_index, a.alt_index, duckhts_contig_key(CHROM) AS chrom,
-         pos, upper(ref) AS ref, upper(a.alt) AS alt
-  FROM records
-  CROSS JOIN unnest(ALT) WITH ORDINALITY AS a(alt, alt_index)
-  -- Symbolic/BND records belong in the typed SV lane, not the literal allele
-  -- key used by the exact SNV/indel providers below.
-  WHERE regexp_full_match(ref, '[ACGTNacgtn]+')
-    AND regexp_full_match(a.alt, '[ACGTNacgtn]+')
-    AND upper(ref) <> upper(a.alt)
+WITH interpreted AS (
+  -- This calls the same event interpreter as the consequence kernel. It is
+  -- not another SQL trim implementation.
+  SELECT n.*, duckvep_allele_geometry(pos, ref, alt) AS geometry
+  FROM case_normalized n
 ), keyed AS (
-  -- VCF POS is one-based. Provider intervals are zero-based, half-open:
-  -- [POS - 1, POS - 1 + length(REF)).
-  -- VariantKey accelerates exact normalized-allele joins. For canonical human
-  -- contigs, RegionKey supplies exact ordered (chromosome, coordinate) bounds.
-  SELECT a.*, r.seq_region,
+  SELECT i.*, r.seq_region,
          variantkey(chrom, pos, ref, alt) AS vk,
-         regionkey(chrom, pos - 1, pos - 1 + length(ref)) AS rk
-  FROM alleles a
-  JOIN grch38_regions r ON r.seq_region_name = a.chrom
+         regionkey(chrom, geometry.feature_start0,
+                   geometry.feature_end0) AS feature_rk
+  FROM interpreted i
+  JOIN grch38_regions r ON r.seq_region_name = i.chrom
 )
 SELECT row_number() OVER (
          ORDER BY seq_region, pos, record_index, alt_index
        )::UBIGINT AS event_index,
-       record_index, alt_index, seq_region, chrom, pos::UBIGINT AS position,
-       ref AS reference, alt AS alternate, vk,
-       mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,
-       pos - 1 AS start0, pos - 1 + length(ref) AS end0,
-       rk >> 31 AS rk_chrom_start,
-       regionkey(chrom, pos - 1 + length(ref),
-                 pos - 1 + length(ref)) >> 31 AS rk_chrom_end,
+       record_index, alt_index, seq_region, chrom,
+       pos::UBIGINT AS position, ref AS reference, alt AS alternate,
+       vk, mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,
+       geometry.kind_code, geometry.interbase,
+       geometry.raw_start0, geometry.raw_end0,
+       geometry.feature_start0, geometry.feature_end0,
+       geometry.edit_start0, geometry.edit_end0,
+       geometry.insertion_boundary0,
+       feature_rk >> 31 AS feature_rk_chrom_start,
+       regionkey(chrom, geometry.feature_end0,
+                 geometry.feature_end0) >> 31 AS feature_rk_chrom_end,
        NULL::UBIGINT AS end_position,
        NULL::VARCHAR AS structural_type,
        NULL::VARCHAR AS copy_change,
        NULL::UINTEGER AS mate_seq_region,
        NULL::UBIGINT AS mate_position
 FROM keyed
-WHERE vk IS NOT NULL AND rk IS NOT NULL
--- Coordinate order is a kernel input contract. It lets each worker advance a
--- transcript/feature sweep instead of searching the whole model per allele.
+WHERE vk IS NOT NULL AND feature_rk IS NOT NULL
+-- Coordinate order is the sweep contract. Normalization can move POS, so sort
+-- only after normalization and event interpretation.
 ORDER BY seq_region, position, event_index;
 ```
 
-Measured VCF decoding, ALT expansion, keying and ordering: 12.200
-seconds; 7,378,240 alleles staged.
+Measured VCF decoding, ALT expansion, normalization, keying and
+ordering: 12.200 seconds; 7,378,240 alleles staged.
 
 ##### Consequence and HGVS
 
@@ -897,18 +921,21 @@ annotation rows.
 
 ##### Exact allele providers
 
-All three providers share the same exact normalized-allele join.
-VariantKey can encode short alleles reversibly or store a hash for
-longer alleles. The `is_hash` equality prevents mixing those
-representations; hashed matches are then checked against the literal
-contig, position, REF and ALT so a collision cannot become clinical
-evidence.
+ClinVar and ClinvArbitration are allele-level providers. VariantKey can
+encode short alleles reversibly or store a hash for longer alleles. The
+`is_hash` equality prevents mixing those representations; hashed matches
+are then checked against the normalized literal contig, position, REF
+and ALT so a collision cannot become clinical evidence. Lists of structs
+keep each provider record intact instead of independently aggregating
+fields that belong together.
 
 ``` sql
 CREATE TABLE case_clinvar AS
-SELECT q.event_index, min(p.allele_id) AS clinvar_allele_id,
-       list_distinct(flatten(list(p.clinical_significance)))
-         AS clinvar_significance
+SELECT q.event_index,
+       list_distinct(list(struct_pack(
+         allele_id := p.allele_id,
+         clinical_significance := p.clinical_significance
+       ))) AS clinvar_records
 FROM case_alleles q
 JOIN read_parquet('providers/clinvar_20260706_grch38_keyed.parquet') p
   ON q.vk = p.vk AND q.is_hash = p.is_hash
@@ -923,8 +950,11 @@ Measured dated ClinVar join: 0.259 seconds; 50,749 matched alleles.
 ``` sql
 CREATE TABLE case_clinvarbitration AS
 SELECT q.event_index,
-       arg_max(p.clinical_significance, p.gold_stars) AS classification,
-       max(p.gold_stars) AS gold_stars
+       list_distinct(list(struct_pack(
+         allele_id := p.allele_id,
+         classification := p.clinical_significance,
+         gold_stars := p.gold_stars
+       ))) AS clinvarbitration_records
 FROM case_alleles q
 JOIN read_parquet('providers/clinvarbitration_grch38_keyed.parquet') p
   ON q.vk = p.vk AND q.is_hash = p.is_hash
@@ -938,18 +968,31 @@ Measured ClinvArbitration join: 0.176 seconds; 45,232 matched alleles.
 
 AlphaMissense contains single-nucleotide substitutions, whose
 VariantKeys are reversible, so hashed events are excluded rather than
-subjected to a literal fallback comparison.
+subjected to a literal fallback comparison. Scores are
+transcript-specific: the provider pack retains the versioned transcript
+accession and the join resolves it to the same resident
+`transcript_index` emitted by DuckVEP. Taking the maximum score across
+all transcripts would attach one transcript’s prediction to unrelated
+transcript consequence rows.
 
 ``` sql
 CREATE TABLE case_alphamissense AS
-SELECT q.event_index,
-       max(p.am_pathogenicity) AS am_pathogenicity,
-       arg_max(p.am_class, p.am_pathogenicity) AS am_class
+SELECT q.event_index, t.transcript_index,
+       list_distinct(list(struct_pack(
+         transcript_id := p.transcript_id,
+         protein_variant := p.protein_variant,
+         uniprot_id := p.uniprot_id,
+         pathogenicity := p.am_pathogenicity,
+         classification := p.am_class
+       ))) AS alphamissense_records
 FROM case_alleles q
 JOIN read_parquet('providers/alphamissense_hg38_variantkey.parquet') p
   ON q.vk = p.vk
+JOIN grch38_transcripts t
+  ON t.transcript_stable_id = p.transcript_stable_id
+ AND t.transcript_version = p.transcript_version
 WHERE NOT q.is_hash
-GROUP BY q.event_index;
+GROUP BY q.event_index, t.transcript_index;
 ```
 
 Measured AlphaMissense join: 0.523 seconds; 14,850 matched alleles.
@@ -959,9 +1002,13 @@ Measured AlphaMissense join: 0.523 seconds; 14,850 matched alleles.
 BigWig is already an indexed, compressed genomic signal store, so
 conservation does not need a bespoke DuckVEP cache. Read only the case
 ranges, preserve missing bases explicitly, and reduce overlaps in SQL.
-This example uses the real UCSC phyloP 100-way track and a chromosome-22
-slice; production orchestration can construct comma-separated batches
-from the distinct case spans and combine them with `UNION ALL BY NAME`.
+Conservation over a replacement or deletion uses the minimized affected
+reference span, not its VCF padding anchor. A pure insertion affects no
+reference base; report its immediate left and right reference flanks
+separately instead of fabricating a one-base mean. This example uses the
+real UCSC phyloP 100-way track and a chromosome-22 slice; production
+orchestration can construct comma-separated batches from the distinct
+case coordinates and combine them with `UNION ALL BY NAME`.
 
 ``` sql
 CREATE TABLE case_phylop_chr22 AS
@@ -973,29 +1020,53 @@ WITH signal AS (
     'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw',
     region := 'chr22:20000000-20099999'
   )
-), overlaps AS (
-  SELECT q.event_index, q.end0 - q.start0 AS requested_bases,
-         least(q.end0, s.end0) - greatest(q.start0, s.start0)
-           AS observed_bases,
-         s.value
+), requests AS (
+  SELECT event_index, 'span' AS request_kind,
+         edit_start0 AS start0, edit_end0 AS end0
   FROM case_alleles q
-  JOIN signal s
-    ON q.chrom = s.chrom
-   AND q.start0 < s.end0 AND q.end0 > s.start0
   WHERE q.chrom = '22'
-    AND q.start0 < 20099999 AND q.end0 > 19999999
+    AND NOT interbase
+    AND edit_start0 < 20099999 AND edit_end0 > 19999999
+  UNION ALL
+  SELECT event_index, 'left', insertion_boundary0 - 1, insertion_boundary0
+  FROM case_alleles q
+  WHERE q.chrom = '22' AND interbase AND insertion_boundary0 > 0
+    AND insertion_boundary0 BETWEEN 20000000 AND 20099999
+  UNION ALL
+  SELECT event_index, 'right', insertion_boundary0, insertion_boundary0 + 1
+  FROM case_alleles q
+  WHERE q.chrom = '22' AND interbase
+    AND insertion_boundary0 BETWEEN 19999999 AND 20099998
+), overlaps AS (
+  SELECT r.event_index, r.request_kind, r.end0 - r.start0 AS requested_bases,
+         greatest(0, least(r.end0, s.end0) - greatest(r.start0, s.start0))
+           AS observed_bases, s.value
+  FROM requests r
+  LEFT JOIN signal s
+    ON r.start0 < s.end0 AND r.end0 > s.start0
 )
 SELECT event_index,
-       sum(observed_bases) AS observed_bases,
-       max(requested_bases) AS requested_bases,
-       sum(observed_bases * value) / sum(observed_bases) AS phyloP_mean,
-       min(value) AS phyloP_min, max(value) AS phyloP_max
+       sum(observed_bases) FILTER (WHERE request_kind = 'span')
+         AS observed_bases,
+       max(requested_bases) FILTER (WHERE request_kind = 'span')
+         AS requested_bases,
+       sum(observed_bases * value) FILTER (WHERE request_kind = 'span') /
+         nullif(sum(observed_bases) FILTER (WHERE request_kind = 'span'), 0)
+         AS phyloP_mean,
+       min(value) FILTER (WHERE request_kind = 'span') AS phyloP_min,
+       max(value) FILTER (WHERE request_kind = 'span') AS phyloP_max,
+       max(value) FILTER (
+         WHERE request_kind = 'left' AND observed_bases = 1
+       ) AS insertion_left_phyloP,
+       max(value) FILTER (
+         WHERE request_kind = 'right' AND observed_bases = 1
+       ) AS insertion_right_phyloP
 FROM overlaps
 GROUP BY event_index;
 ```
 
-The overlap width weights run-length intervals correctly. An absent
-result means the requested span had no observed phyloP value; it is not
+The overlap width weights run-length intervals correctly. `NULL` means
+the requested span or flank had no observed phyloP value; it is not
 silently converted to zero. Repeated cohort workloads may explicitly
 materialize release-labelled, coordinate-sorted Parquet or DuckLake
 tiles, but BigWig remains a valid provider and precision authority
@@ -1010,6 +1081,15 @@ the same value at the half-open end gives an exact
 express both chromosome identity and half-open overlap, and DuckDB plans
 them as [IEJoin](https://duckdb.org/2022/05/27/iejoin).
 
+This example deliberately uses DuckVEP’s VEP-feature coordinates. For an
+insertion they are an empty interval at the interbase site, so the
+strict range inequalities require both adjacent reference positions to
+lie inside the provider interval, matching VEP’s core-feature test. A
+provider whose contract is “affected reference bases” should instead use
+`edit_start0/edit_end0` and an explicit insertion policy, as the phyloP
+query does above. The uploaded `raw_start0/raw_end0` span is provenance,
+not an overlap default.
+
 Do not add `q.chrom = p.chrom` to this plan. DuckDB then chooses a
 chromosome hash join and tests the range predicates across enormous
 same-chromosome candidate sets. On this workload that physical-plan
@@ -1022,12 +1102,15 @@ contig identity and has its own measured memory/speed tradeoff.
 ``` sql
 CREATE TABLE case_interval AS
 SELECT q.event_index,
-       list_distinct(list(p.stable_id)) AS stable_ids,
-       list_distinct(list(p.so_term)) AS so_terms
+       list_distinct(list(struct_pack(
+         regulation_feature_index := p.regulation_feature_index,
+         stable_id := p.stable_id,
+         so_term := p.so_term
+       ))) AS interval_records
 FROM case_alleles q
 JOIN read_parquet('providers/ensembl116_grch38_regulatory.parquet') p
-  ON q.rk_chrom_start < p.rk_chrom_end
- AND q.rk_chrom_end > p.rk_chrom_start
+  ON q.feature_rk_chrom_start < p.rk_chrom_end
+ AND q.feature_rk_chrom_end > p.rk_chrom_start
 GROUP BY q.event_index;
 ```
 
@@ -1037,10 +1120,15 @@ and write takes 1.144 seconds; 414,813 matched alleles.
 
 ##### Streamed result
 
-Transcript indices are compact model-local ordinals. Resolve them to
-stable transcript/gene identifiers only after annotation, then attach
-gene-level and event-level payloads. This keeps provider strings out of
-the shared C model and lets DuckDB project or omit them normally.
+Transcript and regulation-feature indices are compact model-local
+ordinals. Resolve them to stable identifiers only after annotation, then
+attach gene-level and event-level payloads. The interval query above
+demonstrates and measures a general relational overlap provider; it is
+not needed to rediscover the same Ensembl core feature already selected
+by the native sweep. Core feature metadata joins directly by
+`regulation_feature_index`, which cannot attach a nearby but different
+feature. This keeps provider strings out of the shared C model and lets
+DuckDB project or omit them normally.
 
 The query streams annotation into the joins and uses one Parquet writer
 per DuckDB worker. `event_index` is the stable identity and ordering
@@ -1057,11 +1145,11 @@ COPY (
          a.alternate_amino_acid, a.nmd_prediction,
          a.transcript_hgvs, a.protein_hgvs,
          t.transcript_stable_id, t.gene_stable_id, t.mane_select_refseq,
-         cv.clinvar_allele_id, cv.clinvar_significance,
-         ca.classification AS clinvar_class, ca.gold_stars,
-         am.am_pathogenicity, am.am_class,
+         rf.stable_id AS regulation_stable_id,
+         rf.feature_so_term AS regulation_so_term,
+         cv.clinvar_records, ca.clinvarbitration_records,
+         am.alphamissense_records,
          gc.pLI, gc.oe_lof_upper,
-         ri.stable_ids AS interval_ids, ri.so_terms AS interval_terms,
          a.overlap_object, a.duckvep_status, a.duckvep_reason
   FROM duckvep_annotate(
     'case_alleles', 'human_116_grch38',
@@ -1070,12 +1158,14 @@ COPY (
   ) a
   JOIN case_alleles q USING (event_index)
   LEFT JOIN grch38_transcripts t USING (transcript_index)
+  LEFT JOIN grch38_regulation rf USING (regulation_feature_index)
   LEFT JOIN read_parquet('providers/gnomad_v211_constraint_gene.parquet') gc
     ON gc.gene_id = t.gene_stable_id
   LEFT JOIN case_clinvar cv USING (event_index)
   LEFT JOIN case_clinvarbitration ca USING (event_index)
-  LEFT JOIN case_alphamissense am USING (event_index)
-  LEFT JOIN case_interval ri USING (event_index)
+  LEFT JOIN case_alphamissense am
+    ON am.event_index = a.event_index
+   AND am.transcript_index = a.transcript_index
 ) TO 'case/HG002.deepvariant-v1.0.duckvep'
   (FORMAT PARQUET, COMPRESSION ZSTD, PER_THREAD_OUTPUT TRUE);
 ```

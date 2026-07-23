@@ -8,7 +8,87 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
-## Ensembl release CSQ is a lossy projection of the complete VE relation
+## Executable compatibility policy
+
+Executable-language leaks are named in
+`src/duckvep/kernel/src/duckvep_compat.h`. The adapter explicitly selects the public
+`DUCKVEP_COMPAT_VEP_116` kernel profile; the internal `DUCKVEP_COMPAT_STRICT` oracle
+disables only these gated leaks and is not a second consequence standard. A new
+Perl/BioPerl/runtime-dependent result must be classified here: either it receives a named
+flag, a strict counterexample, and an executable-VEP witness, or this ledger explains why
+it is part of the direct VEP state-machine contract rather than an alternative formatter
+policy. It must never remain an undocumented local special case. Algorithms must query
+the policy and must not test a VEP version or substitute a codon table locally.
+
+| Compatibility flag | VEP-116 result | Strict control | Detailed entry |
+|---|---|---|---|
+| `DUCKVEP_COMPAT_HGVS_INCOMPLETE_CODON_ASSIGNMENT` | Perl assignment retains an alternate CDS of at least three bases in the late protein-HGVS path | trim the alternate CDS to complete codons | [Protein HGVS local-peptide state machine](#protein-hgvs-preserves-veps-local-peptide-state-machine) |
+| `DUCKVEP_COMPAT_HGVS_LATE_STOP_STANDARD_TABLE` | BioPerl silently uses NCBI table 1 for the late stop search | retain the transcript codon table | [Late protein-stop search](#late-protein-stop-search-ignores-the-transcript-codon-table) |
+| `DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION` | consequence and HGVSp inspect distinct peptide views | use the canonical coding-context peptide view | [Terminal partial-codon insertions](#terminal-partial-codon-insertions-use-distinct-consequence-and-hgvs-peptide-views) |
+| `DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR` | a negative Perl substring start can produce position-zero output | reject the invalid negative peptide slice | [Protein HGVS local-peptide state machine](#protein-hgvs-preserves-veps-local-peptide-state-machine) |
+| `DUCKVEP_COMPAT_HGVS_XAA_AS_TER` | the formatter conflates BioPerl `Xaa` and `Ter` | keep unknown residue `Xaa` distinct from termination `Ter` | [Protein HGVS local-peptide state machine](#protein-hgvs-preserves-veps-local-peptide-state-machine) |
+
+This is the complete current inventory of runtime-language leaks for which DuckVEP has a
+separate strict result. The table is not a second implementation. The terminal-partial
+insertion predicate has one C authority shared by consequence and HGVS; profile-gated
+consumers choose the required view.
+Codon-table selection for the late stop search goes through the named policy helper, and
+even the single-residue fast path requires its caller to supply a profile.
+
+The implementation and test authorities are deliberately small:
+
+- `duckvep_compat_policy()` is the only profile-to-flag mapping. The
+  `compatibility_policy_inventory_is_versioned` test asserts the complete VEP-116 mask,
+  the empty strict mask, and the profile-dependent late-stop codon table;
+  `compatibility_policy_rejects_unknown_profiles_everywhere` proves that an invalid
+  profile cannot silently acquire strict-like fact or rendering semantics.
+- `hgvs_protein_alt_cds_length()` owns the incomplete-codon assignment replay;
+  `hgvs_short_alternate_cds_reproduces_vep_trim_assignment` pins both the executable Perl
+  result and the strict complete-codon result.
+- `duckvep_compat_late_stop_codon_table()` owns the table-1 substitution;
+  `hgvs_late_stop_search_reproduces_vep_standard_table_and_precedence` exercises both
+  VEP-116 and strict table-2 results.
+- `duckvep_coding_context_is_terminal_partial_insertion()` is the sole predicate for the
+  terminal-partial insertion state. `coding_context_delta_cds_end_nf_known_scene` pins
+  the distinct VEP consequence/HGVS views and strict rejection of the later VEP-only
+  view, while
+  `partial_terminal_insertion_covers_generated_vep_strata` explores both terminal-tail
+  lengths, all insertion-length residues modulo three, both strands, and standard and
+  mitochondrial translation tables.
+- the protein fact builder and renderer admit position-zero facts only through
+  `DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR`;
+  `hgvs_protein_facts_render_core_vep_shapes` builds both position-zero shapes from
+  complete peptide contexts, pins VEP's strings, and proves strict rejection at fact
+  construction. The minimized scenes cite the tracked extraction
+  `test/duckvep/conformance/data/hgvs_compatibility_witnesses.tsv` from the executable
+  differential, rather than inventing renderer-only facts.
+  `hgvs_protein_residue_name()` plus the sequence writer own Xaa/Ter presentation;
+  `strict_compatibility_keeps_xaa_distinct_from_termination` proves that disabling the
+  flag changes both substitution and delins output.
+
+Facts that borrow a coding context carry the same profile as that context. Fact building,
+late frameshift-termination replay, residue access, and rendering reject unknown or
+mismatched profiles; they cannot combine a strict fact with a VEP-116 peptide view. The
+self-contained single-residue fast path rejects an unknown profile as `INVALID_ARG`, not
+as a biologically inapplicable event.
+
+These C tests isolate mechanics; they do not certify VEP compatibility by themselves.
+Executable VEP differentials over fixed witnesses, complete real corpora, and generated
+rare-state campaigns remain the acceptance authority. Sanitizers establish memory and
+undefined-behaviour safety for the exercised states, not biological or VEP equivalence.
+The strict profile is never selected implicitly and is not exposed as a SQL option in the
+VEP-116 release surface.
+
+The remaining entries in this ledger describe VEP's declared coordinate, mapper,
+predicate-order, cache, or output semantics. They are implemented as typed facts and
+generated consequence rules, not hidden formatter switches. Examples include the
+configurable 5 kb transcript reach, the separately named fixed 5 kb BND admission cap,
+the named 1,000-base HGVS shift window, splice/NMD thresholds, and uploaded-feature versus
+minimized-edit geometry. Those values still require source anchors and differential
+witnesses, but toggling them in `STRICT` would define a different consequence engine
+rather than isolate a Perl/BioPerl leak.
+
+## Ensembl release VE is a release product, not the VEP executable oracle
 
 The official Ensembl variation release VCF contains both `VE` and `CSQ`. `VE` preserves
 one `Consequence|Index|Feature_type|Feature_id` item for every stored variation-effect
@@ -18,19 +98,88 @@ Assigning `Consequence` to that hash overwrites earlier terms for the same pair.
 non-coding intronic allele can therefore retain both `non_coding_transcript_variant` and
 `intron_variant` in VE while CSQ contains only `intron_variant`.
 
-Consequently the official VCF is a valid precomputed consequence oracle only through VE,
-not by treating its CSQ text as the complete VEP consequence set. CSQ remains useful for
-testing the typed VCF parser and its advertised presentation fields. Release conformance
-must aggregate VE by Index and feature, set transcript flank distances to zero to match
-the variation database's overlap-only dump, and keep the exact producer revision in its
-receipt. For non-SNVs, do not infer ownership by comparing the GVF/CSQ allele text with a
-padded VCF ALT: the producer records `Variant_seq` and Index before
+`VE` is lossless relative to those stored variation-effect rows, but those rows are not
+the output of the VEP command-line executable. The distinction is observable in release
+116 at both `X:276322 G>A` and `Y:276322 G>A`: the published `VE` value is
+`intergenic_variant`, while the pinned VEP 116 executable in cache mode with
+`--distance 0` emits three path-specific `5_prime_UTR_variant` transcript rows on each
+chromosome. DuckVEP emits the same three Y transcript rows as the executable. The
+executable/cache combination therefore remains the compatibility oracle; the official
+VCF is a separate release-product audit that can reveal differences between Ensembl's
+variation release pipeline and VEP.
+
+The release-product audit must aggregate `VE` by Index and feature, set transcript flank
+distances to zero to match the variation database's overlap-only dump, and keep the exact
+producer revision in its receipt. A difference from `VE` is retained and reported, but it
+does not override an exact executable-VEP result. `CSQ` remains useful for testing the
+typed VCF parser and its advertised presentation fields, not for reconstructing the
+complete stored consequence relation. For non-SNVs, do not infer ownership by comparing
+the GVF/CSQ allele text with a padded VCF ALT: the producer records `Variant_seq` and Index
+before
 `VariationFeature->to_VCF_record` constructs the VCF representation.
 
 Source anchor: Ensembl Variation release/116 commit
 `2fb834b987ede3824e200197a838ce11e91aeb4b`,
 `scripts/misc/release/gvf2vcf.pl::parse_consequence_info`, and
 `scripts/export/release/dump_gvf.pl`.
+
+## Assembly paths, PAR, patches, and alternate haplotypes are distinct model inputs
+
+VEP 116 does not reduce every assembly path to one primary chromosome before annotation.
+Its cache contains top-level alternate and patch paths, and an input already named on an
+available annotation path is evaluated on that path. `Parser.pm` transforms an input
+feature to another top-level sequence only when the stated sequence cannot be resolved by
+the configured annotation sources.
+
+Four upstream structures have different roles and must not be collapsed into one alias
+table:
+
+- core `assembly_exception` rows define coordinate projections for `PAR`, `HAP`,
+  `PATCH_FIX`, and `PATCH_NOVEL` regions;
+- `alt_allele` and `alt_allele_attrib` describe gene-equivalence groups, including
+  `IS_PAR` and representative-gene metadata; they do not authorize merging path-specific
+  transcript consequence rows;
+- VEP cache construction explicitly resolves duplicate human Y slices before dumping
+  transcript content;
+- the Ensembl variation FASTA adapter can fetch human Y-PAR reference sequence from the
+  corresponding X interval when the Y representation is unavailable or masked.
+
+This matters beyond contig spelling. X and Y PAR transcripts can share sequence and gene
+equivalence while retaining different transcript stable IDs and sequence-region
+coordinates. MHC alternate haplotypes such as `HSCHR6_MHC_COX_CTG1` are likewise distinct
+top-level annotation paths. A primary chromosome 6 event is not implicitly copied onto
+every MHC path, and an HLA allele name such as `HLA-A*02:01` is not a genomic
+sequence-region identifier.
+
+The current DuckVEP Ensembl preparation macros select exactly the sequence regions present
+in the supplied reference-chunk relation. A primary-assembly FASTA therefore builds a
+primary-path model; adding an alternate-path FASTA makes those exact paths eligible.
+`duckvep_model_load(...)` and `duckvep_annotate(...)` consume the resulting dense
+sequence-region ordinals and do not perform implicit synonym, PAR, patch, haplotype, or
+assembly-exception projection. Callers that accept external contig names must resolve them
+to an exact modeled path before constructing the event relation. Model receipts must state
+the reference path set, transcript-selection policy, and any assembly-exception
+preprocessing.
+
+This exact-path policy is compatible with VEP only for inputs whose path is directly
+available in the prepared model. General unavailable-path transformation and wrapped or
+projected assembly-exception execution remain separate work; returning an ordinary
+intergenic result for an absent path would be incorrect.
+
+The checked `par_path_witnesses.vcf` covers both path admission and sequence-dependent
+annotation. At `X/Y:276322 G>A`, VEP and DuckVEP emit the six path-specific
+`5_prime_UTR_variant` rows that differ from the published release `VE` product. At
+`X/Y:284188 A>G`, both engines emit path-specific PLCXD1 `start_lost` rows with
+`c.1A>G` and `p.Met1?`, including the corresponding NMD and non-coding transcript states.
+The four-event executable differential contains 44 transcript pairs; all 44 consequence
+pairs, all applicable HGVSc values, and all applicable HGVSp values agree exactly, with no
+unresolved, missing, or extra row.
+
+Source anchors: Ensembl release/116
+`modules/Bio/EnsEMBL/VEP/Parser.pm`, VEP cache pipeline
+`modules/Bio/EnsEMBL/VEP/Pipeline/DumpVEP/CreateDumpJobs.pm`, Ensembl Variation
+`modules/Bio/EnsEMBL/Variation/Utils/FastaSequence.pm`, and the core/otherfeatures schema
+fixtures containing `assembly_exception`, `alt_allele`, and `alt_allele_attrib`.
 
 ## VEP removes EMAR rows before regulatory overlap evaluation
 
@@ -732,6 +881,12 @@ Consequently, an island can produce `intron_variant` together with coding, donor
 donor-fifth-base terms. Moving the REF-shaped feature one base beyond the three-base
 cache flank suppresses all intron-derived terms even when the ALT-only island reaches the
 same bases. This is cache-dependent VEP behaviour, not a general interval-overlap rule.
+Perl's zero-padded string XOR is classified here as a direct VEP predicate semantic,
+not as an HGVS presentation alternative: it defines the differing-region islands that
+the splice and intron state machine consumes. The strict HGVS profile therefore does not
+change it. Its implementation remains in the typed splice-fact producer and is tested
+against the VEP-shaped island oracle; it must not be reimplemented by a formatter or SQL
+adapter.
 
 The pinned VEP environment uses `Set::IntervalTree` 0.12. Its source expands the cached
 intron interval in `BaseTranscriptVariation.pm::_create_intron_trees`, then consumes the
@@ -915,6 +1070,12 @@ synthetic incomplete reference residue as consequence-level `X` invents
 `p.Ter94=`. Fixed C, SQL, and R witnesses assert both views and the exact consequence,
 HGVSc, HGVSp, and shift; the strict executable corpus differential remains the independent
 acceptance gate.
+
+Compatibility policy: the state predicate is
+`duckvep_coding_context_is_terminal_partial_insertion()` for every consumer.
+`DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION` selects only VEP's later
+codon-rounded HGVSp view; disabling it leaves the canonical coding-context peptide view.
+There is no second terminal-partial predicate in the formatter.
 
 Source anchors: Ensembl Variation 116 `VariationEffect.pm::partial_codon`,
 `::inframe_insertion`, `::stop_gained`, `::coding_unknown`, and
@@ -1180,12 +1341,25 @@ peptide comparison would choose another representation:
   `length(post_seq) - length(changed_peptide)`. A matching first residue is therefore not
   sufficient when the changed peptide is longer than the suffix; a cyclic-prefix search
   moves valid indels too far.
+- `_get_surrounding_peptides` returns no post-variant sequence when its one-based
+  `post_pos` equals the peptide length, even though that position names the final
+  translated residue. The subsequent 3-prime shift is skipped. A coding insertion that
+  copies that last residue can therefore remain `p.Tyr22_Trp23insTrp` instead of becoming
+  `p.Trp23dup`, even when its transcript DNA form is a duplication. The held-out
+  seed-161803399 campaign exposed this state with `chrDuck:234 C>CTGG`; the minimized C
+  test uses a `YW` peptide and pins the same endpoint comparison.
 - Perl substring semantics leak into two start-of-peptide outputs. When clipping leaves an
   insertion at `start=1,end=0`, `substr(_peptide, -1, 2)` supplies the final reference
   residue and executable VEP can print strings such as
-  `p.Trp0_Trp1insAsnThrAlaAlaThr`. A cached start-loss override over the same reversed
+  `p.Trp0_Trp1insIle`. A cached start-loss override over the same reversed
   interval can print `p.Trp1_?0`. These are VEP-116 compatibility strings, not valid HGVS
   positions, and the typed fact layer records them separately from semantic edit replay.
+  Two fixed builder scenes are minimized from committed executable differentials on
+  `DUCK1-201`: `chrDuck:119:G:GATA` produces `p.Trp0_Trp1insIle`, while
+  `chrDuck:120:A:ACCA` produces `p.Trp1_?0`. Their complete VEP and DuckVEP rows are in
+  the tracked extraction
+  `test/duckvep/conformance/data/hgvs_compatibility_witnesses.tsv`; it records the source
+  differential revision, seed-named corpus, and pinned VEP/core/variation authorities.
 - The terminal stop becomes an insertion flank only for a pure insertion whose mapper
   coordinate lies inside the terminal codon. VEP may then print
   `p.Trp23_Ter24ins...`. An earlier coding insertion can clip to the same peptide-level
@@ -1197,6 +1371,19 @@ duplication, frameshift, start loss, and extension distinct before rendering. Ra
 properties replay the described peptide edit and publish counters for each observed shape,
 strand, immediate-stop state, and unsupported terminal insertion. Executable-VEP strings
 remain the final compatibility oracle.
+
+Three named policy flags isolate the executable-language behaviour in this state machine:
+
+- `DUCKVEP_COMPAT_HGVS_INCOMPLETE_CODON_ASSIGNMENT` owns the assignment in
+  `_trim_incomplete_codon`;
+- `DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR` owns only the negative-`substr` position-zero
+  result; and
+- `DUCKVEP_COMPAT_HGVS_XAA_AS_TER` owns both Xaa/Ter equality and rendered residue-name
+  substitution, including truncation of alternate peptide text at the first VEP-style
+  `Ter`.
+
+The shared fact builder and writer consume those flags. Callers cannot recreate these
+states by passing a formatter hint, and the strict oracle disables all three.
 
 VEP's ordinary `--hgvs` output renders the default protein suffix without parentheses,
 for example `p.Ter394CysextTer9`. Parentheses are a presentation option enabled by
@@ -1314,6 +1501,9 @@ its beginning. When the first such TGA lies before the affected residue, its com
 distance is non-positive and VEP prints `Ter?`; the search must not reuse a first-stop
 shortcut proved under table 2. DuckVEP reproduces that inconsistency only in the late
 stop search; all ordinary mitochondrial coding consequences remain table-2 translations.
+`DUCKVEP_COMPAT_HGVS_LATE_STOP_STANDARD_TABLE` is the sole switch, and
+`duckvep_compat_late_stop_codon_table()` is the only code allowed to replace a
+transcript's table for this search. Strict mode retains the transcript table.
 
 The same formatter exposes a precedence state that consequence names alone do not make
 obvious. `_get_hgvs_protein_format()` tests cached `stop_lost` combined with peptide type

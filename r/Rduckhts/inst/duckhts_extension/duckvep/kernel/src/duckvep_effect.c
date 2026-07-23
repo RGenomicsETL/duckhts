@@ -61,7 +61,8 @@ void duckvep_nmd_predict(
         /* Projector success is the definedness test used by NMD.pm. A pure
          * insertion immediately before CDS base 1 is the valid reversed range
          * 1..0, and the plugin classifies its zero end as an early-CDS escape. */
-        early_cds_escape = variant_cds_end <= 101u;
+        early_cds_escape =
+            variant_cds_end <= DUCKVEP_NMD_EARLY_CDS_MAX_END1;
     }
     if (early_cds_escape) {
         reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_EARLY_CDS;
@@ -96,10 +97,13 @@ void duckvep_nmd_predict(
 
         if (transcripts->strand[tx_idx] < 0) {
             lo = exons->start1[penultimate];
-            hi = lo > UINT32_MAX - 51u ? UINT32_MAX : lo + 51u;
+            hi = lo > UINT32_MAX - DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET
+                ? UINT32_MAX
+                : lo + DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET;
         } else {
             hi = exons->end1[penultimate];
-            lo = hi > 51u ? hi - 51u : 0u;
+            lo = hi > DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET
+                ? hi - DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET : 0u;
         }
         if (variant_end1 >= lo && variant_end1 <= hi) {
             reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END;
@@ -396,20 +400,29 @@ void duckvep_effect_ctx_apply_event(
         return;
     }
 
-    /* Mirrors Ensembl VariationEffect insertion/deletion predicates: inspect the
-     * normalized allele length delta, not the broad declared kind. A lengthening
-     * delins is an insertion predicate, a shortening delins is a deletion
-     * predicate, and an equal-length substitution is neither. */
-    if (event->ref_diff_length == 0u && event->alt_diff_length > 0u) {
+    /* BaseVariationFeatureOverlapAllele classifies the VEP feature allele
+     * before transcript projection. An equal-length genomic allele spanning
+     * an intron remains SNP-class even when its outer mapped CDS replacement
+     * changes length. */
+    if (event->feature_length_relation ==
+        (uint8_t)DUCKVEP_FEATURE_LENGTH_EQUAL) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_SNP);
+    } else if (event->feature_length_relation ==
+               (uint8_t)DUCKVEP_FEATURE_LENGTH_INCREASE) {
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INSERTION);
-    } else if (event->ref_diff_length > 0u && event->alt_diff_length == 0u) {
+    } else if (event->feature_length_relation ==
+               (uint8_t)DUCKVEP_FEATURE_LENGTH_DECREASE) {
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELETION);
-    } else if (event->ref_diff_length > 0u && event->alt_diff_length > 0u) {
-        if (event->alt_diff_length > event->ref_diff_length) {
-            ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INSERTION);
-        } else if (event->ref_diff_length > event->alt_diff_length) {
-            ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELETION);
-        }
+    } else if (event->ref_diff_length == 0u &&
+               event->alt_diff_length > 0u) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INSERTION);
+    } else if (event->ref_diff_length > 0u &&
+               event->alt_diff_length == 0u) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELETION);
+    } else if (event->alt_diff_length > event->ref_diff_length) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INSERTION);
+    } else if (event->ref_diff_length > event->alt_diff_length) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELETION);
     }
     /* VariationEffect::feature_ablation is shared by ordinary
      * VariationFeatureOverlapAlleles and structural overlap alleles. The
@@ -430,17 +443,29 @@ void duckvep_effect_ctx_apply_delta(
     if (ctx == NULL || delta == NULL || !delta->valid) return;
     ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELTA);
     if (delta->synonymous) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_SYNONYMOUS);
-    if (delta->missense) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_MISSENSE);
+    if (delta->missense &&
+        (ctx->pre_bits &
+         (DUCKVEP_PRE(DUCKVEP_PRE_INSERTION) |
+          DUCKVEP_PRE(DUCKVEP_PRE_DELETION))) == 0u) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_MISSENSE);
+    }
     if (delta->stop_gained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_GAINED);
     if (delta->stop_lost) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_LOST);
     if (delta->stop_retained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_RETAINED);
     if (delta->start_lost) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_LOST);
     if (delta->start_retained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_RETAINED);
-    if (delta->frameshift) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
-    if (delta->inframe_deletion)
+    if (delta->frameshift &&
+        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SNP)) == 0u) {
+        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
+    }
+    if (delta->inframe_deletion &&
+        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u) {
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);
-    if (delta->inframe_insertion)
+    }
+    if (delta->inframe_insertion &&
+        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) != 0u) {
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION);
+    }
     if (delta->protein_altering)
         ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_PROTEIN_ALTERING);
     if (delta->coding_unknown)

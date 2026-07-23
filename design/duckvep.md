@@ -1013,12 +1013,12 @@ indefinitely open prerequisite for every release.
 - `make bench-duckvep-release-parquet` reads the official Ensembl variation consequence
   VCF through typed CSQ columns and records complete versus consequence-only Parquet size,
   checksum, cardinality, and elapsed time without committing the large artifacts.
-- Pinned shards of those official release VCFs are the preferred fast CI oracle for
-  already-observed alleles: compare DuckVEP transcript consequence rows directly with the
-  release-specific CSQ projection without starting a Perl VEP process. They complement,
-  rather than replace, executable-VEP witnesses and generated corpora because a known-
-  variant release cannot observe absent allele shapes, alternative VEP flags, phased
-  combinations, or every structural state.
+- Pinned shards of those official release VCFs are a fast CI audit of Ensembl's published
+  Variation release product, not a VEP executable oracle. Compare DuckVEP rows with the
+  indexed `VE` relation rather than the lossy `CSQ` presentation, and retain differences
+  as product-lineage evidence. Release 116 already differs from cache-mode VEP at
+  `X/Y:276322 G>A`, so executable-VEP witnesses and generated corpora remain the semantic
+  compatibility gate.
 - Release engineering should publish receipt-hashed DuckDB model artifacts outside git,
   keyed by Ensembl/Ensembl Genomes release, species, assembly, transcript-filter policy,
   source relation hashes, and kernel/model ABI. A Zenodo record with a versioned manifest,

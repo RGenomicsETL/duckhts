@@ -1,10 +1,11 @@
 #!/usr/bin/env Rscript
 
 # Compare DuckVEP consequences with the lossless VE rows in an official Ensembl
-# variation release VCF. VE retains Consequence|Index|Feature_type|Feature_id;
-# Index identifies the original GVF Variant_seq and its corresponding VCF ALT.
-# The release CSQ projection is not the oracle: gvf2vcf.pl overwrites repeated
-# consequence terms for one allele/feature while building that presentation.
+# Variation release VCF. This audits that published release product; it is not a
+# substitute for comparison with the VEP executable/cache combination. VE retains
+# Consequence|Index|Feature_type|Feature_id, and Index identifies the original GVF
+# Variant_seq and its corresponding VCF ALT. CSQ is a further lossy presentation:
+# gvf2vcf.pl overwrites repeated terms for one allele/feature while building it.
 
 suppressMessages({
   library(DBI)
@@ -491,6 +492,8 @@ receipt <- data.frame(
     as.character(model_receipt$source_manifest_sha256[[1L]]),
   variation_source_revision = opt$variation_source_revision,
   oracle_field = "VE",
+  comparison_authority =
+    "Ensembl Variation release product; not the VEP executable oracle",
   allele_mapping = "VE zero-based Index identifies VCF ALT ordinal",
   upstream_distance = 0L,
   downstream_distance = 0L,

@@ -1,6 +1,39 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- make the Fedora CRAN-reproduction job install the suggested `Rtinycc` package before
+  strict dependency checks instead of failing before Rduckhts is built
+- document DuckVEP's exact sequence-path contract for X/Y pseudoautosomal regions,
+  patches, and alternate haplotypes. Ensembl `assembly_exception` projections,
+  `alt_allele` gene-equivalence metadata, and path-specific transcript rows are distinct;
+  the current model loader performs no implicit path projection. Also reclassify official
+  Ensembl Variation release-VCF `VE` comparisons as release-product audits rather than
+  VEP executable oracles after a release-116 X/Y PAR witness showed the two products can
+  differ while DuckVEP matches the pinned executable
+- reproduce VEP 116's peptide-endpoint test before protein-HGVS 3-prime
+  shifting. An in-frame insertion that copies the final translated residue can
+  remain an HGVSp insertion rather than being promoted to a protein duplication,
+  even when HGVSc is a transcript duplication. Add the minimized held-out
+  differential witness and record the helper ordering in the compatibility errata
+- make the executable rare-state campaign pass its generated maximum allele length
+  through to the VEP differential, including the retained VCF anchor base. A 100-base
+  campaign can no longer be reported from the runner's former 50-base default subset;
+  the eligibility audit must retain the requested long-allele strata
+- centralize the executable-language leaks required for Ensembl VEP 116 HGVS
+  parity in one named compatibility policy instead of embedding release-specific
+  codon-table and Perl-string behavior in individual algorithms. Consequence
+  projection and HGVS now consume one borrowed per-event/transcript fact object,
+  including one shared transcript edit and one shared terminal-partial-insertion
+  state. Add `duckvep_allele_geometry(...)` so SQL provider joins can use the exact
+  raw VCF span, VEP feature span, minimized edit span, and insertion point interpreted
+  by the native engine. The held-out 100,000-trial UBSan campaign exposed an
+  out-of-range read in the independent HGVS-shift test oracle; repair the oracle,
+  preserve the failing seed, and require the same seed to pass before recording the
+  campaign
+- register the scalar and list forms of `duckhts_alt_to_list(...)` and
+  `bcftools_norm_row(...)` as real DuckDB overload sets. Derived-query normalization
+  can now consume the `VARCHAR[]` ALT column returned by `read_bcf()` instead of
+  failing at bind time despite the documented list signature
 - preflight the peak intermediate CDS length before applying an exact-alias
   multi-edit haplotype. A high-coordinate insertion followed by a lower-coordinate
   deletion can now return `BUFFER_TOO_SMALL` without mutating the caller buffer even

@@ -14,6 +14,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* VEP 116 TranscriptVariationAllele::_genomic_shift fetches at most this many
+ * genomic bases on either side. Keep one authority for interval construction,
+ * reference lookup, and transcript-oriented shifting. */
+#define DUCKVEP_HGVS_SHIFT_LIMIT 1000u
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -181,6 +186,7 @@ typedef struct duckvep_hgvs_protein_fact {
     uint8_t shape; /* duckvep_hgvs_protein_shape_t */
     uint8_t termination_known;
     uint8_t extends_stop;
+    uint8_t compatibility_profile; /* duckvep_compat_profile_t */
     /* start_lost after an insertion uses VEP's two surrounding reference
      * residues, which need not be part of the local changed-peptide window. */
     uint8_t start_lost_flanking;
@@ -322,6 +328,7 @@ duckvep_hgvs_protein_fact_build_single_residue(
     uint8_t                          reference,
     uint8_t                          alternate,
     uint32_t                         consequence_flags,
+    duckvep_compat_profile_t         compatibility_profile,
     duckvep_hgvs_protein_fact_t     *out);
 
 /* Return one one-letter peptide residue from the fact's clipped REF/ALT

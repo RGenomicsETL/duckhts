@@ -6,9 +6,9 @@
  * classification.  The existing duckvep_haplotype_edit_t is intentionally
  * CDS-only; this wider HGVS-facing IR retains transcript coordinates for
  * exonic, intronic, UTR, and non-coding events while borrowing that same
- * optional CDS edit set.  Production consequence annotation still consumes
- * the prepared event and CDS edit helpers directly; it does not construct
- * this wider carrier in its hot loop.
+ * optional CDS edit set.  Consequence-only annotation still consumes the
+ * prepared event and CDS edit helpers directly.  A synchronous derivative
+ * observer constructs this carrier once and shares it through pair facts.
  *
  * No strings are rendered here.  Alleles remain borrowed in genomic-forward
  * orientation and carry transcript_strand explicitly.  A renderer or mutation

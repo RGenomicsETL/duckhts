@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 # Materialize an Ensembl variation consequence VCF as typed Parquet and record
-# both the complete reader projection and the narrow consequence-oracle view.
+# both the complete reader projection and the narrow release-product view.
 
 suppressMessages({
   library(DBI)

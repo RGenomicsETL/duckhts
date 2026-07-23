@@ -456,6 +456,193 @@ duckvep_scalar_simple_kind(uint32_t position,
 	return 1;
 }
 
+enum duckvep_allele_geometry_field {
+	DUCKVEP_GEOMETRY_KIND_CODE = 0,
+	DUCKVEP_GEOMETRY_INTERBASE,
+	DUCKVEP_GEOMETRY_ANCHOR_SIDE_CODE,
+	DUCKVEP_GEOMETRY_RAW_START0,
+	DUCKVEP_GEOMETRY_RAW_END0,
+	DUCKVEP_GEOMETRY_FEATURE_START0,
+	DUCKVEP_GEOMETRY_FEATURE_END0,
+	DUCKVEP_GEOMETRY_EDIT_START0,
+	DUCKVEP_GEOMETRY_EDIT_END0,
+	DUCKVEP_GEOMETRY_INSERTION_BOUNDARY0,
+	DUCKVEP_GEOMETRY_REF_DIFF_OFFSET,
+	DUCKVEP_GEOMETRY_REF_DIFF_LENGTH,
+	DUCKVEP_GEOMETRY_ALT_DIFF_OFFSET,
+	DUCKVEP_GEOMETRY_ALT_DIFF_LENGTH,
+	DUCKVEP_GEOMETRY_FIELD_COUNT
+};
+
+static const char *duckvep_allele_geometry_field_names[] = {
+	"kind_code", "interbase", "anchor_side_code", "raw_start0",
+	"raw_end0", "feature_start0", "feature_end0", "edit_start0",
+	"edit_end0", "insertion_boundary0", "reference_difference_offset",
+	"reference_difference_length", "alternate_difference_offset",
+	"alternate_difference_length"
+};
+
+static int
+duckvep_scalar_dna_valid(const char *sequence, size_t length)
+{
+	size_t index;
+
+	if (sequence == NULL || length == 0 || length > UINT16_MAX)
+		return 0;
+	for (index = 0; index < length; index++) {
+		unsigned char base = (unsigned char)sequence[index];
+		if (base >= 'a' && base <= 'z')
+			base = (unsigned char)(base - ('a' - 'A'));
+		if (base != 'A' && base != 'C' && base != 'G' &&
+		    base != 'T' && base != 'N')
+			return 0;
+	}
+	return 1;
+}
+
+static void
+duckvep_allele_geometry_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckdb_vector position_vector, reference_vector, alternate_vector;
+	duckdb_vector fields[DUCKVEP_GEOMETRY_FIELD_COUNT];
+	uint64_t *positions;
+	duckdb_string_t *references, *alternates;
+	idx_t rows, row;
+	size_t field;
+
+	position_vector = duckdb_data_chunk_get_vector(input, 0);
+	reference_vector = duckdb_data_chunk_get_vector(input, 1);
+	alternate_vector = duckdb_data_chunk_get_vector(input, 2);
+	positions = duckdb_vector_get_data(position_vector);
+	references = duckdb_vector_get_data(reference_vector);
+	alternates = duckdb_vector_get_data(alternate_vector);
+	for (field = 0; field < DUCKVEP_GEOMETRY_FIELD_COUNT; field++)
+		fields[field] = duckdb_struct_vector_get_child(output, (idx_t)field);
+	duckdb_vector_ensure_validity_writable(output);
+	duckdb_vector_ensure_validity_writable(
+	    fields[DUCKVEP_GEOMETRY_INSERTION_BOUNDARY0]);
+	rows = duckdb_data_chunk_get_size(input);
+	for (row = 0; row < rows; row++) {
+		duckvep_event_t event;
+		const char *reference, *alternate;
+		size_t reference_length, alternate_length;
+
+		if (duckvep_validity_is_null(
+		        duckdb_vector_get_validity(position_vector), row) ||
+		    duckvep_validity_is_null(
+		        duckdb_vector_get_validity(reference_vector), row) ||
+		    duckvep_validity_is_null(
+		        duckdb_vector_get_validity(alternate_vector), row)) {
+			duckdb_validity_set_row_invalid(
+			    duckdb_vector_get_validity(output), row);
+			continue;
+		}
+		reference = duckdb_string_t_data(&references[row]);
+		alternate = duckdb_string_t_data(&alternates[row]);
+		reference_length = (size_t)duckdb_string_t_length(references[row]);
+		alternate_length = (size_t)duckdb_string_t_length(alternates[row]);
+		if (positions[row] == 0 || positions[row] > UINT32_MAX ||
+		    !duckvep_scalar_dna_valid(reference, reference_length) ||
+		    !duckvep_scalar_dna_valid(alternate, alternate_length) ||
+		    !duckvep_event_prepare_small(
+		        (uint32_t)positions[row], (const uint8_t *)reference,
+		        (uint16_t)reference_length, (const uint8_t *)alternate,
+		        (uint16_t)alternate_length, &event)) {
+			duckdb_scalar_function_set_error(info,
+			    "duckvep_allele_geometry: position must fit UINTEGER and REF/ALT must be distinct non-empty A/C/G/T/N alleles of at most 65,535 bases");
+			return;
+		}
+		((uint8_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_KIND_CODE]))[row] = event.kind;
+		((bool *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_INTERBASE]))[row] = event.interbase != 0u;
+		((uint8_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_ANCHOR_SIDE_CODE]))[row] = event.anchor_side;
+		((uint64_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_RAW_START0]))[row] =
+		    (uint64_t)event.raw_start1 - 1u;
+		((uint64_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_RAW_END0]))[row] = event.raw_end1;
+		((uint64_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_FEATURE_START0]))[row] =
+		    (uint64_t)event.feature_start1 - 1u;
+		((uint64_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_FEATURE_END0]))[row] = event.feature_end1;
+		((uint64_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_EDIT_START0]))[row] = event.interbase
+		    ? event.insertion_boundary0 : (uint64_t)event.start1 - 1u;
+		((uint64_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_EDIT_END0]))[row] = event.interbase
+		    ? event.insertion_boundary0 : (uint64_t)event.end1;
+		if (event.interbase) {
+			((uint64_t *)duckdb_vector_get_data(
+			    fields[DUCKVEP_GEOMETRY_INSERTION_BOUNDARY0]))[row] =
+			    event.insertion_boundary0;
+		} else {
+			duckdb_validity_set_row_invalid(
+			    duckdb_vector_get_validity(
+			        fields[DUCKVEP_GEOMETRY_INSERTION_BOUNDARY0]), row);
+		}
+		((uint16_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_REF_DIFF_OFFSET]))[row] =
+		    event.ref_diff_offset;
+		((uint16_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_REF_DIFF_LENGTH]))[row] =
+		    event.ref_diff_length;
+		((uint16_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_ALT_DIFF_OFFSET]))[row] =
+		    event.alt_diff_offset;
+		((uint16_t *)duckdb_vector_get_data(
+		    fields[DUCKVEP_GEOMETRY_ALT_DIFF_LENGTH]))[row] =
+		    event.alt_diff_length;
+	}
+}
+
+static void
+duckvep_register_allele_geometry_scalar(duckdb_connection connection)
+{
+	duckdb_scalar_function scalar;
+	duckdb_logical_type position_type, varchar_type, result_type;
+	duckdb_logical_type field_types[DUCKVEP_GEOMETRY_FIELD_COUNT];
+	size_t field;
+
+	scalar = duckdb_create_scalar_function();
+	position_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+	varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+	field_types[DUCKVEP_GEOMETRY_KIND_CODE] =
+	    duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+	field_types[DUCKVEP_GEOMETRY_INTERBASE] =
+	    duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+	field_types[DUCKVEP_GEOMETRY_ANCHOR_SIDE_CODE] =
+	    duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+	for (field = DUCKVEP_GEOMETRY_RAW_START0;
+	    field <= DUCKVEP_GEOMETRY_INSERTION_BOUNDARY0; field++)
+		field_types[field] =
+		    duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+	for (field = DUCKVEP_GEOMETRY_REF_DIFF_OFFSET;
+	    field < DUCKVEP_GEOMETRY_FIELD_COUNT; field++)
+		field_types[field] =
+		    duckdb_create_logical_type(DUCKDB_TYPE_USMALLINT);
+	result_type = duckdb_create_struct_type(field_types,
+	    duckvep_allele_geometry_field_names, DUCKVEP_GEOMETRY_FIELD_COUNT);
+	duckdb_scalar_function_set_name(scalar, "duckvep_allele_geometry");
+	duckdb_scalar_function_add_parameter(scalar, position_type);
+	duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	duckdb_scalar_function_set_return_type(scalar, result_type);
+	duckdb_scalar_function_set_special_handling(scalar);
+	duckdb_scalar_function_set_function(scalar,
+	    duckvep_allele_geometry_scalar);
+	(void)duckdb_register_scalar_function(connection, scalar);
+	duckdb_destroy_scalar_function(&scalar);
+	duckdb_destroy_logical_type(&position_type);
+	duckdb_destroy_logical_type(&varchar_type);
+	duckdb_destroy_logical_type(&result_type);
+	for (field = 0; field < DUCKVEP_GEOMETRY_FIELD_COUNT; field++)
+		duckdb_destroy_logical_type(&field_types[field]);
+}
+
 static int
 duckvep_scalar_dna_copy(uint8_t *destination, const char *source, size_t length)
 {
@@ -1341,7 +1528,7 @@ duckvep_scalar_hgvs_sequence_reason(uint8_t status)
 	}
 }
 
-/* Build and render one transcript row while the consequence-pass trace still
+/* Build and render one transcript row while the consequence-pass facts still
  * borrows the worker scratch. */
 static int
 duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
@@ -1351,7 +1538,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	const duckvep_hgvs_reference_window_t *lookup_reference,
 	duckvep_hgvs_status_t uploaded_reference_status,
 	const duckvep_consequence_t *consequence,
-	const duckvep_annotation_trace_t *trace,
+	const duckvep_pair_facts_t *facts,
 	duckvep_hgvs_scalar_result_t *hgvs_result,
 	char *error, size_t error_size)
 {
@@ -1408,11 +1595,9 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		    hgvs_result);
 		return 1;
 	}
-	edit_status = duckvep_transcript_edit_project_prepared_hint(
-	    &model->transcripts, &model->exons, batch,
-	    (uint32_t)variant, tx_idx, event,
-	    trace != NULL ? trace->projection_exon_hint : UINT32_MAX,
-	    &transcript_edit);
+	edit_status = facts != NULL
+	    ? (duckvep_transcript_edit_status_t)facts->transcript_edit_status
+	    : DUCKVEP_TRANSCRIPT_EDIT_INVALID_ARG;
 	if (edit_status != DUCKVEP_TRANSCRIPT_EDIT_OK) {
 		duckvep_scalar_hgvs_set_transcript_failure(
 		    model, event, tx_idx,
@@ -1420,6 +1605,12 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		    &model->transcripts, tx_idx), hgvs_result);
 		return 1;
 	}
+	if (facts->transcript_edit == NULL) {
+		duckvep_sql_set_error(error, error_size,
+		    "duckvep_annotate: successful pair facts omit transcript edit");
+		return 0;
+	}
+	transcript_edit = *facts->transcript_edit;
 	if (lookup_reference == NULL)
 		(void)duckvep_transcript_edit_cds_fill_prepared(
 		    &model->transcripts, &model->exons, &model->sequences,
@@ -1492,7 +1683,8 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	     event->kind == (uint8_t)DUCKVEP_KIND_MNV)) {
 		hgvs_status = duckvep_hgvs_protein_fact_build_single_residue(
 		    (uint32_t)consequence->protein_pos, consequence->aa_ref,
-		    consequence->aa_alt, consequence->flags, &protein_fact);
+		    consequence->aa_alt, consequence->flags,
+		    DUCKVEP_COMPAT_VEP_116, &protein_fact);
 		if (hgvs_status == DUCKVEP_HGVS_OK) {
 			return duckvep_scalar_hgvs_store_protein(
 			    state, &protein_fact, hgvs_result, error, error_size);
@@ -1514,12 +1706,12 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 	 * this function returns.  An unshifted DNA fact describes the same edit, so
 	 * reuse both context and delta instead of rebuilding projection, alternate
 	 * CDS, and local peptides. */
-	if (trace != NULL && trace->coding_context_valid &&
-	    trace->coding_context != NULL && dna_fact.shift_offset == 0) {
-		context_ptr = trace->coding_context;
+	if (facts != NULL && facts->coding_context_valid &&
+	    facts->coding_context != NULL && dna_fact.shift_offset == 0) {
+		context_ptr = facts->coding_context;
 		context_status = DUCKVEP_VARIANT_CODING_CONTEXT_OK;
-		if (trace->delta != NULL) {
-			delta = *trace->delta;
+		if (facts->delta != NULL) {
+			delta = *facts->delta;
 			delta_ready = delta.valid != 0u;
 		}
 	} else if ((dna_fact.ref_length == 0u) !=
@@ -1565,7 +1757,7 @@ duckvep_scalar_build_hgvs_pair(duckvep_scalar_state_t *state,
 		    &model->transcripts, &model->exons, &model->sequences, batch,
 		    (uint32_t)variant, tx_idx, model->transcripts.strand[tx_idx],
 		    scratch, event,
-		    trace != NULL ? trace->projection_exon_hint : UINT32_MAX,
+		    facts != NULL ? facts->projection_exon_hint : UINT32_MAX,
 		    &context, &delta);
 		if (feature_result == DUCKVEP_FEATURE_SUBSTITUTION_DELTA_ONLY) {
 			hgvs_result->protein_reason =
@@ -1698,7 +1890,7 @@ static int
 duckvep_scalar_hgvs_observe(void *observer_context,
 	const duckvep_variant_batch_t *batch,
 	const duckvep_consequence_t *consequence,
-	const duckvep_annotation_trace_t *trace)
+	const duckvep_pair_facts_t *facts)
 {
 	duckvep_scalar_hgvs_observer_t *observer;
 	duckvep_scalar_state_t *state;
@@ -1725,9 +1917,9 @@ duckvep_scalar_hgvs_observe(void *observer_context,
 	if (consequence->overlap_object_kind !=
 	    (uint8_t)DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT)
 		return 1;
-	if (trace == NULL || trace->event == NULL) {
+	if (facts == NULL || facts->event == NULL) {
 		duckvep_sql_set_error(observer->error, observer->error_size,
-		    "duckvep_annotate: transcript row is missing its live trace");
+		    "duckvep_annotate: transcript row is missing its live pair facts");
 		return 0;
 	}
 	/* Directional transcript candidates are deliberately emitted by the
@@ -1755,23 +1947,23 @@ duckvep_scalar_hgvs_observe(void *observer_context,
 		    sizeof(observer->lookup_reference));
 		if (model->reference_fasta_path != NULL &&
 		    !duckvep_scalar_reference_windows(
-		        state, trace->event, &observer->reference_available,
+		        state, facts->event, &observer->reference_available,
 		        &observer->shift_reference, &observer->lookup_reference,
 		        observer->error, observer->error_size))
 			return 0;
 		if (observer->reference_available) {
 			observer->uploaded_reference_status =
 			    duckvep_hgvs_uploaded_reference_validate(
-			        &observer->lookup_reference, trace->event,
+		        &observer->lookup_reference, facts->event,
 			        batch->allele_bytes + batch->ref_offset[variant],
 			        (size_t)batch->ref_length[variant]);
 		}
 	}
 	return duckvep_scalar_build_hgvs_pair(
-	    state, batch, variant, trace->event,
+	    state, batch, variant, facts->event,
 	    observer->reference_available ? &observer->shift_reference : NULL,
 	    observer->reference_available ? &observer->lookup_reference : NULL,
-	    observer->uploaded_reference_status, consequence, trace, result,
+	    observer->uploaded_reference_status, consequence, facts, result,
 	    observer->error, observer->error_size);
 }
 
@@ -2009,6 +2201,8 @@ duckvep_scalar_run(duckvep_scalar_state_t *state,
 		options_init.downstream_dist = (uint32_t)downstream_distance;
 		options_init.halo = halo_distance;
 		options_init.distances_are_explicit = 1u;
+		options_init.compatibility_profile =
+		    (uint8_t)DUCKVEP_COMPAT_VEP_116;
 		memset(&kernel_error, 0, sizeof(kernel_error));
 		if (duckvep_options_open(&options_init, &state->options,
 		    &kernel_error) != DUCKVEP_OK) {
@@ -2299,6 +2493,8 @@ duckvep_scalar_run_breakends(duckvep_scalar_state_t *state,
 		options_init.downstream_dist = (uint32_t)downstream_distance;
 		options_init.halo = halo_distance;
 		options_init.distances_are_explicit = 1u;
+		options_init.compatibility_profile =
+		    (uint8_t)DUCKVEP_COMPAT_VEP_116;
 		memset(&kernel_error, 0, sizeof(kernel_error));
 		if (duckvep_options_open(&options_init, &state->options,
 		    &kernel_error) != DUCKVEP_OK) {
@@ -3564,6 +3760,7 @@ register_duckvep_functions(duckdb_connection connection,
 	if (registry == NULL)
 		return;
 	duckvep_register_model_functions(connection, registry);
+	duckvep_register_allele_geometry_scalar(connection);
 
 	varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);

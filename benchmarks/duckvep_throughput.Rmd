@@ -365,13 +365,30 @@ surface_by_mode <- split(surface_current, surface_current$output_mode)
 stopifnot(all(vapply(
   surface_by_mode,
   function(x) {
-    length(unique(x$checksum_value)) == 1L &&
-      length(unique(x$fingerprint_schema_version)) == 1L &&
-      length(unique(x$fingerprint_xor_hash)) == 1L &&
-      length(unique(x$fingerprint_sum_hash)) == 1L
+    length(unique(x$checksum_kind)) == 1L &&
+      length(unique(x$checksum_value)) == 1L
   },
   logical(1)
 )))
+surface_fingerprint_complete <- all(
+  !is.na(surface_current$fingerprint_schema_version) &
+    nzchar(surface_current$fingerprint_schema_version) &
+    !is.na(surface_current$fingerprint_xor_hash) &
+    nzchar(surface_current$fingerprint_xor_hash) &
+    !is.na(surface_current$fingerprint_sum_hash) &
+    nzchar(surface_current$fingerprint_sum_hash)
+)
+if (surface_fingerprint_complete) {
+  stopifnot(all(vapply(
+    surface_by_mode,
+    function(x) {
+      length(unique(x$fingerprint_schema_version)) == 1L &&
+        length(unique(x$fingerprint_xor_hash)) == 1L &&
+        length(unique(x$fingerprint_sum_hash)) == 1L
+    },
+    logical(1)
+  )))
+}
 surface_current <- surface_current[order(
   match(surface_current$output_mode, surface_modes),
   surface_current$threads
@@ -424,6 +441,92 @@ surface_table <- data.frame(
 knitr::kable(surface_table, row.names = FALSE)
 ```
 
+### Adjacent revision comparison
+
+```{r public-relation-adjacent}
+surface_previous_revision <- nearest_tested_ancestor(
+  setdiff(surface_complete_revisions, surface_revision)
+)
+surface_previous <- surface_runs[
+  surface_runs$source_revision == surface_previous_revision,
+  ,
+  drop = FALSE
+]
+surface_comparison <- merge(
+  surface_previous,
+  surface_current,
+  by = c("output_mode", "threads"),
+  suffixes = c("_previous", "_current"),
+  sort = FALSE
+)
+stopifnot(
+  nrow(surface_comparison) == length(surface_expected),
+  surface_comparison$variants_previous == surface_comparison$variants_current,
+  surface_comparison$annotated_rows_previous ==
+    surface_comparison$annotated_rows_current,
+  surface_comparison$model_logical_sha256_previous ==
+    surface_comparison$model_logical_sha256_current,
+  surface_comparison$model_source_manifest_sha256_previous ==
+    surface_comparison$model_source_manifest_sha256_current,
+  surface_comparison$model_reference_sha256_previous ==
+    surface_comparison$model_reference_sha256_current,
+  surface_comparison$model_region_ordinal_sha256_previous ==
+    surface_comparison$model_region_ordinal_sha256_current,
+  surface_comparison$corpus_source_sha256_previous ==
+    surface_comparison$corpus_source_sha256_current,
+  surface_comparison$checksum_kind_previous ==
+    surface_comparison$checksum_kind_current,
+  surface_comparison$checksum_value_previous ==
+    surface_comparison$checksum_value_current
+)
+surface_comparison <- surface_comparison[order(
+  match(surface_comparison$output_mode, surface_modes),
+  surface_comparison$threads
+), , drop = FALSE]
+surface_delta_table <- data.frame(
+  output = surface_comparison$output_mode,
+  threads = surface_comparison$threads,
+  previous_revision = substr(surface_previous_revision, 1L, 8L),
+  current_revision = substr(surface_revision, 1L, 8L),
+  previous_median_seconds =
+    surface_comparison$median_seconds_previous,
+  current_median_seconds =
+    surface_comparison$median_seconds_current,
+  elapsed_change_percent = round(
+    100 * (
+      surface_comparison$median_seconds_current /
+        surface_comparison$median_seconds_previous - 1
+    ),
+    2L
+  ),
+  previous_alleles_per_second = format(
+    round(surface_comparison$variants_per_second_previous),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  current_alleles_per_second = format(
+    round(surface_comparison$variants_per_second_current),
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  throughput_change_percent = round(
+    100 * (
+      surface_comparison$variants_per_second_current /
+        surface_comparison$variants_per_second_previous - 1
+    ),
+    2L
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(surface_delta_table, row.names = FALSE)
+```
+
+The adjacent table compares the nearest complete ancestor on the same host,
+corpus, model semantics, output denominator, core affinity, and pass count.
+Positive elapsed change means slower execution; negative throughput change
+means fewer input alleles per second. Identical output checksums are required
+before a pair is admitted to this table.
+
 This exact-revision comparison uses the complete Ensembl 116 GRCh38 model:
 644,427 transcripts, 5,068,416 exon memberships, and all 1,383,580 resident
 RegulatoryFeature and MotifFeature intervals. It annotates every one of the
@@ -434,8 +537,13 @@ runs are restricted to CPUs 2, 4, 6, and 8. Input VCF decoding, coordinate
 sorting, canonical event-table staging, and model loading are outside the timed
 pass. Each public row times event validation and family dispatch through
 `duckvep_annotate(...)`, native consequence/HGVS work, fixed-schema row expansion,
-and checksum aggregation. An additional full-row fingerprint outside the timed
-passes proves one-thread/four-thread equality separately for each output contract.
+and checksum aggregation. The current one-thread/four-thread pair requires the
+same aggregate checksum for each output contract.
+`r if (surface_fingerprint_complete) {
+  "The current rows additionally retain an untimed full-row fingerprint."
+} else {
+  "The current rows do not retain the optional untimed full-row fingerprint."
+}`
 `elapsed_vs_compact` compares projections at the same thread count; it is not a
 comparison against a private kernel lane.
 

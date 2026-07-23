@@ -18,6 +18,7 @@
 
 #include "duckvep_haplotype.h" /* duckvep_haplotype_edit_t (the CDS-edit element) */
 #include "duckvep_kernel.h"    /* SoA views, duckvep_sequence_pool_t, variant batch */
+#include "duckvep_compat.h"
 #include "duckvep_event.h"
 
 #include <stddef.h>
@@ -40,6 +41,9 @@ typedef enum duckvep_nmd_early_cds_fact {
     DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101,
     DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101
 } duckvep_nmd_early_cds_fact_t;
+
+/* Executable inclusive threshold in VEP Plugins release/116 NMD.pm. */
+#define DUCKVEP_NMD_EARLY_CDS_MAX_END1 101u
 
 typedef struct duckvep_sequence_delta {
     int32_t cdna_pos, cds_pos, protein_pos; /* 1-based; -1 when absent */
@@ -254,10 +258,20 @@ typedef struct duckvep_coding_context {
     uint8_t pre_cds_complete;
     uint8_t post_cds_complete;
     uint8_t ref_first_stop_known;
+    uint8_t compatibility_profile; /* duckvep_compat_profile_t */
+    uint8_t feature_length_relation; /* duckvep_feature_length_relation_t */
     uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
+
+/* One authority for the non-obvious single-edit state consumed by both the
+ * consequence peptide view and the HGVS peptide view.  The two consumers may
+ * deliberately render different VEP-116 views, but they must not rediscover
+ * the state with duplicate predicates. */
+DUCKVEP_INTERNAL_API int
+duckvep_coding_context_is_terminal_partial_insertion(
+    const duckvep_coding_context_t *context);
 
 /* The compact consequence sidecar is a closed-world authority for cached
  * start/stop-lost predicates, but frameshift is positive evidence only.  A
@@ -368,7 +382,8 @@ typedef enum duckvep_sequence_delta_route {
     DUCKVEP_DELTA_ROUTE_DEL_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INS_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT,
-    DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT
+    DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT,
+    DUCKVEP_DELTA_ROUTE_UPLOADED_FEATURE_CONTEXT
 } duckvep_sequence_delta_route_t;
 
 /* Project one allele-trimmed small variant into the edit element consumed by the
@@ -401,6 +416,25 @@ duckvep_cds_edit_build_prepared_allele(
     int8_t                            transcript_strand,
     const duckvep_prepared_cds_allele_t *allele,
     uint32_t                          exon_hint,
+    duckvep_haplotype_edit_t         *edit);
+
+/* Reproduce VEP 116's independent-event outer-CDS replacement for a literal
+ * feature whose genomic span contains one or more introns but whose two
+ * endpoints map to CDS. VEP replaces the contiguous CDS range between the
+ * mapped endpoints with the complete feature ALT. This is intentionally not
+ * the phased edit-set projector: a phased caller must preserve every exon and
+ * intron segment instead of collapsing the feature to one CDS edit. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_compat_vep116_outer_cds_edit_build(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_event_t            *event,
+    const uint8_t                    *alternate,
+    uint32_t                          alternate_length,
+    int8_t                            alternate_strand,
     duckvep_haplotype_edit_t         *edit);
 
 /* Project one small allele into the edit set consumed by the CodingContext and

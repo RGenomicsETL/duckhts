@@ -26,6 +26,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* VEP's ordinary-allele pre-predicate is computed from feature REF/ALT
+ * lengths before transcript projection.  This can differ from a mapped CDS
+ * edit when the uploaded feature spans an intron. */
+typedef enum duckvep_feature_length_relation {
+    DUCKVEP_FEATURE_LENGTH_UNKNOWN = 0,
+    DUCKVEP_FEATURE_LENGTH_EQUAL,
+    DUCKVEP_FEATURE_LENGTH_INCREASE,
+    DUCKVEP_FEATURE_LENGTH_DECREASE
+} duckvep_feature_length_relation_t;
+
 typedef struct duckvep_event {
     uint16_t chrom_id;
     uint16_t mate_chrom_id;
@@ -49,6 +59,7 @@ typedef struct duckvep_event {
     uint8_t  sv_type;
     uint8_t  copy_change;
     uint8_t  has_mate;
+    uint8_t  feature_length_relation; /* duckvep_feature_length_relation_t */
 } duckvep_event_t;
 
 typedef enum duckvep_event_anchor {
@@ -56,6 +67,11 @@ typedef enum duckvep_event_anchor {
     DUCKVEP_EVENT_ANCHOR_LEFT,
     DUCKVEP_EVENT_ANCHOR_RIGHT
 } duckvep_event_anchor_t;
+
+static inline uint8_t duckvep_event_ascii_upper(uint8_t byte) {
+    return byte >= (uint8_t)'a' && byte <= (uint8_t)'z'
+        ? (uint8_t)(byte - ((uint8_t)'a' - (uint8_t)'A')) : byte;
+}
 
 static inline uint32_t duckvep_event_sat_add_u32_u16(uint32_t x, uint16_t y) {
     return x > UINT32_MAX - (uint32_t)y ? UINT32_MAX : x + (uint32_t)y;
@@ -162,6 +178,8 @@ static inline void duckvep_event_load_raw_interval(
     event->alt_diff_length = 0u;
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
+    event->feature_length_relation =
+        (uint8_t)DUCKVEP_FEATURE_LENGTH_UNKNOWN;
 }
 
 /* Decode one ordinary REF/ALT pair into its lossless effect geometry. This is
@@ -206,15 +224,25 @@ static inline int duckvep_event_prepare_small(
     event->alt_diff_length = 0u;
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
+    event->feature_length_relation =
+        ref_len == alt_len
+        ? (uint8_t)DUCKVEP_FEATURE_LENGTH_EQUAL
+        : alt_len > ref_len
+            ? (uint8_t)DUCKVEP_FEATURE_LENGTH_INCREASE
+            : (uint8_t)DUCKVEP_FEATURE_LENGTH_DECREASE;
 
-    while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) {
+    while (prefix < ref_len && prefix < alt_len &&
+           duckvep_event_ascii_upper(ref[prefix]) ==
+               duckvep_event_ascii_upper(alt[prefix])) {
         prefix++;
     }
     ref_rem = (uint16_t)(ref_len - prefix);
     alt_rem = (uint16_t)(alt_len - prefix);
     while (suffix < ref_rem && suffix < alt_rem &&
-           ref[(uint16_t)(ref_len - 1u - suffix)] ==
-           alt[(uint16_t)(alt_len - 1u - suffix)]) {
+           duckvep_event_ascii_upper(
+               ref[(uint16_t)(ref_len - 1u - suffix)]) ==
+           duckvep_event_ascii_upper(
+               alt[(uint16_t)(alt_len - 1u - suffix)])) {
         suffix++;
     }
 
