@@ -298,6 +298,18 @@
       ]
     },
     {
+      "name": "duckvep_allele_geometry",
+      "kind": "scalar",
+      "category": "Variant Annotation",
+      "signature": "duckvep_allele_geometry(position, reference, alternate)",
+      "returns": "STRUCT(kind_code UTINYINT, interbase BOOLEAN, anchor_side_code UTINYINT, raw_start0 UBIGINT, raw_end0 UBIGINT, feature_start0 UBIGINT, feature_end0 UBIGINT, edit_start0 UBIGINT, edit_end0 UBIGINT, insertion_boundary0 UBIGINT, reference_difference_offset USMALLINT, reference_difference_length USMALLINT, alternate_difference_offset USMALLINT, alternate_difference_length USMALLINT)",
+      "r_wrapper": "",
+      "description": "Interpret one literal biallelic allele with the same lossless geometry authority used by DuckVEP. position is positive and one-based; REF and ALT are non-empty A/C/G/T/N strings of at most 65,535 bases and must differ after ASCII case folding. kind_code is stable: 0 SNV, 1 insertion, 2 deletion, 3 length-changing replacement, and 4 multi-base substitution. anchor_side_code is 0 for no retained anchor, 1 for a left anchor, and 2 for a right anchor. All coordinate fields are non-null zero-based half-open intervals except insertion_boundary0, which is non-null only for an interbase insertion. Difference offsets and lengths are non-null indices into the uploaded REF and ALT. The result separates the uploaded REF span, VEP-116 VariationFeature span, and fully minimized semantic reference edit. A pure insertion has equal feature/edit start and end plus insertion_boundary0. This function does not split multiallelic records or left-align alleles: run duckhts_bcftools_norm(..., split_multiallelic := TRUE) first when canonical exact keys or cross-source joins require normalization. Use feature_start0/feature_end0 for VEP consequence feature overlap, edit_start0/edit_end0 for affected-reference supplementary providers, and an explicit insertion-flank policy when interbase is TRUE; the uploaded raw REF span is not a biological affected interval.",
+      "examples": [
+        "SELECT (duckvep_allele_geometry(100, 'A', 'ATG')).*;"
+      ]
+    },
+    {
       "name": "duckvep_annotate",
       "kind": "table",
       "category": "Variant Annotation",

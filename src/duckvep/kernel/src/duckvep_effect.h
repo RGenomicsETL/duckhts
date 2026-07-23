@@ -198,6 +198,11 @@ typedef struct duckvep_nmd_result {
     uint8_t escape_reasons;
 } duckvep_nmd_result_t;
 
+/* Executable thresholds in VEP Plugins release/116 NMD.pm. The names retain
+ * the observed inclusive coordinate semantics instead of paraphrasing them as
+ * 100/50-base prose. */
+#define DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET   51u
+
 #define DUCKVEP_NMD_ELIGIBLE_SO_MASK ( \
     DUCKVEP_SO(DUCKVEP_SO_STOP_GAINED) | \
     DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT) | \

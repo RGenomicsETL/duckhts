@@ -13,6 +13,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Fixed VEP 116 predicate reaches. Caller-configurable generic splice-region
+ * distances remain in duckvep_options_init_t. */
+#define DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN 12u
+#define DUCKVEP_VEP_SPLICE_FIXED_REACH          16u
+
 typedef struct duckvep_region_state {
     uint32_t region_mask;
     uint8_t  within_feature;
@@ -22,7 +27,7 @@ typedef struct duckvep_region_state {
     uint8_t  within_cdna;              /* overlaps at least one exon */
     uint8_t  overlaps_exon;
     uint8_t  overlaps_intron;
-    uint8_t  within_frameshift_intron; /* VEP gap with end - start <= 12 */
+    uint8_t  within_frameshift_intron; /* gap span <= fixed VEP threshold */
     uint8_t  overlaps_cds;
     uint8_t  overlaps_utr5;
     uint8_t  overlaps_utr3;

@@ -61,7 +61,8 @@ void duckvep_nmd_predict(
         /* Projector success is the definedness test used by NMD.pm. A pure
          * insertion immediately before CDS base 1 is the valid reversed range
          * 1..0, and the plugin classifies its zero end as an early-CDS escape. */
-        early_cds_escape = variant_cds_end <= 101u;
+        early_cds_escape =
+            variant_cds_end <= DUCKVEP_NMD_EARLY_CDS_MAX_END1;
     }
     if (early_cds_escape) {
         reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_EARLY_CDS;
@@ -96,10 +97,13 @@ void duckvep_nmd_predict(
 
         if (transcripts->strand[tx_idx] < 0) {
             lo = exons->start1[penultimate];
-            hi = lo > UINT32_MAX - 51u ? UINT32_MAX : lo + 51u;
+            hi = lo > UINT32_MAX - DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET
+                ? UINT32_MAX
+                : lo + DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET;
         } else {
             hi = exons->end1[penultimate];
-            lo = hi > 51u ? hi - 51u : 0u;
+            lo = hi > DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET
+                ? hi - DUCKVEP_NMD_PENULTIMATE_EXON_OFFSET : 0u;
         }
         if (variant_end1 >= lo && variant_end1 <= hi) {
             reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_PENULTIMATE_EXON_END;

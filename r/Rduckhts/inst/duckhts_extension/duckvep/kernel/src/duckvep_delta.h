@@ -18,6 +18,7 @@
 
 #include "duckvep_haplotype.h" /* duckvep_haplotype_edit_t (the CDS-edit element) */
 #include "duckvep_kernel.h"    /* SoA views, duckvep_sequence_pool_t, variant batch */
+#include "duckvep_compat.h"
 #include "duckvep_event.h"
 
 #include <stddef.h>
@@ -40,6 +41,9 @@ typedef enum duckvep_nmd_early_cds_fact {
     DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101,
     DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101
 } duckvep_nmd_early_cds_fact_t;
+
+/* Executable inclusive threshold in VEP Plugins release/116 NMD.pm. */
+#define DUCKVEP_NMD_EARLY_CDS_MAX_END1 101u
 
 typedef struct duckvep_sequence_delta {
     int32_t cdna_pos, cds_pos, protein_pos; /* 1-based; -1 when absent */
@@ -254,10 +258,19 @@ typedef struct duckvep_coding_context {
     uint8_t pre_cds_complete;
     uint8_t post_cds_complete;
     uint8_t ref_first_stop_known;
+    uint8_t compatibility_profile; /* duckvep_compat_profile_t */
     uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
+
+/* One authority for the non-obvious single-edit state consumed by both the
+ * consequence peptide view and the HGVS peptide view.  The two consumers may
+ * deliberately render different VEP-116 views, but they must not rediscover
+ * the state with duplicate predicates. */
+DUCKVEP_INTERNAL_API int
+duckvep_coding_context_is_terminal_partial_insertion(
+    const duckvep_coding_context_t *context);
 
 /* The compact consequence sidecar is a closed-world authority for cached
  * start/stop-lost predicates, but frameshift is positive evidence only.  A

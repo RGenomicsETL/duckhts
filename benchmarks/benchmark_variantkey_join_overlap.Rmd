@@ -64,7 +64,11 @@ clinvar_vcf <- Sys.getenv(
 )
 giab_vcf <- Sys.getenv(
   "VARIANTKEY_GIAB_VCF",
-  unset = "/root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz"
+  unset = "/root/duckvep/data/benchmark/HG002.hiseqx.pcr-free.40x.deepvariant-v1.0.grch38.vcf.gz"
+)
+reference_fasta <- Sys.getenv(
+  "VARIANTKEY_REFERENCE_FASTA",
+  unset = "/root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
 )
 regulatory_parquet <- Sys.getenv(
   "VARIANTKEY_REGULATORY_PARQUET",
@@ -101,6 +105,7 @@ clinvarbitration_tsv <- Sys.getenv(
 real_source_paths <- c(
   clinvar_vcf = clinvar_vcf,
   giab_vcf = giab_vcf,
+  reference_fasta = reference_fasta,
   regulatory_parquet = regulatory_parquet,
   transcripts_parquet = transcripts_parquet,
   gnomad_constraint = gnomad_constraint,
@@ -806,6 +811,7 @@ Parquet files are generated benchmark artifacts and are not committed.
 
 ```{r real-parquet-staging}
 real_case_path <- file.path(real_cache_dir, "giab_hg002_grch38_keyed.parquet")
+real_case_raw_path <- file.path(real_cache_dir, "giab_hg002_grch38_raw_keyed.parquet")
 real_clinvar_path <- file.path(real_cache_dir, "clinvar_20260706_grch38_keyed.parquet")
 real_regulatory_path <- file.path(real_cache_dir, "ensembl116_grch38_regulatory_keyed.parquet")
 real_constraint_path <- file.path(real_cache_dir, "gnomad_v211_constraint_gene.parquet")
@@ -839,46 +845,93 @@ canonical_contigs_sql <- paste(
   collapse = ", "
 )
 
-giab_stage_query <- sprintf(
+giab_raw_stage_query <- sprintf(
   paste(
     "WITH alleles AS (",
-    "  SELECT duckhts_contig_key(CHROM) AS chrom,",
-    "         POS::BIGINT AS pos, REF AS ref, allele.alt AS alt",
+    "  SELECT duckhts_contig_key(CHROM) AS chrom, POS::BIGINT AS pos,",
+    "         upper(REF) AS ref, upper(allele.alt) AS alt",
     "  FROM read_bcf(%s, scan_mode := 'sequential')",
     "  CROSS JOIN UNNEST(ALT) AS allele(alt)",
     "), keyed AS (",
-    "  SELECT alleles.*,",
-    "         variantkey(chrom, pos, ref, alt) AS vk,",
-    "         regionkey(chrom, pos - 1, pos - 1 + length(ref)) AS rk",
-    "  FROM alleles",
-    "  WHERE chrom IN (%s)",
+    "  SELECT alleles.*, variantkey(chrom, pos, ref, alt) AS vk",
+    "  FROM alleles WHERE chrom IN (%s)",
+    "    AND regexp_full_match(ref, '[ACGTN]+')",
+    "    AND regexp_full_match(alt, '[ACGTN]+') AND ref <> alt",
     ")",
-    "SELECT chrom, pos, ref, alt, vk,",
-    "       mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,",
-    "       (rk >> 31) AS rk_chrom_start,",
-    "       (regionkey(chrom, pos - 1 + length(ref), pos - 1 + length(ref)) >> 31) AS rk_chrom_end,",
-    "       pos - 1 AS start0, pos - 1 + length(ref) AS end0, rk",
-    "FROM keyed",
-    "WHERE vk IS NOT NULL AND rk IS NOT NULL",
-    "ORDER BY vk"
+    "SELECT *, mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash",
+    "FROM keyed WHERE vk IS NOT NULL ORDER BY vk"
   ),
   sql_path(giab_vcf),
   canonical_contigs_sql
 )
 
+giab_source_query <- sprintf(
+  paste(
+    "(SELECT row_number() OVER ()::UBIGINT AS record_index,",
+    "        duckhts_contig_key(CHROM) AS chrom, POS::BIGINT AS pos,",
+    "        REF AS ref, ALT AS alt",
+    " FROM read_bcf(%s, scan_mode := 'sequential')) AS giab_records"
+  ),
+  sql_path(giab_vcf)
+)
+
+giab_stage_query <- sprintf(
+  paste(
+    "WITH normalized AS (",
+    "  SELECT record_index, alt_index, chrom, pos_normed::BIGINT AS pos,",
+    "         upper(ref_normed) AS ref, upper(alt_normed) AS alt",
+    "  FROM duckhts_bcftools_norm(%s, %s, split_multiallelic := TRUE)",
+    "  WHERE pos_normed IS NOT NULL AND chrom IN (%s)",
+    "    AND regexp_full_match(ref_normed, '[ACGTNacgtn]+')",
+    "    AND regexp_full_match(alt_normed, '[ACGTNacgtn]+')",
+    "    AND upper(ref_normed) <> upper(alt_normed)",
+    "), interpreted AS (",
+    "  SELECT normalized.*, duckvep_allele_geometry(pos, ref, alt) AS geometry",
+    "  FROM normalized",
+    "), keyed AS (",
+    "  SELECT interpreted.*,",
+    "         variantkey(chrom, pos, ref, alt) AS vk,",
+    "         regionkey(chrom, geometry.feature_start0, geometry.feature_end0) AS rk",
+    "  FROM interpreted",
+    ")",
+    "SELECT record_index, alt_index, chrom, pos, ref, alt, vk,",
+    "       mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,",
+    "       (rk >> 31) AS rk_chrom_start,",
+    "       (regionkey(chrom, geometry.feature_end0, geometry.feature_end0) >> 31) AS rk_chrom_end,",
+    "       geometry.raw_start0, geometry.raw_end0,",
+    "       geometry.feature_start0 AS start0, geometry.feature_end0 AS end0,",
+    "       geometry.edit_start0, geometry.edit_end0, geometry.interbase, rk",
+    "FROM keyed",
+    "WHERE vk IS NOT NULL AND rk IS NOT NULL",
+    "ORDER BY vk"
+  ),
+  sql_string(giab_source_query),
+  sql_path(reference_fasta),
+  canonical_contigs_sql
+)
+
+clinvar_source_query <- sprintf(
+  paste(
+    "(SELECT duckhts_contig_key(CHROM) AS chrom, POS::BIGINT AS pos,",
+    "        REF AS ref, ALT AS alt, INFO_ALLELEID AS allele_id,",
+    "        INFO_CLNSIG AS clinical_significance, INFO_GENEINFO AS gene_info",
+    " FROM read_bcf(%s, scan_mode := 'sequential')) AS clinvar_records"
+  ),
+  sql_path(clinvar_vcf)
+)
+
 clinvar_stage_query <- sprintf(
   paste(
-    "WITH alleles AS (",
-    "  SELECT duckhts_contig_key(CHROM) AS chrom,",
-    "         POS::BIGINT AS pos, REF AS ref, allele.alt AS alt,",
-    "         INFO_ALLELEID AS allele_id, INFO_CLNSIG AS clinical_significance,",
-    "         INFO_GENEINFO AS gene_info",
-    "  FROM read_bcf(%s, scan_mode := 'sequential')",
-    "  CROSS JOIN UNNEST(ALT) AS allele(alt)",
+    "WITH normalized AS (",
+    "  SELECT chrom, pos_normed::BIGINT AS pos, upper(ref_normed) AS ref,",
+    "         upper(alt_normed) AS alt, allele_id, clinical_significance, gene_info",
+    "  FROM duckhts_bcftools_norm(%s, %s, split_multiallelic := TRUE)",
+    "  WHERE pos_normed IS NOT NULL AND chrom IN (%s)",
+    "    AND regexp_full_match(ref_normed, '[ACGTNacgtn]+')",
+    "    AND regexp_full_match(alt_normed, '[ACGTNacgtn]+')",
     "), keyed AS (",
-    "  SELECT alleles.*, variantkey(chrom, pos, ref, alt) AS vk",
-    "  FROM alleles",
-    "  WHERE chrom IN (%s)",
+    "  SELECT normalized.*, variantkey(chrom, pos, ref, alt) AS vk",
+    "  FROM normalized",
     ")",
     "SELECT chrom, pos, ref, alt, vk,",
     "       mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,",
@@ -887,7 +940,8 @@ clinvar_stage_query <- sprintf(
     "WHERE vk IS NOT NULL",
     "ORDER BY vk"
   ),
-  sql_path(clinvar_vcf),
+  sql_string(clinvar_source_query),
+  sql_path(reference_fasta),
   canonical_contigs_sql
 )
 
@@ -944,10 +998,15 @@ alphamissense_stage_query <- sprintf(
   paste(
     "WITH keyed AS (",
     "  SELECT variantkey(duckhts_contig_key(chrom), pos, ref, alt) AS vk,",
-    "         am_pathogenicity, am_class",
+    "         regexp_replace(transcript_id, '\\.[0-9]+$', '') AS transcript_stable_id,",
+    "         try_cast(regexp_extract(transcript_id, '\\.([0-9]+)$', 1) AS UINTEGER) AS transcript_version,",
+    "         transcript_id, protein_variant, uniprot_id, am_pathogenicity, am_class",
     "  FROM read_csv(%s, delim = '\\t', skip = 4, header = FALSE, columns = %s)",
     ")",
-    "SELECT vk, am_pathogenicity, am_class FROM keyed WHERE vk IS NOT NULL"
+    "SELECT vk, transcript_stable_id, transcript_version, transcript_id,",
+    "       protein_variant, uniprot_id, am_pathogenicity, am_class",
+    "FROM keyed WHERE vk IS NOT NULL",
+    "ORDER BY vk, transcript_stable_id, transcript_version, protein_variant"
   ),
   sql_path(alphamissense_gz),
   alphamissense_columns_sql
@@ -973,7 +1032,8 @@ clinvarbitration_stage_query <- sprintf(
 )
 
 staging_results <- rbind(
-  cbind(source = "GIAB HG002 VCF to keyed Parquet", copy_timed(giab_stage_query, real_case_path)),
+  cbind(source = "GIAB HG002 raw allele keys", copy_timed(giab_raw_stage_query, real_case_raw_path)),
+  cbind(source = "GIAB HG002 normalized allele keys and geometry", copy_timed(giab_stage_query, real_case_path)),
   cbind(source = "ClinVar VCF to keyed Parquet", copy_timed(clinvar_stage_query, real_clinvar_path)),
   cbind(source = "Ensembl regulatory to keyed Parquet", copy_timed(regulatory_stage_query, real_regulatory_path)),
   cbind(source = "gnomAD constraint to gene Parquet", copy_timed(constraint_stage_query, real_constraint_path)),
@@ -1177,7 +1237,9 @@ normalized allele tuple. The multicolumn query is the correctness oracle. The
 positional query intentionally has a different, larger result cardinality.
 
 ```{r real-exact-positional}
-real_case_rows <- staging_results$rows[staging_results$source == "GIAB HG002 VCF to keyed Parquet"]
+real_case_rows <- staging_results$rows[
+  staging_results$source == "GIAB HG002 normalized allele keys and geometry"
+]
 
 real_exact_multicol <- measure_thread_grid(
   "real_clinvar_exact_multicolumn_pairs",
@@ -1212,7 +1274,8 @@ real_exact_variantkey <- measure_thread_grid(
           "FROM read_parquet(%s) q",
           "JOIN read_parquet(%s) a",
           "  ON q.vk = a.vk",
-          " AND (NOT (q.is_hash OR a.is_hash)",
+          " AND q.is_hash = a.is_hash",
+          " AND (NOT q.is_hash",
           "      OR (q.chrom = a.chrom AND q.pos = a.pos AND q.ref = a.ref AND q.alt = a.alt))"
         ),
         sql_path(real_case_path),
@@ -1282,6 +1345,40 @@ stopifnot(
   )$result_rows)) == 1L
 )
 real_exact_results
+```
+
+The same join is also run once on the uploaded, unnormalized GIAB alleles. This
+is a semantic control, not a competing serving layout: the difference counts
+real ClinVar records that an exact raw-VCF key would miss.
+
+```{r real-normalization-effect}
+raw_exact_matches <- as.numeric(DBI::dbGetQuery(
+  con,
+  sprintf(
+    paste(
+      "SELECT count(*)::BIGINT AS n",
+      "FROM read_parquet(%s) q JOIN read_parquet(%s) a",
+      "  ON q.vk = a.vk",
+      " AND q.is_hash = a.is_hash",
+      " AND (NOT q.is_hash",
+      "      OR (q.chrom = a.chrom AND q.pos = a.pos",
+      "          AND q.ref = a.ref AND q.alt = a.alt))"
+    ),
+    sql_path(real_case_raw_path),
+    sql_path(real_clinvar_path)
+  )
+)$n[1L])
+normalized_exact_matches <- unique(real_exact_multicol$result_rows)
+stopifnot(length(normalized_exact_matches) == 1L,
+          normalized_exact_matches >= raw_exact_matches)
+normalization_match_effect <- data.frame(
+  representation = c("uploaded GIAB alleles", "normalized GIAB alleles"),
+  exact_clinvar_records = c(raw_exact_matches, normalized_exact_matches),
+  stringsAsFactors = FALSE
+)
+normalization_match_effect$recovered_vs_raw <-
+  normalization_match_effect$exact_clinvar_records - raw_exact_matches
+normalization_match_effect
 ```
 
 The split-lane layout processes `r round(real_exact_variantkey_lanes$input_rows_per_second[real_exact_variantkey_lanes$threads == 1] / 1e6, 2)` million GIAB alleles/s on one thread and `r round(real_exact_variantkey_lanes$input_rows_per_second[real_exact_variantkey_lanes$threads == 4] / 1e6, 2)` million/s on four threads. It is faster than the multicolumn oracle because only the `r round(100 * lane_staging_results$rows[lane_staging_results$source == "GIAB hashed lane"] / real_case_rows, 2)`% GIAB hashed lane and `r round(100 * lane_staging_results$rows[lane_staging_results$source == "ClinVar hashed refinement lane"] / staging_results$rows[staging_results$source == "ClinVar VCF to keyed Parquet"], 2)`% ClinVar hashed lane carry allele strings into the refinement join.

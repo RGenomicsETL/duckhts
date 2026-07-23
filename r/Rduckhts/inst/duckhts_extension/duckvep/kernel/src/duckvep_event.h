@@ -57,6 +57,11 @@ typedef enum duckvep_event_anchor {
     DUCKVEP_EVENT_ANCHOR_RIGHT
 } duckvep_event_anchor_t;
 
+static inline uint8_t duckvep_event_ascii_upper(uint8_t byte) {
+    return byte >= (uint8_t)'a' && byte <= (uint8_t)'z'
+        ? (uint8_t)(byte - ((uint8_t)'a' - (uint8_t)'A')) : byte;
+}
+
 static inline uint32_t duckvep_event_sat_add_u32_u16(uint32_t x, uint16_t y) {
     return x > UINT32_MAX - (uint32_t)y ? UINT32_MAX : x + (uint32_t)y;
 }
@@ -207,14 +212,18 @@ static inline int duckvep_event_prepare_small(
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
 
-    while (prefix < ref_len && prefix < alt_len && ref[prefix] == alt[prefix]) {
+    while (prefix < ref_len && prefix < alt_len &&
+           duckvep_event_ascii_upper(ref[prefix]) ==
+               duckvep_event_ascii_upper(alt[prefix])) {
         prefix++;
     }
     ref_rem = (uint16_t)(ref_len - prefix);
     alt_rem = (uint16_t)(alt_len - prefix);
     while (suffix < ref_rem && suffix < alt_rem &&
-           ref[(uint16_t)(ref_len - 1u - suffix)] ==
-           alt[(uint16_t)(alt_len - 1u - suffix)]) {
+           duckvep_event_ascii_upper(
+               ref[(uint16_t)(ref_len - 1u - suffix)]) ==
+           duckvep_event_ascii_upper(
+               alt[(uint16_t)(alt_len - 1u - suffix)])) {
         suffix++;
     }
 

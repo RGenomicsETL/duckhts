@@ -1,6 +1,21 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- centralize the executable-language leaks required for Ensembl VEP 116 HGVS
+  parity in one named compatibility policy instead of embedding release-specific
+  codon-table and Perl-string behavior in individual algorithms. Consequence
+  projection and HGVS now consume one borrowed per-event/transcript fact object,
+  including one shared transcript edit and one shared terminal-partial-insertion
+  state. Add `duckvep_allele_geometry(...)` so SQL provider joins can use the exact
+  raw VCF span, VEP feature span, minimized edit span, and insertion point interpreted
+  by the native engine. The held-out 100,000-trial UBSan campaign exposed an
+  out-of-range read in the independent HGVS-shift test oracle; repair the oracle,
+  preserve the failing seed, and require the same seed to pass before recording the
+  campaign
+- register the scalar and list forms of `duckhts_alt_to_list(...)` and
+  `bcftools_norm_row(...)` as real DuckDB overload sets. Derived-query normalization
+  can now consume the `VARCHAR[]` ALT column returned by `read_bcf()` instead of
+  failing at bind time despite the documented list signature
 - preflight the peak intermediate CDS length before applying an exact-alias
   multi-edit haplotype. A high-coordinate insertion followed by a lower-coordinate
   deletion can now return `BUFFER_TOO_SMALL` without mutating the caller buffer even

@@ -4,6 +4,77 @@
 
 require duckhts
 
+# One native geometry authority separates uploaded REF, VEP feature, and
+# minimized semantic edit coordinates. All reported intervals are 0-based,
+# half-open; insertions are explicit interbase sites rather than fake bases.
+query IIIIIIIIIIIIII
+SELECT g.kind_code, g.interbase::INTEGER, g.anchor_side_code,
+       g.raw_start0, g.raw_end0, g.feature_start0, g.feature_end0,
+       g.edit_start0, g.edit_end0,
+       coalesce(g.insertion_boundary0, 999999),
+       g.reference_difference_offset, g.reference_difference_length,
+       g.alternate_difference_offset, g.alternate_difference_length
+FROM (SELECT duckvep_allele_geometry(100, 'AAC', 'ATC') AS g);
+----
+0	0	0	99	102	99	102	100	101	999999	1	1	1	1
+
+query IIIIIIIIIIIIII
+SELECT g.kind_code, g.interbase::INTEGER, g.anchor_side_code,
+       g.raw_start0, g.raw_end0, g.feature_start0, g.feature_end0,
+       g.edit_start0, g.edit_end0,
+       coalesce(g.insertion_boundary0, 999999),
+       g.reference_difference_offset, g.reference_difference_length,
+       g.alternate_difference_offset, g.alternate_difference_length
+FROM (SELECT duckvep_allele_geometry(100, 'a', 'atg') AS g);
+----
+1	1	1	99	100	100	100	100	100	100	1	0	1	2
+
+query IIIIIIIIIIIIII
+SELECT g.kind_code, g.interbase::INTEGER, g.anchor_side_code,
+       g.raw_start0, g.raw_end0, g.feature_start0, g.feature_end0,
+       g.edit_start0, g.edit_end0,
+       coalesce(g.insertion_boundary0, 999999),
+       g.reference_difference_offset, g.reference_difference_length,
+       g.alternate_difference_offset, g.alternate_difference_length
+FROM (SELECT duckvep_allele_geometry(1, 'CA', 'A') AS g);
+----
+2	0	0	0	2	0	1	0	1	999999	0	1	0	0
+
+# A common suffix at contig position one is a right-anchored insertion before
+# the first reference base. The interbase coordinate is zero, not NULL.
+query IIIIIIIIIIIIII
+SELECT g.kind_code, g.interbase::INTEGER, g.anchor_side_code,
+       g.raw_start0, g.raw_end0, g.feature_start0, g.feature_end0,
+       g.edit_start0, g.edit_end0,
+       coalesce(g.insertion_boundary0, 999999),
+       g.reference_difference_offset, g.reference_difference_length,
+       g.alternate_difference_offset, g.alternate_difference_length
+FROM (SELECT duckvep_allele_geometry(1, 'A', 'CA') AS g);
+----
+1	1	2	0	1	0	0	0	0	0	0	0	0	1
+
+query I
+SELECT list(g.kind_code ORDER BY g.kind_code)
+FROM (VALUES (duckvep_allele_geometry(10, 'AC', 'GT')),
+             (duckvep_allele_geometry(20, 'AC', 'GTT'))) t(g);
+----
+[3, 4]
+
+query I
+SELECT duckvep_allele_geometry(NULL, 'A', 'T') IS NULL;
+----
+1
+
+statement error
+SELECT duckvep_allele_geometry(100, 'A', 'A');
+----
+REF/ALT must be distinct
+
+statement error
+SELECT duckvep_allele_geometry(100, 'a', 'A');
+----
+REF/ALT must be distinct
+
 statement ok
 CREATE TABLE duckvep_test_regions AS
 SELECT * FROM (VALUES (0::UINTEGER), (1::UINTEGER)) t(seq_region);

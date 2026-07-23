@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 17
+#define DUCKVEP_KERNEL_VERSION_MINOR 18
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -43,6 +43,15 @@ typedef enum duckvep_status {
     DUCKVEP_ERR_UNSUPPORTED,    /* event cannot be represented by this entry point */
     DUCKVEP_ERR_INTERNAL
 } duckvep_status_t;
+
+/* The public engine profile names the executable semantics being reproduced.
+ * VEP-specific language/runtime behavior is selected here, never by local
+ * formatter constants. STRICT is an internal comparison oracle, not a second
+ * clinical standard. */
+typedef enum duckvep_compat_profile {
+    DUCKVEP_COMPAT_VEP_116 = 0,
+    DUCKVEP_COMPAT_STRICT = 1
+} duckvep_compat_profile_t;
 
 /* Caller-allocated error detail; no ownership transfer. `message` is a
  * NUL-terminated, fixed-capacity buffer the engine writes into on failure. */
@@ -443,6 +452,7 @@ typedef struct duckvep_options_init {
     uint32_t splice_region_intronic; /* 0 -> DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC     */
     uint32_t halo;                   /* 0 -> max(upstream_dist, downstream_dist)        */
     uint8_t  distances_are_explicit; /* preserve upstream/downstream zero               */
+    uint8_t  compatibility_profile;  /* duckvep_compat_profile_t; zero -> VEP 116       */
 } duckvep_options_init_t;
 
 /* ------------------------------------------------------------- entry points

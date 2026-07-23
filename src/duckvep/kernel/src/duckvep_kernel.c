@@ -16,6 +16,7 @@
 
 #include "duckvep_classify.h"
 #include "duckvep_annotation_internal.h"
+#include "duckvep_compat.h"
 #include "duckvep_codon.h"
 #include "duckvep_delta.h"
 #include "duckvep_effect.h"
@@ -140,7 +141,9 @@ static int transcript_has_frameshift_intron(
             gap_start = exons->end1[current] + 1u;
             gap_end = exons->start1[previous] - 1u;
         }
-        if (gap_end >= gap_start && gap_end - gap_start <= 12u)
+        if (gap_end >= gap_start &&
+            gap_end - gap_start <=
+                DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN)
             return 1;
     }
     return 0;
@@ -173,9 +176,13 @@ static int event_overlaps_vep_stretched_exon(
     for (e = 0u; e < cnt; e++) {
         uint32_t exon_start = exons->start1[off + e];
         uint32_t exon_end = exons->end1[off + e];
-        uint32_t stretched_start = exon_start > 12u ? exon_start - 12u : 0u;
-        uint32_t stretched_end = exon_end > UINT32_MAX - 12u
-            ? UINT32_MAX : exon_end + 12u;
+        uint32_t stretched_start =
+            exon_start > DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN
+            ? exon_start - DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN : 0u;
+        uint32_t stretched_end =
+            exon_end > UINT32_MAX - DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN
+            ? UINT32_MAX
+            : exon_end + DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN;
 
         if (event_hi >= stretched_start && event_lo <= stretched_end)
             return 1;
@@ -258,6 +265,7 @@ enum {
     DVW_MODEL_TX_COUNT      = 18u,
     DVW_OPTIONS_NULL_OUT    = 20u,
     DVW_OPTIONS_OOM         = 21u,
+    DVW_OPTIONS_PROFILE     = 22u,
     DVW_WS_NULL_ARG         = 30u,
     DVW_WS_OOM              = 31u,
     DVW_ANN_NULL_MODEL      = 40u,
@@ -929,6 +937,7 @@ struct duckvep_options {
     uint32_t splice_region_exonic;
     uint32_t splice_region_intronic;
     uint32_t halo;
+    duckvep_compat_profile_t compatibility_profile;
 };
 
 duckvep_status_t duckvep_options_open(
@@ -947,6 +956,15 @@ duckvep_status_t duckvep_options_open(
     if (o == NULL) {
         return fail(error, DUCKVEP_ERR_INTERNAL, DVW_OPTIONS_OOM, "options alloc failed");
     }
+    if (init != NULL && !duckvep_compat_profile_valid(
+            (duckvep_compat_profile_t)init->compatibility_profile)) {
+        free(o);
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_OPTIONS_PROFILE,
+                    "compatibility profile is invalid");
+    }
+    o->compatibility_profile = init != NULL
+        ? (duckvep_compat_profile_t)init->compatibility_profile
+        : DUCKVEP_COMPAT_VEP_116;
 
     o->upstream_dist = init != NULL && init->distances_are_explicit
         ? init->upstream_dist
@@ -1630,7 +1648,7 @@ static int breakend_endpoint_in_directional_window(
  * strand-relative upstream/downstream term for this transcript. Keep the SO
  * rule program authoritative, but avoid constructing the full region, splice,
  * sequence, and observer state for ordinary rich/compact output. HGVS keeps
- * the generalized path because its observer consumes the complete trace. */
+ * the generalized path because its observer consumes the complete pair facts. */
 static int annotate_far_directional_snv(
     struct annotate_ctx       *c,
     uint32_t                   variant_idx,
@@ -1824,6 +1842,8 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     duckvep_sequence_delta_t delta;
     duckvep_coding_context_t coding_context;
     duckvep_variant_coding_context_status_t coding_context_status;
+    duckvep_transcript_edit_t transcript_edit;
+    duckvep_transcript_edit_status_t transcript_edit_status;
     duckvep_nmd_result_t nmd;
     uint64_t cmask;
     uint32_t consequence_flags;
@@ -2138,6 +2158,10 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                 event, ectx.region, projection_exon_hint,
                 c->delta_route_stats != NULL ? &route : NULL, &delta,
                 &coding_context, &coding_context_status);
+            if (coding_context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
+                coding_context.compatibility_profile =
+                    (uint8_t)c->options->compatibility_profile;
+            }
         } else {
             duckvep_sequence_delta_fill_for_annotation_trace(
                 kind, tx, &c->model->exons, seq, c->variants, variant_idx,
@@ -2236,19 +2260,34 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         row->protein_pos = -1;
     }
     if (c->observer != NULL) {
-        duckvep_annotation_trace_t trace;
+        duckvep_pair_facts_t facts;
 
-        memset(&trace, 0, sizeof trace);
-        trace.event = event;
-        trace.delta = cds_delta_attempted ? &delta : NULL;
-        trace.coding_context =
+        memset(&transcript_edit, 0, sizeof transcript_edit);
+        if (row->region_mask == (uint32_t)DUCKVEP_REGION_UPSTREAM ||
+            row->region_mask == (uint32_t)DUCKVEP_REGION_DOWNSTREAM) {
+            transcript_edit_status = DUCKVEP_TRANSCRIPT_EDIT_OUTSIDE_TRANSCRIPT;
+        } else {
+            transcript_edit_status =
+                duckvep_transcript_edit_project_prepared_hint(
+                    tx, &c->model->exons, c->variants, variant_idx, tx_idx,
+                    event, projection_exon_hint, &transcript_edit);
+        }
+        memset(&facts, 0, sizeof facts);
+        facts.event = event;
+        facts.transcript_edit =
+            transcript_edit_status == DUCKVEP_TRANSCRIPT_EDIT_OK
+                ? &transcript_edit : NULL;
+        facts.delta = cds_delta_attempted ? &delta : NULL;
+        facts.coding_context =
             coding_context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK
                 ? &coding_context : NULL;
-        trace.projection_exon_hint = projection_exon_hint;
-        trace.cds_delta_attempted = (uint8_t)cds_delta_attempted;
-        trace.coding_context_valid = (uint8_t)(
+        facts.projection_exon_hint = projection_exon_hint;
+        facts.transcript_edit_status = (uint8_t)transcript_edit_status;
+        facts.coding_context_status = (uint8_t)coding_context_status;
+        facts.cds_delta_attempted = (uint8_t)cds_delta_attempted;
+        facts.coding_context_valid = (uint8_t)(
             coding_context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK);
-        if (!c->observer(c->observer_context, c->variants, row, &trace)) {
+        if (!c->observer(c->observer_context, c->variants, row, &facts)) {
             c->status = DUCKVEP_ERR_INTERNAL;
             return 0;
         }

@@ -677,8 +677,17 @@ writeLines(c(
   "10"
 ), lift_chain)
 
-rduckhts_fasta_index(con, lift_src, index_path = paste0(lift_src, ".fai"))
-rduckhts_fasta_index(con, lift_dst, index_path = paste0(lift_dst, ".fai"))
+lift_src_index <- rduckhts_fasta_index(
+  con, lift_src, index_path = paste0(lift_src, ".fai")
+)
+lift_src_index$index_path <- "<tempfile>"
+lift_src_index
+
+lift_dst_index <- rduckhts_fasta_index(
+  con, lift_dst, index_path = paste0(lift_dst, ".fai")
+)
+lift_dst_index$index_path <- "<tempfile>"
+lift_dst_index
 
 lifted <- rduckhts_liftover(
   con,
@@ -807,6 +816,7 @@ bgunzip_meta <- rduckhts_bgunzip(
   keep = TRUE,
   overwrite = TRUE
 )
+bgunzip_meta$output_path <- "<tempfile>"
 bgunzip_meta[, c("success", "output_path", "bytes_out")]
 
 bam_index_meta <- rduckhts_bam_index(

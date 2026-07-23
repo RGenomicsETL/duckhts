@@ -1291,7 +1291,9 @@ static void bcftools_norm_row_scalar(duckdb_function_info info,
     free(cached_gzi_path);
 }
 
-static void register_bcftools_norm_scalar(duckdb_connection connection, duckdb_logical_type alt_type) {
+static void add_bcftools_norm_scalar(
+    duckdb_scalar_function_set set,
+    duckdb_logical_type        alt_type) {
     duckdb_scalar_function fn = duckdb_create_scalar_function();
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -1320,7 +1322,7 @@ static void register_bcftools_norm_scalar(duckdb_connection connection, duckdb_l
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
     duckdb_scalar_function_set_function(fn, bcftools_norm_row_scalar);
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_add_scalar_function_to_set(set, fn);
     duckdb_destroy_scalar_function(&fn);
 
     duckdb_destroy_logical_type(&varchar_type);
@@ -1331,19 +1333,25 @@ static void register_bcftools_norm_scalar(duckdb_connection connection, duckdb_l
 
 void register_bcftools_norm_functions(duckdb_connection connection) {
     duckdb_scalar_function fn;
+    duckdb_scalar_function_set norm_set;
+    duckdb_scalar_function_set alt_set;
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type varchar_list_type = duckdb_create_list_type(varchar_type);
 
-    register_bcftools_norm_scalar(connection, varchar_type);
-    register_bcftools_norm_scalar(connection, varchar_list_type);
+    norm_set = duckdb_create_scalar_function_set("bcftools_norm_row");
+    add_bcftools_norm_scalar(norm_set, varchar_type);
+    add_bcftools_norm_scalar(norm_set, varchar_list_type);
+    duckdb_register_scalar_function_set(connection, norm_set);
+    duckdb_destroy_scalar_function_set(&norm_set);
 
+    alt_set = duckdb_create_scalar_function_set("duckhts_alt_to_list");
     fn = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(fn, "duckhts_alt_to_list");
     duckdb_scalar_function_add_parameter(fn, varchar_type);
     duckdb_scalar_function_set_return_type(fn, varchar_list_type);
     duckdb_scalar_function_set_special_handling(fn);
     duckdb_scalar_function_set_function(fn, alt_to_list_scalar);
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_add_scalar_function_to_set(alt_set, fn);
     duckdb_destroy_scalar_function(&fn);
 
     fn = duckdb_create_scalar_function();
@@ -1352,8 +1360,11 @@ void register_bcftools_norm_functions(duckdb_connection connection) {
     duckdb_scalar_function_set_return_type(fn, varchar_list_type);
     duckdb_scalar_function_set_special_handling(fn);
     duckdb_scalar_function_set_function(fn, alt_to_list_scalar);
-    duckdb_register_scalar_function(connection, fn);
+    duckdb_add_scalar_function_to_set(alt_set, fn);
     duckdb_destroy_scalar_function(&fn);
+
+    duckdb_register_scalar_function_set(connection, alt_set);
+    duckdb_destroy_scalar_function_set(&alt_set);
 
     duckdb_destroy_logical_type(&varchar_list_type);
     duckdb_destroy_logical_type(&varchar_type);

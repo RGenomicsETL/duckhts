@@ -51,7 +51,8 @@ static int gap_between_exons(const duckvep_exon_model_t *exons,
  * frameshift intron when abs(end - start) <= 12. Normal prepared exon gaps have
  * start <= end, so this is an inclusive intron length of at most 13 bases. */
 static int gap_is_frameshift_intron(uint32_t gap_start, uint32_t gap_end) {
-    return gap_end >= gap_start && gap_end - gap_start <= 12u;
+    return gap_end >= gap_start &&
+        gap_end - gap_start <= DUCKVEP_VEP_FRAMESHIFT_INTRON_MAX_SPAN;
 }
 
 enum duckvep_splice_accum_bit {
@@ -824,7 +825,8 @@ int duckvep_point_outside_splice_reach(
         ? splice_exonic : splice_intronic;
 
     if (cnt < 2u) return 1;
-    if (margin < 16u) margin = 16u;
+    if (margin < DUCKVEP_VEP_SPLICE_FIXED_REACH)
+        margin = DUCKVEP_VEP_SPLICE_FIXED_REACH;
     if (!gap_between_exons(
             exons,
             point_exon_index(transcripts, tx_idx, 0u),
@@ -1003,7 +1005,8 @@ duckvep_splice_classify_differing_regions_sorted_with_windows(
 
         /* VEP leaves its short-intron PPT and generic splice windows
          * unclamped, so an intron-side window may extend into an outer exon. */
-        if (outer_margin < 16u) outer_margin = 16u;
+        if (outer_margin < DUCKVEP_VEP_SPLICE_FIXED_REACH)
+            outer_margin = DUCKVEP_VEP_SPLICE_FIXED_REACH;
         if (feature_ref_length == 0u) query_lo--;
         if (gap_between_exons(
                 exons,
@@ -1028,7 +1031,8 @@ duckvep_splice_classify_differing_regions_sorted_with_windows(
         ? (uint32_t)feature_ref_length : (uint32_t)feature_alt_length;
     empty_margin = splice_exonic > splice_intronic
         ? splice_exonic : splice_intronic;
-    if (empty_margin < 16u) empty_margin = 16u;
+    if (empty_margin < DUCKVEP_VEP_SPLICE_FIXED_REACH)
+        empty_margin = DUCKVEP_VEP_SPLICE_FIXED_REACH;
     if ((uint32_t)exon_rank < cnt && mismatch_span_length != 0u) {
         size_t ei = point_exon_index(
             transcripts, tx_idx, (uint32_t)exon_rank);
@@ -1207,7 +1211,8 @@ void duckvep_classify_point_sorted(
          * windows can be wider. A point strictly farther than the larger
          * reach from both ends of its current exon cannot satisfy any splice
          * predicate, so avoid visiting either neighboring intron. */
-        if (margin < 16u) margin = 16u;
+        if (margin < DUCKVEP_VEP_SPLICE_FIXED_REACH)
+            margin = DUCKVEP_VEP_SPLICE_FIXED_REACH;
         if ((int64_t)pos >
                 (int64_t)current_exon_start + (int64_t)margin &&
             (int64_t)pos <

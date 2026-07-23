@@ -6,6 +6,36 @@ con <- dbConnect(
 )
 expect_silent(rduckhts_load(con))
 
+geometry <- dbGetQuery(
+  con,
+  paste(
+    "SELECT g.* FROM (SELECT",
+    "duckvep_allele_geometry(100, 'a', 'atg') AS g)"
+  )
+)
+expect_identical(geometry$kind_code, 1L)
+expect_identical(geometry$interbase, TRUE)
+expect_equal(geometry$raw_start0, 99)
+expect_equal(geometry$raw_end0, 100)
+expect_equal(geometry$feature_start0, 100)
+expect_equal(geometry$feature_end0, 100)
+expect_equal(geometry$edit_start0, 100)
+expect_equal(geometry$edit_end0, 100)
+expect_equal(geometry$insertion_boundary0, 100)
+expect_identical(geometry$reference_difference_length, 0L)
+expect_identical(geometry$alternate_difference_length, 2L)
+
+right_anchor <- dbGetQuery(
+  con,
+  paste(
+    "SELECT g.* FROM (SELECT",
+    "duckvep_allele_geometry(1, 'A', 'CA') AS g)"
+  )
+)
+expect_identical(right_anchor$kind_code, 1L)
+expect_identical(right_anchor$anchor_side_code, 2L)
+expect_equal(right_anchor$insertion_boundary0, 0)
+
 ensembl_fixture_sql <- c(
   "CREATE SCHEMA duckvep_r_core",
   paste(
