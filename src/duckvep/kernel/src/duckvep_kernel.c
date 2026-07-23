@@ -2582,6 +2582,11 @@ static duckvep_status_t validate_variant_batch(
                 return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_ANN_ALLELE_RANGE,
                             "REF/ALT slice outside allele_bytes_len");
             }
+            if (rlen > UINT16_MAX || alen > UINT16_MAX) {
+                return fail(error, DUCKVEP_ERR_OUT_OF_RANGE,
+                            DVW_ANN_ALLELE_RANGE,
+                            "REF/ALT length exceeds the kernel limit");
+            }
             if (variants->variant_kind[i] ==
                 (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT) {
                 if (!unspecified_alt_shape_matches(
@@ -2604,15 +2609,15 @@ static duckvep_status_t validate_variant_batch(
                 }
                 continue;
             }
-            if (rlen > UINT16_MAX || alen > UINT16_MAX ||
-                !allele_shape_matches_kind(variants->variant_kind[i],
-                                           variants->pos1[i],
-                                           variants->end1[i],
-                                           variants->allele_bytes + (size_t)roff,
-                                           (uint16_t)rlen,
-                                           variants->allele_bytes + (size_t)aoff,
-                                           (uint16_t)alen,
-                                           events != NULL ? &events[i] : NULL)) {
+            if (!allele_shape_matches_kind(
+                    variants->variant_kind[i],
+                    variants->pos1[i],
+                    variants->end1[i],
+                    variants->allele_bytes + (size_t)roff,
+                    (uint16_t)rlen,
+                    variants->allele_bytes + (size_t)aoff,
+                    (uint16_t)alen,
+                    events != NULL ? &events[i] : NULL)) {
                 return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_ALLELE_RANGE,
                             "variant kind inconsistent with REF/ALT span");
             }
