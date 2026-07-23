@@ -10,7 +10,8 @@
   event. An executable differential splits and compares both `T,<*>` and
   `<*>,T` source orders against VEP 116 and pins its long-REF `<*>`
   allele-length quirk, which can emit an ablation term on complete feature
-  overlap
+  overlap. The reusable native variant-tile builder accepts the same exact
+  `<*>` event shape
 - make pedantic extension builds warning-clean in DuckHTS-owned sources: initialize
   liftover alias storage, remove unused legacy helpers, retain portable allocation
   overflow checks, and omit ELF visibility attributes on MinGW

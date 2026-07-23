@@ -15,9 +15,10 @@
  * Run-validation state persists across reset_rows, so ordering is checked across tile
  * boundaries as well as within one tile.
  *
- * Current scope includes validated VCF-shaped small variants plus single-interval
- * structural events. Structural operation and copy direction are explicit fields;
- * breakends use the separate paired-locus annotation path.
+ * Current scope includes validated VCF-shaped small variants, the exact gVCF <*>
+ * catch-all allele, and single-interval structural events. Structural operation
+ * and copy direction are explicit fields; breakends use the separate paired-locus
+ * annotation path.
  */
 #ifndef DUCKVEP_VARIANT_TILE_H
 #define DUCKVEP_VARIANT_TILE_H

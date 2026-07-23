@@ -318,6 +318,32 @@ static inline void duckvep_event_load_small_differing_region(
         batch->alt_length[idx], event);
 }
 
+static inline int duckvep_event_unspecified_alt_shape_matches(
+    uint32_t       pos1,
+    uint32_t       end1,
+    const uint8_t *ref,
+    uint16_t       ref_len,
+    const uint8_t *alt,
+    uint16_t       alt_len) {
+
+    uint16_t i;
+
+    if (pos1 == 0u || ref == NULL || ref_len == 0u || alt == NULL ||
+        alt_len != 3u || alt[0] != '<' || alt[1] != '*' || alt[2] != '>' ||
+        (uint32_t)(ref_len - 1u) > UINT32_MAX - pos1 ||
+        end1 != pos1 + (uint32_t)ref_len - 1u) {
+        return 0;
+    }
+    for (i = 0u; i < ref_len; i++) {
+        uint8_t base = duckvep_event_ascii_upper(ref[i]);
+        if (base != 'A' && base != 'C' && base != 'G' &&
+            base != 'T' && base != 'N') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static inline void duckvep_event_load_unspecified_alt(
     const duckvep_variant_batch_t *batch,
     size_t                         idx,
