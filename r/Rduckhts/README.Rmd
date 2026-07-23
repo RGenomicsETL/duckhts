@@ -399,6 +399,15 @@ and arbitrary producer-specific symbolic interpretation remain explicit follow-u
 Supplementary population and clinical annotations remain typed DuckDB/Parquet/DuckLake
 relations joined after consequence filtering.
 
+The resident kernel accepts any transcript catalog that satisfies its checked model
+contract. The bundled builder currently compiles the Ensembl core transcript set, not
+VEP's `--refseq` or `--merged` sets. It retains GENCODE Basic and Primary flags for SQL
+filtering but does not prefilter the model to either set. The builder withholds sequence
+for source rows marked with transcript-level sequence corrections. A model with inserted
+or deleted transcript bases relative to its genomic exons also needs a richer coordinate
+map than the current resident interface. Mitochondrial genetic codes and ordinary MT
+coordinates are supported; coordinates that cross a circular sequence origin are not.
+
 #### Minimal R example
 
 ```{r}

@@ -1,33 +1,38 @@
 ## Submission
 
 This submission updates the bundled 'duckhts' DuckDB extension in Rduckhts
-(1.3.0 -> 1.4.0). Minor release adding new reader/converter functions,
-sequence-UDF overloads, and some bug fixes. Full list in `NEWS.md`. No
+(1.4.0 -> 1.5.0). The release adds the DuckVEP consequence/HGVS surface,
+BigWig reading, downstream htslib linking metadata, reader and normalization
+extensions, and correctness fixes. Full details are in `NEWS.md`. There is no
 user-facing API breakage.
 
 ## Test environments
 
-- Ubuntu 24.04 (x86_64), R 4.6.0 — local `R CMD check --as-cran` (tarball): Status OK
-- win-builder — R-release (R 4.6.1) Status OK; R-devel submitted
-- Fedora R-devel (rhub `ghcr.io/r-hub/containers/gcc16`, mirrors CRAN
-  `r-devel-linux-x86_64-fedora-gcc`), R-devel 2026-07-17 and GCC 16.1.1:
-  0 errors, 0 warnings, 1 expected incoming-feasibility note for the `.9000`
-  development version and recent submission count
-- macOS builder — R-release submitted
+- Ubuntu 24.04 (x86_64), R 4.6.0 — local tarball
+  `R CMD check --as-cran`
+- Fedora 44 (x86_64), R-devel 2026-07-22 r90289, GCC 16.1.1 — GitHub
+  CRAN-reproduction job
+- Ubuntu R-release and R-devel, Windows R-release, and macOS R-release —
+  GitHub Actions
+- Emscripten/webR package build and package test — GitHub Actions
 
 ## R CMD check results
 
-0 errors | 0 warnings on the completed environments above. The local Fedora
-check of the development version has the single incoming-feasibility note
-described above; it is not a package-code, compilation, documentation, or test
-note.
+0 errors | 0 warnings | 1 note on the completed native environments above.
+The note reports seven CRAN updates in the preceding six months. It is not a
+package-code, compilation, documentation, or test note.
 
-Installed size is reported as INFO (~28 Mb). The size is intentional: the
+The Fedora warning reported for CRAN's Rduckhts 1.4.0 checks came from const
+qualifier diagnostics in bundled htslib code. The 1.5.0 Fedora GCC 16.1.1
+reproduction completed with no warnings.
+
+Installed size is reported as INFO (31.5 Mb). The size is intentional: the
 package bundles the 'duckhts' DuckDB extension C sources and vendored 'htslib'
 1.24 so it builds and tests without network access; no compiled objects or
 large binaries are shipped in the sources. Largest directories are
-`duckhts_extension` and `extdata` (small HTS fixtures). If CRAN's incoming
-check reports installed size as a NOTE, it is expected and by design.
+`duckhts_extension` (26.7 Mb) and `extdata` (3.7 Mb). The source tarball is
+approximately 3.3 Mb and contains no compiled objects or libraries. If CRAN's
+incoming check reports installed size as a NOTE, it is expected and by design.
 
 ## Reverse dependencies
 

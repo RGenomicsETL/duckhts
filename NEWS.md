@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- clarify the public DuckVEP model contract before release: the native kernel is
+  transcript-source-neutral, while the supplied builder compiles the Ensembl core set;
+  transcript-to-genome sequence corrections and circular-origin geometry remain
+  unsupported, GENCODE Basic/Primary membership is retained for SQL filtering, and path
+  projection or phased composition is never implicit
 - make the Fedora CRAN-reproduction job install the suggested `Rtinycc` package before
   strict dependency checks instead of failing before Rduckhts is built
 - document DuckVEP's exact sequence-path contract for X/Y pseudoautosomal regions,

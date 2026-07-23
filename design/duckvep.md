@@ -23,8 +23,9 @@ VEP's clipped transcript-slice state without changing those semantic edits. Allo
 `duckvep_annotate(..., hgvs := true)` relation path are implemented for independent literal
 small variants. Strict executable-VEP evidence covers the fixed position-one/right-anchor cases
 and 56,998 chromosome-21 ClinVar transcript pairs with zero HGVSc/HGVSp differences.
-Genomic HGVS, RefSeq RNA-edit shifting, structural/BND HGVS, broader cross-species HGVS
-distributions, and compound/phased HGVS remain open.
+Genomic HGVS, transcript models whose sequence differs from the genomic exon sequence,
+structural/BND HGVS, broader cross-species HGVS distributions, and compound/phased HGVS
+remain open.
 VEP 116 is the behavioral authority; pure-C properties and bcftools csq supply independent
 checks for mechanics and phased edit state.
 
@@ -300,15 +301,18 @@ For GRCh38 MANE attributes, the prepared DuckDB relation also retains the attrib
 as `mane_select_refseq` or `mane_plus_clinical_refseq`. That value is the paired versioned
 RefSeq transcript accession. The builder rejects multiple or empty mappings for a MANE
 flag. Only the selection bits enter the resident C model; Ensembl/GENCODE and RefSeq
-identifiers stay in the cold relation for late SQL projection and future RefSeq HGVS.
+identifiers stay in the cold relation for late SQL projection.
 
 Single-position, single-amino-acid Translation SeqEdits are kept with the reference-derived
 CDS and applied only to VEP's reference peptide; the alternate peptide remains the raw
-codon translation. Transcript RNA edits and other Translation SeqEdit shapes withhold
-sequence with an explicit reason. The transcript, coordinates, and flags remain in the
-model. Unsupported reference alphabet has the same fail-closed shape. This is different
-from malformed topology: bad coordinates, strand, exon phase or rank, translation bounds,
-or incomplete sequence reconstruction abort the build.
+codon translation. Transcript-level sequence corrections and other Translation SeqEdit
+shapes withhold sequence with an explicit reason. In particular, the current exon map
+requires every transcript cDNA exon span to be contiguous and the same length as its
+genomic exon span; inserted or deleted transcript bases need a richer mapping. The
+transcript, coordinates, and flags remain in the model. Unsupported reference alphabet
+has the same fail-closed shape. This is different from malformed topology: bad
+coordinates, strand, exon phase or rank, translation bounds, or incomplete sequence
+reconstruction abort the build.
 
 The resident model stores CDS bytes and both non-coding transcript flanks in two packed
 byte pools with offsets and lengths per transcript. The flank pool has no per-transcript
@@ -456,7 +460,8 @@ The implemented builder does not yet:
 - stage Ensembl `table.sql` and dump files into DuckDB;
 - reproduce the remaining non-core VEP 116 transcript sources and selection rules,
   including `estgene` and `otherfeatures`/RefSeq;
-- apply transcript RNA edits or arbitrary length-changing/range Translation SeqEdits;
+- apply transcript-to-genome sequence corrections or arbitrary length-changing/range
+  Translation SeqEdits;
 - extend full-model receipts and indexed-cache differentials beyond human GRCh37/38 and
   *P. falciparum* to more Ensembl species, assemblies, and codon-table combinations;
 - preserve the complete Ensembl xref, protein-feature, supporting-feature, attribute, and
@@ -835,9 +840,10 @@ The execution split is:
   event is then projected back to transcript coordinates. Complete uploaded-REF checking
   and `hgvs_variant_notation` duplication-source comparison are separate consumers of a
   wider bounded reference lookup and must not widen that exact shift slice;
-- RefSeq transcripts with RNA-edit attributes may reject reuse of that genomic shift and
-  rerun `perform_shift` over the edited transcript sequence. This is a separate model
-  capability, not the default Ensembl path; and
+- transcripts whose sequence differs from the genomic exon sequence may reject reuse of
+  that genomic shift and rerun `perform_shift` over the corrected transcript sequence.
+  VEP encounters this in some RefSeq models; it is a separate model capability, not a
+  property of RefSeq identifiers themselves; and
 - protein `p.` HGVS consumes the alternate peptide difference produced by the same edit
   set used for phased consequence classification.
 
@@ -845,8 +851,9 @@ The hot transcript sweep therefore emits or retains numeric projected-edit facts
 not allocate HGVS strings. Rendering is late, after filtering. Before a public phased API
 is fixed, the same prepared CDS edit set must become the phased executor's input rather
 than a second trimming or projection authority. External VEP-116 differentials must expand
-from the current Ensembl/GRCh38 independent-event coverage to RefSeq RNA edits, other
-assemblies/species, all shift modes, exact structural events, and compound edits.
+from the current Ensembl/GRCh38 independent-event coverage to transcript catalogs with
+sequence corrections, other assemblies/species, all shift modes, exact structural events,
+and compound edits.
 Apply-then-diff sequence equivalence remains an independent property oracle. Exact
 structural HGVS can later consume typed exact events. BND HGVS
 additionally needs the paired relation's mate and orientation facts; imprecise structural
