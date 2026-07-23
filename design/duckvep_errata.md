@@ -375,6 +375,15 @@ or stop codon instead emits `start_retained_variant` or
 `stop_retained_variant`. It does not emit transcript or protein HGVS for that
 allele.
 
+There is one important executable quirk. VEP 116 still passes the literal three
+characters in `<*>` through its ordinary allele-length deletion predicate. If a
+REF longer than three bases completely contains a transcript, regulatory
+feature, or motif feature, VEP can therefore emit the corresponding ablation
+term. That output does not mean the catch-all allele is a known three-base
+replacement. DuckVEP reproduces it for VEP-116 compatibility; callers who do
+not want consequences for the catch-all allele should exclude `<*>` rows after
+ALT expansion.
+
 DuckVEP accepts one already-expanded ALT per event. A mixed record is therefore
 split before annotation, and both `T,<*>` and `<*>,T` produce the same two
 allele-level results. A record-level gVCF `END` remains source provenance for a
@@ -382,9 +391,10 @@ literal ALT or `<*>`; it does not turn either allele into a structural event.
 
 Source anchors: VEP 116 `Parser_VCF.t` non-variant cases, Ensembl Variation 116
 `VariationFeatureOverlap.pm` alternate-overlap filtering, and
-`VariationEffect.pm` coding-unknown/start-retained/stop-retained predicates.
+`VariationEffect.pm` deletion, feature-ablation, coding-unknown,
+start-retained, and stop-retained predicates.
 `test-duckvep-gvcf-differential` executes both engines on the fixed mixed-ALT
-fixture.
+fixture, including the complete-transcript long-REF case.
 
 ## Structural confidence and inserted-sequence payloads do not alter VEP 116 consequence terms
 

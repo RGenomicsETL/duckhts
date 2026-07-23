@@ -740,6 +740,10 @@ ORDER BY event_index;
 statement ok
 CREATE TABLE duckvep_gvcf_events AS
 SELECT * FROM (VALUES
+  (8::UBIGINT, 1::UINTEGER, 90::UBIGINT,
+   'CGTACGTACGTACGTACGTACGTACGTACGATGGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAAACGTACGTACGTACGTACGT'::VARCHAR,
+   '<*>'::VARCHAR, 260::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,
+   NULL::UINTEGER, NULL::UBIGINT),
   (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, 'C'::VARCHAR,
    170::UBIGINT, NULL::VARCHAR, NULL::VARCHAR, NULL::UINTEGER, NULL::UBIGINT),
   (2::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'T'::VARCHAR, '<NON_REF>'::VARCHAR,
@@ -769,6 +773,7 @@ ORDER BY event_index;
 3	small_variant
 6	small_variant
 7	small_variant
+8	small_variant
 
 query ITTTI
 SELECT event_index, duckvep_event_kind, consequence, duckvep_status,
@@ -784,6 +789,27 @@ ORDER BY event_index;
 3	small_variant	coding_sequence_variant	supported	1
 6	small_variant	start_retained_variant	supported	1
 7	small_variant	stop_retained_variant	supported	1
+8	small_variant	transcript_ablation	supported	1
+
+# VEP 116 passes the three bytes spelling <*> through its ordinary allele-length
+# predicates. A longer REF that completely contains a feature therefore receives
+# an ablation term. This is executable compatibility, not a biological sequence
+# interpretation; callers that do not want catch-all rows should remove them.
+query IT
+WITH observed AS (
+  SELECT annotation.*
+  FROM unnest(_duckvep_annotate_small_rich(
+    'fixture', 1::UINTEGER, 990::UBIGINT,
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '<*>', 0::UBIGINT
+  )) AS u(annotation)
+  WHERE annotation.regulation_feature_index IS NOT NULL
+)
+SELECT regulation_feature_index, consequence
+FROM observed
+ORDER BY regulation_feature_index;
+----
+0	regulatory_region_ablation&regulatory_region_variant
+1	TFBS_ablation&TF_binding_site_variant
 
 # An explicit NULL HGVS selector follows the documented FALSE default instead
 # of filtering small variants out of both native lanes.

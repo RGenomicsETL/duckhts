@@ -52,7 +52,9 @@ The validation gates have independent jobs:
   those records with executable VEP 116. Both `T,<*>` and `<*>,T` source orders
   are present. Literal alleles retain their ordinary consequence; `<*>` receives
   VEP's generic coding or retained start/stop consequence; `<NON_REF>`, bare `*`,
-  and `.` do not enter the alternate-overlap comparison.
+  and `.` do not enter the alternate-overlap comparison. A 171-base REF whose
+  `<*>` allele spans the complete transcript pins VEP 116's literal allele-length
+  behavior: the executable emits `transcript_ablation`.
 - `data/par_path_witnesses.vcf` is the release-116 GRCh38 exact-path PAR witness for a
   published-release/CLI UTR divergence and a sequence-dependent PLCXD1 start-loss/HGVS
   case on both X and Y. Run it through `corpus_differential.R` with the complete human

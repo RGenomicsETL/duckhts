@@ -328,6 +328,9 @@ static inline void duckvep_event_load_unspecified_alt(
 
     duckvep_event_load_raw_interval(batch, idx, event);
     event->kind = (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT;
+    /* VEP 116 passes <*> through its ordinary allele-length predicates. The
+     * resulting three-byte alternate is executable compatibility behavior,
+     * not an assertion that <*> is a biological sequence. */
     event->ref_diff_length = ref_length;
     event->alt_diff_length = alt_length;
     event->feature_length_relation =

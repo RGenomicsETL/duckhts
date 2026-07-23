@@ -331,7 +331,8 @@ test-duckvep-gvcf-differential: release
 		--corpus gvcf_semantics \
 		--vcf test/duckvep/conformance/data/gvcf_semantics.vcf \
 		--extension build/release/duckhts.duckdb_extension \
-		--split-multiallelic --sample-per-shape 0 --distance 0
+		--split-multiallelic --sample-per-shape 0 --distance 0 \
+		--max-allele-length 171
 
 # Reproducible rare-state exploration. The generated VCF, pair-level Parquet, and
 # statistical summaries remain under the ignored results directory so every failure

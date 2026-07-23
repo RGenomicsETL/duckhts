@@ -2,6 +2,7 @@
 ##contig=<ID=chrDuck,length=260>
 ##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the reference block">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrDuck	90	symbolic_star_transcript_span	CGTACGTACGTACGTACGTACGTACGTACGATGGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAAACGTACGTACGTACGTACGT	<*>	.	PASS	END=260
 chrDuck	120	symbolic_star_start_1	A	<*>	.	PASS	END=170
 chrDuck	121	symbolic_star_start_2	T	<*>	.	PASS	END=170
 chrDuck	122	symbolic_star_start_3	G	<*>	.	PASS	END=170
