@@ -1,10 +1,19 @@
 ## Submission
 
 This submission updates the bundled 'duckhts' DuckDB extension in Rduckhts
-(1.4.0 -> 1.5.0). The release adds the DuckVEP consequence/HGVS surface,
-BigWig reading, downstream htslib linking metadata, reader and normalization
-extensions, and correctness fixes. Full details are in `NEWS.md`. There is no
-user-facing API breakage.
+(1.4.0 -> 1.5.0). Since the previous CRAN release, it:
+
+- adds the DuckVEP consequence/HGVS relation, Ensembl model builder,
+  regulatory/motif, structural-variant, breakend, and NMD support, with
+  VEP-116 compatibility fixes;
+- adds BigWig reading through the package's htslib transport and region
+  semantics;
+- updates bundled htslib to 1.24 and exposes versioned downstream linking
+  metadata; and
+- extends BCF parsing, normalization, FASTQ projection/QC, cross-platform
+  package tests, wasm tests, and differential validation.
+
+Full details are in `NEWS.md`. There is no user-facing API breakage.
 
 ## Test environments
 

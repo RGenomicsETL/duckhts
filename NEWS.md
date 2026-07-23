@@ -1,6 +1,9 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- bounds-check htslib's in-place `BQ`/`ZQ` tag rename before writing the tag
+  name, avoiding GCC 11's zero-size-region diagnostic while preserving BAQ
+  behavior
 - clarify the public DuckVEP model contract before release: the native kernel is
   transcript-source-neutral, while the supplied builder compiles the Ensembl core set;
   transcript-to-genome sequence corrections and circular-origin geometry remain
