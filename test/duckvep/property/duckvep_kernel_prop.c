@@ -6409,6 +6409,130 @@ TEST hgvs_genomic_shift_matches_reference_oracle_for_any_indel(void) {
     PASS();
 }
 
+TEST hgvs_clamped_feature_preserves_vep_preclip_multiplication_order(void) {
+    static const uint8_t genomic_reference[] = {
+        'A','T','G', 'A','A','A', 'T','A','A', 'C','G','T','A'
+    };
+    static const uint8_t alt_cc[] = {'C', 'C'};
+    static const uint8_t alt_ccc[] = {'C', 'C', 'C'};
+    static const uint8_t alt_acc[] = {'A', 'C', 'C'};
+    static const uint8_t alt_cac[] = {'C', 'A', 'C'};
+    struct kprop_proj_scene s;
+    duckvep_transcript_edit_t edit;
+    duckvep_hgvs_reference_window_t reference;
+    duckvep_hgvs_dna_fact_t fact;
+    char rendered[64];
+    size_t required = 0u;
+
+    memset(&s, 0, sizeof s);
+    s.chrom = 0u; s.tstart = 100u; s.tend = 109u; s.strand = (int8_t)1;
+    s.excnt = 1u; s.cds_s = 100u; s.cds_e = 106u;
+    s.es[0] = 100u; s.ee[0] = 109u; s.cs[0] = 1u; s.ce[0] = 10u;
+    s.phase[0] = 0;
+    kprop_proj_scene_finish(&s);
+    memset(&reference, 0, sizeof reference);
+    reference.bases = genomic_reference;
+    reference.length = sizeof genomic_reference;
+    reference.start1 = 100u;
+    reference.chrom_id = 0u;
+
+    memset(&edit, 0, sizeof edit);
+    edit.tx_idx = 0u;
+    edit.transcript_strand = (int8_t)1;
+    edit.first.cdna_anchor1 = 10u; edit.first.exonic = 1u;
+    edit.last = edit.first;
+    edit.feature_first = edit.first;
+    edit.feature_last = edit.first;
+    edit.feature_first.genomic_pos1 = 109u;
+    edit.feature_last.genomic_pos1 = 109u;
+    edit.event.chrom_id = 0u;
+    edit.event.kind = (uint8_t)DUCKVEP_KIND_INDEL;
+
+    /* VEP calls hgvs_variant_notation() before _clip_alleles(). The clamped
+     * reference is C, so terminal CG>CC is directly C>CC and remains a
+     * printable duplication even though the differing genomic base is past
+     * the transcript endpoint. */
+    edit.ref = genomic_reference + 10u;
+    edit.ref_length = 1u;
+    edit.alt = alt_cc + 1u;
+    edit.alt_length = 1u;
+    edit.feature_ref = genomic_reference + 9u;
+    edit.feature_ref_length = 2u;
+    edit.feature_alt = alt_cc;
+    edit.feature_alt_length = 2u;
+    edit.event.start1 = 110u;
+    edit.event.end1 = 110u;
+    edit.event.feature_start1 = 109u;
+    edit.event.feature_end1 = 110u;
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+                  &s.tx, &s.ex, NULL, &reference, &edit, &fact));
+    ASSERT_EQ(DUCKVEP_HGVS_DNA_DUPLICATION, fact.shape);
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_dna_render_basic(
+                  &fact, rendered, sizeof rendered, &required));
+    ASSERT_EQ(0, strcmp("c.*3dup", rendered));
+
+    /* The same pre-clip rule represents C>CCC as a three-copy repeat. */
+    edit.alt = alt_ccc + 1u;
+    edit.alt_length = 2u;
+    edit.feature_alt = alt_ccc;
+    edit.feature_alt_length = 3u;
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+                  &s.tx, &s.ex, NULL, &reference, &edit, &fact));
+    ASSERT_EQ(DUCKVEP_HGVS_DNA_REPEAT, fact.shape);
+    ASSERT_EQ(3u, fact.repeat_count);
+    ASSERT_EQ(DUCKVEP_HGVS_OK,
+              duckvep_hgvs_dna_render_basic(
+                  &fact, rendered, sizeof rendered, &required));
+    ASSERT_EQ(0, strcmp("c.*3[3]", rendered));
+
+    /* ACG>ACC and CGT>CAC become insertions only after clipping. Their
+     * insertion coordinates fall beyond this transcript, so VEP emits no
+     * HGVSc. Copying sequence at the endpoint must not promote either one to
+     * a duplication after that failed projection. */
+    edit.ref = genomic_reference + 10u;
+    edit.ref_length = 1u;
+    edit.alt = alt_acc + 2u;
+    edit.alt_length = 1u;
+    edit.feature_ref = genomic_reference + 8u;
+    edit.feature_ref_length = 3u;
+    edit.feature_alt = alt_acc;
+    edit.feature_alt_length = 3u;
+    edit.feature_first.cdna_anchor1 = 9u;
+    edit.feature_first.genomic_pos1 = 108u;
+    edit.feature_last.cdna_anchor1 = 10u;
+    edit.feature_last.genomic_pos1 = 109u;
+    edit.event.start1 = 110u;
+    edit.event.end1 = 110u;
+    edit.event.feature_start1 = 108u;
+    edit.event.feature_end1 = 110u;
+    ASSERT_EQ(DUCKVEP_HGVS_NOT_APPLICABLE,
+              duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+                  &s.tx, &s.ex, NULL, &reference, &edit, &fact));
+
+    edit.ref = genomic_reference + 10u;
+    edit.ref_length = 2u;
+    edit.alt = alt_cac + 1u;
+    edit.alt_length = 2u;
+    edit.feature_ref = genomic_reference + 9u;
+    edit.feature_ref_length = 3u;
+    edit.feature_alt = alt_cac;
+    edit.feature_alt_length = 3u;
+    edit.feature_first.cdna_anchor1 = 10u;
+    edit.feature_first.genomic_pos1 = 109u;
+    edit.feature_last = edit.feature_first;
+    edit.event.start1 = 110u;
+    edit.event.end1 = 111u;
+    edit.event.feature_start1 = 109u;
+    edit.event.feature_end1 = 111u;
+    ASSERT_EQ(DUCKVEP_HGVS_NOT_APPLICABLE,
+              duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+                  &s.tx, &s.ex, NULL, &reference, &edit, &fact));
+    PASS();
+}
+
 TEST hgvs_true_feature_inversion_is_not_delins(void) {
     static const uint8_t ref[] = {'A', 'C'};
     static const uint8_t alt[] = {'G', 'T'};
@@ -25104,6 +25228,7 @@ int main(int argc, char **argv) {
     RUN_TEST(hgvs_shift_reproduces_vep_short_region_overlap);
     RUN_TEST(hgvs_large_duplication_uses_lookup_beyond_shift_slice);
     RUN_TEST(hgvs_genomic_shift_matches_reference_oracle_for_any_indel);
+    RUN_TEST(hgvs_clamped_feature_preserves_vep_preclip_multiplication_order);
     RUN_TEST(hgvs_true_feature_inversion_is_not_delins);
     RUN_TEST(hgvs_single_residue_sidecar_matches_core_shapes);
     RUN_TEST(hgvs_sidecar_requires_frameshift_proof_for_length_change);
