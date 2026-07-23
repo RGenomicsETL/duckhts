@@ -1,14 +1,20 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.0
+# duckhts 1.5.0.9000
+- make pedantic extension builds warning-clean in DuckHTS-owned sources: initialize
+  liftover alias storage, remove unused legacy helpers, retain portable allocation
+  overflow checks, and omit ELF visibility attributes on MinGW
 - recast the retained DuckVEP/FastVEP whole-genome comparison as an illustrated,
   evidence-first report. On the declared complete GIAB HG002 workload, DuckVEP
   records 2.55-fold and 2.12-fold same-core wall-time advantages at one and four
   pinned physical cores while matching all 56,998 held-out VEP 116 transcript
   pairs, consequence sets, and HGVSc/HGVSp suffixes. The report keeps its exact
-  workload, output, run-count, and peak-RSS qualifications, compares both
-  projects' supplementary-annotation routes without timing an asymmetric
-  provider set, and plots the latest checked 5,100,500 randomized property
+  workload, output, run-count, and peak-RSS qualifications, directly benchmarks
+  FastVEP fastSA and DuckDB on the same dated ClinVar payload and 4,095,611
+  HG002 allele queries, and retains measured multi-provider AlphaMissense,
+  assembly-correct REVEL, and phyloP BigWig workloads. It also explains the shared
+  sweep/fact/rule design, late SQL presentation/provider joins, and layered test
+  infrastructure, and plots the latest checked 5,100,500 randomized property
   trials plus 100,268-pair generated VEP differential. It does not extend the
   result to unmeasured predictors
 - bounds-check htslib's in-place `BQ`/`ZQ` tag rename before writing the tag

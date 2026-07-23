@@ -4365,12 +4365,13 @@ static int bcf_appender_contig_task_add(bcf_appender_contig_task_t *task,
                                         const char *region) {
     if (task->n_regions == task->capacity) {
         unsigned int new_capacity = task->capacity ? task->capacity * 2 : 4;
-        if (new_capacity < task->capacity ||
-            (size_t)new_capacity > SIZE_MAX / sizeof(*task->regions)) {
-            return 0;
-        }
+        size_t new_bytes;
+        if (new_capacity < task->capacity) return 0;
+        new_bytes = (size_t)new_capacity * sizeof(*task->regions);
+        if (new_capacity != 0 &&
+            new_bytes / (size_t)new_capacity != sizeof(*task->regions)) return 0;
         char **new_regions = (char **)realloc(
-            task->regions, (size_t)new_capacity * sizeof(*task->regions)
+            task->regions, new_bytes
         );
         if (!new_regions) return 0;
         task->regions = new_regions;

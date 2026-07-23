@@ -1,0 +1,21 @@
+engine,threads,run,queries,hits,payload_check,payload_check_kind,seconds
+DuckDB typed Parquet join,1,1,4095611,44561,5068988809117073306,typed_payload_hash,0.913719375
+DuckDB typed Parquet join,1,2,4095611,44561,5068988809117073306,typed_payload_hash,0.897910275
+DuckDB typed Parquet join,1,3,4095611,44561,5068988809117073306,typed_payload_hash,0.898902163
+DuckDB typed Parquet join,1,4,4095611,44561,5068988809117073306,typed_payload_hash,0.896037780
+DuckDB typed Parquet join,1,5,4095611,44561,5068988809117073306,typed_payload_hash,0.902002633
+DuckDB typed Parquet join,4,1,4095611,44561,5068988809117073306,typed_payload_hash,0.269659303
+DuckDB typed Parquet join,4,2,4095611,44561,5068988809117073306,typed_payload_hash,0.260596517
+DuckDB typed Parquet join,4,3,4095611,44561,5068988809117073306,typed_payload_hash,0.260197721
+DuckDB typed Parquet join,4,4,4095611,44561,5068988809117073306,typed_payload_hash,0.260174599
+DuckDB typed Parquet join,4,5,4095611,44561,5068988809117073306,typed_payload_hash,0.269809235
+FastVEP fastSA lookup,1,1,4095611,44561,8804687,returned_json_bytes,3.422198820
+FastVEP fastSA lookup,1,2,4095611,44561,8804687,returned_json_bytes,3.360629531
+FastVEP fastSA lookup,1,3,4095611,44561,8804687,returned_json_bytes,3.426795705
+FastVEP fastSA lookup,1,4,4095611,44561,8804687,returned_json_bytes,3.432021452
+FastVEP fastSA lookup,1,5,4095611,44561,8804687,returned_json_bytes,3.373877639
+FastVEP fastSA lookup,4,1,4095611,44561,8804687,returned_json_bytes,4.163894916
+FastVEP fastSA lookup,4,2,4095611,44561,8804687,returned_json_bytes,4.087498843
+FastVEP fastSA lookup,4,3,4095611,44561,8804687,returned_json_bytes,4.025713979
+FastVEP fastSA lookup,4,4,4095611,44561,8804687,returned_json_bytes,4.175435767
+FastVEP fastSA lookup,4,5,4095611,44561,8804687,returned_json_bytes,4.066152261

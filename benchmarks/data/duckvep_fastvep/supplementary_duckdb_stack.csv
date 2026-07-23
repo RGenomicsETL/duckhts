@@ -1,0 +1,11 @@
+workload,assembly,provider_rows,probe_rows,result_rows,threads,median_seconds,source_revision,source_report
+ClinVar + ClinvArbitration + AlphaMissense one plan,GRCh38,79617268,4036258,4036328,1,3.257,61d5d89aa58220842de8c5114f427d4b6580fe9b,benchmark_variantkey_join_overlap.md
+ClinVar + ClinvArbitration + AlphaMissense one plan,GRCh38,79617268,4036258,4036328,4,0.985,61d5d89aa58220842de8c5114f427d4b6580fe9b,benchmark_variantkey_join_overlap.md
+REVEL v1.3 exact score join,GRCh37,77966138,4103497,4103497,1,3.224,61d5d89aa58220842de8c5114f427d4b6580fe9b,benchmark_variantkey_join_overlap.md
+REVEL v1.3 exact score join,GRCh37,77966138,4103497,4103497,4,0.944,61d5d89aa58220842de8c5114f427d4b6580fe9b,benchmark_variantkey_join_overlap.md
+AlphaMissense v2 exact score join,GRCh38,71697556,4036258,9225,1,2.674,61d5d89aa58220842de8c5114f427d4b6580fe9b,benchmark_variantkey_join_overlap.md
+AlphaMissense v2 exact score join,GRCh38,71697556,4036258,9225,4,0.789,61d5d89aa58220842de8c5114f427d4b6580fe9b,benchmark_variantkey_join_overlap.md
+phyloP 100-way BigWig full scan,GRCh38,9314560,9314560,9314560,1,0.994,669d2c4d9b91,benchmark_bigwig_reader.md
+phyloP 100-way BigWig full scan,GRCh38,9314560,9314560,9314560,4,0.993,669d2c4d9b91,benchmark_bigwig_reader.md
+phyloP 100-way BigWig 20 indexed ranges,GRCh38,9314560,4656131,4656131,1,0.498,669d2c4d9b91,benchmark_bigwig_reader.md
+phyloP 100-way BigWig 20 indexed ranges,GRCh38,9314560,4656131,4656131,4,0.130,669d2c4d9b91,benchmark_bigwig_reader.md

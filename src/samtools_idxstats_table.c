@@ -41,15 +41,6 @@ typedef struct {
     int emitted;
 } samtools_idxstats_bind_t;
 
-static char *dup_string_idxstats(const char *s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char *copy = (char *)duckdb_malloc(len);
-    if (!copy) return NULL;
-    memcpy(copy, s, len);
-    return copy;
-}
-
 static char *append_suffix_idxstats(const char *path, const char *suffix) {
     size_t path_len;
     size_t suffix_len;

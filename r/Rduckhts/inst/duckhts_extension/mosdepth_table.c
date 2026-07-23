@@ -407,7 +407,6 @@ static int parse_read_group_set(const char *spec, khash_t(mdstr) **out,
     while (token) {
         int ret = 0;
         char *key = NULL;
-        khiter_t it;
         if (*token == '\0') {
             snprintf(err, errlen, "duckhts_mosdepth: invalid read_groups string");
             read_group_set_destroy(set);
@@ -421,7 +420,7 @@ static int parse_read_group_set(const char *spec, khash_t(mdstr) **out,
             free(copy);
             return -1;
         }
-        it = kh_put(mdstr, set, key, &ret);
+        (void)kh_put(mdstr, set, key, &ret);
         if (ret < 0) {
             free(key);
             snprintf(err, errlen, "duckhts_mosdepth: out of memory");
@@ -1807,7 +1806,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     int summary_header_written = 0;
     int precision = (int)bind->precision;
     int rc = -1;
-    int n_targets;
+    int n_targets = 0;
     int by_is_window = 0;
     int64_t window = 0;
 

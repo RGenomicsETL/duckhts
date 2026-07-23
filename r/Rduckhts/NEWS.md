@@ -1,7 +1,10 @@
 
-# Rduckhts 1.5.0-0.1.0
+# Rduckhts 1.5.0.9000-0.1.0
+- remove the DuckHTS-source diagnostics reported by the Debian and Windows
+  win-builder package pretests, including the MinGW hidden-visibility warnings
 - link the package DuckVEP documentation to the illustrated whole-genome
-  DuckVEP/FastVEP speed, memory, and VEP-conformance report
+  DuckVEP/FastVEP speed, memory, VEP-conformance, fastSA-versus-SQL provider,
+  algorithm-design, and test-infrastructure report
 - make the in-memory downstream htslib consumer test compatible with both the
   original and argument-capable `Rtinycc::tcc_call_symbol()` APIs, and bundle
   bounds-checked BAQ tag renaming so GCC 11 package builds do not emit the

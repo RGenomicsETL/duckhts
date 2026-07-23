@@ -7,7 +7,7 @@ West?
 Status: current measured comparison of DuckVEP and FastVEP on the
 complete GIAB HG002 GRCh38 small-variant benchmark VCF. It includes VCF
 decoding and real uncompressed tabular output. DuckVEP additionally pays
-for an explicit global coordinate sort. The consequence speed lane
+for an explicit global coordinate sort. The consequence speed comparison
 excludes HGVS, regulatory/motif features, and supplementary annotation
 for both engines.
 
@@ -43,34 +43,162 @@ The comparison retains the work each tool actually requires:
   transcript cache, annotates, coordinates results, and writes its
   native tab schema.
 - The output schemas have the same width but are not claimed
-  byte-equivalent. FastVEP computes native presentation fields that
-  DuckVEP leaves out; DuckVEP pays for the explicit sort that FastVEP
-  does not perform.
+  byte-equivalent. FastVEP computes every field in its native
+  presentation schema. DuckVEP pays for the explicit sort that FastVEP
+  does not perform, but leaves `Codons`, `Existing_variation`,
+  `DISTANCE`, and `FLAGS` as placeholders in this speed comparison.
 
 This is therefore an operational pipeline comparison, not an
 isolated-kernel microbenchmark.
 
-### Supplementary annotation: a fair comparison
+### Presentation work is not free
 
-FastVEP is not consequence-only. The pinned checkout (`7038e7c`) also
-builds native fastSA stores for clinical, population, score, interval,
-and gene data. The timed command does not load them. DuckVEP likewise
-does not load supplementary providers in the timed command: those remain
-ordinary DuckDB relations joined after consequence filtering.
+The 17 FastVEP columns are not one indivisible kernel. DuckVEP already
+produces the consequence, impact, cDNA/CDS/protein positions, amino
+acids, and numeric transcript/gene ordinals. The measured DuckDB query
+derives the uploaded variant, location, allele, and feature type, then
+joins stable gene and transcript identifiers plus strand from the
+resident model.
 
-| Provider class  | DuckVEP route                                                                                            | FastVEP route                                                   | In the speed lane?  |
-|:----------------|:---------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------|:--------------------|
-| Exact allele    | VariantKey plus literal-allele SQL joins over VCF, Parquet, DuckLake, or another readable relation       | `.osa`/`.osa2`, with built-in sources and custom VCF conversion | No, for either tool |
-| Sparse interval | Half-open SQL overlap or cgranges over BED, GFF/GTF, Parquet, BAM-derived intervals, and other relations | `.osi`, including custom BED conversion                         | No, for either tool |
-| Gene/transcript | Stable-identifier joins after consequence filtering                                                      | `.oga` gene stores and transcript-attached fields               | No, for either tool |
-| Dense signal    | Direct BigWig/bedGraph reads or tiled Parquet reductions                                                 | fastSA sources for phyloP, GERP, DANN, and related scores       | No, for either tool |
+The four placeholders have different status:
 
-The separate [DuckHTS supplementary-provider
-benchmark](benchmark_variantkey_join_overlap.md) measures real ClinVar,
-prediction-score, gene, and interval composition. It is evidence for
-DuckVEP’s SQL path, not a head-to-head fastSA result. A fair
-supplementary race still needs identical provider releases, requested
-fields, missing-value rules, and final output rows for both tools.
+| FastVEP field        | DuckVEP route                                                                                                          | Included here? |
+|:---------------------|:-----------------------------------------------------------------------------------------------------------------------|:---------------|
+| `Existing_variation` | exact allele join to dbSNP, ClinVar, or another named-variant relation                                                 | No             |
+| `DISTANCE`           | one validated projection from VEP feature geometry and transcript endpoints; SQL may render the resulting number       | No             |
+| `FLAGS`              | join requested transcript attributes from the model relation                                                           | No             |
+| `Codons`             | emit the reference/alternate triplets from the coding context the kernel already computed; SQL should only render them | No             |
+
+Thus the comparison credits FastVEP for computing these native values.
+It also shows where DuckVEP can obtain named-variant and transcript
+metadata through ordinary joins without enlarging the consequence model.
+`Codons` is a missing public consequence field, not a supplementary
+join: rebuilding it independently from transcript sequence in SQL would
+create a second coding authority. The shared pair-fact path should
+expose the triplets it already uses, and that additional projection
+remains unmeasured here.
+
+## Algorithm design: make the repeated biology small
+
+DuckVEP compiles the Ensembl transcript, exon, CDS, regulatory, motif,
+and reference inputs once into an immutable structure-of-arrays model.
+Each DuckDB worker owns only mutable sweep cursors, sequence scratch,
+output buffers, and its reference handle.
+
+For sorted events, a start-ordered sweep admits each candidate
+transcript or core feature once, expires it once, and reuses exon
+cursors. The per-pair path keeps uploaded VCF geometry, VEP feature
+geometry, and the minimized sequence edit distinct; projects the edit to
+transcript/CDS coordinates; derives shared topology, splice,
+sequence-delta, NMD, and compatibility facts; and evaluates a generated
+VEP-116 SO rule program. Optional HGVS observes those same pair facts
+instead of repeating candidate discovery. Numeric ordinals and masks
+cross the hot loop; stable identifiers and display strings are joined
+later.
+
+That separation is the performance bet: C owns operations repeated for
+every event/transcript pair, while DuckDB owns decoding, ordering, late
+labels, provider joins, filtering, aggregation, and output. The measured
+operator profile below tests the whole composition, not only the C loop.
+
+## Supplementary annotation: fastSA versus DuckDB joins
+
+FastVEP’s supplementary system deserves a direct result. The pinned
+checkout (`7038e7c`) built a ClinVar `.osa` from the same dated
+2026-07-06 VCF used by DuckDB. Both lookup systems then processed the
+same 4,095,611 literal HG002 ALT alleles and returned the same 44,561
+allele hits with the same requested ClinVar fields: significance, review
+status, phenotypes, variant class, SO accession, and ExAC/1000
+Genomes/ESP frequencies.
+
+The timed region is deliberately staged for both systems:
+
+- FastVEP’s real `SaReader` receives an already resident vector of
+  allele tuples, performs its production 1,024-row preload/query
+  pattern, and returns the complete JSON payload. Query-file parsing and
+  `.osa` construction are outside the timer.
+- DuckDB scans warm narrow Parquet query/provider relations, performs
+  the collision-safe VariantKey join, reads every requested typed
+  payload column, and folds a full payload hash. VCF decoding,
+  normalization, and Parquet construction are outside the timer.
+
+VariantKey-reversible alleles use the 64-bit key alone. Hashed keys
+retain the literal chromosome, position, REF, and ALT refinement so a
+hash collision cannot become clinical evidence. The FastVEP harness is
+only an external benchmark adapter around its public reader; no Rust
+provider was added to DuckHTS.
+
+| system                    | threads | median seconds | queries/s  | runs |
+|:--------------------------|--------:|:---------------|:-----------|-----:|
+| DuckDB typed Parquet join |       1 | 0.899          | 4,556,237  |    5 |
+| FastVEP fastSA lookup     |       1 | 3.422          | 1,196,778  |    5 |
+| DuckDB typed Parquet join |       4 | 0.261          | 15,716,292 |    5 |
+| FastVEP fastSA lookup     |       4 | 4.087          | 1,001,985  |    5 |
+
+<img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-supplementary-lookup-1.png" alt="ClinVar supplementary lookup over 4.1 million identical HG002 alleles; DuckDB's typed Parquet join is faster than FastVEP fastSA on one and four pinned physical cores." width="1036" />
+
+The one-core median is 0.90 seconds for DuckDB versus 3.42 seconds for
+fastSA, a measured 3.81-fold ratio. At four cores the medians are 0.26
+and 4.09 seconds, respectively. fastSA did not scale on this
+shared-reader workload; the report records that observation without
+extrapolating it to every fastSA source or cache layout.
+
+### One SQL plan, several provider classes
+
+ClinVar is not the composability claim. The checked DuckDB provider
+campaign also measures the complete 71.70-million-row AlphaMissense v2
+GRCh38 relation, the 77.97-million-row REVEL v1.3 GRCh37 relation, and a
+real UCSC GRCh38 phyloP 100-way BigWig:
+
+| workload                                            | assembly | provider rows | probe rows | result rows | threads | median seconds | probe rows/s |
+|:----------------------------------------------------|:---------|:--------------|:-----------|:------------|--------:|:---------------|:-------------|
+| ClinVar + ClinvArbitration + AlphaMissense one plan | GRCh38   | 79,617,268    | 4,036,258  | 4,036,328   |       1 | 3.257          | 1,239,256    |
+| ClinVar + ClinvArbitration + AlphaMissense one plan | GRCh38   | 79,617,268    | 4,036,258  | 4,036,328   |       4 | 0.985          | 4,097,724    |
+| REVEL v1.3 exact score join                         | GRCh37   | 77,966,138    | 4,103,497  | 4,103,497   |       1 | 3.224          | 1,272,797    |
+| REVEL v1.3 exact score join                         | GRCh37   | 77,966,138    | 4,103,497  | 4,103,497   |       4 | 0.944          | 4,346,925    |
+| AlphaMissense v2 exact score join                   | GRCh38   | 71,697,556    | 4,036,258  | 9,225       |       1 | 2.674          | 1,509,446    |
+| AlphaMissense v2 exact score join                   | GRCh38   | 71,697,556    | 4,036,258  | 9,225       |       4 | 0.789          | 5,115,663    |
+| phyloP 100-way BigWig full scan                     | GRCh38   | 9,314,560     | 9,314,560  | 9,314,560   |       1 | 0.994          | 9,370,785    |
+| phyloP 100-way BigWig full scan                     | GRCh38   | 9,314,560     | 9,314,560  | 9,314,560   |       4 | 0.993          | 9,380,222    |
+| phyloP 100-way BigWig 20 indexed ranges             | GRCh38   | 9,314,560     | 4,656,131  | 4,656,131   |       1 | 0.498          | 9,349,661    |
+| phyloP 100-way BigWig 20 indexed ranges             | GRCh38   | 9,314,560     | 4,656,131  | 4,656,131   |       4 | 0.130          | 35,816,392   |
+
+<img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-supplementary-stack-1.png" alt="Measured throughput for DuckDB's combined clinical and AlphaMissense plan, separate REVEL and AlphaMissense exact joins, and local phyloP BigWig scan and indexed ranges." width="1036" />
+
+The GRCh38 all-in-one exact plan scans the GIAB case relation once and
+joins ClinVar, ClinvArbitration, and AlphaMissense in 3.257 seconds on
+one thread and 0.985 seconds on four. REVEL v1.3 is kept in its own
+GRCh37 workload: combining its GRCh37 keys with the GRCh38 HG002 plan
+would be fast but biologically false. The BigWig result decodes
+9,314,560 stored phyloP intervals in 0.994 seconds on one thread; 20
+independent indexed ranges scale from 0.498 to 0.130 seconds. The source
+revisions and full receipts remain in [the exact/interval provider
+report](benchmark_variantkey_join_overlap.md) and [the BigWig reader
+report](benchmark_bigwig_reader.md).
+
+### The composability bet
+
+New supplementary annotation is normally a relation, not a new
+consequence engine feature. A dated VCF can be expanded and keyed with
+`read_bcf`; a tabix-indexed score file can be read by region;
+AlphaMissense and REVEL can be projected into narrow Parquet;
+BED/GFF/GTF and regulatory tables use exact half-open overlap; BigWig
+and bedGraph provide dense signals; BAM can supply coverage or
+supporting-read evidence; and gene constraints join on stable
+identifiers. Anything DuckDB can scan—including Parquet, CSV/TSV, JSON,
+Arrow, DuckLake, or a relation produced by another extension—can
+participate without adding another C or Rust provider implementation to
+DuckVEP.
+
+This is not a claim that SQL makes every plan optimal automatically.
+Exact alleles require assembly and normalization agreement; hashed
+VariantKeys need literal refinement; intervals require chromosome
+equality plus exact half-open inequalities; dense signals need declared
+point/span reductions; and provider duplicates need an explicit
+aggregation policy. Within those contracts, DuckDB supplies vectorized
+scans, column projection, Parquet pushdown, parallel hash/range joins,
+spill, aggregation, and output formats. The benchmark above measures
+that bet instead of merely asserting it.
 
 ## Wall time: file in, 47 million rows out
 
@@ -221,11 +349,12 @@ decompression work as annotation parallelism.
 
 ## What was timed
 
-Both lanes begin with the same compressed, coordinate-sorted GIAB VCF on
-the same local filesystem and end with a real uncompressed tab file. The
-full file is intentionally read with `scan_mode := 'sequential'`;
-indexed region subsetting is a separate `read_bcf(...)` transport path
-and is not part of this whole-file measurement.
+Both comparisons begin with the same compressed, coordinate-sorted GIAB
+VCF on the same local filesystem and end with a real uncompressed tab
+file. The full file is intentionally read with
+`scan_mode := 'sequential'`; indexed region subsetting is a separate
+`read_bcf(...)` transport path and is not part of this whole-file
+measurement.
 
 DuckVEP includes:
 
@@ -331,6 +460,29 @@ reflect its 1,030 additional cached transcripts, but against this pinned
 executable-VEP contract they remain extra rows rather than being
 silently discarded as “non-overlapping.”
 
+## Testing infrastructure: several authorities, one release gate
+
+No single oracle can test this engine adequately. DuckVEP therefore
+keeps the following evidence layers separate:
+
+| Layer                   | Independent authority                                                                                                | Failure caught                                            |
+|:------------------------|:---------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------|
+| Model receipt           | source/reference identities, lengths, ordering, phases, sequence and feature invariants                              | wrong or malformed compiled model                         |
+| SQL and R conformance   | fixed public fixtures through the extension and packaged R binary                                                    | schema, binding, wrapper, and end-to-end regression       |
+| Finite SO rules         | generated lookup compared exhaustively with the declarative reference interpreter                                    | rule generation or suppression error                      |
+| Randomized mechanics    | slower independent sweep, normalization, projection, edit, translation, HGVS, BND/regulation, and multi-edit oracles | off-by-one, strand, edit, and state-transition defects    |
+| Executable differential | pinned Ensembl VEP 116 on generated and real ClinVar/GIAB/GRCh37 corpora                                             | compatibility mismatch, missing row, or extra row         |
+| Execution invariance    | complete output bags/fingerprints across vector sizes, output capacities, repeats, and worker counts                 | cursor-resume, chunking, order, or parallel defect        |
+| Memory safety           | focused and broad ASan/UBSan/fuzzer campaigns                                                                        | overflow, lifetime, aliasing, and malformed-input defects |
+| Performance             | timed work accepted only with the declared row counts and full-output fingerprints                                   | a fast result that dropped or changed work                |
+
+Append-only conformance histories retain the tested source revision,
+seed, corpus, strata, trial counts, and failures. A mismatch is
+preserved as a replay case rather than averaged away. The executable
+differential compares the full key union, so a missing or additional
+transcript cannot disappear behind an “overlapping transcripts only”
+denominator.
+
 ## Statistical fuzzing and generated VEP differential
 
 The held-out ClinVar sample is only one distribution. DuckVEP’s checked
@@ -362,13 +514,16 @@ constraints, conservation signals, BAM-derived evidence, and any other
 source DuckDB can read stay as ordinary late joins instead of becoming
 fields copied into a private annotation cache or another C object model.
 
-This speed lane stops at the common 17-column tabular edge so the tool
-comparison remains legible. The broader DuckVEP workflow can instead
-filter numeric consequence masks first, join only requested provider
-columns, and write Parquet or another DuckDB-supported result. The
-[supplementary-provider benchmark](benchmark_variantkey_join_overlap.md)
-measures those exact-key and interval joins separately; those costs are
-not silently folded into the FastVEP comparison.
+This speed comparison stops at the common 17-column tabular edge so the
+tool comparison remains legible. The broader DuckVEP workflow can
+instead filter numeric consequence masks first, join only requested
+provider columns, and write Parquet or another DuckDB-supported result.
+The direct ClinVar result above measures the same fastSA source against
+DuckDB’s typed join, while the [supplementary-provider
+benchmark](benchmark_variantkey_join_overlap.md) extends the evidence to
+AlphaMissense, REVEL, clinical arbitration, genes, and intervals. These
+costs remain separate from the consequence headline instead of being
+silently charged to only one tool.
 
 ## Findings
 
@@ -381,16 +536,21 @@ not silently folded into the FastVEP comparison.
     property trials and 100,268 generated VEP pair comparisons with no
     observed failure. FastVEP’s speed result does not imply the same
     HGVS contract.
-3.  **The principal measured costs have moved above the biological
+3.  **SQL supplementary annotation is measured, not aspirational.** The
+    collision-safe typed ClinVar join is faster than fastSA on this
+    identical 4.10-million-allele workload, and the checked provider
+    campaign composes ClinVar, ClinvArbitration, AlphaMissense, REVEL,
+    and BigWig without adding a provider-specific C or Rust engine.
+4.  **The principal measured costs have moved above the biological
     kernel.** At four cores the largest operator totals are label
     joining, tab writing, result-list expansion, and text projection.
     SQL composability is already fast, and the profile shows where
     further end-to-end gains remain.
-4.  **Memory is the visible price.** DuckVEP peaks near 5.5 GiB versus
+5.  **Memory is the visible price.** DuckVEP peaks near 5.5 GiB versus
     FastVEP’s 3.17 GiB. The immutable model is shared across workers, so
     adding cores does not multiply that peak, but process RSS remains a
     release metric.
-5.  **“Fastest in the West” stays a measured question.** The answer is
+6.  **“Fastest in the West” stays a measured question.** The answer is
     yes for this complete GIAB input, these versions, these core counts,
     and these output contracts. A broader superlative requires adding
     competitors under an equally explicit protocol rather than
@@ -402,9 +562,9 @@ conformance ledger or statistical state exploration. The first 100
 discordant FastVEP pairs are retained in
 `benchmarks/data/duckvep_fastvep/conformance_examples.csv`.
 
-Both speed lanes use the shared 5,000-base transcript-distance default.
-That choice makes the tool comparison like-for-like; it does not
-establish distance-invariant performance. DuckVEP’s separate
+Both speed comparisons use the shared 5,000-base transcript-distance
+default. That choice makes the tool comparison like-for-like; it does
+not establish distance-invariant performance. DuckVEP’s separate
 [dense-region report](duckvep_throughput.md) retains zero-, 10,000-, and
 50,000-base measurements and row fingerprints so this end-to-end
 workload does not become the only performance authority.
@@ -440,7 +600,7 @@ receipt-pinned Ensembl 116 GFF3 and FASTA rather than reusing an older
 cache.
 
 The host is an Intel Core i5-13500 with six physical performance cores.
-CPU 2 is the single-core lane; FastVEP uses CPU sets `2`, `2,4`,
+CPU 2 is the single-core condition; FastVEP uses CPU sets `2`, `2,4`,
 `2,4,6,8`, and `0,2,4,6,8,10`. GNU `/usr/bin/time -v` supplies wall
 time, CPU use, and process-level maximum RSS. All measurements used a
 warm local filesystem page cache and do not claim cold-storage or
@@ -457,6 +617,67 @@ exposes `--threads`, `--distance`, `--memory-limit`, and optional
 ``` bash
 env RUSTFLAGS='-C target-cpu=native' cargo build \
   --manifest-path .sync/fastVEP/Cargo.toml --release --locked
+```
+
+The supplementary comparison first builds fastSA from the same ClinVar
+release:
+
+``` bash
+.sync/fastVEP/target/release/fastvep sa-build \
+  --source clinvar \
+  --input /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
+  --output /tmp/duckvep-fastsa/clinvar_20260706_grch38 \
+  --assembly GRCh38 --no-progress
+```
+
+The DuckDB side stages the same eight payload fields into reversible and
+hashed Parquet relations. Its source projection is the ClinVar
+preparation query in [the provider
+report](benchmark_variantkey_join_overlap.md), without normalizing away
+the uploaded tuple for this direct fastSA comparison. The HG002 query
+relation contains the 4,095,611 literal ALT alleles from the shared VCF.
+Provider construction and query decoding are outside both lookup timers.
+
+The checked FastVEP adapter is copied into the pinned checkout so it
+compiles against that exact public `SaReader` API:
+
+``` bash
+cp benchmarks/fastvep_fastsa_lookup.rs \
+  .sync/fastVEP/crates/fastvep-cli/examples/real_lookup.rs
+cargo build --manifest-path .sync/fastVEP/Cargo.toml \
+  --release -p fastvep-cli --example real_lookup
+taskset -c 2 .sync/fastVEP/target/release/examples/real_lookup \
+  /tmp/duckvep-fastsa/clinvar_20260706_grch38.osa \
+  /tmp/duckvep-fastsa/giab_hg002_literal.tsv 1 5
+taskset -c 2,4,6,8 .sync/fastVEP/target/release/examples/real_lookup \
+  /tmp/duckvep-fastsa/clinvar_20260706_grch38.osa \
+  /tmp/duckvep-fastsa/giab_hg002_literal.tsv 4 5
+```
+
+The DuckDB measurement is SQL. With `.timer on`, the following query was
+run five times after `SET threads = 1` and again after
+`SET threads = 4`, under the same CPU affinity as fastSA:
+
+``` sql
+SELECT sum(hits)::BIGINT, bit_xor(payload_hash)::UBIGINT
+FROM (
+  SELECT count(*)::BIGINT AS hits,
+         bit_xor(hash(p.significance, p.review_status, p.phenotypes,
+                      p.variant_class, p.so_accession,
+                      p.af_exac, p.af_tgp, p.af_esp)) AS payload_hash
+  FROM read_parquet('/tmp/duckvep-fastsa/giab_reversible.parquet') q
+  JOIN read_parquet('/tmp/duckvep-fastsa/clinvar_reversible.parquet') p
+    USING (vk)
+  UNION ALL
+  SELECT count(*)::BIGINT,
+         bit_xor(hash(p.significance, p.review_status, p.phenotypes,
+                      p.variant_class, p.so_accession,
+                      p.af_exac, p.af_tgp, p.af_esp))
+  FROM read_parquet('/tmp/duckvep-fastsa/giab_hashed.parquet') q
+  JOIN read_parquet('/tmp/duckvep-fastsa/clinvar_hashed.parquet') p
+    ON q.vk = p.vk AND q.chrom = p.chrom AND q.pos = p.pos
+   AND q.ref = p.ref AND q.alt = p.alt
+);
 ```
 
 FastVEP creates its binary transcript cache as a side effect of

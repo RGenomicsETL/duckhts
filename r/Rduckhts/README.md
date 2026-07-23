@@ -737,7 +737,11 @@ and its materialized timing evidence; the illustrated [*DuckVEP: the
 fastest Ensembl VEP-compatible consequence predictor in the
 West?*](https://github.com/RGenomicsETL/duckhts/blob/main/benchmarks/benchmark_duckvep_fastvep.md)
 report presents the whole-genome speed, memory, and VEP-conformance
-evidence. The small example below remains only the CRAN/offline
+evidence. It also directly benchmarks the same dated ClinVar payload
+through FastVEP fastSA and DuckDB’s typed collision-safe join, then
+covers AlphaMissense, assembly-correct REVEL, BigWig conservation,
+algorithm design, and the layered fuzz/differential/sanitizer
+infrastructure. The small example below remains only the CRAN/offline
 executable check.
 
 The release gate combines pure-C property/statistical tests, SQL and R

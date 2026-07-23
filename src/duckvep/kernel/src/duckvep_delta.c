@@ -1085,24 +1085,6 @@ DUCKVEP_INTERNAL_API int duckvep_transcript_has_partial_terminal_codon(
     return (cds_length % 3u) != 0u;
 }
 
-static int delta_allele_bases_valid(
-    const duckvep_variant_batch_t *v,
-    size_t                         off,
-    uint16_t                       len) {
-
-    uint16_t i;
-    if (len == 0u) return 1;
-    if (v == NULL || v->allele_bytes == NULL || off > v->allele_bytes_len ||
-        (size_t)len > v->allele_bytes_len - off) {
-        return 0;
-    }
-    for (i = 0u; i < len; i++) {
-        char b = delta_norm_base((char)v->allele_bytes[off + (size_t)i]);
-        if (b == '\0' || b == 'N') return 0;
-    }
-    return 1;
-}
-
 static int delta_allele_bases_valid_ptr(
     const uint8_t *bases,
     uint16_t       length) {

@@ -1410,9 +1410,30 @@ the current native-compiled
 |                     4 |           32.06 |           68.09 |             2.12x |
 
 The tools emit different native tabular schemas. The comparison
-therefore keeps the row and byte denominators and separately checks each
-result against VEP. The illustrated [*DuckVEP: the fastest Ensembl
-VEP-compatible consequence predictor in the
+therefore keeps the row and byte denominators, credits FastVEP for
+native presentation fields left as placeholders in this DuckVEP speed
+projection, and separately checks each result against VEP.
+
+The supplementary result is a direct comparison: the same ClinVar
+2026-07-06 release, the same 4,095,611 HG002 literal ALT queries, the
+same eight requested clinical/frequency fields, and the same 44,561
+allele hits. DuckDB reads and hashes typed payload columns from
+collision-safe Parquet joins; FastVEP returns the complete fastSA JSON
+payload.
+
+| threads | DuckDB typed Parquet join | FastVEP fastSA lookup | fastSA / DuckDB |
+|--------:|--------------------------:|----------------------:|----------------:|
+|       1 |                      0.90 |                  3.42 |           3.81x |
+|       4 |                      0.26 |                  4.09 |          15.69x |
+
+The same report measures a one-plan ClinVar + ClinvArbitration +
+AlphaMissense join, an assembly-correct REVEL workload, and a real
+phyloP 100-way BigWig. It also explains the transcript/core-feature
+sweeps, shared pair facts and generated SO rules, layered
+fuzz/differential/sanitizer infrastructure, and the composability claim:
+new supplementary sources are normally SQL over readable relations, not
+new provider-specific C or Rust code. The illustrated [*DuckVEP: the
+fastest Ensembl VEP-compatible consequence predictor in the
 West?*](benchmarks/benchmark_duckvep_fastvep.md) report gives the build
 flags, source revisions, cache construction, commands, speed, memory,
 and output evidence.

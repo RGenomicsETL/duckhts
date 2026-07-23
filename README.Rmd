@@ -1267,6 +1267,35 @@ fast_comparison <- data.frame(
   ),
   check.names = FALSE
 )
+
+sa_runs <- read.csv(
+  file.path(fast_data, "supplementary_clinvar_lookup.csv"),
+  stringsAsFactors = FALSE
+)
+sa_medians <- aggregate(
+  seconds ~ engine + threads,
+  data = sa_runs,
+  FUN = median
+)
+sa_comparison <- reshape(
+  sa_medians,
+  idvar = "threads",
+  timevar = "engine",
+  direction = "wide"
+)
+names(sa_comparison) <- sub("^seconds\\.", "", names(sa_comparison))
+sa_comparison$`fastSA / DuckDB` <-
+  sa_comparison$`FastVEP fastSA lookup` /
+  sa_comparison$`DuckDB typed Parquet join`
+sa_comparison$`DuckDB typed Parquet join` <- sprintf(
+  "%.2f", sa_comparison$`DuckDB typed Parquet join`
+)
+sa_comparison$`FastVEP fastSA lookup` <- sprintf(
+  "%.2f", sa_comparison$`FastVEP fastSA lookup`
+)
+sa_comparison$`fastSA / DuckDB` <- sprintf(
+  "%.2fx", sa_comparison$`fastSA / DuckDB`
+)
 ```
 
 The resident-engine benchmark uses the complete GIAB HG002 v4.2.1 input and the
@@ -1297,7 +1326,26 @@ knitr::kable(fast_comparison, row.names = FALSE, align = c("r", "r", "r", "r"))
 ```
 
 The tools emit different native tabular schemas. The comparison therefore keeps
-the row and byte denominators and separately checks each result against VEP.
+the row and byte denominators, credits FastVEP for native presentation fields
+left as placeholders in this DuckVEP speed projection, and separately checks
+each result against VEP.
+
+The supplementary result is a direct comparison: the same ClinVar 2026-07-06
+release, the same 4,095,611 HG002 literal ALT queries, the same eight requested
+clinical/frequency fields, and the same 44,561 allele hits. DuckDB reads and
+hashes typed payload columns from collision-safe Parquet joins; FastVEP returns
+the complete fastSA JSON payload.
+
+```{r duckvep-readme-fastsa-table, echo=FALSE}
+knitr::kable(sa_comparison, row.names = FALSE, align = c("r", "r", "r", "r"))
+```
+
+The same report measures a one-plan ClinVar + ClinvArbitration + AlphaMissense
+join, an assembly-correct REVEL workload, and a real phyloP 100-way BigWig. It also
+explains the transcript/core-feature sweeps, shared pair facts and generated SO
+rules, layered fuzz/differential/sanitizer infrastructure, and the composability
+claim: new supplementary sources are normally SQL over readable relations, not
+new provider-specific C or Rust code.
 The illustrated
 [*DuckVEP: the fastest Ensembl VEP-compatible consequence predictor in the
 West?*](benchmarks/benchmark_duckvep_fastvep.md) report gives the build flags,
