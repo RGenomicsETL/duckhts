@@ -816,11 +816,23 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 		return 0;
 	}
 	for (row = 0; row < rows; row++) {
+		int unspecified_alt =
+		    duckvep_scalar_ascii_equals(&alternates[row], "<*>");
+
 		if (!duckvep_scalar_dna_copy(state->allele_bytes +
 		    state->reference_offsets[row],
 		    duckdb_string_t_data(&references[row]),
-		    state->reference_lengths[row]) ||
-		    !duckvep_scalar_dna_copy(state->allele_bytes +
+		    state->reference_lengths[row])) {
+			duckvep_sql_set_error(error, error_size,
+			    "duckvep_annotate: REF/ALT must be unequal A/C/G/T/N alleles");
+			return 0;
+		}
+		if (unspecified_alt) {
+			memcpy(state->allele_bytes + state->alternate_offsets[row],
+			    "<*>", 3u);
+			state->variant_kinds[row] =
+			    (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT;
+		} else if (!duckvep_scalar_dna_copy(state->allele_bytes +
 		    state->alternate_offsets[row],
 		    duckdb_string_t_data(&alternates[row]),
 		    state->alternate_lengths[row]) ||
@@ -830,7 +842,7 @@ duckvep_scalar_prepare_batch(duckvep_scalar_state_t *state,
 		    state->allele_bytes + state->alternate_offsets[row],
 		    state->alternate_lengths[row], &state->variant_kinds[row])) {
 			duckvep_sql_set_error(error, error_size,
-			    "duckvep_annotate: REF/ALT must be unequal A/C/G/T/N alleles");
+			    "duckvep_annotate: REF/ALT must be unequal A/C/G/T/N alleles or exact <*>");
 			return 0;
 		}
 		state->sv_types[row] = DUCKVEP_SV_NONE;

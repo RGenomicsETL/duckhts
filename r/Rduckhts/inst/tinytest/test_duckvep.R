@@ -565,6 +565,56 @@ expect_identical(public_rich_annotation$duckvep_status, "supported")
 expect_identical(public_rich_annotation$transcript_hgvs, "n.25A>G")
 expect_true(is.na(public_rich_annotation$protein_hgvs))
 
+# VEP omits non-variant gVCF sentinels and bare spanning `*`, but its distinct
+# `<*>` catch-all remains an overlap allele without transcript HGVS. A real ALT
+# expanded from the same record remains a small variant when INFO/END is kept.
+dbExecute(
+  con,
+  paste(
+    "CREATE TABLE duckvep_r_gvcf_events AS SELECT * FROM (VALUES",
+    "(1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, 'G'::VARCHAR,",
+    "130::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT),",
+    "(2::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR,",
+    "'<NON_REF>'::VARCHAR, 130::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT),",
+    "(3::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, '<*>'::VARCHAR,",
+    "130::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT),",
+    "(4::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, '*'::VARCHAR,",
+    "NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT),",
+    "(5::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, '.'::VARCHAR,",
+    "NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,",
+    "NULL::UINTEGER, NULL::UBIGINT))",
+    "e(event_index, seq_region, position, reference, alternate, end_position,",
+    "structural_type, copy_change, mate_seq_region, mate_position)"
+  )
+)
+gvcf_annotation <- dbGetQuery(
+  con,
+  paste(
+    "SELECT event_index, duckvep_event_kind, consequence, transcript_hgvs",
+    "FROM duckvep_annotate('duckvep_r_gvcf_events', 'r-hgvs',",
+    "hgvs := TRUE, upstream_distance := 0, downstream_distance := 0,",
+    "rich := TRUE) ORDER BY event_index"
+  )
+)
+expect_equal(gvcf_annotation$event_index, c(1, 3))
+expect_identical(
+  gvcf_annotation$duckvep_event_kind,
+  c("small_variant", "small_variant")
+)
+expect_identical(
+  gvcf_annotation$consequence,
+  c(
+    "non_coding_transcript_exon_variant",
+    "non_coding_transcript_exon_variant"
+  )
+)
+expect_identical(gvcf_annotation$transcript_hgvs[[1]], "n.25A>G")
+expect_true(is.na(gvcf_annotation$transcript_hgvs[[2]]))
+
 # Exercise the rare terminal-CDS states through the public event relation, not
 # only through the kernel and private scalar fixtures. The start-deletion model
 # is synthetic; the terminal-partial model below uses exact remapped Ensembl-116

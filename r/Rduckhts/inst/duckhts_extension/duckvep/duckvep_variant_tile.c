@@ -172,6 +172,14 @@ duckvep_tile_status_t duckvep_variant_tile_append_event(
                 "small-variant kind or raw span is inconsistent with REF/ALT");
             return DUCKVEP_TILE_INVALID;
         }
+    } else if (kind == (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT) {
+        if (!duckvep_event_unspecified_alt_shape_matches(
+                pos1, end1, (const uint8_t *)ref, (uint16_t)ref_len,
+                (const uint8_t *)alt, (uint16_t)alt_len)) {
+            tile_set_error(t,
+                "unspecified alternate must be an exact <*> allele with a valid REF span");
+            return DUCKVEP_TILE_INVALID;
+        }
     } else if (kind == (uint8_t)DUCKVEP_KIND_SV) {
         if (!duckvep_sv_geometry_valid((duckvep_sv_type_t)sv_type,
                                        pos1, end1)) {

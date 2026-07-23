@@ -138,6 +138,7 @@ static inline int duckvep_event_feature_alleles(
 
     if (batch == NULL || event == NULL || ref == NULL || ref_length == NULL ||
         alt == NULL || alt_length == NULL || idx >= batch->count ||
+        event->kind == (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT ||
         !duckvep_event_allele_slices_ok(batch, idx)) {
         return 0;
     }
@@ -317,6 +318,55 @@ static inline void duckvep_event_load_small_differing_region(
         batch->alt_length[idx], event);
 }
 
+static inline int duckvep_event_unspecified_alt_shape_matches(
+    uint32_t       pos1,
+    uint32_t       end1,
+    const uint8_t *ref,
+    uint16_t       ref_len,
+    const uint8_t *alt,
+    uint16_t       alt_len) {
+
+    uint16_t i;
+
+    if (pos1 == 0u || ref == NULL || ref_len == 0u || alt == NULL ||
+        alt_len != 3u || alt[0] != '<' || alt[1] != '*' || alt[2] != '>' ||
+        (uint32_t)(ref_len - 1u) > UINT32_MAX - pos1 ||
+        end1 != pos1 + (uint32_t)ref_len - 1u) {
+        return 0;
+    }
+    for (i = 0u; i < ref_len; i++) {
+        uint8_t base = duckvep_event_ascii_upper(ref[i]);
+        if (base != 'A' && base != 'C' && base != 'G' &&
+            base != 'T' && base != 'N') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static inline void duckvep_event_load_unspecified_alt(
+    const duckvep_variant_batch_t *batch,
+    size_t                         idx,
+    duckvep_event_t               *event) {
+
+    uint16_t ref_length = batch->ref_length[idx];
+    uint16_t alt_length = batch->alt_length[idx];
+
+    duckvep_event_load_raw_interval(batch, idx, event);
+    event->kind = (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT;
+    /* VEP 116 passes <*> through its ordinary allele-length predicates. The
+     * resulting three-byte alternate is executable compatibility behavior,
+     * not an assertion that <*> is a biological sequence. */
+    event->ref_diff_length = ref_length;
+    event->alt_diff_length = alt_length;
+    event->feature_length_relation =
+        ref_length == alt_length
+        ? (uint8_t)DUCKVEP_FEATURE_LENGTH_EQUAL
+        : alt_length > ref_length
+            ? (uint8_t)DUCKVEP_FEATURE_LENGTH_INCREASE
+            : (uint8_t)DUCKVEP_FEATURE_LENGTH_DECREASE;
+}
+
 static inline uint32_t duckvep_event_effective_end1_at(
     const duckvep_variant_batch_t *batch, size_t idx) {
     duckvep_event_t event;
@@ -324,7 +374,9 @@ static inline uint32_t duckvep_event_effective_end1_at(
      * request the supplied interval directly. Production annotation validates
      * variant_kind and uses full intervals only for structural events. */
     if (batch->variant_kind == NULL ||
-        batch->variant_kind[idx] == (uint8_t)DUCKVEP_KIND_SV) {
+        batch->variant_kind[idx] == (uint8_t)DUCKVEP_KIND_SV ||
+        batch->variant_kind[idx] ==
+            (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT) {
         return batch->end1[idx];
     }
     duckvep_event_load_small_differing_region(batch, idx, &event);
@@ -373,7 +425,10 @@ static inline void duckvep_event_load(
                                                : (uint8_t)DUCKVEP_KIND_SV;
     event->sv_type = duckvep_event_sv_type_at(batch, idx);
     event->copy_change = duckvep_event_copy_change_at(batch, idx);
-    if (batch->variant_kind == NULL || event->kind == (uint8_t)DUCKVEP_KIND_SV) {
+    if (event->kind == (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT) {
+        duckvep_event_load_unspecified_alt(batch, idx, event);
+    } else if (batch->variant_kind == NULL ||
+               event->kind == (uint8_t)DUCKVEP_KIND_SV) {
         duckvep_event_load_raw_interval(batch, idx, event);
         if (event->kind == (uint8_t)DUCKVEP_KIND_SV &&
             event->sv_type == (uint8_t)DUCKVEP_SV_INSERTION) {
