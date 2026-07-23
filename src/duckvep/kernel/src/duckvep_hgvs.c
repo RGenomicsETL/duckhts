@@ -1337,6 +1337,22 @@ duckvep_hgvs_status_t duckvep_hgvs_shifted_cds_edit_build(
     edit_status = duckvep_cds_edit_build_prepared_allele(
         transcripts, exons, seq, edit->tx_idx, edit->transcript_strand,
         &allele, UINT32_MAX, &result_edit);
+    if (!insertion &&
+        (edit_status == DUCKVEP_CDS_EDIT_OUT_OF_CDS ||
+         edit_status == DUCKVEP_CDS_EDIT_NON_CONTIGUOUS)) {
+        /*
+         * HGVS-only 3-prime placement can move both ends of a deletion into
+         * CDS while leaving one or more introns inside its genomic span.
+         * TranscriptVariationAllele::_get_alternate_cds then replaces the
+         * outer mapped CDS range, exactly like the independent consequence
+         * path. Reuse that compatibility helper so HGVSp does not invent a
+         * second mapper-gap interpretation.
+         */
+        edit_status = duckvep_compat_vep116_outer_cds_edit_build(
+            transcripts, exons, seq, edit->tx_idx,
+            edit->transcript_strand, &event, NULL, 0u,
+            edit->transcript_strand, &result_edit);
+    }
     if (!insertion && edit_status == DUCKVEP_CDS_EDIT_REF_MISMATCH) {
         uint32_t cds_start1;
         uint32_t cds_end1;
@@ -2237,18 +2253,19 @@ static duckvep_hgvs_status_t hgvs_protein_insertion_finish(
      * it as the second insertion flank. Without that stop the insertion is
      * absent, not a peptide-data failure. */
     if ((size_t)low == hgvs_protein_reference_length(context)) {
-        size_t terminal_codon_start;
+        uint8_t original_reference_first =
+            fact->window.ref_length == 0u ? 0u :
+            hgvs_protein_window_base(
+                context, &fact->window, 0, 0u);
 
-        /* _get_surrounding_peptides() exposes the stop as an insertion flank
-         * only when Mapper translation coordinates place a pure insertion
-         * inside the terminal codon. An earlier coding insertion can clip to
-         * the same peptide-level shape, but VEP returns no HGVSp for it. */
-        terminal_codon_start = context->ref_cds_len >= 3u
-            ? context->ref_cds_len - 2u : 0u;
-        if (fact->reference_last == 0u || !context->has_single_edit ||
-            context->single_edit_ref_len != 0u ||
-            (size_t)context->single_edit_cds_start <= terminal_codon_start ||
-            (size_t)context->single_edit_cds_start > context->ref_cds_len) {
+        /* _clip_alleles caches the complete local reference peptide before
+         * clipping. _get_surrounding_peptides() appends that cached peptide
+         * to TranscriptVariation::_peptide only when it begins with '*'.
+         * This is what makes the terminal stop available as the second flank,
+         * including a nucleotide delins whose peptide-level edit clips to an
+         * insertion. Length or nucleotide edit kind is not the authority. */
+        if (fact->reference_last == 0u ||
+            original_reference_first != (uint8_t)'*') {
             return DUCKVEP_HGVS_NOT_APPLICABLE;
         }
     }

@@ -73,7 +73,11 @@ typedef enum duckvep_pre_bit {
     DUCKVEP_PRE_REGULATORY_ABLATION       = 45,
     DUCKVEP_PRE_REGULATORY_AMPLIFICATION  = 46,
     DUCKVEP_PRE_WITHIN_REGULATORY_REGION  = 47,
-    DUCKVEP_PRE_BIT_COUNT                 = 48
+    /* VEP's raw equal-feature-length pre-predicate. It has no consequence of
+     * its own, but filters frameshift and in-frame terms after transcript
+     * projection. */
+    DUCKVEP_PRE_SNP                        = 48,
+    DUCKVEP_PRE_BIT_COUNT                  = 49
 } duckvep_pre_bit_t;
 
 #define DUCKVEP_PRE(b) (UINT64_C(1) << (b))
@@ -160,9 +164,10 @@ void duckvep_effect_ctx_apply_exon_gate(
     int                   predicate_overlaps_exon);
 
 /* Apply variant-class facts from canonical event topology, not the caller's
- * broad transport kind. VEP's insertion/deletion predicates are allele-length
- * predicates after REF/ALT normalization/trimming; `kind` only chooses the broad
- * classification path. */
+ * broad transport kind. VEP's ordinary insertion/deletion/SNP predicates use
+ * complete uploaded feature REF/ALT lengths before transcript projection.
+ * The semantic differing-region lengths are the fallback only when that raw
+ * relation is unavailable. */
 void duckvep_effect_ctx_apply_event(
     const duckvep_transcript_model_t *transcripts,
     duckvep_effect_ctx_t             *ctx,

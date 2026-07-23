@@ -24,6 +24,7 @@ typedef struct duckvep_workspace_delta_route_stats {
     uint64_t ins_context;
     uint64_t indel_context;
     uint64_t boundary_context;
+    uint64_t uploaded_feature_context;
 } duckvep_workspace_delta_route_stats_t;
 
 DUCKVEP_INTERNAL_API duckvep_delta_scratch_t *duckvep_workspace_delta_scratch(

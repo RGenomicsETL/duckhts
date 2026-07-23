@@ -259,6 +259,7 @@ typedef struct duckvep_coding_context {
     uint8_t post_cds_complete;
     uint8_t ref_first_stop_known;
     uint8_t compatibility_profile; /* duckvep_compat_profile_t */
+    uint8_t feature_length_relation; /* duckvep_feature_length_relation_t */
     uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
@@ -381,7 +382,8 @@ typedef enum duckvep_sequence_delta_route {
     DUCKVEP_DELTA_ROUTE_DEL_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INS_CONTEXT,
     DUCKVEP_DELTA_ROUTE_INDEL_CONTEXT,
-    DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT
+    DUCKVEP_DELTA_ROUTE_BOUNDARY_CONTEXT,
+    DUCKVEP_DELTA_ROUTE_UPLOADED_FEATURE_CONTEXT
 } duckvep_sequence_delta_route_t;
 
 /* Project one allele-trimmed small variant into the edit element consumed by the
@@ -414,6 +416,25 @@ duckvep_cds_edit_build_prepared_allele(
     int8_t                            transcript_strand,
     const duckvep_prepared_cds_allele_t *allele,
     uint32_t                          exon_hint,
+    duckvep_haplotype_edit_t         *edit);
+
+/* Reproduce VEP 116's independent-event outer-CDS replacement for a literal
+ * feature whose genomic span contains one or more introns but whose two
+ * endpoints map to CDS. VEP replaces the contiguous CDS range between the
+ * mapped endpoints with the complete feature ALT. This is intentionally not
+ * the phased edit-set projector: a phased caller must preserve every exon and
+ * intron segment instead of collapsing the feature to one CDS edit. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_compat_vep116_outer_cds_edit_build(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_event_t            *event,
+    const uint8_t                    *alternate,
+    uint32_t                          alternate_length,
+    int8_t                            alternate_strand,
     duckvep_haplotype_edit_t         *edit);
 
 /* Project one small allele into the edit set consumed by the CodingContext and
