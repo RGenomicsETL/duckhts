@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0
+- make the executable rare-state campaign pass its generated maximum allele length
+  through to the VEP differential, including the retained VCF anchor base. A 100-base
+  campaign can no longer be reported from the runner's former 50-base default subset;
+  the eligibility audit must retain the requested long-allele strata
 - centralize the executable-language leaks required for Ensembl VEP 116 HGVS
   parity in one named compatibility policy instead of embedding release-specific
   codon-table and Perl-string behavior in individual algorithms. Consequence

@@ -67,6 +67,10 @@ The validation gates have independent jobs:
   20,000 deterministic alleles concentrated around transcript boundaries and distributed
   across the transcript, and compares all of them with executable VEP 116. The generated
   VCF records the seed; pair-level Parquet keeps every disagreement and unresolved row.
+  `DUCKVEP_STATE_MAX_LENGTH` controls the generated non-anchor allele length and the target
+  passes that value plus the retained VCF anchor to the differential eligibility cap. A
+  long-allele campaign therefore fails rather than quietly reverting to the runner's
+  50-base default subset.
   `data/property_coverage_requirements.tsv` makes the rare-state denominator executable:
   a statistically required state must receive at least one observation, while an allowed
   zero count must name a fixed C witness. An undeclared zero counter, a missing required

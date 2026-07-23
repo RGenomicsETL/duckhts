@@ -344,7 +344,8 @@ test-duckvep-state-exploration: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--corpus state_exploration_seed_$${seed} \
 		--vcf $$vcf --extension build/release/duckhts.duckdb_extension \
-		--sample-per-shape 0 --seed $$seed --hgvs
+		--sample-per-shape 0 --seed $$seed \
+		--max-allele-length $$((max_len + 1)) --hgvs
 
 # Compare a receipt-matched DuckVEP model with the lossless VE relation in an
 # official Ensembl variation release VCF. Pass the source/model/receipt paths
