@@ -131,10 +131,9 @@ ranges. `blocks_per_iteration` controls indexed block batching inside a worker,
 not the number of workers.
 
 This query reads a real 100 kb slice of the UCSC GRCh38 phyloP 100-way track
-rather than converting it to an intermediate text file. It is shown without
-running it during README rendering so documentation builds remain offline:
+rather than converting it to an intermediate text file:
 
-```sql
+```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT count(*) AS stored_intervals,
        min(VALUE)::DOUBLE AS minimum,
        max(VALUE)::DOUBLE AS maximum
