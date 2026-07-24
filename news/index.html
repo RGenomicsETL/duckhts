@@ -33,6 +33,10 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.5.0.9000-0.1.0" id="rduckhts-1509000-010">Rduckhts 1.5.0.9000-0.1.0<a class="anchor" aria-label="anchor" href="#rduckhts-1509000-010"></a></h2>
+<ul><li>bundle the libBigWig strict-prototype correction so macOS Clang package installation no longer warns about the <code>bwCleanup</code> definition</li>
+</ul></div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.0-0.1.0" id="rduckhts-150-010">Rduckhts 1.5.0-0.1.0<a class="anchor" aria-label="anchor" href="#rduckhts-150-010"></a></h2><p class="text-muted">CRAN release: 2026-07-24</p>
 <ul><li>make the in-memory downstream htslib consumer test compatible with both the original and argument-capable <code><a href="https://sounkou-bioinfo.github.io/Rtinycc/reference/tcc_call_symbol.html" class="external-link">Rtinycc::tcc_call_symbol()</a></code> APIs, and bundle bounds-checked BAQ tag renaming so GCC 11 package builds do not emit the former zero-size-region warning</li>
 <li>clarify the bundled DuckVEP catalog and README: the resident kernel is transcript-source-neutral, the package builder currently compiles the Ensembl core set, and transcript-to-genome sequence corrections, circular-origin geometry, implicit path projection, and phased composition remain outside the package surface</li>
