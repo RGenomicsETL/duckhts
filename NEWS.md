@@ -1,5 +1,10 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.0.9000
+- patch pinned libBigWig's `bwCleanup` definition to match its public
+  `bwCleanup(void)` declaration, keeping Clang strict-prototype builds
+  warning-clean
+
 # duckhts 1.5.0
 - bounds-check htslib's in-place `BQ`/`ZQ` tag rename before writing the tag
   name, avoiding GCC 11's zero-size-region diagnostic while preserving BAQ

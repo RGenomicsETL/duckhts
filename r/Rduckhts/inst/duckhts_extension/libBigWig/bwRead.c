@@ -48,7 +48,7 @@ int bwInit(size_t defaultBufSize) {
 }
 
 //This should be called before quiting, to release memory acquired by curl
-void bwCleanup() {
+void bwCleanup(void) {
 #ifndef NOCURL
     curl_global_cleanup();
 #endif

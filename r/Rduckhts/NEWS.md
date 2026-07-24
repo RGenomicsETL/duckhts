@@ -1,4 +1,8 @@
 
+# Rduckhts 1.5.0.9000-0.1.0
+- bundle the libBigWig strict-prototype correction so macOS Clang package
+  installation no longer warns about the `bwCleanup` definition
+
 # Rduckhts 1.5.0-0.1.0
 - make the in-memory downstream htslib consumer test compatible with both the
   original and argument-capable `Rtinycc::tcc_call_symbol()` APIs, and bundle
