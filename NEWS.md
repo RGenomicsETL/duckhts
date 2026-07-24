@@ -1,6 +1,9 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0.9000
+- patch pinned libBigWig's `bwCleanup` definition to match its public
+  `bwCleanup(void)` declaration, keeping Clang strict-prototype builds
+  warning-clean
 - reproduce VEP 116 on expanded gVCF input without per-row SQL regular
   expressions: omit `<NON_REF>`, bare `*`, and `.` ALT rows; retain real
   literal ALTs from mixed records; and annotate the distinct `<*>` catch-all

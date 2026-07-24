@@ -1,5 +1,7 @@
 
 # Rduckhts 1.5.0.9000-0.1.0
+- bundle the libBigWig strict-prototype correction so macOS Clang package
+  installation no longer warns about the `bwCleanup` definition
 - bundle VEP-116-compatible gVCF event dispatch: expanded `<NON_REF>`, bare
   `*`, and `.` ALT rows produce no annotations; literal ALTs from mixed records
   remain small variants; and `<*>` produces the generic coding or retained
