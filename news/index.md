@@ -2,6 +2,13 @@
 
 ## Rduckhts 1.5.0-0.1.0
 
+CRAN release: 2026-07-24
+
+- make the in-memory downstream htslib consumer test compatible with
+  both the original and argument-capable
+  [`Rtinycc::tcc_call_symbol()`](https://sounkou-bioinfo.github.io/Rtinycc/reference/tcc_call_symbol.html)
+  APIs, and bundle bounds-checked BAQ tag renaming so GCC 11 package
+  builds do not emit the former zero-size-region warning
 - clarify the bundled DuckVEP catalog and README: the resident kernel is
   transcript-source-neutral, the package builder currently compiles the
   Ensembl core set, and transcript-to-genome sequence corrections,
