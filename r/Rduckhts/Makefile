@@ -48,9 +48,9 @@ clean:
 	rm -f $(PKG_NAME)_*.tar.gz
 	rm -rf $(PKG_NAME).Rcheck/
 	rm -f src/*.o src/*.so
-	cd inst/duckhts_extension/htslib && make clean 2>/dev/null || true
-	rm -f inst/duckhts_extension/config.log inst/duckhts_extension/config.status
-	rm -f inst/duckhts_extension/htslib/libhts.a inst/duckhts_extension/htslib/libhts.so* inst/duckhts_extension/htslib/htslib.pc
+	# Do not run htslib's clean target here: inst/duckhts_extension is bundled
+	# package source, and htslib clean can remove tracked fixtures. R CMD check
+	# configures and compiles only its extracted package copy.
 	rm -f inst/extdata/*.duckdb_extension*
 	rm -f inst/extdata/*.tmp
 	rm -f inst/extdata/*.raw

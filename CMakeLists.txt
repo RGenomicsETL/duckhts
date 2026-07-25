@@ -68,6 +68,12 @@ endif()
 ###
 project(${EXTENSION_NAME} LANGUAGES C)
 
+# Native builds must fail on diagnostics from DuckHTS and bundled libBigWig.
+# Vendored htslib is built independently with its upstream warning policy.
+option(DUCKHTS_STRICT_WARNINGS
+       "Treat DuckHTS native compiler warnings as errors"
+       ON)
+
 # Create Extension library
 set(EXTENSION_SOURCES
         src/duckhts.c
@@ -152,14 +158,30 @@ endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(VISIBILITY_INLINES_HIDDEN ON)
-# Strip symbols on Linux (not supported by AppleClang)
-if(NOT APPLE)
-    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
+# Strip native shared libraries on Linux. This is a linker option: passing it
+# through CMAKE_<LANG>_FLAGS_RELEASE makes Clang diagnose an unused compile
+# argument when the native warning gate uses -Werror.
+if(NOT APPLE AND NOT DUCKDB_WASM_EXTENSION)
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(${EXTENSION_NAME} PRIVATE -Wpedantic)
+    target_compile_options(${EXTENSION_NAME} PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wformat=2
+        -Wstrict-prototypes)
+    if(DUCKHTS_STRICT_WARNINGS AND NOT EMSCRIPTEN)
+        target_compile_options(${EXTENSION_NAME} PRIVATE -Werror)
+    endif()
+    # These translation units are pinned upstream implementations. Keep their
+    # diagnostic policy independent from DuckHTS-owned sources, as with the
+    # separately built htslib dependency.
+    set_source_files_properties(
+        src/bcftools_filter.c
+        third_party/cgranges/cgranges.c
+        PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 # Include own headers
@@ -171,8 +193,9 @@ target_include_directories(${EXTENSION_NAME} PRIVATE third_party/libBigWig)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/variantkey/include)
 target_compile_definitions(${EXTENSION_NAME} PRIVATE NOCURL=1)
 
-# Include DuckDB C API headers
-target_include_directories(${EXTENSION_NAME} PRIVATE duckdb_capi)
+# DuckDB's fetched C API is an external header surface. Its historical
+# no-prototype declarations are not DuckHTS diagnostics.
+target_include_directories(${EXTENSION_NAME} SYSTEM PRIVATE duckdb_capi)
 
 # ---- htslib ----
 # Build vendored htslib using its own configure + make.  CMake drives the

@@ -34,6 +34,23 @@ jobs:
           DUCKHTS_FEDORA_CONTAINER: 1
         run: bash scripts/check_cran_fedora.sh
 
+  fedora-clang:
+    runs-on: ubuntu-latest
+    name: Fedora 44 Clang 22 (CRAN-like)
+    container:
+      # Pinned Fedora 44 image; see scripts/check_cran_fedora.sh for the
+      # compiler and CRAN-configuration receipt.
+      image: fedora@sha256:6c75d5bf57cb0fa5aa4b92c6a83c86c791644496d9ac230de7711f5b8ec3b898
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and check with warnings promoted to errors
+        env:
+          DUCKHTS_FEDORA_CONTAINER: 1
+          DUCKHTS_FEDORA_PROFILE: clang
+        run: bash scripts/check_cran_fedora_clang.sh
+
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
 
@@ -79,5 +96,5 @@ jobs:
         with:
           upload-snapshots: true
           build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
-          error-on: '"error"'
+          error-on: '"warning"'
           working-directory: r/Rduckhts

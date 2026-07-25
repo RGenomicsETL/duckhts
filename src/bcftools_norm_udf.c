@@ -706,7 +706,8 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
     char *ref_fetch = NULL;
     kstring_t *als = NULL;
     kstring_t *sym = NULL;
-    int n_allele;
+    /* The shared oom label may be reached before allele buffers exist. */
+    int n_allele = 0;
     int symbolic_alts = 1;
     int any_breakend = 0;
     int any_spanning = 0;

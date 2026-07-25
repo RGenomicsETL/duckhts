@@ -26,28 +26,56 @@ fi
 
 # Get R's compiler settings for Windows
 MAKE=`"${R_HOME}/bin/R" CMD config MAKE`
-CC=`"${R_HOME}/bin/R" CMD config CC`
+R_CONFIG_CC=`"${R_HOME}/bin/R" CMD config CC`
+# The Fedora-Clang CRAN-like job selects Clang without changing R's Makeconf.
+# Ordinary builds retain the compiler configured for R.
+CC="${DUCKHTS_CC:-${R_CONFIG_CC}}"
 AR=`"${R_HOME}/bin/R" CMD config AR`
 RANLIB=`"${R_HOME}/bin/R" CMD config RANLIB`
 R_CPPFLAGS=`"${R_HOME}/bin/R" CMD config CPPFLAGS`
 R_CFLAGS=`"${R_HOME}/bin/R" CMD config CFLAGS`
 R_CPICFLAGS=`"${R_HOME}/bin/R" CMD config CPICFLAGS`
 R_LDFLAGS=`"${R_HOME}/bin/R" CMD config LDFLAGS`
+if [ "${DUCKHTS_LDFLAGS+x}" = x ]; then
+    BASE_LDFLAGS="${DUCKHTS_LDFLAGS}"
+else
+    BASE_LDFLAGS="${R_LDFLAGS}"
+fi
 if [ -z "${RANLIB}" ]; then
     RANLIB=ranlib
 fi
 
 HTSLIB_DIR="${EXT_DIR}/htslib"
 DUCKDB_CAPI_HEADER="${EXT_DIR}/duckdb_capi/duckdb_extension.h"
-CFLAGS="${R_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
+# A profile that intentionally selects another compiler can supply that
+# compiler's base flags without inheriting incompatible R Makeconf flags.
+BASE_CFLAGS="${DUCKHTS_CFLAGS:-${R_CFLAGS}}"
+CFLAGS="${BASE_CFLAGS} ${R_CPICFLAGS} -O2 -fPIC -D_FILE_OFFSET_BITS=64"
 # Keep htslib in a pre-C23 compiler mode.  GCC 16 defaults to GNU C23, whose
 # const-preserving string functions expose warnings in htslib 1.24.
 HTSLIB_CFLAGS="${CFLAGS} -std=gnu17"
-# Keep stricter diagnostics on DuckHTS extension sources without applying them
-# to the vendored htslib build.
-EXT_CFLAGS="${CFLAGS} -Wpedantic -DNOCURL=1"
+# Apply one warning-as-error policy to DuckHTS and bundled libBigWig sources.
+# htslib retains its upstream warning policy and GNU17 override above: it is a
+# separately built dependency, not a reason to weaken this package gate.
+DUCKHTS_STRICT_WARNINGS="${DUCKHTS_STRICT_WARNINGS:-1}"
+case "${DUCKHTS_STRICT_WARNINGS}" in
+    0|1) ;;
+    *)
+        echo "ERROR: DUCKHTS_STRICT_WARNINGS must be 0 or 1 (got '${DUCKHTS_STRICT_WARNINGS}')"
+        exit 1
+        ;;
+esac
+EXT_WARNING_FLAGS="-Wall -Wextra -Wpedantic -Wformat=2 -Wstrict-prototypes"
+if [ "${DUCKHTS_STRICT_WARNINGS}" = "1" ]; then
+    EXT_WARNING_FLAGS="${EXT_WARNING_FLAGS} -Werror"
+fi
+EXT_CFLAGS="${CFLAGS} ${EXT_WARNING_FLAGS} -DNOCURL=1"
+# These are imported upstream implementation files. Keep their diagnostics
+# separate from the DuckHTS gate; cgranges and htslib/bcftools are maintained
+# through pinned sources and explicit patches rather than local warning churn.
+UPSTREAM_CFLAGS="${CFLAGS} -w -DNOCURL=1"
 CPPFLAGS="${R_CPPFLAGS} -DNDEBUG"
-LDFLAGS="${R_LDFLAGS}"
+LDFLAGS="${BASE_LDFLAGS}"
 
 HTSLIB_VERSION_STR=`tr -d '\r\n' < "${HTSLIB_DIR}/VERSION" 2>/dev/null || true`
 HTSLIB_VERSION_NUMBER=`awk '/^#define[[:space:]]+HTS_VERSION[[:space:]]+[0-9]+/ {print $3; exit}' "${HTSLIB_DIR}/htslib/hts.h" 2>/dev/null || true`
@@ -376,7 +404,11 @@ OBJECT_FILES=""
 for src_file in $C_SOURCES; do
     obj_file="${src_file%.c}.o"
     echo "  Compiling $src_file -> $obj_file"
-    ${CC} ${EXT_CFLAGS} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
+    src_cflags="${EXT_CFLAGS}"
+    case "$src_file" in
+        cgranges.c|bcftools_filter.c) src_cflags="${UPSTREAM_CFLAGS}" ;;
+    esac
+    ${CC} ${src_cflags} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
     if [ $? -ne 0 ]; then
         echo "ERROR: Failed to compile $src_file"
         exit 1

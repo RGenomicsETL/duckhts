@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.0.9000
+- make native DuckHTS builds promote their compiler diagnostics to errors by
+  default, while keeping pinned upstream implementation diagnostics isolated
+- initialize the `bcftools_norm_row` shared out-of-memory cleanup count before
+  any allocation can fail, avoiding an indeterminate cleanup-loop bound
 - patch pinned libBigWig's `bwCleanup` definition to match its public
   `bwCleanup(void)` declaration, keeping Clang strict-prototype builds
   warning-clean
