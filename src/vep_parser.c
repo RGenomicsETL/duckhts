@@ -517,10 +517,6 @@ static vep_transcript_t* parse_single_transcript_selected(const vep_schema_t* sc
     return transcript;
 }
 
-static vep_transcript_t* parse_single_transcript(const vep_schema_t* schema, const char* transcript_str) {
-    return parse_single_transcript_selected(schema, transcript_str, NULL, 0);
-}
-
 vep_record_t* vep_record_parse_selected(const vep_schema_t* schema, const char* csq_value,
                                          const int* selected_indices, int n_selected) {
     if (!schema || !csq_value || !*csq_value) return NULL;

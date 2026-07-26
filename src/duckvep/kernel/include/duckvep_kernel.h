@@ -94,7 +94,11 @@ typedef enum duckvep_variant_kind {
     DUCKVEP_KIND_DEL,
     DUCKVEP_KIND_INDEL,
     DUCKVEP_KIND_MNV,
-    DUCKVEP_KIND_SV         /* symbolic/structural; dispatched to the SV kernel */
+    DUCKVEP_KIND_SV,        /* symbolic/structural; dispatched to the SV kernel */
+    /* VCF <*>, retained by VEP 116 as an unknown alternate overlap allele.
+     * It has ordinary point/span topology but no alternate sequence for
+     * codon, peptide, or HGVS construction. */
+    DUCKVEP_KIND_UNSPECIFIED_ALT
 } duckvep_variant_kind_t;
 
 /* Structural-event operation. `variant_kind` selects the event family;

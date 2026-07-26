@@ -1,0 +1,6 @@
+diff --git a/cgranges.c b/cgranges.c
+--- a/cgranges.c
++++ b/cgranges.c
+@@ -165 +165 @@
+-	uint64_t i;
++	int64_t i;

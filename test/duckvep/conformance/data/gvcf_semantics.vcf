@@ -1,0 +1,21 @@
+##fileformat=VCFv4.2
+##contig=<ID=chrDuck,length=260>
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the reference block">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrDuck	90	symbolic_star_transcript_span	CGTACGTACGTACGTACGTACGTACGTACGATGGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACTGGTAAACGTACGTACGTACGTACGT	<*>	.	PASS	END=260
+chrDuck	120	symbolic_star_start_1	A	<*>	.	PASS	END=170
+chrDuck	121	symbolic_star_start_2	T	<*>	.	PASS	END=170
+chrDuck	122	symbolic_star_start_3	G	<*>	.	PASS	END=170
+chrDuck	124	literal_with_end	T	C	.	PASS	END=170
+chrDuck	125	non_ref	A	<NON_REF>	.	PASS	END=170
+chrDuck	126	symbolic_star	C	<*>	.	PASS	END=170
+chrDuck	127	spanning_star	G	*	.	PASS	.
+chrDuck	128	no_alt	T	.	.	PASS	END=170
+chrDuck	129	mixed_non_ref	A	C,<NON_REF>	.	PASS	END=170
+chrDuck	130	mixed_symbolic_star	C	T,<*>	.	PASS	END=170
+chrDuck	131	mixed_spanning_star	G	A,*	.	PASS	.
+chrDuck	133	mixed_symbolic_star_first	A	<*>,T	.	PASS	END=170
+chrDuck	135	mixed_non_ref_first	G	<NON_REF>,A	.	PASS	END=170
+chrDuck	238	symbolic_star_stop_1	T	<*>	.	PASS	END=250
+chrDuck	239	symbolic_star_stop_2	A	<*>	.	PASS	END=250
+chrDuck	240	symbolic_star_stop_3	A	<*>	.	PASS	END=250

@@ -1882,22 +1882,31 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
        FROM ({small_source_sql}) source
        WHERE reference <> alternate
          AND length(reference) BETWEEN 1 AND {opt$max_allele_length}
-         AND length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+         AND (
+           alternate = '<*>' OR
+           length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+         )
          AND regexp_full_match(upper(reference), '[ACGTN]+')
-         AND regexp_full_match(upper(alternate), '[ACGTN]+')
+         AND (
+           regexp_full_match(upper(alternate), '[ACGTN]+') OR
+           alternate = '<*>'
+         )
      ), shaped AS (
        SELECT *,
          CASE
+           WHEN alternate = '<*>' THEN 'unspecified_alt'
            WHEN length(reference) = 1 AND length(alternate) = 1 THEN 'snv'
            WHEN length(reference) = length(alternate) THEN 'mnv'
            WHEN length(reference) < length(alternate) THEN 'insertion_like'
            ELSE 'deletion_like'
          END AS var_type,
-         length(alternate) - length(reference) AS length_change
+         CASE WHEN alternate = '<*>' THEN NULL
+              ELSE length(alternate) - length(reference) END AS length_change
        FROM alleles
      ), binned AS (
        SELECT *,
          CASE
+           WHEN alternate = '<*>' THEN 'unspecified'
            WHEN length_change = 0 THEN '0'
            WHEN abs(length_change) = 1 THEN concat(if(length_change > 0, '+', '-'), '1')
            WHEN abs(length_change) <= 3 THEN concat(if(length_change > 0, '+', '-'), '2..3')
@@ -1908,6 +1917,7 @@ sample_sql <- if (identical(opt$event_mode, "small")) {
            ELSE concat(if(length_change > 0, '+', '-'), '>10000')
          END AS length_bin,
          CASE
+           WHEN alternate = '<*>' THEN 'unspecified'
            WHEN greatest(length(reference), length(alternate)) = 1 THEN '1'
            WHEN greatest(length(reference), length(alternate)) <= 50 THEN '2..50'
            WHEN greatest(length(reference), length(alternate)) <= 1000 THEN '51..1000'
@@ -2103,6 +2113,8 @@ if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
            regexp_full_match(alternate, '<[^>]+>') AS symbolic,
            regexp_matches(alternate, '[\\[\\]]') AS breakend,
            alternate = '*' AS spanning_deletion,
+           alternate = '<*>' AS unspecified_alt,
+           regexp_full_match(upper(reference), '[ACGTN]+') AS literal_ref,
            regexp_full_match(upper(reference), '[ACGTN]+') AND
              regexp_full_match(upper(alternate), '[ACGTN]+') AS literal_acgtn
          FROM alleles
@@ -2116,6 +2128,8 @@ if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
            count(*) FILTER (WHERE breakend)::UBIGINT AS breakend_alleles,
            count(*) FILTER (WHERE spanning_deletion)::UBIGINT
              AS spanning_deletion_alleles,
+           count(*) FILTER (WHERE unspecified_alt)::UBIGINT
+             AS unspecified_alt_alleles,
            count(*) FILTER (WHERE literal_acgtn)::UBIGINT
              AS literal_acgtn_alleles,
            count(*) FILTER (
@@ -2140,9 +2154,13 @@ if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
          SELECT * FROM classified
          WHERE {split_predicate}
            AND NOT ref_equal
-           AND literal_acgtn
+           AND literal_ref
+           AND (literal_acgtn OR unspecified_alt)
            AND length(reference) BETWEEN 1 AND {opt$max_allele_length}
-           AND length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+           AND (
+             unspecified_alt OR
+             length(alternate) BETWEEN 1 AND {opt$max_allele_length}
+           )
        ), eligible_model AS (
          SELECT e.*
          FROM eligible_pre_model e

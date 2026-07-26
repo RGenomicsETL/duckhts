@@ -586,7 +586,7 @@ static char *fetch_sequence_flexible(faidx_t *fai, const char *chrom, hts_pos_t 
     char with_chr[512];
     char canonical[512];
     char canonical_with_chr[512];
-    const char *aliases[12];
+    const char *aliases[12] = {NULL};
     hts_pos_t len = 0;
     char *ref = NULL;
     if (!fai || !chrom || start < 1 || end < start) return NULL;
@@ -630,7 +630,7 @@ static char *resolve_fasta_contig_name(faidx_t *fai, const char *chrom) {
     char with_chr[512];
     char canonical[512];
     char canonical_with_chr[512];
-    const char *aliases[12];
+    const char *aliases[12] = {NULL};
 
     if (!fai || !chrom || !*chrom) return NULL;
 

@@ -277,23 +277,21 @@ static int project_mapper_insert_cdna_bounds(
     return 1;
 }
 
-int duckvep_project_feature_overlaps_start_codon_unshifted(
+static int project_feature_cdna_bounds_unshifted(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     size_t                            tx_idx,
-    const duckvep_event_t            *event) {
+    const duckvep_event_t            *event,
+    uint32_t                         *cdna_start_out,
+    uint32_t                         *cdna_end_out) {
 
     uint32_t cdna_start;
     uint32_t cdna_end;
-    uint32_t coding_start;
-    uint32_t coding_end;
 
     if (transcripts == NULL || exons == NULL || event == NULL ||
         tx_idx >= transcripts->transcript_count ||
-        transcripts->strand == NULL || transcripts->flags == NULL ||
-        event->feature_start1 == 0u ||
-        (transcripts->flags[tx_idx] &
-         (uint64_t)DUCKVEP_TX_CDS_START_NF) != 0u) {
+        transcripts->strand == NULL || event->feature_start1 == 0u ||
+        cdna_start_out == NULL || cdna_end_out == NULL) {
         return 0;
     }
     if (event->feature_end1 != UINT32_MAX &&
@@ -318,7 +316,29 @@ int duckvep_project_feature_overlaps_start_codon_unshifted(
             return 0;
         }
     }
-    if (cdna_start == 0u || cdna_end == 0u ||
+    if (cdna_start == 0u || cdna_end == 0u) return 0;
+    *cdna_start_out = cdna_start;
+    *cdna_end_out = cdna_end;
+    return 1;
+}
+
+int duckvep_project_feature_overlaps_start_codon_unshifted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event) {
+
+    uint32_t cdna_start;
+    uint32_t cdna_end;
+    uint32_t coding_start;
+    uint32_t coding_end;
+
+    if (transcripts == NULL || tx_idx >= transcripts->transcript_count ||
+        transcripts->flags == NULL ||
+        (transcripts->flags[tx_idx] &
+         (uint64_t)DUCKVEP_TX_CDS_START_NF) != 0u ||
+        !project_feature_cdna_bounds_unshifted(
+            transcripts, exons, tx_idx, event, &cdna_start, &cdna_end) ||
         !duckvep_project_coding_cdna_bounds(
             transcripts, exons, tx_idx, &coding_start, &coding_end,
             NULL, NULL) ||
@@ -327,6 +347,33 @@ int duckvep_project_feature_overlaps_start_codon_unshifted(
     }
     (void)coding_end;
     return cdna_end >= coding_start && cdna_start <= coding_start + 2u;
+}
+
+int duckvep_project_feature_overlaps_stop_codon_unshifted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event) {
+
+    uint32_t cdna_start;
+    uint32_t cdna_end;
+    uint32_t coding_start;
+    uint32_t coding_end;
+
+    if (transcripts == NULL || tx_idx >= transcripts->transcript_count ||
+        transcripts->flags == NULL ||
+        (transcripts->flags[tx_idx] &
+         (uint64_t)DUCKVEP_TX_CDS_END_NF) != 0u ||
+        !project_feature_cdna_bounds_unshifted(
+            transcripts, exons, tx_idx, event, &cdna_start, &cdna_end) ||
+        !duckvep_project_coding_cdna_bounds(
+            transcripts, exons, tx_idx, &coding_start, &coding_end,
+            NULL, NULL) ||
+        coding_end < 3u) {
+        return 0;
+    }
+    (void)coding_start;
+    return cdna_end >= coding_end - 2u && cdna_start <= coding_end;
 }
 
 int duckvep_project_feature_has_coding_precondition_unshifted(

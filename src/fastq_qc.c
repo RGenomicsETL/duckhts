@@ -105,13 +105,11 @@ static int duckhts_fastq_qc_ensure_cycles(duckhts_fastq_qc_state_t *state,
         }
         new_capacity *= 2u;
     }
-    if (new_capacity < needed ||
-        (size_t)new_capacity > SIZE_MAX / sizeof(*state->cycles)) {
-        return 0;
-    }
-
+    if (new_capacity < needed) return 0;
     old_bytes = (size_t)state->cycle_capacity * sizeof(*state->cycles);
     new_bytes = (size_t)new_capacity * sizeof(*state->cycles);
+    if (new_capacity != 0 &&
+        new_bytes / (size_t)new_capacity != sizeof(*state->cycles)) return 0;
     grown = (duckhts_simd_fastq_cycle_t *)realloc(state->cycles, new_bytes);
     if (!grown) return 0;
     memset((unsigned char *)grown + old_bytes, 0, new_bytes - old_bytes);

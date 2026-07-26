@@ -25,7 +25,7 @@
 #include <stdint.h>
 
 #ifndef DUCKVEP_INTERNAL_API
-# if defined(__GNUC__) || defined(__clang__)
+# if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32)
 #  define DUCKVEP_INTERNAL_API __attribute__((visibility("hidden")))
 # else
 #  define DUCKVEP_INTERNAL_API

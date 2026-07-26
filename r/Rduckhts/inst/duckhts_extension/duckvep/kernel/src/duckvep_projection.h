@@ -89,6 +89,14 @@ int duckvep_project_feature_overlaps_start_codon_unshifted(
     size_t                            tx_idx,
     const duckvep_event_t            *event);
 
+/* Stop-codon counterpart of the start-codon helper above. A cds_end_NF
+ * transcript has no complete annotated stop codon and always returns false. */
+int duckvep_project_feature_overlaps_stop_codon_unshifted(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event);
+
 /* Reproduce the cached `_pre_consequence_predicates->{coding}` admission for
  * a complete small-variant feature. This is broader than requiring both
  * feature endpoints in CDS: one mapped CDS segment is sufficient, including

@@ -7,6 +7,7 @@
 	test-duckvep-so-conformance \
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
+	test-duckvep-gvcf-differential \
 	test-duckvep-state-exploration \
 	test-duckvep-release-vcf \
 	duckvep-corpus-differential duckvep-statistical-report \
@@ -321,6 +322,17 @@ test-duckvep-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--extension build/release/duckhts.duckdb_extension \
 		--sample-per-shape 0 --hgvs
+
+# VEP receives one single-ALT record for each expanded input allele. This pins
+# both ALT orders in mixed gVCF records without asking either engine to infer
+# genotype remapping or record-level block semantics.
+test-duckvep-gvcf-differential: release
+	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
+		--corpus gvcf_semantics \
+		--vcf test/duckvep/conformance/data/gvcf_semantics.vcf \
+		--extension build/release/duckhts.duckdb_extension \
+		--split-multiallelic --sample-per-shape 0 --distance 0 \
+		--max-allele-length 171
 
 # Reproducible rare-state exploration. The generated VCF, pair-level Parquet, and
 # statistical summaries remain under the ignored results directory so every failure

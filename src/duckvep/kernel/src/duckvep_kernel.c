@@ -1393,6 +1393,46 @@ static void annotate_ctx_prepare_variant(
         &ctx->prepared_feature_alt, &ctx->prepared_feature_alt_length);
 }
 
+static void unspecified_alt_delta_fill(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    duckvep_sequence_delta_t         *delta) {
+
+    duckvep_coding_projection_t projection;
+    uint32_t genomic_pos;
+
+    memset(delta, 0, sizeof(*delta));
+    delta->cdna_pos = -1;
+    delta->cds_pos = -1;
+    delta->protein_pos = -1;
+    delta->valid = 1u;
+    delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
+
+    if (duckvep_project_feature_overlaps_start_codon_unshifted(
+            transcripts, exons, tx_idx, event)) {
+        delta->start_retained = 1u;
+    } else if (duckvep_project_feature_overlaps_stop_codon_unshifted(
+                   transcripts, exons, tx_idx, event)) {
+        delta->stop_retained = 1u;
+    } else {
+        delta->coding_unknown = 1u;
+    }
+
+    genomic_pos = transcripts->strand[tx_idx] >= 0
+        ? event->feature_start1 : event->feature_end1;
+    if (duckvep_project_coding_base(
+            transcripts, exons, tx_idx, genomic_pos, &projection) &&
+        projection.cdna_pos <= (uint32_t)INT32_MAX &&
+        projection.cds_pos <= (uint32_t)INT32_MAX &&
+        projection.protein_pos <= (uint32_t)INT32_MAX) {
+        delta->cdna_pos = (int32_t)projection.cdna_pos;
+        delta->cds_pos = (int32_t)projection.cds_pos;
+        delta->protein_pos = (int32_t)projection.protein_pos;
+    }
+}
+
 static int insertion_placement_uses_right_flank(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -2177,7 +2217,13 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
         coding_context_status =
             DUCKVEP_VARIANT_CODING_CONTEXT_UNSUPPORTED_KIND;
     }
-    if (kind != DUCKVEP_KIND_SV &&
+    if (kind == DUCKVEP_KIND_UNSPECIFIED_ALT &&
+        (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS))) {
+        cds_delta_attempted = 1;
+        unspecified_alt_delta_fill(
+            tx, &c->model->exons, (size_t)tx_idx, event, &delta);
+        duckvep_effect_ctx_apply_delta(&ectx, &delta);
+    } else if (kind != DUCKVEP_KIND_SV &&
         (ectx.pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_CDS)) &&
         !feature_mapping_blocks_peptide) {
         const duckvep_sequence_pool_t *seq = c->model->has_seq ? &c->model->seq : NULL;
@@ -2426,7 +2472,8 @@ static duckvep_status_t validate_variant_batch(
                                 : (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
 
         if (variants->pos1[i] == 0u || variants->end1[i] < variants->pos1[i] ||
-            kind > (uint8_t)DUCKVEP_KIND_SV) {
+            (kind > (uint8_t)DUCKVEP_KIND_SV &&
+             kind != (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT)) {
             return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_COORD_RANGE,
                         "variant has an invalid interval or kind");
         }
@@ -2509,15 +2556,42 @@ static duckvep_status_t validate_variant_batch(
                 return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_ANN_ALLELE_RANGE,
                             "REF/ALT slice outside allele_bytes_len");
             }
-            if (rlen > UINT16_MAX || alen > UINT16_MAX ||
-                !allele_shape_matches_kind(variants->variant_kind[i],
-                                           variants->pos1[i],
-                                           variants->end1[i],
-                                           variants->allele_bytes + (size_t)roff,
-                                           (uint16_t)rlen,
-                                           variants->allele_bytes + (size_t)aoff,
-                                           (uint16_t)alen,
-                                           events != NULL ? &events[i] : NULL)) {
+            if (rlen > UINT16_MAX || alen > UINT16_MAX) {
+                return fail(error, DUCKVEP_ERR_OUT_OF_RANGE,
+                            DVW_ANN_ALLELE_RANGE,
+                            "REF/ALT length exceeds the kernel limit");
+            }
+            if (variants->variant_kind[i] ==
+                (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT) {
+                if (!duckvep_event_unspecified_alt_shape_matches(
+                        variants->pos1[i], variants->end1[i],
+                        variants->allele_bytes + (size_t)roff,
+                        (uint16_t)rlen,
+                        variants->allele_bytes + (size_t)aoff,
+                        (uint16_t)alen)) {
+                    return fail(
+                        error, DUCKVEP_ERR_INVALID_ARG,
+                        DVW_ANN_ALLELE_RANGE,
+                        "unspecified alternate must be an exact <*> allele");
+                }
+                if (events != NULL) {
+                    duckvep_event_load_unspecified_alt(variants, i, &events[i]);
+                    events[i].chrom_id = variants->chrom_id[i];
+                    events[i].sv_type = (uint8_t)DUCKVEP_SV_NONE;
+                    events[i].copy_change =
+                        (uint8_t)DUCKVEP_COPY_CHANGE_UNKNOWN;
+                }
+                continue;
+            }
+            if (!allele_shape_matches_kind(
+                    variants->variant_kind[i],
+                    variants->pos1[i],
+                    variants->end1[i],
+                    variants->allele_bytes + (size_t)roff,
+                    (uint16_t)rlen,
+                    variants->allele_bytes + (size_t)aoff,
+                    (uint16_t)alen,
+                    events != NULL ? &events[i] : NULL)) {
                 return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_ALLELE_RANGE,
                             "variant kind inconsistent with REF/ALT span");
             }

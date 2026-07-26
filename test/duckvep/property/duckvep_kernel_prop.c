@@ -24775,6 +24775,17 @@ TEST tile_rejects_breakends_and_malformed_small_variants(void) {
     ASSERT_EQ(DUCKVEP_TILE_INVALID,
               duckvep_variant_tile_append(tile, 0u, 10u, 10u, (uint8_t)DUCKVEP_KIND_INDEL,
                                           "AC", 2u, "G", 1u, "v", 1u));
+    /* The catch-all kind accepts only exact <*> syntax and the REF-derived span. */
+    ASSERT_EQ(
+        DUCKVEP_TILE_INVALID,
+        duckvep_variant_tile_append(
+            tile, 0u, 10u, 10u, (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT,
+            "AC", 2u, "<*>", 3u, "v", 1u));
+    ASSERT_EQ(
+        DUCKVEP_TILE_INVALID,
+        duckvep_variant_tile_append(
+            tile, 0u, 10u, 11u, (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT,
+            "AC", 2u, "<NON_REF>", 9u, "v", 1u));
     /* null required field */
     ASSERT_EQ(DUCKVEP_TILE_INVALID,
               duckvep_variant_tile_append(tile, 0u, 10u, 10u, (uint8_t)DUCKVEP_KIND_SNV,
@@ -24799,10 +24810,15 @@ TEST tile_appends_and_batch_view_roundtrips(void) {
     ASSERT_EQ(DUCKVEP_TILE_APPENDED, tile_put_ins(tile, 1u, 210u, "A", "AT", 2u, "rs4"));
     ASSERT_EQ(DUCKVEP_TILE_APPENDED, tile_put_del(tile, 1u, 220u, "AC", 2u, "A", "rs5"));
     ASSERT_EQ(DUCKVEP_TILE_APPENDED, tile_put_indel(tile, 1u, 230u, "AC", 2u, "G", 1u, "rs6"));
-    ASSERT_EQ(6u, duckvep_variant_tile_count(tile));
+    ASSERT_EQ(
+        DUCKVEP_TILE_APPENDED,
+        duckvep_variant_tile_append(
+            tile, 1u, 240u, 243u, (uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT,
+            "ACGT", 4u, "<*>", 3u, "gvcf", 4u));
+    ASSERT_EQ(7u, duckvep_variant_tile_count(tile));
 
     duckvep_variant_tile_batch(tile, &v);
-    ASSERT_EQ(6u, v.count);
+    ASSERT_EQ(7u, v.count);
     ASSERT_EQ(1u, v.chrom_id[0]);
     ASSERT_EQ(100u, v.pos1[0]);
     ASSERT_EQ(205u, v.pos1[2]);
@@ -24815,6 +24831,7 @@ TEST tile_appends_and_batch_view_roundtrips(void) {
     ASSERT_EQ((uint8_t)DUCKVEP_KIND_INS, v.variant_kind[3]);
     ASSERT_EQ((uint8_t)DUCKVEP_KIND_DEL, v.variant_kind[4]);
     ASSERT_EQ((uint8_t)DUCKVEP_KIND_INDEL, v.variant_kind[5]);
+    ASSERT_EQ((uint8_t)DUCKVEP_KIND_UNSPECIFIED_ALT, v.variant_kind[6]);
     /* allele pool: ref then alt per row */
     ASSERT_EQ('A', (char)v.allele_bytes[v.ref_offset[0]]);
     ASSERT_EQ('G', (char)v.allele_bytes[v.alt_offset[0]]);
@@ -24829,11 +24846,17 @@ TEST tile_appends_and_batch_view_roundtrips(void) {
     ASSERT_EQ(1u, v.alt_length[4]);
     ASSERT_EQ(2u, v.ref_length[5]);
     ASSERT_EQ(1u, v.alt_length[5]);
+    ASSERT_EQ(4u, v.ref_length[6]);
+    ASSERT_EQ(3u, v.alt_length[6]);
+    ASSERT(memcmp(v.allele_bytes + v.alt_offset[6], "<*>", 3u) == 0);
     /* variant_id metadata indexed by variant_idx */
     id = duckvep_variant_tile_variant_id(tile, 5u, &idlen);
     ASSERT_EQ(3u, idlen);
     ASSERT(id != NULL && memcmp(id, "rs6", 3u) == 0);
-    ASSERT(duckvep_variant_tile_variant_id(tile, 6u, &idlen) == NULL); /* out of range */
+    id = duckvep_variant_tile_variant_id(tile, 6u, &idlen);
+    ASSERT_EQ(4u, idlen);
+    ASSERT(id != NULL && memcmp(id, "gvcf", 4u) == 0);
+    ASSERT(duckvep_variant_tile_variant_id(tile, 7u, &idlen) == NULL); /* out of range */
     duckvep_variant_tile_destroy(tile);
     PASS();
 }
