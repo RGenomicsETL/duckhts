@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_parallel_empty_contigs <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-
-  expect_silent(rduckhts_load(con))
   expect_silent(dbExecute(con, "PRAGMA threads=4"))
 
   bam_path <- system.file("extdata", "parallel_empty_contigs.bam", package = "Rduckhts")

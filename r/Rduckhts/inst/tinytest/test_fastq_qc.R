@@ -2,10 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_fastq_qc <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  expect_silent(rduckhts_load(con))
 
   fastq <- system.file("extdata", "r1.fq", package = "Rduckhts")
   long_qname_fastq <- system.file(

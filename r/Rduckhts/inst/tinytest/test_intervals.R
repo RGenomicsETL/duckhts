@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_interval_readers <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-
-  expect_silent(rduckhts_load(con))
 
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
   bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")

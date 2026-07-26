@@ -3,10 +3,8 @@ library(tinytest)
 library(DBI)
 
 test_quality_encoding <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  expect_silent(rduckhts_load(con))
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")

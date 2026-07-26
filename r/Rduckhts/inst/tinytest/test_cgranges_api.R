@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_cgranges_api <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-
-  expect_silent(rduckhts_load(con))
 
   expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('r_idx') AS ok")$ok[1], TRUE)
   expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_idx', 'chr1', 10, 20) AS ok")$ok[1], TRUE)

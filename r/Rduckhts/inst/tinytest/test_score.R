@@ -3,11 +3,8 @@ library(DBI)
 library(Rduckhts)
 
 test_score <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-
-  expect_silent(rduckhts_load(con))
 
   extdata <- system.file("extdata", package = "Rduckhts")
   vcf <- file.path(extdata, "score_input.vcf")

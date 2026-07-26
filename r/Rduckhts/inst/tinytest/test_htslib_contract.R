@@ -20,10 +20,8 @@ test_htslib_contract <- function() {
   expect_true(is.numeric(config$runtime_feature_bits))
   expect_true(nzchar(config$runtime_feature_string))
 
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- DBI::dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  rduckhts_load(con)
   info <- rduckhts_htslib_info(con)
   expect_identical(as.character(info$version[[1L]]), "1.24")
   expect_true(info$feature_bits[[1L]] > 0)

@@ -2,13 +2,10 @@ library(tinytest)
 library(DBI)
 
 test_cigar_utils <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   literal_metrics <- DBI::dbGetQuery(
     con,

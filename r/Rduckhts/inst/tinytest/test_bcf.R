@@ -2,13 +2,10 @@ library(tinytest)
 library(DBI)
 
 test_bcf_string_format_lists <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     dbDisconnect(con, shutdown = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   bcf_path <- system.file("extdata", "format_string_list.vcf", package = "Rduckhts")
   fixed_path <- system.file("extdata", "fixed_count_arrays.vcf", package = "Rduckhts")
@@ -156,13 +153,10 @@ test_bcf_string_format_lists <- function() {
 }
 
 test_bcf_v2_sql <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     dbDisconnect(con, shutdown = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
   bcf_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
   quoted_path <- DBI::dbQuoteString(con, bcf_path)
@@ -562,13 +556,10 @@ test_bcf_v2_sql <- function() {
 }
 
 test_bcf_appender <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     dbDisconnect(con, shutdown = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
 

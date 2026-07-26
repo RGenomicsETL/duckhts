@@ -7,7 +7,8 @@
 duckhts_load(con = NULL, extension_path = NULL)
 }
 \arguments{
-\item{con}{An existing DuckDB connection, or \code{NULL} to create one.}
+\item{con}{An existing DuckDB connection, or \code{NULL} to create a
+package-owned connection with \code{rduckhts_connect()}.}
 
 \item{extension_path}{Explicit path to the \code{.duckdb_extension} file.
 If \code{NULL}, uses the default location in the installed package.}
@@ -16,5 +17,6 @@ If \code{NULL}, uses the default location in the installed package.}
 The DuckDB connection (invisibly).
 }
 \description{
-Load the duckhts extension into a DuckDB connection
+Compatibility wrapper around \code{rduckhts_connect()} and
+\code{rduckhts_load()}. Prefer the \code{rduckhts_*} functions in new code.
 }
