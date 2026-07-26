@@ -2,13 +2,28 @@
 
 ## Rduckhts 1.5.0.9000-0.1.0
 
+- make bundled-extension compilation promote DuckHTS and libBigWig
+  diagnostics to errors by default, including CRAN-like Fedora Clang
+  builds
+- bundle the `bcftools_norm_row` out-of-memory cleanup correction so a
+  failed internal allocation cannot use an indeterminate allele-buffer
+  count
 - bundle the libBigWig strict-prototype correction so macOS Clang
   package installation no longer warns about the `bwCleanup` definition
-
-## Rduckhts 1.5.0-0.1.0
-
-CRAN release: 2026-07-24
-
+- bundle VEP-116-compatible gVCF event dispatch: expanded `<NON_REF>`,
+  bare `*`, and `.` ALT rows produce no annotations; literal ALTs from
+  mixed records remain small variants; and `<*>` produces the generic
+  coding or retained start/stop consequence with empty HGVS.
+  Record-level `INFO/END` remains provenance for literal ALTs and `<*>`.
+  The package docs and tests also warn that VEP 116’s literal
+  allele-length handling can emit an ablation term when a long-REF `<*>`
+  row completely contains a feature
+- remove the DuckHTS-source diagnostics reported by the Debian and
+  Windows win-builder package pretests, including the MinGW
+  hidden-visibility warnings
+- link the package DuckVEP documentation to the illustrated whole-genome
+  DuckVEP/FastVEP speed, memory, VEP-conformance, fastSA-versus-SQL
+  provider, algorithm-design, and test-infrastructure report
 - make the in-memory downstream htslib consumer test compatible with
   both the original and argument-capable
   [`Rtinycc::tcc_call_symbol()`](https://sounkou-bioinfo.github.io/Rtinycc/reference/tcc_call_symbol.html)

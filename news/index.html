@@ -34,11 +34,13 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.0.9000-0.1.0" id="rduckhts-1509000-010">Rduckhts 1.5.0.9000-0.1.0<a class="anchor" aria-label="anchor" href="#rduckhts-1509000-010"></a></h2>
-<ul><li>bundle the libBigWig strict-prototype correction so macOS Clang package installation no longer warns about the <code>bwCleanup</code> definition</li>
-</ul></div>
-    <div class="section level2">
-<h2 class="pkg-version" data-toc-text="1.5.0-0.1.0" id="rduckhts-150-010">Rduckhts 1.5.0-0.1.0<a class="anchor" aria-label="anchor" href="#rduckhts-150-010"></a></h2><p class="text-muted">CRAN release: 2026-07-24</p>
-<ul><li>make the in-memory downstream htslib consumer test compatible with both the original and argument-capable <code><a href="https://sounkou-bioinfo.github.io/Rtinycc/reference/tcc_call_symbol.html" class="external-link">Rtinycc::tcc_call_symbol()</a></code> APIs, and bundle bounds-checked BAQ tag renaming so GCC 11 package builds do not emit the former zero-size-region warning</li>
+<ul><li>make bundled-extension compilation promote DuckHTS and libBigWig diagnostics to errors by default, including CRAN-like Fedora Clang builds</li>
+<li>bundle the <code>bcftools_norm_row</code> out-of-memory cleanup correction so a failed internal allocation cannot use an indeterminate allele-buffer count</li>
+<li>bundle the libBigWig strict-prototype correction so macOS Clang package installation no longer warns about the <code>bwCleanup</code> definition</li>
+<li>bundle VEP-116-compatible gVCF event dispatch: expanded <code>&lt;NON_REF&gt;</code>, bare <code>*</code>, and <code>.</code> ALT rows produce no annotations; literal ALTs from mixed records remain small variants; and <code>&lt;*&gt;</code> produces the generic coding or retained start/stop consequence with empty HGVS. Record-level <code>INFO/END</code> remains provenance for literal ALTs and <code>&lt;*&gt;</code>. The package docs and tests also warn that VEP 116’s literal allele-length handling can emit an ablation term when a long-REF <code>&lt;*&gt;</code> row completely contains a feature</li>
+<li>remove the DuckHTS-source diagnostics reported by the Debian and Windows win-builder package pretests, including the MinGW hidden-visibility warnings</li>
+<li>link the package DuckVEP documentation to the illustrated whole-genome DuckVEP/FastVEP speed, memory, VEP-conformance, fastSA-versus-SQL provider, algorithm-design, and test-infrastructure report</li>
+<li>make the in-memory downstream htslib consumer test compatible with both the original and argument-capable <code><a href="https://sounkou-bioinfo.github.io/Rtinycc/reference/tcc_call_symbol.html" class="external-link">Rtinycc::tcc_call_symbol()</a></code> APIs, and bundle bounds-checked BAQ tag renaming so GCC 11 package builds do not emit the former zero-size-region warning</li>
 <li>clarify the bundled DuckVEP catalog and README: the resident kernel is transcript-source-neutral, the package builder currently compiles the Ensembl core set, and transcript-to-genome sequence corrections, circular-origin geometry, implicit path projection, and phased composition remain outside the package surface</li>
 <li>make the Fedora CRAN-reproduction flow install the suggested <code>Rtinycc</code> downstream-linking test dependency before strict package checks</li>
 <li>clarify in the bundled DuckVEP function catalog that the supplied reference defines the exact modeled sequence paths and that annotation does not implicitly project X/Y PAR, patch, or alternate-haplotype coordinates. Package documentation now distinguishes official Ensembl Variation release-VCF product audits from executable-VEP compatibility</li>
