@@ -24,10 +24,7 @@ A one-row data frame with \`version\`, \`feature_bits\`, and
 
 ``` r
 if (FALSE) { # \dontrun{
-con <- DBI::dbConnect(
-  duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-)
-rduckhts_load(con)
+con <- rduckhts_connect()
 rduckhts_htslib_info(con)
 DBI::dbDisconnect(con, shutdown = TRUE)
 } # }

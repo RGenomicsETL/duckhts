@@ -1,7 +1,9 @@
 # Load DuckHTS Extension
 
-Loads the DuckHTS extension into a DuckDB connection. This must be
-called before using any of the HTS reader functions.
+Loads the DuckHTS extension into an existing DuckDB connection. This
+must be called before using HTS reader functions on a connection not
+created by
+[`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_connect.md).
 
 ## Usage
 
@@ -13,30 +15,28 @@ rduckhts_load(con, extension_path = NULL)
 
 - con:
 
-  A DuckDB connection object
+  A DuckDB connection object.
 
 - extension_path:
 
-  Optional path to the duckhts extension file. If NULL, will try to use
-  the bundled extension.
+  Optional path to the DuckHTS extension file. If `NULL`, uses the
+  extension bundled with Rduckhts.
 
 ## Value
 
-TRUE if the extension was loaded successfully
+`TRUE` if the extension was loaded successfully.
 
 ## Details
 
-The DuckDB connection must be created with
-`allow_unsigned_extensions = "true"`.
+The connection must permit unsigned extension loading. With current
+versions of the duckdb R package, its driver must also permit extension
+loading. Prefer
+[`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_connect.md)
+when Rduckhts owns the connection.
 
 ## Examples
 
 ``` r
-library(DBI)
-library(duckdb)
-
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
-#> [1] TRUE
-dbDisconnect(con, shutdown = TRUE)
+con <- rduckhts_connect()
+DBI::dbDisconnect(con, shutdown = TRUE)
 ```

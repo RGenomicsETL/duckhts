@@ -1,5 +1,23 @@
 # Changelog
 
+## Rduckhts 1.5.1-0.1.1
+
+- add
+  [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_connect.md)
+  as the single package-owned connection path. It explicitly permits the
+  locally compiled bundled extension, uses temporary DuckDB
+  extension/secret storage when supported, and disables implicit known-
+  extension installation and loading. Package examples and
+  extension-dependent tinytests now use this path, including on CRAN’s
+  Linux libc++ builds where the `duckdb` package otherwise disables
+  extension loading. `duckhts_load(NULL)` delegates to the same
+  connection contract, while
+  [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_load.md)
+  remains available for caller-owned connections. File-backed
+  connections reject a reused DuckDB driver, whose creation policy
+  cannot be changed, and release a newly owned driver if connection or
+  extension loading fails
+
 ## Rduckhts 1.5.1-0.1.0
 
 - make bundled-extension compilation promote DuckHTS and libBigWig

@@ -105,9 +105,7 @@ Invisible TRUE on success
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
-#> [1] TRUE
+con <- rduckhts_connect()
 bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
 rduckhts_bam(con, "reads", bam_path, overwrite = TRUE)
 dbGetQuery(con, "SELECT COUNT(*) FROM reads WHERE FLAG & 4 = 0")

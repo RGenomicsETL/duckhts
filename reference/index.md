@@ -50,6 +50,8 @@
   : BGZF Compress a File
 - [`rduckhts_bigwig()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bigwig.md)
   : Create a BigWig Signal Table
+- [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_connect.md)
+  : Create a DuckDB connection with bundled DuckHTS loaded
 - [`rduckhts_detect_quality_encoding()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_detect_quality_encoding.md)
   : Detect FASTQ Quality Encoding
 - [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fasta.md)

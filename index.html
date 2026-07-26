@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1-0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1-0.1.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -150,7 +150,7 @@
 <div class="section level2">
 <h2 id="quick-start">Quick Start<a class="anchor" aria-label="anchor" href="#quick-start"></a>
 </h2>
-<p>The extension is loaded with <code>rduckhts_load(con, extension_path = NULL)</code>. The wrappers break down into:</p>
+<p>Create a package-owned connection with <code><a href="reference/rduckhts_connect.html">rduckhts_connect()</a></code>, which explicitly loads the bundled extension without enabling automatic installation or loading of unrelated DuckDB extensions. Use <code>rduckhts_load(con, extension_path = NULL)</code> only for an existing connection whose driver permits extension loading. The wrappers break down into:</p>
 <ul>
 <li>readers: <code><a href="reference/rduckhts_bcf.html">rduckhts_bcf()</a></code>, <code><a href="reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, <code><a href="reference/rduckhts_fastq.html">rduckhts_fastq()</a></code>, <code><a href="reference/rduckhts_bigwig.html">rduckhts_bigwig()</a></code>, <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code>, <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code>, <code><a href="reference/rduckhts_tabix.html">rduckhts_tabix()</a></code>, <code><a href="reference/rduckhts_bed.html">rduckhts_bed()</a></code>
 </li>
@@ -182,9 +182,7 @@
 <span><span class="va">fasta_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"ce.fa"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fastq_r1</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r1.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="va">fastq_r2</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
-<span><span class="va">con</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dbi.r-dbi.org/reference/dbConnect.html" class="external-link">dbConnect</a></span><span class="op">(</span><span class="fu">duckdb</span><span class="fu">::</span><span class="fu"><a href="https://r.duckdb.org/reference/duckdb.html" class="external-link">duckdb</a></span><span class="op">(</span>config <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>allow_unsigned_extensions <span class="op">=</span> <span class="st">"true"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/rduckhts_load.html">rduckhts_load</a></span><span class="op">(</span><span class="va">con</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] TRUE</span></span>
+<span><span class="va">con</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_connect.html">rduckhts_connect</a></span><span class="op">(</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta.html">rduckhts_fasta</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"sequences"</span>, <span class="va">fasta_path</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fastq.html">rduckhts_fastq</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"reads"</span>, <span class="va">fastq_r1</span>, mate_path <span class="op">=</span> <span class="va">fastq_r2</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -463,11 +461,11 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="1%">
 <col width="0%">
-<col width="9%">
 <col width="0%">
-<col width="88%">
+<col width="8%">
+<col width="0%">
+<col width="90%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -531,7 +529,8 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td></td>
-<td>Annotate a narrow canonical event relation against one resident DuckVEP model through one fixed-schema, pipe-friendly surface. events_table names a coordinate-ordered relation with event_index UBIGINT, seq_region UINTEGER, positive one-based position, reference VARCHAR, alternate VARCHAR, end_position UBIGINT, structural_type VARCHAR, copy_change VARCHAR, mate_seq_region UINTEGER, and mate_position UBIGINT. One row represents one ALT allele. Keep genotype, phase-set, confidence-interval, raw-ALT, orientation, and other provenance in the source relation; join selected annotations back by event_index instead of multiplying wide payloads by transcript count. Literal reference/alternate rows are small variants; a typed end/span or supported symbolic ALT is structural; a complete mate coordinate pair is a breakend. Contradictory or incomplete geometry fails instead of being guessed, including disagreement between supported symbolic ALT and explicit structural_type values. For VCF span SVs, prepare position as POS + 1 after removing the left anchor; insertion position is the interbase site after POS. DEL implies LOSS and DUP/TDUP imply GAIN when copy_change is NULL. Filtering the globally coordinate-ordered event stream preserves the order required by each native transcript and regulation-feature sweep; the macro does not hide a sort. The event seq_region is an exact ordinal in the loaded model; annotation does not strip contig prefixes or project PAR, patch, alternate-haplotype, or circular-origin coordinates. X/Y PAR and alternate-path transcript rows therefore remain path-specific exactly as prepared. Each event is annotated independently: genotype and phase-set columns are not combined into haplotypes. The stable compact contract includes SO/region masks, IMPACT/status/reason codes, one-based cDNA/CDS/protein positions, amino-acid bytes, NMD prediction/escape codes, and overlap-object ordinals. protein_position is the affected one-based protein residue/codon ordinal used by codon-level evidence such as PS1/PM5. rich := TRUE adds Consequence, IMPACT, region, amino-acid, NMD, overlap-object, duckvep_status, and duckvep_reason text from the same native pass while retaining every compact field; FALSE or explicit NULL leaves those presentation columns NULL. hgvs := TRUE fuses independent-event HGVSc/HGVSn/HGVSp into the small-variant lane without repeating candidate discovery; it composes with rich := TRUE in one pass; structural and breakend HGVS remain NULL. DuckHTS audit status/reason fields distinguish an unresolved computation from a genuinely absent consequence and are not Ensembl CSQ fields. Zero disables either directional transcript window. Decode consequence_mask only after filtering by joining duckvep_so_terms(); join transcript_index, gene_index, or regulation_feature_index to the prepared model relations for stable identifiers, biotype, MANE/GENCODE/CCDS flags, and other presentation metadata. This typed rich projection does not claim the complete serialized VEP CSQ vocabulary: exon/intron ordinals, codon strings, distance text, CANONICAL/APPRIS/TSL, existing variation, and supplementary predictors require their declared model or annotation relations.</td>
+<td>Annotate a narrow canonical event relation against one resident DuckVEP model through one fixed-schema, pipe-friendly surface. events_table names a coordinate-ordered relation with event_index UBIGINT, seq_region UINTEGER, positive one-based position, reference VARCHAR, alternate VARCHAR, end_position UBIGINT, structural_type VARCHAR, copy_change VARCHAR, mate_seq_region UINTEGER, and mate_position UBIGINT. One row represents one ALT allele. Keep genotype, phase-set, confidence-interval, raw-ALT, orientation, and other provenance in the source relation; join selected annotations back by event_index instead of multiplying wide payloads by transcript count. Literal reference/alternate rows are small variants; an explicit structural type, supported symbolic ALT, or span without literal alleles is structural; a complete mate coordinate pair is a breakend. Following VEP 116, expanded gVCF <non_ref>, bare <em>, and . ALT rows emit no annotation. The distinct &lt;</em>&gt; catch-all allele remains an overlap allele: coding positions receive coding_sequence_variant, start/stop codon positions receive the corresponding retained consequence, and HGVS fields remain NULL. VEP 116 also compares the literal three-character &lt;<em>&gt; spelling with REF length, so a long-REF catch-all allele that completely contains a feature can receive an ablation term; exclude &lt;</em>&gt; rows after ALT expansion if catch-all consequences are not wanted. A literal ALT from a mixed gVCF record remains a small variant even when the source relation retains record-level INFO/END; keep that END as provenance rather than treating it as an SV type. Contradictory or incomplete geometry fails instead of being guessed, including disagreement between supported symbolic ALT and explicit structural_type values. For VCF span SVs, prepare position as POS + 1 after removing the left anchor; insertion position is the interbase site after POS. DEL implies LOSS and DUP/TDUP imply GAIN when copy_change is NULL. Filtering the globally coordinate-ordered event stream preserves the order required by each native transcript and regulation-feature sweep; the macro does not hide a sort. The event seq_region is an exact ordinal in the loaded model; annotation does not strip contig prefixes or project PAR, patch, alternate-haplotype, or circular-origin coordinates. X/Y PAR and alternate-path transcript rows therefore remain path-specific exactly as prepared. Each event is annotated independently: genotype and phase-set columns are not combined into haplotypes. The stable compact contract includes SO/region masks, IMPACT/status/reason codes, one-based cDNA/CDS/protein positions, amino-acid bytes, NMD prediction/escape codes, and overlap-object ordinals. protein_position is the affected one-based protein residue/codon ordinal used by codon-level evidence such as PS1/PM5. rich := TRUE adds Consequence, IMPACT, region, amino-acid, NMD, overlap-object, duckvep_status, and duckvep_reason text from the same native pass while retaining every compact field; FALSE or explicit NULL leaves those presentation columns NULL. hgvs := TRUE fuses independent-event HGVSc/HGVSn/HGVSp into the small-variant path without repeating candidate discovery; it composes with rich := TRUE in one pass; structural and breakend HGVS remain NULL. DuckHTS audit status/reason fields distinguish an unresolved computation from a genuinely absent consequence and are not Ensembl CSQ fields. Zero disables either directional transcript window. Decode consequence_mask only after filtering by joining duckvep_so_terms(); join transcript_index, gene_index, or regulation_feature_index to the prepared model relations for stable identifiers, biotype, MANE/GENCODE/CCDS flags, and other presentation metadata. This typed rich projection does not claim the complete serialized VEP CSQ vocabulary: exon/intron ordinals, codon strings, distance text, CANONICAL/APPRIS/TSL, existing variation, and supplementary predictors require their declared model or annotation relations.</non_ref>
+</td>
 </tr>
 <tr class="odd">
 <td><code>duckvep_so_terms</code></td>
@@ -2012,9 +2011,9 @@ Show generated function catalog
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">mos_out</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"summary_path"</span>, <span class="st">"regions_path"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;                                                                  summary_path</span></span>
+<span><span class="co">#&gt;                                                                 summary_path</span></span>
 <span><span class="co">#&gt; 1 &lt;tempfile&gt;</span></span>
-<span><span class="co">#&gt;                                                            regions_path</span></span>
+<span><span class="co">#&gt;                                                           regions_path</span></span>
 <span><span class="co">#&gt; 1 &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu">utils</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/r/utils/read.table.html" class="external-link">read.delim</a></span><span class="op">(</span></span>
@@ -2126,7 +2125,7 @@ Show generated function catalog
 <span>  <span class="st">"ACGTACGTAA"</span></span>
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                          index_path</span></span>
+<span><span class="co">#&gt;   success                                         index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
@@ -2231,7 +2230,7 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                           output_path bytes_out</span></span>
+<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
@@ -2252,7 +2251,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bam_index_meta</span></span>
-<span><span class="co">#&gt;   success                                           index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                          index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          BAI</span></span>
 <span></span>
 <span><span class="va">bcf_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bcf_index.html">rduckhts_bcf_index</a></span><span class="op">(</span></span>
@@ -2261,7 +2260,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bcf_index_meta</span></span>
-<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                             index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          CSI</span></span>
 <span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span></span>
@@ -2271,10 +2270,8 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
-<span><span class="co">#&gt;   index_format</span></span>
-<span><span class="co">#&gt; 1          TBI</span></span>
+<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>

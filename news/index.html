@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1-0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1-0.1.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,10 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.5.1-0.1.1" id="rduckhts-151-011">Rduckhts 1.5.1-0.1.1<a class="anchor" aria-label="anchor" href="#rduckhts-151-011"></a></h2>
+<ul><li>add <code><a href="../reference/rduckhts_connect.html">rduckhts_connect()</a></code> as the single package-owned connection path. It explicitly permits the locally compiled bundled extension, uses temporary DuckDB extension/secret storage when supported, and disables implicit known- extension installation and loading. Package examples and extension-dependent tinytests now use this path, including on CRAN’s Linux libc++ builds where the <code>duckdb</code> package otherwise disables extension loading. <code>duckhts_load(NULL)</code> delegates to the same connection contract, while <code><a href="../reference/rduckhts_load.html">rduckhts_load()</a></code> remains available for caller-owned connections. File-backed connections reject a reused DuckDB driver, whose creation policy cannot be changed, and release a newly owned driver if connection or extension loading fails</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.1-0.1.0" id="rduckhts-151-010">Rduckhts 1.5.1-0.1.0<a class="anchor" aria-label="anchor" href="#rduckhts-151-010"></a></h2>
 <ul><li>make bundled-extension compilation promote DuckHTS and libBigWig diagnostics to errors by default, including CRAN-like Fedora Clang builds</li>

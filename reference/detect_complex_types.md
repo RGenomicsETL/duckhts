@@ -30,13 +30,11 @@ column_type, and a description of R type.
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+con <- rduckhts_connect()
 #> duckdb is keeping downloaded extensions in a temporary directory:
-#> ℹ /tmp/Rtmp0Z52pr/duckdb/extensions
+#> ℹ /tmp/RtmpvHGKAb/duckdb/extensions
 #> This is removed when the R session ends, so extensions are re-downloaded each session.
 #> ℹ To keep them, point `options(duckdb.extension_directory =)` or the `DUCKDB_EXTENSION_DIRECTORY` environment variable at a permanent path.
-rduckhts_load(con)
-#> [1] TRUE
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 complex_cols <- detect_complex_types(con, "variants")

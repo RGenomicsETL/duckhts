@@ -34,9 +34,7 @@ Extracted data based on the operation
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
-#> [1] TRUE
+con <- rduckhts_connect()
 gff_path <- system.file("extdata", "gff_file.gff.gz", package = "Rduckhts")
 rduckhts_gff(con, "annotations", gff_path, attributes_map = TRUE, overwrite = TRUE)
 data <- dbGetQuery(con, "SELECT attributes FROM annotations LIMIT 5")
