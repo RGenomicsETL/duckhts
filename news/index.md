@@ -1,6 +1,6 @@
 # Changelog
 
-## Rduckhts 1.5.0.9000-0.1.0
+## Rduckhts 1.5.1-0.1.0
 
 - make bundled-extension compilation promote DuckHTS and libBigWig
   diagnostics to errors by default, including CRAN-like Fedora Clang
