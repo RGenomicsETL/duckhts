@@ -162,7 +162,7 @@ void cr_sort(cgranges_t *cr)
 
 int32_t cr_is_sorted(const cgranges_t *cr)
 {
-	uint64_t i;
+	int64_t i;
 	for (i = 1; i < cr->n_r; ++i)
 		if (cr->r[i-1].x > cr->r[i].x)
 			break;

@@ -61,6 +61,8 @@ for f in "${FILES[@]}"; do
   cp "$CACHE_DIR/$f" "$TARGET_DIR/$f"
 done
 
+apply_patches "$TARGET_DIR" cgranges
+
 echo "$CGRANGES_COMMIT" > "$TARGET_DIR/COMMIT"
 echo "https://github.com/lh3/cgranges/tree/$CGRANGES_COMMIT" > "$TARGET_DIR/SOURCE_URL"
 

@@ -808,7 +808,8 @@ duckvep_reference_descriptor_path(int descriptor, const char *source_path)
 		return NULL;
 	needed = GetFinalPathNameByHandleA(handle, NULL, 0,
 	    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-	if (needed == 0 || needed > SIZE_MAX - 1u)
+	/* `needed + 1` is passed back to a DWORD-sized Win32 API. */
+	if (needed == 0 || needed == (DWORD)-1)
 		return NULL;
 	path = malloc((size_t)needed + 1u);
 	if (path == NULL)
