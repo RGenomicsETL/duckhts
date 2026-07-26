@@ -128,7 +128,7 @@ Security behavior of this config:
 
 ## Quick Start 
 
-The extension is loaded with `rduckhts_load(con, extension_path = NULL)`. The wrappers break down into:
+Create a package-owned connection with `rduckhts_connect()`, which explicitly loads the bundled extension without enabling automatic installation or loading of unrelated DuckDB extensions. Use `rduckhts_load(con, extension_path = NULL)` only for an existing connection whose driver permits extension loading. The wrappers break down into:
 
 - readers: `rduckhts_bcf()`, `rduckhts_bam()`, `rduckhts_fasta()`, `rduckhts_fastq()`, `rduckhts_bigwig()`, `rduckhts_gff()`, `rduckhts_gtf()`, `rduckhts_tabix()`, `rduckhts_bed()`
 - multi-file readers: `rduckhts_bam_multi()`, `rduckhts_bcf_multi()`, `rduckhts_fastq_multi()`, `rduckhts_fasta_multi()`, `rduckhts_gff_multi()`, `rduckhts_gtf_multi()`, `rduckhts_tabix_multi()`, `rduckhts_bed_multi()`
@@ -153,8 +153,7 @@ setup_hts_env()
 fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
 fastq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
 fastq_r2 <- system.file("extdata", "r2.fq", package = "Rduckhts")
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
+con <- rduckhts_connect()
 
 rduckhts_fasta(con, "sequences", fasta_path, overwrite = TRUE)
 rduckhts_fastq(con, "reads", fastq_r1, mate_path = fastq_r2, overwrite = TRUE)

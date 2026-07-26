@@ -3,9 +3,8 @@ library(tinytest)
 library(DBI)
 
 test_seq_ops <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
-  expect_silent(rduckhts_load(con))
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
@@ -462,7 +461,6 @@ test_seq_ops <- function() {
   expect_error(DBI::dbGetQuery(con, sprintf(
     "SELECT * FROM read_fastq('%s', sequence_encoding := 'xyz')", fastq_r1)))
 
-  dbDisconnect(con, shutdown = TRUE)
   message("Sequence operation tests passed!")
 }
 

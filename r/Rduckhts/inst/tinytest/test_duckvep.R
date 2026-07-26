@@ -1,10 +1,9 @@
 library(tinytest)
 library(DBI)
 
-con <- dbConnect(
-  duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-)
-expect_silent(rduckhts_load(con))
+local({
+con <- rduckhts_connect()
+on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
 geometry <- dbGetQuery(
   con,
@@ -2471,4 +2470,4 @@ expect_true(
   )$dropped
 )
 
-dbDisconnect(con, shutdown = TRUE)
+})

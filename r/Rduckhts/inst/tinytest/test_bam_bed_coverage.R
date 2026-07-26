@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_bam_bed_coverage <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   mixed_bam <- system.file("extdata", "fixture_mixed.bam", package = "Rduckhts")
   mixed_bed <- system.file("extdata", "fixture_mixed_regions.bed", package = "Rduckhts")

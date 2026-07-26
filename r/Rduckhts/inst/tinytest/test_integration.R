@@ -4,12 +4,9 @@ library(DBI)
 
 # Test table creation pattern (like RBCFTools)
 test_table_creation <- function() {
-  # Create an in-memory DuckDB connection
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
-
-  # Ensure bundled extension can be loaded
-  expect_silent(rduckhts_load(con))
+  # Create an in-memory DuckDB connection with the bundled extension loaded.
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   runtime_probe <- dbGetQuery(
     con,
@@ -437,7 +434,6 @@ test_table_creation <- function() {
   expect_silent(rduckhts_bcf(con, "test_table", bcf_path, overwrite = TRUE))
   expect_error(rduckhts_bcf(con, "test_table", bcf_path, overwrite = FALSE))
 
-  dbDisconnect(con, shutdown = TRUE)
   message("Table creation pattern tests passed!")
 }
 

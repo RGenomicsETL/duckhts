@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_variantkey_regionkey <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   contig_keys <- dbGetQuery(
     con,

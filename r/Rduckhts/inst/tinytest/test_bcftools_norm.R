@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_bcftools_norm <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-
-  expect_silent(rduckhts_load(con))
 
   fasta_path <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts", mustWork = TRUE)
   quoted_fasta <- DBI::dbQuoteString(con, fasta_path)

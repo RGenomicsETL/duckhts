@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_bin_counts <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   mixed_bam <- system.file("extdata", "fixture_mixed.bam", package = "Rduckhts")
   mixed_cram <- system.file("extdata", "fixture_mixed.cram", package = "Rduckhts")

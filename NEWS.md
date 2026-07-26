@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1
+- make Rduckhts package-owned DuckDB connections explicitly permit the locally
+  compiled bundled extension while disabling implicit installation/loading of
+  unrelated known extensions. This keeps package examples and tests executable
+  with current `duckdb` builds that otherwise disable extension loading on
+  Linux libc++ toolchains. File-backed connections reject a reused DuckDB
+  driver whose creation policy cannot be changed, and failed new connections
+  release their driver
 - make native DuckHTS builds promote their compiler diagnostics to errors by
   default, while keeping pinned upstream implementation diagnostics isolated
 - initialize the `bcftools_norm_row` shared out-of-memory cleanup count before

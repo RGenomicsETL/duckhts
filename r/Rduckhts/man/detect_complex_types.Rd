@@ -23,8 +23,7 @@ Identifies columns in a DuckDB table that contain complex types
 library(DBI)
 library(duckdb)
 
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
+con <- rduckhts_connect()
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 complex_cols <- detect_complex_types(con, "variants")

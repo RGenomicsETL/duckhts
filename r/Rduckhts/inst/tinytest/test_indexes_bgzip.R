@@ -2,11 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_indexes_bgzip <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   vcf_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")

@@ -7,28 +7,26 @@
 rduckhts_load(con, extension_path = NULL)
 }
 \arguments{
-\item{con}{A DuckDB connection object}
+\item{con}{A DuckDB connection object.}
 
-\item{extension_path}{Optional path to the duckhts extension file. If NULL,
-will try to use the bundled extension.}
+\item{extension_path}{Optional path to the DuckHTS extension file. If
+\code{NULL}, uses the extension bundled with Rduckhts.}
 }
 \value{
-TRUE if the extension was loaded successfully
+\code{TRUE} if the extension was loaded successfully.
 }
 \description{
-Loads the DuckHTS extension into a DuckDB connection. This must be called
-before using any of the HTS reader functions.
+Loads the DuckHTS extension into an existing DuckDB connection. This must be
+called before using HTS reader functions on a connection not created by
+\code{rduckhts_connect()}.
 }
 \details{
-The DuckDB connection must be created with
-\code{allow_unsigned_extensions = "true"}.
+The connection must permit unsigned extension loading. With current versions
+of the \pkg{duckdb} R package, its driver must also permit extension loading.
+Prefer \code{rduckhts_connect()} when Rduckhts owns the connection.
 }
 \examples{
-library(DBI)
-library(duckdb)
-
-con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
-dbDisconnect(con, shutdown = TRUE)
+con <- rduckhts_connect()
+DBI::dbDisconnect(con, shutdown = TRUE)
 
 }

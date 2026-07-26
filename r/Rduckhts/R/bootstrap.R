@@ -456,38 +456,22 @@ duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose 
 
 #' Load the duckhts extension into a DuckDB connection
 #'
-#' @param con An existing DuckDB connection, or \code{NULL} to create one.
+#' @description
+#' Compatibility wrapper around \code{rduckhts_connect()} and
+#' \code{rduckhts_load()}. Prefer the \code{rduckhts_*} functions in new code.
+#'
+#' @param con An existing DuckDB connection, or \code{NULL} to create a
+#'   package-owned connection with \code{rduckhts_connect()}.
 #' @param extension_path Explicit path to the \code{.duckdb_extension} file.
 #'   If \code{NULL}, uses the default location in the installed package.
 #' @return The DuckDB connection (invisibly).
 #' @export
 duckhts_load <- function(con = NULL, extension_path = NULL) {
-  if (!requireNamespace("duckdb", quietly = TRUE)) {
-    stop("duckdb R package is required", call. = FALSE)
-  }
   if (is.null(con)) {
-    drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-    con <- DBI::dbConnect(drv)
+    con <- rduckhts_connect(extension_path = extension_path)
+  } else {
+    rduckhts_load(con, extension_path = extension_path)
   }
-
-  if (is.null(extension_path)) {
-    extension_path <- file.path(
-      duckhts_extension_dir(),
-      "build",
-      "duckhts.duckdb_extension"
-    )
-  }
-  if (!file.exists(extension_path)) {
-    stop(
-      "Extension not found: ",
-      extension_path,
-      "\nRun duckhts_build() first.",
-      call. = FALSE
-    )
-  }
-
-  DBI::dbExecute(con, sprintf("LOAD '%s'", extension_path))
-
   invisible(con)
 }
 

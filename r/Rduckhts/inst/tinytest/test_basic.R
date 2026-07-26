@@ -6,6 +6,7 @@ expect_true(requireNamespace("Rduckhts", quietly = TRUE))
 
 # Test basic functions exist
 expect_true(exists("duckhts_build"))
+expect_true(exists("rduckhts_connect"))
 expect_true(exists("rduckhts_load"))
 expect_true(exists("rduckhts_bcf"))
 expect_true(exists("rduckhts_bam"))
@@ -42,6 +43,10 @@ expect_true(exists("rduckhts_gff_convert_parquet"))
 expect_true(exists("rduckhts_tabix_convert_parquet"))
 
 # Test function signatures
+expect_identical(
+  names(formals(rduckhts_connect)),
+  c("dbdir", "read_only", "bigint", "config", "extension_path")
+)
 expect_identical(
   names(formals(rduckhts_load)),
   c("con", "extension_path")

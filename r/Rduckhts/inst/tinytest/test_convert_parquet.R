@@ -19,10 +19,8 @@ meta_value <- function(meta, key) {
 
 with_duckhts_con <- function(code) {
   code <- substitute(code)
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- DBI::dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  rduckhts_load(con)
   env <- new.env(parent = parent.frame())
   env$con <- con
   eval(code, envir = env)
@@ -91,6 +89,16 @@ with_duckhts_con({
     sprintf("SELECT count(*) AS n FROM read_bcf(%s)", qstr(bcf_path))
   )$n
   expect_equal(rows, expected)
+  json_state <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT loaded FROM duckdb_extensions()",
+      "WHERE extension_name = 'json'"
+    )
+  )
+  if (nrow(json_state) == 1L) {
+    expect_false(json_state$loaded[[1L]])
+  }
 })
 
 with_duckhts_con({

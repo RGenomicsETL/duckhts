@@ -2,13 +2,10 @@ library(tinytest)
 library(DBI)
 
 test_bcf_filter_list_fetch_regression <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     dbDisconnect(con, shutdown = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   bcf_path <- system.file("extdata", "bcf_filter_list_regression.vcf", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
@@ -69,13 +66,10 @@ test_bcf_filter_list_fetch_regression <- function() {
 }
 
 test_bcf_malformed_record_errors <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     dbDisconnect(con, shutdown = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   bcf_path <- system.file("extdata", "malformed_bad_pos.vcf", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
@@ -124,13 +118,10 @@ test_bcf_malformed_record_errors <- function() {
 }
 
 test_bcf_type_clash_errors <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
+  con <- rduckhts_connect()
   on.exit({
     dbDisconnect(con, shutdown = TRUE)
   }, add = TRUE)
-
-  expect_silent(rduckhts_load(con))
 
   info_path <- system.file("extdata", "bcf_info_type_clash.bcf", package = "Rduckhts")
   format_path <- system.file("extdata", "bcf_format_type_clash.bcf", package = "Rduckhts")

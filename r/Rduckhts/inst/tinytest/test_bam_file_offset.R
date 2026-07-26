@@ -8,10 +8,8 @@ library(tinytest)
 library(DBI)
 
 test_file_offset <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
-
-  rduckhts_load(con)
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   expect_true(file.exists(bam_path))
@@ -80,7 +78,6 @@ test_file_offset <- function() {
   expect_identical(lag_q$order_violations[1], 0L,
                    info = "no order violations: FILE_OFFSET strictly increases")
 
-  dbDisconnect(con, shutdown = TRUE)
 }
 
 test_file_offset()

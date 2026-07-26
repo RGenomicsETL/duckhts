@@ -61,8 +61,7 @@ DuckHTS byte-oriented helper kernels such as \code{seq_gc_content(...)}.
 }
 \examples{
 \dontrun{
-con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
-rduckhts_load(con)
+con <- rduckhts_connect()
 rduckhts_simd_info(con)
 rduckhts_simd_kernel_info(con)
 rduckhts_simd_backend_available(con, "scalar")

@@ -2,9 +2,8 @@ library(tinytest)
 library(DBI)
 
 test_pileup <- function() {
-  drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-  con <- dbConnect(drv)
-  expect_silent(rduckhts_load(con))
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
   bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
@@ -65,7 +64,6 @@ test_pileup <- function() {
     bam_path, bam_index_path
   )))
 
-  dbDisconnect(con, shutdown = TRUE)
 }
 
 test_pileup()

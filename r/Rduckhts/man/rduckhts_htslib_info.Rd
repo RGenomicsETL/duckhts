@@ -19,10 +19,7 @@ is actually loaded with DuckHTS.
 }
 \examples{
 \dontrun{
-con <- DBI::dbConnect(
-  duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
-)
-rduckhts_load(con)
+con <- rduckhts_connect()
 rduckhts_htslib_info(con)
 DBI::dbDisconnect(con, shutdown = TRUE)
 }
