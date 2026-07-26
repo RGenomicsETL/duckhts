@@ -1,7 +1,7 @@
 ## Submission
 
 This submission updates the bundled 'duckhts' DuckDB extension in Rduckhts
-(1.4.0 -> 1.5.0). Since the previous CRAN release, it:
+(1.4.0 -> 1.5.1). Since the previous CRAN release, it:
 
 - adds the DuckVEP consequence/HGVS relation, Ensembl model builder,
   regulatory/motif, structural-variant, breakend, and NMD support, with
@@ -11,16 +11,19 @@ This submission updates the bundled 'duckhts' DuckDB extension in Rduckhts
 - updates bundled htslib to 1.24 and exposes versioned downstream linking
   metadata; and
 - extends BCF parsing, normalization, FASTQ projection/QC, cross-platform
-  package tests, wasm tests, and differential validation.
+  package tests, wasm tests, and differential validation; and
+- makes DuckHTS-owned native diagnostics fatal in package builds, fixes the
+  reported Windows/macOS compiler diagnostics, and adds a Fedora 44 Clang 22
+  CRAN-like check with checksum-verified R and compiler artifacts.
 
 Full details are in `NEWS.md`. There is no user-facing API breakage.
 
 ## Test environments
 
-- Ubuntu 24.04 (x86_64), R 4.6.0 — local tarball
+- Ubuntu 24.04.3 (x86_64), R 4.6.0 — local 1.5.1 tarball
   `R CMD check --as-cran`
-- Fedora 44 (x86_64), R-devel 2026-07-22 r90289, GCC 16.1.1 — GitHub
-  CRAN-reproduction job
+- Fedora 44 (x86_64), Fedora-packaged R 4.6.1, Clang 22.1.8 — local and
+  GitHub CRAN-like tarball checks
 - Ubuntu R-release and R-devel, Windows R-release, and macOS R-release —
   GitHub Actions
 - Emscripten/webR package build and package test — GitHub Actions
@@ -28,12 +31,12 @@ Full details are in `NEWS.md`. There is no user-facing API breakage.
 ## R CMD check results
 
 0 errors | 0 warnings | 1 note on the completed native environments above.
-The note reports seven CRAN updates in the preceding six months. It is not a
+The note reports eight CRAN updates in the preceding six months. It is not a
 package-code, compilation, documentation, or test note.
 
-The Fedora warning reported for CRAN's Rduckhts 1.4.0 checks came from const
-qualifier diagnostics in bundled htslib code. The 1.5.0 Fedora GCC 16.1.1
-reproduction completed with no warnings.
+The compiler diagnostics reported in pre-release macOS and Windows package
+checks are fixed in 1.5.1. The Fedora 44 Clang 22.1.8 CRAN-like check completed
+with no package warnings.
 
 Installed size is reported as INFO (31.5 Mb). The size is intentional: the
 package bundles the 'duckhts' DuckDB extension C sources and vendored 'htslib'

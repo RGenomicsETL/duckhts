@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.0.9000
+# duckhts 1.5.1
 - make native DuckHTS builds promote their compiler diagnostics to errors by
   default, while keeping pinned upstream implementation diagnostics isolated
 - initialize the `bcftools_norm_row` shared out-of-memory cleanup count before
