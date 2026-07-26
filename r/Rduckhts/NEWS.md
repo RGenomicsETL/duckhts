@@ -1,5 +1,5 @@
 
-# Rduckhts 1.5.0.9000-0.1.0
+# Rduckhts 1.5.1-0.1.1
 - make bundled-extension compilation promote DuckHTS and libBigWig diagnostics
   to errors by default, including CRAN-like Fedora Clang builds
 - bundle the `bcftools_norm_row` out-of-memory cleanup correction so a failed
