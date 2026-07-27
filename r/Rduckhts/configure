@@ -97,10 +97,10 @@ fi
 # vendored dependency; DuckHTS sources continue to use R's compiler mode.
 HTSLIB_CFLAGS="${CFLAGS} -std=gnu17"
 
-# Apply one warning-as-error policy to DuckHTS and bundled libBigWig sources.
-# htslib retains its upstream warning policy and GNU17 override above: it is a
-# separately built dependency, not a reason to weaken this package gate.
-DUCKHTS_STRICT_WARNINGS="${DUCKHTS_STRICT_WARNINGS:-1}"
+# Released package builds preserve the warning policy supplied by R and the
+# installation environment. CI opts into warning-as-error checks for DuckHTS
+# and bundled libBigWig sources; htslib retains its upstream warning policy.
+DUCKHTS_STRICT_WARNINGS="${DUCKHTS_STRICT_WARNINGS:-0}"
 case "${DUCKHTS_STRICT_WARNINGS}" in
   0|1) ;;
   *)
@@ -460,7 +460,7 @@ echo "---------- Building DuckHTS extension ----------"
 cd "${EXT_DIR}"
 
 C_SOURCES="duckhts.c simd/duckhts_simd_dispatch.c simd/duckhts_simd_scalar.c simd/duckhts_simd_avx2.c simd/duckhts_simd_avx512.c simd/duckhts_simd_neon.c simd/duckhts_simd_wasm_simd128.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c fastq_qc.c interval_udf.c tabix_reader.c bigwig_reader.c libbigwig_hfile_io.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c variantkey_udf.c cgranges.c libBigWig/bwRead.c libBigWig/bwValues.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c duckvep/kernel/src/duckvep_kernel.c duckvep/kernel/src/duckvep_so.c duckvep/kernel/src/duckvep_sweep.c duckvep/kernel/src/duckvep_classify.c duckvep/kernel/src/duckvep_effect.c duckvep/kernel/src/duckvep_sv.c duckvep/kernel/src/duckvep_delta.c duckvep/kernel/src/duckvep_projection.c duckvep/kernel/src/duckvep_transcript_edit.c duckvep/kernel/src/duckvep_hgvs.c duckvep/kernel/src/duckvep_codon.c duckvep/kernel/src/duckvep_coding.c duckvep/kernel/src/duckvep_haplotype.c duckvep/duckvep_variant_tile.c duckvep/duckvep_model.c duckvep/duckvep_annotate.c duckvep/duckvep_ensembl.c duckvep/duckvep_sql.c kmer_udf.c wasm_http_hfile.c"
-INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./libBigWig -I./duckvep/kernel/include -I./duckvep/kernel/src"
+INCLUDES="-I./include -I./duckdb_capi -isystem ./htslib -I./libBigWig -I./duckvep/kernel/include -I./duckvep/kernel/src"
 
 echo "Compiling extension sources..."
 OBJECT_FILES=""
