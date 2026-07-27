@@ -24,7 +24,8 @@ user-facing API breakage. Full details are in `NEWS.md`.
 
 The package was checked on Ubuntu 24.04 with R-devel and on Fedora 44 with R
 4.6.1 and Clang 22.1.8. GitHub Actions also checked Ubuntu R-release and
-R-devel, Windows x86_64 and ARM64 R-release, and macOS ARM64 R-release.
+R-devel, Windows x86_64 R-release, and macOS ARM64 R-release, and built,
+installed, and validated a clean source tarball on Windows ARM64 R-release.
 
 ## R CMD check results
 
