@@ -8,8 +8,11 @@
   Linux libc++ toolchains. File-backed connections reject a reused DuckDB
   driver whose creation policy cannot be changed, and failed new connections
   release their driver
-- make native DuckHTS builds promote their compiler diagnostics to errors by
-  default, while keeping pinned upstream implementation diagnostics isolated
+- make native DuckHTS CMake builds and explicit CI profiles promote package-owned
+  compiler diagnostics to errors while released R package builds preserve the
+  warning policy supplied by R and the installation environment. Vendored htslib
+  headers are system includes in Unix-like package builds, and the macOS package
+  check now reproduces CRAN M1Mac's conversion-warning flags
 - initialize the `bcftools_norm_row` shared out-of-memory cleanup count before
   any allocation can fail, avoiding an indeterminate cleanup-loop bound
 - patch pinned libBigWig's `bwCleanup` definition to match its public

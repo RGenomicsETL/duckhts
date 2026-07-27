@@ -86,6 +86,17 @@ jobs:
       #  run: |
       #    brew install pkg-config curl gsl libdeflate bzip2 xz openssl
 
+      - name: Reproduce CRAN M1Mac conversion diagnostics
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "DUCKHTS_CFLAGS=$(R CMD config CFLAGS) -Wconversion -Wno-sign-conversion" >> "$GITHUB_ENV"
+
+      - name: Enable strict Windows native diagnostics
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "DUCKHTS_STRICT_WARNINGS=1" >> "$GITHUB_ENV"
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::rcmdcheck
@@ -98,3 +109,17 @@ jobs:
           build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
           error-on: '"warning"'
           working-directory: r/Rduckhts
+
+      - name: Verify htslib header diagnostics stay outside DuckHTS compilation
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          install_log=$(find r/Rduckhts -type f -path '*/Rduckhts.Rcheck/00install.out' -print -quit)
+          test -n "$install_log"
+          extension_log=$(mktemp)
+          awk '/Building DuckHTS extension/ { extension = 1 } extension { print }' "$install_log" > "$extension_log"
+          test -s "$extension_log"
+          if grep -E 'htslib/htslib/[^:]+:[0-9]+:[0-9]+: (warning|error):' "$extension_log"; then
+            echo "vendored htslib header diagnostics leaked into DuckHTS compilation" >&2
+            exit 1
+          fi
