@@ -13,8 +13,10 @@ This resubmission no longer promotes compiler warnings supplied by R or the
 installation environment to errors. Strict package-owned diagnostics remain an
 explicit CI check, and vendored htslib headers are treated as system headers in
 Unix-like package builds. This fixes the reported M1Mac installation failure.
+It also derives Windows extension metadata from R's target rather than the MSYS
+shell architecture and validates native Windows ARM64 package loading.
 
-It also adds `rduckhts_connect()` to permit loading the bundled extension with
+It adds `rduckhts_connect()` to permit loading the bundled extension with
 `duckdb` 1.5.5, fixing the Fedora-Clang example and tinytest errors. There is no
 user-facing API breakage. Full details are in `NEWS.md`.
 
@@ -22,7 +24,7 @@ user-facing API breakage. Full details are in `NEWS.md`.
 
 The package was checked on Ubuntu 24.04 with R-devel and on Fedora 44 with R
 4.6.1 and Clang 22.1.8. GitHub Actions also checked Ubuntu R-release and
-R-devel, Windows R-release, and macOS R-release.
+R-devel, Windows x86_64 and ARM64 R-release, and macOS ARM64 R-release.
 
 ## R CMD check results
 

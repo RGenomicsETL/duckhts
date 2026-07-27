@@ -13,6 +13,10 @@
   warning policy supplied by R and the installation environment. Vendored htslib
   headers are system includes in Unix-like package builds, and the macOS package
   check now reproduces CRAN M1Mac's conversion-warning flags
+- derive Windows package extension metadata from R's target and require the
+  compiler target to agree, rather than trusting the MSYS shell architecture.
+  Add native Windows ARM64 package coverage that loads the resulting
+  `windows_arm64_mingw` extension and validates its bundled htslib receipt
 - initialize the `bcftools_norm_row` shared out-of-memory cleanup count before
   any allocation can fail, avoiding an indeterminate cleanup-loop bound
 - patch pinned libBigWig's `bwCleanup` definition to match its public
