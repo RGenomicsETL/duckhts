@@ -28,7 +28,8 @@ rduckhts_htslib_config(link = NULL, validate = TRUE)
 
 An object of class \`rduckhts_htslib_config\`. Its \`cppflags\` and
 \`ldflags\` elements can be consumed by a downstream package configure
-script; the remaining fields form the versioned build receipt.
+script; \`duckdb_platform\` records the extension footer platform and
+the remaining fields form the versioned build receipt.
 
 ## Details
 
