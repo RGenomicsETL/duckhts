@@ -194,8 +194,12 @@ jobs:
           on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
           platform <- DBI::dbGetQuery(con, "PRAGMA platform")[[1L]]
           stopifnot(identical(platform, "windows_arm64_mingw"))
-          result <- tinytest::run_test_file(
-            "r/Rduckhts/inst/tinytest/test_htslib_contract.R"
+          result <- tinytest::test_package(
+            "Rduckhts",
+            pattern = "^test_htslib_contract[.]R$"
           )
           print(result)
-          stopifnot(all(result))
+          stopifnot(
+            length(result) > 0L,
+            all(vapply(result, isTRUE, logical(1)))
+          )
