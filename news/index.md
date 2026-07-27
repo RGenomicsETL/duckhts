@@ -1,7 +1,13 @@
 # Changelog
 
-## Rduckhts 1.5.1-0.1.1
+## Rduckhts 1.5.1-0.1.2
 
+- preserve R and site compiler-warning policy during released package
+  installs instead of promoting every externally enabled warning to an
+  error. Strict package-owned diagnostics remain an explicit CI gate,
+  vendored htslib headers are system includes in Unix-like package
+  builds, and the macOS package check reproduces CRAN M1Mac’s
+  conversion-warning flags
 - add
   [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_connect.md)
   as the single package-owned connection path. It explicitly permits the

@@ -31,10 +31,6 @@ library(DBI)
 library(duckdb)
 
 con <- rduckhts_connect()
-#> duckdb is keeping downloaded extensions in a temporary directory:
-#> ℹ /tmp/RtmpyNyi4O/duckdb/extensions
-#> This is removed when the R session ends, so extensions are re-downloaded each session.
-#> ℹ To keep them, point `options(duckdb.extension_directory =)` or the `DUCKDB_EXTENSION_DIRECTORY` environment variable at a permanent path.
 bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
 rduckhts_bcf(con, "variants", bcf_path, overwrite = TRUE)
 complex_cols <- detect_complex_types(con, "variants")
