@@ -1,5 +1,10 @@
 
-# Rduckhts 1.5.1-0.1.2
+# Rduckhts 1.5.1-0.1.3
+- derive the Windows DuckDB extension platform from R's target and require the
+  compiler target to agree, instead of trusting the architecture reported by
+  the MSYS shell. Native Windows ARM64 package coverage now builds a clean
+  source tarball, installs it, loads the `windows_arm64_mingw` extension, and
+  validates the bundled htslib receipt
 - preserve R and site compiler-warning policy during released package installs
   instead of promoting every externally enabled warning to an error. Strict
   package-owned diagnostics remain an explicit CI gate, vendored htslib headers

@@ -9,6 +9,19 @@ test_htslib_contract <- function() {
   expect_identical(default_config$link, link)
   config <- rduckhts_htslib_config(link)
   expect_identical(config$contract_version, 1L)
+  expect_true(nzchar(config$duckdb_platform))
+  if (.Platform$OS.type == "windows") {
+    r_arch <- tolower(R.Version()[["arch"]])
+    expected_platform <- if (r_arch %in% c("aarch64", "arm64")) {
+      "windows_arm64_mingw"
+    } else if (r_arch %in% c("x86_64", "amd64")) {
+      "windows_amd64_mingw"
+    } else {
+      stop("unsupported Windows R architecture in test: ", r_arch)
+    }
+    expect_identical(config$duckdb_platform, expected_platform)
+    expect_true(endsWith(config$build_id, paste0("-", expected_platform)))
+  }
   expect_identical(config$htslib_version, "1.24")
   expect_identical(config$runtime_version, config$htslib_version)
   expect_identical(config$htslib_header_version, 102400L)

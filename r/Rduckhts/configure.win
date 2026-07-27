@@ -104,22 +104,43 @@ else
     DUCKDB_VERSION="v1.2.0"
 fi
 
+normalize_windows_target_arch() {
+    case "$1" in
+        aarch64*|arm64*) echo arm64 ;;
+        x86_64*|amd64*) echo amd64 ;;
+        *) return 1 ;;
+    esac
+}
+
 OS_NAME=`uname -s`
-ARCH_NAME=`uname -m`
-DUCKDB_PLATFORM=""
 case "${OS_NAME}" in
-    *MINGW*|*MSYS*|*CYGWIN*)
-        case "${ARCH_NAME}" in
-            x86_64) DUCKDB_PLATFORM="windows_amd64_mingw";;
-            aarch64|arm64) DUCKDB_PLATFORM="windows_arm64_mingw";;
-        esac
+    *MINGW*|*MSYS*|*CYGWIN*) ;;
+    *)
+        echo "ERROR: Unsupported Windows build shell: ${OS_NAME}"
+        exit 1
         ;;
 esac
 
-if [ -z "${DUCKDB_PLATFORM}" ]; then
-    echo "ERROR: Unsupported platform: ${OS_NAME}/${ARCH_NAME}"
+R_TARGET=`"${R_HOME}/bin/R" --vanilla --slave -e 'cat(R.Version()[["platform"]])'`
+R_TARGET_ARCH=`normalize_windows_target_arch "${R_TARGET}" 2>/dev/null || true`
+if [ -z "${R_TARGET_ARCH}" ]; then
+    echo "ERROR: Unsupported R target platform: ${R_TARGET}"
     exit 1
 fi
+
+CC_TARGET=`${CC} -dumpmachine 2>/dev/null || true`
+CC_TARGET_ARCH=`normalize_windows_target_arch "${CC_TARGET}" 2>/dev/null || true`
+if [ -z "${CC_TARGET_ARCH}" ]; then
+    echo "ERROR: Could not determine the Windows compiler target from '${CC} -dumpmachine': ${CC_TARGET}"
+    exit 1
+fi
+if [ "${CC_TARGET_ARCH}" != "${R_TARGET_ARCH}" ]; then
+    echo "ERROR: R/compiler target mismatch: R=${R_TARGET}, compiler=${CC_TARGET}"
+    exit 1
+fi
+
+DUCKDB_PLATFORM="windows_${R_TARGET_ARCH}_mingw"
+echo "Windows target receipt: R=${R_TARGET}, compiler=${CC_TARGET}, DuckDB=${DUCKDB_PLATFORM}"
 
 echo "---------- Checking for required libraries (Windows) ----------"
 
