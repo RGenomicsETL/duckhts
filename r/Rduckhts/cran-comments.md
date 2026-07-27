@@ -1,23 +1,30 @@
 ## Submission
 
-This is a patch release following Rduckhts 1.5.0-0.1.0. It updates the bundled
-'duckhts' DuckDB extension from 1.5.0 to 1.5.1 and fixes the current CRAN check
-issues.
+This is the requested resubmission of Rduckhts 1.5.1-0.1.1, now versioned
+1.5.1-0.1.3. It is a patch release following the accepted Rduckhts
+1.5.0-0.1.0 and updates the bundled 'duckhts' DuckDB extension from 1.5.0 to
+1.5.1.
 
-It fixes the reported native diagnostics, including uninitialized normalization
-cleanup state and liftover alias pointers, unused coverage, interval, and VEP
-code, the libBigWig `bwCleanup` prototype, and MinGW visibility and
-allocation-size checks.
+The reported M1Mac installation failure was caused by the package's former
+default of promoting compiler warnings supplied by R and the installation
+environment to errors. Released package builds now preserve that external
+warning policy, while strict package-owned diagnostics remain an explicit CI
+check. Vendored htslib headers are treated as system headers in Unix-like
+package builds. The macOS ARM64 package check enables the conversion-warning
+flags that produced the report; package installation emits no compiler warning
+or error diagnostics, and `R CMD check` finishes with `Status: OK`.
 
-This resubmission no longer promotes compiler warnings supplied by R or the
-installation environment to errors. Strict package-owned diagnostics remain an
-explicit CI check, and vendored htslib headers are treated as system headers in
-Unix-like package builds. This fixes the reported M1Mac installation failure.
-It also derives Windows extension metadata from R's target rather than the MSYS
-shell architecture and validates native Windows ARM64 package loading.
+This resubmission also derives Windows extension metadata from R's target
+rather than the architecture reported by the MSYS shell. A native Windows
+ARM64 job builds a clean source tarball, installs it, loads the resulting
+`windows_arm64_mingw` extension, and validates the bundled htslib receipt.
 
-It adds `rduckhts_connect()` to permit loading the bundled extension with
-`duckdb` 1.5.5, fixing the Fedora-Clang example and tinytest errors. There is no
+The release fixes the other reported native diagnostics, including
+uninitialized normalization cleanup state and liftover alias pointers, unused
+coverage, interval, and VEP code, the libBigWig `bwCleanup` prototype, and
+MinGW visibility and allocation-size checks. It also adds
+`rduckhts_connect()` to permit loading the bundled extension with `duckdb`
+1.5.5, fixing the Fedora-Clang example and tinytest errors. There is no
 user-facing API breakage. Full details are in `NEWS.md`.
 
 ## Test environments
