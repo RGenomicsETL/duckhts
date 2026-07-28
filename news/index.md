@@ -1,5 +1,13 @@
 # Changelog
 
+## Rduckhts 1.5.1.9000-0.1.5
+
+- compile and load a minimal registered R native library so binary
+  repositories record the actual target architecture in the package
+  `Built` field. This prevents configure-built DuckHTS and htslib
+  artifacts from being treated as architecture-independent and reused
+  across Linux, macOS, or Windows targets
+
 ## Rduckhts 1.5.1-0.1.4
 
 - declare `NeedsCompilation: yes` because package configuration compiles
