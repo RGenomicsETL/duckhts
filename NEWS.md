@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1
+- mark Rduckhts as requiring compilation because its configure scripts build
+  target-specific DuckHTS and htslib artifacts outside the conventional R
+  `src/` directory. This prevents binary repositories from serving an amd64
+  package artifact to Linux ARM64 consumers. Add a native Linux ARM64 clean-
+  tarball install/load job alongside the Windows ARM64 package contract
 - make Rduckhts package-owned DuckDB connections explicitly permit the locally
   compiled bundled extension while disabling implicit installation/loading of
   unrelated known extensions. This keeps package examples and tests executable

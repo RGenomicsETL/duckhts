@@ -1,4 +1,12 @@
 
+# Rduckhts 1.5.1-0.1.4
+- declare `NeedsCompilation: yes` because package configuration compiles
+  target-specific DuckHTS and htslib artifacts outside the conventional R
+  `src/` directory. Binary repositories can no longer treat an x86_64 package
+  as architecture-independent and reuse it on Linux ARM64. Native Linux ARM64
+  coverage now builds and audits a clean source tarball, installs it, loads the
+  `linux_arm64` extension, and validates the bundled htslib receipt
+
 # Rduckhts 1.5.1-0.1.3
 - derive the Windows DuckDB extension platform from R's target and require the
   compiler target to agree, instead of trusting the architecture reported by

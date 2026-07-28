@@ -125,6 +125,76 @@ jobs:
             exit 1
           fi
 
+  linux-arm64-package:
+    name: Linux ARM64 package contract
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+      DUCKHTS_STRICT_WARNINGS: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r/Rduckhts
+          dependencies: '"hard"'
+          extra-packages: any::tinytest
+          install-pandoc: false
+
+      - name: Build and audit clean source tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f Rduckhts_*.tar.gz
+          R CMD build --no-manual r/Rduckhts
+          tarball=$(find . -maxdepth 1 -name 'Rduckhts_*.tar.gz' -print -quit)
+          test -n "$tarball"
+          Rscript scripts/audit_rduckhts_source_tarball.R "$tarball"
+
+      - name: Install source tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball=$(find . -maxdepth 1 -name 'Rduckhts_*.tar.gz' -print -quit)
+          test -n "$tarball"
+          R CMD INSTALL "$tarball"
+
+      - name: Validate Linux ARM64 extension and htslib contract
+        shell: Rscript {0}
+        run: |
+          stopifnot(tolower(Sys.info()[["machine"]]) %in% c("aarch64", "arm64"))
+          config <- Rduckhts::rduckhts_htslib_config(validate = TRUE)
+          print(config[c(
+            "build_id", "duckdb_platform", "htslib_version",
+            "runtime_version", "link", "library_file"
+          )])
+          stopifnot(
+            identical(config$duckdb_platform, "linux_arm64"),
+            endsWith(config$build_id, "-linux_arm64"),
+            identical(config$runtime_version, config$htslib_version)
+          )
+          con <- Rduckhts::rduckhts_connect()
+          on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+          platform <- DBI::dbGetQuery(con, "PRAGMA platform")[[1L]]
+          stopifnot(identical(platform, "linux_arm64"))
+          result <- tinytest::test_package(
+            "Rduckhts",
+            pattern = "^test_htslib_contract[.]R$"
+          )
+          print(result)
+          stopifnot(
+            length(result) > 0L,
+            all(vapply(result, isTRUE, logical(1)))
+          )
+
   windows-arm64-package:
     name: Windows ARM64 package contract
     runs-on: windows-11-arm
@@ -158,15 +228,7 @@ jobs:
           R CMD build --no-manual r/Rduckhts
           tarball=$(find . -maxdepth 1 -name 'Rduckhts_*.tar.gz' -print -quit)
           test -n "$tarball"
-          Rscript - "$tarball" <<'RS'
-          tarball <- commandArgs(trailingOnly = TRUE)[[1L]]
-          files <- utils::untar(tarball, list = TRUE)
-          compiled <- grep("[.](o|a|dll|so|dylib)$", files, value = TRUE)
-          if (length(compiled)) {
-            stop("source tarball contains compiled files: ",
-                 paste(compiled, collapse = ", "))
-          }
-          RS
+          Rscript scripts/audit_rduckhts_source_tarball.R "$tarball"
 
       - name: Install source tarball
         shell: bash

@@ -1,8 +1,12 @@
 # Basic functionality tests for Rduckhts package
 library(tinytest)
 
-# Test package loading
+# Test package loading and architecture-specific build metadata
 expect_true(requireNamespace("Rduckhts", quietly = TRUE))
+expect_identical(
+  packageDescription("Rduckhts")[["NeedsCompilation"]],
+  "yes"
+)
 
 # Test basic functions exist
 expect_true(exists("duckhts_build"))
