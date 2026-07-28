@@ -1,5 +1,11 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.1.9000
+- make the Rduckhts binary architecture contract executable by compiling a
+  minimal registered R native library. Binary repositories now derive a real
+  target-specific `Built` field instead of classifying configure-built DuckHTS
+  and htslib artifacts as architecture-independent
+
 # duckhts 1.5.1
 - mark Rduckhts as requiring compilation because its configure scripts build
   target-specific DuckHTS and htslib artifacts outside the conventional R

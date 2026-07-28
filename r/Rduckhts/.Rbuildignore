@@ -13,7 +13,6 @@
 ^\.gitignore$
 ^\.git/
 ^\.github/
-^src/
 ^third_party/
 ^test/
 ^scripts/
