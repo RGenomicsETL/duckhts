@@ -30,6 +30,8 @@ jobs:
         env:
           API_URL: https://rgenomicsetl.r-universe.dev/api/packages/Rduckhts
           CDN_URL: https://cdn.r-universe.dev
+          GH_API: https://api.github.com
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           json=$(curl -fsSL "$API_URL")
@@ -42,7 +44,7 @@ jobs:
 
           while IFS= read -r row; do
             index=$((index + 1))
-            _jq() { echo "$row" | base64 -d | jq -r "$1"; }
+            _jq() { printf '%s' "$row" | base64 -d | jq -r "$1"; }
             os=$(_jq '.os // empty')
             rver=$(_jq '.r // empty')
             distro=$(_jq '.distro // empty')
@@ -102,6 +104,40 @@ jobs:
           fi
 
           echo "$version" > dist/latest-version.txt
+
+          # Remove every prior asset for this package version.  This is
+          # necessary because the old synchronizer could leave an amd64 or
+          # arm64 asset under the other platform's name; uploading corrected
+          # names alone would leave those unsafe assets servable.
+          release_url="$GH_API/repos/$GITHUB_REPOSITORY/releases/tags/r-universe-binaries"
+          release_json_file="dist/release.json"
+          release_status=$(curl -sS -o "$release_json_file" -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$release_url" || true)
+          case "$release_status" in
+            200)
+              while IFS= read -r asset_id; do
+                [ -n "$asset_id" ] || continue
+                curl -fsSL -X DELETE \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "$GH_API/repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+              done < <(
+                jq -r --arg prefix "Rduckhts_${version}_" \
+                  '.assets[]? | select(.name | startswith($prefix)) | .id' \
+                  "$release_json_file"
+              )
+              ;;
+            404)
+              ;;
+            *)
+              cat "$release_json_file" >&2
+              echo "Could not inspect the r-universe-binaries release (HTTP $release_status)" >&2
+              exit 1
+              ;;
+          esac
+
           echo "publish=yes" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifacts
