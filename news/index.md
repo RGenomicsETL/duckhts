@@ -20,6 +20,8 @@
 
 ## Rduckhts 1.5.1-0.1.3
 
+CRAN release: 2026-07-28
+
 - derive the Windows DuckDB extension platform from R’s target and
   require the compiler target to agree, instead of trusting the
   architecture reported by the MSYS shell. Native Windows ARM64 package
