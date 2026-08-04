@@ -9,7 +9,7 @@
 - [`duckhts_bootstrap()`](https://rgenomicsetl.github.io/duckhts/reference/duckhts_bootstrap.md)
   : Bootstrap the duckhts extension sources into the R package
 - [`duckhts_build()`](https://rgenomicsetl.github.io/duckhts/reference/duckhts_build.md)
-  : Build the duckhts DuckDB extension
+  : Retired manual DuckHTS extension builder
 - [`duckhts_load()`](https://rgenomicsetl.github.io/duckhts/reference/duckhts_load.md)
   : Load the duckhts extension into a DuckDB connection
 - [`extract_array_element()`](https://rgenomicsetl.github.io/duckhts/reference/extract_array_element.md)

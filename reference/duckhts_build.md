@@ -1,8 +1,8 @@
-# Build the duckhts DuckDB extension
+# Retired manual DuckHTS extension builder
 
-Compiles htslib and the duckhts extension from the sources bundled in
-the installed R package. The built `.duckdb_extension` file is placed in
-the extension directory.
+The former manual builder duplicated the package configure path and
+could mutate an installed package tree. Build Rduckhts from a source
+tarball with `R CMD build` and install that tarball instead.
 
 ## Usage
 
@@ -14,24 +14,20 @@ duckhts_build(build_dir = NULL, make = NULL, force = FALSE, verbose = TRUE)
 
 - build_dir:
 
-  Where to build. Required. Use a writable location such as
-  [`tempdir()`](https://rdrr.io/r/base/tempfile.html) when the installed
-  package directory is read-only.
+  Retained for source compatibility; ignored.
 
 - make:
 
-  Optional GNU make command to use (e.g., "gmake" or "make"). When NULL,
-  auto-detects gmake or make. If a non-GNU make is used, htslib's
-  configure step will fail.
+  Retained for source compatibility; ignored.
 
 - force:
 
-  Rebuild even if the extension file already exists.
+  Retained for source compatibility; ignored.
 
 - verbose:
 
-  Print build output.
+  Retained for source compatibility; ignored.
 
 ## Value
 
-Path to the built `duckhts.duckdb_extension` file.
+This function always raises an error.

@@ -2,6 +2,13 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- retire the unsupported
+  [`duckhts_build()`](https://rgenomicsetl.github.io/duckhts/reference/duckhts_build.md)
+  manual compiler path, which could duplicate package configuration and
+  mutate installed sources. The package configure scripts now share one
+  htslib receipt renderer; the R implementation is split into focused
+  files without changing the supported reader and connection wrappers
+
 - compile and load a minimal registered R native library so binary
   repositories record the actual target architecture in the package
   `Built` field. This prevents configure-built DuckHTS and htslib
