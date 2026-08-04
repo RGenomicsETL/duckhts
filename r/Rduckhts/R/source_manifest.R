@@ -2,8 +2,7 @@
 # Keep source inventory consumers on this one receipt instead of maintaining
 # another R-only list.
 
-duckhts_source_manifest <- function() {
-  manifest <- file.path(duckhts_extension_dir(), "duckhts_sources.tsv")
+duckhts_read_source_manifest <- function(manifest) {
   if (!file.exists(manifest)) {
     stop("DuckHTS source manifest not found: ", manifest, call. = FALSE)
   }
@@ -15,6 +14,12 @@ duckhts_source_manifest <- function() {
     stringsAsFactors = FALSE,
     quote = "",
     comment.char = ""
+  )
+}
+
+duckhts_source_manifest <- function() {
+  duckhts_read_source_manifest(
+    file.path(duckhts_extension_dir(), "duckhts_sources.tsv")
   )
 }
 

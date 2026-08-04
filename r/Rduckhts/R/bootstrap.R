@@ -41,15 +41,7 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   if (!file.exists(source_manifest)) {
     stop("DuckHTS source manifest not found at: ", source_manifest, call. = FALSE)
   }
-  source_rows <- utils::read.delim(
-    source_manifest,
-    sep = "|",
-    header = FALSE,
-    col.names = c("repo_path", "package_path"),
-    stringsAsFactors = FALSE,
-    quote = "",
-    comment.char = ""
-  )
+  source_rows <- duckhts_read_source_manifest(source_manifest)
   source_rows <- source_rows[nzchar(source_rows$repo_path), , drop = FALSE]
   for (i in seq_len(nrow(source_rows))) {
     source_path <- file.path(repo_root, source_rows$repo_path[[i]])
