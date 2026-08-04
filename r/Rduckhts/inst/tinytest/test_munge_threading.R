@@ -9,12 +9,19 @@ test_munge_threading <- function() {
   dir.create(tmp_dir)
 
   fasta_ref <- file.path(tmp_dir, "munge.fa")
-  writeLines(c(
-    ">chrF",
-    "ACGTACGTAA"
-  ), fasta_ref)
+  writeLines(
+    c(
+      ">chrF",
+      "ACGTACGTAA"
+    ),
+    fasta_ref
+  )
 
-  expect_true(rduckhts_fasta_index(con, fasta_ref, index_path = paste0(fasta_ref, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    fasta_ref,
+    index_path = paste0(fasta_ref, ".fai")
+  )$success[1])
   expect_silent(dbExecute(con, "PRAGMA threads=4"))
 
   out <- rduckhts_munge(
@@ -30,7 +37,15 @@ test_munge_threading <- function() {
       "FROM range(50000) t(i)"
     ),
     fasta_ref = fasta_ref,
-    column_map = c(CHR = "CHR", BP = "BP", A1 = "A1", A2 = "A2", SNP = "SNP", FRQ = "FRQ", N = "N")
+    column_map = c(
+      CHR = "CHR",
+      BP = "BP",
+      A1 = "A1",
+      A2 = "A2",
+      SNP = "SNP",
+      FRQ = "FRQ",
+      N = "N"
+    )
   )
 
   expect_equal(nrow(out), 50000)

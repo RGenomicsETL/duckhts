@@ -14,11 +14,22 @@ suppressMessages({
 op <- OptionParser()
 op <- add_option(op, "--input", default = "")
 op <- add_option(op, "--tool", default = "")
-op <- add_option(op, "--output-contract", dest = "output_contract", default = "")
+op <- add_option(
+  op,
+  "--output-contract",
+  dest = "output_contract",
+  default = ""
+)
 op <- add_option(op, "--threads", type = "integer", default = 1L)
 op <- add_option(op, "--run", type = "integer", default = 1L)
 op <- add_option(op, "--timing-file", dest = "timing_file", default = "")
-op <- add_option(op, "--skip-lines", dest = "skip_lines", type = "integer", default = 0L)
+op <- add_option(
+  op,
+  "--skip-lines",
+  dest = "skip_lines",
+  type = "integer",
+  default = 0L
+)
 op <- add_option(op, "--output", default = "")
 opt <- parse_args(op)
 

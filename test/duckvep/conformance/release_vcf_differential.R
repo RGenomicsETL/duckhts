@@ -20,7 +20,11 @@ source(file.path(root, "scripts", "duckvep_evidence.R"), local = TRUE)
 
 op <- OptionParser()
 op <- add_option(op, "--input", help = "official Ensembl release VCF.gz")
-op <- add_option(op, "--database", help = "receipt-hashed DuckVEP model database")
+op <- add_option(
+  op,
+  "--database",
+  help = "receipt-hashed DuckVEP model database"
+)
 op <- add_option(
   op,
   "--extension",
@@ -69,13 +73,25 @@ opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
 required <- c("input", "database", "output")
-missing <- required[vapply(required, function(x) {
-  is.null(opt[[x]]) || !nzchar(opt[[x]])
-}, logical(1))]
-if (length(missing)) die("missing required option(s): {paste(missing, collapse = ', ')}")
-if (!file.exists(opt$input)) die("input does not exist: {opt$input}")
-if (!file.exists(opt$database)) die("database does not exist: {opt$database}")
-if (opt$threads < 1L) die("--threads must be positive")
+missing <- required[vapply(
+  required,
+  function(x) {
+    is.null(opt[[x]]) || !nzchar(opt[[x]])
+  },
+  logical(1)
+)]
+if (length(missing)) {
+  die("missing required option(s): {paste(missing, collapse = ', ')}")
+}
+if (!file.exists(opt$input)) {
+  die("input does not exist: {opt$input}")
+}
+if (!file.exists(opt$database)) {
+  die("database does not exist: {opt$database}")
+}
+if (opt$threads < 1L) {
+  die("--threads must be positive")
+}
 if (!is.finite(opt$limit) || opt$limit < 0 || opt$limit != floor(opt$limit)) {
   die("--limit must be a whole non-negative number")
 }
@@ -129,17 +145,24 @@ model_database_sha256 <- duckvep_evidence_sha256(database)
 
 drv <- duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = database)
-on.exit({
-  try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
-}, add = TRUE)
+on.exit(
+  {
+    try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+  },
+  add = TRUE
+)
 
 sql_q <- function(x) as.character(dbQuoteString(con, x))
 dbExecute(con, glue("LOAD {sql_q(extension)}"))
 dbExecute(con, glue("SET threads = {opt$threads}"))
 
 required_relations <- c(
-  "bench_regions", "bench_transcripts", "bench_exons", "model_regions",
-  "model_transcripts", "model_receipt"
+  "bench_regions",
+  "bench_transcripts",
+  "bench_exons",
+  "model_regions",
+  "model_transcripts",
+  "model_receipt"
 )
 present_relations <- dbGetQuery(
   con,
@@ -147,7 +170,9 @@ present_relations <- dbGetQuery(
 )$table_name
 missing_relations <- setdiff(required_relations, present_relations)
 if (length(missing_relations)) {
-  die("model database lacks relation(s): {paste(missing_relations, collapse = ', ')}")
+  die(
+    "model database lacks relation(s): {paste(missing_relations, collapse = ', ')}"
+  )
 }
 
 region <- dbGetQuery(
@@ -164,7 +189,9 @@ if (nrow(region) != 1L) {
 seq_region <- region$seq_region[[1L]]
 
 model_receipt <- dbGetQuery(con, "SELECT * FROM model_receipt")
-if (nrow(model_receipt) != 1L) die("model_receipt must contain exactly one row")
+if (nrow(model_receipt) != 1L) {
+  die("model_receipt must contain exactly one row")
+}
 if (!identical(as.character(model_receipt$source_version[[1L]]), opt$release)) {
   die("model release does not match --release")
 }
@@ -306,7 +333,9 @@ eligible_events <- dbGetQuery(
   con,
   "SELECT count(*)::UBIGINT AS n FROM release_events"
 )$n[[1L]]
-if (eligible_events == 0) die("the selected release stratum contains no SNVs")
+if (eligible_events == 0) {
+  die("the selected release stratum contains no SNVs")
+}
 
 oracle_time <- system.time({
   dbExecute(
@@ -488,12 +517,12 @@ receipt <- data.frame(
   unsupported_duckvep_rows = pair_counts$unsupported_duckvep_rows[[1L]],
   model_database_sha256 = model_database_sha256,
   model_logical_sha256 = as.character(model_receipt$model_sha256[[1L]]),
-  model_source_manifest_sha256 =
-    as.character(model_receipt$source_manifest_sha256[[1L]]),
+  model_source_manifest_sha256 = as.character(model_receipt$source_manifest_sha256[[
+    1L
+  ]]),
   variation_source_revision = opt$variation_source_revision,
   oracle_field = "VE",
-  comparison_authority =
-    "Ensembl Variation release product; not the VEP executable oracle",
+  comparison_authority = "Ensembl Variation release product; not the VEP executable oracle",
   allele_mapping = "VE zero-based Index identifies VCF ALT ordinal",
   upstream_distance = 0L,
   downstream_distance = 0L,
@@ -517,15 +546,26 @@ if (isTRUE(checked_evidence)) {
   )
 }
 
-cat(glue("eligible SNV alleles: {format(eligible_events, big.mark = ',')}"), "\n")
-cat(glue(
-  "exact transcript/object pairs: {format(counts$exact_pairs[[1L]], big.mark = ',')} / ",
-  "{format(counts$compared_pairs[[1L]], big.mark = ',')}"
-), "\n", sep = "")
-cat(glue(
-  "mismatch={counts$mismatched_pairs[[1L]]}; missing={counts$missing_pairs[[1L]]}; ",
-  "extra={counts$extra_pairs[[1L]]}; unsupported={pair_counts$unsupported_duckvep_rows[[1L]]}"
-), "\n", sep = "")
+cat(
+  glue("eligible SNV alleles: {format(eligible_events, big.mark = ',')}"),
+  "\n"
+)
+cat(
+  glue(
+    "exact transcript/object pairs: {format(counts$exact_pairs[[1L]], big.mark = ',')} / ",
+    "{format(counts$compared_pairs[[1L]], big.mark = ',')}"
+  ),
+  "\n",
+  sep = ""
+)
+cat(
+  glue(
+    "mismatch={counts$mismatched_pairs[[1L]]}; missing={counts$missing_pairs[[1L]]}; ",
+    "extra={counts$extra_pairs[[1L]]}; unsupported={pair_counts$unsupported_duckvep_rows[[1L]]}"
+  ),
+  "\n",
+  sep = ""
+)
 cat(glue("receipt: {output}"), "\n")
 
 if (

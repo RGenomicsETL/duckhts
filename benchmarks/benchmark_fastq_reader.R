@@ -11,7 +11,10 @@ sql_string <- function(x) {
 
 set_affinity <- function(cpu) {
   output <- system2(
-    "taskset", c("-pc", cpu, Sys.getpid()), stdout = TRUE, stderr = TRUE
+    "taskset",
+    c("-pc", cpu, Sys.getpid()),
+    stdout = TRUE,
+    stderr = TRUE
   )
   status <- attr(output, "status")
   stopifnot(is.null(status) || identical(status, 0L))
@@ -26,7 +29,9 @@ sha256 <- function(path) {
 peak_rss_kib <- function() {
   status <- readLines("/proc/self/status", warn = FALSE)
   line <- grep("^VmHWM:", status, value = TRUE)
-  if (length(line) != 1L) return(NA_real_)
+  if (length(line) != 1L) {
+    return(NA_real_)
+  }
   as.double(strsplit(trimws(line), "[[:space:]]+")[[1]][[2]])
 }
 
@@ -42,8 +47,14 @@ warm_file <- function(path) {
 read_exome_manifest <- function(manifest_path, input_dir) {
   manifest <- read.csv(manifest_path, stringsAsFactors = FALSE)
   required <- c(
-    "file_id", "sample", "library", "lane", "read_end",
-    "compressed_bytes", "sha256", "url"
+    "file_id",
+    "sample",
+    "library",
+    "lane",
+    "read_end",
+    "compressed_bytes",
+    "sha256",
+    "url"
   )
   stopifnot(all(required %in% names(manifest)))
   manifest$path <- file.path(input_dir, basename(manifest$url))
@@ -60,17 +71,21 @@ write_fixture <- function(path, reads = 2000000L, read_length = 150L) {
     expected_lines <- as.double(reads) * 4
     wc_output <- system2("wc", c("-l", path), stdout = TRUE)
     fields <- strsplit(trimws(wc_output[[1]]), "[[:space:]]+")[[1]]
-    if (as.double(fields[[1]]) == expected_lines) return(invisible(path))
+    if (as.double(fields[[1]]) == expected_lines) {
+      return(invisible(path))
+    }
     unlink(path)
   }
 
   sequence_a <- substr(
     paste(rep("ACGT", ceiling(read_length / 4)), collapse = ""),
-    1L, read_length
+    1L,
+    read_length
   )
   sequence_b <- substr(
     paste(rep("TGCA", ceiling(read_length / 4)), collapse = ""),
-    1L, read_length
+    1L,
+    read_length
   )
   quality_a <- paste(rep("I", read_length), collapse = "")
   quality_b <- paste(rep("G", read_length), collapse = "")
@@ -84,7 +99,10 @@ write_fixture <- function(path, reads = 2000000L, read_length = 150L) {
     sequence <- ifelse(index %% 2L == 0L, sequence_a, sequence_b)
     quality <- ifelse(index %% 2L == 0L, quality_a, quality_b)
     records <- as.vector(rbind(
-      sprintf("@bench:%09d/1", index), sequence, "+", quality
+      sprintf("@bench:%09d/1", index),
+      sequence,
+      "+",
+      quality
     ))
     writeLines(records, output, sep = "\n", useBytes = TRUE)
   }
@@ -98,8 +116,17 @@ open_duckhts <- function(extension) {
   con
 }
 
-measure_queries <- function(build, revision, extension, fixture, queries,
-                            repetitions, cpu, input_reads, input_bases) {
+measure_queries <- function(
+  build,
+  revision,
+  extension,
+  fixture,
+  queries,
+  repetitions,
+  cpu,
+  input_reads,
+  input_bases
+) {
   set_affinity(cpu)
   con <- open_duckhts(extension)
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
@@ -137,22 +164,37 @@ measure_queries <- function(build, revision, extension, fixture, queries,
   do.call(rbind, rows)
 }
 
-run_timed <- function(program, args, time_path, stderr_path,
-                      environment = character()) {
+run_timed <- function(
+  program,
+  args,
+  time_path,
+  stderr_path,
+  environment = character()
+) {
   format <- "elapsed_seconds=%e max_rss_kib=%M percent_cpu=%P"
   time_args <- c(
-    "-f", shQuote(format), "-o", shQuote(time_path), "--",
-    shQuote(normalizePath(program)), vapply(args, shQuote, character(1))
+    "-f",
+    shQuote(format),
+    "-o",
+    shQuote(time_path),
+    "--",
+    shQuote(normalizePath(program)),
+    vapply(args, shQuote, character(1))
   )
   status <- system2(
-    "/usr/bin/time", time_args, stdout = FALSE, stderr = stderr_path,
+    "/usr/bin/time",
+    time_args,
+    stdout = FALSE,
+    stderr = stderr_path,
     env = environment
   )
   stopifnot(identical(status, 0L))
   fields <- strsplit(readLines(time_path, warn = FALSE)[[1]], " ")[[1]]
   values <- strsplit(fields, "=", fixed = TRUE)
-  parsed <- setNames(vapply(values, `[[`, character(1), 2L),
-                     vapply(values, `[[`, character(1), 1L))
+  parsed <- setNames(
+    vapply(values, `[[`, character(1), 2L),
+    vapply(values, `[[`, character(1), 1L)
+  )
   c(
     elapsed_seconds = as.double(parsed[["elapsed_seconds"]]),
     max_rss_kib = as.double(parsed[["max_rss_kib"]]),
@@ -162,10 +204,19 @@ run_timed <- function(program, args, time_path, stderr_path,
 
 fastp_args <- function(input, json_path, html_path) {
   c(
-    "-i", normalizePath(input), "-w", "1",
-    "--disable_adapter_trimming", "--disable_quality_filtering",
-    "--disable_length_filtering", "--disable_trim_poly_g",
-    "--dont_eval_duplication", "-j", json_path, "-h", html_path
+    "-i",
+    normalizePath(input),
+    "-w",
+    "1",
+    "--disable_adapter_trimming",
+    "--disable_quality_filtering",
+    "--disable_length_filtering",
+    "--disable_trim_poly_g",
+    "--dont_eval_duplication",
+    "-j",
+    json_path,
+    "-h",
+    html_path
   )
 }
 
@@ -202,19 +253,27 @@ mode_synthetic_worker <- function(args) {
       paste0(
         "SELECT sum(length(NAME) + length(SEQUENCE) + length(QUALITY))::HUGEINT AS answer ",
         "FROM read_fastq(%s)"
-      ), fixture_sql
+      ),
+      fixture_sql
     ),
     packed = sprintf(
       paste0(
         "SELECT sum(length(NAME) + length(SEQUENCE) + length(QUALITY))::HUGEINT AS answer ",
         "FROM read_fastq(%s, sequence_encoding := 'nt16', ",
         "quality_representation := 'phred')"
-      ), fixture_sql
+      ),
+      fixture_sql
     )
   )
   result <- measure_queries(
-    args[[2]], args[[3]], args[[4]], fixture, queries,
-    as.integer(args[[6]]), args[[7]], reads,
+    args[[2]],
+    args[[3]],
+    args[[4]],
+    fixture,
+    queries,
+    as.integer(args[[6]]),
+    args[[7]],
+    reads,
     as.double(reads) * read_length
   )
   write.csv(result, args[[10]], row.names = FALSE, quote = TRUE)
@@ -241,14 +300,28 @@ mode_synthetic <- function(args) {
   previous_csv <- tempfile("fastq-previous-", fileext = ".csv")
   direct_csv <- tempfile("fastq-direct-", fileext = ".csv")
   run_r_worker(c(
-    "synthetic-worker", "previous", "247e5c8", shQuote(baseline_extension),
-    shQuote(fixture), repetitions, cpu, reads, read_length,
+    "synthetic-worker",
+    "previous",
+    "247e5c8",
+    shQuote(baseline_extension),
+    shQuote(fixture),
+    repetitions,
+    cpu,
+    reads,
+    read_length,
     shQuote(previous_csv)
   ))
   run_r_worker(c(
-    "synthetic-worker", "direct", current_revision,
-    shQuote(current_extension), shQuote(fixture), repetitions, cpu, reads,
-    read_length, shQuote(direct_csv)
+    "synthetic-worker",
+    "direct",
+    current_revision,
+    shQuote(current_extension),
+    shQuote(fixture),
+    repetitions,
+    cpu,
+    reads,
+    read_length,
+    shQuote(direct_csv)
   ))
 
   set_affinity(cpu)
@@ -260,22 +333,30 @@ mode_synthetic <- function(args) {
     stem <- file.path(report_dir, sprintf("run-%02d", rep))
     json_path <- paste0(stem, ".json")
     timing <- run_timed(
-      fastp_binary, fastp_args(fixture, json_path, paste0(stem, ".html")),
-      paste0(stem, ".time"), paste0(stem, ".log"),
+      fastp_binary,
+      fastp_args(fixture, json_path, paste0(stem, ".html")),
+      paste0(stem, ".time"),
+      paste0(stem, ".log"),
       sprintf("LD_LIBRARY_PATH=%s", fastp_library_path)
     )
     report <- jsonlite::fromJSON(json_path)
     stopifnot(report$summary$before_filtering$total_reads == reads)
     fastp_rows[[rep]] <- data.frame(
-      engine = "fastp", build = "current",
+      engine = "fastp",
+      build = "current",
       source_revision = "d517536b021bca0916cf33cb456f4e4b8aa24456",
-      artifact_sha256 = sha256(fastp_binary), workload = "qc_no_output",
-      repetition = rep, elapsed_seconds = timing[["elapsed_seconds"]],
-      max_rss_kib = timing[["max_rss_kib"]], input_reads = reads,
+      artifact_sha256 = sha256(fastp_binary),
+      workload = "qc_no_output",
+      repetition = rep,
+      elapsed_seconds = timing[["elapsed_seconds"]],
+      max_rss_kib = timing[["max_rss_kib"]],
+      input_reads = reads,
       input_bases = as.double(reads) * read_length,
       input_bytes = as.double(file.info(fixture)$size),
-      result_checksum = reads, configured_threads = 1L,
-      cpu_affinity = cpu, stringsAsFactors = FALSE
+      result_checksum = reads,
+      configured_threads = 1L,
+      cpu_affinity = cpu,
+      stringsAsFactors = FALSE
     )
   }
   result <- rbind(
@@ -306,19 +387,28 @@ mode_gzip_worker <- function(args) {
       paste0(
         "SELECT sum(length(NAME) + length(SEQUENCE) + length(QUALITY))::HUGEINT AS answer ",
         "FROM read_fastq(%s)"
-      ), fixture_sql
+      ),
+      fixture_sql
     ),
     gzip_packed = sprintf(
       paste0(
         "SELECT sum(length(NAME) + length(SEQUENCE) + length(QUALITY))::HUGEINT AS answer ",
         "FROM read_fastq(%s, sequence_encoding := 'nt16', ",
         "quality_representation := 'phred')"
-      ), fixture_sql
+      ),
+      fixture_sql
     )
   )
   result <- measure_queries(
-    args[[2]], args[[3]], args[[4]], fixture, queries,
-    as.integer(args[[6]]), args[[7]], NA_real_, NA_real_
+    args[[2]],
+    args[[3]],
+    args[[4]],
+    fixture,
+    queries,
+    as.integer(args[[6]]),
+    args[[7]],
+    NA_real_,
+    NA_real_
   )
   write.csv(result, args[[9]], row.names = FALSE, quote = TRUE)
 }
@@ -330,12 +420,26 @@ mode_gzip <- function(args) {
   previous_csv <- tempfile("fastq-gzip-previous-", fileext = ".csv")
   direct_csv <- tempfile("fastq-gzip-direct-", fileext = ".csv")
   run_r_worker(c(
-    "gzip-worker", "previous", "247e5c8", shQuote(normalizePath(args[[2]])),
-    shQuote(fixture), args[[7]], args[[8]], "unused", shQuote(previous_csv)
+    "gzip-worker",
+    "previous",
+    "247e5c8",
+    shQuote(normalizePath(args[[2]])),
+    shQuote(fixture),
+    args[[7]],
+    args[[8]],
+    "unused",
+    shQuote(previous_csv)
   ))
   run_r_worker(c(
-    "gzip-worker", "direct", args[[9]], shQuote(normalizePath(args[[3]])),
-    shQuote(fixture), args[[7]], args[[8]], "unused", shQuote(direct_csv)
+    "gzip-worker",
+    "direct",
+    args[[9]],
+    shQuote(normalizePath(args[[3]])),
+    shQuote(fixture),
+    args[[7]],
+    args[[8]],
+    "unused",
+    shQuote(direct_csv)
   ))
   result <- rbind(
     read.csv(previous_csv, stringsAsFactors = FALSE),
@@ -372,22 +476,28 @@ mode_fastp_exome <- function(args) {
       timing <- run_timed(
         fastp_binary,
         fastp_args(item$path, json_path, paste0(stem, ".html")),
-        paste0(stem, ".time"), paste0(stem, ".log"),
+        paste0(stem, ".time"),
+        paste0(stem, ".log"),
         sprintf("LD_LIBRARY_PATH=%s", fastp_library_path)
       )
       report <- jsonlite::fromJSON(json_path)
       before <- report$read1_before_filtering
       run_rows[[length(run_rows) + 1L]] <- data.frame(
-        engine = "fastp", build = "current",
+        engine = "fastp",
+        build = "current",
         source_revision = "d517536b021bca0916cf33cb456f4e4b8aa24456",
-        artifact_sha256 = sha256(fastp_binary), workload = "fastp_qc",
-        file_id = item$file_id, repetition = rep,
+        artifact_sha256 = sha256(fastp_binary),
+        workload = "fastp_qc",
+        file_id = item$file_id,
+        repetition = rep,
         elapsed_seconds = timing[["elapsed_seconds"]],
         max_rss_kib = timing[["max_rss_kib"]],
-        input_reads = before$total_reads, input_bases = before$total_bases,
+        input_reads = before$total_reads,
+        input_bases = before$total_bases,
         input_bytes = item$compressed_bytes,
         result_checksum = before$total_reads + before$total_bases,
-        configured_threads = 1L, cpu_affinity = cpu,
+        configured_threads = 1L,
+        cpu_affinity = cpu,
         stringsAsFactors = FALSE
       )
     }
@@ -395,16 +505,23 @@ mode_fastp_exome <- function(args) {
     summary <- report$summary$before_filtering
     before <- report$read1_before_filtering
     metric_rows[[i]] <- data.frame(
-      file_id = item$file_id, read_end = item$read_end,
-      total_reads = before$total_reads, total_bases = before$total_bases,
-      q20_bases = before$q20_bases, q30_bases = before$q30_bases,
-      q40_bases = before$q40_bases, total_cycles = before$total_cycles,
-      mean_length = summary$read1_mean_length, gc_rate = summary$gc_content,
+      file_id = item$file_id,
+      read_end = item$read_end,
+      total_reads = before$total_reads,
+      total_bases = before$total_bases,
+      q20_bases = before$q20_bases,
+      q30_bases = before$q30_bases,
+      q40_bases = before$q40_bases,
+      total_cycles = before$total_cycles,
+      mean_length = summary$read1_mean_length,
+      gc_rate = summary$gc_content,
       stringsAsFactors = FALSE
     )
     cycles <- seq_len(before$total_cycles)
     cycle_rows[[i]] <- data.frame(
-      file_id = item$file_id, read_end = item$read_end, cycle = cycles,
+      file_id = item$file_id,
+      read_end = item$read_end,
+      cycle = cycles,
       quality_mean = before$quality_curves$mean,
       quality_a = before$quality_curves$A,
       quality_t = before$quality_curves$T,
@@ -420,8 +537,18 @@ mode_fastp_exome <- function(args) {
     )
   }
   write.csv(do.call(rbind, run_rows), run_csv, row.names = FALSE, quote = TRUE)
-  write.csv(do.call(rbind, metric_rows), metric_csv, row.names = FALSE, quote = TRUE)
-  write.csv(do.call(rbind, cycle_rows), cycle_csv, row.names = FALSE, quote = TRUE)
+  write.csv(
+    do.call(rbind, metric_rows),
+    metric_csv,
+    row.names = FALSE,
+    quote = TRUE
+  )
+  write.csv(
+    do.call(rbind, cycle_rows),
+    cycle_csv,
+    row.names = FALSE,
+    quote = TRUE
+  )
 }
 
 mode_duckhts_exome <- function(args) {
@@ -436,42 +563,50 @@ mode_duckhts_exome <- function(args) {
   set_affinity(cpu)
   invisible(lapply(manifest$path, warm_file))
 
-  scans <- vapply(seq_len(nrow(manifest)), function(i) {
-    sprintf(
-      paste0(
-        "SELECT %s::VARCHAR AS file_id, %d::UTINYINT AS read_end, ",
-        "SEQUENCE, QUALITY FROM read_fastq(%s, ",
-        "sequence_encoding := 'nt16', quality_representation := 'phred')"
-      ),
-      sql_string(manifest$file_id[[i]]), manifest$read_end[[i]],
-      sql_string(normalizePath(manifest$path[[i]]))
-    )
-  }, character(1))
-  query <- sprintf(paste0(
-    "WITH reads AS (%s), bases AS (",
-    "SELECT file_id, read_end, ",
-    "generate_subscripts(SEQUENCE, 1)::USMALLINT AS cycle, ",
-    "unnest(SEQUENCE)::UTINYINT AS base, ",
-    "unnest(QUALITY)::UTINYINT AS quality FROM reads) ",
-    "SELECT file_id, read_end, cycle, count(*)::UBIGINT AS total_bases, ",
-    "sum(quality)::HUGEINT AS quality_sum, ",
-    "sum((quality >= 20)::UTINYINT)::HUGEINT AS q20_bases, ",
-    "sum((quality >= 30)::UTINYINT)::HUGEINT AS q30_bases, ",
-    "sum((quality >= 40)::UTINYINT)::HUGEINT AS q40_bases, ",
-    "sum((base = 1)::UTINYINT)::HUGEINT AS a_bases, ",
-    "sum((base = 2)::UTINYINT)::HUGEINT AS c_bases, ",
-    "sum((base = 4)::UTINYINT)::HUGEINT AS g_bases, ",
-    "sum((base = 8)::UTINYINT)::HUGEINT AS t_bases, ",
-    "sum((base = 15)::UTINYINT)::HUGEINT AS n_bases, ",
-    "sum((base NOT IN (1, 2, 4, 8, 15))::UTINYINT)::HUGEINT AS other_bases, ",
-    "sum(if(base = 1, quality, 0))::HUGEINT AS a_quality_sum, ",
-    "sum(if(base = 2, quality, 0))::HUGEINT AS c_quality_sum, ",
-    "sum(if(base = 4, quality, 0))::HUGEINT AS g_quality_sum, ",
-    "sum(if(base = 8, quality, 0))::HUGEINT AS t_quality_sum, ",
-    "sum(if(base = 15, quality, 0))::HUGEINT AS n_quality_sum ",
-    "FROM bases GROUP BY file_id, read_end, cycle ",
-    "ORDER BY file_id, cycle"
-  ), paste(scans, collapse = " UNION ALL "))
+  scans <- vapply(
+    seq_len(nrow(manifest)),
+    function(i) {
+      sprintf(
+        paste0(
+          "SELECT %s::VARCHAR AS file_id, %d::UTINYINT AS read_end, ",
+          "SEQUENCE, QUALITY FROM read_fastq(%s, ",
+          "sequence_encoding := 'nt16', quality_representation := 'phred')"
+        ),
+        sql_string(manifest$file_id[[i]]),
+        manifest$read_end[[i]],
+        sql_string(normalizePath(manifest$path[[i]]))
+      )
+    },
+    character(1)
+  )
+  query <- sprintf(
+    paste0(
+      "WITH reads AS (%s), bases AS (",
+      "SELECT file_id, read_end, ",
+      "generate_subscripts(SEQUENCE, 1)::USMALLINT AS cycle, ",
+      "unnest(SEQUENCE)::UTINYINT AS base, ",
+      "unnest(QUALITY)::UTINYINT AS quality FROM reads) ",
+      "SELECT file_id, read_end, cycle, count(*)::UBIGINT AS total_bases, ",
+      "sum(quality)::HUGEINT AS quality_sum, ",
+      "sum((quality >= 20)::UTINYINT)::HUGEINT AS q20_bases, ",
+      "sum((quality >= 30)::UTINYINT)::HUGEINT AS q30_bases, ",
+      "sum((quality >= 40)::UTINYINT)::HUGEINT AS q40_bases, ",
+      "sum((base = 1)::UTINYINT)::HUGEINT AS a_bases, ",
+      "sum((base = 2)::UTINYINT)::HUGEINT AS c_bases, ",
+      "sum((base = 4)::UTINYINT)::HUGEINT AS g_bases, ",
+      "sum((base = 8)::UTINYINT)::HUGEINT AS t_bases, ",
+      "sum((base = 15)::UTINYINT)::HUGEINT AS n_bases, ",
+      "sum((base NOT IN (1, 2, 4, 8, 15))::UTINYINT)::HUGEINT AS other_bases, ",
+      "sum(if(base = 1, quality, 0))::HUGEINT AS a_quality_sum, ",
+      "sum(if(base = 2, quality, 0))::HUGEINT AS c_quality_sum, ",
+      "sum(if(base = 4, quality, 0))::HUGEINT AS g_quality_sum, ",
+      "sum(if(base = 8, quality, 0))::HUGEINT AS t_quality_sum, ",
+      "sum(if(base = 15, quality, 0))::HUGEINT AS n_quality_sum ",
+      "FROM bases GROUP BY file_id, read_end, cycle ",
+      "ORDER BY file_id, cycle"
+    ),
+    paste(scans, collapse = " UNION ALL ")
+  )
 
   con <- open_duckhts(extension)
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
@@ -484,14 +619,21 @@ mode_duckhts_exome <- function(args) {
   total_reads <- sum(cycles$total_bases[cycles$cycle == 1])
   total_bases <- sum(cycles$total_bases)
   run <- data.frame(
-    engine = "DuckHTS", build = build, source_revision = revision,
-    artifact_sha256 = sha256(extension), workload = "pure_sql_fastp_cycles",
-    file_id = "all-eight-files", repetition = 1L,
-    elapsed_seconds = elapsed, max_rss_kib = peak_rss_kib(),
-    input_reads = total_reads, input_bases = total_bases,
+    engine = "DuckHTS",
+    build = build,
+    source_revision = revision,
+    artifact_sha256 = sha256(extension),
+    workload = "pure_sql_fastp_cycles",
+    file_id = "all-eight-files",
+    repetition = 1L,
+    elapsed_seconds = elapsed,
+    max_rss_kib = peak_rss_kib(),
+    input_reads = total_reads,
+    input_bases = total_bases,
     input_bytes = sum(manifest$compressed_bytes),
     result_checksum = total_reads + total_bases + sum(cycles$q30_bases),
-    configured_threads = 1L, cpu_affinity = cpu,
+    configured_threads = 1L,
+    cpu_affinity = cpu,
     stringsAsFactors = FALSE
   )
   write.csv(run, run_csv, row.names = FALSE, quote = TRUE)
@@ -510,47 +652,67 @@ mode_duckhts_qc_exome <- function(args) {
   set_affinity(cpu)
   invisible(lapply(manifest$path, warm_file))
 
-  scans <- vapply(seq_len(nrow(manifest)), function(i) {
-    sprintf(
-      paste0(
-        "SELECT %s::VARCHAR AS file_id, %d::UTINYINT AS read_end, ",
-        "SEQUENCE, QUALITY FROM read_fastq(%s)"
-      ),
-      sql_string(manifest$file_id[[i]]), manifest$read_end[[i]],
-      sql_string(normalizePath(manifest$path[[i]]))
-    )
-  }, character(1))
-  query <- sprintf(paste0(
-    "WITH reads AS (%s), summaries AS (",
-    "SELECT file_id, read_end, duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc ",
-    "FROM reads GROUP BY file_id, read_end) ",
-    "SELECT file_id, read_end, qc.reads, qc.bases, qc.q20_bases, ",
-    "qc.q30_bases, qc.q40_bases, qc.quality_sum, qc.a_bases, ",
-    "qc.c_bases, qc.g_bases, qc.t_bases, qc.n_bases, qc.other_bases, ",
-    "qc.max_read_length, cycle.cycle, cycle.bases AS cycle_bases, ",
-    "cycle.quality_sum AS cycle_quality_sum, ",
-    "cycle.a_bases AS cycle_a_bases, cycle.c_bases AS cycle_c_bases, ",
-    "cycle.g_bases AS cycle_g_bases, cycle.t_bases AS cycle_t_bases, ",
-    "cycle.n_bases AS cycle_n_bases, cycle.other_bases AS cycle_other_bases, ",
-    "cycle.a_quality_sum, cycle.c_quality_sum, cycle.g_quality_sum, ",
-    "cycle.t_quality_sum ",
-    "FROM summaries, UNNEST(qc.cycles) AS u(cycle) ",
-    "ORDER BY file_id, cycle"
-  ), paste(scans, collapse = " UNION ALL "))
+  scans <- vapply(
+    seq_len(nrow(manifest)),
+    function(i) {
+      sprintf(
+        paste0(
+          "SELECT %s::VARCHAR AS file_id, %d::UTINYINT AS read_end, ",
+          "SEQUENCE, QUALITY FROM read_fastq(%s)"
+        ),
+        sql_string(manifest$file_id[[i]]),
+        manifest$read_end[[i]],
+        sql_string(normalizePath(manifest$path[[i]]))
+      )
+    },
+    character(1)
+  )
+  query <- sprintf(
+    paste0(
+      "WITH reads AS (%s), summaries AS (",
+      "SELECT file_id, read_end, duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc ",
+      "FROM reads GROUP BY file_id, read_end) ",
+      "SELECT file_id, read_end, qc.reads, qc.bases, qc.q20_bases, ",
+      "qc.q30_bases, qc.q40_bases, qc.quality_sum, qc.a_bases, ",
+      "qc.c_bases, qc.g_bases, qc.t_bases, qc.n_bases, qc.other_bases, ",
+      "qc.max_read_length, cycle.cycle, cycle.bases AS cycle_bases, ",
+      "cycle.quality_sum AS cycle_quality_sum, ",
+      "cycle.a_bases AS cycle_a_bases, cycle.c_bases AS cycle_c_bases, ",
+      "cycle.g_bases AS cycle_g_bases, cycle.t_bases AS cycle_t_bases, ",
+      "cycle.n_bases AS cycle_n_bases, cycle.other_bases AS cycle_other_bases, ",
+      "cycle.a_quality_sum, cycle.c_quality_sum, cycle.g_quality_sum, ",
+      "cycle.t_quality_sum ",
+      "FROM summaries, UNNEST(qc.cycles) AS u(cycle) ",
+      "ORDER BY file_id, cycle"
+    ),
+    paste(scans, collapse = " UNION ALL ")
+  )
 
   con <- open_duckhts(extension)
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
   start <- proc.time()[["elapsed"]]
   flat <- dbGetQuery(con, query)
   elapsed <- proc.time()[["elapsed"]] - start
-  stopifnot(nrow(flat) > 0L, all(flat$other_bases == 0),
-            all(flat$cycle_other_bases == 0))
+  stopifnot(
+    nrow(flat) > 0L,
+    all(flat$other_bases == 0),
+    all(flat$cycle_other_bases == 0)
+  )
 
   first_cycle <- !duplicated(flat$file_id)
-  metrics <- flat[first_cycle, c(
-    "file_id", "read_end", "reads", "bases", "q20_bases",
-    "q30_bases", "q40_bases", "max_read_length"
-  )]
+  metrics <- flat[
+    first_cycle,
+    c(
+      "file_id",
+      "read_end",
+      "reads",
+      "bases",
+      "q20_bases",
+      "q30_bases",
+      "q40_bases",
+      "max_read_length"
+    )
+  ]
   names(metrics)[names(metrics) == "reads"] <- "total_reads"
   names(metrics)[names(metrics) == "bases"] <- "total_bases"
   names(metrics)[names(metrics) == "max_read_length"] <- "total_cycles"
@@ -577,11 +739,15 @@ mode_duckhts_qc_exome <- function(args) {
     stringsAsFactors = FALSE
   )
   stopifnot(all(
-    vapply(seq_len(nrow(metrics)), function(i) {
-      rows <- cycles$file_id == metrics$file_id[[i]]
-      sum(cycles$total_bases[rows]) == metrics$total_bases[[i]] &&
-        cycles$total_bases[rows][[1]] == metrics$total_reads[[i]]
-    }, logical(1))
+    vapply(
+      seq_len(nrow(metrics)),
+      function(i) {
+        rows <- cycles$file_id == metrics$file_id[[i]]
+        sum(cycles$total_bases[rows]) == metrics$total_bases[[i]] &&
+          cycles$total_bases[rows][[1]] == metrics$total_reads[[i]]
+      },
+      logical(1)
+    )
   ))
 
   write.csv(metrics, metric_csv, row.names = FALSE, quote = TRUE)
@@ -589,14 +755,21 @@ mode_duckhts_qc_exome <- function(args) {
   total_reads <- sum(metrics$total_reads)
   total_bases <- sum(metrics$total_bases)
   run <- data.frame(
-    engine = "DuckHTS", build = build, source_revision = revision,
-    artifact_sha256 = sha256(extension), workload = "fused_fastq_qc",
-    file_id = "all-eight-files", repetition = 1L,
-    elapsed_seconds = elapsed, max_rss_kib = peak_rss_kib(),
-    input_reads = total_reads, input_bases = total_bases,
+    engine = "DuckHTS",
+    build = build,
+    source_revision = revision,
+    artifact_sha256 = sha256(extension),
+    workload = "fused_fastq_qc",
+    file_id = "all-eight-files",
+    repetition = 1L,
+    elapsed_seconds = elapsed,
+    max_rss_kib = peak_rss_kib(),
+    input_reads = total_reads,
+    input_bases = total_bases,
     input_bytes = sum(manifest$compressed_bytes),
     result_checksum = total_reads + total_bases + sum(metrics$q30_bases),
-    configured_threads = 1L, cpu_affinity = cpu,
+    configured_threads = 1L,
+    cpu_affinity = cpu,
     stringsAsFactors = FALSE
   )
   write.csv(run, run_csv, row.names = FALSE, quote = TRUE)
@@ -613,31 +786,47 @@ mode_compare_qc_exome <- function(args) {
   cycle_keys <- c(keys, "cycle")
 
   metrics <- merge(
-    duckhts_metrics, fastp_metrics, by = keys,
+    duckhts_metrics,
+    fastp_metrics,
+    by = keys,
     suffixes = c(".duckhts", ".fastp")
   )
-  stopifnot(nrow(metrics) == nrow(duckhts_metrics),
-            nrow(metrics) == nrow(fastp_metrics))
-  exact_fields <- c(
-    "total_reads", "total_bases", "q20_bases", "q30_bases",
-    "q40_bases", "total_cycles", "mean_length"
+  stopifnot(
+    nrow(metrics) == nrow(duckhts_metrics),
+    nrow(metrics) == nrow(fastp_metrics)
   )
-  exact_differences <- vapply(exact_fields, function(field) {
-    max(abs(
-      metrics[[paste0(field, ".duckhts")]] -
-        metrics[[paste0(field, ".fastp")]]
-    ))
-  }, numeric(1))
+  exact_fields <- c(
+    "total_reads",
+    "total_bases",
+    "q20_bases",
+    "q30_bases",
+    "q40_bases",
+    "total_cycles",
+    "mean_length"
+  )
+  exact_differences <- vapply(
+    exact_fields,
+    function(field) {
+      max(abs(
+        metrics[[paste0(field, ".duckhts")]] -
+          metrics[[paste0(field, ".fastp")]]
+      ))
+    },
+    numeric(1)
+  )
   stopifnot(all(exact_differences == 0))
 
   cycles <- merge(duckhts_cycles, fastp_cycles, by = cycle_keys)
-  stopifnot(nrow(cycles) == nrow(duckhts_cycles),
-            nrow(cycles) == nrow(fastp_cycles))
+  stopifnot(
+    nrow(cycles) == nrow(duckhts_cycles),
+    nrow(cycles) == nrow(fastp_cycles)
+  )
   ratio <- function(numerator, denominator) {
     ifelse(denominator == 0, 0, numerator / denominator)
   }
   cycles$quality_mean.duckhts <- ratio(
-    cycles$quality_sum, cycles$total_bases
+    cycles$quality_sum,
+    cycles$total_bases
   )
   for (base in c("a", "c", "g", "t")) {
     cycles[[paste0("quality_", base, ".duckhts")]] <- ratio(
@@ -645,25 +834,47 @@ mode_compare_qc_exome <- function(args) {
       cycles[[paste0(base, "_bases")]]
     )
     cycles[[paste0("content_", base, ".duckhts")]] <- ratio(
-      cycles[[paste0(base, "_bases")]], cycles$total_bases
+      cycles[[paste0(base, "_bases")]],
+      cycles$total_bases
     )
   }
   cycles$content_n.duckhts <- ratio(cycles$n_bases, cycles$total_bases)
   cycles$content_gc.duckhts <- ratio(
-    cycles$c_bases + cycles$g_bases, cycles$total_bases
+    cycles$c_bases + cycles$g_bases,
+    cycles$total_bases
   )
 
-  quality_fields <- c("quality_mean", "quality_a", "quality_c", "quality_g", "quality_t")
-  content_fields <- c("content_a", "content_c", "content_g", "content_t", "content_n", "content_gc")
+  quality_fields <- c(
+    "quality_mean",
+    "quality_a",
+    "quality_c",
+    "quality_g",
+    "quality_t"
+  )
+  content_fields <- c(
+    "content_a",
+    "content_c",
+    "content_g",
+    "content_t",
+    "content_n",
+    "content_gc"
+  )
   max_curve_difference <- function(fields) {
-    max(vapply(fields, function(field) {
-      max(abs(cycles[[paste0(field, ".duckhts")]] - cycles[[field]]),
-          na.rm = TRUE)
-    }, numeric(1)))
+    max(vapply(
+      fields,
+      function(field) {
+        max(
+          abs(cycles[[paste0(field, ".duckhts")]] - cycles[[field]]),
+          na.rm = TRUE
+        )
+      },
+      numeric(1)
+    ))
   }
   comparison <- data.frame(
     field_family = c(
-      "global integer totals", "global GC fraction",
+      "global integer totals",
+      "global GC fraction",
       "per-cycle mean-quality curves",
       "per-cycle nucleotide-content curves"
     ),
@@ -691,7 +902,9 @@ usage <- paste(
 )
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) == 0L) stop(usage)
+if (length(args) == 0L) {
+  stop(usage)
+}
 switch(
   args[[1]],
   "synthetic-worker" = mode_synthetic_worker(args),

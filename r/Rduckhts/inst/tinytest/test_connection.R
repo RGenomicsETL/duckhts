@@ -1,8 +1,14 @@
 library(tinytest)
 library(DBI)
 
-expect_error(rduckhts_connect(config = "threads=1"), "config must be a named list")
-expect_error(rduckhts_connect(config = list("1")), "config must be a named list")
+expect_error(
+  rduckhts_connect(config = "threads=1"),
+  "config must be a named list"
+)
+expect_error(
+  rduckhts_connect(config = list("1")),
+  "config must be a named list"
+)
 
 .connection_test_driver <- function(dbdir, config) {
   driver_args <- list(dbdir = dbdir, config = config)
@@ -37,11 +43,13 @@ test_package_owned_connection <- function() {
     )
   }
 
-  con <- rduckhts_connect(config = list(
-    threads = "1",
-    autoinstall_known_extensions = "true",
-    autoload_known_extensions = "true"
-  ))
+  con <- rduckhts_connect(
+    config = list(
+      threads = "1",
+      autoinstall_known_extensions = "true",
+      autoload_known_extensions = "true"
+    )
+  )
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   settings <- dbGetQuery(
@@ -102,7 +110,10 @@ test_reused_file_driver_rejected <- function() {
 
 test_failed_file_connection_releases_driver <- function() {
   dbdir <- tempfile("rduckhts_failed_", fileext = ".duckdb")
-  missing_extension <- tempfile("rduckhts_missing_", fileext = ".duckdb_extension")
+  missing_extension <- tempfile(
+    "rduckhts_missing_",
+    fileext = ".duckdb_extension"
+  )
   expect_error(
     rduckhts_connect(dbdir = dbdir, extension_path = missing_extension),
     "extension not found"

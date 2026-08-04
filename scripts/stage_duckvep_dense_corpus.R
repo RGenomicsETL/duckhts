@@ -32,7 +32,13 @@ op <- add_option(
   help = "declared corpus name retained in the receipt [%default]"
 )
 op <- add_option(op, "--output-database", dest = "output_database")
-op <- add_option(op, "--tile-size", dest = "tile_size", type = "integer", default = 250000L)
+op <- add_option(
+  op,
+  "--tile-size",
+  dest = "tile_size",
+  type = "integer",
+  default = 250000L
+)
 op <- add_option(
   op,
   "--tiles-per-axis",
@@ -60,12 +66,22 @@ missing_options <- required[vapply(
   logical(1L)
 )]
 if (length(missing_options)) {
-  die("missing required option(s): {paste0('--', gsub('_', '-', missing_options), collapse = ', ')}")
+  die(
+    "missing required option(s): {paste0('--', gsub('_', '-', missing_options), collapse = ', ')}"
+  )
 }
-if (opt$tile_size < 1L) die("--tile-size must be positive")
-if (opt$tiles_per_axis < 1L) die("--tiles-per-axis must be positive")
-if (opt$threads < 1L) die("--threads must be positive")
-if (!nzchar(trimws(opt$source_name))) die("--source-name must not be empty")
+if (opt$tile_size < 1L) {
+  die("--tile-size must be positive")
+}
+if (opt$tiles_per_axis < 1L) {
+  die("--tiles-per-axis must be positive")
+}
+if (opt$threads < 1L) {
+  die("--threads must be positive")
+}
+if (!nzchar(trimws(opt$source_name))) {
+  die("--source-name must not be empty")
+}
 
 input_paths <- c(opt$extension, opt$model_database, opt$source_vcf)
 missing_paths <- input_paths[!file.exists(input_paths)]
@@ -87,7 +103,9 @@ output_database <- file.path(
 )
 input_paths <- c(extension, model_database, source_vcf)
 if (output_database %in% input_paths) {
-  die("output database must not replace the extension, model database, or source VCF")
+  die(
+    "output database must not replace the extension, model database, or source VCF"
+  )
 }
 file_identity <- function(path) {
   if (!file.exists(path) || !identical(Sys.info()[["sysname"]], "Linux")) {
@@ -100,7 +118,9 @@ file_identity <- function(path) {
     stderr = TRUE
   )
   status <- attr(value, "status")
-  if (!is.null(status) && status != 0L) die("stat failed for {path}")
+  if (!is.null(status) && status != 0L) {
+    die("stat failed for {path}")
+  }
   trimws(value[[1L]])
 }
 if (file.exists(output_database)) {
@@ -110,7 +130,9 @@ if (file.exists(output_database)) {
     die("output database is a hard-link alias of an input")
   }
   if (!isTRUE(opt$overwrite)) {
-    die("output already exists; pass --overwrite to replace it: {output_database}")
+    die(
+      "output already exists; pass --overwrite to replace it: {output_database}"
+    )
   }
 }
 staged_database <- paste0(
@@ -123,9 +145,12 @@ on.exit(unlink(c(staged_database, paste0(staged_database, ".wal"))), add = TRUE)
 
 drv <- duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = staged_database)
-on.exit({
-  if (!is.null(con)) dbDisconnect(con, shutdown = TRUE)
-}, add = TRUE)
+on.exit(
+  {
+    if (!is.null(con)) dbDisconnect(con, shutdown = TRUE)
+  },
+  add = TRUE
+)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
 
 invisible(dbExecute(con, glue("SET threads = {opt$threads}")))
@@ -147,8 +172,17 @@ primary_contigs <- paste(
 )
 small_ncrna <- paste(
   c(
-    "misc_RNA", "snRNA", "miRNA", "snoRNA", "rRNA", "scaRNA",
-    "Mt_tRNA", "Mt_rRNA", "ribozyme", "sRNA", "vault_RNA"
+    "misc_RNA",
+    "snRNA",
+    "miRNA",
+    "snoRNA",
+    "rRNA",
+    "scaRNA",
+    "Mt_tRNA",
+    "Mt_rRNA",
+    "ribozyme",
+    "sRNA",
+    "vault_RNA"
   ),
   collapse = "', '"
 )
@@ -417,7 +451,9 @@ model_receipt <- dbGetQuery(
   con,
   "SELECT * FROM duckvep_model.main.model_receipt"
 )
-if (nrow(model_receipt) != 1L) die("model_receipt must contain exactly one row")
+if (nrow(model_receipt) != 1L) {
+  die("model_receipt must contain exactly one row")
+}
 region_ordinal_sha256 <- dbGetQuery(
   con,
   "SELECT sha256(string_agg(
@@ -430,7 +466,9 @@ region_ordinal_sha256 <- dbGetQuery(
 sha256 <- function(path) {
   value <- system2("sha256sum", path, stdout = TRUE, stderr = TRUE)
   status <- attr(value, "status")
-  if (!is.null(status) && status != 0L) die("sha256sum failed for {path}")
+  if (!is.null(status) && status != 0L) {
+    die("sha256sum failed for {path}")
+  }
   strsplit(value[[1L]], "[[:space:]]+")[[1L]][[1L]]
 }
 source_sha256 <- sha256(source_vcf)
@@ -460,7 +498,11 @@ receipt <- data.frame(
   region_ordinal_sha256 = as.character(region_ordinal_sha256),
   tile_size = opt$tile_size,
   tiles_per_axis = opt$tiles_per_axis,
-  selection_mode = if (isTRUE(opt$all_tiles)) "all_primary_tiles" else "density_ranked",
+  selection_mode = if (isTRUE(opt$all_tiles)) {
+    "all_primary_tiles"
+  } else {
+    "density_ranked"
+  },
   selected_tile_count = staged_counts$selected_tile_count,
   selected_tile_bases = staged_counts$selected_tile_bases,
   selected_source_alt_count = staged_counts$selected_source_alt_count,

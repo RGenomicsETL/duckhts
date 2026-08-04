@@ -3,9 +3,12 @@ library(DBI)
 
 test_cigar_utils <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+    },
+    add = TRUE
+  )
 
   literal_metrics <- DBI::dbGetQuery(
     con,

@@ -126,8 +126,8 @@ duckhts_runtime_htslib_info <- function() {
 #' }
 #' @export
 rduckhts_htslib_config <- function(
-    link = NULL,
-    validate = TRUE
+  link = NULL,
+  validate = TRUE
 ) {
   config_path <- system.file("htslib_config.R", package = "Rduckhts")
   if (!nzchar(config_path) || !file.exists(config_path)) {

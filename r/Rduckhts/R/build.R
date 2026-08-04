@@ -15,7 +15,12 @@
 #' @param verbose Retained for source compatibility; ignored.
 #' @return This function always raises an error.
 #' @export
-duckhts_build <- function(build_dir = NULL, make = NULL, force = FALSE, verbose = TRUE) {
+duckhts_build <- function(
+  build_dir = NULL,
+  make = NULL,
+  force = FALSE,
+  verbose = TRUE
+) {
   .Deprecated(
     new = "R CMD build followed by R CMD INSTALL on the source tarball",
     package = "Rduckhts",

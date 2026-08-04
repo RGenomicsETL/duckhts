@@ -6,12 +6,36 @@ test_parallel_empty_contigs <- function() {
   on.exit(dbDisconnect(con, shutdown = TRUE))
   expect_silent(dbExecute(con, "PRAGMA threads=4"))
 
-  bam_path <- system.file("extdata", "parallel_empty_contigs.bam", package = "Rduckhts")
-  bam_index_path <- system.file("extdata", "parallel_empty_contigs.bam.bai", package = "Rduckhts")
-  vcf_path <- system.file("extdata", "parallel_empty_contigs.vcf.gz", package = "Rduckhts")
-  vcf_index_path <- system.file("extdata", "parallel_empty_contigs.vcf.gz.tbi", package = "Rduckhts")
-  bcf_path <- system.file("extdata", "parallel_empty_contigs.bcf", package = "Rduckhts")
-  bcf_index_path <- system.file("extdata", "parallel_empty_contigs.bcf.csi", package = "Rduckhts")
+  bam_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.bam",
+    package = "Rduckhts"
+  )
+  bam_index_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.bam.bai",
+    package = "Rduckhts"
+  )
+  vcf_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.vcf.gz",
+    package = "Rduckhts"
+  )
+  vcf_index_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.vcf.gz.tbi",
+    package = "Rduckhts"
+  )
+  bcf_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.bcf",
+    package = "Rduckhts"
+  )
+  bcf_index_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.bcf.csi",
+    package = "Rduckhts"
+  )
 
   expect_true(file.exists(bam_path))
   expect_true(file.exists(bam_index_path))
@@ -60,7 +84,10 @@ test_parallel_empty_contigs <- function() {
           "%s, '%s', region := '%s', tidy_format := true,",
           "overwrite := true, include_file_offset := true, region_threads := %d)"
         ),
-        quoted_bcf, target, regions, threads
+        quoted_bcf,
+        target,
+        regions,
+        threads
       )
     )
     expect_equal(result$rows_written[[1]], 2)

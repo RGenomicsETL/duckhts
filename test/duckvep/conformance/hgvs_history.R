@@ -54,12 +54,21 @@ con <- dbConnect(duckdb())
 on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
 required <- c(
-  "source_revision", "extension_build_binding", "extension_sha256",
-  "model_artifact_kind", "model_artifact_sha256",
-  "reference_fasta_sha256", "reference_fai_sha256", "source_vcf_sha256",
+  "source_revision",
+  "extension_build_binding",
+  "extension_sha256",
+  "model_artifact_kind",
+  "model_artifact_sha256",
+  "reference_fasta_sha256",
+  "reference_fai_sha256",
+  "source_vcf_sha256",
   "input_vcf_sha256",
-  "corpus", "model", "oracle_version", "oracle_build",
-  "hgvsc_comparison", "hgvsp_comparison"
+  "corpus",
+  "model",
+  "oracle_version",
+  "oracle_build",
+  "hgvsc_comparison",
+  "hgvsp_comparison"
 )
 columns <- dbGetQuery(
   con,
@@ -97,9 +106,16 @@ receipt <- dbGetQuery(
      FROM read_parquet({sql_q(opt$pairs)})"
   )
 )
-count_columns <- grep("(revisions|bindings|digests|kinds)$", names(receipt), value = TRUE)
-if (nrow(receipt) != 1L || anyNA(receipt) ||
-    any(unlist(receipt[count_columns], use.names = FALSE) != 1)) {
+count_columns <- grep(
+  "(revisions|bindings|digests|kinds)$",
+  names(receipt),
+  value = TRUE
+)
+if (
+  nrow(receipt) != 1L ||
+    anyNA(receipt) ||
+    any(unlist(receipt[count_columns], use.names = FALSE) != 1)
+) {
   die("HGVS pair artifact has incomplete or non-constant build receipts")
 }
 if (!identical(receipt$source_revision[[1L]], revision)) {
@@ -108,21 +124,31 @@ if (!identical(receipt$source_revision[[1L]], revision)) {
     "the current clean checkout {revision}"
   )
 }
-if (!identical(
-  receipt$extension_build_binding[[1L]],
-  "htslib_distclean_make_release"
-)) {
+if (
+  !identical(
+    receipt$extension_build_binding[[1L]],
+    "htslib_distclean_make_release"
+  )
+) {
   die("HGVS pair artifact was not produced by a clean vendored release build")
 }
 digest_columns <- c(
-  "extension_sha256", "model_artifact_sha256", "reference_fasta_sha256",
-  "reference_fai_sha256", "source_vcf_sha256", "input_vcf_sha256"
+  "extension_sha256",
+  "model_artifact_sha256",
+  "reference_fasta_sha256",
+  "reference_fai_sha256",
+  "source_vcf_sha256",
+  "input_vcf_sha256"
 )
-if (any(!vapply(
-  receipt[digest_columns],
-  function(value) grepl("^[0-9a-f]{64}$", value[[1L]]),
-  logical(1L)
-))) {
+if (
+  any(
+    !vapply(
+      receipt[digest_columns],
+      function(value) grepl("^[0-9a-f]{64}$", value[[1L]]),
+      logical(1L)
+    )
+  )
+) {
   die("HGVS pair artifact contains an invalid SHA-256 receipt")
 }
 if (!nzchar(receipt$model_artifact_kind[[1L]])) {
@@ -184,12 +210,25 @@ if (anyNA(rows) || any(!nzchar(rows$comparison))) {
 }
 
 history_columns <- c(
-  "run_date", "source_revision", "artifact_md5", "artifact_sha256",
-  "extension_build_binding", "extension_sha256", "model_artifact_kind",
-  "model_artifact_sha256", "reference_fasta_sha256",
-  "reference_fai_sha256", "source_vcf_sha256", "input_vcf_sha256",
-  "corpus", "model",
-  "oracle_version", "oracle_build", "metric", "comparison", "n"
+  "run_date",
+  "source_revision",
+  "artifact_md5",
+  "artifact_sha256",
+  "extension_build_binding",
+  "extension_sha256",
+  "model_artifact_kind",
+  "model_artifact_sha256",
+  "reference_fasta_sha256",
+  "reference_fai_sha256",
+  "source_vcf_sha256",
+  "input_vcf_sha256",
+  "corpus",
+  "model",
+  "oracle_version",
+  "oracle_build",
+  "metric",
+  "comparison",
+  "n"
 )
 rows <- data.frame(
   run_date = rep(as.character(Sys.Date()), nrow(rows)),

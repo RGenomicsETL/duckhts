@@ -62,14 +62,30 @@ op <- add_option(
 opt <- parse_args(op)
 
 die <- function(...) stop(glue(..., .envir = parent.frame()), call. = FALSE)
-if (!nzchar(opt$input)) die("--input is required")
-if (!nzchar(opt$output_dir)) die("--output-dir is required")
-if (!file.exists(opt$input)) die("input does not exist: {opt$input}")
-if (!file.exists(opt$extension)) die("extension does not exist: {opt$extension}")
-if (opt$release < 1L) die("--release must be positive")
-if (opt$threads < 1L) die("--threads must be positive")
-if (opt$row_group_size < 2048L) die("--row-group-size must be at least 2048")
-if (!opt$compression %in% c("zstd", "snappy", "gzip", "lz4_raw", "uncompressed")) {
+if (!nzchar(opt$input)) {
+  die("--input is required")
+}
+if (!nzchar(opt$output_dir)) {
+  die("--output-dir is required")
+}
+if (!file.exists(opt$input)) {
+  die("input does not exist: {opt$input}")
+}
+if (!file.exists(opt$extension)) {
+  die("extension does not exist: {opt$extension}")
+}
+if (opt$release < 1L) {
+  die("--release must be positive")
+}
+if (opt$threads < 1L) {
+  die("--threads must be positive")
+}
+if (opt$row_group_size < 2048L) {
+  die("--row-group-size must be at least 2048")
+}
+if (
+  !opt$compression %in% c("zstd", "snappy", "gzip", "lz4_raw", "uncompressed")
+) {
   die("unsupported Parquet compression: {opt$compression}")
 }
 
@@ -81,7 +97,9 @@ output_dir <- normalizePath(opt$output_dir, mustWork = TRUE)
 sha256 <- function(path) {
   output <- system2("sha256sum", path, stdout = TRUE, stderr = TRUE)
   status <- attr(output, "status")
-  if (!is.null(status) && status != 0L) die("sha256sum failed for {path}")
+  if (!is.null(status) && status != 0L) {
+    die("sha256sum failed for {path}")
+  }
   sub("[[:space:]].*$", "", output[[1L]])
 }
 
@@ -93,7 +111,9 @@ if (!nzchar(opt$source_revision)) {
     stderr = FALSE
   )
   status <- attr(revision, "status")
-  if (!is.null(status) && status != 0L) die("cannot determine source revision")
+  if (!is.null(status) && status != 0L) {
+    die("cannot determine source revision")
+  }
   opt$source_revision <- trimws(revision[[1L]])
 }
 
@@ -154,7 +174,9 @@ existing <- artifacts[file.exists(artifacts)]
 if (length(existing) != 0L && !isTRUE(opt$overwrite)) {
   die("output exists; pass --overwrite:\n{paste(existing, collapse = '\n')}")
 }
-if (isTRUE(opt$overwrite)) unlink(existing)
+if (isTRUE(opt$overwrite)) {
+  unlink(existing)
+}
 
 source_bytes <- unname(file.info(input)$size)
 source_hash <- sha256(input)
@@ -257,11 +279,20 @@ if (nzchar(opt$history)) {
     history <- rbind(old[!same, , drop = FALSE], rows)
   }
   history <- history[
-    order(history$run_date, history$source_revision, history$source, history$projection),
+    order(
+      history$run_date,
+      history$source_revision,
+      history$source,
+      history$projection
+    ),
     ,
     drop = FALSE
   ]
-  temporary <- tempfile("duckvep-release-parquet-", dirname(opt$history), ".csv")
+  temporary <- tempfile(
+    "duckvep-release-parquet-",
+    dirname(opt$history),
+    ".csv"
+  )
   utils::write.csv(history, temporary, row.names = FALSE)
   if (!file.rename(temporary, opt$history)) {
     unlink(temporary)
@@ -283,4 +314,6 @@ for (i in seq_len(nrow(rows))) {
   )
 }
 cat(glue("source sha256: {source_hash}"), "\n", sep = "")
-if (nzchar(opt$history)) cat(glue("history: {opt$history}"), "\n", sep = "")
+if (nzchar(opt$history)) {
+  cat(glue("history: {opt$history}"), "\n", sep = "")
+}

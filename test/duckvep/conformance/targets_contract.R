@@ -251,13 +251,15 @@ invisible(duckvep_evidence_write_cache_receipt(
   "http-etag:66fbffe0a-64efc55395049:27644657162",
   overwrite = TRUE
 ))
-stopifnot(nzchar(duckvep_evidence_validate_cache_receipt(
-  cache_receipt,
-  cache_root,
-  "homo_sapiens",
-  "116",
-  "GRCh38"
-)$receipt_sha256))
+stopifnot(nzchar(
+  duckvep_evidence_validate_cache_receipt(
+    cache_receipt,
+    cache_root,
+    "homo_sapiens",
+    "116",
+    "GRCh38"
+  )$receipt_sha256
+))
 expect_error(
   duckvep_evidence_cache_leaf(
     cache_root,

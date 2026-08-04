@@ -5,7 +5,12 @@ test_bcftools_norm <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
 
-  fasta_path <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts", mustWork = TRUE)
+  fasta_path <- system.file(
+    "extdata",
+    "liftover_repeat_src.fa",
+    package = "Rduckhts",
+    mustWork = TRUE
+  )
   quoted_fasta <- DBI::dbQuoteString(con, fasta_path)
 
   DBI::dbExecute(
@@ -103,8 +108,17 @@ test_bcftools_norm <- function() {
   expect_true(is.na(row_missing$normed[1]))
   expect_equal(row_missing$norm_status[1], "MissingContig")
 
-  out_split <- rduckhts_bcftools_norm(con, "norm_seq", fasta_path, split_multiallelic = TRUE)
-  row_split <- out_split[out_split$ref == "T" & out_split$alt == "TT,TTT", , drop = FALSE]
+  out_split <- rduckhts_bcftools_norm(
+    con,
+    "norm_seq",
+    fasta_path,
+    split_multiallelic = TRUE
+  )
+  row_split <- out_split[
+    out_split$ref == "T" & out_split$alt == "TT,TTT",
+    ,
+    drop = FALSE
+  ]
   row_split <- row_split[order(row_split$alt_index), , drop = FALSE]
   expect_equal(nrow(row_split), 2)
   expect_equal(row_split$pos_normed, c(1, 1))
@@ -120,23 +134,50 @@ test_bcftools_norm <- function() {
   expect_equal(as.character(out_list$alt_normed[[1]]), c("GT", "GTT"))
   expect_true(out_list$normed[1])
 
-  empty_seq_split <- rduckhts_bcftools_norm(con, "norm_empty_seq", fasta_path, split_multiallelic = TRUE)
-  empty_seq_split <- empty_seq_split[order(empty_seq_split$case_id), , drop = FALSE]
+  empty_seq_split <- rduckhts_bcftools_norm(
+    con,
+    "norm_empty_seq",
+    fasta_path,
+    split_multiallelic = TRUE
+  )
+  empty_seq_split <- empty_seq_split[
+    order(empty_seq_split$case_id),
+    ,
+    drop = FALSE
+  ]
   expect_equal(empty_seq_split$case_id, c("dot", "empty_text", "null_text"))
   expect_equal(nrow(empty_seq_split), 3)
   expect_true(all(is.na(empty_seq_split$alt_normed[c(1, 3)])))
   expect_equal(nchar(empty_seq_split$alt_normed[2]), 0)
-  expect_equal(empty_seq_split$norm_status, c("RefOnly", "NullInput", "RefOnly"))
+  expect_equal(
+    empty_seq_split$norm_status,
+    c("RefOnly", "NullInput", "RefOnly")
+  )
   expect_equal(as.logical(empty_seq_split$normed), c(FALSE, NA, FALSE))
   expect_true(all(is.na(empty_seq_split$alt_index[c(1, 3)])))
   expect_equal(empty_seq_split$alt_index[2], 1)
 
-  empty_list_split <- rduckhts_bcftools_norm(con, "norm_empty_list", fasta_path, split_multiallelic = TRUE)
-  empty_list_split <- empty_list_split[order(empty_list_split$case_id), , drop = FALSE]
-  expect_equal(empty_list_split$case_id, c("empty_list", "null_item", "null_list"))
+  empty_list_split <- rduckhts_bcftools_norm(
+    con,
+    "norm_empty_list",
+    fasta_path,
+    split_multiallelic = TRUE
+  )
+  empty_list_split <- empty_list_split[
+    order(empty_list_split$case_id),
+    ,
+    drop = FALSE
+  ]
+  expect_equal(
+    empty_list_split$case_id,
+    c("empty_list", "null_item", "null_list")
+  )
   expect_equal(nrow(empty_list_split), 3)
   expect_true(all(is.na(empty_list_split$alt_normed)))
-  expect_equal(empty_list_split$norm_status, c("RefOnly", "NullInput", "RefOnly"))
+  expect_equal(
+    empty_list_split$norm_status,
+    c("RefOnly", "NullInput", "RefOnly")
+  )
   expect_equal(as.logical(empty_list_split$normed), c(FALSE, NA, FALSE))
   expect_true(all(is.na(empty_list_split$alt_index[c(1, 3)])))
   expect_equal(empty_list_split$alt_index[2], 1)
@@ -150,9 +191,23 @@ test_bcftools_norm <- function() {
   expect_true(out_spanning$normed[1])
   expect_equal(out_spanning$norm_status[1], "Normalized")
 
-  out_gvcf <- rduckhts_bcftools_norm(con, "norm_gvcf", fasta_path, end_pos_col = "end_pos")
+  out_gvcf <- rduckhts_bcftools_norm(
+    con,
+    "norm_gvcf",
+    fasta_path,
+    end_pos_col = "end_pos"
+  )
   out_gvcf <- out_gvcf[order(out_gvcf$case_id), , drop = FALSE]
-  expect_equal(out_gvcf$case_id, c("band_non_ref", "mixed_non_ref", "mixed_non_ref_band", "mixed_symbolic_star", "star_only"))
+  expect_equal(
+    out_gvcf$case_id,
+    c(
+      "band_non_ref",
+      "mixed_non_ref",
+      "mixed_non_ref_band",
+      "mixed_symbolic_star",
+      "star_only"
+    )
+  )
   expect_equal(out_gvcf$pos_normed, c(2, 1, 1, 1, 2))
   expect_equal(out_gvcf$end_pos_normed, c(6, 1, 6, 1, 2))
   expect_equal(out_gvcf$ref_normed, c("T", "G", "G", "G", "T"))
@@ -162,11 +217,32 @@ test_bcftools_norm <- function() {
   expect_equal(as.character(out_gvcf$alt_normed[[4]]), c("GT", "<*>"))
   expect_equal(as.character(out_gvcf$alt_normed[[5]]), "*")
   expect_equal(as.logical(out_gvcf$normed), c(FALSE, TRUE, TRUE, TRUE, NA))
-  expect_equal(out_gvcf$norm_status, c("GVCFReferenceBlock", "Normalized", "Normalized", "Normalized", "SpanningDeletion"))
+  expect_equal(
+    out_gvcf$norm_status,
+    c(
+      "GVCFReferenceBlock",
+      "Normalized",
+      "Normalized",
+      "Normalized",
+      "SpanningDeletion"
+    )
+  )
 
-  out_fast_path <- rduckhts_bcftools_norm(con, "norm_fast_path", fasta_path, end_pos_col = "end_pos")
+  out_fast_path <- rduckhts_bcftools_norm(
+    con,
+    "norm_fast_path",
+    fasta_path,
+    end_pos_col = "end_pos"
+  )
   out_fast_path <- out_fast_path[order(out_fast_path$case_id), , drop = FALSE]
-  expect_equal(out_fast_path$case_id, c("plain_mnv_left_trim", "plain_mnv_no_common_head", "plain_snv_explicit_end"))
+  expect_equal(
+    out_fast_path$case_id,
+    c(
+      "plain_mnv_left_trim",
+      "plain_mnv_no_common_head",
+      "plain_snv_explicit_end"
+    )
+  )
   expect_equal(out_fast_path$pos_normed, c(3, 2, 2))
   expect_equal(out_fast_path$end_pos_normed, c(3, 3, 2))
   expect_equal(out_fast_path$ref_normed, c("T", "TT", "T"))
@@ -174,15 +250,30 @@ test_bcftools_norm <- function() {
   expect_equal(as.character(out_fast_path$alt_normed[[2]]), "CC")
   expect_equal(as.character(out_fast_path$alt_normed[[3]]), "C")
   expect_equal(as.logical(out_fast_path$normed), c(TRUE, FALSE, FALSE))
-  expect_equal(out_fast_path$norm_status, c("Normalized", "Unchanged", "Unchanged"))
+  expect_equal(
+    out_fast_path$norm_status,
+    c("Normalized", "Unchanged", "Unchanged")
+  )
 
-  out_spanning_split <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path, split_multiallelic = TRUE)
-  out_spanning_split <- out_spanning_split[order(out_spanning_split$alt_index), , drop = FALSE]
+  out_spanning_split <- rduckhts_bcftools_norm(
+    con,
+    "norm_spanning",
+    fasta_path,
+    split_multiallelic = TRUE
+  )
+  out_spanning_split <- out_spanning_split[
+    order(out_spanning_split$alt_index),
+    ,
+    drop = FALSE
+  ]
   expect_equal(nrow(out_spanning_split), 2)
   expect_equal(out_spanning_split$alt_normed, c("*", "GT"))
   expect_equal(out_spanning_split$ref_normed, c("T", "G"))
   expect_equal(out_spanning_split$pos_normed, c(2, 1))
-  expect_equal(out_spanning_split$norm_status, c("SpanningDeletion", "Normalized"))
+  expect_equal(
+    out_spanning_split$norm_status,
+    c("SpanningDeletion", "Normalized")
+  )
   expect_equal(as.logical(out_spanning_split$normed), c(NA, TRUE))
   expect_equal(out_spanning_split$alt_index, c(1, 2))
 
@@ -414,12 +505,21 @@ test_bcftools_norm <- function() {
   plan_split_text <- paste(plan_split$explain_value, collapse = "\n")
   fixed_count <- function(pattern, text) {
     match_positions <- gregexpr(pattern, text, fixed = TRUE)[[1]]
-    if (length(match_positions) == 1L && match_positions[1] == -1L) 0L else length(match_positions)
+    if (length(match_positions) == 1L && match_positions[1] == -1L) {
+      0L
+    } else {
+      length(match_positions)
+    }
   }
   expect_equal(fixed_count("LEFT_DELIM_JOIN", plan_split_text), 1)
   expect_equal(fixed_count("bcftools_norm_row", plan_split_text), 1)
 
-  phased_fields_path <- system.file("extdata", "phased_genotype_fields.vcf", package = "Rduckhts", mustWork = TRUE)
+  phased_fields_path <- system.file(
+    "extdata",
+    "phased_genotype_fields.vcf",
+    package = "Rduckhts",
+    mustWork = TRUE
+  )
   quoted_phased <- DBI::dbQuoteString(con, phased_fields_path)
   phased_gt <- DBI::dbGetQuery(
     con,

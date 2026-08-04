@@ -2,13 +2,13 @@
 # the retained command-line adapter in tools/append_extension_metadata.R.
 
 duckhts_append_extension_metadata <- function(
-    library_file,
-    out_file,
-    extension_name = "duckhts",
-    duckdb_platform,
-    duckdb_version,
-    extension_version,
-    abi_type = "C_STRUCT"
+  library_file,
+  out_file,
+  extension_name = "duckhts",
+  duckdb_platform,
+  duckdb_version,
+  extension_version,
+  abi_type = "C_STRUCT"
 ) {
   required <- list(
     library_file = library_file,
@@ -19,9 +19,13 @@ duckhts_append_extension_metadata <- function(
     extension_version = extension_version,
     abi_type = abi_type
   )
-  missing <- names(required)[vapply(required, function(x) {
-    length(x) != 1L || is.na(x) || !nzchar(as.character(x))
-  }, logical(1))]
+  missing <- names(required)[vapply(
+    required,
+    function(x) {
+      length(x) != 1L || is.na(x) || !nzchar(as.character(x))
+    },
+    logical(1)
+  )]
   if (length(missing)) {
     stop(
       "Missing extension metadata value(s): ",

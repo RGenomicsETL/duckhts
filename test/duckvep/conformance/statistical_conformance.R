@@ -138,12 +138,15 @@ upper95 <- function(k, n) {
 
 con <- dbConnect(duckdb())
 spill_dir <- NULL
-on.exit({
-  try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
-  if (!is.null(spill_dir)) {
-    unlink(spill_dir, recursive = TRUE, force = TRUE)
-  }
-}, add = TRUE)
+on.exit(
+  {
+    try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+    if (!is.null(spill_dir)) {
+      unlink(spill_dir, recursive = TRUE, force = TRUE)
+    }
+  },
+  add = TRUE
+)
 sql_q <- function(x) as.character(dbQuoteString(con, x))
 spill_dir <- tempfile("duckvep-statistical-spill-")
 if (!dir.create(spill_dir)) {
@@ -254,7 +257,8 @@ if (isTRUE(opt$pair_level_input)) {
   ann_pairs_path <- file.path(spill_dir, "ann_pairs.parquet")
   invisible(dbExecute(
     con,
-    glue("COPY (
+    glue(
+      "COPY (
    SELECT
      source,
      any_value(corpus) AS corpus,
@@ -284,7 +288,8 @@ if (isTRUE(opt$pair_level_input)) {
    FROM ann
    LEFT JOIN LATERAL unnest(string_split(coalesce(consequence, ''), '&')) u(term) ON true
    GROUP BY source, variant_id, coalesce(tx, '')
-   ) TO {sql_q(ann_pairs_path)} (FORMAT parquet, COMPRESSION zstd)")
+   ) TO {sql_q(ann_pairs_path)} (FORMAT parquet, COMPRESSION zstd)"
+    )
   ))
   invisible(dbExecute(
     con,

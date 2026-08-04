@@ -17,7 +17,23 @@ test_variantkey_regionkey <- function() {
   )
   expect_equal(
     contig_keys$key,
-    c("1", "1", "MT", "MT", "MT", "MT", "X", "Y", "GL000220.1", "NC_000001.11", "23", "chr1", "chr", "", NA_character_)
+    c(
+      "1",
+      "1",
+      "MT",
+      "MT",
+      "MT",
+      "MT",
+      "X",
+      "Y",
+      "GL000220.1",
+      "NC_000001.11",
+      "23",
+      "chr1",
+      "chr",
+      "",
+      NA_character_
+    )
   )
 
   vkx <- dbGetQuery(

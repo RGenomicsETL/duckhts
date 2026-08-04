@@ -5,15 +5,56 @@ test_cgranges_api <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
 
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('r_idx') AS ok")$ok[1], TRUE)
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_idx', 'chr1', 10, 20) AS ok")$ok[1], TRUE)
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_idx', 'chr1', 30, 40) AS ok")$ok[1], TRUE)
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('r_idx') AS ok")$ok[1], TRUE)
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('r_idx') AS ok")$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_add('r_idx', 'chr1', 10, 20) AS ok"
+    )$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_add('r_idx', 'chr1', 30, 40) AS ok"
+    )$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('r_idx') AS ok")$ok[1],
+    TRUE
+  )
 
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('r_str_idx') AS ok")$ok[1], TRUE)
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_str_idx', 'chr1', 50, 60, 'alpha') AS ok")$ok[1], TRUE)
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('r_str_idx', 'chr1', 70, 80, 'beta') AS ok")$ok[1], TRUE)
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('r_str_idx') AS ok")$ok[1], TRUE)
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_create('r_str_idx') AS ok"
+    )$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_add('r_str_idx', 'chr1', 50, 60, 'alpha') AS ok"
+    )$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_add('r_str_idx', 'chr1', 70, 80, 'beta') AS ok"
+    )$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('r_str_idx') AS ok")$ok[
+      1
+    ],
+    TRUE
+  )
 
   hits <- DBI::dbGetQuery(
     con,
@@ -66,7 +107,12 @@ test_cgranges_api <- function() {
     )$ok[1],
     TRUE
   )
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('qry_idx') AS ok")$ok[1], TRUE)
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('qry_idx') AS ok")$ok[
+      1
+    ],
+    TRUE
+  )
 
   num_hits <- DBI::dbGetQuery(
     con,
@@ -203,20 +249,40 @@ test_cgranges_api <- function() {
   )
   expect_equal(bed_from_query_hits$interval_ordinal, c(0, 1))
   expect_equal(bed_from_query_hits$label, c(0, 1))
-  expect_equal(bed_from_query_hits$interval_chrom, c("CHROMOSOME_I", "CHROMOSOME_I"))
-
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('bed_provider_idx') AS ok")$ok[1], TRUE)
   expect_equal(
-    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_add('bed_provider_idx', 'CHROMOSOME_I', 5, 15) AS ok")$ok[1],
+    bed_from_query_hits$interval_chrom,
+    c("CHROMOSOME_I", "CHROMOSOME_I")
+  )
+
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_create('bed_provider_idx') AS ok"
+    )$ok[1],
     TRUE
   )
-  expect_equal(DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('bed_provider_idx') AS ok")$ok[1], TRUE)
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_add('bed_provider_idx', 'CHROMOSOME_I', 5, 15) AS ok"
+    )$ok[1],
+    TRUE
+  )
+  expect_equal(
+    DBI::dbGetQuery(
+      con,
+      "SELECT duckhts_cgranges_index('bed_provider_idx') AS ok"
+    )$ok[1],
+    TRUE
+  )
   bed_provider_hits <- DBI::dbGetQuery(
     con,
     paste(
       "SELECT count(*) AS overlapping_rows,",
       "  sum(duckhts_cgranges_count_overlaps('bed_provider_idx', chrom, start, \"end\"))::BIGINT AS total_hits",
-      "FROM read_bed(", DBI::dbQuoteString(con, bed_path), ")",
+      "FROM read_bed(",
+      DBI::dbQuoteString(con, bed_path),
+      ")",
       "WHERE duckhts_cgranges_has_overlap('bed_provider_idx', chrom, start, \"end\")"
     )
   )
@@ -228,7 +294,9 @@ test_cgranges_api <- function() {
     paste(
       "SELECT q.chrom, q.start, q.\"end\", hit.interval_ordinal, hit.label, hit.label_type,",
       "  hit.interval_start, hit.interval_end",
-      "FROM read_bed(", DBI::dbQuoteString(con, bed_path), ") AS q",
+      "FROM read_bed(",
+      DBI::dbQuoteString(con, bed_path),
+      ") AS q",
       "CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('bed_provider_idx', q.chrom, q.start, q.\"end\")) AS u(hit)",
       "ORDER BY q.chrom, q.start, hit.interval_ordinal"
     )
@@ -257,7 +325,10 @@ test_cgranges_api <- function() {
   expect_equal(nrow(bulk_hits), 3)
   expect_equal(bulk_hits$query_row_id, c(10, 20, 40))
   expect_equal(bulk_hits$interval_ordinal, c(0, 1, 1))
-  expect_equal(as.character(bulk_hits$label), c("11", NA_character_, NA_character_))
+  expect_equal(
+    as.character(bulk_hits$label),
+    c("11", NA_character_, NA_character_)
+  )
   expect_equal(bulk_hits$interval_start, c(100, 140, 140))
   expect_equal(bulk_hits$interval_end, c(120, 170, 170))
 
@@ -295,7 +366,10 @@ test_cgranges_api <- function() {
   expect_true(is.na(contain_hits$label[1]))
 
   expect_error(
-    DBI::dbGetQuery(con, "SELECT * FROM duckhts_cgranges_overlaps('missing', 'chr1', 1, 2)"),
+    DBI::dbGetQuery(
+      con,
+      "SELECT * FROM duckhts_cgranges_overlaps('missing', 'chr1', 1, 2)"
+    ),
     pattern = "unknown index name"
   )
 }

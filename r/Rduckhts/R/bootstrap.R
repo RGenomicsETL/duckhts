@@ -39,19 +39,31 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   src_dir <- file.path(repo_root, "src")
   source_manifest <- file.path(src_dir, "duckhts_sources.tsv")
   if (!file.exists(source_manifest)) {
-    stop("DuckHTS source manifest not found at: ", source_manifest, call. = FALSE)
+    stop(
+      "DuckHTS source manifest not found at: ",
+      source_manifest,
+      call. = FALSE
+    )
   }
   source_rows <- duckhts_read_source_manifest(source_manifest)
   source_rows <- source_rows[nzchar(source_rows$repo_path), , drop = FALSE]
   for (i in seq_len(nrow(source_rows))) {
     source_path <- file.path(repo_root, source_rows$repo_path[[i]])
     destination_path <- file.path(dest, source_rows$package_path[[i]])
-    dir.create(dirname(destination_path), recursive = TRUE, showWarnings = FALSE)
+    dir.create(
+      dirname(destination_path),
+      recursive = TRUE,
+      showWarnings = FALSE
+    )
     if (!file.copy(source_path, destination_path, overwrite = TRUE)) {
       stop("Failed to copy DuckHTS source: ", source_path, call. = FALSE)
     }
   }
-  file.copy(source_manifest, file.path(dest, "duckhts_sources.tsv"), overwrite = TRUE)
+  file.copy(
+    source_manifest,
+    file.path(dest, "duckhts_sources.tsv"),
+    overwrite = TRUE
+  )
 
   duckvep_dest <- file.path(dest, "duckvep")
   dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
@@ -87,7 +99,11 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     ),
     file.path(duckvep_kernel_dest, "src")
   )
-  message("  Copied ", nrow(source_rows), " C source files from the shared manifest")
+  message(
+    "  Copied ",
+    nrow(source_rows),
+    " C source files from the shared manifest"
+  )
 
   # Headers
   inc_dest <- file.path(dest, "include")
@@ -98,18 +114,38 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   file.copy(file.path(cgranges_dir, c("cgranges.h", "khash.h")), inc_dest)
   variantkey_inc_dest <- file.path(inc_dest, "variantkey")
   dir.create(variantkey_inc_dest, showWarnings = FALSE)
-  variantkey_dir <- file.path(repo_root, "third_party", "variantkey", "include", "variantkey")
+  variantkey_dir <- file.path(
+    repo_root,
+    "third_party",
+    "variantkey",
+    "include",
+    "variantkey"
+  )
   variantkey_files <- c("hex.h", "variantkey.h", "regionkey.h")
   file.copy(file.path(variantkey_dir, variantkey_files), variantkey_inc_dest)
-  message("  Copied ", length(inc_files) + 2L + length(variantkey_files), " header files")
+  message(
+    "  Copied ",
+    length(inc_files) + 2L + length(variantkey_files),
+    " header files"
+  )
 
   # Vendored read-only libBigWig sources and the upstream correctness fixture.
   libbigwig_src <- file.path(repo_root, "third_party", "libBigWig")
   libbigwig_dest <- file.path(dest, "libBigWig")
-  dir.create(file.path(libbigwig_dest, "test"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(
+    file.path(libbigwig_dest, "test"),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
   libbigwig_files <- c(
-    "LICENSE", "README.md", "SOURCE_URL", "COMMIT",
-    "bigWig.h", "bigWigIO.h", "bwCommon.h", "bwValues.h"
+    "LICENSE",
+    "README.md",
+    "SOURCE_URL",
+    "COMMIT",
+    "bigWig.h",
+    "bigWigIO.h",
+    "bwCommon.h",
+    "bwValues.h"
   )
   file.copy(file.path(libbigwig_src, libbigwig_files), libbigwig_dest)
   file.copy(
@@ -135,7 +171,12 @@ duckhts_bootstrap <- function(repo_root = NULL) {
   message("  Copied DuckDB C API headers")
 
   # Apply local patch(es) to C API headers for R package only
-  patch_file <- file.path(pkg_src_dir, "inst", "patches", "duckdb_capi_strict_prototypes.patch")
+  patch_file <- file.path(
+    pkg_src_dir,
+    "inst",
+    "patches",
+    "duckdb_capi_strict_prototypes.patch"
+  )
   if (file.exists(patch_file)) {
     message("  Applying DuckDB C API patch: ", patch_file)
     patch_status <- system2("patch", c("-p1", "-d", dest, "-i", patch_file))
@@ -163,18 +204,28 @@ duckhts_bootstrap <- function(repo_root = NULL) {
 
   render_script <- file.path(repo_root, "scripts", "render_function_catalog.py")
   if (!file.exists(render_script)) {
-    stop("Function catalog renderer not found at: ", render_script, call. = FALSE)
+    stop(
+      "Function catalog renderer not found at: ",
+      render_script,
+      call. = FALSE
+    )
   }
   python <- Sys.which("python3")
   if (!nzchar(python)) {
     python <- Sys.which("python")
   }
   if (!nzchar(python)) {
-    stop("python3/python is required to render the function catalog", call. = FALSE)
+    stop(
+      "python3/python is required to render the function catalog",
+      call. = FALSE
+    )
   }
   render_status <- system2(python, c(render_script, repo_root))
   if (!identical(render_status, 0L)) {
-    stop("Failed to render generated documentation assets from functions.yaml", call. = FALSE)
+    stop(
+      "Failed to render generated documentation assets from functions.yaml",
+      call. = FALSE
+    )
   }
   message("  Rendered generated documentation assets from functions.yaml")
 

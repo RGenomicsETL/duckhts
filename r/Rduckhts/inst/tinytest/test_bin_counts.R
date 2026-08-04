@@ -6,12 +6,25 @@ test_bin_counts <- function() {
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   mixed_bam <- system.file("extdata", "fixture_mixed.bam", package = "Rduckhts")
-  mixed_cram <- system.file("extdata", "fixture_mixed.cram", package = "Rduckhts")
+  mixed_cram <- system.file(
+    "extdata",
+    "fixture_mixed.cram",
+    package = "Rduckhts"
+  )
   fixture_ref <- system.file("extdata", "fixture_ref.fa", package = "Rduckhts")
-  unmapped_sam <- system.file("extdata", "fixture_unmapped.sam", package = "Rduckhts")
+  unmapped_sam <- system.file(
+    "extdata",
+    "fixture_unmapped.sam",
+    package = "Rduckhts"
+  )
 
   bins_none <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, rmdup = "none")
-  bins_streaming <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, rmdup = "streaming")
+  bins_streaming <- rduckhts_bam_bin_counts(
+    con,
+    mixed_bam,
+    5000,
+    rmdup = "streaming"
+  )
   bins_flag <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, rmdup = "flag")
 
   expect_equal(bins_none$bin_id, 0:9)
@@ -24,10 +37,20 @@ test_bin_counts <- function() {
   expect_equal(sum(bins_streaming$count_total), 5)
   expect_equal(sum(bins_flag$count_total), 8)
 
-  excl_dup <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, exclude_flags = 1024)
+  excl_dup <- rduckhts_bam_bin_counts(
+    con,
+    mixed_bam,
+    5000,
+    exclude_flags = 1024
+  )
   expect_equal(sum(excl_dup$count_total), 8)
 
-  read1_only <- rduckhts_bam_bin_counts(con, mixed_bam, 5000, require_flags = 64)
+  read1_only <- rduckhts_bam_bin_counts(
+    con,
+    mixed_bam,
+    5000,
+    require_flags = 64
+  )
   expect_equal(sum(read1_only$count_total), 4)
 
   mq_only <- rduckhts_bam_bin_counts(

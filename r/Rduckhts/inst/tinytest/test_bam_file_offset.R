@@ -28,7 +28,7 @@ test_file_offset <- function() {
   fo_type <- schema$column_type[col_names == "FILE_OFFSET"]
   expect_identical(fo_type, "UBIGINT", info = "FILE_OFFSET is UBIGINT")
 
-  sample_id_pos   <- which(col_names == "SAMPLE_ID")
+  sample_id_pos <- which(col_names == "SAMPLE_ID")
   file_offset_pos <- which(col_names == "FILE_OFFSET")
   expect_true(
     file_offset_pos == sample_id_pos + 1L,
@@ -42,9 +42,10 @@ test_file_offset <- function() {
   )$FILE_OFFSET
 
   expect_true(all(!is.na(offsets)), info = "FILE_OFFSET has no NAs")
-  expect_true(all(offsets > 0L),    info = "FILE_OFFSET values are positive")
+  expect_true(all(offsets > 0L), info = "FILE_OFFSET values are positive")
   expect_identical(
-    length(unique(offsets)), length(offsets),
+    length(unique(offsets)),
+    length(offsets),
     info = "FILE_OFFSET is unique per record (no two records share an offset)"
   )
   expect_true(
@@ -59,7 +60,10 @@ test_file_offset <- function() {
   # NOTE: window functions cannot be nested inside aggregate FILTER clauses in
   # DuckDB ("Binder Error: aggregate function calls cannot contain window
   # function calls"). Compute the window in a CTE first, then aggregate.
-  lag_q <- dbGetQuery(con, sprintf("
+  lag_q <- dbGetQuery(
+    con,
+    sprintf(
+      "
     WITH windowed AS (
       SELECT
         FILE_OFFSET,
@@ -71,13 +75,21 @@ test_file_offset <- function() {
       COUNT(DISTINCT FILE_OFFSET)::INTEGER                         AS distinct_offsets,
       COUNT(*) FILTER (WHERE prev_offset >= FILE_OFFSET)::INTEGER  AS order_violations
     FROM windowed
-  ", bam_path))
+  ",
+      bam_path
+    )
+  )
 
-  expect_identical(lag_q$total[1], lag_q$distinct_offsets[1],
-                   info = "no duplicate FILE_OFFSET values")
-  expect_identical(lag_q$order_violations[1], 0L,
-                   info = "no order violations: FILE_OFFSET strictly increases")
-
+  expect_identical(
+    lag_q$total[1],
+    lag_q$distinct_offsets[1],
+    info = "no duplicate FILE_OFFSET values"
+  )
+  expect_identical(
+    lag_q$order_violations[1],
+    0L,
+    info = "no order violations: FILE_OFFSET strictly increases"
+  )
 }
 
 test_file_offset()

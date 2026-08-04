@@ -8,10 +8,11 @@ duckvep_system2_quote <- function(value) {
 }
 
 duckvep_evidence_command <- function(
-    command,
-    args,
-    context,
-    env = character()) {
+  command,
+  args,
+  context,
+  env = character()
+) {
   value <- suppressWarnings(system2(
     command,
     duckvep_system2_quote(args),
@@ -22,7 +23,9 @@ duckvep_evidence_command <- function(
   status <- attr(value, "status")
   if (!is.null(status) && status != 0L) {
     detail <- paste(value, collapse = "\n")
-    if (nzchar(detail)) detail <- paste0(":\n", detail)
+    if (nzchar(detail)) {
+      detail <- paste0(":\n", detail)
+    }
     stop(paste0(context, detail), call. = FALSE)
   }
   value
@@ -47,28 +50,41 @@ duckvep_evidence_tracked_changes <- function(root) {
     c("-C", root, "status", "--porcelain=v1", "--untracked-files=no"),
     "cannot inspect DuckHTS tracked files"
   )
-  if (!length(value)) return(character())
+  if (!length(value)) {
+    return(character())
+  }
   sub("^.. ", "", value)
 }
 
 duckvep_evidence_repo_path <- function(root, path) {
-  if (!nzchar(path)) return("")
+  if (!nzchar(path)) {
+    return("")
+  }
   root <- normalizePath(root, mustWork = TRUE)
   path <- normalizePath(path, mustWork = FALSE)
   prefix <- paste0(root, .Platform$file.sep)
-  if (!startsWith(path, prefix)) return("")
+  if (!startsWith(path, prefix)) {
+    return("")
+  }
   substring(path, nchar(prefix) + 1L)
 }
 
 duckvep_evidence_assert_checkout <- function(
-    root,
-    revision = NULL,
-    allowed_outputs = character(),
-    context = "checked evidence") {
+  root,
+  revision = NULL,
+  allowed_outputs = character(),
+  context = "checked evidence"
+) {
   current <- duckvep_evidence_revision(root)
   if (!is.null(revision) && !identical(current, revision)) {
     stop(
-      paste0(context, " changed source revision from ", revision, " to ", current),
+      paste0(
+        context,
+        " changed source revision from ",
+        revision,
+        " to ",
+        current
+      ),
       call. = FALSE
     )
   }
@@ -95,8 +111,13 @@ duckvep_evidence_assert_checkout <- function(
 
 duckvep_evidence_file_state <- function(path) {
   info <- file.info(path)
-  if (nrow(info) != 1L || is.na(info$size) || is.na(info$mtime) ||
-      is.na(info$ctime) || isTRUE(info$isdir)) {
+  if (
+    nrow(info) != 1L ||
+      is.na(info$size) ||
+      is.na(info$mtime) ||
+      is.na(info$ctime) ||
+      isTRUE(info$isdir)
+  ) {
     stop(paste0("cannot identify regular artifact ", path), call. = FALSE)
   }
   c(
@@ -125,10 +146,11 @@ duckvep_evidence_sha256 <- function(path) {
 }
 
 duckvep_evidence_cache_info_path <- function(
-    cache_dir,
-    species,
-    cache_version,
-    assembly) {
+  cache_dir,
+  species,
+  cache_version,
+  assembly
+) {
   normalizePath(
     file.path(
       normalizePath(cache_dir, mustWork = TRUE),
@@ -141,10 +163,11 @@ duckvep_evidence_cache_info_path <- function(
 }
 
 duckvep_evidence_cache_leaf <- function(
-    cache_dir,
-    species,
-    cache_version,
-    assembly) {
+  cache_dir,
+  species,
+  cache_version,
+  assembly
+) {
   components <- c(
     species = species,
     cache_version = cache_version,
@@ -179,10 +202,11 @@ duckvep_evidence_sha256_lines <- function(lines) {
 }
 
 duckvep_evidence_cache_inventory <- function(
-    cache_dir,
-    species,
-    cache_version,
-    assembly) {
+  cache_dir,
+  species,
+  cache_version,
+  assembly
+) {
   leaf <- duckvep_evidence_cache_leaf(
     cache_dir,
     species,
@@ -221,8 +245,12 @@ duckvep_evidence_cache_inventory <- function(
     stop("VEP cache paths may not contain tabs or newlines", call. = FALSE)
   }
   info <- file.info(paths)
-  if (any(is.na(info$size)) || any(is.na(info$mtime)) ||
-      any(is.na(info$ctime)) || any(info$isdir)) {
+  if (
+    any(is.na(info$size)) ||
+      any(is.na(info$mtime)) ||
+      any(is.na(info$ctime)) ||
+      any(info$isdir)
+  ) {
     stop("cannot stat every VEP cache file", call. = FALSE)
   }
   size <- format(info$size, scientific = FALSE, trim = TRUE)
@@ -248,13 +276,22 @@ duckvep_evidence_read_cache_receipt <- function(path) {
     comment.char = "",
     stringsAsFactors = FALSE
   )
-  if (!nrow(values) || any(!nzchar(values$field)) || anyDuplicated(values$field)) {
+  if (
+    !nrow(values) || any(!nzchar(values$field)) || anyDuplicated(values$field)
+  ) {
     stop("invalid VEP cache receipt fields", call. = FALSE)
   }
   required <- c(
-    "schema_version", "species", "cache_version", "assembly",
-    "source_url", "source_identity", "cache_info_sha256",
-    "inventory_kind", "inventory_entries", "inventory_bytes",
+    "schema_version",
+    "species",
+    "cache_version",
+    "assembly",
+    "source_url",
+    "source_identity",
+    "cache_info_sha256",
+    "inventory_kind",
+    "inventory_entries",
+    "inventory_bytes",
     "inventory_sha256"
   )
   missing <- setdiff(required, values$field)
@@ -269,25 +306,28 @@ duckvep_evidence_read_cache_receipt <- function(path) {
 }
 
 duckvep_evidence_write_cache_receipt <- function(
-    path,
-    cache_dir,
-    species,
-    cache_version,
-    assembly,
-    source_url,
-    source_identity,
-    overwrite = FALSE) {
+  path,
+  cache_dir,
+  species,
+  cache_version,
+  assembly,
+  source_url,
+  source_identity,
+  overwrite = FALSE
+) {
   if (!grepl("^[A-Za-z][A-Za-z0-9+.-]*://[^\t\r\n]+$", source_url)) {
     stop("cache source_url must be an absolute URL", call. = FALSE)
   }
-  if (!grepl(
-    paste0(
-      "^(?:sha256:[0-9a-fA-F]{64}|md5:[0-9a-fA-F]{32}|",
-      "bsd-sum:[0-9]+:[0-9]+|http-etag:[0-9a-fA-F-]+:[0-9]+)$"
-    ),
-    source_identity,
-    perl = TRUE
-  )) {
+  if (
+    !grepl(
+      paste0(
+        "^(?:sha256:[0-9a-fA-F]{64}|md5:[0-9a-fA-F]{32}|",
+        "bsd-sum:[0-9]+:[0-9]+|http-etag:[0-9a-fA-F-]+:[0-9]+)$"
+      ),
+      source_identity,
+      perl = TRUE
+    )
+  ) {
     stop("invalid cache source_identity", call. = FALSE)
   }
   path <- normalizePath(path, mustWork = FALSE)
@@ -300,7 +340,10 @@ duckvep_evidence_write_cache_receipt <- function(
   path_key <- chartr("\\", "/", path)
   leaf_key <- paste0(chartr("\\", "/", leaf), "/")
   if (startsWith(path_key, leaf_key)) {
-    stop("cache receipt must live outside the inventoried cache leaf", call. = FALSE)
+    stop(
+      "cache receipt must live outside the inventoried cache leaf",
+      call. = FALSE
+    )
   }
   if (file.exists(path) && !isTRUE(overwrite)) {
     stop("cache receipt already exists: ", path, call. = FALSE)
@@ -341,16 +384,18 @@ duckvep_evidence_write_cache_receipt <- function(
 }
 
 duckvep_evidence_validate_cache_receipt <- function(
-    path,
-    cache_dir,
-    species,
-    cache_version,
-    assembly) {
+  path,
+  cache_dir,
+  species,
+  cache_version,
+  assembly
+) {
   fields <- duckvep_evidence_read_cache_receipt(path)
-  if (!grepl(
-        "^[A-Za-z][A-Za-z0-9+.-]*://[^\t\r\n]+$",
-        fields[["source_url"]]
-      ) ||
+  if (
+    !grepl(
+      "^[A-Za-z][A-Za-z0-9+.-]*://[^\t\r\n]+$",
+      fields[["source_url"]]
+    ) ||
       !grepl(
         paste0(
           "^(?:sha256:[0-9a-f]{64}|md5:[0-9a-f]{32}|",
@@ -358,7 +403,8 @@ duckvep_evidence_validate_cache_receipt <- function(
         ),
         fields[["source_identity"]],
         perl = TRUE
-      )) {
+      )
+  ) {
     stop("invalid VEP cache receipt source identity", call. = FALSE)
   }
   expected <- c(
@@ -423,10 +469,15 @@ duckvep_evidence_explicit_packages <- function(lines) {
       !startsWith(records, "#") &
       !startsWith(records, "List of packages in environment:")
   ]
-  if (length(records) && any(!grepl(
-    "^[A-Za-z][A-Za-z0-9+.-]*://",
-    records
-  ))) {
+  if (
+    length(records) &&
+      any(
+        !grepl(
+          "^[A-Za-z][A-Za-z0-9+.-]*://",
+          records
+        )
+      )
+  ) {
     stop("invalid non-URL record in explicit Conda package set", call. = FALSE)
   }
   sort(unique(records))
@@ -486,10 +537,11 @@ duckvep_evidence_untracked_build_inputs <- function(root) {
 }
 
 duckvep_evidence_build_extension <- function(
-    root,
-    extension,
-    revision,
-    allowed_outputs = character()) {
+  root,
+  extension,
+  revision,
+  allowed_outputs = character()
+) {
   expected <- normalizePath(
     file.path(root, "build", "release", "duckhts.duckdb_extension"),
     mustWork = FALSE
@@ -498,7 +550,8 @@ duckvep_evidence_build_extension <- function(
   if (!identical(requested, expected)) {
     stop(
       paste0(
-        "checked evidence must use the in-tree release extension: ", expected
+        "checked evidence must use the in-tree release extension: ",
+        expected
       ),
       call. = FALSE
     )
@@ -655,7 +708,10 @@ duckvep_evidence_build_extension <- function(
     "cannot recheck extension-ci-tools worktree"
   )
   if (length(extension_ci_status)) {
-    stop("extension-ci-tools worktree changed during release build", call. = FALSE)
+    stop(
+      "extension-ci-tools worktree changed during release build",
+      call. = FALSE
+    )
   }
   list(
     path = expected,
@@ -665,9 +721,10 @@ duckvep_evidence_build_extension <- function(
 }
 
 duckvep_evidence_write_extension_receipt <- function(
-    path,
-    source_revision,
-    extension) {
+  path,
+  source_revision,
+  extension
+) {
   if (!grepl("^[0-9a-f]{40}$", source_revision)) {
     stop("extension receipt needs a full Git object name", call. = FALSE)
   }
@@ -712,10 +769,11 @@ duckvep_evidence_write_extension_receipt <- function(
 }
 
 duckvep_evidence_read_extension_receipt <- function(
-    path,
-    root,
-    extension,
-    source_revision) {
+  path,
+  root,
+  extension,
+  source_revision
+) {
   path <- normalizePath(path, mustWork = TRUE)
   value <- utils::read.delim(
     path,
@@ -726,9 +784,11 @@ duckvep_evidence_read_extension_receipt <- function(
     stringsAsFactors = FALSE
   )
   fields <- c("source_revision", "path", "binding", "sha256")
-  if (!identical(names(value), c("field", "value")) ||
+  if (
+    !identical(names(value), c("field", "value")) ||
       nrow(value) != length(fields) ||
-      !identical(value$field, fields)) {
+      !identical(value$field, fields)
+  ) {
     stop("extension receipt has an invalid schema", call. = FALSE)
   }
   receipt <- stats::setNames(value$value, value$field)
@@ -742,12 +802,17 @@ duckvep_evidence_read_extension_receipt <- function(
   requested <- normalizePath(extension, mustWork = FALSE)
   recorded <- normalizePath(receipt[["path"]], mustWork = FALSE)
   if (!identical(requested, expected) || !identical(recorded, expected)) {
-    stop("extension receipt does not bind the in-tree release extension", call. = FALSE)
+    stop(
+      "extension receipt does not bind the in-tree release extension",
+      call. = FALSE
+    )
   }
-  if (!identical(
+  if (
+    !identical(
       receipt[["binding"]],
       "htslib_distclean_make_release"
-    )) {
+    )
+  ) {
     stop("extension receipt has an unsupported build binding", call. = FALSE)
   }
   observed_sha256 <- duckvep_evidence_sha256(expected)

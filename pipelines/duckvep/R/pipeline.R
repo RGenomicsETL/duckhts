@@ -7,12 +7,16 @@ duckvep_targets_bool <- function(value, field) {
 }
 
 duckvep_targets_path <- function(path, root) {
-  if (!nzchar(path) || identical(path, ":memory:")) return(path)
+  if (!nzchar(path) || identical(path, ":memory:")) {
+    return(path)
+  }
   path <- path.expand(path)
   absolute <- grepl("^/", path) ||
     grepl("^[A-Za-z]:[/\\\\]", path) ||
     grepl("^\\\\\\\\", path)
-  if (!absolute) path <- file.path(root, path)
+  if (!absolute) {
+    path <- file.path(root, path)
+  }
   duckvep_targets_canonical_path(path)
 }
 
@@ -24,13 +28,17 @@ duckvep_targets_canonical_path <- function(path) {
   absolute <- grepl("^/", path) ||
     grepl("^[A-Za-z]:[/\\\\]", path) ||
     grepl("^\\\\\\\\", path)
-  if (!absolute) path <- file.path(getwd(), path)
+  if (!absolute) {
+    path <- file.path(getwd(), path)
+  }
   path <- chartr("\\", "/", path)
   prefix <- if (grepl("^[A-Za-z]:/", path)) {
     substring(path, 1L, 3L)
   } else if (startsWith(path, "//")) {
     parts <- strsplit(substring(path, 3L), "/+", perl = TRUE)[[1L]]
-    if (length(parts) < 2L) stop("invalid UNC path: ", path, call. = FALSE)
+    if (length(parts) < 2L) {
+      stop("invalid UNC path: ", path, call. = FALSE)
+    }
     paste0("//", parts[[1L]], "/", parts[[2L]])
   } else {
     "/"
@@ -39,7 +47,9 @@ duckvep_targets_canonical_path <- function(path) {
   parts <- strsplit(remainder, "/+", perl = TRUE)[[1L]]
   current <- normalizePath(prefix, winslash = "/", mustWork = TRUE)
   for (part in parts) {
-    if (!nzchar(part) || identical(part, ".")) next
+    if (!nzchar(part) || identical(part, ".")) {
+      next
+    }
     if (identical(part, "..")) {
       current <- dirname(current)
     } else {
@@ -55,13 +65,14 @@ duckvep_targets_canonical_path <- function(path) {
 }
 
 duckvep_targets_read_campaigns <- function(
-    path,
-    root,
-    micromamba_default,
-    vep_prefix_default,
-    output_root,
-    extension_paths,
-    targets_store) {
+  path,
+  root,
+  micromamba_default,
+  vep_prefix_default,
+  output_root,
+  extension_paths,
+  targets_store
+) {
   value <- utils::read.delim(
     path,
     colClasses = "character",
@@ -71,26 +82,59 @@ duckvep_targets_read_campaigns <- function(
     stringsAsFactors = FALSE
   )
   allowed <- c(
-    "id", "enabled", "corpus", "event_mode", "vcf", "gff",
-    "gff_index_policy", "cache_dir",
-    "cache_info", "cache_receipt", "assembly", "species", "cache_version", "fasta",
-    "database", "model_sql", "model_name", "sample_per_shape",
-    "max_allele_length", "split_multiallelic", "stratify_raw_allele_length",
-    "seed", "chrom", "distance", "max_sv_size", "regulatory", "hgvs",
-    "fork", "vep_buffer_size", "vep_prefix", "micromamba",
-    "nmd_plugin_dir", "oracle_environment_receipt", "duckdb_memory_limit",
-    "duckdb_threads", "source_url", "source_version", "source_checksum"
+    "id",
+    "enabled",
+    "corpus",
+    "event_mode",
+    "vcf",
+    "gff",
+    "gff_index_policy",
+    "cache_dir",
+    "cache_info",
+    "cache_receipt",
+    "assembly",
+    "species",
+    "cache_version",
+    "fasta",
+    "database",
+    "model_sql",
+    "model_name",
+    "sample_per_shape",
+    "max_allele_length",
+    "split_multiallelic",
+    "stratify_raw_allele_length",
+    "seed",
+    "chrom",
+    "distance",
+    "max_sv_size",
+    "regulatory",
+    "hgvs",
+    "fork",
+    "vep_buffer_size",
+    "vep_prefix",
+    "micromamba",
+    "nmd_plugin_dir",
+    "oracle_environment_receipt",
+    "duckdb_memory_limit",
+    "duckdb_threads",
+    "source_url",
+    "source_version",
+    "source_checksum"
   )
   unknown <- setdiff(names(value), allowed)
   if (length(unknown)) {
-    stop("unknown campaign field(s): ", paste(unknown, collapse = ", "),
+    stop(
+      "unknown campaign field(s): ",
+      paste(unknown, collapse = ", "),
       call. = FALSE
     )
   }
   if (!("id" %in% names(value)) || !nrow(value)) {
     stop("campaign manifest needs at least one id", call. = FALSE)
   }
-  if (!("enabled" %in% names(value))) value$enabled <- "true"
+  if (!("enabled" %in% names(value))) {
+    value$enabled <- "true"
+  }
   enabled <- vapply(
     value$enabled,
     duckvep_targets_bool,
@@ -98,15 +142,27 @@ duckvep_targets_read_campaigns <- function(
     field = "enabled"
   )
   value <- value[enabled, , drop = FALSE]
-  if (!nrow(value)) stop("campaign manifest enables no campaigns", call. = FALSE)
-  if (any(!grepl("^[A-Za-z0-9][A-Za-z0-9_.-]*$", value$id)) ||
-      anyDuplicated(value$id)) {
+  if (!nrow(value)) {
+    stop("campaign manifest enables no campaigns", call. = FALSE)
+  }
+  if (
+    any(!grepl("^[A-Za-z0-9][A-Za-z0-9_.-]*$", value$id)) ||
+      anyDuplicated(value$id)
+  ) {
     stop("campaign ids must be unique path-safe identifiers", call. = FALSE)
   }
   path_fields <- intersect(
     c(
-      "vcf", "gff", "cache_dir", "cache_info", "cache_receipt", "fasta", "database",
-      "model_sql", "nmd_plugin_dir", "oracle_environment_receipt",
+      "vcf",
+      "gff",
+      "cache_dir",
+      "cache_info",
+      "cache_receipt",
+      "fasta",
+      "database",
+      "model_sql",
+      "nmd_plugin_dir",
+      "oracle_environment_receipt",
       "vep_prefix"
     ),
     names(value)
@@ -124,13 +180,17 @@ duckvep_targets_read_campaigns <- function(
     row <- lapply(row, function(item) item[[1L]])
     row <- row[nzchar(vapply(row, as.character, character(1L)))]
     micromamba <- row$micromamba %||% micromamba_default
-    if (!file.exists(micromamba) &&
-        !grepl("[/\\\\]", micromamba)) {
+    if (
+      !file.exists(micromamba) &&
+        !grepl("[/\\\\]", micromamba)
+    ) {
       micromamba <- unname(Sys.which(micromamba))
     } else {
       micromamba <- duckvep_targets_path(micromamba, root)
     }
-    if (!nzchar(micromamba)) stop("micromamba is unavailable", call. = FALSE)
+    if (!nzchar(micromamba)) {
+      stop("micromamba is unavailable", call. = FALSE)
+    }
     row$micromamba <- normalizePath(micromamba, mustWork = TRUE)
     vep_prefix <- row$vep_prefix %||% vep_prefix_default
     row$vep_prefix <- duckvep_targets_path(vep_prefix, root)
@@ -145,14 +205,18 @@ duckvep_targets_read_campaigns <- function(
       stop("campaigns must declare oracle_environment_receipt", call. = FALSE)
     }
     required <- c("corpus", "event_mode", "fasta", "model_name")
-    missing <- required[!nzchar(vapply(
-      required,
-      function(field) row[[field]] %||% "",
-      character(1L)
-    ))]
+    missing <- required[
+      !nzchar(vapply(
+        required,
+        function(field) row[[field]] %||% "",
+        character(1L)
+      ))
+    ]
     if (length(missing)) {
       stop(
-        "campaign ", row$id, " is missing field(s): ",
+        "campaign ",
+        row$id,
+        " is missing field(s): ",
         paste(missing, collapse = ", "),
         call. = FALSE
       )
@@ -167,7 +231,9 @@ duckvep_targets_read_campaigns <- function(
     )
     if (sum(model_paths) != 1L) {
       stop(
-        "campaign ", row$id, " needs exactly one of database or model_sql",
+        "campaign ",
+        row$id,
+        " needs exactly one of database or model_sql",
         call. = FALSE
       )
     }
@@ -195,7 +261,11 @@ duckvep_targets_source_revision <- function(root) {
   )
 }
 
-duckvep_targets_build_extension <- function(root, source_revision, receipt_path) {
+duckvep_targets_build_extension <- function(
+  root,
+  source_revision,
+  receipt_path
+) {
   environment <- new.env(parent = baseenv())
   sys.source(
     file.path(root, "scripts", "duckvep_evidence.R"),
@@ -223,7 +293,9 @@ duckvep_targets_build_extension <- function(root, source_revision, receipt_path)
 duckvep_targets_campaign_inputs <- function(campaign) {
   inputs <- character()
   add_file <- function(path, label) {
-    if (!nzchar(path) || identical(path, ":memory:")) return(invisible(NULL))
+    if (!nzchar(path) || identical(path, ":memory:")) {
+      return(invisible(NULL))
+    }
     if (!file.exists(path) || dir.exists(path)) {
       stop(label, " is not a file: ", path, call. = FALSE)
     }
@@ -265,9 +337,11 @@ duckvep_targets_campaign_inputs <- function(campaign) {
   if (nzchar(campaign$nmd_plugin_dir %||% "")) {
     add_file(file.path(campaign$nmd_plugin_dir, "NMD.pm"), "NMD plugin")
   }
-  if (nzchar(campaign$cache_dir %||% "") &&
+  if (
+    nzchar(campaign$cache_dir %||% "") &&
       (!nzchar(campaign$cache_info %||% "") ||
-        !nzchar(campaign$cache_receipt %||% ""))) {
+        !nzchar(campaign$cache_receipt %||% ""))
+  ) {
     stop(
       "cache-backed campaigns must declare cache_info and cache_receipt",
       call. = FALSE
@@ -295,7 +369,9 @@ duckvep_targets_campaign_inputs <- function(campaign) {
 }
 
 duckvep_targets_cache_state <- function(campaign) {
-  if (!nzchar(campaign$cache_dir %||% "")) return("gff")
+  if (!nzchar(campaign$cache_dir %||% "")) {
+    return("gff")
+  }
   state <- duckvep_evidence_validate_cache_receipt(
     campaign$cache_receipt,
     campaign$cache_dir,
@@ -347,11 +423,12 @@ duckvep_targets_campaign_outputs <- function(campaign, output_root) {
 }
 
 duckvep_targets_campaign_args <- function(
-    campaign,
-    extension,
-    extension_receipt,
-    outputs,
-    published_outputs = outputs) {
+  campaign,
+  extension,
+  extension_receipt,
+  outputs,
+  published_outputs = outputs
+) {
   values <- c(
     corpus = "corpus",
     event_mode = "event-mode",
@@ -407,19 +484,26 @@ duckvep_targets_campaign_args <- function(
   }
   c(
     arguments,
-    "--extension", extension,
-    "--extension-build-receipt", extension_receipt,
-    "--annotations-out", outputs[["annotations"]],
-    "--annotations-label", published_outputs[["annotations"]],
-    "--sample-vcf", outputs[["sample_vcf"]],
+    "--extension",
+    extension,
+    "--extension-build-receipt",
+    extension_receipt,
+    "--annotations-out",
+    outputs[["annotations"]],
+    "--annotations-label",
+    published_outputs[["annotations"]],
+    "--sample-vcf",
+    outputs[["sample_vcf"]],
     "--keep-sample-vcf",
     if ("eligibility" %in% names(outputs)) {
       c("--eligibility-out", outputs[["eligibility"]])
     },
     if ("hgvs_summary" %in% names(outputs)) {
       c(
-        "--hgvs-out", outputs[["hgvs_summary"]],
-        "--hgvs-pairs-out", outputs[["hgvs_pairs"]]
+        "--hgvs-out",
+        outputs[["hgvs_summary"]],
+        "--hgvs-pairs-out",
+        outputs[["hgvs_pairs"]]
       )
     }
   )
@@ -432,7 +516,10 @@ duckvep_targets_extension_paths <- function(extension_bundle) {
   )]
   receipt <- extension_bundle[endsWith(extension_bundle, "extension.tsv")]
   if (length(extension) != 1L || length(receipt) != 1L) {
-    stop("extension bundle must contain one extension and one receipt", call. = FALSE)
+    stop(
+      "extension bundle must contain one extension and one receipt",
+      call. = FALSE
+    )
   }
   list(extension = unname(extension), receipt = unname(receipt))
 }
@@ -449,12 +536,13 @@ duckvep_targets_path_within <- function(path, directory) {
 }
 
 duckvep_targets_attach_outputs <- function(
-    campaigns,
-    output_root,
-    campaign_manifest,
-    extension_bundle,
-    targets_store,
-    root) {
+  campaigns,
+  output_root,
+  campaign_manifest,
+  extension_bundle,
+  targets_store,
+  root
+) {
   outputs <- stats::setNames(
     lapply(
       campaigns,
@@ -486,11 +574,13 @@ duckvep_targets_attach_outputs <- function(
   campaign_directories <- unique(dirname(flat_outputs))
   enclosed_protected <- protected[vapply(
     protected,
-    function(path) any(vapply(
-      campaign_directories,
-      function(directory) duckvep_targets_path_within(path, directory),
-      logical(1L)
-    )),
+    function(path) {
+      any(vapply(
+        campaign_directories,
+        function(directory) duckvep_targets_path_within(path, directory),
+        logical(1L)
+      ))
+    },
     logical(1L)
   )]
   if (length(enclosed_protected)) {
@@ -506,17 +596,24 @@ duckvep_targets_attach_outputs <- function(
     "duckvep_targets",
     "results"
   )
-  if (duckvep_targets_path_within(output_root, root) &&
-      !duckvep_targets_path_within(output_root, allowed_repo_outputs)) {
+  if (
+    duckvep_targets_path_within(output_root, root) &&
+      !duckvep_targets_path_within(output_root, allowed_repo_outputs)
+  ) {
     stop(
       "DUCKVEP_TARGETS_OUTPUT may be outside the repository or below ",
       allowed_repo_outputs,
       call. = FALSE
     )
   }
-  if (duckvep_targets_path_within(output_root, targets_store) ||
-      duckvep_targets_path_within(targets_store, output_root)) {
-    stop("campaign output root and targets store must not overlap", call. = FALSE)
+  if (
+    duckvep_targets_path_within(output_root, targets_store) ||
+      duckvep_targets_path_within(targets_store, output_root)
+  ) {
+    stop(
+      "campaign output root and targets store must not overlap",
+      call. = FALSE
+    )
   }
   for (index in seq_along(campaigns)) {
     campaigns[[index]]$outputs <- outputs[[campaigns[[index]]$id]]
@@ -547,18 +644,20 @@ duckvep_targets_recover_campaign_directory <- function(final_directory) {
       call. = FALSE
     )
   }
-  if (!length(backups)) return(invisible(NULL))
+  if (!length(backups)) {
+    return(invisible(NULL))
+  }
   if (dir.exists(final_directory)) {
     unlink(backups, recursive = TRUE, force = TRUE)
     if (dir.exists(backups)) {
-      stop("cannot remove completed publication backup: ", backups,
+      stop(
+        "cannot remove completed publication backup: ",
+        backups,
         call. = FALSE
       )
     }
   } else if (!file.rename(backups, final_directory)) {
-    stop("cannot restore interrupted campaign output: ", backups,
-      call. = FALSE
-    )
+    stop("cannot restore interrupted campaign output: ", backups, call. = FALSE)
   }
   invisible(NULL)
 }
@@ -574,7 +673,8 @@ duckvep_targets_publish_outputs <- function(stage_directory, final_directory) {
   )
   had_previous <- dir.exists(final_directory)
   if (had_previous && !file.rename(final_directory, backup_directory)) {
-    stop("cannot stage previous campaign directory for replacement",
+    stop(
+      "cannot stage previous campaign directory for replacement",
       call. = FALSE
     )
   }
@@ -595,7 +695,9 @@ duckvep_targets_publish_outputs <- function(stage_directory, final_directory) {
   if (had_previous) {
     unlink(backup_directory, recursive = TRUE, force = TRUE)
     if (dir.exists(backup_directory)) {
-      stop("published output but cannot remove prior backup: ", backup_directory,
+      stop(
+        "published output but cannot remove prior backup: ",
+        backup_directory,
         call. = FALSE
       )
     }
@@ -604,13 +706,16 @@ duckvep_targets_publish_outputs <- function(stage_directory, final_directory) {
 }
 
 duckvep_targets_run_campaign <- function(
-    campaign,
-    campaign_inputs,
-    cache_state,
-    extension_bundle,
-    root) {
-  if (!requireNamespace("blit", quietly = TRUE) ||
-      utils::packageVersion("blit") < "0.2.0.9000") {
+  campaign,
+  campaign_inputs,
+  cache_state,
+  extension_bundle,
+  root
+) {
+  if (
+    !requireNamespace("blit", quietly = TRUE) ||
+      utils::packageVersion("blit") < "0.2.0.9000"
+  ) {
     stop("blit >= 0.2.0.9000 is required", call. = FALSE)
   }
   invisible(campaign_inputs)
@@ -619,7 +724,9 @@ duckvep_targets_run_campaign <- function(
   }
   extension_paths <- duckvep_targets_extension_paths(extension_bundle)
   outputs <- campaign$outputs
-  if (is.null(outputs)) stop("campaign has no validated outputs", call. = FALSE)
+  if (is.null(outputs)) {
+    stop("campaign has no validated outputs", call. = FALSE)
+  }
   directory <- dirname(outputs[[1L]])
   parent <- dirname(directory)
   dir.create(parent, recursive = TRUE, showWarnings = FALSE)
@@ -663,7 +770,9 @@ duckvep_targets_run_campaign <- function(
   ))
   if (status != 0L) {
     stop(
-      "DuckVEP campaign ", campaign$id, " failed; retained log: ",
+      "DuckVEP campaign ",
+      campaign$id,
+      " failed; retained log: ",
       staged_outputs[["log"]],
       call. = FALSE
     )
@@ -671,9 +780,12 @@ duckvep_targets_run_campaign <- function(
   missing <- staged_outputs[!file.exists(staged_outputs)]
   if (length(missing)) {
     stop(
-      "DuckVEP campaign ", campaign$id, " omitted output(s): ",
+      "DuckVEP campaign ",
+      campaign$id,
+      " omitted output(s): ",
       paste(names(missing), collapse = ", "),
-      "; retained run directory: ", stage_directory,
+      "; retained run directory: ",
+      stage_directory,
       call. = FALSE
     )
   }

@@ -13,28 +13,45 @@ test_liftover_stress <- function() {
   dst_fa <- file.path(tmp_dir, "liftover_dst.fa")
   chain_path <- file.path(tmp_dir, "liftover.chain")
 
-  writeLines(c(
-    ">chrF",
-    "ACGTACGTAA",
-    ">chrR",
-    "AACCGGTTAA"
-  ), src_fa)
-  writeLines(c(
-    ">chrLiftF",
-    "ACGTACGTAA",
-    ">chrLiftR",
-    "TTAACCGGTT"
-  ), dst_fa)
-  writeLines(c(
-    "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
-    "10",
-    "",
-    "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
-    "10"
-  ), chain_path)
+  writeLines(
+    c(
+      ">chrF",
+      "ACGTACGTAA",
+      ">chrR",
+      "AACCGGTTAA"
+    ),
+    src_fa
+  )
+  writeLines(
+    c(
+      ">chrLiftF",
+      "ACGTACGTAA",
+      ">chrLiftR",
+      "TTAACCGGTT"
+    ),
+    dst_fa
+  )
+  writeLines(
+    c(
+      "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
+      "10",
+      "",
+      "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
+      "10"
+    ),
+    chain_path
+  )
 
-  expect_true(rduckhts_fasta_index(con, src_fa, index_path = paste0(src_fa, ".fai"))$success[1])
-  expect_true(rduckhts_fasta_index(con, dst_fa, index_path = paste0(dst_fa, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    src_fa,
+    index_path = paste0(src_fa, ".fai")
+  )$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    dst_fa,
+    index_path = paste0(dst_fa, ".fai")
+  )$success[1])
 
   expect_silent(dbExecute(
     con,

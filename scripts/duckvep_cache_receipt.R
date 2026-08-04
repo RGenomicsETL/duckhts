@@ -31,19 +31,25 @@ parser <- add_option(
 options <- parse_args(parser)
 
 required <- c(
-  "cache_dir", "species", "cache_version", "assembly",
-  "source_url", "source_identity", "output"
+  "cache_dir",
+  "species",
+  "cache_version",
+  "assembly",
+  "source_url",
+  "source_identity",
+  "output"
 )
-missing <- required[!nzchar(vapply(
-  required,
-  function(field) options[[field]] %||% "",
-  character(1L)
-))]
+missing <- required[
+  !nzchar(vapply(
+    required,
+    function(field) options[[field]] %||% "",
+    character(1L)
+  ))
+]
 if (length(missing)) {
   stop(
-    "missing option(s): ", paste(paste0("--", gsub("_", "-", missing)),
-      collapse = ", "
-    ),
+    "missing option(s): ",
+    paste(paste0("--", gsub("_", "-", missing)), collapse = ", "),
     call. = FALSE
   )
 }
@@ -66,9 +72,17 @@ validated <- duckvep_evidence_validate_cache_receipt(
   options$assembly
 )
 cat(
-  "receipt=", path, "\n",
-  "entries=", validated$entries, "\n",
-  "bytes=", validated$bytes, "\n",
-  "inventory_sha256=", validated$inventory_sha256, "\n",
+  "receipt=",
+  path,
+  "\n",
+  "entries=",
+  validated$entries,
+  "\n",
+  "bytes=",
+  validated$bytes,
+  "\n",
+  "inventory_sha256=",
+  validated$inventory_sha256,
+  "\n",
   sep = ""
 )

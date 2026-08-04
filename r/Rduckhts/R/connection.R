@@ -52,8 +52,12 @@ rduckhts_connect <- function(
   if (!is.list(config)) {
     stop("config must be a named list", call. = FALSE)
   }
-  if (length(config) > 0L &&
-      (is.null(names(config)) || anyNA(names(config)) || any(!nzchar(names(config))))) {
+  if (
+    length(config) > 0L &&
+      (is.null(names(config)) ||
+        anyNA(names(config)) ||
+        any(!nzchar(names(config))))
+  ) {
     stop("config must be a named list", call. = FALSE)
   }
 
@@ -103,14 +107,17 @@ rduckhts_connect <- function(
 
   con <- NULL
   loaded <- FALSE
-  on.exit({
-    if (!loaded) {
-      if (!is.null(con)) {
-        try(DBI::dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+  on.exit(
+    {
+      if (!loaded) {
+        if (!is.null(con)) {
+          try(DBI::dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+        }
+        try(duckdb::duckdb_shutdown(drv), silent = TRUE)
       }
-      try(duckdb::duckdb_shutdown(drv), silent = TRUE)
-    }
-  }, add = TRUE)
+    },
+    add = TRUE
+  )
   con <- DBI::dbConnect(drv)
   rduckhts_load(con, extension_path = extension_path)
   loaded <- TRUE
