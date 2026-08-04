@@ -11,6 +11,10 @@
   prevents configure-built DuckHTS and htslib artifacts from being treated as
   architecture-independent and reused across Linux, macOS, or Windows targets
 
+- validate R-universe binary packages against both their `Built` field and
+  bundled DuckDB extension footer, preventing a package built for one target
+  from being published under another architecture
+
 # Rduckhts 1.5.1-0.1.4
 - declare `NeedsCompilation: yes` because package configuration compiles
   target-specific DuckHTS and htslib artifacts outside the conventional R
