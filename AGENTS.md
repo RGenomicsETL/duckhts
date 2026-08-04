@@ -123,7 +123,7 @@ THREADS=4 make test
 
 Additional R package rules:
 - **Never** run `R CMD INSTALL .` from `r/Rduckhts/` — it mutates `inst/duckhts_extension/htslib` in place. Always build a tarball and install the tarball.
-- When new source files are added under `src/`, update `CMakeLists.txt`, `r/Rduckhts/R/bootstrap.R`, `r/Rduckhts/configure`, and `r/Rduckhts/configure.win`.
+- When new extension translation units are added, update `src/duckhts_sources.tsv`; CMake, R bootstrap, and Unix/Windows package configure consume that manifest.
 - Version scheme: `duckhtsVersion-x` (for example `1.1.5-0.0.1`).
 - All R changes must maintain CRAN compatibility.
 - A new public function is incomplete until its C source is wired through both the extension build and the R package build on Unix and Windows.

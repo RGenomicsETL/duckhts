@@ -54,6 +54,12 @@ clean:
 	rm -f inst/extdata/*.duckdb_extension*
 	rm -f inst/extdata/*.tmp
 	rm -f inst/extdata/*.raw
+	# Configure outputs belong to the extracted install tree, not the source tree.
+	rm -rf inst/duckhts_extension/build
+	rm -rf inst/duckhts_extension/htslib/include
+	rm -rf inst/duckhts_extension/htslib/lib
+	rm -rf inst/duckhts_extension/htslib/libexec
+	rm -f inst/htslib_config.R
 
 # Prepare for CRAN submission
 .PHONY: cran-ready

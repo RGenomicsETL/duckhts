@@ -75,65 +75,25 @@ option(DUCKHTS_STRICT_WARNINGS
        ON)
 
 # Create Extension library
-set(EXTENSION_SOURCES
-        src/duckhts.c
-        src/simd/duckhts_simd_dispatch.c
-        src/simd/duckhts_simd_scalar.c
-        src/simd/duckhts_simd_avx2.c
-        src/simd/duckhts_simd_avx512.c
-        src/simd/duckhts_simd_neon.c
-        src/simd/duckhts_simd_wasm_simd128.c
-        src/bcf_reader.c
-        src/bam_reader.c
-        src/bam_pileup.c
-        src/bgzip.c
-        src/hts_index_builder.c
-        src/liftover_udf.c
-        src/bcftools_norm_udf.c
-        src/munge_udf.c
-        src/seq_reader.c
-        src/fastq_qc.c
-        src/interval_udf.c
-        src/bigwig_reader.c
-        src/libbigwig_hfile_io.c
-        src/kmer_udf.c
-        src/tabix_reader.c
-        src/vep_parser.c
-        src/duckvep/kernel/src/duckvep_kernel.c
-        src/duckvep/kernel/src/duckvep_so.c
-        src/duckvep/kernel/src/duckvep_sweep.c
-        src/duckvep/kernel/src/duckvep_classify.c
-        src/duckvep/kernel/src/duckvep_effect.c
-        src/duckvep/kernel/src/duckvep_sv.c
-        src/duckvep/kernel/src/duckvep_delta.c
-        src/duckvep/kernel/src/duckvep_projection.c
-        src/duckvep/kernel/src/duckvep_transcript_edit.c
-        src/duckvep/kernel/src/duckvep_hgvs.c
-        src/duckvep/kernel/src/duckvep_codon.c
-        src/duckvep/kernel/src/duckvep_coding.c
-        src/duckvep/kernel/src/duckvep_haplotype.c
-        src/duckvep/duckvep_variant_tile.c
-        src/duckvep/duckvep_model.c
-        src/duckvep/duckvep_annotate.c
-        src/duckvep/duckvep_ensembl.c
-        src/duckvep/duckvep_sql.c
-        src/hts_meta_reader.c
-        src/quality_encoding.c
-        src/quality_encoding_reader.c
-        src/score_udf.c
-        src/mosdepth_table.c
-        src/bam_bin_counts.c
-        src/samtools_idxstats_table.c
-        src/bam_bed_coverage.c
-        src/cgranges_api.c
-        src/variantkey_udf.c
-        third_party/cgranges/cgranges.c
-        third_party/libBigWig/bwRead.c
-        third_party/libBigWig/bwValues.c
-        src/bcftools_filter.c
-        src/bcftools_shim.c
-        src/wasm_http_hfile.c
-)
+set(DUCKHTS_SOURCE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/src/duckhts_sources.tsv")
+if(NOT EXISTS "${DUCKHTS_SOURCE_MANIFEST}")
+    message(FATAL_ERROR "DuckHTS source manifest not found: ${DUCKHTS_SOURCE_MANIFEST}")
+endif()
+file(STRINGS "${DUCKHTS_SOURCE_MANIFEST}" DUCKHTS_SOURCE_ROWS)
+set(EXTENSION_SOURCES)
+foreach(row IN LISTS DUCKHTS_SOURCE_ROWS)
+    string(REPLACE "|" ";" fields "${row}")
+    list(LENGTH fields field_count)
+    if(field_count LESS 1)
+        continue()
+    endif()
+    list(GET fields 0 repo_source)
+    set(repo_source_path "${CMAKE_CURRENT_SOURCE_DIR}/${repo_source}")
+    if(NOT EXISTS "${repo_source_path}")
+        message(FATAL_ERROR "DuckHTS source manifest names missing source: ${repo_source}")
+    endif()
+    list(APPEND EXTENSION_SOURCES "${repo_source_path}")
+endforeach()
 
 if (DUCKDB_WASM_EXTENSION)
 	# Keep SIMD128 specific to the DuckDB-Wasm runtime.  webR and native builds

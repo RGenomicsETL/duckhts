@@ -10,6 +10,7 @@ if (length(args) < 1) {
 repo_root <- args[1]
 
 # Source the function directly (package may not be installed yet)
+source(file.path("R", "source_manifest.R"))
 source(file.path("R", "bootstrap.R"))
 
 duckhts_bootstrap(repo_root = repo_root)
