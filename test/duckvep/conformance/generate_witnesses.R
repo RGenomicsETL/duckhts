@@ -105,7 +105,9 @@ if (opt$random_cases < 0L) {
   die("--random-cases must be non-negative")
 }
 if (opt$max_random_length < 1L || opt$max_random_length > 65534L) {
-  die("--max-random-length must be between 1 and 65534 (the uint16 allele limit minus its VCF anchor)")
+  die(
+    "--max-random-length must be between 1 and 65534 (the uint16 allele limit minus its VCF anchor)"
+  )
 }
 
 con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
@@ -229,12 +231,16 @@ w_alt <- character(witness_capacity)
 w_class <- character(witness_capacity)
 w_shape <- character(witness_capacity)
 grow_witnesses <- function(need) {
-  if (need <= witness_capacity) return(invisible(NULL))
+  if (need <= witness_capacity) {
+    return(invisible(NULL))
+  }
   next_capacity <- min(
     .Machine$integer.max,
     max(as.double(need), as.double(witness_capacity) * 2)
   )
-  if (next_capacity < need) die("too many witnesses for an R vector")
+  if (next_capacity < need) {
+    die("too many witnesses for an R vector")
+  }
   witness_capacity <<- as.integer(next_capacity)
   length(w_pos) <<- witness_capacity
   length(w_ref) <<- witness_capacity
@@ -606,7 +612,10 @@ if (opt$random_cases > 0L) {
   seen <- new.env(hash = TRUE, parent = emptyenv())
   fixed_rows <- seq_len(witness_count)
   fixed_keys <- paste(
-    w_pos[fixed_rows], w_ref[fixed_rows], w_alt[fixed_rows], sep = ":"
+    w_pos[fixed_rows],
+    w_ref[fixed_rows],
+    w_alt[fixed_rows],
+    sep = ":"
   )
   for (key in fixed_keys) {
     assign(key, TRUE, envir = seen)
@@ -728,42 +737,60 @@ if (opt$check) {
   )
   if (chrom == "chrDuck" && opt$tx == "DUCK1-201") {
     stopifnot(
-      "missing stop-gained-only predicate witness" =
-        any(w$shape == "predicate_window_stop_gained_only"),
-      "missing in-frame-and-stop predicate witness" =
-        any(w$shape == "predicate_window_inframe_stop_gained"),
-      "missing intron-cache ALT-overhang witness" =
-        any(w$shape == "intron_cache_alt_overhang"),
-      "missing intron-cache flank boundary witness" =
-        any(w$shape == "intron_cache_outside_flank"),
-      "missing terminal-CDS mapping control" =
-        any(w$shape == "terminal_cds_mapping_control"),
-      "missing terminal-CDS mapper-gap witness" =
-        any(w$shape == "terminal_cds_mapping_gap"),
-      "missing length-changing coding mapper-gap witness" =
-        any(w$shape == "length_change_mapper_gap_coding_unknown"),
-      "missing length-changing stop mapper-gap witness" =
-        any(w$shape == "length_change_mapper_gap_stop_retained"),
-      "missing complete-feature start witness" =
-        any(w$shape == "feature_window_start_retained"),
-      "missing minimized start control" =
-        any(w$shape == "feature_window_start_control"),
-      "missing complete-feature retained-stop witness" =
-        any(w$shape == "feature_window_stop_retained"),
-      "missing changed-stop-index witness" =
-        any(w$shape == "feature_window_stop_index_changed"),
-      "missing minimized terminal missense control" =
-        any(w$pos == 237L & w$ref == "G" & w$alt == "T"),
-      "missing minimized terminal stop-gained control" =
-        any(w$pos == 237L & w$ref == "G" & w$alt == "A"),
-      "missing length-changing start/stop witness" =
-        any(w$shape == "length_change_start_and_stop"),
-      "missing shortening protein/stop witness" =
-        any(w$shape == "length_change_protein_and_stop"),
-      "missing terminal shortfall witness" =
-        any(w$shape == "length_change_frameshift_and_stop_lost"),
-      "missing deletion/stop witness" =
-        any(w$shape == "length_change_inframe_deletion_and_stop")
+      "missing stop-gained-only predicate witness" = any(
+        w$shape == "predicate_window_stop_gained_only"
+      ),
+      "missing in-frame-and-stop predicate witness" = any(
+        w$shape == "predicate_window_inframe_stop_gained"
+      ),
+      "missing intron-cache ALT-overhang witness" = any(
+        w$shape == "intron_cache_alt_overhang"
+      ),
+      "missing intron-cache flank boundary witness" = any(
+        w$shape == "intron_cache_outside_flank"
+      ),
+      "missing terminal-CDS mapping control" = any(
+        w$shape == "terminal_cds_mapping_control"
+      ),
+      "missing terminal-CDS mapper-gap witness" = any(
+        w$shape == "terminal_cds_mapping_gap"
+      ),
+      "missing length-changing coding mapper-gap witness" = any(
+        w$shape == "length_change_mapper_gap_coding_unknown"
+      ),
+      "missing length-changing stop mapper-gap witness" = any(
+        w$shape == "length_change_mapper_gap_stop_retained"
+      ),
+      "missing complete-feature start witness" = any(
+        w$shape == "feature_window_start_retained"
+      ),
+      "missing minimized start control" = any(
+        w$shape == "feature_window_start_control"
+      ),
+      "missing complete-feature retained-stop witness" = any(
+        w$shape == "feature_window_stop_retained"
+      ),
+      "missing changed-stop-index witness" = any(
+        w$shape == "feature_window_stop_index_changed"
+      ),
+      "missing minimized terminal missense control" = any(
+        w$pos == 237L & w$ref == "G" & w$alt == "T"
+      ),
+      "missing minimized terminal stop-gained control" = any(
+        w$pos == 237L & w$ref == "G" & w$alt == "A"
+      ),
+      "missing length-changing start/stop witness" = any(
+        w$shape == "length_change_start_and_stop"
+      ),
+      "missing shortening protein/stop witness" = any(
+        w$shape == "length_change_protein_and_stop"
+      ),
+      "missing terminal shortfall witness" = any(
+        w$shape == "length_change_frameshift_and_stop_lost"
+      ),
+      "missing deletion/stop witness" = any(
+        w$shape == "length_change_inframe_deletion_and_stop"
+      )
     )
   }
   cat(glue(

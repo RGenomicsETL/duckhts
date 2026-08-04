@@ -11,10 +11,17 @@ test_interval_readers <- function() {
 
   expect_true(file.exists(fasta_path))
   expect_true(file.exists(bed_path))
-  expect_true(rduckhts_fasta_index(con, fasta_path, index_path = fasta_index_path)$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    fasta_path,
+    index_path = fasta_index_path
+  )$success[1])
 
   expect_silent(rduckhts_bed(con, "targets", bed_path, overwrite = TRUE))
-  expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM targets")$n[1], 4)
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT count(*) AS n FROM targets")$n[1],
+    4
+  )
 
   typed_row <- DBI::dbGetQuery(
     con,
@@ -32,7 +39,12 @@ test_interval_readers <- function() {
   expect_equal(typed_row$thick_start[1], 0)
   expect_equal(typed_row$block_count[1], 2)
 
-  nuc <- rduckhts_fasta_nuc(con, fasta_path, bed_path = bed_path, index_path = fasta_index_path)
+  nuc <- rduckhts_fasta_nuc(
+    con,
+    fasta_path,
+    bed_path = bed_path,
+    index_path = fasta_index_path
+  )
   first_nuc <- nuc[nuc$chrom == "CHROMOSOME_I" & nuc$start == 0, , drop = FALSE]
   expect_equal(nrow(first_nuc), 1)
   expect_equal(first_nuc$pct_at[1], 0.4)
@@ -60,7 +72,11 @@ test_interval_readers <- function() {
     index_path = fasta_index_path,
     include_seq = TRUE
   )
-  first_seq <- seq_nuc[seq_nuc$chrom == "CHROMOSOME_I" & seq_nuc$start == 0, "seq", drop = TRUE]
+  first_seq <- seq_nuc[
+    seq_nuc$chrom == "CHROMOSOME_I" & seq_nuc$start == 0,
+    "seq",
+    drop = TRUE
+  ]
   expect_equal(first_seq[1], "GCCTAAGCCT")
 
   n_fasta_path <- system.file("extdata", "nuc_with_n.fa", package = "Rduckhts")
@@ -68,9 +84,18 @@ test_interval_readers <- function() {
   n_fasta_index_path <- tempfile("duckhts_nuc_n_", fileext = ".fai")
   expect_true(file.exists(n_fasta_path))
   expect_true(file.exists(n_bed_path))
-  expect_true(rduckhts_fasta_index(con, n_fasta_path, index_path = n_fasta_index_path)$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    n_fasta_path,
+    index_path = n_fasta_index_path
+  )$success[1])
 
-  n_nuc <- rduckhts_fasta_nuc(con, n_fasta_path, bed_path = n_bed_path, index_path = n_fasta_index_path)
+  n_nuc <- rduckhts_fasta_nuc(
+    con,
+    n_fasta_path,
+    bed_path = n_bed_path,
+    index_path = n_fasta_index_path
+  )
   expect_equal(n_nuc$pct_at[1], 2 / 6)
   expect_equal(n_nuc$pct_gc[1], 4 / 6)
   expect_equal(n_nuc$num_a[1], 1)
@@ -90,15 +115,34 @@ test_interval_readers <- function() {
     keep = TRUE,
     overwrite = TRUE
   )$success[1])
-  expect_true(rduckhts_tabix_index(con, gz_path, preset = "bed", index_path = tbi_path, threads = 1)$success[1])
-  expect_silent(rduckhts_bed(con, "targets_idx", gz_path, region = "CHROMOSOME_I:1-20", index_path = tbi_path, overwrite = TRUE))
-  expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM targets_idx")$n[1], 2)
-
-  bed_count_only <- DBI::dbGetQuery(con, sprintf(
-    "SELECT COUNT(*) AS n FROM read_bed('%s', index_path := '%s')",
+  expect_true(rduckhts_tabix_index(
+    con,
     gz_path,
-    tbi_path
+    preset = "bed",
+    index_path = tbi_path,
+    threads = 1
+  )$success[1])
+  expect_silent(rduckhts_bed(
+    con,
+    "targets_idx",
+    gz_path,
+    region = "CHROMOSOME_I:1-20",
+    index_path = tbi_path,
+    overwrite = TRUE
   ))
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT count(*) AS n FROM targets_idx")$n[1],
+    2
+  )
+
+  bed_count_only <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT COUNT(*) AS n FROM read_bed('%s', index_path := '%s')",
+      gz_path,
+      tbi_path
+    )
+  )
   expect_equal(bed_count_only$n[1], 4)
 }
 

@@ -48,7 +48,10 @@ rduckhts_simd_backend <- function(con) {
 #' @rdname rduckhts_simd_backend
 #' @export
 rduckhts_simd_requested_backend <- function(con) {
-  out <- DBI::dbGetQuery(con, "SELECT duckhts_simd_requested_backend() AS backend")
+  out <- DBI::dbGetQuery(
+    con,
+    "SELECT duckhts_simd_requested_backend() AS backend"
+  )
   out$backend[[1]]
 }
 
@@ -58,7 +61,10 @@ rduckhts_simd_backend_compiled <- function(con, backend) {
   backend <- .simd_backend_arg(backend)
   out <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT duckhts_simd_backend_compiled(%s) AS compiled", sql_quote_string(backend))
+    sprintf(
+      "SELECT duckhts_simd_backend_compiled(%s) AS compiled",
+      sql_quote_string(backend)
+    )
   )
   isTRUE(out$compiled[[1]])
 }
@@ -69,7 +75,10 @@ rduckhts_simd_backend_cpu_supported <- function(con, backend) {
   backend <- .simd_backend_arg(backend)
   out <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT duckhts_simd_backend_cpu_supported(%s) AS supported", sql_quote_string(backend))
+    sprintf(
+      "SELECT duckhts_simd_backend_cpu_supported(%s) AS supported",
+      sql_quote_string(backend)
+    )
   )
   isTRUE(out$supported[[1]])
 }
@@ -80,7 +89,10 @@ rduckhts_simd_backend_available <- function(con, backend) {
   backend <- .simd_backend_arg(backend)
   out <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT duckhts_simd_backend_available(%s) AS available", sql_quote_string(backend))
+    sprintf(
+      "SELECT duckhts_simd_backend_available(%s) AS available",
+      sql_quote_string(backend)
+    )
   )
   isTRUE(out$available[[1]])
 }
@@ -103,7 +115,10 @@ rduckhts_simd_set_backend <- function(con, backend = "auto") {
   backend <- .simd_backend_arg(backend)
   out <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT backend FROM duckhts_simd_set_backend(%s)", sql_quote_string(backend))
+    sprintf(
+      "SELECT backend FROM duckhts_simd_set_backend(%s)",
+      sql_quote_string(backend)
+    )
   )
   out$backend[[1]]
 }

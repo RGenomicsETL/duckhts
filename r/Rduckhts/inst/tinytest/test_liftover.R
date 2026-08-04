@@ -12,46 +12,80 @@ test_liftover <- function() {
   dst_fa <- file.path(tmp_dir, "liftover_dst.fa")
   chain_path <- file.path(tmp_dir, "liftover.chain")
 
-  writeLines(c(
-    ">chrF",
-    "ACGTACGTAA",
-    ">chrR",
-    "AACCGGTTAA"
-  ), src_fa)
-  writeLines(c(
-    ">chrLiftF",
-    "ACGTACGTAA",
-    ">chrLiftR",
-    "TTAACCGGTT"
-  ), dst_fa)
-  writeLines(c(
-    "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
-    "10",
-    "",
-    "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
-    "10"
-  ), chain_path)
+  writeLines(
+    c(
+      ">chrF",
+      "ACGTACGTAA",
+      ">chrR",
+      "AACCGGTTAA"
+    ),
+    src_fa
+  )
+  writeLines(
+    c(
+      ">chrLiftF",
+      "ACGTACGTAA",
+      ">chrLiftR",
+      "TTAACCGGTT"
+    ),
+    dst_fa
+  )
+  writeLines(
+    c(
+      "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
+      "10",
+      "",
+      "chain 100 chrR 10 + 0 10 chrLiftR 10 - 0 10 2",
+      "10"
+    ),
+    chain_path
+  )
 
-  expect_true(rduckhts_fasta_index(con, src_fa, index_path = paste0(src_fa, ".fai"))$success[1])
-  expect_true(rduckhts_fasta_index(con, dst_fa, index_path = paste0(dst_fa, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    src_fa,
+    index_path = paste0(src_fa, ".fai")
+  )$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    dst_fa,
+    index_path = paste0(dst_fa, ".fai")
+  )$success[1])
 
   alias_src_fa <- file.path(tmp_dir, "liftover_chr23_alias_src.fa")
   alias_dst_fa <- file.path(tmp_dir, "liftover_chr23_alias_dst.fa")
   alias_chain_path <- file.path(tmp_dir, "liftover_chr23_alias.chain")
-  writeLines(c(
-    ">chrX",
-    "ACGTACGTAA"
-  ), alias_src_fa)
-  writeLines(c(
-    ">chrLiftX",
-    "ACGTACGTAA"
-  ), alias_dst_fa)
-  writeLines(c(
-    "chain 100 X 10 + 0 10 chrLiftX 10 + 0 10 1",
-    "10"
-  ), alias_chain_path)
-  expect_true(rduckhts_fasta_index(con, alias_src_fa, index_path = paste0(alias_src_fa, ".fai"))$success[1])
-  expect_true(rduckhts_fasta_index(con, alias_dst_fa, index_path = paste0(alias_dst_fa, ".fai"))$success[1])
+  writeLines(
+    c(
+      ">chrX",
+      "ACGTACGTAA"
+    ),
+    alias_src_fa
+  )
+  writeLines(
+    c(
+      ">chrLiftX",
+      "ACGTACGTAA"
+    ),
+    alias_dst_fa
+  )
+  writeLines(
+    c(
+      "chain 100 X 10 + 0 10 chrLiftX 10 + 0 10 1",
+      "10"
+    ),
+    alias_chain_path
+  )
+  expect_true(rduckhts_fasta_index(
+    con,
+    alias_src_fa,
+    index_path = paste0(alias_src_fa, ".fai")
+  )$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    alias_dst_fa,
+    index_path = paste0(alias_dst_fa, ".fai")
+  )$success[1])
 
   query <- paste(
     "SELECT * FROM (VALUES",
@@ -71,9 +105,17 @@ test_liftover <- function() {
   )
 
   expect_equal(nrow(out), 3)
-  row_forward <- out[out$src_chrom == "chrF" & !is.na(out$src_ref), , drop = FALSE]
+  row_forward <- out[
+    out$src_chrom == "chrF" & !is.na(out$src_ref),
+    ,
+    drop = FALSE
+  ]
   row_reverse <- out[out$src_chrom == "chrR", , drop = FALSE]
-  row_missing_ref <- out[out$src_chrom == "chrF" & is.na(out$src_ref), , drop = FALSE]
+  row_missing_ref <- out[
+    out$src_chrom == "chrF" & is.na(out$src_ref),
+    ,
+    drop = FALSE
+  ]
 
   expect_equal(nrow(row_forward), 1)
   expect_equal(row_forward$dest_chrom[1], "chrLiftF")
@@ -114,20 +156,37 @@ test_liftover <- function() {
   star_swap_src_fa <- file.path(tmp_dir, "liftover_star_swap_src.fa")
   star_swap_dst_fa <- file.path(tmp_dir, "liftover_star_swap_dst.fa")
   star_swap_chain <- file.path(tmp_dir, "liftover_star_swap.chain")
-  writeLines(c(
-    ">chrS",
-    "TCCAC"
-  ), star_swap_src_fa)
-  writeLines(c(
-    ">chrD",
-    "TCTGC"
-  ), star_swap_dst_fa)
-  writeLines(c(
-    "chain 1 chrS 5 + 0 5 chrD 5 + 0 5 1",
-    "5"
-  ), star_swap_chain)
-  expect_true(rduckhts_fasta_index(con, star_swap_src_fa, index_path = paste0(star_swap_src_fa, ".fai"))$success[1])
-  expect_true(rduckhts_fasta_index(con, star_swap_dst_fa, index_path = paste0(star_swap_dst_fa, ".fai"))$success[1])
+  writeLines(
+    c(
+      ">chrS",
+      "TCCAC"
+    ),
+    star_swap_src_fa
+  )
+  writeLines(
+    c(
+      ">chrD",
+      "TCTGC"
+    ),
+    star_swap_dst_fa
+  )
+  writeLines(
+    c(
+      "chain 1 chrS 5 + 0 5 chrD 5 + 0 5 1",
+      "5"
+    ),
+    star_swap_chain
+  )
+  expect_true(rduckhts_fasta_index(
+    con,
+    star_swap_src_fa,
+    index_path = paste0(star_swap_src_fa, ".fai")
+  )$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    star_swap_dst_fa,
+    index_path = paste0(star_swap_dst_fa, ".fai")
+  )$success[1])
 
   star_swap_out <- rduckhts_liftover(
     con,
@@ -151,21 +210,38 @@ test_liftover <- function() {
   star_refadd_src_fa <- file.path(tmp_dir, "liftover_star_refadd_src.fa")
   star_refadd_dst_fa <- file.path(tmp_dir, "liftover_star_refadd_dst.fa")
   star_refadd_chain <- file.path(tmp_dir, "liftover_star_refadd.chain")
-  writeLines(c(
-    ">chrS",
-    "GTGCGTGGGTGGGC"
-  ), star_refadd_src_fa)
-  writeLines(c(
-    ">chrD",
-    "GTGCGGCCGGGGGGGC"
-  ), star_refadd_dst_fa)
-  writeLines(c(
-    "chain 1 chrS 14 + 0 14 chrD 16 + 0 16 1",
-    "5 0 2",
-    "9"
-  ), star_refadd_chain)
-  expect_true(rduckhts_fasta_index(con, star_refadd_src_fa, index_path = paste0(star_refadd_src_fa, ".fai"))$success[1])
-  expect_true(rduckhts_fasta_index(con, star_refadd_dst_fa, index_path = paste0(star_refadd_dst_fa, ".fai"))$success[1])
+  writeLines(
+    c(
+      ">chrS",
+      "GTGCGTGGGTGGGC"
+    ),
+    star_refadd_src_fa
+  )
+  writeLines(
+    c(
+      ">chrD",
+      "GTGCGGCCGGGGGGGC"
+    ),
+    star_refadd_dst_fa
+  )
+  writeLines(
+    c(
+      "chain 1 chrS 14 + 0 14 chrD 16 + 0 16 1",
+      "5 0 2",
+      "9"
+    ),
+    star_refadd_chain
+  )
+  expect_true(rduckhts_fasta_index(
+    con,
+    star_refadd_src_fa,
+    index_path = paste0(star_refadd_src_fa, ".fai")
+  )$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    star_refadd_dst_fa,
+    index_path = paste0(star_refadd_dst_fa, ".fai")
+  )$success[1])
 
   star_refadd_out <- rduckhts_liftover(
     con,
@@ -312,7 +388,9 @@ test_liftover <- function() {
           "NULL, 2, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT, false",
           ")).src_pos"
         ),
-        chain_path, dst_fa, src_fa
+        chain_path,
+        dst_fa,
+        src_fa
       )
     ),
     "chrom must be non-null"
@@ -327,7 +405,9 @@ test_liftover <- function() {
           "'chrF', 0, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT, false",
           ")).src_pos"
         ),
-        chain_path, dst_fa, src_fa
+        chain_path,
+        dst_fa,
+        src_fa
       )
     ),
     "pos must be >= 1"
@@ -436,28 +516,45 @@ test_liftover <- function() {
   mt_dst_fa <- file.path(tmp_dir, "liftover_mt_dst.fa")
   mt_chain <- file.path(tmp_dir, "liftover_mt.chain")
 
-  writeLines(c(
-    ">chrF",
-    "ACGTACGTAA",
-    ">MT",
-    "AACCGGTTAACCGG"
-  ), mt_src_fa)
-  writeLines(c(
-    ">chrLiftF",
-    "ACGTACGTAA",
-    ">chrM",
-    "AACCGGTTAACCGG"
-  ), mt_dst_fa)
-  writeLines(c(
-    "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
-    "10",
-    "",
-    "chain 50 MT 14 + 0 14 chrM 14 + 0 14 2",
-    "14"
-  ), mt_chain)
+  writeLines(
+    c(
+      ">chrF",
+      "ACGTACGTAA",
+      ">MT",
+      "AACCGGTTAACCGG"
+    ),
+    mt_src_fa
+  )
+  writeLines(
+    c(
+      ">chrLiftF",
+      "ACGTACGTAA",
+      ">chrM",
+      "AACCGGTTAACCGG"
+    ),
+    mt_dst_fa
+  )
+  writeLines(
+    c(
+      "chain 100 chrF 10 + 0 10 chrLiftF 10 + 0 10 1",
+      "10",
+      "",
+      "chain 50 MT 14 + 0 14 chrM 14 + 0 14 2",
+      "14"
+    ),
+    mt_chain
+  )
 
-  expect_true(rduckhts_fasta_index(con, mt_src_fa, index_path = paste0(mt_src_fa, ".fai"))$success[1])
-  expect_true(rduckhts_fasta_index(con, mt_dst_fa, index_path = paste0(mt_dst_fa, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    mt_src_fa,
+    index_path = paste0(mt_src_fa, ".fai")
+  )$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    mt_dst_fa,
+    index_path = paste0(mt_dst_fa, ".fai")
+  )$success[1])
 
   # lift_mt=FALSE (default): matching MT sizes → contig rename, no chain liftover
   mt_pass <- rduckhts_liftover(
@@ -492,7 +589,10 @@ test_liftover <- function() {
   expect_equal(mt_chain_lift$dest_chrom[1], "chrM")
   expect_equal(mt_chain_lift$dest_pos[1], 5)
   # When lifted through chain, note should be OK/NULL, not MitochondriaPassthrough
-  expect_true(is.na(mt_chain_lift$note[1]) || mt_chain_lift$note[1] != "MitochondriaPassthrough")
+  expect_true(
+    is.na(mt_chain_lift$note[1]) ||
+      mt_chain_lift$note[1] != "MitochondriaPassthrough"
+  )
 
   # chrM alias also triggers passthrough
   mt_alias <- rduckhts_liftover(
@@ -582,9 +682,21 @@ test_liftover <- function() {
   expect_equal(out_nla$dest_alt[1], "T")
 
   ## ---- repeat-run indel extension / swap regression ----
-  repeat_chain <- system.file("extdata", "liftover_repeat.chain", package = "Rduckhts")
-  repeat_src_fa <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts")
-  repeat_dst_fa <- system.file("extdata", "liftover_repeat_dst.fa", package = "Rduckhts")
+  repeat_chain <- system.file(
+    "extdata",
+    "liftover_repeat.chain",
+    package = "Rduckhts"
+  )
+  repeat_src_fa <- system.file(
+    "extdata",
+    "liftover_repeat_src.fa",
+    package = "Rduckhts"
+  )
+  repeat_dst_fa <- system.file(
+    "extdata",
+    "liftover_repeat_dst.fa",
+    package = "Rduckhts"
+  )
   expect_true(nzchar(repeat_chain))
   expect_true(nzchar(repeat_src_fa))
   expect_true(nzchar(repeat_dst_fa))
@@ -625,9 +737,21 @@ test_liftover <- function() {
   expect_equal(repeat_nla$swap[1], 1)
 
   ## ---- clip-pad negative-score regression ----
-  clip_chain <- system.file("extdata", "liftover_clip_pad.chain", package = "Rduckhts")
-  clip_src_fa <- system.file("extdata", "liftover_clip_pad_src.fa", package = "Rduckhts")
-  clip_dst_fa <- system.file("extdata", "liftover_clip_pad_dst.fa", package = "Rduckhts")
+  clip_chain <- system.file(
+    "extdata",
+    "liftover_clip_pad.chain",
+    package = "Rduckhts"
+  )
+  clip_src_fa <- system.file(
+    "extdata",
+    "liftover_clip_pad_src.fa",
+    package = "Rduckhts"
+  )
+  clip_dst_fa <- system.file(
+    "extdata",
+    "liftover_clip_pad_dst.fa",
+    package = "Rduckhts"
+  )
   expect_true(nzchar(clip_chain))
   expect_true(nzchar(clip_src_fa))
   expect_true(nzchar(clip_dst_fa))
@@ -680,8 +804,16 @@ test_liftover <- function() {
     file.copy(chain_path, chain_copies[i], overwrite = TRUE)
     file.copy(src_fa, src_copies[i], overwrite = TRUE)
     file.copy(dst_fa, dst_copies[i], overwrite = TRUE)
-    expect_true(rduckhts_fasta_index(con, src_copies[i], index_path = paste0(src_copies[i], ".fai"))$success[1])
-    expect_true(rduckhts_fasta_index(con, dst_copies[i], index_path = paste0(dst_copies[i], ".fai"))$success[1])
+    expect_true(rduckhts_fasta_index(
+      con,
+      src_copies[i],
+      index_path = paste0(src_copies[i], ".fai")
+    )$success[1])
+    expect_true(rduckhts_fasta_index(
+      con,
+      dst_copies[i],
+      index_path = paste0(dst_copies[i], ".fai")
+    )$success[1])
   }
 
   for (i in c(seq_len(12), 1, 6, 12)) {
@@ -694,7 +826,9 @@ test_liftover <- function() {
           "'chrF', 2, 'C', 'T', '%s', '%s', '%s', 1, 250, false, NULL::BIGINT, false",
           ") AS lo) s"
         ),
-        chain_copies[i], dst_copies[i], src_copies[i]
+        chain_copies[i],
+        dst_copies[i],
+        src_copies[i]
       )
     )
     expect_equal(res$dest_chrom[1], "chrLiftF")

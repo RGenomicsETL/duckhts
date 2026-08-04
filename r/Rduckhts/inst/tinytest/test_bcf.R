@@ -3,23 +3,55 @@ library(DBI)
 
 test_bcf_string_format_lists <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    dbDisconnect(con, shutdown = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      dbDisconnect(con, shutdown = TRUE)
+    },
+    add = TRUE
+  )
 
-  bcf_path <- system.file("extdata", "format_string_list.vcf", package = "Rduckhts")
-  fixed_path <- system.file("extdata", "fixed_count_arrays.vcf", package = "Rduckhts")
-  mapping_path <- system.file("extdata", "mapping_number_families.vcf", package = "Rduckhts")
+  bcf_path <- system.file(
+    "extdata",
+    "format_string_list.vcf",
+    package = "Rduckhts"
+  )
+  fixed_path <- system.file(
+    "extdata",
+    "fixed_count_arrays.vcf",
+    package = "Rduckhts"
+  )
+  mapping_path <- system.file(
+    "extdata",
+    "mapping_number_families.vcf",
+    package = "Rduckhts"
+  )
   vep_path <- system.file("extdata", "test_vep.vcf", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
   expect_true(file.exists(fixed_path))
   expect_true(file.exists(mapping_path))
   expect_true(file.exists(vep_path))
 
-  expect_silent(rduckhts_bcf(con, "bcf_string_lists", bcf_path, decompression_threads = 0, overwrite = TRUE))
-  expect_silent(rduckhts_bcf(con, "bcf_fixed_counts", fixed_path, overwrite = TRUE))
+  expect_silent(rduckhts_bcf(
+    con,
+    "bcf_string_lists",
+    bcf_path,
+    decompression_threads = 0,
+    overwrite = TRUE
+  ))
+  expect_silent(rduckhts_bcf(
+    con,
+    "bcf_fixed_counts",
+    fixed_path,
+    overwrite = TRUE
+  ))
   expect_error(
-    rduckhts_bcf(con, "bcf_bad_threads", bcf_path, decompression_threads = -1, overwrite = TRUE),
+    rduckhts_bcf(
+      con,
+      "bcf_bad_threads",
+      bcf_path,
+      decompression_threads = -1,
+      overwrite = TRUE
+    ),
     pattern = "decompression_threads must be a single whole number"
   )
   expect_error(
@@ -85,7 +117,10 @@ test_bcf_string_format_lists <- function() {
 
   v2_type_row <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT typeof(FORMAT_LAA_SAMPLE1) AS t FROM read_bcf_v2(%s) LIMIT 1", quoted_bcf)
+    sprintf(
+      "SELECT typeof(FORMAT_LAA_SAMPLE1) AS t FROM read_bcf_v2(%s) LIMIT 1",
+      quoted_bcf
+    )
   )
   expect_equal(v2_type_row$t[1], "VARCHAR[]")
 
@@ -146,7 +181,8 @@ test_bcf_string_format_lists <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_mapping, quoted_mapping
+      quoted_mapping,
+      quoted_mapping
     )
   )
   expect_equal(mapping_mismatch$n[1], 0)
@@ -154,9 +190,12 @@ test_bcf_string_format_lists <- function() {
 
 test_bcf_v2_sql <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    dbDisconnect(con, shutdown = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      dbDisconnect(con, shutdown = TRUE)
+    },
+    add = TRUE
+  )
   bcf_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
   quoted_path <- DBI::dbQuoteString(con, bcf_path)
@@ -189,12 +228,17 @@ test_bcf_v2_sql <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_path, quoted_path
+      quoted_path,
+      quoted_path
     )
   )
   expect_equal(schema_mismatch$n[1], 0)
 
-  fixed_path <- system.file("extdata", "fixed_count_arrays.vcf", package = "Rduckhts")
+  fixed_path <- system.file(
+    "extdata",
+    "fixed_count_arrays.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(fixed_path))
   quoted_fixed <- DBI::dbQuoteString(con, fixed_path)
 
@@ -208,7 +252,8 @@ test_bcf_v2_sql <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_fixed, quoted_fixed
+      quoted_fixed,
+      quoted_fixed
     )
   )
   expect_equal(default_mismatch$n[1], 0)
@@ -223,12 +268,17 @@ test_bcf_v2_sql <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_fixed, quoted_fixed
+      quoted_fixed,
+      quoted_fixed
     )
   )
   expect_equal(tidy_mismatch$n[1], 0)
 
-  vep_tidy_path <- system.file("extdata", "test_vep_tidy.vcf", package = "Rduckhts")
+  vep_tidy_path <- system.file(
+    "extdata",
+    "test_vep_tidy.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(vep_tidy_path))
   quoted_vep_tidy <- DBI::dbQuoteString(con, vep_tidy_path)
   v2_vep_tidy <- DBI::dbGetQuery(
@@ -273,14 +323,19 @@ test_bcf_v2_sql <- function() {
         "string_agg(FORMAT_GT, ',' ORDER BY POS) AS gt",
         "FROM read_bcf_v2(%s, samples_file := %s, tidy_format := true)"
       ),
-      quoted_fixed, quoted_samples_file
+      quoted_fixed,
+      quoted_samples_file
     )
   )
   expect_equal(sample_pushdown$n[1], 2)
   expect_equal(sample_pushdown$samples[1], 1)
   expect_equal(sample_pushdown$gt[1], "0/1,0/0")
 
-  indexed_bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+  indexed_bcf_path <- system.file(
+    "extdata",
+    "vcf_file.bcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(indexed_bcf_path))
   quoted_indexed_bcf <- DBI::dbQuoteString(con, indexed_bcf_path)
   zero_sample_tidy <- DBI::dbGetQuery(
@@ -293,7 +348,9 @@ test_bcf_v2_sql <- function() {
         "(SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf_v2(%s, tidy_format := true, exclude_samples := 'A,B')) ",
         " WHERE column_name = 'SAMPLE_ID') AS sample_id_cols"
       ),
-      quoted_indexed_bcf, quoted_indexed_bcf, quoted_indexed_bcf
+      quoted_indexed_bcf,
+      quoted_indexed_bcf,
+      quoted_indexed_bcf
     )
   )
   expect_equal(zero_sample_tidy$count_only[1], zero_sample_tidy$materialized[1])
@@ -353,7 +410,8 @@ test_bcf_v2_sql <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_indexed_bcf, quoted_indexed_bcf
+      quoted_indexed_bcf,
+      quoted_indexed_bcf
     )
   )
   expect_equal(gt_projection_mismatch$n[1], 0)
@@ -371,7 +429,11 @@ test_bcf_v2_sql <- function() {
   )
   expect_equal(gt_edge_cases$gt[1], "2,0/300,240/260")
 
-  ploidy_edge_path <- system.file("extdata", "genotype_ploidy_edge_cases.vcf", package = "Rduckhts")
+  ploidy_edge_path <- system.file(
+    "extdata",
+    "genotype_ploidy_edge_cases.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(ploidy_edge_path))
   ploidy_edges <- DBI::dbGetQuery(
     con,
@@ -383,9 +445,16 @@ test_bcf_v2_sql <- function() {
       DBI::dbQuoteString(con, ploidy_edge_path)
     )
   )
-  expect_equal(ploidy_edges$gt[1], "BIG=0/10,DIP=0|1,HAP=1,TET=0/1/2/3,TRI=0/1/2")
+  expect_equal(
+    ploidy_edges$gt[1],
+    "BIG=0/10,DIP=0|1,HAP=1,TET=0/1/2/3,TRI=0/1/2"
+  )
 
-  phased_fields_path <- system.file("extdata", "phased_genotype_fields.vcf", package = "Rduckhts")
+  phased_fields_path <- system.file(
+    "extdata",
+    "phased_genotype_fields.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(phased_fields_path))
   quoted_phased <- DBI::dbQuoteString(con, phased_fields_path)
   phased_mismatch <- DBI::dbGetQuery(
@@ -400,7 +469,8 @@ test_bcf_v2_sql <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_phased, quoted_phased
+      quoted_phased,
+      quoted_phased
     )
   )
   expect_equal(phased_mismatch$n[1], 0)
@@ -438,7 +508,11 @@ test_bcf_v2_sql <- function() {
     "S1=1:PL=2:GP=2:DS=1,S2=0|1|1:PL=4:GP=4:DS=1,S1=0|1|1|2:PL=15:GP=15:DS=2,S2=2|2:PL=6:GP=6:DS=2"
   )
 
-  tidy_chunk_path <- system.file("extdata", "tidy_chunk_boundary.vcf", package = "Rduckhts")
+  tidy_chunk_path <- system.file(
+    "extdata",
+    "tidy_chunk_boundary.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(tidy_chunk_path))
   tidy_chunk <- DBI::dbGetQuery(
     con,
@@ -463,7 +537,10 @@ test_bcf_v2_sql <- function() {
 
   no_format_tidy <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT count(*) AS n FROM read_bcf_v2(%s, tidy_format := true, include_format := false)", quoted_fixed)
+    sprintf(
+      "SELECT count(*) AS n FROM read_bcf_v2(%s, tidy_format := true, include_format := false)",
+      quoted_fixed
+    )
   )
   expect_equal(no_format_tidy$n[1], 2)
 
@@ -481,7 +558,10 @@ test_bcf_v2_sql <- function() {
       quoted_vep
     )
   )
-  expect_equal(vep_schema$cols[1], "ALT,CHROM,FILTER,ID,POS,QUAL,REF,VEP_Consequence,VEP_DISTANCE")
+  expect_equal(
+    vep_schema$cols[1],
+    "ALT,CHROM,FILTER,ID,POS,QUAL,REF,VEP_Consequence,VEP_DISTANCE"
+  )
 
   ensembl_path <- system.file(
     "extdata",
@@ -509,12 +589,19 @@ test_bcf_v2_sql <- function() {
   expect_error(
     DBI::dbGetQuery(
       con,
-      sprintf("SELECT count(*) FROM read_bcf_v2(%s, info_fields := 'NOPE')", quoted_fixed)
+      sprintf(
+        "SELECT count(*) FROM read_bcf_v2(%s, info_fields := 'NOPE')",
+        quoted_fixed
+      )
     ),
     pattern = "unknown field"
   )
 
-  score_gwas_path <- system.file("extdata", "score_gwas_summary.vcf", package = "Rduckhts")
+  score_gwas_path <- system.file(
+    "extdata",
+    "score_gwas_summary.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(score_gwas_path))
   expect_error(
     DBI::dbGetQuery(
@@ -530,7 +617,10 @@ test_bcf_v2_sql <- function() {
   expect_error(
     DBI::dbGetQuery(
       con,
-      sprintf("SELECT count(*) FROM read_bcf_v2(%s, format_fields := 'GT')", quoted_vep)
+      sprintf(
+        "SELECT count(*) FROM read_bcf_v2(%s, format_fields := 'GT')",
+        quoted_vep
+      )
     ),
     pattern = "no samples"
   )
@@ -549,7 +639,10 @@ test_bcf_v2_sql <- function() {
   expect_error(
     DBI::dbGetQuery(
       con,
-      sprintf("SELECT count(*) FROM read_bcf_v2(%s, samples := 'NOPE')", quoted_fixed)
+      sprintf(
+        "SELECT count(*) FROM read_bcf_v2(%s, samples := 'NOPE')",
+        quoted_fixed
+      )
     ),
     pattern = "unknown sample"
   )
@@ -557,9 +650,12 @@ test_bcf_v2_sql <- function() {
 
 test_bcf_appender <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    dbDisconnect(con, shutdown = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      dbDisconnect(con, shutdown = TRUE)
+    },
+    add = TRUE
+  )
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
 

@@ -14,12 +14,19 @@ sql_quote_string <- function(x) {
 }
 
 .validate_nonnegative_integer_param <- function(value, name) {
-  if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
-      value < 0 || value > .Machine$integer.max || value != floor(value)) {
+  if (
+    !is.numeric(value) ||
+      length(value) != 1L ||
+      is.na(value) ||
+      value < 0 ||
+      value > .Machine$integer.max ||
+      value != floor(value)
+  ) {
     stop(
       sprintf(
         "%s must be a single whole number between 0 and %d",
-        name, .Machine$integer.max
+        name,
+        .Machine$integer.max
       ),
       call. = FALSE
     )
@@ -28,7 +35,12 @@ sql_quote_string <- function(x) {
 }
 
 .validate_scan_mode_param <- function(value, name = "scan_mode") {
-  if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
+  if (
+    !is.character(value) ||
+      length(value) != 1L ||
+      is.na(value) ||
+      !nzchar(value)
+  ) {
     stop(sprintf("%s must be 'auto' or 'sequential'", name), call. = FALSE)
   }
   value <- tolower(value)
@@ -43,9 +55,16 @@ sql_varchar_list_literal <- function(x, name = "value") {
     return("[]::VARCHAR[]")
   }
   if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
-    stop(name, " must be a character vector without NA or empty values", call. = FALSE)
+    stop(
+      name,
+      " must be a character vector without NA or empty values",
+      call. = FALSE
+    )
   }
-  sprintf("[%s]", paste(vapply(x, sql_quote_string, character(1)), collapse = ", "))
+  sprintf(
+    "[%s]",
+    paste(vapply(x, sql_quote_string, character(1)), collapse = ", ")
+  )
 }
 
 sql_map_literal <- function(x, name = "column_map", allow_empty = FALSE) {
@@ -60,7 +79,10 @@ sql_map_literal <- function(x, name = "column_map", allow_empty = FALSE) {
     stop(name, " must be a named character vector", call. = FALSE)
   }
   keys <- paste(vapply(nm, sql_quote_string, character(1)), collapse = ", ")
-  vals <- paste(vapply(as.character(x), sql_quote_string, character(1)), collapse = ", ")
+  vals <- paste(
+    vapply(as.character(x), sql_quote_string, character(1)),
+    collapse = ", "
+  )
   sprintf("map([%s], [%s])", keys, vals)
 }
 
@@ -89,14 +111,22 @@ read_munge_column_map_file <- function(path) {
     comment.char = ""
   )
   if (ncol(tbl) < 2) {
-    stop("column_map_file must be a two-column TSV with source and canonical names", call. = FALSE)
+    stop(
+      "column_map_file must be a two-column TSV with source and canonical names",
+      call. = FALSE
+    )
   }
   out <- structure(tbl[[1]], names = toupper(tbl[[2]]))
   out[nzchar(names(out))]
 }
 
 resolve_munge_column_map <- function(raw_map, available_columns) {
-  if (is.null(raw_map) || length(raw_map) == 0 || is.null(available_columns) || length(available_columns) == 0) {
+  if (
+    is.null(raw_map) ||
+      length(raw_map) == 0 ||
+      is.null(available_columns) ||
+      length(available_columns) == 0
+  ) {
     return(character())
   }
   available_columns <- as.character(available_columns)
@@ -120,7 +150,10 @@ resolve_munge_column_map <- function(raw_map, available_columns) {
 
 read_munge_preset_map <- function(con, preset) {
   preset_sql <- sql_quote_string(preset)
-  out <- DBI::dbGetQuery(con, sprintf("SELECT duckdb_munge_preset_map(%s) AS m", preset_sql))
+  out <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT duckdb_munge_preset_map(%s) AS m", preset_sql)
+  )
   if (nrow(out) != 1 || is.null(out$m[[1]])) {
     stop("duckdb_munge: unknown preset", call. = FALSE)
   }

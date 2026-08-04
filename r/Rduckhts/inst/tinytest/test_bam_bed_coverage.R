@@ -6,8 +6,16 @@ test_bam_bed_coverage <- function() {
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   mixed_bam <- system.file("extdata", "fixture_mixed.bam", package = "Rduckhts")
-  mixed_bed <- system.file("extdata", "fixture_mixed_regions.bed", package = "Rduckhts")
-  min_depth_bed <- system.file("extdata", "fixture_mixed_min_depth_regions.bed", package = "Rduckhts")
+  mixed_bed <- system.file(
+    "extdata",
+    "fixture_mixed_regions.bed",
+    package = "Rduckhts"
+  )
+  min_depth_bed <- system.file(
+    "extdata",
+    "fixture_mixed_min_depth_regions.bed",
+    package = "Rduckhts"
+  )
 
   cov <- rduckhts_bam_bed_coverage(con, mixed_bam, mixed_bed)
   expect_equal(cov$chrom, c("11", "11", "11"))
@@ -68,7 +76,12 @@ test_bam_bed_coverage <- function() {
   expect_equal(round(cov_high_min_depth$meandepth_post, 2), c(0, 0, 0))
 
   expect_error(
-    rduckhts_bam_bed_coverage(con, mixed_bam, mixed_bed, decompression_threads = -1),
+    rduckhts_bam_bed_coverage(
+      con,
+      mixed_bam,
+      mixed_bed,
+      decompression_threads = -1
+    ),
     pattern = "decompression_threads must be a single whole number"
   )
 

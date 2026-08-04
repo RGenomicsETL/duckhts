@@ -8,7 +8,11 @@ test_multi_read <- function() {
 
   # Locate bundled fixture files
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
-  bam2_path <- system.file("extdata", "parallel_empty_contigs.bam", package = "Rduckhts")
+  bam2_path <- system.file(
+    "extdata",
+    "parallel_empty_contigs.bam",
+    package = "Rduckhts"
+  )
   bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
   bcf2_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")
   fq_r1 <- system.file("extdata", "r1.fq", package = "Rduckhts")
@@ -39,8 +43,7 @@ test_multi_read <- function() {
   expect_true(all(unique(res$filename) %in% c(bam_path, bam2_path)))
 
   # overwrite guard
-  expect_error(rduckhts_bam_multi(con, "bam_multi", bam_path),
-               "already exists")
+  expect_error(rduckhts_bam_multi(con, "bam_multi", bam_path), "already exists")
 
   # overwrite = TRUE replaces
   rduckhts_bam_multi(con, "bam_multi", bam_path, overwrite = TRUE)
@@ -95,8 +98,12 @@ test_multi_read <- function() {
   # .params data.frame: per-file parameter overrides
   # -------------------------------------------------------
   params_df <- data.frame(file = c(fq_r1, fq_r2), stringsAsFactors = FALSE)
-  rduckhts_fastq_multi(con, "fq_params", files = character(0),
-                       .params = params_df)
+  rduckhts_fastq_multi(
+    con,
+    "fq_params",
+    files = character(0),
+    .params = params_df
+  )
   res <- dbGetQuery(con, "SELECT * FROM fq_params")
   expect_true(nrow(res) > 0)
   expect_equal(length(unique(res$filename)), 2L)
@@ -105,8 +112,7 @@ test_multi_read <- function() {
   # .params validation: missing file column
   # -------------------------------------------------------
   expect_error(
-    rduckhts_bam_multi(con, "t_bad", bam_path,
-                       .params = data.frame(x = 1)),
+    rduckhts_bam_multi(con, "t_bad", bam_path, .params = data.frame(x = 1)),
     "file"
   )
 
@@ -119,20 +125,26 @@ test_multi_read <- function() {
   # -------------------------------------------------------
   # hts_union_query SQL macro: verify it generates valid SQL
   # -------------------------------------------------------
-  query_sql <- DBI::dbGetQuery(con, sprintf(
-    "SELECT hts_union_query('read_bam', '%s') AS q",
-    gsub("'", "''", bam_path)
-  ))
+  query_sql <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT hts_union_query('read_bam', '%s') AS q",
+      gsub("'", "''", bam_path)
+    )
+  )
   expect_true(is.data.frame(query_sql))
   expect_true(nrow(query_sql) == 1L)
   expect_true(grepl("read_bam", query_sql$q[1]))
   expect_true(grepl("filename", query_sql$q[1]))
 
   # Execute the generated query via SET VARIABLE pattern
-  DBI::dbExecute(con, sprintf(
-    "SET VARIABLE q = hts_union_query('read_bam', '%s')",
-    gsub("'", "''", bam_path)
-  ))
+  DBI::dbExecute(
+    con,
+    sprintf(
+      "SET VARIABLE q = hts_union_query('read_bam', '%s')",
+      gsub("'", "''", bam_path)
+    )
+  )
   generated <- DBI::dbGetQuery(con, "SELECT * FROM query(getvariable('q'))")
   expect_true(is.data.frame(generated))
   expect_true("filename" %in% names(generated))

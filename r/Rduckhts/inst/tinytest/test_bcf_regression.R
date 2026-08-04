@@ -3,11 +3,18 @@ library(DBI)
 
 test_bcf_filter_list_fetch_regression <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    dbDisconnect(con, shutdown = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      dbDisconnect(con, shutdown = TRUE)
+    },
+    add = TRUE
+  )
 
-  bcf_path <- system.file("extdata", "bcf_filter_list_regression.vcf", package = "Rduckhts")
+  bcf_path <- system.file(
+    "extdata",
+    "bcf_filter_list_regression.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(bcf_path))
 
   quoted_bcf <- DBI::dbQuoteString(con, bcf_path)
@@ -16,7 +23,8 @@ test_bcf_filter_list_fetch_regression <- function() {
       con,
       sprintf(
         "SELECT POS, FILTER::VARCHAR AS filter_str FROM %s(%s) ORDER BY POS",
-        reader, quoted_bcf
+        reader,
+        quoted_bcf
       )
     )
 
@@ -42,7 +50,8 @@ test_bcf_filter_list_fetch_regression <- function() {
       con,
       sprintf(
         "SELECT COUNT(*) AS n_rows, SUM(length(FILTER)) AS filter_items FROM %s(%s)",
-        reader, quoted_bcf
+        reader,
+        quoted_bcf
       )
     )
     expect_equal(summary$n_rows[1], 5000L)
@@ -59,7 +68,8 @@ test_bcf_filter_list_fetch_regression <- function() {
         "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
         "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
       ),
-      quoted_bcf, quoted_bcf
+      quoted_bcf,
+      quoted_bcf
     )
   )
   expect_equal(mismatch$n[1], 0)
@@ -67,18 +77,28 @@ test_bcf_filter_list_fetch_regression <- function() {
 
 test_bcf_malformed_record_errors <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    dbDisconnect(con, shutdown = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      dbDisconnect(con, shutdown = TRUE)
+    },
+    add = TRUE
+  )
 
-  bcf_path <- system.file("extdata", "malformed_bad_pos.vcf", package = "Rduckhts")
+  bcf_path <- system.file(
+    "extdata",
+    "malformed_bad_pos.vcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(bcf_path))
   quoted_bcf <- DBI::dbQuoteString(con, bcf_path)
 
   expect_error(
     dbGetQuery(
       con,
-      sprintf("SELECT count(*) FROM read_bcf(%s, tidy_format := true)", quoted_bcf)
+      sprintf(
+        "SELECT count(*) FROM read_bcf(%s, tidy_format := true)",
+        quoted_bcf
+      )
     ),
     pattern = "read_bcf: failed to read or parse BCF/VCF record"
   )
@@ -86,7 +106,10 @@ test_bcf_malformed_record_errors <- function() {
   expect_error(
     dbGetQuery(
       con,
-      sprintf("SELECT sum(POS) FROM read_bcf_v2(%s, tidy_format := true)", quoted_bcf)
+      sprintf(
+        "SELECT sum(POS) FROM read_bcf_v2(%s, tidy_format := true)",
+        quoted_bcf
+      )
     ),
     pattern = "read_bcf_v2: failed to read or parse BCF/VCF record"
   )
@@ -119,13 +142,28 @@ test_bcf_malformed_record_errors <- function() {
 
 test_bcf_type_clash_errors <- function() {
   con <- rduckhts_connect()
-  on.exit({
-    dbDisconnect(con, shutdown = TRUE)
-  }, add = TRUE)
+  on.exit(
+    {
+      dbDisconnect(con, shutdown = TRUE)
+    },
+    add = TRUE
+  )
 
-  info_path <- system.file("extdata", "bcf_info_type_clash.bcf", package = "Rduckhts")
-  format_path <- system.file("extdata", "bcf_format_type_clash.bcf", package = "Rduckhts")
-  str_path <- system.file("extdata", "bcf_info_str_clash.bcf", package = "Rduckhts")
+  info_path <- system.file(
+    "extdata",
+    "bcf_info_type_clash.bcf",
+    package = "Rduckhts"
+  )
+  format_path <- system.file(
+    "extdata",
+    "bcf_format_type_clash.bcf",
+    package = "Rduckhts"
+  )
+  str_path <- system.file(
+    "extdata",
+    "bcf_info_str_clash.bcf",
+    package = "Rduckhts"
+  )
   expect_true(file.exists(info_path))
   expect_true(file.exists(format_path))
   expect_true(file.exists(str_path))
@@ -134,15 +172,27 @@ test_bcf_type_clash_errors <- function() {
   quoted_format <- DBI::dbQuoteString(con, format_path)
   quoted_str <- DBI::dbQuoteString(con, str_path)
 
-  null_policy_info <- dbGetQuery(con, sprintf("SELECT INFO_DP IS NULL AS is_null FROM read_bcf(%s)", quoted_info))
+  null_policy_info <- dbGetQuery(
+    con,
+    sprintf("SELECT INFO_DP IS NULL AS is_null FROM read_bcf(%s)", quoted_info)
+  )
   expect_true(null_policy_info$is_null[1])
 
   # Reverse clash: String header over numeric payload. htslib's string decode
   # does not type-check, so both readers must NULL this under the default policy
   # rather than leak raw bytes.
-  null_str_info <- dbGetQuery(con, sprintf("SELECT INFO_NN IS NULL AS is_null FROM read_bcf(%s)", quoted_str))
+  null_str_info <- dbGetQuery(
+    con,
+    sprintf("SELECT INFO_NN IS NULL AS is_null FROM read_bcf(%s)", quoted_str)
+  )
   expect_true(null_str_info$is_null[1])
-  null_str_info_v2 <- dbGetQuery(con, sprintf("SELECT INFO_NN IS NULL AS is_null FROM read_bcf_v2(%s, info_fields := 'NN')", quoted_str))
+  null_str_info_v2 <- dbGetQuery(
+    con,
+    sprintf(
+      "SELECT INFO_NN IS NULL AS is_null FROM read_bcf_v2(%s, info_fields := 'NN')",
+      quoted_str
+    )
+  )
   expect_true(null_str_info_v2$is_null[1])
 
   null_policy_format <- dbGetQuery(
@@ -169,23 +219,53 @@ test_bcf_type_clash_errors <- function() {
   expect_true(warn_format$s2_null[1])
 
   expect_error(
-    dbGetQuery(con, sprintf("SELECT INFO_DP FROM read_bcf(%s, decode_error_policy := 'error')", quoted_info)),
+    dbGetQuery(
+      con,
+      sprintf(
+        "SELECT INFO_DP FROM read_bcf(%s, decode_error_policy := 'error')",
+        quoted_info
+      )
+    ),
     pattern = "read_bcf: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10"
   )
   expect_error(
-    dbGetQuery(con, sprintf("SELECT INFO_DP FROM read_bcf_v2(%s, info_fields := 'DP', decode_error_policy := 'error')", quoted_info)),
+    dbGetQuery(
+      con,
+      sprintf(
+        "SELECT INFO_DP FROM read_bcf_v2(%s, info_fields := 'DP', decode_error_policy := 'error')",
+        quoted_info
+      )
+    ),
     pattern = "read_bcf_v2: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10"
   )
   expect_error(
-    dbGetQuery(con, sprintf("SELECT INFO_NN FROM read_bcf(%s, decode_error_policy := 'error')", quoted_str)),
+    dbGetQuery(
+      con,
+      sprintf(
+        "SELECT INFO_NN FROM read_bcf(%s, decode_error_policy := 'error')",
+        quoted_str
+      )
+    ),
     pattern = "read_bcf: INFO/NN encoded BCF type INT8 does not match header Type=String at chr1:10"
   )
   expect_error(
-    dbGetQuery(con, sprintf("SELECT FORMAT_XX_S1 FROM read_bcf(%s, decode_error_policy := 'error')", quoted_format)),
+    dbGetQuery(
+      con,
+      sprintf(
+        "SELECT FORMAT_XX_S1 FROM read_bcf(%s, decode_error_policy := 'error')",
+        quoted_format
+      )
+    ),
     pattern = "read_bcf: FORMAT/XX encoded BCF type CHAR does not match header Type=Integer at chr1:10"
   )
   expect_error(
-    dbGetQuery(con, sprintf("SELECT FORMAT_XX_S1 FROM read_bcf_v2(%s, format_fields := 'XX', decode_error_policy := 'error')", quoted_format)),
+    dbGetQuery(
+      con,
+      sprintf(
+        "SELECT FORMAT_XX_S1 FROM read_bcf_v2(%s, format_fields := 'XX', decode_error_policy := 'error')",
+        quoted_format
+      )
+    ),
     pattern = "read_bcf_v2: FORMAT/XX encoded BCF type CHAR does not match header Type=Integer at chr1:10"
   )
 }

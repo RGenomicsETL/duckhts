@@ -372,20 +372,22 @@ if (!(opt$gff_index_policy %in% c("auto", "require", "ignore"))) {
   die("--gff-index-policy must be auto, require, or ignore")
 }
 if (isTRUE(opt$skip_extension_build) && nzchar(opt$extension_build_receipt)) {
-  die("--skip-extension-build and --extension-build-receipt are mutually exclusive")
+  die(
+    "--skip-extension-build and --extension-build-receipt are mutually exclusive"
+  )
 }
 if (isTRUE(opt$hgvs) && !identical(opt$event_mode, "small")) {
   die("--hgvs currently applies only to --event-mode small")
 }
 if (isTRUE(opt$hgvs) && isTRUE(opt$regulatory)) {
-  die("--hgvs compares transcript rows and cannot be combined with --regulatory")
+  die(
+    "--hgvs compares transcript rows and cannot be combined with --regulatory"
+  )
 }
 if (
   !isTRUE(opt$source_audit_only) &&
-    (
-      !requireNamespace("blit", quietly = TRUE) ||
-        utils::packageVersion("blit") < "0.2.0.9000"
-    )
+    (!requireNamespace("blit", quietly = TRUE) ||
+      utils::packageVersion("blit") < "0.2.0.9000")
 ) {
   die(
     "the current WangLabCSU/blit checkout is required ",
@@ -393,9 +395,11 @@ if (
   )
 }
 oracle_mode <- if (nzchar(opt$cache_dir)) "cache" else "gff"
-if (!isTRUE(opt$source_audit_only) &&
+if (
+  !isTRUE(opt$source_audit_only) &&
     identical(oracle_mode, "cache") &&
-    (!nzchar(opt$cache_info) || !nzchar(opt$cache_receipt))) {
+    (!nzchar(opt$cache_info) || !nzchar(opt$cache_receipt))
+) {
   die("--cache-dir requires --cache-info and --cache-receipt")
 }
 fasta_index <- paste0(opt$fasta, ".fai")
@@ -446,10 +450,14 @@ if (!isTRUE(opt$source_audit_only)) {
     opt$oracle_environment_receipt,
     warn = FALSE
   )
-  if (sum(environment_lock == "@EXPLICIT") != 1L ||
+  if (
+    sum(environment_lock == "@EXPLICIT") != 1L ||
       !any(grepl("/ensembl-vep-116[.]0-", environment_lock)) ||
-      !any(grepl("/perl-bioperl-core-1[.]7[.]8-", environment_lock))) {
-    die("oracle environment receipt is not the explicit VEP-116/BioPerl-1.7.8 lock")
+      !any(grepl("/perl-bioperl-core-1[.]7[.]8-", environment_lock))
+  ) {
+    die(
+      "oracle environment receipt is not the explicit VEP-116/BioPerl-1.7.8 lock"
+    )
   }
   oracle_environment_receipt_sha256 <- duckvep_evidence_sha256(
     opt$oracle_environment_receipt
@@ -491,8 +499,10 @@ if (!isTRUE(opt$source_audit_only) && identical(oracle_mode, "cache")) {
     }
     value
   }
-  if (!identical(cache_value("species"), opt$species) ||
-      !identical(cache_value("assembly"), opt$assembly)) {
+  if (
+    !identical(cache_value("species"), opt$species) ||
+      !identical(cache_value("assembly"), opt$assembly)
+  ) {
     die("cache info species/assembly does not match the campaign")
   }
   cache_info_sha256 <- duckvep_evidence_sha256(opt$cache_info)
@@ -544,7 +554,11 @@ if (isTRUE(opt$skip_extension_build)) {
   extension_sha256 <- extension_receipt$sha256
 }
 model_artifact_kind <- if (external_model_database) "duckdb" else "sql"
-model_artifact_path <- if (external_model_database) opt$database else opt$model_sql
+model_artifact_path <- if (external_model_database) {
+  opt$database
+} else {
+  opt$model_sql
+}
 model_artifact_sha256 <- if (nzchar(model_artifact_path)) {
   duckvep_evidence_sha256(model_artifact_path)
 } else {
@@ -578,15 +592,15 @@ fasta_regions <- if (isTRUE(opt$source_audit_only)) {
 fasta_chroms <- fasta_regions$chrom
 if (
   !isTRUE(opt$source_audit_only) &&
-    (
-      length(fasta_chroms) == 0L ||
-        any(!nzchar(fasta_chroms)) ||
-        anyDuplicated(fasta_chroms) ||
-        any(!is.finite(fasta_regions$sequence_length)) ||
-        any(fasta_regions$sequence_length < 1) ||
-        any(fasta_regions$sequence_length > 4294967295) ||
-        any(fasta_regions$sequence_length != floor(fasta_regions$sequence_length))
-    )
+    (length(fasta_chroms) == 0L ||
+      any(!nzchar(fasta_chroms)) ||
+      anyDuplicated(fasta_chroms) ||
+      any(!is.finite(fasta_regions$sequence_length)) ||
+      any(fasta_regions$sequence_length < 1) ||
+      any(fasta_regions$sequence_length > 4294967295) ||
+      any(
+        fasta_regions$sequence_length != floor(fasta_regions$sequence_length)
+      ))
 ) {
   die("FASTA index has invalid names or lengths: {fasta_index}")
 }
@@ -615,20 +629,16 @@ if (
 }
 if (
   isTRUE(opt$source_audit_only) &&
-    (
-      !identical(opt$event_mode, "small") ||
-        !nzchar(opt$eligibility_out)
-    )
+    (!identical(opt$event_mode, "small") ||
+      !nzchar(opt$eligibility_out))
 ) {
   die("--source-audit-only requires small mode and --eligibility-out")
 }
 if (
   !identical(opt$event_mode, "small") &&
-    (
-      isTRUE(opt$split_multiallelic) ||
-        isTRUE(opt$stratify_raw_allele_length) ||
-        nzchar(opt$eligibility_out)
-    )
+    (isTRUE(opt$split_multiallelic) ||
+      isTRUE(opt$stratify_raw_allele_length) ||
+      nzchar(opt$eligibility_out))
 ) {
   die(
     "--split-multiallelic, --stratify-raw-allele-length, and ",
@@ -655,7 +665,9 @@ if (nzchar(opt$nmd_plugin_dir)) {
     die("--source-audit-only does not execute the NMD plugin")
   }
   if (!identical(opt$event_mode, "small")) {
-    die("structural and breakend differentials do not compare NMD plugin output")
+    die(
+      "structural and breakend differentials do not compare NMD plugin output"
+    )
   }
   if (!dir.exists(opt$nmd_plugin_dir)) {
     die("VEP plugin directory does not exist: {opt$nmd_plugin_dir}")
@@ -744,9 +756,12 @@ colliding_outputs <- unique(canonical_outputs[duplicated(canonical_outputs)])
 if (length(colliding_outputs) != 0L) {
   labels <- vapply(
     colliding_outputs,
-    function(path) paste(names(canonical_outputs)[canonical_outputs == path],
-      collapse = ", "
-    ),
+    function(path) {
+      paste(
+        names(canonical_outputs)[canonical_outputs == path],
+        collapse = ", "
+      )
+    },
     character(1L)
   )
   die(
@@ -834,8 +849,10 @@ if (isTRUE(opt$hgvs)) {
   )
   if (
     !identical(names(so_bits), c("SO_term", "so_enum")) ||
-      nrow(so_bits) == 0L || nrow(so_bits) > 64L ||
-      anyNA(so_bits$SO_term) || any(!nzchar(so_bits$SO_term)) ||
+      nrow(so_bits) == 0L ||
+      nrow(so_bits) > 64L ||
+      anyNA(so_bits$SO_term) ||
+      any(!nzchar(so_bits$SO_term)) ||
       anyDuplicated(so_bits$SO_term)
   ) {
     die("invalid generated SO-bit binding table: {so_bit_path}")
@@ -970,13 +987,16 @@ if (isTRUE(opt$hgvs)) {
     paste(
       "SELECT seq_region, name",
       region_length_projection,
-      "FROM", model_query_relation("duckvep_sequence_regions"),
+      "FROM",
+      model_query_relation("duckvep_sequence_regions"),
       "ORDER BY seq_region"
     )
   )
   if (
-    nrow(model_regions) == 0L || anyNA(model_regions[, c("seq_region", "name")]) ||
-      any(!nzchar(model_regions$name)) || anyDuplicated(model_regions$seq_region) ||
+    nrow(model_regions) == 0L ||
+      anyNA(model_regions[, c("seq_region", "name")]) ||
+      any(!nzchar(model_regions$name)) ||
+      anyDuplicated(model_regions$seq_region) ||
       anyDuplicated(model_regions$name)
   ) {
     die("--hgvs requires unique non-NULL sequence-region ordinals and names")
@@ -1019,7 +1039,8 @@ load_queries <- c(
     paste(
       "SELECT seq_region",
       if (complete_coverage) ", sequence_length" else "",
-      "FROM", model_query_relation("duckvep_sequence_regions"),
+      "FROM",
+      model_query_relation("duckvep_sequence_regions"),
       "ORDER BY seq_region"
     )
   },
@@ -1027,12 +1048,14 @@ load_queries <- c(
     "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
     "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence, codon_table,",
     "pre_cds_sequence, post_cds_sequence",
-    "FROM", model_query_relation("duckvep_transcripts"),
+    "FROM",
+    model_query_relation("duckvep_transcripts"),
     "ORDER BY seq_region, transcript_start, transcript_index"
   ),
   paste(
     "SELECT transcript_index, exon_start, exon_end, exon_cdna_start, exon_cdna_end,",
-    "phase, end_phase FROM", model_query_relation("duckvep_exons"),
+    "phase, end_phase FROM",
+    model_query_relation("duckvep_exons"),
     "ORDER BY transcript_index, exon_cdna_start"
   )
 )
@@ -1040,7 +1063,8 @@ load_options <- character()
 if ("duckvep_mature_mirna" %in% present_relations) {
   mature_mirna_query <- paste(
     "SELECT transcript_index, mature_mirna_start, mature_mirna_end",
-    "FROM", model_query_relation("duckvep_mature_mirna"),
+    "FROM",
+    model_query_relation("duckvep_mature_mirna"),
     "ORDER BY transcript_index, mature_mirna_start"
   )
   load_options <- c(
@@ -1051,7 +1075,8 @@ if ("duckvep_mature_mirna" %in% present_relations) {
 if ("duckvep_peptide_edits" %in% present_relations) {
   peptide_edit_query <- paste(
     "SELECT transcript_index, protein_position, alternate_amino_acid",
-    "FROM", model_query_relation("duckvep_peptide_edits"),
+    "FROM",
+    model_query_relation("duckvep_peptide_edits"),
     "ORDER BY transcript_index, protein_position"
   )
   load_options <- c(
@@ -1062,7 +1087,8 @@ if ("duckvep_peptide_edits" %in% present_relations) {
 if (isTRUE(opt$regulatory)) {
   interval_feature_query <- paste(
     "SELECT regulation_feature_index, seq_region, feature_start, feature_end,",
-    "feature_kind FROM", model_query_relation("duckvep_regulation_features"),
+    "feature_kind FROM",
+    model_query_relation("duckvep_regulation_features"),
     "ORDER BY seq_region, feature_start, regulation_feature_index"
   )
   load_options <- c(
@@ -1121,7 +1147,9 @@ if (!nzchar(source_vcf) && !generate_structural && !generate_breakend) {
   die("VCF does not exist: {source_vcf}")
 }
 
-if (!nzchar(source_vcf) && any(nzchar(c(opt$source_url, opt$source_checksum)))) {
+if (
+  !nzchar(source_vcf) && any(nzchar(c(opt$source_url, opt$source_checksum)))
+) {
   die("source provenance options require --vcf")
 }
 source_sha256 <- ""
@@ -1157,7 +1185,11 @@ if (nzchar(source_vcf)) {
         "found {actual_checksum}"
       )
     }
-    verified_source_checksum <- paste(checksum_algorithm, actual_checksum, sep = ":")
+    verified_source_checksum <- paste(
+      checksum_algorithm,
+      actual_checksum,
+      sep = ":"
+    )
   }
 }
 
@@ -1776,7 +1808,8 @@ if (generate_breakend) {
 source_bcf_columns <- character()
 if (
   identical(opt$event_mode, "structural") &&
-    !generate_structural && nzchar(source_vcf)
+    !generate_structural &&
+    nzchar(source_vcf)
 ) {
   source_bcf_columns <- dbGetQuery(
     con,
@@ -2208,7 +2241,11 @@ if (identical(opt$event_mode, "small") && nzchar(opt$eligibility_out)) {
     ),
     eligibility
   )
-  dir.create(dirname(opt$eligibility_out), recursive = TRUE, showWarnings = FALSE)
+  dir.create(
+    dirname(opt$eligibility_out),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
   utils::write.csv(eligibility, opt$eligibility_out, row.names = FALSE, na = "")
 }
 if (isTRUE(opt$source_audit_only)) {
@@ -2225,7 +2262,12 @@ if (isTRUE(opt$source_audit_only)) {
     glue("SELECT duckvep_model_drop({sql_q(opt$model_name)})")
   ))
   cat(glue("source records audited: {eligibility$source_records[[1L]]}"), "\n")
-  cat(glue("eligible distinct alleles: {eligibility$eligible_distinct_alleles[[1L]]}"), "\n")
+  cat(
+    glue(
+      "eligible distinct alleles: {eligibility$eligible_distinct_alleles[[1L]]}"
+    ),
+    "\n"
+  )
   cat(glue("eligibility receipt: {opt$eligibility_out}"), "\n")
   quit(save = "no", status = 0L)
 }
@@ -2355,8 +2397,15 @@ repeat {
   }
   writeLines(
     paste(
-      chunk$chrom, chunk$position, chunk$variant_id, chunk$reference,
-      chunk$alternate, ".", "PASS", info, sep = "\t"
+      chunk$chrom,
+      chunk$position,
+      chunk$variant_id,
+      chunk$reference,
+      chunk$alternate,
+      ".",
+      "PASS",
+      info,
+      sep = "\t"
     ),
     vc
   )
@@ -2661,7 +2710,9 @@ blit_capture <- function(command, context) {
   value <- readLines(output, warn = FALSE)
   if (!identical(status, 0L)) {
     detail <- paste(value, collapse = "\n")
-    if (nzchar(detail)) detail <- paste0(":\n", detail)
+    if (nzchar(detail)) {
+      detail <- paste0(":\n", detail)
+    }
     die("{context}{detail}")
   }
   value
@@ -2676,7 +2727,9 @@ installed_environment <- do.call(
   blit_capture("cannot inspect the VEP environment")
 installed_packages <- duckvep_evidence_explicit_packages(installed_environment)
 locked_packages <- duckvep_evidence_explicit_packages(environment_lock)
-if (!length(installed_packages) || !identical(installed_packages, locked_packages)) {
+if (
+  !length(installed_packages) || !identical(installed_packages, locked_packages)
+) {
   die("installed VEP environment does not match --oracle-environment-receipt")
 }
 vep_environment_history <- file.path(vep_prefix, "conda-meta", "history")
@@ -3237,9 +3290,13 @@ if (nrow(duplicate_annotation_pair) != 0L) {
   die(
     "annotation dump is not unique for source=",
     duplicate_annotation_pair$source[[1L]],
-    ", variant_id=", duplicate_annotation_pair$variant_id[[1L]],
-    ", tx=", duplicate_annotation_pair$tx[[1L]],
-    ": ", duplicate_annotation_pair$n[[1L]], " rows"
+    ", variant_id=",
+    duplicate_annotation_pair$variant_id[[1L]],
+    ", tx=",
+    duplicate_annotation_pair$tx[[1L]],
+    ": ",
+    duplicate_annotation_pair$n[[1L]],
+    " rows"
   )
 }
 
@@ -3365,7 +3422,8 @@ if (isTRUE(opt$hgvs)) {
   }
   hgvs_summary <- dbGetQuery(
     con,
-    glue("WITH comparisons AS (
+    glue(
+      "WITH comparisons AS (
        SELECT
          'hgvsc'::VARCHAR AS metric,
          hgvsc_comparison AS comparison,
@@ -3395,13 +3453,15 @@ if (isTRUE(opt$hgvs)) {
      FROM comparisons
      GROUP BY ALL
      ORDER BY metric, comparison, n DESC, var_type, length_bin,
-              consequence_class, engine_status, engine_reason")
+              consequence_class, engine_status, engine_reason"
+    )
   )
   dir.create(dirname(opt$hgvs_out), recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(hgvs_summary, opt$hgvs_out, row.names = FALSE)
   hgvs_discordance_count <- dbGetQuery(
     con,
-    glue("SELECT count(*) AS n
+    glue(
+      "SELECT count(*) AS n
      FROM (
        SELECT hgvsc_comparison AS comparison FROM {hgvs_pair_relation}
        UNION ALL
@@ -3411,15 +3471,18 @@ if (isTRUE(opt$hgvs)) {
        'engine_invalid_status', 'engine_invalid_value', 'engine_invalid_reason',
        'engine_unresolved', 'mismatch', 'engine_extra', 'engine_missing',
        'engine_extra_row', 'engine_missing_row'
-     )")
+     )"
+    )
   )$n[[1L]]
 }
 
 counts <- dbGetQuery(
   con,
-  glue("SELECT source, count(*) AS annotation_rows
+  glue(
+    "SELECT source, count(*) AS annotation_rows
    FROM read_parquet({sql_q(opt$annotations_out)})
-   GROUP BY source ORDER BY source")
+   GROUP BY source ORDER BY source"
+  )
 )
 
 cat(glue("sampled variants: {sample_count}"), "\n", sep = "")
@@ -3443,7 +3506,11 @@ cat(
   "\n",
   sep = ""
 )
-cat(glue("VEP duplicate object rows collapsed: {vep_duplicate_rows}"), "\n", sep = "")
+cat(
+  glue("VEP duplicate object rows collapsed: {vep_duplicate_rows}"),
+  "\n",
+  sep = ""
+)
 cat(
   glue(
     "VEP distinct allele-level object rows unioned: ",
@@ -3472,13 +3539,16 @@ rc <- system2(
   "Rscript",
   duckvep_system2_quote(c(
     report,
-    "--annotations", opt$annotations_out,
+    "--annotations",
+    opt$annotations_out,
     if (nzchar(opt$annotations_label)) {
       c("--annotations-label", opt$annotations_label)
     },
     "--pair-level-input",
-    "--duckdb-memory-limit", opt$duckdb_memory_limit,
-    "--duckdb-threads", as.character(opt$duckdb_threads)
+    "--duckdb-memory-limit",
+    opt$duckdb_memory_limit,
+    "--duckdb-threads",
+    as.character(opt$duckdb_threads)
   ))
 )
 if (rc != 0L) {
@@ -3501,10 +3571,12 @@ if (identical(oracle_mode, "cache")) {
     if (nzchar(opt$cache_version)) opt$cache_version else "116",
     opt$assembly
   )
-  if (!identical(
-    final_cache_receipt$inventory_sha256,
-    cache_inventory_sha256
-  )) {
+  if (
+    !identical(
+      final_cache_receipt$inventory_sha256,
+      cache_inventory_sha256
+    )
+  ) {
     die("VEP cache state changed during executable conformance")
   }
 }

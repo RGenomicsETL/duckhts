@@ -258,7 +258,12 @@ extract_map_data <- function(map_col, operation = "keys", default = NA) {
       }
       return(x$value[key_pos[1]])
     }
-    if (is.list(x) && !is.data.frame(x) && "key" %in% names(x) && "value" %in% names(x)) {
+    if (
+      is.list(x) &&
+        !is.data.frame(x) &&
+        "key" %in% names(x) &&
+        "value" %in% names(x)
+    ) {
       key_pos <- which(x[["key"]] == operation)
       if (length(key_pos) == 0) {
         return(default)

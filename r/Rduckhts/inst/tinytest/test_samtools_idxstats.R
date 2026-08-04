@@ -6,19 +6,33 @@ test_samtools_idxstats <- function() {
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   mixed_bam <- system.file("extdata", "fixture_mixed.bam", package = "Rduckhts")
-  mixed_cram <- system.file("extdata", "fixture_mixed.cram", package = "Rduckhts")
+  mixed_cram <- system.file(
+    "extdata",
+    "fixture_mixed.cram",
+    package = "Rduckhts"
+  )
   range_bam <- system.file("extdata", "range.bam", package = "Rduckhts")
   range_bai <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
 
   bam_out <- tempfile("idxstats_mixed_", fileext = ".txt")
-  bam_res <- rduckhts_samtools_idxstats(con, mixed_bam, output = bam_out, overwrite = TRUE)
+  bam_res <- rduckhts_samtools_idxstats(
+    con,
+    mixed_bam,
+    output = bam_out,
+    overwrite = TRUE
+  )
   expect_true(isTRUE(bam_res$success[[1]]))
   expect_true(isTRUE(bam_res$used_index_fast_path[[1]]))
   bam_lines <- readLines(bam_out, warn = FALSE)
   expect_equal(bam_lines, c("11\t50000\t10\t0", "*\t0\t0\t0"))
 
   cram_out <- tempfile("idxstats_cram_", fileext = ".txt")
-  cram_res <- rduckhts_samtools_idxstats(con, mixed_cram, output = cram_out, overwrite = TRUE)
+  cram_res <- rduckhts_samtools_idxstats(
+    con,
+    mixed_cram,
+    output = cram_out,
+    overwrite = TRUE
+  )
   expect_true(isTRUE(cram_res$success[[1]]))
   expect_true(!isTRUE(cram_res$used_index_fast_path[[1]]))
   cram_lines <- readLines(cram_out, warn = FALSE)

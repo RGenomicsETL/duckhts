@@ -6,9 +6,17 @@ test_mosdepth <- function() {
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   bam_path <- system.file("extdata", "range.bam", package = "Rduckhts")
-  bam_index_path <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
+  bam_index_path <- system.file(
+    "extdata",
+    "range.bam.bai",
+    package = "Rduckhts"
+  )
   cram_path <- system.file("extdata", "range.cram", package = "Rduckhts")
-  cram_index_path <- system.file("extdata", "range.cram.crai", package = "Rduckhts")
+  cram_index_path <- system.file(
+    "extdata",
+    "range.cram.crai",
+    package = "Rduckhts"
+  )
   fasta_path <- system.file("extdata", "ce.fa", package = "Rduckhts")
 
   tmp_dir <- tempfile("duckhts_mosdepth_")
@@ -25,12 +33,21 @@ test_mosdepth <- function() {
     overwrite = TRUE
   )
   expect_true(isTRUE(out_fast$success[1]))
-  expect_true(file.exists(file.path(tmp_dir, "range_fast.mosdepth.summary.txt")))
-  expect_true(file.exists(file.path(tmp_dir, "range_fast.mosdepth.global.dist.txt")))
+  expect_true(file.exists(file.path(
+    tmp_dir,
+    "range_fast.mosdepth.summary.txt"
+  )))
+  expect_true(file.exists(file.path(
+    tmp_dir,
+    "range_fast.mosdepth.global.dist.txt"
+  )))
   expect_true(file.exists(file.path(tmp_dir, "range_fast.per-base.bed.gz")))
   expect_true(file.exists(file.path(tmp_dir, "range_fast.per-base.bed.gz.csi")))
 
-  summary_lines <- readLines(file.path(tmp_dir, "range_fast.mosdepth.summary.txt"))
+  summary_lines <- readLines(file.path(
+    tmp_dir,
+    "range_fast.mosdepth.summary.txt"
+  ))
   expect_equal(
     summary_lines[1:3],
     c(
@@ -51,9 +68,18 @@ test_mosdepth <- function() {
     overwrite = TRUE
   )
   expect_true(isTRUE(out_prec$success[1]))
-  summary_prec <- readLines(file.path(tmp_dir, "range_prec.mosdepth.summary.txt"))
-  expect_true(any(grepl("^CHROMOSOME_I\\t1009800\\t1730\\t0\\.0017\\t0\\t4$", summary_prec)))
-  expect_true(any(grepl("^total\\t1024800\\t11129\\t0\\.0109\\t0\\t6$", summary_prec)))
+  summary_prec <- readLines(file.path(
+    tmp_dir,
+    "range_prec.mosdepth.summary.txt"
+  ))
+  expect_true(any(grepl(
+    "^CHROMOSOME_I\\t1009800\\t1730\\t0\\.0017\\t0\\t4$",
+    summary_prec
+  )))
+  expect_true(any(grepl(
+    "^total\\t1024800\\t11129\\t0\\.0109\\t0\\t6$",
+    summary_prec
+  )))
 
   prefix_cram <- file.path(tmp_dir, "range_cram")
   out_cram <- rduckhts_mosdepth(
@@ -66,7 +92,10 @@ test_mosdepth <- function() {
     overwrite = TRUE
   )
   expect_true(isTRUE(out_cram$success[1]))
-  summary_cram <- readLines(file.path(tmp_dir, "range_cram.mosdepth.summary.txt"))
+  summary_cram <- readLines(file.path(
+    tmp_dir,
+    "range_cram.mosdepth.summary.txt"
+  ))
   expect_equal(
     summary_cram[1:3],
     c(
@@ -116,9 +145,15 @@ test_mosdepth <- function() {
   expect_true(isTRUE(out_win$success[1]))
   expect_true(file.exists(file.path(tmp_dir, "range_win.regions.bed.gz")))
   expect_true(file.exists(file.path(tmp_dir, "range_win.regions.bed.gz.csi")))
-  expect_true(file.exists(file.path(tmp_dir, "range_win.mosdepth.region.dist.txt")))
+  expect_true(file.exists(file.path(
+    tmp_dir,
+    "range_win.mosdepth.region.dist.txt"
+  )))
 
-  region_dist <- readLines(file.path(tmp_dir, "range_win.mosdepth.region.dist.txt"))
+  region_dist <- readLines(file.path(
+    tmp_dir,
+    "range_win.mosdepth.region.dist.txt"
+  ))
   expect_equal(
     region_dist[1:5],
     c(
@@ -143,7 +178,10 @@ test_mosdepth <- function() {
   )
   expect_true(isTRUE(out_thr$success[1]))
   expect_true(file.exists(file.path(tmp_dir, "range_thr.thresholds.bed.gz")))
-  expect_true(file.exists(file.path(tmp_dir, "range_thr.thresholds.bed.gz.csi")))
+  expect_true(file.exists(file.path(
+    tmp_dir,
+    "range_thr.thresholds.bed.gz.csi"
+  )))
   expect_true(!is.na(out_thr$thresholds_path[1]))
   thresholds_rows <- DBI::dbGetQuery(
     con,
@@ -196,9 +234,21 @@ test_mosdepth <- function() {
   )
   expect_true(file.exists(file.path(tmp_dir, "big_fast.per-base.bed.gz.csi")))
 
-  empty_bam_path <- system.file("extdata", "empty-tids.bam", package = "Rduckhts")
-  empty_index_path <- system.file("extdata", "empty-tids.bam.bai", package = "Rduckhts")
-  empty_bed_path <- system.file("extdata", "empty-tids.bed", package = "Rduckhts")
+  empty_bam_path <- system.file(
+    "extdata",
+    "empty-tids.bam",
+    package = "Rduckhts"
+  )
+  empty_index_path <- system.file(
+    "extdata",
+    "empty-tids.bam.bai",
+    package = "Rduckhts"
+  )
+  empty_bed_path <- system.file(
+    "extdata",
+    "empty-tids.bed",
+    package = "Rduckhts"
+  )
   prefix_empty <- file.path(tmp_dir, "empty_tids")
   out_empty <- rduckhts_mosdepth(
     con,
@@ -216,7 +266,9 @@ test_mosdepth <- function() {
     con,
     paste0(
       "SELECT chrom, length, bases, round(\"mean\", 2) AS mean_depth, max ",
-      "FROM read_csv('", file.path(tmp_dir, "empty_tids.mosdepth.summary.txt"), "', delim = '\t', header = TRUE) ",
+      "FROM read_csv('",
+      file.path(tmp_dir, "empty_tids.mosdepth.summary.txt"),
+      "', delim = '\t', header = TRUE) ",
       "WHERE chrom = 'HPV18'"
     )
   )
@@ -309,7 +361,10 @@ test_mosdepth <- function() {
   )
   expect_true(isTRUE(out_quant$success[1]))
   expect_true(file.exists(file.path(tmp_dir, "empty_quant.quantized.bed.gz")))
-  expect_true(file.exists(file.path(tmp_dir, "empty_quant.quantized.bed.gz.csi")))
+  expect_true(file.exists(file.path(
+    tmp_dir,
+    "empty_quant.quantized.bed.gz.csi"
+  )))
   expect_true(!is.na(out_quant$quantized_path[1]))
   quant_rows <- DBI::dbGetQuery(
     con,
@@ -351,8 +406,16 @@ test_mosdepth <- function() {
   expect_true(file.exists(file.path(tmp_dir, "range_noper.regions.bed.gz")))
   expect_false(file.exists(file.path(tmp_dir, "range_noper.per-base.bed.gz")))
 
-  ovl_bam_path <- system.file("extdata", "overlapping-pairs.bam", package = "Rduckhts")
-  ovl_index_path <- system.file("extdata", "overlapping-pairs.bam.bai", package = "Rduckhts")
+  ovl_bam_path <- system.file(
+    "extdata",
+    "overlapping-pairs.bam",
+    package = "Rduckhts"
+  )
+  ovl_index_path <- system.file(
+    "extdata",
+    "overlapping-pairs.bam.bai",
+    package = "Rduckhts"
+  )
   prefix_default <- file.path(tmp_dir, "range_default")
   out_default <- rduckhts_mosdepth(
     con,
@@ -365,7 +428,10 @@ test_mosdepth <- function() {
     overwrite = TRUE
   )
   expect_true(isTRUE(out_default$success[1]))
-  summary_default <- readLines(file.path(tmp_dir, "range_default.mosdepth.summary.txt"))
+  summary_default <- readLines(file.path(
+    tmp_dir,
+    "range_default.mosdepth.summary.txt"
+  ))
   expect_equal(
     summary_default[1:4],
     c(
@@ -488,7 +554,10 @@ test_mosdepth <- function() {
     overwrite = TRUE
   )
   expect_true(isTRUE(out_fragment$success[1]))
-  summary_fragment <- readLines(file.path(tmp_dir, "range_fragment.mosdepth.summary.txt"))
+  summary_fragment <- readLines(file.path(
+    tmp_dir,
+    "range_fragment.mosdepth.summary.txt"
+  ))
   expect_equal(
     summary_fragment[1:5],
     c(

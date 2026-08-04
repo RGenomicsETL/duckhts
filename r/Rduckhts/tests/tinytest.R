@@ -1,5 +1,5 @@
 if (requireNamespace("tinytest", quietly = TRUE)) {
-    tinytest::test_package("Rduckhts")
+  tinytest::test_package("Rduckhts")
 } else {
-    message("tinytest not available; skipping tests")
+  message("tinytest not available; skipping tests")
 }

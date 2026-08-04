@@ -7,7 +7,10 @@ test_bigwig <- function() {
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
   bigwig_path <- system.file(
-    "extdata", "libbigwig_test.bw", package = "Rduckhts", mustWork = TRUE
+    "extdata",
+    "libbigwig_test.bw",
+    package = "Rduckhts",
+    mustWork = TRUE
   )
 
   read_little_endian <- function(bytes, offset0, width) {
@@ -25,11 +28,14 @@ test_bigwig <- function() {
     path
   }
   query_bigwig_count <- function(path) {
-    dbGetQuery(con, paste0(
-      "SELECT count(*) FROM read_bigwig(",
-      as.character(dbQuoteString(con, path)),
-      ")"
-    ))
+    dbGetQuery(
+      con,
+      paste0(
+        "SELECT count(*) FROM read_bigwig(",
+        as.character(dbQuoteString(con, path)),
+        ")"
+      )
+    )
   }
 
   expect_silent(rduckhts_bigwig(

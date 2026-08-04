@@ -2,8 +2,10 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 1L || !nzchar(args[[1L]])) {
-  stop("usage: audit_rduckhts_source_tarball.R <Rduckhts source tarball>",
-       call. = FALSE)
+  stop(
+    "usage: audit_rduckhts_source_tarball.R <Rduckhts source tarball>",
+    call. = FALSE
+  )
 }
 
 tarball <- normalizePath(args[[1L]], mustWork = TRUE)

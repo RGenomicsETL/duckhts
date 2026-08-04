@@ -77,7 +77,10 @@ rduckhts_bcf <- function(
     params$tidy_format <- "true"
   }
   if (!is.null(additional_csq_column_types)) {
-    params$additional_csq_column_types <- sprintf("'%s'", additional_csq_column_types)
+    params$additional_csq_column_types <- sprintf(
+      "'%s'",
+      additional_csq_column_types
+    )
   }
   if (!is.null(scan_mode)) {
     params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
@@ -92,13 +95,23 @@ rduckhts_bcf <- function(
     )
   }
   if (!is.null(decode_error_policy)) {
-    if (!is.character(decode_error_policy) || length(decode_error_policy) != 1L ||
-        is.na(decode_error_policy) || !nzchar(decode_error_policy)) {
-      stop("decode_error_policy must be 'null', 'warn', or 'error'", call. = FALSE)
+    if (
+      !is.character(decode_error_policy) ||
+        length(decode_error_policy) != 1L ||
+        is.na(decode_error_policy) ||
+        !nzchar(decode_error_policy)
+    ) {
+      stop(
+        "decode_error_policy must be 'null', 'warn', or 'error'",
+        call. = FALSE
+      )
     }
     decode_error_policy <- tolower(decode_error_policy)
     if (!decode_error_policy %in% c("null", "warn", "error")) {
-      stop("decode_error_policy must be 'null', 'warn', or 'error'", call. = FALSE)
+      stop(
+        "decode_error_policy must be 'null', 'warn', or 'error'",
+        call. = FALSE
+      )
     }
     params$decode_error_policy <- sql_quote_string(decode_error_policy)
   }
@@ -299,7 +312,9 @@ rduckhts_pileup <- function(
     }
   }
 
-  if (is.null(region) || length(region) != 1L || is.na(region) || !nzchar(region)) {
+  if (
+    is.null(region) || length(region) != 1L || is.na(region) || !nzchar(region)
+  ) {
     stop("region must be a single non-empty string", call. = FALSE)
   }
 
@@ -513,22 +528,30 @@ rduckhts_bigwig <- function(
   blocks_per_iteration = 64L,
   overwrite = FALSE
 ) {
-  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+  if (
+    !is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)
+  ) {
     stop("path must be one non-empty character string", call. = FALSE)
   }
   if (!is.null(region)) {
-    if (!is.character(region) || length(region) == 0L ||
-        anyNA(region) || any(!nzchar(region))) {
+    if (
+      !is.character(region) ||
+        length(region) == 0L ||
+        anyNA(region) ||
+        any(!nzchar(region))
+    ) {
       stop("region must contain non-empty character strings", call. = FALSE)
     }
     region <- paste(region, collapse = ",")
   }
-  if (!is.numeric(blocks_per_iteration) ||
+  if (
+    !is.numeric(blocks_per_iteration) ||
       length(blocks_per_iteration) != 1L ||
       is.na(blocks_per_iteration) ||
       blocks_per_iteration < 1 ||
       blocks_per_iteration > 1048576 ||
-      blocks_per_iteration != floor(blocks_per_iteration)) {
+      blocks_per_iteration != floor(blocks_per_iteration)
+  ) {
     stop(
       "blocks_per_iteration must be a whole number between 1 and 1048576",
       call. = FALSE
@@ -538,7 +561,8 @@ rduckhts_bigwig <- function(
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
-        "Table '", table_name,
+        "Table '",
+        table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
@@ -673,13 +697,27 @@ rduckhts_fasta_nuc <- function(
   include_seq = FALSE
 ) {
   params <- list()
-  if (!is.null(bed_path)) params$bed_path <- sprintf("'%s'", bed_path)
-  if (!is.null(bin_width)) params$bin_width <- bin_width
-  if (!is.null(region)) params$region <- sprintf("'%s'", region)
-  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
-  if (!is.null(gzi_path)) params$gzi_path <- sprintf("'%s'", gzi_path)
-  if (!is.null(bed_index_path)) params$bed_index_path <- sprintf("'%s'", bed_index_path)
-  if (include_seq) params$include_seq <- "true"
+  if (!is.null(bed_path)) {
+    params$bed_path <- sprintf("'%s'", bed_path)
+  }
+  if (!is.null(bin_width)) {
+    params$bin_width <- bin_width
+  }
+  if (!is.null(region)) {
+    params$region <- sprintf("'%s'", region)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  if (!is.null(gzi_path)) {
+    params$gzi_path <- sprintf("'%s'", gzi_path)
+  }
+  if (!is.null(bed_index_path)) {
+    params$bed_index_path <- sprintf("'%s'", bed_index_path)
+  }
+  if (include_seq) {
+    params$include_seq <- "true"
+  }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM fasta_nuc('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
@@ -735,9 +773,13 @@ rduckhts_bgzip <- function(
   overwrite = FALSE
 ) {
   params <- list(threads = threads, level = level)
-  if (!is.null(output_path)) params$output_path <- sprintf("'%s'", output_path)
+  if (!is.null(output_path)) {
+    params$output_path <- sprintf("'%s'", output_path)
+  }
   params$keep <- if (keep) "true" else "false"
-  if (overwrite) params$overwrite <- "true"
+  if (overwrite) {
+    params$overwrite <- "true"
+  }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM bgzip('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
@@ -766,9 +808,13 @@ rduckhts_bgunzip <- function(
   overwrite = FALSE
 ) {
   params <- list(threads = threads)
-  if (!is.null(output_path)) params$output_path <- sprintf("'%s'", output_path)
+  if (!is.null(output_path)) {
+    params$output_path <- sprintf("'%s'", output_path)
+  }
   params$keep <- if (keep) "true" else "false"
-  if (overwrite) params$overwrite <- "true"
+  if (overwrite) {
+    params$overwrite <- "true"
+  }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM bgunzip('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
@@ -820,11 +866,21 @@ rduckhts_bam_bin_counts <- function(
     exclude_flags = exclude_flags,
     rmdup = sql_quote_string(rmdup)
   )
-  if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
-  if (isTRUE(include_unmapped)) params$include_unmapped <- "true"
-  if (!is.null(reference)) params$reference <- sql_quote_string(reference)
-  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
-  if (!is.null(stats)) params$stats <- sql_quote_string(stats)
+  if (!is.null(chrom)) {
+    params$chrom <- sql_quote_string(chrom)
+  }
+  if (isTRUE(include_unmapped)) {
+    params$include_unmapped <- "true"
+  }
+  if (!is.null(reference)) {
+    params$reference <- sql_quote_string(reference)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sql_quote_string(index_path)
+  }
+  if (!is.null(stats)) {
+    params$stats <- sql_quote_string(stats)
+  }
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM bam_bin_counts(%s, %s%s)",
@@ -899,9 +955,15 @@ rduckhts_bam_bed_coverage <- function(
     strand_outputs = if (isTRUE(strand_outputs)) "true" else "false",
     processing_threads = processing_threads
   )
-  if (!is.null(reference)) params$reference <- sql_quote_string(reference)
-  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
-  if (!is.null(bed_index_path)) params$bed_index_path <- sql_quote_string(bed_index_path)
+  if (!is.null(reference)) {
+    params$reference <- sql_quote_string(reference)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sql_quote_string(index_path)
+  }
+  if (!is.null(bed_index_path)) {
+    params$bed_index_path <- sql_quote_string(bed_index_path)
+  }
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM duckhts_bam_bed_coverage(%s, %s%s)",
@@ -988,14 +1050,30 @@ rduckhts_mosdepth <- function(
     max_frag_len = max_frag_len,
     precision_digits = precision_digits
   )
-  if (!is.null(chrom)) params$chrom <- sql_quote_string(chrom)
-  if (!is.null(by)) params$by <- sql_quote_string(by)
-  if (!is.null(fasta)) params$fasta <- sql_quote_string(fasta)
-  if (!is.null(read_groups)) params$read_groups <- sql_quote_string(read_groups)
-  if (!is.null(quantize)) params$quantize <- sql_quote_string(quantize)
-  if (!is.null(thresholds)) params$thresholds <- sql_quote_string(thresholds)
-  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
-  if (isTRUE(overwrite)) params$overwrite <- "true"
+  if (!is.null(chrom)) {
+    params$chrom <- sql_quote_string(chrom)
+  }
+  if (!is.null(by)) {
+    params$by <- sql_quote_string(by)
+  }
+  if (!is.null(fasta)) {
+    params$fasta <- sql_quote_string(fasta)
+  }
+  if (!is.null(read_groups)) {
+    params$read_groups <- sql_quote_string(read_groups)
+  }
+  if (!is.null(quantize)) {
+    params$quantize <- sql_quote_string(quantize)
+  }
+  if (!is.null(thresholds)) {
+    params$thresholds <- sql_quote_string(thresholds)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sql_quote_string(index_path)
+  }
+  if (isTRUE(overwrite)) {
+    params$overwrite <- "true"
+  }
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM duckhts_mosdepth(%s, %s%s)",
@@ -1027,7 +1105,9 @@ rduckhts_bam_index <- function(
   threads = 4
 ) {
   params <- list(min_shift = min_shift, threads = threads)
-  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM bam_index('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
@@ -1058,9 +1138,15 @@ rduckhts_samtools_idxstats <- function(
   overwrite = FALSE
 ) {
   params <- list(threads = threads)
-  if (!is.null(output)) params$output <- sql_quote_string(output)
-  if (!is.null(index_path)) params$index_path <- sql_quote_string(index_path)
-  if (isTRUE(overwrite)) params$overwrite <- "true"
+  if (!is.null(output)) {
+    params$output <- sql_quote_string(output)
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- sql_quote_string(index_path)
+  }
+  if (isTRUE(overwrite)) {
+    params$overwrite <- "true"
+  }
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM duckhts_samtools_idxstats(%s%s)",
@@ -1091,8 +1177,12 @@ rduckhts_bcf_index <- function(
   threads = 4
 ) {
   params <- list(threads = threads)
-  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
-  if (!is.null(min_shift)) params$min_shift <- min_shift
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  if (!is.null(min_shift)) {
+    params$min_shift <- min_shift
+  }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM bcf_index('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
@@ -1133,12 +1223,24 @@ rduckhts_tabix_index <- function(
     min_shift = min_shift,
     threads = threads
   )
-  if (!is.null(index_path)) params$index_path <- sprintf("'%s'", index_path)
-  if (!is.null(seq_col)) params$seq_col <- seq_col
-  if (!is.null(start_col)) params$start_col <- start_col
-  if (!is.null(end_col)) params$end_col <- end_col
-  if (!is.null(comment_char)) params$comment_char <- sprintf("'%s'", comment_char)
-  if (!is.null(skip_lines)) params$skip_lines <- skip_lines
+  if (!is.null(index_path)) {
+    params$index_path <- sprintf("'%s'", index_path)
+  }
+  if (!is.null(seq_col)) {
+    params$seq_col <- seq_col
+  }
+  if (!is.null(start_col)) {
+    params$start_col <- start_col
+  }
+  if (!is.null(end_col)) {
+    params$end_col <- end_col
+  }
+  if (!is.null(comment_char)) {
+    params$comment_char <- sprintf("'%s'", comment_char)
+  }
+  if (!is.null(skip_lines)) {
+    params$skip_lines <- skip_lines
+  }
   param_str <- build_param_str(params)
   query <- sprintf("SELECT * FROM tabix_index('%s'%s)", path, param_str)
   DBI::dbGetQuery(con, query)
@@ -1670,7 +1772,12 @@ rduckhts_hts_index <- function(con, path, format = NULL, index_path = NULL) {
 #' @return A data frame with span-oriented index metadata.
 #'
 #' @export
-rduckhts_hts_index_spans <- function(con, path, format = NULL, index_path = NULL) {
+rduckhts_hts_index_spans <- function(
+  con,
+  path,
+  format = NULL,
+  index_path = NULL
+) {
   params <- list()
   if (!is.null(format)) {
     params$format <- sprintf("'%s'", format)
@@ -1679,7 +1786,11 @@ rduckhts_hts_index_spans <- function(con, path, format = NULL, index_path = NULL
     params$index_path <- sprintf("'%s'", index_path)
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM read_hts_index_spans('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM read_hts_index_spans('%s'%s)",
+    path,
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1695,7 +1806,12 @@ rduckhts_hts_index_spans <- function(con, path, format = NULL, index_path = NULL
 #' @return A data frame with raw index blob metadata.
 #'
 #' @export
-rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) {
+rduckhts_hts_index_raw <- function(
+  con,
+  path,
+  format = NULL,
+  index_path = NULL
+) {
   params <- list()
   if (!is.null(format)) {
     params$format <- sprintf("'%s'", format)
@@ -1725,7 +1841,7 @@ rduckhts_hts_index_raw <- function(con, path, format = NULL, index_path = NULL) 
 #' @param src_fasta_ref Optional source FASTA reference
 #' @param max_snp_gap Maximum chain block merge gap
 #' @param max_indel_inc Maximum indel anchor expansion
- #' @param lift_mt If FALSE (default), mitochondrial variants with matching
+#' @param lift_mt If FALSE (default), mitochondrial variants with matching
 #'   source/destination contig lengths are passed through with only contig
 #'   rename. If TRUE, MT variants are lifted through the chain like any
 #'   other contig.
@@ -1755,10 +1871,20 @@ rduckhts_liftover <- function(
   end_pos_col = NULL,
   no_left_align = FALSE
 ) {
-  if (!is.numeric(max_snp_gap) || length(max_snp_gap) != 1 || is.na(max_snp_gap) || max_snp_gap < 0) {
+  if (
+    !is.numeric(max_snp_gap) ||
+      length(max_snp_gap) != 1 ||
+      is.na(max_snp_gap) ||
+      max_snp_gap < 0
+  ) {
     stop("max_snp_gap must be >= 0", call. = FALSE)
   }
-  if (!is.numeric(max_indel_inc) || length(max_indel_inc) != 1 || is.na(max_indel_inc) || max_indel_inc < 0) {
+  if (
+    !is.numeric(max_indel_inc) ||
+      length(max_indel_inc) != 1 ||
+      is.na(max_indel_inc) ||
+      max_indel_inc < 0
+  ) {
     stop("max_indel_inc must be >= 0", call. = FALSE)
   }
 
@@ -1772,23 +1898,37 @@ rduckhts_liftover <- function(
     sprintf("'%s'", chrom_col),
     sprintf("'%s'", pos_col)
   )
-  if (!is.null(ref_col)) params <- c(params, sprintf("ref_col := '%s'", ref_col))
-  if (!is.null(alt_col)) params <- c(params, sprintf("alt_col := '%s'", alt_col))
+  if (!is.null(ref_col)) {
+    params <- c(params, sprintf("ref_col := '%s'", ref_col))
+  }
+  if (!is.null(alt_col)) {
+    params <- c(params, sprintf("alt_col := '%s'", alt_col))
+  }
   params <- c(
     params,
     sprintf("chain_path := '%s'", chain_path),
     sprintf("dst_fasta_ref := '%s'", dst_fasta_ref)
   )
-  if (!is.null(src_fasta_ref)) params <- c(params, sprintf("src_fasta_ref := '%s'", src_fasta_ref))
+  if (!is.null(src_fasta_ref)) {
+    params <- c(params, sprintf("src_fasta_ref := '%s'", src_fasta_ref))
+  }
   params <- c(
     params,
     sprintf("max_snp_gap := %d", as.integer(max_snp_gap)),
     sprintf("max_indel_inc := %d", as.integer(max_indel_inc)),
     sprintf("lift_mt := %s", tolower(as.character(lift_mt)))
   )
-  if (!is.null(end_pos_col)) params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
-  params <- c(params, sprintf("no_left_align := %s", tolower(as.character(no_left_align))))
-  sql <- sprintf("SELECT * FROM duckdb_liftover(%s)", paste(params, collapse = ", "))
+  if (!is.null(end_pos_col)) {
+    params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
+  }
+  params <- c(
+    params,
+    sprintf("no_left_align := %s", tolower(as.character(no_left_align)))
+  )
+  sql <- sprintf(
+    "SELECT * FROM duckdb_liftover(%s)",
+    paste(params, collapse = ", ")
+  )
   DBI::dbGetQuery(con, sql)
 }
 
@@ -1847,17 +1987,42 @@ rduckhts_bcftools_norm <- function(
     sql_quote_string(table_expr),
     sql_quote_string(fasta_ref)
   )
-  if (!identical(chrom_col, "chrom")) params <- c(params, sprintf("chrom_col := '%s'", chrom_col))
-  if (!identical(pos_col, "pos")) params <- c(params, sprintf("pos_col := '%s'", pos_col))
-  if (!identical(ref_col, "ref")) params <- c(params, sprintf("ref_col := '%s'", ref_col))
-  if (!identical(alt_col, "alt")) params <- c(params, sprintf("alt_col := '%s'", alt_col))
-  params <- c(params, sprintf("split_multiallelic := %s", tolower(as.character(split_multiallelic))))
-  if (!is.null(end_pos_col)) params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
-  if (!is.null(svlen_col)) params <- c(params, sprintf("svlen_col := '%s'", svlen_col))
-  if (!is.null(fasta_index_path)) params <- c(params, sprintf("fasta_index_path := '%s'", fasta_index_path))
-  if (!is.null(gzi_path)) params <- c(params, sprintf("gzi_path := '%s'", gzi_path))
+  if (!identical(chrom_col, "chrom")) {
+    params <- c(params, sprintf("chrom_col := '%s'", chrom_col))
+  }
+  if (!identical(pos_col, "pos")) {
+    params <- c(params, sprintf("pos_col := '%s'", pos_col))
+  }
+  if (!identical(ref_col, "ref")) {
+    params <- c(params, sprintf("ref_col := '%s'", ref_col))
+  }
+  if (!identical(alt_col, "alt")) {
+    params <- c(params, sprintf("alt_col := '%s'", alt_col))
+  }
+  params <- c(
+    params,
+    sprintf(
+      "split_multiallelic := %s",
+      tolower(as.character(split_multiallelic))
+    )
+  )
+  if (!is.null(end_pos_col)) {
+    params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
+  }
+  if (!is.null(svlen_col)) {
+    params <- c(params, sprintf("svlen_col := '%s'", svlen_col))
+  }
+  if (!is.null(fasta_index_path)) {
+    params <- c(params, sprintf("fasta_index_path := '%s'", fasta_index_path))
+  }
+  if (!is.null(gzi_path)) {
+    params <- c(params, sprintf("gzi_path := '%s'", gzi_path))
+  }
 
-  sql <- sprintf("SELECT * FROM duckhts_bcftools_norm(%s)", paste(params, collapse = ", "))
+  sql <- sprintf(
+    "SELECT * FROM duckhts_bcftools_norm(%s)",
+    paste(params, collapse = ", ")
+  )
   DBI::dbGetQuery(con, sql)
 }
 
@@ -1903,26 +2068,53 @@ rduckhts_munge <- function(
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
     table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
   }
-  provided_modes <- sum(!vapply(list(preset, column_map, column_map_file), is.null, logical(1)))
+  provided_modes <- sum(
+    !vapply(list(preset, column_map, column_map_file), is.null, logical(1))
+  )
   if (provided_modes > 1) {
-    stop("duckdb_munge: specify only one of preset, column_map, or column_map_file", call. = FALSE)
+    stop(
+      "duckdb_munge: specify only one of preset, column_map, or column_map_file",
+      call. = FALSE
+    )
   }
 
-  available_columns <- names(DBI::dbGetQuery(con, sprintf("SELECT * FROM %s LIMIT 0", table_expr)))
+  available_columns <- names(DBI::dbGetQuery(
+    con,
+    sprintf("SELECT * FROM %s LIMIT 0", table_expr)
+  ))
 
   if (!is.null(preset)) {
-    default_map_path <- system.file("extdata", "colheaders.tsv", package = "Rduckhts", mustWork = TRUE)
-    alias_map <- resolve_munge_column_map(read_munge_column_map_file(default_map_path), available_columns)
-    preset_map <- resolve_munge_column_map(read_munge_preset_map(con, preset), available_columns)
+    default_map_path <- system.file(
+      "extdata",
+      "colheaders.tsv",
+      package = "Rduckhts",
+      mustWork = TRUE
+    )
+    alias_map <- resolve_munge_column_map(
+      read_munge_column_map_file(default_map_path),
+      available_columns
+    )
+    preset_map <- resolve_munge_column_map(
+      read_munge_preset_map(con, preset),
+      available_columns
+    )
     column_map <- c(alias_map, preset_map)
     column_map <- column_map[!duplicated(names(column_map), fromLast = TRUE)]
     preset <- NULL
   }
   if (is.null(preset) && is.null(column_map) && is.null(column_map_file)) {
-    column_map_file <- system.file("extdata", "colheaders.tsv", package = "Rduckhts", mustWork = TRUE)
+    column_map_file <- system.file(
+      "extdata",
+      "colheaders.tsv",
+      package = "Rduckhts",
+      mustWork = TRUE
+    )
   }
   if (!is.null(column_map_file)) {
-    file_map <- resolve_munge_column_map(read_munge_column_map_file(column_map_file), available_columns)
+    file_map <- resolve_munge_column_map(
+      read_munge_column_map_file(column_map_file),
+      available_columns
+    )
     if (!is.null(column_map)) {
       column_map <- c(file_map, column_map)
       column_map <- column_map[!duplicated(names(column_map), fromLast = TRUE)]
@@ -1932,9 +2124,18 @@ rduckhts_munge <- function(
     column_map_file <- NULL
   }
   params <- list(sql_quote_string(table_expr))
-  if (!is.null(preset)) params <- c(params, sprintf("preset := '%s'", preset))
-  if (!is.null(column_map)) params <- c(params, sprintf("column_map := %s", sql_map_literal(column_map)))
-  if (!is.null(column_map_file)) params <- c(params, sprintf("column_map_file := '%s'", column_map_file))
+  if (!is.null(preset)) {
+    params <- c(params, sprintf("preset := '%s'", preset))
+  }
+  if (!is.null(column_map)) {
+    params <- c(
+      params,
+      sprintf("column_map := %s", sql_map_literal(column_map))
+    )
+  }
+  if (!is.null(column_map_file)) {
+    params <- c(params, sprintf("column_map_file := '%s'", column_map_file))
+  }
   if (!is.null(fasta_ref)) {
     params <- c(params, sprintf("fasta_ref := '%s'", fasta_ref))
   }
@@ -1943,13 +2144,32 @@ rduckhts_munge <- function(
     sprintf("iffy_tag := '%s'", iffy_tag),
     sprintf("mismatch_tag := '%s'", mismatch_tag)
   )
-  if (!is.null(ns)) params <- c(params, sprintf("ns := %s", format(ns, scientific = FALSE, trim = TRUE)))
-  if (!is.null(nc)) params <- c(params, sprintf("nc := %s", format(nc, scientific = FALSE, trim = TRUE)))
-  if (!is.null(ne)) params <- c(params, sprintf("ne := %s", format(ne, scientific = FALSE, trim = TRUE)))
+  if (!is.null(ns)) {
+    params <- c(
+      params,
+      sprintf("ns := %s", format(ns, scientific = FALSE, trim = TRUE))
+    )
+  }
+  if (!is.null(nc)) {
+    params <- c(
+      params,
+      sprintf("nc := %s", format(nc, scientific = FALSE, trim = TRUE))
+    )
+  }
+  if (!is.null(ne)) {
+    params <- c(
+      params,
+      sprintf("ne := %s", format(ne, scientific = FALSE, trim = TRUE))
+    )
+  }
   metal_keys <- c("INFO", "HET_I2", "HET_P", "HET_LP", "DIRE")
   has_metal <- !is.null(column_map) && any(metal_keys %in% names(column_map))
   macro_name <- if (has_metal) "duckdb_munge_metal" else "duckdb_munge"
-  sql <- sprintf("SELECT * FROM %s(%s)", macro_name, paste(params, collapse = ", "))
+  sql <- sprintf(
+    "SELECT * FROM %s(%s)",
+    macro_name,
+    paste(params, collapse = ", ")
+  )
   DBI::dbGetQuery(con, sql)
 }
 
@@ -2021,8 +2241,24 @@ rduckhts_score <- function(
   }
   if (!is.null(columns)) {
     columns <- toupper(columns)
-    if (!(columns %in% c("PLINK", "PLINK2", "REGENIE", "SAIGE", "BOLT", "METAL", "PGS", "SSF", "GWAS-SSF"))) {
-      stop("columns must be one of PLINK, PLINK2, REGENIE, SAIGE, BOLT, METAL, PGS, SSF, GWAS-SSF", call. = FALSE)
+    if (
+      !(columns %in%
+        c(
+          "PLINK",
+          "PLINK2",
+          "REGENIE",
+          "SAIGE",
+          "BOLT",
+          "METAL",
+          "PGS",
+          "SSF",
+          "GWAS-SSF"
+        ))
+    ) {
+      stop(
+        "columns must be one of PLINK, PLINK2, REGENIE, SAIGE, BOLT, METAL, PGS, SSF, GWAS-SSF",
+        call. = FALSE
+      )
     }
   }
   if (is.null(summary_path) && is.null(summaries_list_file)) {
@@ -2048,29 +2284,85 @@ rduckhts_score <- function(
     sql_quote_string(bcf_path),
     summary_sql
   )
-  if (!is.null(use)) params <- c(params, sprintf("use := '%s'", use))
-  if (!is.null(columns)) params <- c(params, sprintf("columns := '%s'", columns))
-  if (!is.null(columns_file)) params <- c(params, sprintf("columns_file := %s", sql_quote_string(columns_file)))
-  if (!is.null(q_score_thr)) params <- c(params, sprintf("q_score_thr := '%s'", q_score_thr))
-  if (!is.null(summaries_list_file)) params <- c(params, sprintf("summaries_list_file := %s", sql_quote_string(summaries_list_file)))
-  if (!is.null(log_path)) params <- c(params, sprintf("log_path := %s", sql_quote_string(log_path)))
-  if (!is.null(samples)) params <- c(params, sprintf("samples := '%s'", samples))
-  if (!is.null(regions)) params <- c(params, sprintf("regions := '%s'", regions))
-  if (!is.null(regions_file)) params <- c(params, sprintf("regions_file := '%s'", regions_file))
-  if (!is.null(regions_overlap)) params <- c(params, sprintf("regions_overlap := %d", as.integer(regions_overlap)))
-  if (!is.null(targets)) params <- c(params, sprintf("targets := '%s'", targets))
-  if (!is.null(targets_file)) params <- c(params, sprintf("targets_file := '%s'", targets_file))
-  if (!is.null(targets_overlap)) params <- c(params, sprintf("targets_overlap := %d", as.integer(targets_overlap)))
-  if (!is.null(apply_filters)) params <- c(params, sprintf("apply_filters := '%s'", apply_filters))
-  if (!is.null(include)) params <- c(params, sprintf("include := '%s'", include))
-  if (!is.null(exclude)) params <- c(params, sprintf("exclude := '%s'", exclude))
+  if (!is.null(use)) {
+    params <- c(params, sprintf("use := '%s'", use))
+  }
+  if (!is.null(columns)) {
+    params <- c(params, sprintf("columns := '%s'", columns))
+  }
+  if (!is.null(columns_file)) {
+    params <- c(
+      params,
+      sprintf("columns_file := %s", sql_quote_string(columns_file))
+    )
+  }
+  if (!is.null(q_score_thr)) {
+    params <- c(params, sprintf("q_score_thr := '%s'", q_score_thr))
+  }
+  if (!is.null(summaries_list_file)) {
+    params <- c(
+      params,
+      sprintf(
+        "summaries_list_file := %s",
+        sql_quote_string(summaries_list_file)
+      )
+    )
+  }
+  if (!is.null(log_path)) {
+    params <- c(params, sprintf("log_path := %s", sql_quote_string(log_path)))
+  }
+  if (!is.null(samples)) {
+    params <- c(params, sprintf("samples := '%s'", samples))
+  }
+  if (!is.null(regions)) {
+    params <- c(params, sprintf("regions := '%s'", regions))
+  }
+  if (!is.null(regions_file)) {
+    params <- c(params, sprintf("regions_file := '%s'", regions_file))
+  }
+  if (!is.null(regions_overlap)) {
+    params <- c(
+      params,
+      sprintf("regions_overlap := %d", as.integer(regions_overlap))
+    )
+  }
+  if (!is.null(targets)) {
+    params <- c(params, sprintf("targets := '%s'", targets))
+  }
+  if (!is.null(targets_file)) {
+    params <- c(params, sprintf("targets_file := '%s'", targets_file))
+  }
+  if (!is.null(targets_overlap)) {
+    params <- c(
+      params,
+      sprintf("targets_overlap := %d", as.integer(targets_overlap))
+    )
+  }
+  if (!is.null(apply_filters)) {
+    params <- c(params, sprintf("apply_filters := '%s'", apply_filters))
+  }
+  if (!is.null(include)) {
+    params <- c(params, sprintf("include := '%s'", include))
+  }
+  if (!is.null(exclude)) {
+    params <- c(params, sprintf("exclude := '%s'", exclude))
+  }
   params <- c(
     params,
-    sprintf("use_variant_id := %s", if (isTRUE(use_variant_id)) "true" else "false"),
+    sprintf(
+      "use_variant_id := %s",
+      if (isTRUE(use_variant_id)) "true" else "false"
+    ),
     sprintf("counts := %s", if (isTRUE(counts)) "true" else "false"),
-    sprintf("force_samples := %s", if (isTRUE(force_samples)) "true" else "false")
+    sprintf(
+      "force_samples := %s",
+      if (isTRUE(force_samples)) "true" else "false"
+    )
   )
-  sql <- sprintf("SELECT * FROM bcftools_score(%s)", paste(params, collapse = ", "))
+  sql <- sprintf(
+    "SELECT * FROM bcftools_score(%s)",
+    paste(params, collapse = ", ")
+  )
   DBI::dbGetQuery(con, sql)
 }
 
@@ -2102,17 +2394,23 @@ rduckhts_score <- function(
   if (is.character(value) && length(value) == 1) {
     return(sprintf("%s := %s", name, sql_quote_string(value)))
   }
-  stop(sprintf("Unsupported parameter type for '%s': %s", name, class(value)[1]),
-       call. = FALSE)
+  stop(
+    sprintf("Unsupported parameter type for '%s': %s", name, class(value)[1]),
+    call. = FALSE
+  )
 }
 
 .build_hts_arm <- function(reader, file, params) {
   # params is a named list of already-validated non-NULL values
   param_parts <- character(0)
   if (length(params) > 0) {
-    param_parts <- vapply(names(params), function(nm) {
-      .format_hts_param(nm, params[[nm]])
-    }, character(1))
+    param_parts <- vapply(
+      names(params),
+      function(nm) {
+        .format_hts_param(nm, params[[nm]])
+      },
+      character(1)
+    )
   }
   param_str <- if (length(param_parts) > 0) {
     paste0(", ", paste(param_parts, collapse = ", "))
@@ -2120,15 +2418,23 @@ rduckhts_score <- function(
     ""
   }
   quoted_file <- sql_quote_string(file)
-  sprintf("SELECT %s AS filename, t.* FROM %s(%s%s) t",
-          quoted_file, reader, quoted_file, param_str)
+  sprintf(
+    "SELECT %s AS filename, t.* FROM %s(%s%s) t",
+    quoted_file,
+    reader,
+    quoted_file,
+    param_str
+  )
 }
 
 .expand_hts_files <- function(con, files) {
   # Use DuckDB glob() to expand each pattern (works with local and S3 paths)
   all_files <- character(0)
   for (pattern in files) {
-    sql <- sprintf("SELECT file FROM glob(%s) g(file)", sql_quote_string(pattern))
+    sql <- sprintf(
+      "SELECT file FROM glob(%s) g(file)",
+      sql_quote_string(pattern)
+    )
     res <- DBI::dbGetQuery(con, sql)
     if (nrow(res) == 0) {
       warning(sprintf("Pattern '%s' matched no files", pattern), call. = FALSE)
@@ -2142,13 +2448,21 @@ rduckhts_score <- function(
   unique(all_files)
 }
 
-.hts_multi_read <- function(con, table_name, reader, files, uniform_params,
-                            .params, overwrite) {
+.hts_multi_read <- function(
+  con,
+  table_name,
+  reader,
+  files,
+  uniform_params,
+  .params,
+  overwrite
+) {
   # Table guard — same pattern as rduckhts_bam, rduckhts_bcf, etc.
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
       stop(
-        "Table '", table_name,
+        "Table '",
+        table_name,
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
@@ -2183,23 +2497,33 @@ rduckhts_score <- function(
       stop("No files matched any patterns in .params$file", call. = FALSE)
     }
     override_cols <- setdiff(names(.params), "file")
-    arms <- vapply(expanded, function(f) {
-      row_idx <- row_map[[f]]
-      merged <- uniform_params
-      for (col in override_cols) {
-        val <- .params[[col]][row_idx]
-        if (!is.na(val) && !is.null(val)) {
-          merged[[col]] <- val
+    arms <- vapply(
+      expanded,
+      function(f) {
+        row_idx <- row_map[[f]]
+        merged <- uniform_params
+        for (col in override_cols) {
+          val <- .params[[col]][row_idx]
+          if (!is.na(val) && !is.null(val)) {
+            merged[[col]] <- val
+          }
         }
-      }
-      .build_hts_arm(reader, f, merged)
-    }, character(1), USE.NAMES = FALSE)
+        .build_hts_arm(reader, f, merged)
+      },
+      character(1),
+      USE.NAMES = FALSE
+    )
   } else {
     # Uniform mode: expand all globs and apply same params
     expanded <- .expand_hts_files(con, files)
-    arms <- vapply(expanded, function(f) {
-      .build_hts_arm(reader, f, uniform_params)
-    }, character(1), USE.NAMES = FALSE)
+    arms <- vapply(
+      expanded,
+      function(f) {
+        .build_hts_arm(reader, f, uniform_params)
+      },
+      character(1),
+      USE.NAMES = FALSE
+    )
   }
 
   union_sql <- paste(arms, collapse = " UNION ALL BY NAME ")
@@ -2240,27 +2564,59 @@ rduckhts_score <- function(
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
-                               index_path = NULL, reference = NULL,
-                               standard_tags = FALSE, auxiliary_tags = FALSE,
-                               sequence_encoding = NULL,
-                               quality_representation = NULL,
-                               cigar_representation = NULL,
-                               scan_mode = NULL,
-                               decompression_threads = 2,
-                               .params = NULL, overwrite = FALSE) {
+rduckhts_bam_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  reference = NULL,
+  standard_tags = FALSE,
+  auxiliary_tags = FALSE,
+  sequence_encoding = NULL,
+  quality_representation = NULL,
+  cigar_representation = NULL,
+  scan_mode = NULL,
+  decompression_threads = 2,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (!is.null(reference)) params$reference <- reference
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (!is.null(reference)) {
+    params$reference <- reference
+  }
   params$standard_tags <- standard_tags
   params$auxiliary_tags <- auxiliary_tags
-  if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
-  if (!is.null(quality_representation)) params$quality_representation <- quality_representation
-  if (!is.null(cigar_representation)) params$cigar_representation <- cigar_representation
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  if (!is.null(decompression_threads)) params$decompression_threads <- decompression_threads
-  .hts_multi_read(con, table_name, "read_bam", files, params, .params, overwrite)
+  if (!is.null(sequence_encoding)) {
+    params$sequence_encoding <- sequence_encoding
+  }
+  if (!is.null(quality_representation)) {
+    params$quality_representation <- quality_representation
+  }
+  if (!is.null(cigar_representation)) {
+    params$cigar_representation <- cigar_representation
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  if (!is.null(decompression_threads)) {
+    params$decompression_threads <- decompression_threads
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_bam",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple VCF/BCF files into a DuckDB table
@@ -2283,27 +2639,50 @@ rduckhts_bam_multi <- function(con, table_name, files, region = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
-                               index_path = NULL, tidy_format = FALSE,
-                               additional_csq_column_types = NULL,
-                               scan_mode = NULL,
-                               decompression_threads = 0,
-                               .params = NULL, overwrite = FALSE) {
+rduckhts_bcf_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  tidy_format = FALSE,
+  additional_csq_column_types = NULL,
+  scan_mode = NULL,
+  decompression_threads = 0,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (isTRUE(tidy_format)) params$tidy_format <- TRUE
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (isTRUE(tidy_format)) {
+    params$tidy_format <- TRUE
+  }
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- additional_csq_column_types
   }
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- .validate_nonnegative_integer_param(
       decompression_threads,
       "decompression_threads"
     )
   }
-  .hts_multi_read(con, table_name, "read_bcf", files, params, .params, overwrite)
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_bcf",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple FASTQ files into a DuckDB table
@@ -2325,20 +2704,47 @@ rduckhts_bcf_multi <- function(con, table_name, files, region = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
-                                 interleaved = FALSE, sequence_encoding = NULL,
-                                 quality_representation = NULL,
-                                 input_quality_encoding = NULL,
-                                 scan_mode = NULL,
-                                 .params = NULL, overwrite = FALSE) {
+rduckhts_fastq_multi <- function(
+  con,
+  table_name,
+  files,
+  mate_path = NULL,
+  interleaved = FALSE,
+  sequence_encoding = NULL,
+  quality_representation = NULL,
+  input_quality_encoding = NULL,
+  scan_mode = NULL,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(mate_path)) params$mate_path <- mate_path
-  if (isTRUE(interleaved)) params$interleaved <- TRUE
-  if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
-  if (!is.null(quality_representation)) params$quality_representation <- quality_representation
-  if (!is.null(input_quality_encoding)) params$input_quality_encoding <- input_quality_encoding
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  .hts_multi_read(con, table_name, "read_fastq", files, params, .params, overwrite)
+  if (!is.null(mate_path)) {
+    params$mate_path <- mate_path
+  }
+  if (isTRUE(interleaved)) {
+    params$interleaved <- TRUE
+  }
+  if (!is.null(sequence_encoding)) {
+    params$sequence_encoding <- sequence_encoding
+  }
+  if (!is.null(quality_representation)) {
+    params$quality_representation <- quality_representation
+  }
+  if (!is.null(input_quality_encoding)) {
+    params$input_quality_encoding <- input_quality_encoding
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_fastq",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple FASTA files into a DuckDB table
@@ -2359,18 +2765,43 @@ rduckhts_fastq_multi <- function(con, table_name, files, mate_path = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_fasta_multi <- function(con, table_name, files, region = NULL,
-                                 index_path = NULL, gzi_path = NULL,
-                                 sequence_encoding = NULL,
-                                 scan_mode = NULL,
-                                 .params = NULL, overwrite = FALSE) {
+rduckhts_fasta_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  gzi_path = NULL,
+  sequence_encoding = NULL,
+  scan_mode = NULL,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (!is.null(gzi_path)) params$gzi_path <- gzi_path
-  if (!is.null(sequence_encoding)) params$sequence_encoding <- sequence_encoding
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  .hts_multi_read(con, table_name, "read_fasta", files, params, .params, overwrite)
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (!is.null(gzi_path)) {
+    params$gzi_path <- gzi_path
+  }
+  if (!is.null(sequence_encoding)) {
+    params$sequence_encoding <- sequence_encoding
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_fasta",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple BED files into a DuckDB table
@@ -2389,14 +2820,35 @@ rduckhts_fasta_multi <- function(con, table_name, files, region = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_bed_multi <- function(con, table_name, files, region = NULL,
-                               index_path = NULL, scan_mode = NULL,
-                               .params = NULL, overwrite = FALSE) {
+rduckhts_bed_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  scan_mode = NULL,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  .hts_multi_read(con, table_name, "read_bed", files, params, .params, overwrite)
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_bed",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple tabix-indexed files into a DuckDB table
@@ -2419,26 +2871,57 @@ rduckhts_bed_multi <- function(con, table_name, files, region = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
-                                 index_path = NULL, header = NULL,
-                                 header_names = NULL, auto_detect = NULL,
-                                 column_types = NULL, scan_mode = NULL,
-                                 .params = NULL, overwrite = FALSE) {
+rduckhts_tabix_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  header = NULL,
+  header_names = NULL,
+  auto_detect = NULL,
+  column_types = NULL,
+  scan_mode = NULL,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (!is.null(header)) params$header <- isTRUE(header)
-  if (!is.null(auto_detect)) params$auto_detect <- isTRUE(auto_detect)
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (!is.null(header)) {
+    params$header <- isTRUE(header)
+  }
+  if (!is.null(auto_detect)) {
+    params$auto_detect <- isTRUE(auto_detect)
+  }
   if (!is.null(header_names)) {
-    if (!is.character(header_names)) stop("header_names must be a character vector", call. = FALSE)
+    if (!is.character(header_names)) {
+      stop("header_names must be a character vector", call. = FALSE)
+    }
     params$header_names <- header_names
   }
   if (!is.null(column_types)) {
-    if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
+    if (!is.character(column_types)) {
+      stop("column_types must be a character vector", call. = FALSE)
+    }
     params$column_types <- normalize_tabix_types(column_types)
   }
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  .hts_multi_read(con, table_name, "read_tabix", files, params, .params, overwrite)
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_tabix",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple GFF files into a DuckDB table
@@ -2465,33 +2948,73 @@ rduckhts_tabix_multi <- function(con, table_name, files, region = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
-                               index_path = NULL, header = NULL,
-                               header_names = NULL, auto_detect = NULL,
-                               column_types = NULL, scan_mode = NULL,
-                               attributes_map = FALSE,
-                               attributes_list = FALSE, attributes_pairs = FALSE,
-                               strict = FALSE,
-                               .params = NULL, overwrite = FALSE) {
+rduckhts_gff_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  header = NULL,
+  header_names = NULL,
+  auto_detect = NULL,
+  column_types = NULL,
+  scan_mode = NULL,
+  attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
+  strict = FALSE,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (!is.null(header)) params$header <- isTRUE(header)
-  if (!is.null(auto_detect)) params$auto_detect <- isTRUE(auto_detect)
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (!is.null(header)) {
+    params$header <- isTRUE(header)
+  }
+  if (!is.null(auto_detect)) {
+    params$auto_detect <- isTRUE(auto_detect)
+  }
   if (!is.null(header_names)) {
-    if (!is.character(header_names)) stop("header_names must be a character vector", call. = FALSE)
+    if (!is.character(header_names)) {
+      stop("header_names must be a character vector", call. = FALSE)
+    }
     params$header_names <- header_names
   }
   if (!is.null(column_types)) {
-    if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
+    if (!is.character(column_types)) {
+      stop("column_types must be a character vector", call. = FALSE)
+    }
     params$column_types <- normalize_tabix_types(column_types)
   }
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  if (isTRUE(attributes_map)) params$attributes_map <- TRUE
-  if (isTRUE(attributes_list)) params$attributes_list <- TRUE
-  if (isTRUE(attributes_pairs)) params$attributes_pairs <- TRUE
-  if (isTRUE(strict)) params$strict <- TRUE
-  .hts_multi_read(con, table_name, "read_gff", files, params, .params, overwrite)
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  if (isTRUE(attributes_map)) {
+    params$attributes_map <- TRUE
+  }
+  if (isTRUE(attributes_list)) {
+    params$attributes_list <- TRUE
+  }
+  if (isTRUE(attributes_pairs)) {
+    params$attributes_pairs <- TRUE
+  }
+  if (isTRUE(strict)) {
+    params$strict <- TRUE
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_gff",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }
 
 #' Read multiple GTF files into a DuckDB table
@@ -2517,29 +3040,67 @@ rduckhts_gff_multi <- function(con, table_name, files, region = NULL,
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
 #' @return Invisible \code{TRUE} on success.
 #' @export
-rduckhts_gtf_multi <- function(con, table_name, files, region = NULL,
-                               index_path = NULL, header = NULL,
-                               header_names = NULL, auto_detect = NULL,
-                               column_types = NULL, scan_mode = NULL,
-                               attributes_map = FALSE,
-                               attributes_list = FALSE, attributes_pairs = FALSE,
-                               .params = NULL, overwrite = FALSE) {
+rduckhts_gtf_multi <- function(
+  con,
+  table_name,
+  files,
+  region = NULL,
+  index_path = NULL,
+  header = NULL,
+  header_names = NULL,
+  auto_detect = NULL,
+  column_types = NULL,
+  scan_mode = NULL,
+  attributes_map = FALSE,
+  attributes_list = FALSE,
+  attributes_pairs = FALSE,
+  .params = NULL,
+  overwrite = FALSE
+) {
   params <- list()
-  if (!is.null(region)) params$region <- region
-  if (!is.null(index_path)) params$index_path <- index_path
-  if (!is.null(header)) params$header <- isTRUE(header)
-  if (!is.null(auto_detect)) params$auto_detect <- isTRUE(auto_detect)
+  if (!is.null(region)) {
+    params$region <- region
+  }
+  if (!is.null(index_path)) {
+    params$index_path <- index_path
+  }
+  if (!is.null(header)) {
+    params$header <- isTRUE(header)
+  }
+  if (!is.null(auto_detect)) {
+    params$auto_detect <- isTRUE(auto_detect)
+  }
   if (!is.null(header_names)) {
-    if (!is.character(header_names)) stop("header_names must be a character vector", call. = FALSE)
+    if (!is.character(header_names)) {
+      stop("header_names must be a character vector", call. = FALSE)
+    }
     params$header_names <- header_names
   }
   if (!is.null(column_types)) {
-    if (!is.character(column_types)) stop("column_types must be a character vector", call. = FALSE)
+    if (!is.character(column_types)) {
+      stop("column_types must be a character vector", call. = FALSE)
+    }
     params$column_types <- normalize_tabix_types(column_types)
   }
-  if (!is.null(scan_mode)) params$scan_mode <- .validate_scan_mode_param(scan_mode)
-  if (isTRUE(attributes_map)) params$attributes_map <- TRUE
-  if (isTRUE(attributes_list)) params$attributes_list <- TRUE
-  if (isTRUE(attributes_pairs)) params$attributes_pairs <- TRUE
-  .hts_multi_read(con, table_name, "read_gtf", files, params, .params, overwrite)
+  if (!is.null(scan_mode)) {
+    params$scan_mode <- .validate_scan_mode_param(scan_mode)
+  }
+  if (isTRUE(attributes_map)) {
+    params$attributes_map <- TRUE
+  }
+  if (isTRUE(attributes_list)) {
+    params$attributes_list <- TRUE
+  }
+  if (isTRUE(attributes_pairs)) {
+    params$attributes_pairs <- TRUE
+  }
+  .hts_multi_read(
+    con,
+    table_name,
+    "read_gtf",
+    files,
+    params,
+    .params,
+    overwrite
+  )
 }

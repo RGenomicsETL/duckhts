@@ -9,12 +9,19 @@ test_munge <- function() {
   dir.create(tmp_dir)
 
   fasta_ref <- file.path(tmp_dir, "munge.fa")
-  writeLines(c(
-    ">chrF",
-    "ACGTACGTAA"
-  ), fasta_ref)
+  writeLines(
+    c(
+      ">chrF",
+      "ACGTACGTAA"
+    ),
+    fasta_ref
+  )
 
-  expect_true(rduckhts_fasta_index(con, fasta_ref, index_path = paste0(fasta_ref, ".fai"))$success[1])
+  expect_true(rduckhts_fasta_index(
+    con,
+    fasta_ref,
+    index_path = paste0(fasta_ref, ".fai")
+  )$success[1])
 
   scalar_sql <- sprintf(
     paste(
@@ -68,7 +75,14 @@ test_munge <- function() {
       "'%s', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL",
       ")).ez AS ez"
     ),
-    fasta_ref, fasta_ref, fasta_ref, fasta_ref, fasta_ref, fasta_ref, fasta_ref, fasta_ref
+    fasta_ref,
+    fasta_ref,
+    fasta_ref,
+    fasta_ref,
+    fasta_ref,
+    fasta_ref,
+    fasta_ref,
+    fasta_ref
   )
   scalar_out <- dbGetQuery(con, scalar_sql)
   expect_equal(scalar_out$chrom[1], "chrF")
@@ -89,7 +103,15 @@ test_munge <- function() {
       ") AS t(CHR, BP, A1, A2, SNP, FRQ, N)"
     ),
     fasta_ref = fasta_ref,
-    column_map = c(CHR = "CHR", BP = "BP", A1 = "A1", A2 = "A2", SNP = "SNP", FRQ = "FRQ", N = "N")
+    column_map = c(
+      CHR = "CHR",
+      BP = "BP",
+      A1 = "A1",
+      A2 = "A2",
+      SNP = "SNP",
+      FRQ = "FRQ",
+      N = "N"
+    )
   )
   expect_equal(nrow(wrapper_map), 2)
   wrapper_rs2 <- wrapper_map[wrapper_map$id == "rs2", , drop = FALSE]
@@ -266,8 +288,14 @@ test_munge <- function() {
     ),
     fasta_ref = fasta_ref,
     column_map = c(
-      CHR = "chr_col", BP = "pos_col", A1 = "a1_col", A2 = "a2_col",
-      SNP = "id_col", INFO = "info_col", HET_I2 = "het_i2_col", DIRE = "dir_col"
+      CHR = "chr_col",
+      BP = "pos_col",
+      A1 = "a1_col",
+      A2 = "a2_col",
+      SNP = "id_col",
+      INFO = "info_col",
+      HET_I2 = "het_i2_col",
+      DIRE = "dir_col"
     )
   )
   expect_equal(nrow(custom_metal), 1)
@@ -287,7 +315,14 @@ test_munge <- function() {
   fai_only_default <- rduckhts_munge(
     con,
     query = "SELECT 'chrF' AS CHR, 2 AS BP, 'A' AS A1, 'C' AS A2, 'rs_fai1' AS SNP, 0.01 AS P",
-    column_map = c(CHR = "CHR", BP = "BP", A1 = "A1", A2 = "A2", SNP = "SNP", P = "P")
+    column_map = c(
+      CHR = "CHR",
+      BP = "BP",
+      A1 = "A1",
+      A2 = "A2",
+      SNP = "SNP",
+      P = "P"
+    )
   )
   expect_equal(nrow(fai_only_default), 1)
   # In fai-only mode: ref=A2=C, alt=A1=A (no reference comparison, no swap)
@@ -295,7 +330,9 @@ test_munge <- function() {
   expect_equal(fai_only_default$alt[1], "A")
   expect_false(fai_only_default$alleles_swapped[1])
   # No FASTA check → filter should be PASS (no IFFY/REF_MISMATCH)
-  expect_true(is.na(fai_only_default$filter[1]) || fai_only_default$filter[1] != "IFFY")
+  expect_true(
+    is.na(fai_only_default$filter[1]) || fai_only_default$filter[1] != "IFFY"
+  )
 
   # fai-only with explicit fasta_ref = NULL
   fai_only_explicit <- rduckhts_munge(

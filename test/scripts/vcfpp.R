@@ -20,8 +20,14 @@ script_arg <- grep("^--file=", full_args, value = TRUE)
 if (length(script_arg) != 1) {
   stop("Unable to determine script path from commandArgs()", call. = FALSE)
 }
-script_path <- normalizePath(sub("^--file=", "", script_arg[[1]]), mustWork = TRUE)
-repo_root <- normalizePath(file.path(dirname(script_path), "..", ".."), mustWork = TRUE)
+script_path <- normalizePath(
+  sub("^--file=", "", script_arg[[1]]),
+  mustWork = TRUE
+)
+repo_root <- normalizePath(
+  file.path(dirname(script_path), "..", ".."),
+  mustWork = TRUE
+)
 
 if (!requireNamespace("vcfppR", quietly = TRUE)) {
   stop(
@@ -34,7 +40,11 @@ default_output_dirs <- c(
   file.path(repo_root, "test", "data"),
   file.path(repo_root, "r", "Rduckhts", "inst", "extdata")
 )
-output_dirs <- if (length(args) > 0) normalizePath(args, mustWork = FALSE) else default_output_dirs
+output_dirs <- if (length(args) > 0) {
+  normalizePath(args, mustWork = FALSE)
+} else {
+  default_output_dirs
+}
 
 for (output_dir in output_dirs) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -52,14 +62,16 @@ filter_def <- function(id, description) {
   list(id = id, description = description)
 }
 
-write_fixture <- function(path,
-                          contigs,
-                          info_defs = list(),
-                          format_defs = list(),
-                          filter_defs = list(),
-                          samples = character(),
-                          records,
-                          extra_lines = character()) {
+write_fixture <- function(
+  path,
+  contigs,
+  info_defs = list(),
+  format_defs = list(),
+  filter_defs = list(),
+  samples = character(),
+  records,
+  extra_lines = character()
+) {
   writer <- methods::new(vcfppR::vcfwriter, path, "VCFv4.2")
   on.exit(try(writer$close(), silent = TRUE), add = TRUE)
 
@@ -90,16 +102,18 @@ write_fixture <- function(path,
   invisible(path)
 }
 
-render_fixture <- function(filename,
-                           section,
-                           purpose,
-                           contigs,
-                           info_defs = list(),
-                           format_defs = list(),
-                           filter_defs = list(),
-                           samples = character(),
-                           records,
-                           extra_lines = character()) {
+render_fixture <- function(
+  filename,
+  section,
+  purpose,
+  contigs,
+  info_defs = list(),
+  format_defs = list(),
+  filter_defs = list(),
+  samples = character(),
+  records,
+  extra_lines = character()
+) {
   written_paths <- character(length(output_dirs))
   for (i in seq_along(output_dirs)) {
     path <- file.path(output_dirs[[i]], filename)
@@ -325,12 +339,27 @@ manifest[[length(manifest) + 1]] <- render_fixture(
   purpose = "Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic",
   contigs = c("chr1"),
   info_defs = list(
-    tag_def("SB", "1", "Integer", "Intentionally wrong: standard SB should be Number=4")
+    tag_def(
+      "SB",
+      "1",
+      "Integer",
+      "Intentionally wrong: standard SB should be Number=4"
+    )
   ),
   format_defs = list(
     tag_def("GT", "1", "String", "Genotype"),
-    tag_def("HQ", "1", "Integer", "Intentionally wrong: standard HQ should be Number=2"),
-    tag_def("FT", ".", "String", "Intentionally wrong: standard FT should be Number=1")
+    tag_def(
+      "HQ",
+      "1",
+      "Integer",
+      "Intentionally wrong: standard HQ should be Number=2"
+    ),
+    tag_def(
+      "FT",
+      ".",
+      "String",
+      "Intentionally wrong: standard FT should be Number=1"
+    )
   ),
   samples = c("S1", "S2"),
   records = c(
