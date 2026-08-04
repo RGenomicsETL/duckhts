@@ -108,7 +108,7 @@ git diff --check
 If `duckdb_sqllogictest` is available through the configured venv, focused SQL tests can also be run with:
 
 ```bash
-./configure/venv/bin/python3 -m duckdb_sqllogictest \
+./configure/venv/bin/python3 scripts/run_sqllogictest.py \
   --test-dir test/sql \
   --file-path test/sql/duckhts.test \
   --external-extension build/release/duckhts.duckdb_extension
