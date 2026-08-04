@@ -127,7 +127,6 @@ r/Rduckhts/inst/duckhts_extension/htslib/*.wasm
 r/Rduckhts/inst/duckhts_extension/htslib/include/
 r/Rduckhts/inst/duckhts_extension/htslib/lib/
 r/Rduckhts/inst/duckhts_extension/htslib/libexec/
-r/Rduckhts/inst/htslib_config.R
 r/Rduckhts/inst/duckhts_extension/htslib/config.log
 r/Rduckhts/inst/duckhts_extension/htslib/config.status
 r/Rduckhts/inst/duckhts_extension/htslib/config_vars.h
