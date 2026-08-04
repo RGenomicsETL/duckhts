@@ -131,6 +131,27 @@ class RUniverseArtifactReceiptTests(unittest.TestCase):
             receipt = validate_artifact(package, "wasm", VERSION, "4.6.0")
         self.assertEqual(receipt.platform, "linux_i686_musl")
 
+    def test_accepts_all_native_architecture_receipts(self) -> None:
+        cases = (
+            ("tar", "x86_64-pc-linux-gnu", "linux_amd64", "linux"),
+            ("zip", "aarch64-unknown-linux-gnu", "linux_arm64", "linux"),
+            ("tar", "x86_64-apple-darwin20", "osx_amd64", "mac"),
+            ("zip", "aarch64-apple-darwin23", "osx_arm64", "mac"),
+            ("tar", "x86_64-w64-mingw32", "windows_amd64_mingw", "win"),
+            ("zip", "aarch64-w64-mingw32", "windows_arm64_mingw", "win"),
+        )
+        for archive_kind, target, platform, api_os in cases:
+            with self.subTest(platform=platform):
+                with tempfile.TemporaryDirectory() as tmp:
+                    package = _write_package(
+                        Path(tmp),
+                        archive_kind=archive_kind,
+                        target=target,
+                        platform=platform,
+                    )
+                    receipt = validate_artifact(package, api_os, VERSION, "4.6.1")
+                self.assertEqual(receipt.platform, platform)
+
     def test_rejects_built_and_footer_disagreement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             package = _write_package(
