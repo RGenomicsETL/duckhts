@@ -417,7 +417,12 @@ echo "---------- Building DuckHTS extension (Windows) ----------"
 # Build the extension
 cd "${EXT_DIR}"
 
-C_SOURCES="duckhts.c simd/duckhts_simd_dispatch.c simd/duckhts_simd_scalar.c simd/duckhts_simd_avx2.c simd/duckhts_simd_avx512.c simd/duckhts_simd_neon.c simd/duckhts_simd_wasm_simd128.c bcf_reader.c bam_reader.c bam_pileup.c bgzip.c hts_index_builder.c liftover_udf.c bcftools_norm_udf.c munge_udf.c seq_reader.c fastq_qc.c interval_udf.c tabix_reader.c bigwig_reader.c libbigwig_hfile_io.c hts_meta_reader.c quality_encoding.c quality_encoding_reader.c mosdepth_table.c bam_bin_counts.c samtools_idxstats_table.c bam_bed_coverage.c cgranges_api.c variantkey_udf.c cgranges.c libBigWig/bwRead.c libBigWig/bwValues.c bcftools_filter.c bcftools_shim.c score_udf.c vep_parser.c duckvep/kernel/src/duckvep_kernel.c duckvep/kernel/src/duckvep_so.c duckvep/kernel/src/duckvep_sweep.c duckvep/kernel/src/duckvep_classify.c duckvep/kernel/src/duckvep_effect.c duckvep/kernel/src/duckvep_sv.c duckvep/kernel/src/duckvep_delta.c duckvep/kernel/src/duckvep_projection.c duckvep/kernel/src/duckvep_transcript_edit.c duckvep/kernel/src/duckvep_hgvs.c duckvep/kernel/src/duckvep_codon.c duckvep/kernel/src/duckvep_coding.c duckvep/kernel/src/duckvep_haplotype.c duckvep/duckvep_variant_tile.c duckvep/duckvep_model.c duckvep/duckvep_annotate.c duckvep/duckvep_ensembl.c duckvep/duckvep_sql.c kmer_udf.c wasm_http_hfile.c"
+SOURCE_MANIFEST="${EXT_DIR}/duckhts_sources.tsv"
+if [ ! -s "${SOURCE_MANIFEST}" ]; then
+    echo "ERROR: DuckHTS source manifest not found at ${SOURCE_MANIFEST}"
+    exit 1
+fi
+C_SOURCES=`awk -F'|' 'NF >= 2 && $1 !~ /^#/ {print $2}' "${SOURCE_MANIFEST}"`
 INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./libBigWig -I./duckvep/kernel/include -I./duckvep/kernel/src"
 
 echo "Compiling extension sources for Windows..."
@@ -477,30 +482,29 @@ find "${HTSLIB_DIR}" -name "*.o" -delete || true
 # only keep ${HTSLIB_DIR}/lib and ${HTSLIB_DIR}/include for the extension, remove everything else
 find "${HTSLIB_DIR}" -mindepth 1 -maxdepth 1 ! -name "libexec" ! -name "lib" ! -name "include" -exec rm -rf {} \; || true
 
-# ---------- Generate htslib_config.R from template ----------
+# ---------- Generate htslib_config.R from the shared receipt renderer ----------
 HTSLIB_CONFIG_IN="${THIS_DIR}/inst/htslib_config.R.in"
 HTSLIB_CONFIG_OUT="${THIS_DIR}/inst/htslib_config.R"
 if [ -f "${HTSLIB_CONFIG_IN}" ]; then
   HTSLIB_STATIC_DEFAULT="TRUE"
-  HTSLIB_STATIC_DEP_LIBS_ESCAPED=`echo "${HTSLIB_STATIC_DEP_LIBS}" | sed 's/[&/\\\\]/\\\\&/g'`
-  to_r_bool() { if [ "$1" = "yes" ]; then echo TRUE; else echo FALSE; fi; }
-  sed \
-    -e "s/@HTSLIB_STATIC_DEFAULT@/${HTSLIB_STATIC_DEFAULT}/g" \
-    -e "s/@HTSLIB_STATIC_DEP_LIBS@/${HTSLIB_STATIC_DEP_LIBS_ESCAPED}/g" \
-    -e "s/@HTSLIB_VERSION@/${HTSLIB_VERSION_STR}/g" \
-    -e "s/@HTSLIB_VERSION_NUMBER@/${HTSLIB_VERSION_NUMBER}/g" \
-    -e "s/@RDUCKHTS_VERSION@/${EXT_VERSION}/g" \
-    -e "s/@DUCKDB_PLATFORM@/${DUCKDB_PLATFORM}/g" \
-    -e "s/@HTSLIB_HAS_ZLIB@/`to_r_bool "${HAS_ZLIB}"`/g" \
-    -e "s/@HTSLIB_HAS_BZ2@/`to_r_bool "${HAS_BZ2}"`/g" \
-    -e "s/@HTSLIB_HAS_LZMA@/`to_r_bool "${HAS_LZMA}"`/g" \
-    -e "s/@HTSLIB_HAS_LIBDEFLATE@/`to_r_bool "${HAS_LIBDEFLATE}"`/g" \
-    -e "s/@HTSLIB_HAS_CURL@/`to_r_bool "${HAS_CURL}"`/g" \
-    -e "s/@HTSLIB_HAS_OPENSSL@/`to_r_bool "${HAS_OPENSSL}"`/g" \
-    -e "s/@HTSLIB_HAS_PLUGINS@/`to_r_bool "${HTSLIB_HAS_PLUGINS}"`/g" \
-    -e "s/@HTSLIB_HAS_S3@/`to_r_bool "${HTSLIB_HAS_S3}"`/g" \
-    -e "s/@HTSLIB_HAS_GCS@/`to_r_bool "${HTSLIB_HAS_GCS}"`/g" \
-    "${HTSLIB_CONFIG_IN}" > "${HTSLIB_CONFIG_OUT}"
+  "${R_HOME}/bin/Rscript" "${THIS_DIR}/tools/write_htslib_config.R" \
+    --template "${HTSLIB_CONFIG_IN}" \
+    --output "${HTSLIB_CONFIG_OUT}" \
+    --static-default "${HTSLIB_STATIC_DEFAULT}" \
+    --static-dep-libs "${HTSLIB_STATIC_DEP_LIBS}" \
+    --htslib-version "${HTSLIB_VERSION_STR}" \
+    --htslib-version-number "${HTSLIB_VERSION_NUMBER}" \
+    --rduckhts-version "${EXT_VERSION}" \
+    --duckdb-platform "${DUCKDB_PLATFORM}" \
+    --has-zlib "${HAS_ZLIB}" \
+    --has-bz2 "${HAS_BZ2}" \
+    --has-lzma "${HAS_LZMA}" \
+    --has-libdeflate "${HAS_LIBDEFLATE}" \
+    --has-curl "${HAS_CURL}" \
+    --has-openssl "${HAS_OPENSSL}" \
+    --has-plugins "${HTSLIB_HAS_PLUGINS}" \
+    --has-s3 "${HTSLIB_HAS_S3}" \
+    --has-gcs "${HTSLIB_HAS_GCS}"
   echo "Generated inst/htslib_config.R"
 fi
 

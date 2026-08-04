@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- retire the duplicate R-side extension compiler, metadata serializer, and
+  platform mapper; the package configure scripts and shared metadata writer are
+  now the only build authority. Split the R package code into focused helper,
+  connection, htslib, SIMD, catalog, and wrapper files
+
 - make the Rduckhts binary architecture contract executable by compiling a
   minimal registered R native library. Binary repositories now derive a real
   target-specific `Built` field instead of classifying configure-built DuckHTS

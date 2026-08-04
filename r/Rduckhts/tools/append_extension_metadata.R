@@ -2,68 +2,54 @@ args <- commandArgs(trailingOnly = TRUE)
 
 parse_args <- function(args) {
     res <- list()
-    i <- 1
+    i <- 1L
     while (i <= length(args)) {
         key <- args[[i]]
-        if (startsWith(key, "--") && i + 1 <= length(args)) {
-            res[[substring(key, 3)]] <- args[[i + 1]]
-            i <- i + 2
+        if (startsWith(key, "--") && i + 1L <= length(args)) {
+            res[[substring(key, 3L)]] <- args[[i + 1L]]
+            i <- i + 2L
         } else {
-            i <- i + 1
+            i <- i + 1L
         }
     }
     res
 }
 
-start_signature <- function() {
-    sig <- as.raw(c(0, 147, 4, 16))
-    sig <- c(sig, charToRaw("duckdb_signature"))
-    sig <- c(sig, as.raw(c(128, 4)))
-    sig
+script_args <- commandArgs()
+script_arg <- grep("^--file=", script_args, value = TRUE)
+if (!length(script_arg)) {
+    stop("append_extension_metadata.R must be run with Rscript", call. = FALSE)
 }
-
-padded_byte_string <- function(x) {
-    bytes <- charToRaw(x)
-    if (length(bytes) > 32) {
-        bytes <- bytes[1:32]
-    }
-    c(bytes, as.raw(rep(0, 32 - length(bytes))))
-}
+script_path <- normalizePath(sub("^--file=", "", script_arg[[1L]]), mustWork = TRUE)
+source(file.path(dirname(script_path), "..", "R", "extension_metadata.R"))
 
 opts <- parse_args(args)
-
-library_file <- opts[["library-file"]]
-out_file <- opts[["out-file"]]
-extension_name <- opts[["extension-name"]]
-duckdb_platform <- opts[["duckdb-platform"]]
-duckdb_version <- opts[["duckdb-version"]]
-extension_version <- opts[["extension-version"]]
-abi_type <- opts[["abi-type"]]
-
-if (is.null(library_file) || is.null(out_file) || is.null(extension_name) ||
-    is.null(duckdb_platform) || is.null(duckdb_version) || is.null(extension_version)) {
-    stop("Missing required arguments for append_extension_metadata")
+required <- c(
+    "library-file", "out-file", "extension-name", "duckdb-platform",
+    "duckdb-version", "extension-version"
+)
+missing <- required[vapply(required, function(name) {
+    is.null(opts[[name]]) || !nzchar(opts[[name]])
+}, logical(1))]
+if (length(missing)) {
+    stop(
+        "Missing required arguments for append_extension_metadata: ",
+        paste(missing, collapse = ", "),
+        call. = FALSE
+    )
 }
 
-if (is.null(abi_type) || abi_type == "") {
+abi_type <- opts[["abi-type"]]
+if (is.null(abi_type) || !nzchar(abi_type)) {
     abi_type <- "C_STRUCT"
 }
 
-out_tmp <- paste0(out_file, ".tmp")
-
-file.copy(library_file, out_tmp, overwrite = TRUE)
-
-con <- file(out_tmp, open = "ab")
-writeBin(start_signature(), con, useBytes = TRUE)
-writeBin(padded_byte_string(""), con, useBytes = TRUE)
-writeBin(padded_byte_string(""), con, useBytes = TRUE)
-writeBin(padded_byte_string(""), con, useBytes = TRUE)
-writeBin(padded_byte_string(abi_type), con, useBytes = TRUE)
-writeBin(padded_byte_string(extension_version), con, useBytes = TRUE)
-writeBin(padded_byte_string(duckdb_version), con, useBytes = TRUE)
-writeBin(padded_byte_string(duckdb_platform), con, useBytes = TRUE)
-writeBin(padded_byte_string("4"), con, useBytes = TRUE)
-writeBin(as.raw(rep(0, 256)), con, useBytes = TRUE)
-close(con)
-
-file.rename(out_tmp, out_file)
+duckhts_append_extension_metadata(
+    library_file = opts[["library-file"]],
+    out_file = opts[["out-file"]],
+    extension_name = opts[["extension-name"]],
+    duckdb_platform = opts[["duckdb-platform"]],
+    duckdb_version = opts[["duckdb-version"]],
+    extension_version = opts[["extension-version"]],
+    abi_type = abi_type
+)
