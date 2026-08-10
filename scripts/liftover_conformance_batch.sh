@@ -30,6 +30,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/duckhts_cache.sh"
 LIFTOVER_REFERENCE_DIR=${LIFTOVER_REFERENCE_DIR:-$(duckhts_cache_subdir "references/liftover/grch37-to-grch38")}
 CASES_TSV="${LIFTOVER_CASES_TSV:-$SCRIPT_DIR/conformance_case_table.tsv}"
+REGISTRY_TSV="${DUCKHTSBENCH_REGISTRY:-$REPO_ROOT/r/duckhtsbench/inst/benchmark_registry.tsv}"
 OUT_DIR="${LIFTOVER_OUT_DIR:-$(duckhts_cache_subdir conformance/liftover)}"
 CHAIN_PATH="${LIFTOVER_CHAIN_PATH:-$LIFTOVER_REFERENCE_DIR/GRCh37_to_GRCh38.chain.gz}"
 SRC_FASTA="${LIFTOVER_SRC_FASTA:-$LIFTOVER_REFERENCE_DIR/human_g1k_v37.fasta}"
@@ -78,62 +79,44 @@ case_requested() {
   return 1
 }
 
-stage_case_input() { # case_id dataset sample source_url_or_path
+stage_case_input() { # case_id dataset sample artifact_id
   local case_id="$1"
   local dataset="$2"
   local sample="$3"
-  local source="$4"
-  local case_dir cached index provenance basename
+  local artifact_id="$4"
+  local source cache_relpath transform cached index provenance row
 
-  if [[ "$dataset" == "giab" ]]; then
-    case_dir="$(duckhts_cache_subdir datasets/giab/nist-v4.2.1/grch37)"
-  else
-    case_dir="$(duckhts_cache_subdir "conformance/liftover/cases/$case_id")"
-  fi
-  mkdir -p "$case_dir"
-  basename="$(basename "${source%%\?*}")"
-  cached="$case_dir/$basename"
+  [[ -f "$REGISTRY_TSV" ]] || { echo "Benchmark registry not found: $REGISTRY_TSV" >&2; return 1; }
+  row="$(awk -F '\t' -v id="$artifact_id" '$1 == id {print $5 "\t" $7 "\t" $8; exit}' "$REGISTRY_TSV")"
+  [[ -n "$row" ]] || { echo "unknown liftover artifact: $artifact_id" >&2; return 1; }
+  IFS=$'\t' read -r source cache_relpath transform <<<"$row"
+  [[ "$transform" == "direct_download" ]] || { echo "liftover artifact is not a direct VCF download: $artifact_id" >&2; return 1; }
+  cached="$(duckhts_cache_subdir "$cache_relpath")"
   index="${cached}.tbi"
-  provenance="$case_dir/${case_id}.provenance.tsv"
+  provenance="${cached}.provenance.tsv"
+  mkdir -p "$(dirname "$cached")"
 
   if [[ ! -s "$cached" ]]; then
-    if [[ "$source" =~ ^https?:// ]]; then
-      command -v curl >/dev/null 2>&1 || {
-        echo "curl is required to stage $case_id" >&2
-        return 1
-      }
-      echo "Downloading $case_id from $source" >&2
-      curl --fail --location --retry 5 --retry-delay 5 --continue-at - --output "$cached" "$source"
-    elif [[ -f "$source" ]]; then
-      echo "Caching local input for $case_id: $source" >&2
-      cp -f "$source" "$cached"
-    else
-      echo "case input is neither a URL nor a file: $source" >&2
-      return 1
-    fi
+    command -v curl >/dev/null 2>&1 || { echo "curl is required to stage $case_id" >&2; return 1; }
+    echo "Downloading $case_id from registered artifact $artifact_id" >&2
+    curl --fail --location --retry 5 --retry-delay 5 --continue-at - --output "$cached" "$source"
   else
     echo "Using cached $case_id input: $cached" >&2
   fi
 
-  if [[ ! -s "$index" ]]; then
-    "$BCFTOOLS_BIN" index -f -t "$cached"
-  fi
+  if [[ ! -s "$index" ]]; then "$BCFTOOLS_BIN" index -f -t "$cached"; fi
   if [[ ! -f "$provenance" ]]; then
     duckhts_write_provenance "$provenance" \
-      "workload=liftover_conformance" \
-      "case_id=$case_id" \
-      "dataset=$dataset" \
-      "sample=$sample" \
-      "source=$source" \
-      "cached_vcf=$cached" \
-      "cached_index=$index" \
-      "staging_command=curl or cp; bcftools index -t" \
+      "workload=liftover_conformance" "case_id=$case_id" "dataset=$dataset" \
+      "sample=$sample" "artifact_id=$artifact_id" "source=$source" \
+      "cached_vcf=$cached" "cached_index=$index" \
+      "staging_command=curl; bcftools index -t" \
       "bcftools=$($BCFTOOLS_BIN --version | head -n 1)"
   fi
   printf '%s\n' "$cached"
 }
 
-while IFS=$'\t' read -r case_id dataset sample description default_region input_vcf; do
+while IFS=$'\t' read -r case_id dataset sample description default_region artifact_id; do
   [[ -n "$case_id" ]] || continue
   [[ "$case_id" == "case_id" ]] && continue
   if ! case_requested "$case_id" "$@"; then
@@ -145,7 +128,7 @@ while IFS=$'\t' read -r case_id dataset sample description default_region input_
     region="$REGION_OVERRIDE"
   fi
 
-  cached_vcf="$(stage_case_input "$case_id" "$dataset" "$sample" "$input_vcf")"
+  cached_vcf="$(stage_case_input "$case_id" "$dataset" "$sample" "$artifact_id")"
   out_prefix="$OUT_DIR/$case_id"
   run_count=$((run_count + 1))
   echo "==> [$case_id] $description"
