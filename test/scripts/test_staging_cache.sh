@@ -77,8 +77,13 @@ esac
 EOF
 chmod +x "$FAKE_BIN"/*
 
-PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
-  bash "$ROOT_DIR/scripts/stage_norm_1000g_dragen_gvcf.sh" >/dev/null
-[[ -f "$CACHE_DIR/benchmarks/norm/1000g-dragen/HG00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz.provenance.tsv" ]]
+# Native extension CI intentionally has no R runtime. The R-owned registry
+# adapters are exercised by `make test-benchmark-registry`; this shell test
+# remains a no-R check of the shared cache convention and shell stage helpers.
+if command -v Rscript >/dev/null 2>&1; then
+  PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
+    bash "$ROOT_DIR/scripts/stage_norm_1000g_dragen_gvcf.sh" >/dev/null
+  [[ -f "$CACHE_DIR/benchmarks/norm/1000g-dragen/HG00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz.provenance.tsv" ]]
+fi
 
 echo "DuckHTS staging cache defaults: OK"

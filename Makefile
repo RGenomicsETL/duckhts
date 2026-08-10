@@ -135,8 +135,8 @@ endif
 # -----------------------------------------------------------------------------
 
 test: test_debug
-test_debug: test-cache-paths test-benchmark-registry test-duckvep-kernel test-simd-kernels test-sqllogictest-debug
-test_release: test-cache-paths test-benchmark-registry test-duckvep-kernel test-simd-kernels test-sqllogictest-release
+test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-debug
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-release
 
 test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
