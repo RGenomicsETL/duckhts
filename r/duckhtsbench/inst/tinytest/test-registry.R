@@ -29,6 +29,7 @@ writeLines(c(
   paste(c("fixture", "fixture", "fixture", "fixture-1", paste0("file://", source_path), "public", "fixture/output.txt", "direct_download", "tinytest", "1", ""), collapse = "\t")
 ), mini_registry)
 Sys.setenv(DUCKHTSBENCH_REGISTRY = mini_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "cache"))
+expect_equal(duckhts_bench_cache_path("nested/artifact"), file.path(tmp, "cache", "nested", "artifact"))
 output <- duckhts_bench_fetch("fixture")
 expect_equal(readLines(output), "registry fetch")
 expect_true(file.exists(paste0(output, ".provenance.tsv")))

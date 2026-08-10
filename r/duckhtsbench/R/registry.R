@@ -6,6 +6,18 @@ duckhts_bench_cache_dir <- function() {
   file.path(path.expand("~"), ".cache", "duckhts")
 }
 
+#' Return a path below the configured DuckHTS cache.
+#'
+#' @param relative_path Relative cache path.
+#' @return A cache path.
+#' @export
+duckhts_bench_cache_path <- function(relative_path = "") {
+  if (length(relative_path) != 1L || is.na(relative_path) || grepl("^(/|[A-Za-z]:[/\\\\])", relative_path)) {
+    stop("relative_path must be one relative cache path", call. = FALSE)
+  }
+  file.path(duckhts_bench_cache_dir(), relative_path)
+}
+
 bench_registry_path <- function() {
   path <- Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = "")
   if (nzchar(path) && file.exists(path)) return(path)

@@ -59,7 +59,10 @@ bench_rows <- as.integer(Sys.getenv("LIFTOVER_BENCH_ROWS", unset = "1000000"))
 bench_runs <- as.integer(Sys.getenv("LIFTOVER_BENCH_RUNS", unset = "3"))
 duckhts_cache_dir <- Sys.getenv(
   "DUCKHTS_CACHE_DIR",
-  unset = file.path(path.expand("~"), ".cache", "duckhts")
+  unset = file.path(
+    path.expand(Sys.getenv("XDG_CACHE_HOME", unset = file.path("~", ".cache"))),
+    "duckhts"
+  )
 )
 liftover_reference_dir <- file.path(duckhts_cache_dir, "references", "liftover", "grch37-to-grch38")
 giab_cache_dir <- file.path(duckhts_cache_dir, "datasets", "giab", "nist-v4.2.1", "grch37")
