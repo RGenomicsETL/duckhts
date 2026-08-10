@@ -125,3 +125,14 @@ duckbed_dir <- duckhts_bench_stage_duckbedqc(file.path(tmp, "duckbed"), git)
 expect_true(file.exists(file.path(duckbed_dir, "provenance.tsv")))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
+
+identity_registry <- file.path(tmp, "identity.tsv")
+writeLines(c(
+  paste(names(registry), collapse = "\t"),
+  paste(c("identity_fixture", "fixture", "fixture", "test", "file:///dev/null", "public", "unused", "direct_download", "tinytest", "1", "bytes=999"), collapse = "\t")
+), identity_registry)
+identity_file <- file.path(tmp, "identity.txt")
+writeLines("not 999 bytes", identity_file)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = identity_registry)
+expect_error(duckhts_bench_validate_identity("identity_fixture", identity_file), "supplier byte identity")
+if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
