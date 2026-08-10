@@ -138,6 +138,18 @@ Additional R package rules:
 - Do not hand-edit `configure/extension_version.txt`, rendered README/catalog files, or the local `community-extensions/` descriptor for a version-only bump. Normal configure, bootstrap, and catalog rendering carry the authoritative versions forward.
 - A version-only development-cycle bump does not add empty `NEWS.md` sections; changelog entries belong to actual user-visible changes and release finalization.
 
+## Benchmark and Corpus Staging
+
+`r/duckhtsbench` owns the benchmark/corpus artifact registry: identity, source
+release and locator, access conditions, cache-relative destination, derivation,
+and consumers. Benchmark Rmd files and staging wrappers resolve inputs through
+that registry; they do not add private paths, independent URLs, or a second
+cache convention. Each artifact needed by an active benchmark or conformance
+run must have an executable cache-stage path and a network-free staging test.
+A derived artifact names its raw registry inputs and transformation. Do not
+retire a benchmark merely because its data is difficult to reacquire; make the
+reacquisition and derivation contract executable.
+
 ## Testing and Fixtures
 Every public feature needs two levels of testing unless the change is docs-only:
 1. SQL conformance in `test/sql/` — schema, semantics, region/index behavior.

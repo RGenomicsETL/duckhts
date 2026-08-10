@@ -23,7 +23,8 @@
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
-	stage-gffbase stage-duckbedqc-data test-cache-paths
+	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
+	test-cache-paths
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -77,7 +78,7 @@ help:
 		'SIMD: make [test-simd-kernels|bench-simd-kernels]' \
 		'DuckVEP: make [test-duckvep-kernel|test-duckvep-differential]' \
 		'Reports: make [bench-duckvep-throughput|duckvep-render-reports]' \
-		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|duckvep-conformance-corpora]' \
+		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|duckvep-conformance-corpora|variantkey-providers]' \
 		'Wasm: make wasm-playwright-test' \
 		'Cleanup: make [clean|clean_all|clean_local]'
 
@@ -140,6 +141,7 @@ test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllog
 test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
 	bash test/scripts/test_staging_cache.sh
+	bash test/scripts/test_variantkey_provider_staging.sh
 
 test-sqllogictest-debug: check_configure
 	$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
@@ -179,7 +181,7 @@ clean_local:
 docs: check-benchmark-portability rdm
 
 check-benchmark-portability:
-	python3 scripts/check_benchmark_portability.py
+	Rscript r/duckhtsbench/scripts/check_benchmark_portability.R
 
 function_catalog:
 	python3 scripts/render_function_catalog.py
@@ -214,6 +216,9 @@ stage-gffbase:
 
 stage-duckbedqc-data:
 	scripts/stage_duckbedqc_data.sh
+
+stage-variantkey-providers:
+	scripts/stage_variantkey_providers.sh
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
