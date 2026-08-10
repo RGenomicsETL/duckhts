@@ -141,6 +141,7 @@ test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllog
 test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
 	bash test/scripts/test_staging_cache.sh
+	bash test/scripts/test_liftover_registry_batch.sh
 
 test-benchmark-registry:
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \

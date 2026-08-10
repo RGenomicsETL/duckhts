@@ -21,6 +21,7 @@ set -euo pipefail
 #   LIFTOVER_DST_FASTA     destination FASTA (default: staged liftover cache path)
 #                           Run scripts/stage_liftover_references.sh first.
 #   LIFTOVER_REGION_OVERRIDE optional region string applied to every selected case
+#   LIFTOVER_STAGE_ONLY=1 stage selected registered inputs without running comparison
 #   DUCKHTS_EXT, BCFTOOLS_BIN, BCFTOOLS_PLUGIN_DIR, KEEP_SLICE are forwarded to
 #   scripts/liftover_conformance.sh unchanged.
 
@@ -129,8 +130,12 @@ while IFS=$'\t' read -r case_id dataset sample description default_region artifa
   fi
 
   cached_vcf="$(stage_case_input "$case_id" "$dataset" "$sample" "$artifact_id")"
-  out_prefix="$OUT_DIR/$case_id"
   run_count=$((run_count + 1))
+  if [[ "${LIFTOVER_STAGE_ONLY:-0}" == "1" ]]; then
+    echo "==> [$case_id] staged $cached_vcf"
+    continue
+  fi
+  out_prefix="$OUT_DIR/$case_id"
   echo "==> [$case_id] $description"
   if [[ -n "$region" ]]; then
     LIFTOVER_REGION="$region" bash "$SCRIPT_DIR/liftover_conformance.sh" \

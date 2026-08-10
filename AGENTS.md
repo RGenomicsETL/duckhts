@@ -145,7 +145,10 @@ release and locator, access conditions, cache-relative destination, derivation,
 and consumers. Benchmark Rmd files and staging wrappers resolve inputs through
 that registry; they do not add private paths, independent URLs, or a second
 cache convention. Each artifact needed by an active benchmark or conformance
-run must have an executable cache-stage path and a network-free staging test.
+run must have an executable cache-stage path and a network-free staging test. When a
+registry change affects an active benchmark or conformance workload, run its smallest
+representative real benchmark/conformance workload after staging; retain the rendered
+report or state precisely why a declared public input cannot yet be staged.
 A derived artifact names its raw registry inputs and transformation. Do not
 retire a benchmark merely because its data is difficult to reacquire; make the
 reacquisition and derivation contract executable.
