@@ -81,8 +81,4 @@ PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
   bash "$ROOT_DIR/scripts/stage_norm_1000g_dragen_gvcf.sh" >/dev/null
 [[ -f "$CACHE_DIR/benchmarks/norm/1000g-dragen/HG00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz.provenance.tsv" ]]
 
-PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
-  bash "$ROOT_DIR/scripts/stage_liftover_references.sh" >/dev/null
-[[ -f "$CACHE_DIR/references/liftover/grch37-to-grch38/provenance.tsv" ]]
-
 echo "DuckHTS staging cache defaults: OK"

@@ -72,3 +72,26 @@ expect_true(file.exists(paste0(riker_bam, ".bai")))
 expect_true(file.exists(file.path(tmp, "riker", "provenance.tsv")))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
+
+lift_gz <- file.path(tmp, "grch37.fa.gz")
+connection <- gzfile(lift_gz, "wb")
+writeLines(c(">1", "ACGT"), connection)
+close(connection)
+lift_dst <- file.path(tmp, "grch38.fa")
+lift_chain <- file.path(tmp, "chain.gz")
+writeLines(c(">chr1", "ACGT"), lift_dst)
+writeLines("chain", lift_chain)
+lift_registry <- file.path(tmp, "liftover.tsv")
+writeLines(c(
+  paste(names(registry), collapse = "\t"),
+  paste(c("liftover_grch37_fasta_gz", "liftover", "source", "test", paste0("file://", lift_gz), "public", "source.fa.gz", "direct_download", "tinytest", "1", ""), collapse = "\t"),
+  paste(c("liftover_grch38_fasta", "liftover", "destination", "test", paste0("file://", lift_dst), "public", "destination.fa", "direct_download", "tinytest", "2", ""), collapse = "\t"),
+  paste(c("liftover_grch37_grch38_chain", "liftover", "chain", "test", paste0("file://", lift_chain), "public", "chain.gz", "direct_download", "tinytest", "3", ""), collapse = "\t")
+), lift_registry)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = lift_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "lift-cache"))
+lift_paths <- duckhts_bench_stage_liftover(file.path(tmp, "lift"), samtools, Sys.which("gzip"))
+expect_true(all(file.exists(lift_paths)))
+expect_true(all(file.exists(paste0(lift_paths[1:2], ".fai"))))
+expect_true(file.exists(file.path(tmp, "lift", "provenance.tsv")))
+if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
+if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
