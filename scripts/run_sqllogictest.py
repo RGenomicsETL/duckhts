@@ -73,8 +73,6 @@ def _allowed_output(path: Path, root: Path, tracked: set[str]) -> bool:
     relative_name = relative.as_posix()
     if relative_name in tracked:
         return False
-    if relative_name == "test/data" or relative_name.startswith("test/data/"):
-        return False
     if relative_name == "test/duckvep" or relative_name.startswith("test/duckvep/"):
         return False
     if relative_name == "third_party" or relative_name.startswith("third_party/"):

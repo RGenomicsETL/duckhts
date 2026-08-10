@@ -22,7 +22,8 @@ def main() -> int:
             chunk = CHUNK_START.match(line)
             if chunk:
                 header = chunk.group(1)
-                language = header.split(",", 1)[0].strip().lower()
+                engine = header.split(",", 1)[0].strip()
+                language = engine.split(None, 1)[0].lower()
                 active = language in EXECUTABLE_LANGUAGES and not EVAL_FALSE.search(header)
                 continue
             if line.startswith("```"):
