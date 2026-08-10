@@ -24,7 +24,7 @@
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
 	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
-	test-cache-paths
+	test-cache-paths test-benchmark-registry
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -135,12 +135,18 @@ endif
 # -----------------------------------------------------------------------------
 
 test: test_debug
-test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-release
+test_debug: test-cache-paths test-benchmark-registry test-duckvep-kernel test-simd-kernels test-sqllogictest-debug
+test_release: test-cache-paths test-benchmark-registry test-duckvep-kernel test-simd-kernels test-sqllogictest-release
 
 test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
 	bash test/scripts/test_staging_cache.sh
+
+test-benchmark-registry:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	(cd "$$tmp" && R CMD build --no-build-vignettes --no-manual "$(PROJ_DIR)r/duckhtsbench"); \
+	R CMD INSTALL -l "$$tmp" "$$tmp"/duckhtsbench_*.tar.gz; \
+	Rscript -e '.libPaths(c("'"$$tmp"'", .libPaths())); tinytest::test_package("duckhtsbench", testdir = "tinytest")'
 
 test-sqllogictest-debug: check_configure
 	$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
