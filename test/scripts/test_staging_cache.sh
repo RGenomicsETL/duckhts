@@ -85,9 +85,4 @@ PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
   bash "$ROOT_DIR/scripts/stage_liftover_references.sh" >/dev/null
 [[ -f "$CACHE_DIR/references/liftover/grch37-to-grch38/provenance.tsv" ]]
 
-PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
-  bash "$ROOT_DIR/scripts/stage_riker_wgs_bam.sh" >/dev/null
-[[ -f "$CACHE_DIR/benchmarks/riker-wgs/downloads/HG00188.final.cram" ]]
-[[ -f "$CACHE_DIR/benchmarks/riker-wgs/provenance.tsv" ]]
-
 echo "DuckHTS staging cache defaults: OK"

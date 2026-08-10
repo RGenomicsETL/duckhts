@@ -5,16 +5,16 @@
 #'
 #' @param id Artifact identifier.
 #' @param overwrite Whether to replace an existing cache artifact.
+#' @param output Optional destination; defaults to the registry cache path.
 #' @return The staged path, invisibly.
 #' @export
-duckhts_bench_fetch <- function(id, overwrite = FALSE) {
+duckhts_bench_fetch <- function(id, overwrite = FALSE, output = duckhts_bench_artifact_path(id)) {
   registry <- duckhts_bench_registry()
   row <- registry[registry$id == id, , drop = FALSE]
   if (nrow(row) != 1L) stop("unknown or non-unique benchmark artifact: ", id, call. = FALSE)
   if (row$transform != "direct_download") {
     stop("artifact requires a named derivation, not direct download: ", id, call. = FALSE)
   }
-  output <- duckhts_bench_artifact_path(id)
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
   if (overwrite || !file.exists(output) || !file.info(output)$size) {
     utils::download.file(row$locator, output, mode = "wb", quiet = FALSE)
