@@ -26,7 +26,7 @@ writeLines("registry fetch", source_path)
 mini_registry <- file.path(tmp, "registry.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
-  paste(c("fixture", "fixture", "fixture", "fixture-1", paste0("file://", source_path), "public", "fixture/output.txt", "direct_download", "tinytest", "1"), collapse = "\t")
+  paste(c("fixture", "fixture", "fixture", "fixture-1", paste0("file://", source_path), "public", "fixture/output.txt", "direct_download", "tinytest", "1", ""), collapse = "\t")
 ), mini_registry)
 Sys.setenv(DUCKHTSBENCH_REGISTRY = mini_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "cache"))
 output <- duckhts_bench_fetch("fixture")
@@ -40,7 +40,7 @@ writeLines("##fileformat=VCFv4.2", source_vcf)
 giab_registry <- file.path(tmp, "giab.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
-  paste(c("giab_hg001_grch37_v421", "giab-v4.2.1", "benchmark_vcf", "test", paste0("file://", source_vcf), "public", "datasets/giab/HG001.vcf.gz", "direct_download", "tinytest", "1"), collapse = "\t")
+  paste(c("giab_hg001_grch37_v421", "giab-v4.2.1", "benchmark_vcf", "test", paste0("file://", source_vcf), "public", "datasets/giab/HG001.vcf.gz", "direct_download", "tinytest", "1", ""), collapse = "\t")
 ), giab_registry)
 bcftools <- file.path(tmp, "bcftools")
 writeLines(c("#!/usr/bin/env sh", "touch \"$4.tbi\""), bcftools)
@@ -59,8 +59,8 @@ writeLines("CRAM", riker_cram)
 riker_registry <- file.path(tmp, "riker.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
-  paste(c("riker_hg00188_reference", "riker-wgs", "reference", "test", paste0("file://", riker_reference), "public", "unused.fa", "direct_download", "tinytest", "1"), collapse = "\t"),
-  paste(c("riker_hg00188_cram", "riker-wgs", "input_cram", "test", paste0("file://", riker_cram), "public", "unused.cram", "direct_download", "tinytest", "2"), collapse = "\t")
+  paste(c("riker_hg00188_reference", "riker-wgs", "reference", "test", paste0("file://", riker_reference), "public", "unused.fa", "direct_download", "tinytest", "1", ""), collapse = "\t"),
+  paste(c("riker_hg00188_cram", "riker-wgs", "input_cram", "test", paste0("file://", riker_cram), "public", "unused.cram", "direct_download", "tinytest", "2", ""), collapse = "\t")
 ), riker_registry)
 samtools <- file.path(tmp, "samtools")
 writeLines(c("#!/usr/bin/env sh", "case \"$1\" in", "faidx) touch \"$2.fai\" ;;", "quickcheck) exit 0 ;;", "view) while [ \"$1\" != \"-o\" ]; do shift; done; touch \"$2\" ;;", "index) shift 3; touch \"$1.bai\" ;;", "esac"), samtools)
