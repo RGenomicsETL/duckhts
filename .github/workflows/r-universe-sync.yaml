@@ -22,67 +22,122 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq zip
 
+      - name: Test artifact receipt validator
+        run: python3 test/scripts/test_r_universe_artifact.py
+
       - name: Download R-universe artifacts
         id: sync
         env:
           API_URL: https://rgenomicsetl.r-universe.dev/api/packages/Rduckhts
           CDN_URL: https://cdn.r-universe.dev
           GH_API: https://api.github.com
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          json=$(curl -s "$API_URL")
-          version=$(echo "$json" | jq -r '.Version')
+          json=$(curl -fsSL "$API_URL")
+          version=$(jq -er '.Version // empty' <<<"$json")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-          release_url="$GH_API/repos/$GITHUB_REPOSITORY/releases/tags/r-universe-binaries"
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
-            release_json=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$release_url" || true)
-          else
-            release_json=$(curl -s -H "Accept: application/vnd.github+json" "$release_url" || true)
-          fi
+          mkdir -p dist/binaries dist/downloads dist/zips
+          declare -A seen_suffixes=()
+          index=0
 
-          mkdir -p dist/binaries dist/zips
+          while IFS= read -r row; do
+            index=$((index + 1))
+            _jq() { printf '%s' "$row" | base64 -d | jq -r "$1"; }
+            os=$(_jq '.os // empty')
+            rver=$(_jq '.r // empty')
+            distro=$(_jq '.distro // empty')
+            fileid=$(_jq '.fileid // empty')
 
-          echo "$json" | jq -r '._binaries[] | @base64' | while read -r row; do
-            _jq() { echo "$row" | base64 -d | jq -r "$1"; }
-            os=$(_jq '.os')
-            rver=$(_jq '.r')
-            distro=$(_jq '.distro')
-            fileid=$(_jq '.fileid')
-
-            if [ -z "$fileid" ] || [ "$fileid" = "null" ]; then
+            # R-universe lists unavailable builds without a fileid.  There is
+            # no package receipt to validate or publish in that case.
+            if [ -z "$fileid" ]; then
               continue
             fi
+            if [[ ! "$rver" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+              echo "Invalid R version in R-universe API: $rver" >&2
+              exit 1
+            fi
 
-            case "$os" in
-              win) triplet="windows_amd64_mingw";;
-              mac) triplet="osx_arm64";;
-              linux) triplet="linux_amd64";;
-              *) triplet="$os";;
+            case "$fileid" in
+              http://*|https://*) download_url="$fileid";;
+              *) download_url="${CDN_URL%/}/${fileid#/}";;
             esac
 
-            suffix="${triplet}_r${rver}"
-            if [ -n "$distro" ] && [ "$distro" != "null" ] && [ "$os" = "linux" ]; then
+            download_dir="dist/downloads/$index"
+            mkdir -p "$download_dir"
+            (cd "$download_dir" && curl -fsSL -L -J -O "$download_url")
+            mapfile -t package_files < <(find "$download_dir" -maxdepth 1 -type f -print)
+            if [ "${#package_files[@]}" -ne 1 ]; then
+              echo "Expected one downloaded R-universe package for API row $index" >&2
+              exit 1
+            fi
+            package_file="${package_files[0]}"
+
+            platform=$(python3 scripts/validate_r_universe_artifact.py \
+              --package "$package_file" \
+              --api-os "$os" \
+              --expected-version "$version" \
+              --expected-r-version "$rver")
+            suffix="${platform}_r${rver}"
+            if [ -n "$distro" ] && [ "$os" = "linux" ]; then
               suffix="${suffix}_${distro}"
             fi
+            if [[ -n "${seen_suffixes[$suffix]+set}" ]]; then
+              echo "Duplicate receipted artifact suffix: $suffix" >&2
+              exit 1
+            fi
+            seen_suffixes["$suffix"]=1
 
             outdir="dist/binaries/${suffix}"
             mkdir -p "$outdir"
-            (cd "$outdir" && curl -L -O -J "$CDN_URL/$fileid")
+            package_name=$(basename "$package_file")
+            cp "$package_file" "$outdir/$package_name"
+            (cd "$outdir" && zip -q -r "../../zips/Rduckhts_${version}_${suffix}.zip" "$package_name")
+          done < <(jq -r '._binaries[]? | @base64' <<<"$json")
 
-            pkg_file=$(ls -t "$outdir" | head -n 1)
-            if [ -n "$pkg_file" ]; then
-              (cd "$outdir" && zip -r "../../zips/Rduckhts_${version}_${suffix}.zip" "$pkg_file")
-            fi
-          done
-
-          if ! ls dist/zips/*.zip >/dev/null 2>&1; then
+          if ! compgen -G 'dist/zips/*.zip' >/dev/null; then
             echo "No binaries found to publish"
             echo "publish=no" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "$version" > dist/latest-version.txt
+
+          # Remove every prior asset for this package version.  This is
+          # necessary because the old synchronizer could leave an amd64 or
+          # arm64 asset under the other platform's name; uploading corrected
+          # names alone would leave those unsafe assets servable.
+          release_url="$GH_API/repos/$GITHUB_REPOSITORY/releases/tags/r-universe-binaries"
+          release_json_file="dist/release.json"
+          release_status=$(curl -sS -o "$release_json_file" -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$release_url" || true)
+          case "$release_status" in
+            200)
+              while IFS= read -r asset_id; do
+                [ -n "$asset_id" ] || continue
+                curl -fsSL -X DELETE \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "$GH_API/repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+              done < <(
+                jq -r --arg prefix "Rduckhts_${version}_" \
+                  '.assets[]? | select(.name | startswith($prefix)) | .id' \
+                  "$release_json_file"
+              )
+              ;;
+            404)
+              ;;
+            *)
+              cat "$release_json_file" >&2
+              echo "Could not inspect the r-universe-binaries release (HTTP $release_status)" >&2
+              exit 1
+              ;;
+          esac
+
           echo "publish=yes" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifacts

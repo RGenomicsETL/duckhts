@@ -11,6 +11,10 @@
   target-specific `Built` field instead of classifying configure-built DuckHTS
   and htslib artifacts as architecture-independent
 
+- make the nightly R-universe artifact sync validate the package `Built` field
+  against the bundled DuckDB extension footer, publish only the receipted
+  platform name, and fail on missing or contradictory architecture metadata
+
 # duckhts 1.5.1
 - mark Rduckhts as requiring compilation because its configure scripts build
   target-specific DuckHTS and htslib artifacts outside the conventional R
