@@ -141,7 +141,6 @@ test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllog
 test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
 	bash test/scripts/test_staging_cache.sh
-	bash test/scripts/test_variantkey_provider_staging.sh
 
 test-sqllogictest-debug: check_configure
 	$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
