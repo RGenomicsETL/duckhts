@@ -44,7 +44,11 @@ library(knitr)
 library(jsonlite)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
-out_dir <- file.path(repo_root, ".tmp", "simd_seq_gc")
+duckhts_cache_dir <- Sys.getenv(
+  "DUCKHTS_CACHE_DIR",
+  unset = file.path(path.expand("~"), ".cache", "duckhts")
+)
+out_dir <- Sys.getenv("SIMD_SEQ_GC_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "simd-seq-gc"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 json_out <- file.path(out_dir, "benchmark_simd_seq_gc.json")
 

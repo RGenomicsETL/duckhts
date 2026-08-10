@@ -2,6 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=duckhts_cache.sh
+source "${ROOT_DIR}/scripts/duckhts_cache.sh"
 PORT=${PORT:-8001}
 HOST=${HOST:-127.0.0.1}
 LOCAL_WASM_IMAGE=${LOCAL_WASM_IMAGE:-duckhts/duckdb-wasm-local:latest}
@@ -13,10 +15,10 @@ DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.31.0}
 # SERVE=0 builds the site and exits, printing SITE_ROOT/PORT so an external
 # driver (e.g. Playwright's webServer) can own the HTTP server lifecycle.
 SERVE=${SERVE:-1}
-ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.duckdb-wasm-local-artifacts}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-$(duckhts_cache_subdir wasm/local-artifacts)}
 SITE_ROOT=${SITE_ROOT:-${ARTIFACT_ROOT}/site}
 WASM_BUILD_DIR=${WASM_BUILD_DIR:-${ARTIFACT_ROOT}/build/wasm_eh/extension/duckhts}
-DOCKER_WORK_ROOT=${DOCKER_WORK_ROOT:-${ROOT_DIR}/.duckdb_wasm_docker_work}
+DOCKER_WORK_ROOT=${DOCKER_WORK_ROOT:-$(duckhts_cache_subdir wasm/docker-work)}
 DOCKER_REBUILD_IMAGE=${DOCKER_REBUILD_IMAGE:-0}
 
 echo "Building DuckHTS wasm extension (DuckDB community extension path)..."
@@ -85,10 +87,27 @@ rm -rf "${SITE_ROOT}"
 mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/duckdb-wasm" "${SITE_ROOT}/extdata"
 
 RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist"
-curl -fsSL "${RUNTIME_BASE}/duckdb-browser.mjs" -o "${SITE_ROOT}/duckdb-browser.mjs"
-curl -fsSL "${RUNTIME_BASE}/duckdb-browser-eh.worker.js" -o "${SITE_ROOT}/duckdb-browser-eh.worker.js"
-curl -fsSL "${RUNTIME_BASE}/duckdb-eh.wasm" -o "${SITE_ROOT}/duckdb-eh.wasm"
-curl -fsSL "${RUNTIME_BASE}/duckdb-browser-eh.worker.js.map" -o "${SITE_ROOT}/duckdb-browser-eh.worker.js.map" || true
+RUNTIME_CACHE="$(duckhts_cache_subdir "runtime/duckdb-wasm/${DUCKDB_WASM_NPM_VERSION}")"
+mkdir -p "$RUNTIME_CACHE"
+fetch_runtime() { # filename [optional]
+  local name="$1"
+  local optional="${2:-0}"
+  local cached="$RUNTIME_CACHE/$name"
+  if [[ ! -s "$cached" ]]; then
+    if ! curl -fsSL "${RUNTIME_BASE}/$name" -o "$cached"; then
+      rm -f "$cached"
+      if [[ "$optional" = "1" ]]; then
+        return 0
+      fi
+      return 1
+    fi
+  fi
+  cp -f "$cached" "$SITE_ROOT/$name"
+}
+fetch_runtime duckdb-browser.mjs
+fetch_runtime duckdb-browser-eh.worker.js
+fetch_runtime duckdb-eh.wasm
+fetch_runtime duckdb-browser-eh.worker.js.map 1
 printf '%s\n' '<!doctype html><title>duckhts</title>' > "${SITE_ROOT}/favicon.ico"
 
 ln -sf "${ROOT_DIR}/scripts/duckdb-wasm-local-test.html" "${SITE_ROOT}/scripts/duckdb-wasm-local-test.html"

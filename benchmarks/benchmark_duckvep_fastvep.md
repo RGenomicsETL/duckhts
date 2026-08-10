@@ -373,24 +373,22 @@ candidate discovery, consequence annotation, ordered result handling,
 and native 17-field tab writer. It consumes the already sorted VCF and
 does not perform an explicit sort.
 
-| tool    | output_contract       | row_count  | bytes         | lines      | observed_sha256                                                  | observed_runs | byte_order_stable |
-|:--------|:----------------------|:-----------|:--------------|:-----------|:-----------------------------------------------------------------|--------------:|:------------------|
-| duckvep | matched_tab_17_fields | 47,629,345 | 6,174,109,710 | 47,629,346 | cab3099378b4ccb0de4c2ecabc4cf6cac58c32aeb456015c8a6657782c24e8e3 |             6 | FALSE             |
-| fastvep | native_tab_17_fields  | 47,828,122 | 6,376,454,054 | 47,828,124 | aec1d995ecd519e86f449372f4c9b6975f72dc9284afc16c646778e9c14d201f |             6 | TRUE              |
+| tool    | output_contract       | row_count  | bytes         | lines      | observed_runs | byte_order_stable |
+|:--------|:----------------------|:-----------|:--------------|:-----------|--------------:|:------------------|
+| duckvep | matched_tab_17_fields | 47,629,345 | 6,174,109,710 | 47,629,346 |             6 | FALSE             |
+| fastvep | native_tab_17_fields  | 47,828,122 | 6,376,454,054 | 47,828,124 |             6 | TRUE              |
 
 FastVEP’s tab schema is its native fixed 17-field projection. DuckVEP
 matches the same physical column count and writes comparable text
 volume, but it does not fabricate FastVEP-only presentation values such
-as codon strings, flags, or existing-variation labels. The SHA-256 value
-is an observed file receipt, not an assertion that the two engines write
-identical text. FastVEP produced the same bytes in all six checked
-thread/repeat observations. DuckVEP produced multiple byte orders across
-6 observations because the final relational join has no output
-`ORDER BY`; a same-parser order-independent fingerprint over all
-47,629,345 rows was identical in all 6 runs checked for multiset
-stability. Its checked fingerprint is XOR 15135830789387217416,
-low-32-bit sum 102267960154848972, and high-32-bit sum
-102341672868090308.
+as codon strings, flags, or existing-variation labels. FastVEP produced
+the same bytes in all six checked thread/repeat observations. DuckVEP
+produced multiple byte orders across 6 observations because the final
+relational join has no output `ORDER BY`; a same-parser
+order-independent fingerprint over all 47,629,345 rows was identical in
+all 6 runs checked for multiset stability. Its checked fingerprint is
+XOR 15135830789387217416, low-32-bit sum 102267960154848972, and
+high-32-bit sum 102341672868090308.
 
 The FastVEP cache contains 645,457 transcripts; the exact VEP-filtered
 DuckVEP model contains 644,427. The 1,030-transcript difference remains
@@ -518,12 +516,8 @@ This speed comparison stops at the common 17-column tabular edge so the
 tool comparison remains legible. The broader DuckVEP workflow can
 instead filter numeric consequence masks first, join only requested
 provider columns, and write Parquet or another DuckDB-supported result.
-The direct ClinVar result above measures the same fastSA source against
-DuckDB’s typed join, while the [supplementary-provider
-benchmark](benchmark_variantkey_join_overlap.md) extends the evidence to
-AlphaMissense, REVEL, clinical arbitration, genes, and intervals. These
-costs remain separate from the consequence headline instead of being
-silently charged to only one tool.
+A real multi-provider timing is deliberately deferred until its complete
+cache-staging contract exists.
 
 ## Findings
 
@@ -536,11 +530,10 @@ silently charged to only one tool.
     property trials and 100,268 generated VEP pair comparisons with no
     observed failure. FastVEP’s speed result does not imply the same
     HGVS contract.
-3.  **SQL supplementary annotation is measured, not aspirational.** The
-    collision-safe typed ClinVar join is faster than fastSA on this
-    identical 4.10-million-allele workload, and the checked provider
-    campaign composes ClinVar, ClinvArbitration, AlphaMissense, REVEL,
-    and BigWig without adding a provider-specific C or Rust engine.
+3.  **Supplementary annotation remains SQL composition.** The retained
+    source comparison uses collision-safe typed ClinVar rows. A
+    cross-machine provider campaign needs explicit cache staging before
+    it can make a current timing claim.
 4.  **The principal measured costs have moved above the biological
     kernel.** At four cores the largest operator totals are label
     joining, tab writing, result-list expansion, and text projection.
@@ -569,254 +562,34 @@ not establish distance-invariant performance. DuckVEP’s separate
 50,000-base measurements and row fingerprints so this end-to-end
 workload does not become the only performance authority.
 
-## Revisions and input receipts
+## Measured input identities
 
-| item                                | receipt                                                          |
-|:------------------------------------|:-----------------------------------------------------------------|
-| DuckHTS measured checkout           | 2a1c37cf2938e8226a078f19ca429ffeff84de73                         |
-| DuckHTS extension binary            | 53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b |
-| DuckVEP measured worker revision    | 44f3e3533c957a798939bda6106c828f0bbea75c                         |
-| DuckVEP current reproduction worker | 819a3c8a6c4ec2ec0b8489c0910ceb7e20deb9f3cdf2399ce794e7b65068195d |
-| FastVEP checkout                    | 7038e7c17708e7d2226149e78e0bb297bcc6d1d6                         |
-| FastVEP native binary               | b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a |
-| FastVEP rebuilt transcript cache    | 00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962 |
-| DuckVEP Ensembl 116 GRCh38 model    | 4c2077c83958f7a300119225f91ebf288baba49497d6efe691a2a9898eb4710a |
-| GIAB HG002 input VCF                | adb4d4a50048aa13353a06b84fcfcbca09a5d17525efaa4cea44f8822e81175c |
-| ClinVar 2026-07-06 source VCF       | 59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 |
-| held-out ClinVar input VCF          | 7ecec9a7507166c2f6d4db240ba27b6f07ed9da3b0d95936882888941bcf3bf4 |
-| Ensembl 116 primary FASTA           | 1e74081a49ceb9739cc14c812fbb8b3db978eb80ba8e5350beb80d8ad8dfef3b |
-| Ensembl 116 primary FASTA index     | 0998f61682f4041b11f0d156e1db6dae3e4c743e26643a3f45ea7faea70cb604 |
-| Ensembl 116 GFF3                    | 08e881d96ab6385a2c31f063a018be4b2c36860b323f2724be07022deeef21ce |
+This historical campaign used DuckHTS `2a1c37c`, the DuckVEP worker
+revision `44f3e35`, FastVEP checkout `7038e7c`, Ensembl release 116,
+ClinVar GRCh38 archive `20260706`, and the GIAB NIST v4.2.1 HG002 GRCh38
+benchmark VCF. The checked-in observation tables retain the row and byte
+denominators, tool timing, and output-order observations. Those are
+historical evidence, not a promise that the unavailable model and
+transcript-cache inputs can be reconstructed from a fresh clone.
 
-The extension binary was clean-built at `c977cba`; there are no
-extension, public-catalog, or build-wiring changes from that revision
-through the measured `2a1c37c` checkout. Git revision `44f3e35`
-preserves the exact benchmark worker used for every retained DuckVEP
-timing. The current worker hash identifies the reproduction script
-rendered below without requiring that script to remain byte-identical as
-the public SQL API evolves. FastVEP was updated to the latest upstream
-checkout before the run and its transcript cache was rebuilt from the
-receipt-pinned Ensembl 116 GFF3 and FASTA rather than reusing an older
-cache.
+## Reproduction status
 
-The host is an Intel Core i5-13500 with six physical performance cores.
-CPU 2 is the single-core condition; FastVEP uses CPU sets `2`, `2,4`,
-`2,4,6,8`, and `0,2,4,6,8,10`. GNU `/usr/bin/time -v` supplies wall
-time, CPU use, and process-level maximum RSS. All measurements used a
-warm local filesystem page cache and do not claim cold-storage or
-`fsync` latency.
+The checked-in timing files and observed-output tables are the evidence
+for this historical comparison. They record the measured host commands;
+they are not a portable benchmark runner, and no `make` target executes
+them.
 
-## Reproduction
+A fresh campaign must stage every large input below
+`$DUCKHTS_CACHE_DIR`, record its public locator, release, access
+conditions, derivation, and consuming variable beside the staged
+artifact, then render a new report. The identifiable public inputs are
+ClinVar GRCh38 archive `20260706`, GIAB NIST `v4.2.1` HG002 GRCh38, and
+Ensembl release 116 GFF3/primary-assembly FASTA. The historical DuckVEP
+model and FastVEP transcript cache have no current public staging
+recipe, so this repository does not claim that the retained timing can
+be recreated today. A new source/release mapping is required before that
+workload is enabled again.
 
-The exact measured command lines are retained verbatim in the checked-in
-GNU time files. The DuckVEP worker is
-`benchmarks/benchmark_duckvep_fastvep_worker.R`; it owns the SQL and
-exposes `--threads`, `--distance`, `--memory-limit`, and optional
-`--profile-json`. FastVEP was built with:
-
-``` bash
-env RUSTFLAGS='-C target-cpu=native' cargo build \
-  --manifest-path .sync/fastVEP/Cargo.toml --release --locked
-```
-
-The supplementary comparison first builds fastSA from the same ClinVar
-release:
-
-``` bash
-.sync/fastVEP/target/release/fastvep sa-build \
-  --source clinvar \
-  --input /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
-  --output /tmp/duckvep-fastsa/clinvar_20260706_grch38 \
-  --assembly GRCh38 --no-progress
-```
-
-The DuckDB side stages the same eight payload fields into reversible and
-hashed Parquet relations. Its source projection is the ClinVar
-preparation query in [the provider
-report](benchmark_variantkey_join_overlap.md), without normalizing away
-the uploaded tuple for this direct fastSA comparison. The HG002 query
-relation contains the 4,095,611 literal ALT alleles from the shared VCF.
-Provider construction and query decoding are outside both lookup timers.
-
-The checked FastVEP adapter is copied into the pinned checkout so it
-compiles against that exact public `SaReader` API:
-
-``` bash
-cp benchmarks/fastvep_fastsa_lookup.rs \
-  .sync/fastVEP/crates/fastvep-cli/examples/real_lookup.rs
-cargo build --manifest-path .sync/fastVEP/Cargo.toml \
-  --release -p fastvep-cli --example real_lookup
-taskset -c 2 .sync/fastVEP/target/release/examples/real_lookup \
-  /tmp/duckvep-fastsa/clinvar_20260706_grch38.osa \
-  /tmp/duckvep-fastsa/giab_hg002_literal.tsv 1 5
-taskset -c 2,4,6,8 .sync/fastVEP/target/release/examples/real_lookup \
-  /tmp/duckvep-fastsa/clinvar_20260706_grch38.osa \
-  /tmp/duckvep-fastsa/giab_hg002_literal.tsv 4 5
-```
-
-The DuckDB measurement is SQL. With `.timer on`, the following query was
-run five times after `SET threads = 1` and again after
-`SET threads = 4`, under the same CPU affinity as fastSA:
-
-``` sql
-SELECT sum(hits)::BIGINT, bit_xor(payload_hash)::UBIGINT
-FROM (
-  SELECT count(*)::BIGINT AS hits,
-         bit_xor(hash(p.significance, p.review_status, p.phenotypes,
-                      p.variant_class, p.so_accession,
-                      p.af_exac, p.af_tgp, p.af_esp)) AS payload_hash
-  FROM read_parquet('/tmp/duckvep-fastsa/giab_reversible.parquet') q
-  JOIN read_parquet('/tmp/duckvep-fastsa/clinvar_reversible.parquet') p
-    USING (vk)
-  UNION ALL
-  SELECT count(*)::BIGINT,
-         bit_xor(hash(p.significance, p.review_status, p.phenotypes,
-                      p.variant_class, p.so_accession,
-                      p.af_exac, p.af_tgp, p.af_esp))
-  FROM read_parquet('/tmp/duckvep-fastsa/giab_hashed.parquet') q
-  JOIN read_parquet('/tmp/duckvep-fastsa/clinvar_hashed.parquet') p
-    ON q.vk = p.vk AND q.chrom = p.chrom AND q.pos = p.pos
-   AND q.ref = p.ref AND q.alt = p.alt
-);
-```
-
-FastVEP creates its binary transcript cache as a side effect of
-annotation when the requested cache does not exist. The measured cache
-was rebuilt without source-label or synonym overrides as follows; the
-retained held-out VCF is only the trigger input for this
-cache-construction pass:
-
-``` bash
-cache=/tmp/homo_sapiens_grch38_116_7038e7c.cache
-test ! -e "$cache"
-.sync/fastVEP/target/release/fastvep annotate \
-  --input benchmarks/data/duckvep_fastvep/clinvar_chr21_seed113.vcf \
-  --output /dev/null --output-format tab --no-progress \
-  --gff3 /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.116.gff3.gz \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --transcript-cache "$cache"
-test "$(sha256sum "$cache" | cut -d' ' -f1)" = \
-  00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962
-```
-
-The single-core invocations were:
-
-``` bash
-/usr/bin/time -v \
-  -o /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.time \
-  taskset -c 2 Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
-  --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
-  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.tab \
-  --threads 1 --distance 5000 --memory-limit 4GB
-
-/usr/bin/time -v \
-  -o /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.time \
-  taskset -c 2 env RAYON_NUM_THREADS=1 \
-  .sync/fastVEP/target/release/fastvep annotate \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
-  --output /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.tab \
-  --output-format tab --distance 5000 --no-progress \
-  --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache
-
-Rscript benchmarks/benchmark_duckvep_fastvep_receipt.R \
-  --input /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.tab \
-  --tool duckvep --output-contract matched_tab_17_fields \
-  --threads 1 --run 1 \
-  --timing-file benchmarks/data/duckvep_fastvep/duckvep_giab_threads1.time \
-  --output /tmp/duckvep-fastvep-benchmark/duckvep_receipt_run1.csv
-
-Rscript benchmarks/benchmark_duckvep_fastvep_receipt.R \
-  --input /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.tab \
-  --tool fastvep --output-contract native_tab_17_fields \
-  --threads 1 --run 1 --skip-lines 1 \
-  --timing-file benchmarks/data/duckvep_fastvep/fastvep_giab_threads1.time \
-  --output /tmp/duckvep-fastvep-benchmark/fastvep_receipt_run1.csv
-```
-
-The four-core DuckVEP measurements change the affinity set and DuckDB
-task count without enabling htslib decompression workers. Run suffixes
-and timing destinations distinguish the three repetitions:
-
-``` bash
-/usr/bin/time -v \
-  -o /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_run1.time \
-  taskset -c 2,4,6,8 \
-  Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
-  --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
-  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4.tab \
-  --threads 4 --distance 5000 --memory-limit 4GB
-
-taskset -c 2,4,6,8 \
-  Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
-  --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
-  --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.tab \
-  --threads 4 --distance 5000 --memory-limit 4GB \
-  --profile-json /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json
-
-cp /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json \
-  benchmarks/data/duckvep_fastvep/duckvep_giab_threads4_profile.json
-```
-
-The same receipt command is run before an output is replaced. Its
-per-run rows are retained in
-`benchmarks/data/duckvep_fastvep/output_observations.csv`; the render
-derives observed-run counts, byte-order stability, and multiset
-stability from those rows rather than from an aggregate assertion.
-
-`benchmarks/benchmark_duckvep_fastvep_conformance.R` collects the
-VEP-oracle comparison without dropping missing or extra transcript keys.
-The held-out oracle, FastVEP HGVS output, and collector were produced
-with:
-
-``` bash
-out=/tmp/duckvep-fastvep-benchmark/conformance200.CCg7sP
-Rscript test/duckvep/conformance/corpus_differential.R \
-  --corpus clinvar_chr21_seed113 \
-  --vcf /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
-  --source-version 20260706 \
-  --source-checksum sha256:59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 \
-  --cache-dir /root/duckvep/data/vep_cache \
-  --cache-info /root/duckvep/data/vep_cache/homo_sapiens/116_GRCh38/info.txt \
-  --cache-receipt /root/duckvep/data/receipts/homo_sapiens-116-GRCh38.tsv \
-  --assembly GRCh38 --species homo_sapiens \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --database /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --model-sql= --model-name fastvep_conformance \
-  --sample-per-shape 200 --max-allele-length 50 --seed 113 --chrom 21 \
-  --distance 5000 --hgvs --fork 8 --vep-buffer-size 5000 \
-  --sample-vcf "$out/clinvar_chr21_seed113.vcf" --keep-sample-vcf \
-  --annotations-out "$out/duckvep_annotations.parquet" \
-  --hgvs-out "$out/duckvep_hgvs_summary.csv" \
-  --hgvs-pairs-out "$out/duckvep_hgvs_pairs.parquet" \
-  --extension build/release/duckhts.duckdb_extension
-
-test "$(sha256sum "$out/clinvar_chr21_seed113.vcf" | cut -d' ' -f1)" = \
-  7ecec9a7507166c2f6d4db240ba27b6f07ed9da3b0d95936882888941bcf3bf4
-
-taskset -c 2 env RAYON_NUM_THREADS=1 \
-  .sync/fastVEP/target/release/fastvep annotate \
-  --input "$out/clinvar_chr21_seed113.vcf" --output "$out/fastvep.vcf" \
-  --output-format vcf --hgvs --distance 5000 --no-progress \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache
-
-Rscript benchmarks/benchmark_duckvep_fastvep_conformance.R \
-  --extension build/release/duckhts.duckdb_extension \
-  --fastvep-vcf "$out/fastvep.vcf" \
-  --input-vcf "$out/clinvar_chr21_seed113.vcf" \
-  --oracle-parquet "$out/duckvep_annotations.parquet" \
-  --output "$out/conformance.csv" \
-  --examples "$out/conformance_examples.csv"
-```
-
-Render this report only from the R Markdown source:
-
-``` bash
-Rscript -e "rmarkdown::render('benchmarks/benchmark_duckvep_fastvep.Rmd', output_format='github_document')"
-```
+The worker remains `benchmarks/benchmark_duckvep_fastvep_worker.R`; its
+inputs, outputs, and temporary timing files must be cache-resident in a
+future runner. Render this report only from its R Markdown source.

@@ -45,17 +45,16 @@ python3 scripts/cgranges_benchmark.py \
   --bedtools bedtools \
   --subjects 50000 \
   --queries 5000 \
-  --passes 3 \
-  --out-dir .tmp/cgranges_benchmark
+  --passes 3
 ```
 
-Real DuckBedQC BED files can be benchmarked with:
+Real DuckBedQC BED files can be benchmarked after staging their pinned source revision:
 
 ```sh
+make stage-duckbedqc-data
 python3 scripts/cgranges_benchmark_real.py \
   --extension build/release/duckhts.duckdb_extension \
-  --passes 1 \
-  --out-dir .tmp/cgranges_benchmark_real
+  --passes 1
 ```
 
 For a shell/CLI-only smoke path that still avoids generated bulk-query SQL:
@@ -68,7 +67,11 @@ scripts/cgranges_benchmark_cli.sh
 library(knitr)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
-out_dir <- file.path(repo_root, ".tmp", "cgranges_benchmark")
+duckhts_cache_dir <- Sys.getenv(
+  "DUCKHTS_CACHE_DIR",
+  unset = file.path(path.expand("~"), ".cache", "duckhts")
+)
+out_dir <- Sys.getenv("CGRANGES_BENCH_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "cgranges"))
 summary_csv <- file.path(out_dir, "summary.csv")
 metadata_json <- file.path(out_dir, "metadata.json")
 

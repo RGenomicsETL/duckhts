@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+CONFORMANCE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../duckhts_cache.sh
+source "$CONFORMANCE_SCRIPT_DIR/../duckhts_cache.sh"
+
 conformance_repo_root() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +30,7 @@ conformance_require_file() {
 conformance_resolve_plugin_dir() {
   local root="$1"
   local zip_path="${root}/score_1.22-20250819.zip"
-  local out_dir="${root}/.tmp/score-plugin"
+  local out_dir="${DUCKHTS_SCORE_PLUGIN_DIR:-$(duckhts_cache_subdir conformance/score-plugin)}"
 
   mkdir -p "$out_dir"
   if [[ ! -f "${out_dir}/score.so" || ! -f "${out_dir}/munge.so" || ! -f "${out_dir}/liftover.so" ]]; then

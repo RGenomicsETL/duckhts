@@ -7,11 +7,15 @@
 # Usage:
 #   scripts/stage_duckvep_conformance_corpora.sh [OUTPUT_DIR] [CORPUS]
 #
-# OUTPUT_DIR defaults to ./duckvep-corpora. CORPUS is one of:
-#   all (default), hprc-african4-chr22, sniffles2-chr22, dbvar-chr22
+# OUTPUT_DIR defaults to $DUCKHTS_CACHE_DIR/corpora/duckvep. CORPUS is one
+# of: all (default), hprc-african4-chr22, sniffles2-chr22, dbvar-chr22.
 set -euo pipefail
 
-OUTPUT_DIR="${1:-./duckvep-corpora}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=duckhts_cache.sh
+source "$SCRIPT_DIR/duckhts_cache.sh"
+
+OUTPUT_DIR="${1:-$(duckhts_cache_subdir "corpora/duckvep")}"
 CORPUS="${2:-all}"
 
 for tool in bcftools tabix sha256sum curl; do

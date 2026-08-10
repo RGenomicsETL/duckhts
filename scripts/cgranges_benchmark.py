@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+from duckhts_cache import duckhts_cache_subdir
+
 
 def sql_quote(path: Path | str) -> str:
     return str(path).replace("'", "''")
@@ -519,7 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit-subjects", type=int)
     parser.add_argument("--limit-queries", type=int)
     parser.add_argument("--label")
-    parser.add_argument("--out-dir", default=".tmp/cgranges_benchmark")
+    parser.add_argument("--out-dir", default=str(duckhts_cache_subdir("benchmarks", "cgranges")))
     parser.add_argument("--timeout", type=int, default=3600)
 
     parser.add_argument("--worker-duckhts", action="store_true")

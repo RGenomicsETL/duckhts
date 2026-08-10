@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Prepare indexed test data for duckhts SQL tests.
-#
-# Copies files from vendored htslib test suite into test/data/ and
-# builds the required indexes (BAI, CSI, TBI, FAI) so that region
-# queries work without stderr noise.
+# Maintainer-only reconstruction of the committed DuckHTS SQL fixture closure.
+# A normal fresh clone already has the small fixtures and indexes it needs; use
+# `make test_release`, not this script. Full reconstruction also requires the
+# local pinned upstream mirrors named below.
 #
 # Prerequisites: samtools, bcftools, bgzip, tabix (all from htslib/samtools).
 #

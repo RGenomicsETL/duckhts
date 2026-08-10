@@ -472,8 +472,8 @@ The implemented builder does not yet:
 Those richer facts should remain typed DuckDB relations joined by numeric source IDs. They
 do not belong in every resident C transcript record. Exact VEP-compatible selection and
 the richer Ensembl relation set can therefore be separate named products built from the
-same staged release. Production-corpus conformance and throughput remain tracked at
-https://github.com/RGenomicsETL/duckhts/issues/93 and
+same staged release. The [conformance report](../benchmarks/duckvep_conformance.md)
+records the declared corpus evidence; throughput accounting remains tracked at
 https://github.com/RGenomicsETL/duckhts/issues/95. Further species and genetic-code
 coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 
@@ -554,8 +554,7 @@ Production MNVs and indels use the generalized edit/CDS/peptide context exactly 
 projection, sequence, capacity, or unsupported-state failure remains explicit and is never
 retried through a smaller shape-specific classifier. Narrow direct classifiers remain only
 as independent pure-C test references; the annotation path cannot select them after a
-context failure. https://github.com/RGenomicsETL/duckhts/issues/93 owns continued
-real-VEP differential closure, not a second consequence implementation.
+context failure.
 
 ## NMD prediction
 
@@ -933,9 +932,8 @@ RSS, interval-index density, real multi-provider plan, join-count stress, and
 twelve-provider logical-time envelope live in
 `benchmarks/benchmark_variantkey_join_overlap.md`.
 
-The stateful stable-API integration is tracked at
-https://github.com/RGenomicsETL/duckhts/issues/94. Supplementary source plumbing does not
-belong as ignored arguments in the consequence-kernel API.
+Supplementary source plumbing does not belong as ignored arguments in the
+consequence-kernel API.
 
 ## Validation and performance
 
@@ -1221,7 +1219,7 @@ Source ownership makes the resident model immutable and shared; GNU `time -v` ob
 That process measurement is not allocation attribution. At 50,000 bases the same inputs
 expand to 88,784,213 rows and the observed four-branch RSS premium remains 8.16 MiB.
 
-The closed consequence-conformance and dense-throughput campaigns are tracked at
-https://github.com/RGenomicsETL/duckhts/issues/93 and
-https://github.com/RGenomicsETL/duckhts/issues/95. Phased execution remains a distinct
-semantic vertical at https://github.com/RGenomicsETL/duckhts/issues/92.
+The conformance report records the closed consequence campaign, while
+https://github.com/RGenomicsETL/duckhts/issues/95 tracks remaining throughput work. Phased
+execution remains a distinct semantic vertical at
+https://github.com/RGenomicsETL/duckhts/issues/92.

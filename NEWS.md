@@ -1,6 +1,19 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- make the ordinary clone/build/test loop use the committed fixture closure: remove the
+  obsolete instruction to regenerate test data from private mirrors, run SQLLogicTests
+  through the cleanup-aware runner, and leave package builds network-free unless the
+  developer explicitly chooses dependency bootstrap. Optional liftover, normalization, and
+  VariantKey benchmark inputs are now explicit environment variables rather than one developer's paths.
+  Explicit GIAB, liftover-reference, normalization, Riker, DuckVEP-corpus, and local browser staging
+  defaults now share `~/.cache/duckhts` (or `DUCKHTS_CACHE_DIR`) and record source/transformation
+  provenance beside staged data. Retire unreferenced generic and mosdepth benchmark reports and the
+  unstageable real-provider VariantKey section rather than retain host-local data claims. Keep the
+  historical FastVEP result as evidence, not as an unstageable command catalogue. Normalize embedded
+  native source paths so equal clean builds can
+  produce equal extension bytes.
+
 - retire the duplicate R-side extension compiler, metadata serializer, and
   platform mapper; the package configure scripts and shared metadata writer are
   now the only build authority. Split the R package code into focused helper,

@@ -222,7 +222,7 @@ def run_backend(args: argparse.Namespace, backend: str) -> list[dict[str, Any]]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--extension", default="build/release/duckhts.duckdb_extension")
-    parser.add_argument("--bam", default="HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam")
+    parser.add_argument("--bam", default="test/data/nanopore.bam")
     parser.add_argument("--max-reads", type=int, default=0, help="0 means all reads")
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--threads", type=int, default=1)

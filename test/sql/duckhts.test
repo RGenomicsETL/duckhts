@@ -2,8 +2,8 @@
 # description: Test duckhts extension - read_bcf, read_bam, read_fasta, read_fastq, read_gff, read_gtf, read_tabix
 # group: [duckhts]
 #
-# Test data lives in test/data/ and is prepared by test/scripts/prepare_test_data.sh
-# which copies files from vendored htslib and builds the required indexes.
+# The small fixtures and indexes required by this test are committed under test/data/.
+# Per-test generated output is removed by scripts/run_sqllogictest.py.
 
 require duckhts
 

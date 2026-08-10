@@ -26,8 +26,8 @@ Two workloads are reported for each SIMD backend request:
   real BAM sequence strings flowing through `seq_gc_content(...)`.  This better
   isolates the SIMD byte-scanning kernel on realistic sequence lengths.
 
-The default local input is `HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam`
-when present, falling back to `test/data/nanopore.bam` for smaller checkouts.
+The default input is the committed `test/data/nanopore.bam` fixture. Set
+`SIMD_BAM_GC_BAM` to benchmark a separately staged BAM under the DuckHTS cache.
 
 # Run
 
@@ -51,7 +51,11 @@ library(knitr)
 library(jsonlite)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
-out_dir <- file.path(repo_root, ".tmp", "simd_bam_gc")
+duckhts_cache_dir <- Sys.getenv(
+  "DUCKHTS_CACHE_DIR",
+  unset = file.path(path.expand("~"), ".cache", "duckhts")
+)
+out_dir <- Sys.getenv("SIMD_BAM_GC_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "simd-bam-gc"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 json_out <- file.path(out_dir, "benchmark_simd_bam_gc.json")
 meta_out <- file.path(out_dir, "benchmark_simd_bam_gc_meta.json")
@@ -62,10 +66,7 @@ extension <- Sys.getenv(
 )
 extension <- normalizePath(extension, mustWork = TRUE)
 
-default_bam <- file.path(repo_root, "HG00106.chrom11.ILLUMINA.bwa.GBR.exome.20130415.bam")
-if (!file.exists(default_bam)) {
-  default_bam <- file.path(repo_root, "test", "data", "nanopore.bam")
-}
+default_bam <- file.path(repo_root, "test", "data", "nanopore.bam")
 bam <- Sys.getenv("SIMD_BAM_GC_BAM", unset = default_bam)
 bam <- normalizePath(bam, mustWork = TRUE)
 

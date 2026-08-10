@@ -15,14 +15,17 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=duckhts_cache.sh
+source "$REPO_ROOT/scripts/duckhts_cache.sh"
 cd "$REPO_ROOT"
 
 EXT="${EXT:-$REPO_ROOT/build/release/duckhts.duckdb_extension}"
 BEDTK="${BEDTK:-$REPO_ROOT/.sync/bedtk/bedtk}"
 BEDTOOLS="${BEDTOOLS:-bedtools}"
-SUBJECT="${SUBJECT:-$REPO_ROOT/DuckBedQC/data/GRCh38_exons.bed}"
-QUERY="${QUERY:-$REPO_ROOT/DuckBedQC/data/GRCh38_illumina_clinical_regions_v100.39.0.bed}"
-OUT_DIR="${OUT_DIR:-$REPO_ROOT/.tmp/cgranges_benchmark_cli}"
+DUCKBEDQC_DIR="${DUCKBEDQC_DIR:-$(duckhts_cache_subdir datasets/duckbedqc)}"
+SUBJECT="${SUBJECT:-$DUCKBEDQC_DIR/data/GRCh38_exons.bed}"
+QUERY="${QUERY:-$DUCKBEDQC_DIR/data/GRCh38_illumina_clinical_regions_v100.39.0.bed}"
+OUT_DIR="${OUT_DIR:-$(duckhts_cache_subdir benchmarks/cgranges-cli)}"
 
 mkdir -p "$OUT_DIR"
 SUMMARY="$OUT_DIR/summary.tsv"

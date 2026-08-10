@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT_DIR}/scripts/conformance/common.sh"
 
 SCENARIO="${1:-all}"
-OUT_DIR="${2:-${ROOT_DIR}/.tmp/conformance/${SCENARIO}}"
+OUT_DIR="${2:-$(duckhts_cache_subdir "conformance/bcftools/${SCENARIO}")}"
 SCENARIO_DIR="${ROOT_DIR}/scripts/conformance/scenarios"
 
 conformance_require_cmd duckdb

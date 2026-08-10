@@ -7,14 +7,8 @@ set -euo pipefail
 # Usage:
 #   bash scripts/liftover_conformance.sh INPUT_VCF CHAIN_PATH SRC_FASTA DST_FASTA [OUT_PREFIX]
 #
-# Example (GIAB HG001 chr20 slice):
-#   LIFTOVER_REGION=20 \
-#   bash scripts/liftover_conformance.sh \
-#     'https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/NA12878_HG001/NISTv4.2.1/GRCh37/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz' \
-#     /root/GRCh37/GRCh37_to_GRCh38.chain.gz \
-#     /root/GRCh37/human_g1k_v37.fasta \
-#     /root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
-#     giab_hg001_chr20_liftover
+# Stage references first with scripts/stage_liftover_references.sh. The
+# batch driver materializes each public GIAB slice below the DuckHTS cache.
 #
 # Environment variables:
 #   DUCKHTS_EXT         path to duckhts.duckdb_extension
@@ -30,14 +24,20 @@ if [[ $# -lt 4 || $# -gt 5 ]]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=duckhts_cache.sh
+source "$SCRIPT_DIR/duckhts_cache.sh"
+
 INPUT_VCF="$1"
 CHAIN_PATH="$2"
 SRC_FASTA="$3"
 DST_FASTA="$4"
-OUT_PREFIX="${5:-liftover_conformance}"
+OUT_PREFIX="${5:-$(duckhts_cache_subdir conformance/liftover/single/liftover_conformance)}"
 DUCKHTS_EXT="${DUCKHTS_EXT:-build/release/duckhts.duckdb_extension}"
 LIFTOVER_REGION="${LIFTOVER_REGION:-}"
 KEEP_SLICE="${KEEP_SLICE:-0}"
+
+mkdir -p "$(dirname "$OUT_PREFIX")"
 
 if [[ -z "${BCFTOOLS_BIN:-}" ]]; then
   BCFTOOLS_BIN="$(Rscript -e "if (!requireNamespace('RBCFTools', quietly=TRUE)) quit(status=1); cat(RBCFTools::bcftools_path())")" || {

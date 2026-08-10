@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from duckhts_cache import duckhts_cache_subdir
+
 
 GFFBASE_UPSTREAM_URL = "https://github.com/Kuanhao-Chao/gffbase.git"
 GFFBASE_UPSTREAM_COMMIT = "78714cf30a9d799eab544e00a79a4da9754987ca"
@@ -332,9 +334,8 @@ def import_gffbase(repo_root: Path):
             except ImportError:
                 pass
         raise RuntimeError(
-            "Could not import gffbase. Install it, e.g.\n"
-            "  python3 -m pip install --target .tmp/gffbase_site gffbase==0.1.0\n"
-            "  PYTHONPATH=.tmp/gffbase_site python3 scripts/gffbase_conformance_benchmark.py\n"
+            "Could not import gffbase. Stage the pinned benchmark package first:\n"
+            "  make stage-gffbase\n"
             "or install from the pinned upstream mirror under .sync/gffbase."
         ) from first_error
 
@@ -821,7 +822,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=root / ".tmp" / "gffbase_conformance",
+        default=duckhts_cache_subdir("benchmarks", "gffbase", "results"),
         help="Directory for CSV/JSON outputs and generated fixtures",
     )
     parser.add_argument("--rows", type=int, default=200_000, help="Synthetic GFF3 feature rows for timing")

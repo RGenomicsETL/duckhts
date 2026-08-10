@@ -15,22 +15,27 @@ set -euo pipefail
 #
 # Environment variables:
 #   LIFTOVER_CASES_TSV     case table (default: scripts/conformance_case_table.tsv)
-#   LIFTOVER_OUT_DIR       output directory (default: /tmp/duckhts_liftover_cases)
-#   LIFTOVER_CHAIN_PATH    chain file (default: /root/GRCh37/GRCh37_to_GRCh38.chain.gz)
-#   LIFTOVER_SRC_FASTA     source FASTA (default: /root/GRCh37/human_g1k_v37.fasta)
-#   LIFTOVER_DST_FASTA     destination FASTA (default: /root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna)
+#   LIFTOVER_OUT_DIR       output directory (default: $DUCKHTS_CACHE_DIR/conformance/liftover)
+#   LIFTOVER_CHAIN_PATH    chain file (default: staged liftover cache path)
+#   LIFTOVER_SRC_FASTA     source FASTA (default: staged liftover cache path)
+#   LIFTOVER_DST_FASTA     destination FASTA (default: staged liftover cache path)
+#                           Run scripts/stage_liftover_references.sh first.
 #   LIFTOVER_REGION_OVERRIDE optional region string applied to every selected case
 #   DUCKHTS_EXT, BCFTOOLS_BIN, BCFTOOLS_PLUGIN_DIR, KEEP_SLICE are forwarded to
 #   scripts/liftover_conformance.sh unchanged.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=duckhts_cache.sh
+source "$SCRIPT_DIR/duckhts_cache.sh"
+LIFTOVER_REFERENCE_DIR=${LIFTOVER_REFERENCE_DIR:-$(duckhts_cache_subdir "references/liftover/grch37-to-grch38")}
 CASES_TSV="${LIFTOVER_CASES_TSV:-$SCRIPT_DIR/conformance_case_table.tsv}"
-OUT_DIR="${LIFTOVER_OUT_DIR:-/tmp/duckhts_liftover_cases}"
-CHAIN_PATH="${LIFTOVER_CHAIN_PATH:-/root/GRCh37/GRCh37_to_GRCh38.chain.gz}"
-SRC_FASTA="${LIFTOVER_SRC_FASTA:-/root/GRCh37/human_g1k_v37.fasta}"
-DST_FASTA="${LIFTOVER_DST_FASTA:-/root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
+OUT_DIR="${LIFTOVER_OUT_DIR:-$(duckhts_cache_subdir conformance/liftover)}"
+CHAIN_PATH="${LIFTOVER_CHAIN_PATH:-$LIFTOVER_REFERENCE_DIR/GRCh37_to_GRCh38.chain.gz}"
+SRC_FASTA="${LIFTOVER_SRC_FASTA:-$LIFTOVER_REFERENCE_DIR/human_g1k_v37.fasta}"
+DST_FASTA="${LIFTOVER_DST_FASTA:-$LIFTOVER_REFERENCE_DIR/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
 REGION_OVERRIDE="${LIFTOVER_REGION_OVERRIDE:-}"
+BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 SUMMARY_TSV="$OUT_DIR/summary.tsv"
 run_count=0
 
@@ -73,6 +78,61 @@ case_requested() {
   return 1
 }
 
+stage_case_input() { # case_id dataset sample source_url_or_path
+  local case_id="$1"
+  local dataset="$2"
+  local sample="$3"
+  local source="$4"
+  local case_dir cached index provenance basename
+
+  if [[ "$dataset" == "giab" ]]; then
+    case_dir="$(duckhts_cache_subdir datasets/giab/nist-v4.2.1/grch37)"
+  else
+    case_dir="$(duckhts_cache_subdir "conformance/liftover/cases/$case_id")"
+  fi
+  mkdir -p "$case_dir"
+  basename="$(basename "${source%%\?*}")"
+  cached="$case_dir/$basename"
+  index="${cached}.tbi"
+  provenance="$case_dir/${case_id}.provenance.tsv"
+
+  if [[ ! -s "$cached" ]]; then
+    if [[ "$source" =~ ^https?:// ]]; then
+      command -v curl >/dev/null 2>&1 || {
+        echo "curl is required to stage $case_id" >&2
+        return 1
+      }
+      echo "Downloading $case_id from $source" >&2
+      curl --fail --location --retry 5 --retry-delay 5 --continue-at - --output "$cached" "$source"
+    elif [[ -f "$source" ]]; then
+      echo "Caching local input for $case_id: $source" >&2
+      cp -f "$source" "$cached"
+    else
+      echo "case input is neither a URL nor a file: $source" >&2
+      return 1
+    fi
+  else
+    echo "Using cached $case_id input: $cached" >&2
+  fi
+
+  if [[ ! -s "$index" ]]; then
+    "$BCFTOOLS_BIN" index -f -t "$cached"
+  fi
+  if [[ ! -f "$provenance" ]]; then
+    duckhts_write_provenance "$provenance" \
+      "workload=liftover_conformance" \
+      "case_id=$case_id" \
+      "dataset=$dataset" \
+      "sample=$sample" \
+      "source=$source" \
+      "cached_vcf=$cached" \
+      "cached_index=$index" \
+      "staging_command=curl or cp; bcftools index -t" \
+      "bcftools=$($BCFTOOLS_BIN --version | head -n 1)"
+  fi
+  printf '%s\n' "$cached"
+}
+
 while IFS=$'\t' read -r case_id dataset sample description default_region input_vcf; do
   [[ -n "$case_id" ]] || continue
   [[ "$case_id" == "case_id" ]] && continue
@@ -85,15 +145,16 @@ while IFS=$'\t' read -r case_id dataset sample description default_region input_
     region="$REGION_OVERRIDE"
   fi
 
+  cached_vcf="$(stage_case_input "$case_id" "$dataset" "$sample" "$input_vcf")"
   out_prefix="$OUT_DIR/$case_id"
   run_count=$((run_count + 1))
   echo "==> [$case_id] $description"
   if [[ -n "$region" ]]; then
     LIFTOVER_REGION="$region" bash "$SCRIPT_DIR/liftover_conformance.sh" \
-      "$input_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
+      "$cached_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
   else
     bash "$SCRIPT_DIR/liftover_conformance.sh" \
-      "$input_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
+      "$cached_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
   fi
 
   compare_tsv="$out_prefix.compare.tsv"

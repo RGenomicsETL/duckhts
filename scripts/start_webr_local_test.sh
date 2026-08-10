@@ -2,10 +2,12 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=duckhts_cache.sh
+source "${ROOT_DIR}/scripts/duckhts_cache.sh"
 PORT=${PORT:-8000}
 HOST=${HOST:-127.0.0.1}
 WEBR_IMAGE=${WEBR_IMAGE:-ghcr.io/r-wasm/webr:main}
-ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.webr-local-artifacts}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-$(duckhts_cache_subdir webr/local-artifacts)}
 
 echo "Building local webR artifact with ${WEBR_IMAGE}..."
 
