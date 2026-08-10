@@ -95,3 +95,18 @@ expect_true(all(file.exists(paste0(lift_paths[1:2], ".fai"))))
 expect_true(file.exists(file.path(tmp, "lift", "provenance.tsv")))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
+
+gff_registry <- file.path(tmp, "gffbase.tsv")
+writeLines(c(
+  paste(names(registry), collapse = "\t"),
+  paste(c("gffbase_010", "gffbase", "python_package", "test", "https://example.test/gffbase", "public", "site", "pip_install", "tinytest", "1", ""), collapse = "\t")
+), gff_registry)
+python <- file.path(tmp, "python3")
+writeLines(c("#!/usr/bin/env sh", "while [ \"$1\" != \"--target\" ]; do shift; done", "mkdir -p \"$2/gffbase\""), python)
+Sys.chmod(python, "0755")
+Sys.setenv(DUCKHTSBENCH_REGISTRY = gff_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "gff-cache"))
+gff_site <- duckhts_bench_stage_gffbase(file.path(tmp, "gff-site"), python)
+expect_true(dir.exists(file.path(gff_site, "gffbase")))
+expect_true(file.exists(file.path(gff_site, "provenance.tsv")))
+if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
+if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
