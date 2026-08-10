@@ -357,6 +357,40 @@ builder so extension builds remain offline and the same validation runs for eith
 The builder does not require a MySQL server once those relations and the matching reference
 chunks have been persisted.
 
+#### Versioned model input contract
+
+A DuckVEP model is identified by the tuple `(source, source release, VEP behavioral
+release, species, assembly, transcript-selection policy, reference identity)`. The source
+release and behavioral release are separate fields because an adapter can deliberately
+support a bounded VEP behavioral subset over a particular Ensembl source release; they must
+never be inferred from a cache filename or silently changed in place.
+
+The release adapter is the only version-specific layer. It obtains the declared Ensembl
+relations, maps release-specific schema or attribute-policy differences into the canonical
+input relations below, and records the exact source manifests. It must not reinterpret
+canonical model fields, alter ordinal ordering, or make a version-specific selection without
+putting that selection in the receipt and validation evidence.
+
+| Builder | Required canonical source relations |
+| --- | --- |
+| `duckvep_ensembl_regions` | `core_schema.coord_system`, `core_schema.seq_region`, and a reference-chunk relation with `chrom`, zero-based `start`, half-open `end`, and `seq` |
+| `duckvep_ensembl_transcripts` | region inputs plus `core_schema.seq_region_attrib`, `transcript`, `gene`, `translation`, `exon_transcript`, `exon`, `transcript_attrib`, `translation_attrib`, and `attrib_type` |
+| `duckvep_ensembl_regulation_features` | `funcgen_schema.regulatory_feature`, `feature_type`, and `motif_feature`, plus the canonical region relation |
+
+The extension validates the columns it reads and rejects inconsistent values; the exact
+source-column projections are executable in the builder macros and acceptance fixtures.
+A future release adapter may add source handling, but it must still produce the same
+canonical region, transcript, and regulation relations. Loader projections are backward
+compatible in their documented 11-, 12-, and 13-column forms; a new model capability is an
+additive contract change with an explicit receipt field and tests, not a reinterpretation of
+an older model.
+
+Promoting a new VEP target therefore requires three independent proofs: a pinned public
+source/release manifest and reference identity, canonical-model receipt validation, and
+release-specific differential cases against the pinned upstream VEP target. The evidence
+must state the supported consequence/HGVS/CSQ subset and every intentional difference;
+passing VEP 116 evidence does not validate another release.
+
 `duckvep_model_receipt(...)` checks dense ordinals, region/transcript agreement, and every
 regulatory/motif interval against its declared region. It
 records the declared source, release, assembly, transcript filter, source-manifest hash,

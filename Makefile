@@ -202,28 +202,28 @@ bench-norm:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_norm.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 stage-norm-1000g-dragen-gvcf:
-	scripts/stage_norm_1000g_dragen_gvcf.sh
+	bash scripts/stage_norm_1000g_dragen_gvcf.sh
 
 stage-liftover-references:
-	scripts/stage_liftover_references.sh
+	bash scripts/stage_liftover_references.sh
 
 stage-giab-v4.2.1:
-	scripts/stage_giab_benchmark_vcfs.sh
+	bash scripts/stage_giab_benchmark_vcfs.sh
 
 stage-riker-wgs:
-	scripts/stage_riker_wgs_bam.sh
+	bash scripts/stage_riker_wgs_bam.sh
 
 stage-duckvep-conformance-corpora:
-	scripts/stage_duckvep_conformance_corpora.sh
+	bash scripts/stage_duckvep_conformance_corpora.sh
 
 stage-gffbase:
-	scripts/stage_gffbase.sh
+	bash scripts/stage_gffbase.sh
 
 stage-duckbedqc-data:
-	scripts/stage_duckbedqc_data.sh
+	bash scripts/stage_duckbedqc_data.sh
 
 stage-variantkey-providers:
-	scripts/stage_variantkey_providers.sh
+	bash scripts/stage_variantkey_providers.sh
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
