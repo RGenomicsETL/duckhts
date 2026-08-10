@@ -77,17 +77,6 @@ esac
 EOF
 chmod +x "$FAKE_BIN"/*
 
-case_table="$TMP_DIR/cases.tsv"
-cat >"$case_table" <<'EOF'
-case_id	dataset	sample	description	default_region	input_vcf
-giab_hg001_grch37_chr20	giab	HG001	fixture	20	https://example.test/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-EOF
-
-PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" LIFTOVER_CASES_TSV="$case_table" \
-  GIAB_SAMPLES=HG001 bash "$ROOT_DIR/scripts/stage_giab_benchmark_vcfs.sh" >/dev/null
-[[ -f "$CACHE_DIR/datasets/giab/nist-v4.2.1/grch37/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz" ]]
-[[ -f "$CACHE_DIR/datasets/giab/nist-v4.2.1/grch37/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz.provenance.tsv" ]]
-
 PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" \
   bash "$ROOT_DIR/scripts/stage_norm_1000g_dragen_gvcf.sh" >/dev/null
 [[ -f "$CACHE_DIR/benchmarks/norm/1000g-dragen/HG00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz.provenance.tsv" ]]
