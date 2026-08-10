@@ -110,3 +110,18 @@ expect_true(dir.exists(file.path(gff_site, "gffbase")))
 expect_true(file.exists(file.path(gff_site, "provenance.tsv")))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
+
+duckbed_registry <- file.path(tmp, "duckbedqc.tsv")
+commit <- "118fc21c6cde9d680989dd4d1b613789539469f3"
+writeLines(c(
+  paste(names(registry), collapse = "\t"),
+  paste(c("duckbedqc_118fc21", "cgranges", "beds", "test", "https://example.test/DuckBedQC.git", "public", "checkout", "git_clone", "tinytest", "1", paste0("git_commit=", commit)), collapse = "\t")
+), duckbed_registry)
+git <- file.path(tmp, "git")
+writeLines(c("#!/usr/bin/env sh", "case \"$1\" in", "clone) mkdir -p \"$3/.git\" \"$3/data\"; touch \"$3/data/GRCh38_exons.bed\" \"$3/data/GRCh38_illumina_clinical_regions_v100.39.0.bed\" ;;", "-C) if [ \"$3\" = \"rev-parse\" ]; then printf '%s\\n' '118fc21c6cde9d680989dd4d1b613789539469f3'; fi ;;", "esac"), git)
+Sys.chmod(git, "0755")
+Sys.setenv(DUCKHTSBENCH_REGISTRY = duckbed_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "duckbed-cache"))
+duckbed_dir <- duckhts_bench_stage_duckbedqc(file.path(tmp, "duckbed"), git)
+expect_true(file.exists(file.path(duckbed_dir, "provenance.tsv")))
+if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
+if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
