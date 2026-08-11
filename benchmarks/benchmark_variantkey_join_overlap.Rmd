@@ -744,7 +744,7 @@ cgranges_count_overlap <- measure_thread_grid(
       con,
       sprintf(
         paste(
-          "SELECT sum(duckhts_cgranges_count_overlaps('%s', p.chrom, p.start, p.\"end\"))::BIGINT AS n",
+          "SELECT sum(duckhts_cgranges_count_overlaps('%s', p.chrom, p.start::BIGINT, p.\"end\"::BIGINT))::BIGINT AS n",
           "FROM ov_probe p"
         ),
         idx_name
@@ -1930,7 +1930,7 @@ real_cgranges_interval <- measure_thread_grid(
       con,
       sprintf(
         paste(
-          "SELECT sum(duckhts_cgranges_count_overlaps('%s', chrom, start0, end0))::BIGINT AS n",
+          "SELECT sum(duckhts_cgranges_count_overlaps('%s', chrom, start0::BIGINT, end0::BIGINT))::BIGINT AS n",
           "FROM read_parquet(%s)"
         ),
         real_idx_name,
@@ -2163,7 +2163,7 @@ real_cgranges_sql <- paste0(
   "SELECT duckhts_cgranges_index('rss_reg'); ",
   sprintf(
     paste(
-      "SELECT sum(duckhts_cgranges_count_overlaps('rss_reg', chrom, start0, end0))",
+      "SELECT sum(duckhts_cgranges_count_overlaps('rss_reg', chrom, start0::BIGINT, end0::BIGINT))",
       "FROM read_parquet(%s)"
     ),
     sql_path(real_case_path)

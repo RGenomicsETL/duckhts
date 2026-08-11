@@ -103,8 +103,8 @@ duckhts_bench_write_provenance <- function(id, output = duckhts_bench_artifact_p
   if (nrow(row) != 1L) stop("unknown or non-unique benchmark artifact: ", id, call. = FALSE)
   receipt <- paste0(output, ".provenance.tsv")
   fields <- data.frame(
-    field = c("artifact_id", "workload", "release", "source_locator", "access", "transform", "cached_output", "consumer"),
-    value = c(id, row$workload, row$release, row$locator, row$access, row$transform, output, row$consumer),
+    field = c("artifact_id", "workload", "release", "source_locator", "access", "transform", "supplier_identity", "cached_output", "consumer"),
+    value = c(id, row$workload, row$release, row$locator, row$access, row$transform, row$supplier_identity, output, row$consumer),
     stringsAsFactors = FALSE
   )
   dir.create(dirname(receipt), recursive = TRUE, showWarnings = FALSE)
