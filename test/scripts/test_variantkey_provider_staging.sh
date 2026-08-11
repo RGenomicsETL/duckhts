@@ -74,6 +74,16 @@ DBI::dbExecute(con, paste(
 DBI::dbExecute(con, "INSERT INTO duckvep_regulation_features VALUES (1, 'ENSR1', 10, 20, 'regulatory_region', 'enhancer', 'SO:0000165')")
 DBI::dbExecute(con, "CREATE TABLE model_transcripts (gene_stable_id VARCHAR)")
 DBI::dbExecute(con, "INSERT INTO model_transcripts VALUES ('ENSG000001')")
+DBI::dbExecute(con, paste(
+  "CREATE TABLE model_receipt (source_name VARCHAR, source_version VARCHAR, assembly VARCHAR,",
+  "source_manifest_sha256 VARCHAR, reference_sha256 VARCHAR, model_sha256 VARCHAR)"
+))
+DBI::dbExecute(con, paste(
+  "INSERT INTO model_receipt VALUES ('Ensembl', '116', 'GRCh38',",
+  "'34eaee64f47916a2d9d3d864377f911424741c7ead12883e47dcf998f9677703',",
+  "'d8c3af0094a7bba6125763bad779ec18a81483c739c6ed122094bdf86c187b92',",
+  "'296bc90633562da49e900a723675c7a0b4aba53b8cbdec027f107d46972aec68')"
+))
 DBI::dbDisconnect(con, shutdown = TRUE)
 RS
 

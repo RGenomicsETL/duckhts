@@ -22,7 +22,7 @@
 	test-sqllogictest-debug test-sqllogictest-release \
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
-	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
+	stage-giab-v4.2.1 stage-riker-wgs \
 	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
 	test-cache-paths test-benchmark-registry test-variantkey-provider-staging
 
@@ -224,9 +224,6 @@ stage-giab-v4.2.1:
 
 stage-riker-wgs:
 	bash scripts/stage_riker_wgs_bam.sh
-
-stage-duckvep-conformance-corpora:
-	bash scripts/stage_duckvep_conformance_corpora.sh
 
 stage-gffbase:
 	bash scripts/stage_gffbase.sh

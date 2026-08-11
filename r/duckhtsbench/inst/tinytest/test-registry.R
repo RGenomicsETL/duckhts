@@ -6,6 +6,10 @@ if (!nzchar(registry_path)) {
 }
 expect_true(file.exists(registry_path))
 Sys.setenv(DUCKHTSBENCH_REGISTRY = registry_path)
+missing_registry <- tempfile("duckhtsbench-missing-registry-")
+Sys.setenv(DUCKHTSBENCH_REGISTRY = missing_registry)
+expect_error(duckhts_bench_registry(), "does not exist")
+Sys.setenv(DUCKHTSBENCH_REGISTRY = registry_path)
 
 registry <- duckhts_bench_registry()
 expect_true(all(c("id", "workload", "release", "locator", "access", "cache_relpath", "transform", "consumer") %in% names(registry)))

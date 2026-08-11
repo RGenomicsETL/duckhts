@@ -106,6 +106,20 @@ if (!file.exists(model) || !file.info(model)$size) {
     call. = FALSE
   )
 }
+model_row <- plan[plan$id == "duckvep_ensembl116_model", , drop = FALSE]
+identity_fields <- strsplit(model_row$supplier_identity[[1L]], ";", fixed = TRUE)[[1L]]
+model_identity <- stats::setNames(sub("^[^=]+=", "", identity_fields), sub("=.*$", "", identity_fields))
+model_con <- DBI::dbConnect(duckdb::duckdb(), model, read_only = TRUE)
+receipt <- DBI::dbGetQuery(
+  model_con,
+  "SELECT source_name, source_version, assembly, source_manifest_sha256, reference_sha256, model_sha256 FROM model_receipt"
+)
+DBI::dbDisconnect(model_con, shutdown = TRUE)
+if (nrow(receipt) != 1L || receipt$source_name[[1L]] != "Ensembl" ||
+    receipt$source_version[[1L]] != "116" || receipt$assembly[[1L]] != "GRCh38" ||
+    any(vapply(names(model_identity), function(name) receipt[[name]][[1L]] != model_identity[[name]], logical(1L)))) {
+  stop("registered DuckVEP model receipt does not match Ensembl 116 GRCh38 identity", call. = FALSE)
+}
 duckhts_bench_write_provenance("duckvep_ensembl116_model", model)
 
 export_relation <- function(id, query) {

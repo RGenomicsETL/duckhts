@@ -22,7 +22,10 @@ duckhts_bench_cache_path <- function(relative_path = "") {
 
 bench_registry_path <- function() {
   path <- Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = "")
-  if (nzchar(path) && file.exists(path)) return(path)
+  if (nzchar(path)) {
+    if (file.exists(path)) return(path)
+    stop("DUCKHTSBENCH_REGISTRY does not exist: ", path, call. = FALSE)
+  }
   installed <- system.file("benchmark_registry.tsv", package = "duckhtsbench")
   if (nzchar(installed)) return(installed)
   stop("duckhtsbench must be installed or DUCKHTSBENCH_REGISTRY must name benchmark_registry.tsv", call. = FALSE)
