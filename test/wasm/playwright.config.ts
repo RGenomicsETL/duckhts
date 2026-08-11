@@ -6,7 +6,10 @@ import path from "node:path";
 // which prints DUCKHTS_WASM_SITE_ROOT / DUCKHTS_WASM_PORT.  The Makefile target
 // and CI job export those; fall back to the script's defaults otherwise.
 const DUCKHTS_CACHE_DIR =
-  process.env.DUCKHTS_CACHE_DIR || path.join(os.homedir(), ".cache", "duckhts");
+  process.env.DUCKHTS_CACHE_DIR ||
+  (process.env.XDG_CACHE_HOME
+    ? path.join(process.env.XDG_CACHE_HOME, "duckhts")
+    : path.join(os.homedir(), ".cache", "duckhts"));
 const SITE_ROOT =
   process.env.DUCKHTS_WASM_SITE_ROOT ||
   path.join(DUCKHTS_CACHE_DIR, "wasm", "local-artifacts", "site");

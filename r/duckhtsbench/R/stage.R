@@ -16,10 +16,26 @@ duckhts_bench_fetch <- function(id, overwrite = FALSE, output = duckhts_bench_ar
     stop("artifact requires a named derivation, not direct download: ", id, call. = FALSE)
   }
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
-  if (overwrite || !file.exists(output) || !file.info(output)$size) {
-    utils::download.file(row$locator, output, mode = "wb", quiet = FALSE)
+  ready <- file.exists(output) && file.info(output)$size > 0L
+  if (ready && !overwrite) {
+    valid <- tryCatch({
+      duckhts_bench_validate_identity(id, output)
+      TRUE
+    }, error = function(error) FALSE)
+    if (!valid) {
+      unlink(c(output, paste0(output, ".provenance.tsv")), force = TRUE)
+      ready <- FALSE
+    }
   }
-  duckhts_bench_validate_identity(id, output)
+  if (overwrite || !ready) {
+    temporary <- paste0(output, ".partial-", Sys.getpid())
+    unlink(temporary, force = TRUE)
+    on.exit(unlink(temporary, force = TRUE), add = TRUE)
+    utils::download.file(row$locator, temporary, mode = "wb", quiet = FALSE)
+    duckhts_bench_validate_identity(id, temporary)
+    if (file.exists(output) && unlink(output, force = TRUE) != 0L) stop("could not replace cached artifact: ", id, call. = FALSE)
+    if (!file.rename(temporary, output)) stop("could not publish downloaded artifact: ", id, call. = FALSE)
+  }
   duckhts_bench_write_provenance(id, output)
   invisible(output)
 }

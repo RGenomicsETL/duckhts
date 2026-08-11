@@ -68,10 +68,8 @@ real_region <- Sys.getenv("NORM_REAL_REGION", unset = "")
 real_fasta <- Sys.getenv("NORM_REAL_FASTA", unset = "")
 real_split <- identical(Sys.getenv("NORM_REAL_SPLIT", unset = "0"), "1")
 real_label <- Sys.getenv("NORM_REAL_LABEL", unset = "real_callset")
-duckhts_cache_dir <- Sys.getenv(
-  "DUCKHTS_CACHE_DIR",
-  unset = file.path(path.expand("~"), ".cache", "duckhts")
-)
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+duckhts_cache_dir <- duckhts_bench_cache_dir()
 liftover_reference_dir <- file.path(duckhts_cache_dir, "references", "liftover", "grch37-to-grch38")
 gvcf_input_path <- Sys.getenv(
   "NORM_GVCF_VCF",

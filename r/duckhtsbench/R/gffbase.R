@@ -11,10 +11,11 @@ duckhts_bench_stage_gffbase <- function(
   row <- row[row$id == "gffbase_010", , drop = FALSE]
   if (nrow(row) != 1L) stop("GFFBase registry entry is missing", call. = FALSE)
   dir.create(site_dir, recursive = TRUE, showWarnings = FALSE)
-  if (!dir.exists(file.path(site_dir, "gffbase"))) {
-    status <- system2(python, c("-m", "pip", "install", "--target", site_dir, "gffbase==0.1.0"))
-    if (status != 0L) stop("could not install pinned GFFBase", call. = FALSE)
-  }
+  status <- system2(
+    python,
+    c("-m", "pip", "install", "--upgrade", "--force-reinstall", "--target", site_dir, "gffbase==0.1.0")
+  )
+  if (status != 0L) stop("could not install pinned GFFBase", call. = FALSE)
   writeLines(c("field\tvalue", "workload\tgffbase-conformance", "package\tgffbase", "version\t0.1.0", paste0("source\t", row$locator), paste0("site_directory\t", site_dir)), file.path(site_dir, "provenance.tsv"))
   invisible(site_dir)
 }
