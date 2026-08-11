@@ -61,7 +61,8 @@ if (!file.exists(revel_parquet) || !file.info(revel_parquet)$size) {
     paste(
       "COPY (SELECT chr AS chrom, CAST(hg19_pos AS BIGINT) AS pos, ref, alt,",
       "CAST(REVEL AS DOUBLE) AS revel",
-      "FROM read_csv_auto('%s', header = TRUE) WHERE TRY_CAST(hg19_pos AS BIGINT) IS NOT NULL)",
+      "FROM read_csv_auto('%s', header = TRUE, all_varchar = TRUE)",
+      "WHERE TRY_CAST(hg19_pos AS BIGINT) IS NOT NULL)",
       "TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)"
     ),
     gsub("'", "''", candidates[[1L]], fixed = TRUE),
