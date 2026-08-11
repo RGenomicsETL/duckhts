@@ -36,7 +36,7 @@ writeLines(c(">1", "ACGT"), connection)
 close(connection)
 work <- file.path(source_dir, "revel")
 dir.create(work)
-writeLines(c("chr,hg19_pos,ref,alt,REVEL", "1,1,A,C,0.5"), file.path(work, "revel_with_transcript_ids"))
+writeLines(c("chr,hg19_pos,ref,alt,REVEL", "1,1,A,C,0.5", "X,2,A,C,0.3"), file.path(work, "revel_with_transcript_ids"))
 old <- getwd()
 setwd(work)
 utils::zip(file.path(source_dir, "revel.zip"), "revel_with_transcript_ids")
@@ -142,6 +142,9 @@ for (id in c("duckvep_ensembl116_regulatory_parquet", "duckvep_ensembl116_transc
   output <- gsub("'", "''", paths[registry$id == id], fixed = TRUE)
   stopifnot(DBI::dbGetQuery(con, sprintf("SELECT count(*) AS n FROM read_parquet('%s')", output))$n == 1L)
 }
+revel <- gsub("'", "''", paths[registry$id == "revel_v13_grch37"], fixed = TRUE)
+revel_rows <- DBI::dbGetQuery(con, sprintf("SELECT chrom, pos FROM read_parquet('%s') ORDER BY pos", revel))
+stopifnot(identical(revel_rows$chrom, c("1", "X")), identical(revel_rows$pos, c(1, 2)))
 DBI::dbDisconnect(con, shutdown = TRUE)
 RS
 

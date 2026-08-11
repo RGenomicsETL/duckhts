@@ -69,7 +69,7 @@ DBI::dbExecute(con, sprintf(
   paste(
     "COPY (SELECT chr AS chrom, CAST(hg19_pos AS BIGINT) AS pos, ref, alt,",
     "CAST(REVEL AS DOUBLE) AS revel",
-    "FROM read_csv_auto('%s', header = TRUE, all_varchar = TRUE)",
+    "FROM read_csv_auto('%s', header = TRUE, types = {'chr': 'VARCHAR'})",
     "WHERE TRY_CAST(hg19_pos AS BIGINT) IS NOT NULL)",
     "TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)"
   ),
