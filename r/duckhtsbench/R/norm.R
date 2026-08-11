@@ -10,14 +10,15 @@ duckhts_bench_stage_norm <- function(
     output = duckhts_bench_artifact_path("norm_hg00096_chr22_20m_30m"),
     bcftools = Sys.which("bcftools"), tabix = Sys.which("tabix"), threads = 2L) {
   if (!nzchar(bcftools) || !nzchar(tabix)) stop("bcftools and tabix are required to stage normalization input", call. = FALSE)
-  row <- duckhts_bench_registry()
-  row <- row[row$id == "norm_hg00096_chr22_20m_30m", , drop = FALSE]
-  if (nrow(row) != 1L) stop("normalization registry entry is missing", call. = FALSE)
+  registry <- duckhts_bench_registry()
+  row <- registry[registry$id == "norm_hg00096_chr22_20m_30m", , drop = FALSE]
+  if (nrow(row) != 1L || row$locator != "artifact:norm_hg00096_raw_gvcf") stop("normalization slice registry entry is missing or has an unregistered source", call. = FALSE)
+  raw <- duckhts_bench_fetch("norm_hg00096_raw_gvcf")
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
   temporary <- paste0(output, ".partial-", Sys.getpid())
   unlink(temporary, force = TRUE)
   on.exit(unlink(temporary, force = TRUE), add = TRUE)
-  status <- system2(bcftools, c("view", "--threads", threads, "-r", "chr22:20000000-30000000", "-s", "HG00096", "-Oz", "-o", temporary, row$locator))
+  status <- system2(bcftools, c("view", "--threads", threads, "-r", "chr22:20000000-30000000", "-s", "HG00096", "-Oz", "-o", temporary, raw))
   if (status != 0L || !file.exists(temporary) || !file.info(temporary)$size) stop("could not extract registered 1000G DRAGEN gVCF slice", call. = FALSE)
   if (file.exists(output) && unlink(output, force = TRUE) != 0L) stop("could not replace normalization gVCF slice", call. = FALSE)
   if (!file.rename(temporary, output)) stop("could not publish registered normalization gVCF slice", call. = FALSE)

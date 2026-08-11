@@ -9,7 +9,8 @@
   Explicit GIAB, liftover-reference, normalization, Riker, DuckVEP-corpus, local browser, and
   VariantKey-provider raw-source staging defaults now share `~/.cache/duckhts` (or
   `DUCKHTS_CACHE_DIR`), validate declared publisher identities before cache reuse, and record
-  source/transformation provenance beside staged data. Retire only unreferenced generic and mosdepth benchmark reports;
+  source/transformation provenance beside staged data. Retire only the unreferenced generic report;
+  restore the whole-genome mosdepth report and a registry-backed `bench-mosdepth` entry point, and
   preserve the VariantKey and FastVEP reports as evidence while their declared public-provider
   staging work is made executable. Normalize embedded
   native source paths so equal clean builds can

@@ -51,12 +51,15 @@ writeLines(c(
   paste(c("giab_hg001_grch37_v421", "giab-v4.2.1", "benchmark_vcf", "test", paste0("file://", source_vcf), "public", "datasets/giab/HG001.vcf.gz", "direct_download", "tinytest", "1", ""), collapse = "\t")
 ), giab_registry)
 bcftools <- file.path(tmp, "bcftools")
-writeLines(c("#!/usr/bin/env sh", "touch \"$4.tbi\""), bcftools)
+writeLines(c("#!/usr/bin/env sh", "printf \"idx\\n\" >\"$4.tbi\""), bcftools)
 Sys.chmod(bcftools, "0755")
 Sys.setenv(DUCKHTSBENCH_REGISTRY = giab_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "giab-cache"))
 giab <- duckhts_bench_stage_giab("HG001", bcftools)
 expect_true(file.exists(giab[["HG001"]]))
 expect_true(file.exists(paste0(giab[["HG001"]], ".tbi")))
+writeLines("stale", paste0(giab[["HG001"]], ".tbi"))
+giab <- duckhts_bench_stage_giab("HG001", bcftools)
+expect_equal(readLines(paste0(giab[["HG001"]], ".tbi")), "idx")
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
 
@@ -115,7 +118,8 @@ writeLines("##fileformat=VCFv4.2", norm_source)
 norm_registry <- file.path(tmp, "norm.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
-  paste(c("norm_hg00096_chr22_20m_30m", "norm", "gvcf_slice", "test", paste0("file://", norm_source), "public", "norm/HG00096.g.vcf.gz", "bcftools_view_region_sample;tabix_index", "tinytest", "1", ""), collapse = "\t")
+  paste(c("norm_hg00096_raw_gvcf", "norm", "raw_gvcf", "test", paste0("file://", norm_source), "public", "norm/HG00096.raw.g.vcf.gz", "direct_download", "tinytest", "1", ""), collapse = "\t"),
+  paste(c("norm_hg00096_chr22_20m_30m", "norm", "gvcf_slice", "test", "artifact:norm_hg00096_raw_gvcf", "local_derived", "norm/HG00096.g.vcf.gz", "bcftools_view_region_sample;tabix_index", "tinytest", "2", ""), collapse = "\t")
 ), norm_registry)
 norm_bcftools <- file.path(tmp, "norm-bcftools")
 writeLines(c("#!/usr/bin/env sh", "while [ \"$1\" != \"-o\" ]; do shift; done", "printf \"VCF\\n\" >\"$2\""), norm_bcftools)

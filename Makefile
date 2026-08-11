@@ -16,7 +16,7 @@
 	test-duckvep-release-vcf \
 	duckvep-corpus-differential duckvep-statistical-report \
 	duckvep-record-conformance duckvep-record-properties \
-	bench-duckvep-throughput bench-duckvep-release-parquet \
+	bench-duckvep-throughput bench-duckvep-release-parquet bench-mosdepth \
 	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
@@ -236,6 +236,9 @@ stage-duckbedqc-data:
 
 stage-variantkey-providers:
 	Rscript r/duckhtsbench/scripts/stage_variantkey_providers.R
+
+bench-mosdepth:
+	Rscript -e "rmarkdown::render('benchmarks/Benchmarks_mosdepth.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
