@@ -28,6 +28,19 @@ duckhts_bench_fetch <- function(id, overwrite = FALSE, output = duckhts_bench_ar
     }
   }
   if (overwrite || !ready) {
+    identity <- as.character(row$supplier_identity)
+    fields <- if (!length(identity) || is.na(identity) || !nzchar(identity)) character() else strsplit(identity, ";", fixed = TRUE)[[1L]]
+    values <- stats::setNames(sub("^[^=]+=", "", fields), sub("=.*$", "", fields))
+    if ("etag" %in% names(values)) {
+      curl <- Sys.which("curl")
+      if (!nzchar(curl)) stop("curl is required to validate supplier ETag: ", id, call. = FALSE)
+      headers <- system2(curl, c("-fsSIL", row$locator), stdout = TRUE)
+      etags <- sub("^[[:space:]]*[Ee][Tt][Aa][Gg]:[[:space:]]*\\\"?([^\\\"[:space:]\\r]+).*", "\\1", headers)
+      etags <- etags[grepl("^[[:space:]]*[Ee][Tt][Aa][Gg]:", headers)]
+      if (!length(etags) || tail(etags, 1L) != values[["etag"]]) {
+        stop("supplier ETag does not match registered artifact: ", id, call. = FALSE)
+      }
+    }
     temporary <- paste0(output, ".partial-", Sys.getpid())
     unlink(temporary, force = TRUE)
     on.exit(unlink(temporary, force = TRUE), add = TRUE)

@@ -88,19 +88,39 @@ mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/duckdb-wasm" "${SITE_ROOT}/extdata
 
 RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist"
 RUNTIME_CACHE="$(duckhts_cache_subdir "runtime/duckdb-wasm/${DUCKDB_WASM_NPM_VERSION}")"
+if [[ "$DUCKDB_WASM_NPM_VERSION" != "1.31.0" ]]; then
+  echo "DuckDB wasm runtime version $DUCKDB_WASM_NPM_VERSION has no pinned asset manifest" >&2
+  exit 2
+fi
 mkdir -p "$RUNTIME_CACHE"
+runtime_sha256() { # filename
+  case "$1" in
+    duckdb-browser.mjs) printf '%s\n' '660ee2979e878cfd1d70122ab6d511d4454c5e687f59977e77ff70097730a8a0' ;;
+    duckdb-browser-eh.worker.js) printf '%s\n' 'fb692cd56e87c71849ff545e14fef54c91ed4cdef295f16172ab27be8de76b5d' ;;
+    duckdb-eh.wasm) printf '%s\n' '07993a5cda534ebb303d476cbdf3d1f7271841c1298709a4b4a5713d8c78b156' ;;
+    duckdb-browser-eh.worker.js.map) printf '%s\n' 'e3750fb2ea26e4e1e1baf49f3a2b2f3d722d3a0bd840830f2abd431f8546dc90' ;;
+    *) return 2 ;;
+  esac
+}
+verify_runtime() { # filename path
+  [[ "$(sha256sum "$2" | awk '{print $1}')" == "$(runtime_sha256 "$1")" ]]
+}
 fetch_runtime() { # filename [optional]
   local name="$1"
   local optional="${2:-0}"
   local cached="$RUNTIME_CACHE/$name"
-  if [[ ! -s "$cached" ]]; then
-    if ! curl -fsSL "${RUNTIME_BASE}/$name" -o "$cached"; then
-      rm -f "$cached"
+  local temporary="${cached}.partial.$$"
+  if [[ ! -s "$cached" ]] || ! verify_runtime "$name" "$cached"; then
+    rm -f "$cached" "$temporary"
+    if ! curl -fsSL "${RUNTIME_BASE}/$name" -o "$temporary" || ! verify_runtime "$name" "$temporary"; then
+      rm -f "$temporary"
       if [[ "$optional" = "1" ]]; then
         return 0
       fi
+      echo "could not stage verified duckdb-wasm runtime asset: $name" >&2
       return 1
     fi
+    mv -f "$temporary" "$cached"
   fi
   cp -f "$cached" "$SITE_ROOT/$name"
 }
