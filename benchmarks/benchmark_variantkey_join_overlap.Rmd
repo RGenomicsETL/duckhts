@@ -1827,6 +1827,12 @@ real_contigs <- DBI::dbGetQuery(
   sprintf("SELECT DISTINCT chrom FROM read_parquet(%s) ORDER BY chrom", sql_path(real_regulatory_path))
 )$chrom
 
+real_interval_case_rows <- DBI::dbGetQuery(
+  con,
+  sprintf("SELECT count(*)::BIGINT AS n FROM read_parquet(%s) WHERE start0 < end0", sql_path(real_case_path))
+)$n[[1L]]
+if (!real_interval_case_rows) stop("real regulatory overlap requires nonempty query intervals", call. = FALSE)
+
 real_typed_contig_queries <- vapply(
   real_contigs,
   function(chrom) {
@@ -1836,7 +1842,7 @@ real_typed_contig_queries <- vapply(
         "FROM read_parquet(%s) q",
         "JOIN read_parquet(%s) s",
         "  ON q.start0 < s.end0 AND q.end0 > s.start0",
-        "WHERE q.chrom = %s AND s.chrom = %s"
+        "WHERE q.chrom = %s AND s.chrom = %s AND q.start0 < q.end0"
       ),
       sql_path(real_case_path),
       sql_path(real_regulatory_path),
@@ -1871,13 +1877,13 @@ data.frame(
 
 real_typed_interval <- measure_thread_grid(
   "real_regulatory_typed_per_contig_iejoin_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() DBI::dbGetQuery(con, real_typed_interval_sql)
 )
 
 real_packed_interval <- measure_thread_grid(
   "real_regulatory_packed_coordinate_iejoin_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() {
     DBI::dbGetQuery(
       con,
@@ -1887,7 +1893,8 @@ real_packed_interval <- measure_thread_grid(
           "FROM read_parquet(%s) q",
           "JOIN read_parquet(%s) s",
           "  ON q.rk_chrom_start < s.rk_chrom_end",
-          " AND q.rk_chrom_end > s.rk_chrom_start"
+          " AND q.rk_chrom_end > s.rk_chrom_start",
+          "WHERE q.start0 < q.end0"
         ),
         sql_path(real_case_path),
         sql_path(real_regulatory_path)
@@ -1899,7 +1906,7 @@ real_packed_interval <- measure_thread_grid(
 real_max_span <- as.numeric(real_regulatory_stats$max_span[1L])
 real_regionkey_interval <- measure_thread_grid(
   "real_regulatory_regionkey_bounded_start_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() {
     DBI::dbGetQuery(
       con,
@@ -1911,7 +1918,8 @@ real_regionkey_interval <- measure_thread_grid(
           "  ON s.rk_chrom_start >=",
           "     (regionkey(q.chrom, greatest(0, q.start0 - %d + 1)::BIGINT, greatest(0, q.start0 - %d + 1)::BIGINT) >> 31)",
           " AND s.rk_chrom_start < (regionkey(q.chrom, q.end0::BIGINT, q.end0::BIGINT) >> 31)",
-          " AND are_overlapping_regionkeys(q.rk, s.rk)"
+          " AND are_overlapping_regionkeys(q.rk, s.rk)",
+          "WHERE q.start0 < q.end0"
         ),
         sql_path(real_case_path),
         sql_path(real_regulatory_path),
@@ -1924,14 +1932,14 @@ real_regionkey_interval <- measure_thread_grid(
 
 real_cgranges_interval <- measure_thread_grid(
   "real_regulatory_cgranges_count_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() {
     DBI::dbGetQuery(
       con,
       sprintf(
         paste(
           "SELECT sum(duckhts_cgranges_count_overlaps('%s', chrom, start0::BIGINT, end0::BIGINT))::BIGINT AS n",
-          "FROM read_parquet(%s)"
+          "FROM read_parquet(%s) WHERE start0 < end0"
         ),
         real_idx_name,
         sql_path(real_case_path)
