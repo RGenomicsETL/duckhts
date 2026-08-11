@@ -20,7 +20,7 @@ duckhts_bench_stage_duckbedqc <- function(
     run(c("clone", row$locator, destination), "could not clone registered DuckBedQC repository")
   }
   run(c("-C", destination, "fetch", "--quiet", "origin", commit), "could not fetch registered DuckBedQC commit")
-  run(c("-C", destination, "checkout", "--quiet", "--detach", commit), "could not check out registered DuckBedQC commit")
+  run(c("-C", destination, "checkout", "--quiet", "--force", "--detach", commit), "could not check out registered DuckBedQC commit")
   actual <- trimws(system2(git, c("-C", destination, "rev-parse", "HEAD"), stdout = TRUE))
   if (!identical(actual, commit)) stop("DuckBedQC checkout does not match registered commit", call. = FALSE)
   required <- file.path(destination, "data", c("GRCh38_exons.bed", "GRCh38_illumina_clinical_regions_v100.39.0.bed"))
