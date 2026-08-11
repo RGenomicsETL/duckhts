@@ -22,7 +22,13 @@ cd "$REPO_ROOT"
 EXT="${EXT:-$REPO_ROOT/build/release/duckhts.duckdb_extension}"
 BEDTK="${BEDTK:-$REPO_ROOT/.sync/bedtk/bedtk}"
 BEDTOOLS="${BEDTOOLS:-bedtools}"
-DUCKBEDQC_DIR="${DUCKBEDQC_DIR:-$(duckhts_cache_subdir datasets/duckbedqc)}"
+if [[ -z "${DUCKBEDQC_DIR:-}" ]]; then
+  BENCHMARK_REGISTRY="${DUCKHTSBENCH_REGISTRY:-$REPO_ROOT/r/duckhtsbench/inst/benchmark_registry.tsv}"
+  [[ -f "$BENCHMARK_REGISTRY" ]] || { echo "Benchmark registry not found: $BENCHMARK_REGISTRY" >&2; exit 1; }
+  duckbedqc_relpath="$(awk -F '\t' '$1 == "duckbedqc_118fc21" { print $7; exit }' "$BENCHMARK_REGISTRY")"
+  [[ -n "$duckbedqc_relpath" ]] || { echo "DuckBedQC artifact is not registered: $BENCHMARK_REGISTRY" >&2; exit 1; }
+  DUCKBEDQC_DIR="$(duckhts_cache_subdir "$duckbedqc_relpath")"
+fi
 SUBJECT="${SUBJECT:-$DUCKBEDQC_DIR/data/GRCh38_exons.bed}"
 QUERY="${QUERY:-$DUCKBEDQC_DIR/data/GRCh38_illumina_clinical_regions_v100.39.0.bed}"
 OUT_DIR="${OUT_DIR:-$(duckhts_cache_subdir benchmarks/cgranges-cli)}"
