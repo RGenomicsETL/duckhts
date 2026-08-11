@@ -28,6 +28,14 @@ if [ "${DOCKER_REBUILD_IMAGE}" = "1" ] || ! docker image inspect "${LOCAL_WASM_I
 fi
 
 mkdir -p "${DOCKER_WORK_ROOT}"
+ROOT_DIR_PHYSICAL="$(cd "${ROOT_DIR}" && pwd -P)"
+DOCKER_WORK_ROOT_PHYSICAL="$(cd "${DOCKER_WORK_ROOT}" && pwd -P)"
+case "${DOCKER_WORK_ROOT_PHYSICAL}/" in
+  "${ROOT_DIR_PHYSICAL}/"*)
+    echo "DOCKER_WORK_ROOT must be outside the DuckHTS checkout: ${DOCKER_WORK_ROOT}" >&2
+    exit 2
+    ;;
+esac
 rsync -a --delete \
   --exclude '.git/' \
   --exclude 'build/' \

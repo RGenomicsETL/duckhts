@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import csv
+import hashlib
 import json
 import os
 import platform
@@ -222,6 +223,14 @@ def repo_root_from_script() -> Path:
 
 def sql_string(value: str | Path) -> str:
     return str(value).replace("'", "''")
+
+
+def file_md5(path: Path) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def git_rev(path: Path) -> str:
@@ -915,6 +924,8 @@ def main(argv: list[str] | None = None) -> int:
         "duckhts_git_dirty": git_dirty(repo_root),
         "duckhts_extension": str(args.extension.resolve()),
         "duckhts_extension_size": args.extension.stat().st_size,
+        "duckhts_extension_md5": file_md5(args.extension),
+        "gffbase_site": str(Path(gffbase.__file__).resolve().parent),
         "gffbase_version": getattr(gffbase, "__version__", ""),
         "gffbase_native_available": bool(gffbase.native_available()),
         "gffbase_engine_requested": args.gffbase_engine,
@@ -929,6 +940,7 @@ def main(argv: list[str] | None = None) -> int:
         "rows": args.rows,
         "passes": args.passes,
         "warmup": args.warmup,
+        "include_create_db": args.include_create_db,
         "duckdb_threads": args.duckdb_threads,
         "synthetic_path": str(synthetic_path.resolve()) if synthetic_path.exists() else "",
         "synthetic_bytes": synthetic_path.stat().st_size if synthetic_path.exists() else 0,

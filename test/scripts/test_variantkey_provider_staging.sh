@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/duckhts-variantkey-stage-test.XXXXXX")"
 SOURCE_DIR="$TMP_DIR/source"
 FAKE_BIN="$TMP_DIR/bin"
-CACHE_DIR="$TMP_DIR/cache"
+CACHE_DIR="$TMP_DIR/cache root"
 REGISTRY="$TMP_DIR/registry.tsv"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$SOURCE_DIR" "$FAKE_BIN"

@@ -10,5 +10,9 @@ Encoding: UTF-8
 Imports:
     utils
 Suggests:
+    DBI,
+    duckdb,
+    jsonlite,
+    optparse,
     tinytest
 RoxygenNote: 7.3.3

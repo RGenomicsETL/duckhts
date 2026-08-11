@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- make cgranges benchmark orchestration R-native with an `optparse` entry point,
+  retain the former Python command as a compatibility launcher, and invalidate
+  shared cgranges/GFFBase results whenever their source revision, extension,
+  workload, or declared input identity changes. Resolve retained FastVEP input
+  commands through the selected artifact registry; quote provider-stage paths;
+  and reject an in-checkout wasm Docker work directory before recursive rsync.
+
 - make the ordinary clone/build/test loop use the committed fixture closure: remove the
   obsolete instruction to regenerate test data from private mirrors, run SQLLogicTests
   through the cleanup-aware runner, and leave package builds network-free unless the

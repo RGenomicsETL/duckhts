@@ -39,7 +39,7 @@ path. The current scripts avoid that pattern.
 Synthetic, deterministic default used for the rendered table:
 
 ```sh
-python3 scripts/cgranges_benchmark.py \
+Rscript r/duckhtsbench/scripts/cgranges_benchmark.R \
   --extension build/release/duckhts.duckdb_extension \
   --bedtk .sync/bedtk/bedtk \
   --bedtools bedtools \
@@ -65,6 +65,7 @@ scripts/cgranges_benchmark_cli.sh
 
 ```{r setup, include = FALSE}
 library(knitr)
+library(jsonlite)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
 source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
@@ -77,6 +78,15 @@ subjects <- as.integer(Sys.getenv("CGRANGES_BENCH_SUBJECTS", unset = "50000"))
 queries <- as.integer(Sys.getenv("CGRANGES_BENCH_QUERIES", unset = "5000"))
 passes <- as.integer(Sys.getenv("CGRANGES_BENCH_PASSES", unset = "3"))
 force <- identical(Sys.getenv("CGRANGES_BENCH_FORCE", unset = "0"), "1")
+extension_path <- normalizePath(file.path(repo_root, "build", "release", "duckhts.duckdb_extension"), mustWork = TRUE)
+current_identity <- list(
+  source_revision = trimws(system2("git", c("-C", repo_root, "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)),
+  extension = extension_path,
+  extension_md5 = unname(tools::md5sum(extension_path)),
+  subject_intervals = subjects,
+  query_intervals = queries,
+  passes = passes
+)
 
 expected_cols <- c(
   "tool", "variant", "subject_intervals", "query_intervals", "passes",
@@ -86,14 +96,21 @@ expected_cols <- c(
 needs_run <- force || !file.exists(summary_csv) || !file.exists(metadata_json)
 if (!needs_run && file.exists(summary_csv)) {
   existing_header <- names(utils::read.csv(summary_csv, nrows = 0, check.names = FALSE))
-  needs_run <- !all(expected_cols %in% existing_header)
+  old_identity <- tryCatch(jsonlite::fromJSON(metadata_json), error = function(error) list())
+  identity_matches <- identical(as.character(old_identity$source_revision), current_identity$source_revision) &&
+    identical(as.character(old_identity$extension), current_identity$extension) &&
+    identical(as.character(old_identity$extension_md5), current_identity$extension_md5) &&
+    identical(as.integer(old_identity$subject_intervals), current_identity$subject_intervals) &&
+    identical(as.integer(old_identity$query_intervals), current_identity$query_intervals) &&
+    identical(as.integer(old_identity$passes), current_identity$passes)
+  needs_run <- !all(expected_cols %in% existing_header) || !identity_matches
 }
 
 if (needs_run) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   cmd <- c(
-    file.path(repo_root, "scripts", "cgranges_benchmark.py"),
-    "--extension", file.path(repo_root, "build", "release", "duckhts.duckdb_extension"),
+    file.path(repo_root, "r", "duckhtsbench", "scripts", "cgranges_benchmark.R"),
+    "--extension", extension_path,
     "--bedtk", file.path(repo_root, ".sync", "bedtk", "bedtk"),
     "--bedtools", Sys.getenv("BEDTOOLS", unset = "bedtools"),
     "--subjects", as.character(subjects),

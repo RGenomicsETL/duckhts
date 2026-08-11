@@ -24,7 +24,8 @@
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs \
 	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
-	test-cache-paths test-benchmark-registry test-variantkey-provider-staging
+	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
+	test-cgranges-benchmark-r
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -152,6 +153,9 @@ test-benchmark-registry: test-variantkey-provider-staging
 
 test-variantkey-provider-staging:
 	bash test/scripts/test_variantkey_provider_staging.sh
+
+test-cgranges-benchmark-r:
+	bash test/scripts/test_cgranges_benchmark_r.sh
 
 test-sqllogictest-debug: check_configure
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
