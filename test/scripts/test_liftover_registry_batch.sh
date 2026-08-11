@@ -41,6 +41,8 @@ printf '%s\n' \
   $'fixture_case\tgiab\tHGTEST\tfixture\t20\tfixture' \
   >"$cases"
 for file in chain source.fa destination.fa; do printf 'fixture\n' >"$TMP_DIR/$file"; done
+mkdir -p "$TMP_DIR/out"
+printf 'prior conformance summary\n' >"$TMP_DIR/out/summary.tsv"
 
 PATH="$BIN_DIR:$PATH" \
   DUCKHTS_CACHE_DIR="$CACHE_DIR" \
@@ -58,4 +60,5 @@ output="$CACHE_DIR/datasets/giab/fixture.vcf.gz"
 [[ -f "$output.tbi" ]]
 [[ -f "$output.provenance.tsv" ]]
 grep -Fq $'artifact_id\tfixture' "$output.provenance.tsv"
+grep -Fxq 'prior conformance summary' "$TMP_DIR/out/summary.tsv"
 echo "Liftover registry batch staging: OK"

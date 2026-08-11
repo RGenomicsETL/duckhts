@@ -59,7 +59,9 @@ if [[ ! -f "$DST_FASTA" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
-printf 'case_id\tdataset\tsample\tregion\tmapped_statuses\treject_statuses\tmapped_mismatches\treject_mismatches\tcompare_tsv\treject_compare_tsv\n' > "$SUMMARY_TSV"
+if [[ "${LIFTOVER_STAGE_ONLY:-0}" != "1" ]]; then
+  printf 'case_id\tdataset\tsample\tregion\tmapped_statuses\treject_statuses\tmapped_mismatches\treject_mismatches\tcompare_tsv\treject_compare_tsv\n' > "$SUMMARY_TSV"
+fi
 
 have_selection=0
 if [[ $# -gt 0 ]]; then
