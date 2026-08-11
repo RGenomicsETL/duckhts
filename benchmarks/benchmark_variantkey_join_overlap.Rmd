@@ -2067,7 +2067,8 @@ real_regulatory_output_query <- sprintf(
     "FROM read_parquet(%s) q",
     "JOIN read_parquet(%s) s",
     "  ON q.rk_chrom_start < s.rk_chrom_end",
-    " AND q.rk_chrom_end > s.rk_chrom_start"
+    " AND q.rk_chrom_end > s.rk_chrom_start",
+    "WHERE q.start0 < q.end0"
   ),
   sql_path(real_case_path),
   sql_path(real_regulatory_path)
