@@ -261,8 +261,8 @@ scripts live under `scripts/`; build the extension and a `riker` binary first.
 # 1. download the NYGC 1000G CRAM + GRCh38 decoy/HLA reference, transcode to
 #    BAM, and retain provenance below the DuckHTS cache. Network is used only
 #    in this staging step, never the build:
-export DUCKHTS_CACHE_DIR="${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}"
-scripts/stage_riker_wgs_bam.sh
+source scripts/duckhts_cache.sh
+bash scripts/stage_riker_wgs_bam.sh
 
 # 2. run the 3-way sweep (root needed to drop the page cache each run):
 sudo python3 scripts/riker_wgs_benchmark.py \

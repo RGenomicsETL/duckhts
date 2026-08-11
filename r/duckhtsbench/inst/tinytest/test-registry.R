@@ -179,4 +179,14 @@ identity_file <- file.path(tmp, "identity.txt")
 writeLines("not 999 bytes", identity_file)
 Sys.setenv(DUCKHTSBENCH_REGISTRY = identity_registry)
 expect_error(duckhts_bench_validate_identity("identity_fixture", identity_file), "supplier byte identity")
+sha256_bin <- Sys.which("sha256sum")
+if (!nzchar(sha256_bin)) sha256_bin <- Sys.which("shasum")
+sha256_args <- if (basename(sha256_bin) == "shasum") c("-a", "256", shQuote(identity_file)) else shQuote(identity_file)
+identity_sha256 <- strsplit(trimws(system2(sha256_bin, sha256_args, stdout = TRUE)), "[[:space:]]+")[[1L]][[1L]]
+writeLines(c(
+  paste(names(registry), collapse = "\t"),
+  paste(c("sha256_fixture", "fixture", "fixture", "test", "file:///dev/null", "public", "unused", "direct_download", "tinytest", "1", paste0("sha256=", identity_sha256)), collapse = "\t")
+), identity_registry)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = identity_registry)
+expect_true(duckhts_bench_validate_identity("sha256_fixture", identity_file))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)

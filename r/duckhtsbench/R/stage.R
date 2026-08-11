@@ -79,8 +79,16 @@ duckhts_bench_validate_identity <- function(id, output = duckhts_bench_artifact_
   if ("md5" %in% names(values) && unname(tools::md5sum(output)) != values[["md5"]]) {
     stop("supplier MD5 identity does not match cached artifact: ", id, call. = FALSE)
   }
-  if ("sha256" %in% names(values) && unname(tools::sha256sum(output)) != values[["sha256"]]) {
-    stop("supplier SHA-256 identity does not match cached artifact: ", id, call. = FALSE)
+  if ("sha256" %in% names(values)) {
+    sha256_bin <- Sys.which("sha256sum")
+    sha256_args <- shQuote(output)
+    if (!nzchar(sha256_bin)) {
+      sha256_bin <- Sys.which("shasum")
+      sha256_args <- c("-a", "256", shQuote(output))
+    }
+    if (!nzchar(sha256_bin)) stop("sha256sum or shasum is required to validate supplier checksum: ", id, call. = FALSE)
+    actual_sha256 <- strsplit(trimws(system2(sha256_bin, sha256_args, stdout = TRUE)), "[[:space:]]+")[[1L]][[1L]]
+    if (actual_sha256 != values[["sha256"]]) stop("supplier SHA-256 identity does not match cached artifact: ", id, call. = FALSE)
   }
   if ("sum" %in% names(values) && "blocks" %in% names(values)) {
     sum_bin <- Sys.which("sum")
