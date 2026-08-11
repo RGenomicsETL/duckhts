@@ -30,6 +30,8 @@ writeLines(c(
 ), mini_registry)
 Sys.setenv(DUCKHTSBENCH_REGISTRY = mini_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "cache"))
 expect_equal(duckhts_bench_cache_path("nested/artifact"), file.path(tmp, "cache", "nested", "artifact"))
+expect_error(duckhts_bench_cache_path("../outside"), "cache-contained")
+expect_error(duckhts_bench_cache_path("nested\\..\\outside"), "cache-contained")
 output <- duckhts_bench_fetch("fixture")
 expect_equal(readLines(output), "registry fetch")
 expect_true(file.exists(paste0(output, ".provenance.tsv")))
