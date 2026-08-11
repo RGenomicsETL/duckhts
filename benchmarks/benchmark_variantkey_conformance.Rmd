@@ -66,7 +66,11 @@ ext_path <- Sys.getenv(
   "DUCKHTS_EXTENSION",
   unset = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 )
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
 source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+artifact_path <- duckhts_bench_artifact_path
 duckhts_cache_dir <- duckhts_bench_cache_dir()
 out_root <- Sys.getenv("VARIANTKEY_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "variantkey-conformance"))
 dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
@@ -99,11 +103,9 @@ if (is.na(duck_decompression_threads) || duck_decompression_threads < 0L) {
   stop("VARIANTKEY_DUCK_DECOMPRESSION_THREADS must be a non-negative integer", call. = FALSE)
 }
 
-giab_cache_dir <- file.path(duckhts_cache_dir, "datasets", "giab", "nist-v4.2.1", "grch37")
-default_paths <- file.path(
-  giab_cache_dir,
-  paste0(c("HG001", "HG002", "HG006"), "_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")
-)
+default_paths <- vapply(c("hg001", "hg002", "hg006"), function(sample) {
+  artifact_path(paste0("giab_", sample, "_grch37_v421"))
+}, character(1L))
 case_env <- Sys.getenv("VARIANTKEY_REAL_CASES", unset = paste(default_paths, collapse = ","))
 raw_paths <- trimws(strsplit(case_env, ",", fixed = TRUE)[[1]])
 raw_paths <- raw_paths[nzchar(raw_paths)]

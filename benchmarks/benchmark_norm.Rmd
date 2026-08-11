@@ -68,23 +68,19 @@ real_region <- Sys.getenv("NORM_REAL_REGION", unset = "")
 real_fasta <- Sys.getenv("NORM_REAL_FASTA", unset = "")
 real_split <- identical(Sys.getenv("NORM_REAL_SPLIT", unset = "0"), "1")
 real_label <- Sys.getenv("NORM_REAL_LABEL", unset = "real_callset")
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
 source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
-duckhts_cache_dir <- duckhts_bench_cache_dir()
-liftover_reference_dir <- file.path(duckhts_cache_dir, "references", "liftover", "grch37-to-grch38")
-gvcf_input_path <- Sys.getenv(
-  "NORM_GVCF_VCF",
-  unset = file.path(duckhts_cache_dir, "benchmarks", "norm", "1000g-dragen", "HG00096", "HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz")
-)
-gvcf_fasta <- Sys.getenv(
-  "NORM_GVCF_FASTA",
-  unset = file.path(liftover_reference_dir, "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna")
-)
+artifact_path <- duckhts_bench_artifact_path
+gvcf_input_path <- Sys.getenv("NORM_GVCF_VCF", unset = artifact_path("norm_hg00096_chr22_20m_30m"))
+gvcf_fasta <- Sys.getenv("NORM_GVCF_FASTA", unset = artifact_path("liftover_grch38_fasta"))
 gvcf_provenance <- Sys.getenv("NORM_GVCF_PROVENANCE", unset = paste0(gvcf_input_path, ".provenance.tsv"))
 gvcf_label <- Sys.getenv("NORM_GVCF_LABEL", unset = "1000G_DRAGEN_HG00096_chr22_20_30Mb_gVCF")
 gvcf_runs <- as.integer(Sys.getenv("NORM_GVCF_RUNS", unset = "1"))
 gvcf_split <- identical(Sys.getenv("NORM_GVCF_SPLIT", unset = "0"), "1")
-giab_dir <- Sys.getenv("NORM_GIAB_DIR", unset = file.path(duckhts_cache_dir, "datasets", "giab", "nist-v4.2.1", "grch37"))
-giab_fasta <- Sys.getenv("NORM_GIAB_FASTA", unset = file.path(liftover_reference_dir, "human_g1k_v37.fasta"))
+giab_dir <- Sys.getenv("NORM_GIAB_DIR", unset = dirname(artifact_path("giab_hg001_grch37_v421")))
+giab_fasta <- Sys.getenv("NORM_GIAB_FASTA", unset = artifact_path("liftover_grch37_fasta"))
 giab_samples <- trimws(strsplit(Sys.getenv("NORM_GIAB_SAMPLES", unset = "HG001,HG002,HG006"), ",", fixed = TRUE)[[1]])
 giab_samples <- giab_samples[nzchar(giab_samples)]
 giab_runs <- as.integer(Sys.getenv("NORM_GIAB_RUNS", unset = "1"))
@@ -681,7 +677,9 @@ DuckHTS counts normalized rows and status classes through `duckhts_bcftools_norm
 giab_inputs <- if (length(giab_samples)) {
   data.frame(
     sample = giab_samples,
-    path = file.path(giab_dir, paste0(giab_samples, "_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")),
+    path = vapply(giab_samples, function(sample) {
+      tryCatch(artifact_path(paste0("giab_", tolower(sample), "_grch37_v421")), error = function(error) "")
+    }, character(1L)),
     stringsAsFactors = FALSE
   )
 } else {

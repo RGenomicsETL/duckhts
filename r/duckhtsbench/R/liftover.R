@@ -7,11 +7,16 @@
 #'   and chain paths, invisibly.
 #' @export
 duckhts_bench_stage_liftover <- function(
-    base_dir = duckhts_bench_cache_path("references/liftover/grch37-to-grch38"),
-    samtools = Sys.which("samtools"), gzip = Sys.which("gzip")) {
+    base_dir = NULL, samtools = Sys.which("samtools"), gzip = Sys.which("gzip")) {
   if (!nzchar(samtools) || !nzchar(gzip)) stop("samtools and gzip are required for liftover staging", call. = FALSE)
-  source_gz <- duckhts_bench_fetch("liftover_grch37_fasta_gz", output = file.path(base_dir, "downloads", "human_g1k_v37.fasta.gz"))
-  source_fasta <- file.path(base_dir, "human_g1k_v37.fasta")
+  use_registry_paths <- is.null(base_dir)
+  source_gz <- if (use_registry_paths) {
+    duckhts_bench_fetch("liftover_grch37_fasta_gz")
+  } else {
+    duckhts_bench_fetch("liftover_grch37_fasta_gz", output = file.path(base_dir, "downloads", "human_g1k_v37.fasta.gz"))
+  }
+  source_fasta <- if (use_registry_paths) duckhts_bench_artifact_path("liftover_grch37_fasta") else file.path(base_dir, "human_g1k_v37.fasta")
+  if (use_registry_paths) base_dir <- dirname(source_fasta)
   registry <- duckhts_bench_registry()
   derived <- registry[registry$id == "liftover_grch37_fasta", , drop = FALSE]
   if (nrow(derived) != 1L || derived$locator != "artifact:liftover_grch37_fasta_gz") {
@@ -34,8 +39,16 @@ duckhts_bench_stage_liftover <- function(
     stop("could not replace the decompressed GRCh37 liftover FASTA", call. = FALSE)
   }
   if (!file.rename(temporary, source_fasta)) stop("could not publish the decompressed GRCh37 FASTA", call. = FALSE)
-  destination_fasta <- duckhts_bench_fetch("liftover_grch38_fasta", output = file.path(base_dir, "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"))
-  chain <- duckhts_bench_fetch("liftover_grch37_grch38_chain", output = file.path(base_dir, "GRCh37_to_GRCh38.chain.gz"))
+  destination_fasta <- if (use_registry_paths) {
+    duckhts_bench_fetch("liftover_grch38_fasta")
+  } else {
+    duckhts_bench_fetch("liftover_grch38_fasta", output = file.path(base_dir, "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"))
+  }
+  chain <- if (use_registry_paths) {
+    duckhts_bench_fetch("liftover_grch37_grch38_chain")
+  } else {
+    duckhts_bench_fetch("liftover_grch37_grch38_chain", output = file.path(base_dir, "GRCh37_to_GRCh38.chain.gz"))
+  }
   for (fasta in c(source_fasta, destination_fasta)) {
     index <- paste0(fasta, ".fai")
     if (file.exists(index) && unlink(index, force = TRUE) != 0L) {
