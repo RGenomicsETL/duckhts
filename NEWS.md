@@ -6,8 +6,9 @@
   through the cleanup-aware runner, and leave package builds network-free unless the
   developer explicitly chooses dependency bootstrap. Optional liftover, normalization, and
   VariantKey benchmark inputs are now explicit environment variables rather than one developer's paths.
-  Explicit GIAB, liftover-reference, normalization, Riker, DuckVEP-corpus, and local browser staging
-  defaults now share `~/.cache/duckhts` (or `DUCKHTS_CACHE_DIR`) and record source/transformation
+  Explicit GIAB, liftover-reference, normalization, Riker, DuckVEP-corpus, local browser, and
+  VariantKey-provider raw-source staging defaults now share `~/.cache/duckhts` (or
+  `DUCKHTS_CACHE_DIR`) and record source/transformation
   provenance beside staged data. Retire only unreferenced generic and mosdepth benchmark reports;
   preserve the VariantKey and FastVEP reports as evidence while their declared public-provider
   staging work is made executable. Normalize embedded

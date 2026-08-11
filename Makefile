@@ -24,7 +24,7 @@
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
 	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
-	test-cache-paths test-benchmark-registry
+	test-cache-paths test-benchmark-registry test-variantkey-provider-staging
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -143,11 +143,14 @@ test-cache-paths:
 	bash test/scripts/test_staging_cache.sh
 	bash test/scripts/test_liftover_registry_batch.sh
 
-test-benchmark-registry:
+test-benchmark-registry: test-variantkey-provider-staging
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 	(cd "$$tmp" && R CMD build --no-build-vignettes --no-manual "$(PROJ_DIR)r/duckhtsbench"); \
 	R CMD INSTALL -l "$$tmp" "$$tmp"/duckhtsbench_*.tar.gz; \
 	Rscript -e '.libPaths(c("'"$$tmp"'", .libPaths())); tinytest::test_package("duckhtsbench", testdir = "tinytest")'
+
+test-variantkey-provider-staging:
+	bash test/scripts/test_variantkey_provider_staging.sh
 
 test-sqllogictest-debug: check_configure
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
@@ -232,7 +235,7 @@ stage-duckbedqc-data:
 	bash scripts/stage_duckbedqc_data.sh
 
 stage-variantkey-providers:
-	bash scripts/stage_variantkey_providers.sh
+	Rscript r/duckhtsbench/scripts/stage_variantkey_providers.R
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"

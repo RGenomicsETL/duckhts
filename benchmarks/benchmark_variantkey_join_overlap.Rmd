@@ -43,14 +43,14 @@ Useful overrides:
 Stage the provider workload explicitly before rendering:
 
 ```sh
-make stage-variantkey-providers \
-  VARIANTKEY_GNOMAD_CONSTRAINT_URL=https://... \
-  VARIANTKEY_REVEL_V13_PARQUET_URL=https://... \
-  VARIANTKEY_DUCKVEP_MODEL_URL=https://...
+make stage-variantkey-providers
 ```
 
-The gnomAD access URL and locally derived REVEL/model artifacts are explicit
-inputs because this repository does not invent a stable release locator for them.
+The command stages declared public raw sources and exports provider relations
+from the registered model cache entry. It fails closed if that model is absent:
+the public Ensembl 116 model producer is tracked in
+<https://github.com/RGenomicsETL/duckhts/issues/179>, rather than being
+replaced by an unreceipted URL.
 
 ```{r setup, include = FALSE}
 library(DBI)
@@ -65,24 +65,23 @@ join_rows <- as.integer(Sys.getenv("VARIANTKEY_JOIN_ROWS", unset = "1000000"))
 interval_rows <- as.integer(Sys.getenv("VARIANTKEY_INTERVAL_ROWS", unset = "250000"))
 bench_runs <- as.integer(Sys.getenv("VARIANTKEY_JOIN_RUNS", unset = "3"))
 thread_grid_env <- Sys.getenv("VARIANTKEY_JOIN_THREADS_LIST", unset = "1,2,4")
-duckhts_cache_dir <- Sys.getenv(
-  "DUCKHTS_CACHE_DIR",
-  unset = file.path(path.expand("~"), ".cache", "duckhts")
-)
-provider_cache_dir <- file.path(duckhts_cache_dir, "benchmarks", "variantkey-providers")
-provider_raw_dir <- file.path(provider_cache_dir, "raw")
-provider_derived_dir <- file.path(provider_cache_dir, "derived")
+registry_source <- normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE)
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(registry_source)
+artifact_path <- duckhts_bench_artifact_path
 
-clinvar_vcf <- Sys.getenv("VARIANTKEY_CLINVAR_VCF", unset = file.path(provider_raw_dir, "clinvar_20260706_grch38.vcf.gz"))
-giab_vcf <- Sys.getenv("VARIANTKEY_GIAB_VCF", unset = file.path(provider_raw_dir, "HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz"))
-reference_fasta <- Sys.getenv("VARIANTKEY_REFERENCE_FASTA", unset = file.path(provider_raw_dir, "Homo_sapiens.GRCh38.dna.primary_assembly.fa"))
-regulatory_parquet <- Sys.getenv("VARIANTKEY_REGULATORY_PARQUET", unset = file.path(provider_derived_dir, "ensembl116_grch38_regulatory.parquet"))
-transcripts_parquet <- Sys.getenv("VARIANTKEY_TRANSCRIPTS_PARQUET", unset = file.path(provider_derived_dir, "ensembl116_grch38_transcripts.parquet"))
-gnomad_constraint <- Sys.getenv("VARIANTKEY_GNOMAD_CONSTRAINT", unset = file.path(provider_raw_dir, "gnomad_constraint.tsv"))
-real_cache_dir <- Sys.getenv("VARIANTKEY_REAL_CACHE_DIR", unset = provider_derived_dir)
-revel_parquet <- Sys.getenv("VARIANTKEY_REVEL_PARQUET", unset = file.path(provider_raw_dir, "revel_v1.3_grch37.parquet"))
-alphamissense_gz <- Sys.getenv("VARIANTKEY_ALPHAMISSENSE_GZ", unset = file.path(provider_raw_dir, "AlphaMissense_hg38.tsv.gz"))
-clinvarbitration_tsv <- Sys.getenv("VARIANTKEY_CLINVARBITRATION_TSV", unset = file.path(provider_raw_dir, "clinvar_decisions.tsv"))
+clinvar_vcf <- Sys.getenv("VARIANTKEY_CLINVAR_VCF", unset = artifact_path("variantkey_clinvar_20260706"))
+giab_vcf <- Sys.getenv("VARIANTKEY_GIAB_VCF", unset = artifact_path("variantkey_giab_hg002_v421"))
+reference_fasta <- Sys.getenv("VARIANTKEY_REFERENCE_FASTA", unset = artifact_path("ensembl116_grch38_fasta_fa"))
+regulatory_parquet <- Sys.getenv("VARIANTKEY_REGULATORY_PARQUET", unset = artifact_path("duckvep_ensembl116_regulatory_parquet"))
+transcripts_parquet <- Sys.getenv("VARIANTKEY_TRANSCRIPTS_PARQUET", unset = artifact_path("duckvep_ensembl116_transcripts_parquet"))
+gnomad_constraint <- Sys.getenv("VARIANTKEY_GNOMAD_CONSTRAINT", unset = artifact_path("gnomad_v211_constraint"))
+real_cache_dir <- Sys.getenv("VARIANTKEY_REAL_CACHE_DIR", unset = dirname(regulatory_parquet))
+revel_parquet <- Sys.getenv("VARIANTKEY_REVEL_PARQUET", unset = artifact_path("revel_v13_grch37"))
+alphamissense_gz <- Sys.getenv("VARIANTKEY_ALPHAMISSENSE_GZ", unset = artifact_path("alphamissense_v2_hg38"))
+clinvarbitration_tsv <- Sys.getenv("VARIANTKEY_CLINVARBITRATION_TSV", unset = artifact_path("clinvarbitration_202508"))
 
 real_source_paths <- c(
   clinvar_vcf = clinvar_vcf,
@@ -100,7 +99,7 @@ if (length(missing_real_sources)) {
   stop(
     "missing staged benchmark sources: ",
     paste(names(missing_real_sources), collapse = ", "),
-    ". Run `make stage-variantkey-providers` with the required release URLs.",
+    ". Run `make stage-variantkey-providers`; it reports any unavailable registered model.",
     call. = FALSE
   )
 }
