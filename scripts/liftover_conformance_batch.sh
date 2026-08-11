@@ -163,6 +163,9 @@ if [[ "$run_count" -eq 0 ]]; then
   echo "No cases selected from: $CASES_TSV" >&2
   exit 1
 fi
+if [[ "${LIFTOVER_STAGE_ONLY:-0}" == "1" ]]; then
+  exit 0
+fi
 
 echo
 echo "Batch summary:"
