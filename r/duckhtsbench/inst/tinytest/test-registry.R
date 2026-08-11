@@ -104,7 +104,8 @@ lift_registry <- file.path(tmp, "liftover.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
   paste(c("liftover_grch37_fasta_gz", "liftover", "source", "test", paste0("file://", lift_gz), "public", "source.fa.gz", "direct_download", "tinytest", "1", ""), collapse = "\t"),
-  paste(c("liftover_grch38_fasta", "liftover", "destination", "test", paste0("file://", lift_dst), "public", "destination.fa", "direct_download", "tinytest", "2", ""), collapse = "\t"),
+  paste(c("liftover_grch37_fasta", "liftover", "source", "test", "artifact:liftover_grch37_fasta_gz", "local_derived", "source.fa", "decompress", "tinytest", "2", ""), collapse = "\t"),
+  paste(c("liftover_grch38_fasta", "liftover", "destination", "test", paste0("file://", lift_dst), "public", "destination.fa", "direct_download", "tinytest", "3", ""), collapse = "\t"),
   paste(c("liftover_grch37_grch38_chain", "liftover", "chain", "test", paste0("file://", lift_chain), "public", "chain.gz", "direct_download", "tinytest", "3", ""), collapse = "\t")
 ), lift_registry)
 Sys.setenv(DUCKHTSBENCH_REGISTRY = lift_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "lift-cache"))

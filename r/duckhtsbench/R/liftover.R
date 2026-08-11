@@ -12,11 +12,24 @@ duckhts_bench_stage_liftover <- function(
   if (!nzchar(samtools) || !nzchar(gzip)) stop("samtools and gzip are required for liftover staging", call. = FALSE)
   source_gz <- duckhts_bench_fetch("liftover_grch37_fasta_gz", output = file.path(base_dir, "downloads", "human_g1k_v37.fasta.gz"))
   source_fasta <- file.path(base_dir, "human_g1k_v37.fasta")
+  registry <- duckhts_bench_registry()
+  derived <- registry[registry$id == "liftover_grch37_fasta", , drop = FALSE]
+  if (nrow(derived) != 1L || derived$locator != "artifact:liftover_grch37_fasta_gz") {
+    stop("liftover derived-FASTA registry entry is missing or has an unregistered source", call. = FALSE)
+  }
   temporary <- paste0(source_fasta, ".partial-", Sys.getpid())
   unlink(temporary, force = TRUE)
   on.exit(unlink(temporary, force = TRUE), add = TRUE)
-  status <- system2(gzip, c("--decompress", "--keep", "--stdout", source_gz), stdout = temporary)
-  if (status != 0L) stop("could not decompress the GRCh37 liftover FASTA", call. = FALSE)
+  status <- system2(gzip, c("--decompress", "--keep", "--stdout", shQuote(source_gz)), stdout = temporary)
+  identity <- as.character(derived$supplier_identity[[1L]])
+  expected_bytes <- if (!is.na(identity) && nzchar(identity) && grepl("(^|;)bytes=", identity)) {
+    as.numeric(sub(".*(^|;)bytes=([0-9]+).*", "\\2", identity))
+  } else NA_real_
+  valid <- file.exists(temporary) && file.info(temporary)$size > 0L &&
+    (is.na(expected_bytes) || file.info(temporary)$size == expected_bytes)
+  if ((status != 0L && status != 2L) || !valid) {
+    stop("could not derive the verified GRCh37 liftover FASTA", call. = FALSE)
+  }
   if (file.exists(source_fasta) && unlink(source_fasta, force = TRUE) != 0L) {
     stop("could not replace the decompressed GRCh37 liftover FASTA", call. = FALSE)
   }
