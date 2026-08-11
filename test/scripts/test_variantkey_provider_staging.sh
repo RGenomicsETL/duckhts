@@ -83,12 +83,7 @@ Rscript - "$REGISTRY" "$CACHE_DIR" <<'RS'
 args <- commandArgs(trailingOnly = TRUE)
 registry <- utils::read.delim(args[[1]], stringsAsFactors = FALSE, check.names = FALSE)
 paths <- file.path(args[[2]], registry$cache_relpath)
-expected <- c(
-  "variantkey_clinvar_20260706", "variantkey_giab_hg002_v421",
-  "ensembl116_grch38_fasta_fa", "revel_v13_grch37",
-  "clinvarbitration_202508", "duckvep_ensembl116_regulatory_parquet",
-  "duckvep_ensembl116_transcripts_parquet"
-)
+expected <- registry$id[registry$workload == "variantkey-providers"]
 for (id in expected) {
   output <- paths[registry$id == id]
   stopifnot(length(output) == 1L, file.exists(output), file.info(output)$size > 0L)
