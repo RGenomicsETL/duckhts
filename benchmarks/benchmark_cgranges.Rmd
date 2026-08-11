@@ -118,7 +118,7 @@ if (needs_run) {
     "--passes", as.character(passes),
     "--out-dir", out_dir
   )
-  out <- system2("python3", cmd, stdout = TRUE, stderr = TRUE)
+  out <- system2("Rscript", cmd, stdout = TRUE, stderr = TRUE)
   status <- attr(out, "status")
   if (!is.null(status) && status != 0) {
     stop(paste(out, collapse = "\n"))
