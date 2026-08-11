@@ -87,8 +87,18 @@ DBI::dbExecute(con, paste(
 DBI::dbDisconnect(con, shutdown = TRUE)
 registry <- utils::read.delim(registry_path, stringsAsFactors = FALSE, check.names = FALSE)
 model_row <- registry$id == "duckvep_ensembl116_model"
+sha256 <- function(path) {
+  command <- Sys.which("sha256sum")
+  arguments <- shQuote(path)
+  if (!nzchar(command)) {
+    command <- Sys.which("shasum")
+    arguments <- c("-a", "256", shQuote(path))
+  }
+  if (!nzchar(command)) stop("sha256sum or shasum is required")
+  strsplit(trimws(system2(command, arguments, stdout = TRUE)), "[[:space:]]+")[[1L]][[1L]]
+}
 identity <- registry$supplier_identity[model_row]
-identity <- sub("sha256=[^;]+", paste0("sha256=", unname(tools::sha256sum(model))), identity)
+identity <- sub("sha256=[^;]+", paste0("sha256=", sha256(model)), identity)
 identity <- sub("bytes=[0-9]+", paste0("bytes=", file.info(model)$size), identity)
 registry$supplier_identity[model_row] <- identity
 utils::write.table(registry, registry_path, sep = "\t", row.names = FALSE, quote = FALSE)

@@ -79,7 +79,8 @@ gvcf_provenance <- Sys.getenv("NORM_GVCF_PROVENANCE", unset = paste0(gvcf_input_
 gvcf_label <- Sys.getenv("NORM_GVCF_LABEL", unset = "1000G_DRAGEN_HG00096_chr22_20_30Mb_gVCF")
 gvcf_runs <- as.integer(Sys.getenv("NORM_GVCF_RUNS", unset = "1"))
 gvcf_split <- identical(Sys.getenv("NORM_GVCF_SPLIT", unset = "0"), "1")
-giab_dir <- Sys.getenv("NORM_GIAB_DIR", unset = dirname(artifact_path("giab_hg001_grch37_v421")))
+giab_dir_override <- Sys.getenv("NORM_GIAB_DIR", unset = "")
+giab_dir <- if (nzchar(giab_dir_override)) giab_dir_override else dirname(artifact_path("giab_hg001_grch37_v421"))
 giab_fasta <- Sys.getenv("NORM_GIAB_FASTA", unset = artifact_path("liftover_grch37_fasta"))
 giab_samples <- trimws(strsplit(Sys.getenv("NORM_GIAB_SAMPLES", unset = "HG001,HG002,HG006"), ",", fixed = TRUE)[[1]])
 giab_samples <- giab_samples[nzchar(giab_samples)]
@@ -678,6 +679,9 @@ giab_inputs <- if (length(giab_samples)) {
   data.frame(
     sample = giab_samples,
     path = vapply(giab_samples, function(sample) {
+      if (nzchar(giab_dir_override)) {
+        return(file.path(giab_dir, paste0(sample, "_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")))
+      }
       tryCatch(artifact_path(paste0("giab_", tolower(sample), "_grch37_v421")), error = function(error) "")
     }, character(1L)),
     stringsAsFactors = FALSE
