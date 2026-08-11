@@ -40,6 +40,11 @@ expect_equal(readLines(output), "registry fetch")
 expect_true(file.exists(paste0(output, ".provenance.tsv")))
 writeLines("poisoned cache entry", output)
 expect_equal(readLines(duckhts_bench_fetch("fixture")), "registry fetch")
+writeLines(c(
+  paste(names(registry), collapse = "\t"),
+  paste(c("escape", "fixture", "fixture", "fixture-1", paste0("file://", source_path), "public", "../outside", "direct_download", "tinytest", "1", ""), collapse = "\t")
+), mini_registry)
+expect_error(duckhts_bench_artifact_path("escape"), "cache-contained")
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
 

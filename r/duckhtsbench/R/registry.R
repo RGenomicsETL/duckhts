@@ -45,7 +45,7 @@ duckhts_bench_artifact_path <- function(id) {
   registry <- duckhts_bench_registry()
   row <- registry[registry$id == id, , drop = FALSE]
   if (nrow(row) != 1L) stop("unknown or non-unique benchmark artifact: ", id, call. = FALSE)
-  file.path(duckhts_bench_cache_dir(), row$cache_relpath[[1L]])
+  duckhts_bench_cache_path(row$cache_relpath[[1L]])
 }
 
 #' Return a reproducible staging plan for a benchmark workload.
