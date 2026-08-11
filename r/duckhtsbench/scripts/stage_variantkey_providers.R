@@ -23,6 +23,14 @@ if (!requireNamespace("DBI", quietly = TRUE) || !requireNamespace("duckdb", quie
 
 plan <- duckhts_bench_stage_plan("variantkey-providers")
 artifact <- duckhts_bench_artifact_path
+temporary_path <- function(output) paste0(output, ".partial-", Sys.getpid())
+publish <- function(temporary, output) {
+  if (file.exists(output) && unlink(output, force = TRUE) != 0L) {
+    stop("could not replace staged artifact: ", output, call. = FALSE)
+  }
+  if (!file.rename(temporary, output)) stop("could not publish staged artifact: ", output, call. = FALSE)
+}
+
 # Direct source downloads are the only generic operation. All other transforms
 # below name their input/output registry IDs explicitly.
 for (id in plan$id[plan$transform == "direct_download"]) {
@@ -31,60 +39,63 @@ for (id in plan$id[plan$transform == "direct_download"]) {
 
 fasta_gz <- artifact("ensembl116_grch38_fasta")
 fasta <- artifact("ensembl116_grch38_fasta_fa")
-if (!file.exists(fasta) || !file.info(fasta)$size) {
-  dir.create(dirname(fasta), recursive = TRUE, showWarnings = FALSE)
-  gzip <- Sys.which("gzip")
-  if (!nzchar(gzip)) stop("gzip is required to derive the Ensembl FASTA", call. = FALSE)
-  status <- system2(gzip, c("--decompress", "--keep", "--stdout", fasta_gz), stdout = fasta)
-  if (status != 0L) stop("could not decompress registered Ensembl FASTA", call. = FALSE)
-}
+dir.create(dirname(fasta), recursive = TRUE, showWarnings = FALSE)
+gzip <- Sys.which("gzip")
+if (!nzchar(gzip)) stop("gzip is required to derive the Ensembl FASTA", call. = FALSE)
+temporary <- temporary_path(fasta)
+unlink(temporary, force = TRUE)
+status <- system2(gzip, c("--decompress", "--keep", "--stdout", fasta_gz), stdout = temporary)
+if (status != 0L) stop("could not decompress registered Ensembl FASTA", call. = FALSE)
+publish(temporary, fasta)
 samtools <- Sys.which("samtools")
 if (!nzchar(samtools)) stop("samtools is required to index the Ensembl FASTA", call. = FALSE)
-if (!file.exists(paste0(fasta, ".fai")) || !file.info(paste0(fasta, ".fai"))$size) {
-  status <- system2(samtools, c("faidx", fasta))
-  if (status != 0L) stop("could not index registered Ensembl FASTA", call. = FALSE)
-}
+index <- paste0(fasta, ".fai")
+if (file.exists(index) && unlink(index, force = TRUE) != 0L) stop("could not replace Ensembl FASTA index", call. = FALSE)
+status <- system2(samtools, c("faidx", fasta))
+if (status != 0L || !file.exists(index) || !file.info(index)$size) stop("could not index registered Ensembl FASTA", call. = FALSE)
 duckhts_bench_write_provenance("ensembl116_grch38_fasta_fa", fasta)
 
 revel_zip <- artifact("revel_v13_source_zip")
 revel_parquet <- artifact("revel_v13_grch37")
-if (!file.exists(revel_parquet) || !file.info(revel_parquet)$size) {
-  dir.create(dirname(revel_parquet), recursive = TRUE, showWarnings = FALSE)
-  extracted_dir <- tempfile("duckhtsbench-revel-")
-  on.exit(unlink(extracted_dir, recursive = TRUE, force = TRUE), add = TRUE)
-  utils::unzip(revel_zip, exdir = extracted_dir)
-  candidates <- list.files(extracted_dir, pattern = "^revel_with_transcript_ids$", recursive = TRUE, full.names = TRUE)
-  if (length(candidates) != 1L) stop("REVEL v1.3 archive lacks a unique revel_with_transcript_ids member", call. = FALSE)
-  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, sprintf(
-    paste(
-      "COPY (SELECT chr AS chrom, CAST(hg19_pos AS BIGINT) AS pos, ref, alt,",
-      "CAST(REVEL AS DOUBLE) AS revel",
-      "FROM read_csv_auto('%s', header = TRUE, all_varchar = TRUE)",
-      "WHERE TRY_CAST(hg19_pos AS BIGINT) IS NOT NULL)",
-      "TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)"
-    ),
-    gsub("'", "''", candidates[[1L]], fixed = TRUE),
-    gsub("'", "''", revel_parquet, fixed = TRUE)
-  ))
-}
+dir.create(dirname(revel_parquet), recursive = TRUE, showWarnings = FALSE)
+extracted_dir <- tempfile("duckhtsbench-revel-")
+utils::unzip(revel_zip, exdir = extracted_dir)
+candidates <- list.files(extracted_dir, pattern = "^revel_with_transcript_ids$", recursive = TRUE, full.names = TRUE)
+if (length(candidates) != 1L) stop("REVEL v1.3 archive lacks a unique revel_with_transcript_ids member", call. = FALSE)
+temporary <- temporary_path(revel_parquet)
+unlink(temporary, force = TRUE)
+con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+DBI::dbExecute(con, sprintf(
+  paste(
+    "COPY (SELECT chr AS chrom, CAST(hg19_pos AS BIGINT) AS pos, ref, alt,",
+    "CAST(REVEL AS DOUBLE) AS revel",
+    "FROM read_csv_auto('%s', header = TRUE, all_varchar = TRUE)",
+    "WHERE TRY_CAST(hg19_pos AS BIGINT) IS NOT NULL)",
+    "TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)"
+  ),
+  gsub("'", "''", candidates[[1L]], fixed = TRUE),
+  gsub("'", "''", temporary, fixed = TRUE)
+))
+DBI::dbDisconnect(con, shutdown = TRUE)
+unlink(extracted_dir, recursive = TRUE, force = TRUE)
+publish(temporary, revel_parquet)
 duckhts_bench_write_provenance("revel_v13_grch37", revel_parquet)
 
 clinvarbitration_archive <- artifact("clinvarbitration_202508_source_archive")
 clinvarbitration_tsv <- artifact("clinvarbitration_202508")
-if (!file.exists(clinvarbitration_tsv) || !file.info(clinvarbitration_tsv)$size) {
-  dir.create(dirname(clinvarbitration_tsv), recursive = TRUE, showWarnings = FALSE)
-  members <- utils::untar(clinvarbitration_archive, list = TRUE)
-  member <- members[grepl("(^|/)clinvar_decisions\\.tsv$", members)]
-  if (length(member) != 1L) stop("ClinvArbitration archive lacks a unique clinvar_decisions.tsv member", call. = FALSE)
-  work <- tempfile("duckhtsbench-clinvarbitration-")
-  on.exit(unlink(work, recursive = TRUE, force = TRUE), add = TRUE)
-  utils::untar(clinvarbitration_archive, files = member, exdir = work)
-  source <- file.path(work, member)
-  if (!file.exists(source)) stop("could not extract ClinvArbitration decision table", call. = FALSE)
-  if (!file.copy(source, clinvarbitration_tsv, overwrite = TRUE)) stop("could not stage ClinvArbitration decision table", call. = FALSE)
-}
+dir.create(dirname(clinvarbitration_tsv), recursive = TRUE, showWarnings = FALSE)
+members <- utils::untar(clinvarbitration_archive, list = TRUE)
+member <- members[grepl("(^|/)clinvar_decisions\\.tsv$", members)]
+if (length(member) != 1L) stop("ClinvArbitration archive lacks a unique clinvar_decisions.tsv member", call. = FALSE)
+work <- tempfile("duckhtsbench-clinvarbitration-")
+utils::untar(clinvarbitration_archive, files = member, exdir = work)
+source <- file.path(work, member)
+if (!file.exists(source)) stop("could not extract ClinvArbitration decision table", call. = FALSE)
+temporary <- temporary_path(clinvarbitration_tsv)
+unlink(temporary, force = TRUE)
+if (!file.copy(source, temporary, overwrite = TRUE)) stop("could not stage ClinvArbitration decision table", call. = FALSE)
+unlink(work, recursive = TRUE, force = TRUE)
+publish(temporary, clinvarbitration_tsv)
 duckhts_bench_write_provenance("clinvarbitration_202508", clinvarbitration_tsv)
 
 model <- artifact("duckvep_ensembl116_model")
@@ -99,16 +110,17 @@ duckhts_bench_write_provenance("duckvep_ensembl116_model", model)
 
 export_relation <- function(id, query) {
   output <- artifact(id)
-  if (!file.exists(output) || !file.info(output)$size) {
-    dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
-    con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
-    on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-    DBI::dbExecute(con, sprintf("ATTACH '%s' AS model (READ_ONLY)", gsub("'", "''", model, fixed = TRUE)))
-    DBI::dbExecute(con, sprintf(
-      "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)",
-      query, gsub("'", "''", output, fixed = TRUE)
-    ))
-  }
+  dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
+  temporary <- temporary_path(output)
+  unlink(temporary, force = TRUE)
+  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+  DBI::dbExecute(con, sprintf("ATTACH '%s' AS model (READ_ONLY)", gsub("'", "''", model, fixed = TRUE)))
+  DBI::dbExecute(con, sprintf(
+    "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)",
+    query, gsub("'", "''", temporary, fixed = TRUE)
+  ))
+  DBI::dbDisconnect(con, shutdown = TRUE)
+  publish(temporary, output)
   duckhts_bench_write_provenance(id, output)
 }
 

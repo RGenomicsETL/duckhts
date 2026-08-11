@@ -79,6 +79,10 @@ RS
 PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$REGISTRY" \
   Rscript "$ROOT_DIR/r/duckhtsbench/scripts/stage_variantkey_providers.R" >/dev/null
 
+printf 'stale parquet' >"$CACHE_DIR/benchmarks/variantkey-providers/raw/revel_grch37.parquet"
+PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$REGISTRY" \
+  Rscript "$ROOT_DIR/r/duckhtsbench/scripts/stage_variantkey_providers.R" >/dev/null
+
 Rscript - "$REGISTRY" "$CACHE_DIR" <<'RS'
 args <- commandArgs(trailingOnly = TRUE)
 registry <- utils::read.delim(args[[1]], stringsAsFactors = FALSE, check.names = FALSE)
