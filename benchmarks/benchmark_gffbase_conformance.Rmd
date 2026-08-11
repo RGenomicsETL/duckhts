@@ -51,10 +51,8 @@ library(knitr)
 library(jsonlite)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
-duckhts_cache_dir <- Sys.getenv(
-  "DUCKHTS_CACHE_DIR",
-  unset = file.path(path.expand("~"), ".cache", "duckhts")
-)
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+duckhts_cache_dir <- duckhts_bench_cache_dir()
 gffbase_site <- Sys.getenv("GFFBASE_SITE", unset = file.path(duckhts_cache_dir, "benchmarks", "gffbase", "python-site"))
 if (!dir.exists(gffbase_site)) {
   stop("GFFBase is absent from the DuckHTS cache. Run `make stage-gffbase`.", call. = FALSE)

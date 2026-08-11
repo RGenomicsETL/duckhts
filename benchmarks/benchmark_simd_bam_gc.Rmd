@@ -51,10 +51,8 @@ library(knitr)
 library(jsonlite)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
-duckhts_cache_dir <- Sys.getenv(
-  "DUCKHTS_CACHE_DIR",
-  unset = file.path(path.expand("~"), ".cache", "duckhts")
-)
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+duckhts_cache_dir <- duckhts_bench_cache_dir()
 out_dir <- Sys.getenv("SIMD_BAM_GC_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "simd-bam-gc"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 json_out <- file.path(out_dir, "benchmark_simd_bam_gc.json")

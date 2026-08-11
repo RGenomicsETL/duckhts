@@ -66,10 +66,8 @@ ext_path <- Sys.getenv(
   "DUCKHTS_EXTENSION",
   unset = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 )
-duckhts_cache_dir <- Sys.getenv(
-  "DUCKHTS_CACHE_DIR",
-  unset = file.path(path.expand("~"), ".cache", "duckhts")
-)
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+duckhts_cache_dir <- duckhts_bench_cache_dir()
 out_root <- Sys.getenv("VARIANTKEY_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "variantkey-conformance"))
 dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
 
