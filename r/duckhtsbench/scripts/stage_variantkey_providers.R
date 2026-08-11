@@ -106,9 +106,11 @@ if (!file.exists(model) || !file.info(model)$size) {
     call. = FALSE
   )
 }
+duckhts_bench_validate_identity("duckvep_ensembl116_model", model)
 model_row <- plan[plan$id == "duckvep_ensembl116_model", , drop = FALSE]
 identity_fields <- strsplit(model_row$supplier_identity[[1L]], ";", fixed = TRUE)[[1L]]
 model_identity <- stats::setNames(sub("^[^=]+=", "", identity_fields), sub("=.*$", "", identity_fields))
+model_identity <- model_identity[intersect(names(model_identity), c("model_sha256", "source_manifest_sha256", "reference_sha256"))]
 model_con <- DBI::dbConnect(duckdb::duckdb(), model, read_only = TRUE)
 receipt <- DBI::dbGetQuery(
   model_con,

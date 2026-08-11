@@ -85,6 +85,13 @@ DBI::dbExecute(con, paste(
   "'296bc90633562da49e900a723675c7a0b4aba53b8cbdec027f107d46972aec68')"
 ))
 DBI::dbDisconnect(con, shutdown = TRUE)
+registry <- utils::read.delim(registry_path, stringsAsFactors = FALSE, check.names = FALSE)
+model_row <- registry$id == "duckvep_ensembl116_model"
+identity <- registry$supplier_identity[model_row]
+identity <- sub("sha256=[^;]+", paste0("sha256=", unname(tools::sha256sum(model))), identity)
+identity <- sub("bytes=[0-9]+", paste0("bytes=", file.info(model)$size), identity)
+registry$supplier_identity[model_row] <- identity
+utils::write.table(registry, registry_path, sep = "\t", row.names = FALSE, quote = FALSE)
 RS
 
 PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$REGISTRY" \
@@ -93,6 +100,20 @@ PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$RE
 printf 'stale parquet' >"$CACHE_DIR/benchmarks/variantkey-providers/raw/revel_grch37.parquet"
 PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$REGISTRY" \
   Rscript "$ROOT_DIR/r/duckhtsbench/scripts/stage_variantkey_providers.R" >/dev/null
+
+Rscript - "$CACHE_DIR/models/duckvep/ensembl-116-grch38.duckdb" <<'RS'
+args <- commandArgs(trailingOnly = TRUE)
+suppressPackageStartupMessages(library(DBI))
+suppressPackageStartupMessages(library(duckdb))
+con <- DBI::dbConnect(duckdb::duckdb(), args[[1L]])
+DBI::dbExecute(con, "INSERT INTO model_transcripts VALUES ('ENSG_MUTATED')")
+DBI::dbDisconnect(con, shutdown = TRUE)
+RS
+if PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$REGISTRY" \
+  Rscript "$ROOT_DIR/r/duckhtsbench/scripts/stage_variantkey_providers.R" >/dev/null 2>&1; then
+  echo "mutated DuckVEP model unexpectedly passed identity validation" >&2
+  exit 1
+fi
 
 Rscript - "$REGISTRY" "$CACHE_DIR" <<'RS'
 args <- commandArgs(trailingOnly = TRUE)
