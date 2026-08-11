@@ -5,12 +5,12 @@
 #' @param samtools Path to `samtools`.
 #' @return Path to the derived BAM, invisibly.
 #' @export
-duckhts_bench_stage_riker <- function(base_dir = duckhts_bench_cache_path("benchmarks/riker-wgs"),
-                                      threads = 8L, samtools = Sys.which("samtools")) {
+duckhts_bench_stage_riker <- function(base_dir = NULL, threads = 8L, samtools = Sys.which("samtools")) {
   if (!nzchar(samtools)) stop("samtools is required to stage the Riker WGS benchmark", call. = FALSE)
-  ref <- duckhts_bench_fetch("riker_hg00188_reference", output = file.path(base_dir, "reference", "GRCh38_full_analysis_set_plus_decoy_hla.fa"))
-  cram <- duckhts_bench_fetch("riker_hg00188_cram", output = file.path(base_dir, "downloads", "HG00188.final.cram"))
-  bam <- file.path(base_dir, "stage", "HG00188_30x", "input.bam")
+  use_registry_paths <- is.null(base_dir)
+  ref <- if (use_registry_paths) duckhts_bench_fetch("riker_hg00188_reference") else duckhts_bench_fetch("riker_hg00188_reference", output = file.path(base_dir, "reference", "GRCh38_full_analysis_set_plus_decoy_hla.fa"))
+  cram <- if (use_registry_paths) duckhts_bench_fetch("riker_hg00188_cram") else duckhts_bench_fetch("riker_hg00188_cram", output = file.path(base_dir, "downloads", "HG00188.final.cram"))
+  bam <- if (use_registry_paths) duckhts_bench_artifact_path("riker_hg00188_bam") else file.path(base_dir, "stage", "HG00188_30x", "input.bam")
   dir.create(dirname(bam), recursive = TRUE, showWarnings = FALSE)
   run <- function(args, error) {
     status <- system2(samtools, args)
@@ -29,7 +29,7 @@ duckhts_bench_stage_riker <- function(base_dir = duckhts_bench_cache_path("bench
   if (file.exists(bam_index) && unlink(bam_index, force = TRUE) != 0L) stop("could not replace Riker BAM index", call. = FALSE)
   run(c("index", "-@", threads, shQuote(bam)), "could not index Riker BAM")
   if (!file.exists(bam_index) || !file.info(bam_index)$size) stop("could not publish Riker BAM index", call. = FALSE)
-  receipt <- file.path(base_dir, "provenance.tsv")
+  receipt <- if (use_registry_paths) paste0(bam, ".provenance.tsv") else file.path(base_dir, "provenance.tsv")
   writeLines(c(
     "field\tvalue",
     "workload\triker-wgs",

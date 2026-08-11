@@ -80,7 +80,8 @@ riker_registry <- file.path(tmp, "riker.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
   paste(c("riker_hg00188_reference", "riker-wgs", "reference", "test", paste0("file://", riker_reference), "public", "unused.fa", "direct_download", "tinytest", "1", ""), collapse = "\t"),
-  paste(c("riker_hg00188_cram", "riker-wgs", "input_cram", "test", paste0("file://", riker_cram), "public", "unused.cram", "direct_download", "tinytest", "2", ""), collapse = "\t")
+  paste(c("riker_hg00188_cram", "riker-wgs", "input_cram", "test", paste0("file://", riker_cram), "public", "unused.cram", "direct_download", "tinytest", "2", ""), collapse = "\t"),
+  paste(c("riker_hg00188_bam", "riker-wgs", "derived_bam", "test", "artifact:riker_hg00188_reference;artifact:riker_hg00188_cram", "local_derived", "relocated/derived.bam", "samtools_view_reference_cram;samtools_index", "tinytest", "3", ""), collapse = "\t")
 ), riker_registry)
 samtools <- file.path(tmp, "samtools")
 writeLines(c("#!/usr/bin/env sh", "case \"$1\" in", "faidx) printf \"idx\\n\" >\"$2.fai\" ;;", "quickcheck) exit 0 ;;", "view) while [ \"$1\" != \"-o\" ]; do shift; done; printf \"BAM\\n\" >\"$2\" ;;", "index) shift 3; printf \"BAI\\n\" >\"$1.bai\" ;;", "esac"), samtools)
@@ -93,6 +94,9 @@ expect_true(file.exists(file.path(tmp, "riker", "provenance.tsv")))
 writeLines("stale", riker_bam)
 riker_bam <- duckhts_bench_stage_riker(file.path(tmp, "riker"), 1L, samtools)
 expect_equal(readLines(riker_bam), "BAM")
+Sys.setenv(DUCKHTS_CACHE_DIR = file.path(tmp, "riker-registry-cache"))
+riker_registry_bam <- duckhts_bench_stage_riker(NULL, 1L, samtools)
+expect_equal(riker_registry_bam, file.path(tmp, "riker-registry-cache", "relocated", "derived.bam"))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
 
