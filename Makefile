@@ -150,14 +150,22 @@ test-benchmark-registry:
 	Rscript -e '.libPaths(c("'"$$tmp"'", .libPaths())); tinytest::test_package("duckhtsbench", testdir = "tinytest")'
 
 test-sqllogictest-debug: check_configure
-	$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
-		--test-dir test/sql \
-		--external-extension build/debug/$(EXTENSION_NAME).duckdb_extension
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
+			--test-dir test/sql \
+			--external-extension build/debug/$(EXTENSION_NAME).duckdb_extension; \
+	fi
 
 test-sqllogictest-release: check_configure
-	$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
-		--test-dir test/sql \
-		--external-extension build/release/$(EXTENSION_NAME).duckdb_extension
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
+			--test-dir test/sql \
+			--external-extension build/release/$(EXTENSION_NAME).duckdb_extension; \
+	fi
 
 # Override header fetch to use the actual DuckDB release version, not the C API version
 update_duckdb_headers_custom:
