@@ -137,13 +137,16 @@ expect_equal(readLines(norm_output), "VCF")
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
 
+gff_wheel <- file.path(tmp, "gffbase.whl")
+writeLines("verified wheel", gff_wheel)
 gff_registry <- file.path(tmp, "gffbase.tsv")
 writeLines(c(
   paste(names(registry), collapse = "\t"),
-  paste(c("gffbase_010", "gffbase", "python_package", "test", "https://example.test/gffbase", "public", "site", "pip_install", "tinytest", "1", ""), collapse = "\t")
+  paste(c("gffbase_010_linux_x86_64_wheel", "gffbase", "python_wheel", "test", paste0("file://", gff_wheel), "public", "wheel.whl", "direct_download", "tinytest", "1", ""), collapse = "\t"),
+  paste(c("gffbase_010", "gffbase", "python_package", "test", "artifact:gffbase_010_linux_x86_64_wheel", "local_derived", "site", "pip_install_verified_wheel", "tinytest", "2", ""), collapse = "\t")
 ), gff_registry)
 python <- file.path(tmp, "python3")
-writeLines(c("#!/usr/bin/env sh", "while [ \"$1\" != \"--target\" ]; do shift; done", "mkdir -p \"$2/gffbase\""), python)
+writeLines(c("#!/usr/bin/env sh", "if [ \"$1\" = \"-c\" ]; then exit 0; fi", "while [ \"$1\" != \"--target\" ]; do shift; done", "mkdir -p \"$2/gffbase\""), python)
 Sys.chmod(python, "0755")
 Sys.setenv(DUCKHTSBENCH_REGISTRY = gff_registry, DUCKHTS_CACHE_DIR = file.path(tmp, "gff-cache"))
 gff_site <- duckhts_bench_stage_gffbase(file.path(tmp, "gff-site"), python)

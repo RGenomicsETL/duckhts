@@ -102,8 +102,18 @@ runtime_sha256() { # filename
     *) return 2 ;;
   esac
 }
+sha256_of() { # path
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "sha256sum or shasum is required to verify duckdb-wasm runtime assets" >&2
+    return 2
+  fi
+}
 verify_runtime() { # filename path
-  [[ "$(sha256sum "$2" | awk '{print $1}')" == "$(runtime_sha256 "$1")" ]]
+  [[ "$(sha256_of "$2")" == "$(runtime_sha256 "$1")" ]]
 }
 fetch_runtime() { # filename [optional]
   local name="$1"

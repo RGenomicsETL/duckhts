@@ -28,7 +28,7 @@ duckhts_bench_stage_liftover <- function(
     if (file.exists(index) && unlink(index, force = TRUE) != 0L) {
       stop("could not replace liftover FASTA index: ", index, call. = FALSE)
     }
-    status <- system2(samtools, c("faidx", fasta))
+    status <- system2(samtools, c("faidx", shQuote(fasta)))
     if (status != 0L || !file.exists(index) || !file.info(index)$size) {
       stop("could not index liftover FASTA: ", fasta, call. = FALSE)
     }

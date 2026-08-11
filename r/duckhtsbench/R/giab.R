@@ -16,7 +16,7 @@ duckhts_bench_stage_giab <- function(samples = c("HG001", "HG002", "HG006"), bcf
   for (path in paths) {
     index <- paste0(path, ".tbi")
     if (file.exists(index) && unlink(index, force = TRUE) != 0L) stop("could not replace GIAB VCF index: ", path, call. = FALSE)
-    status <- system2(bcftools, c("index", "-f", "-t", path))
+    status <- system2(bcftools, c("index", "-f", "-t", shQuote(path)))
     if (status != 0L || !file.exists(index) || !file.info(index)$size) stop("could not index staged GIAB VCF: ", path, call. = FALSE)
   }
   invisible(paths)
