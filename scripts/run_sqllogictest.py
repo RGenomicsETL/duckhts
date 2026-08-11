@@ -133,10 +133,14 @@ class DuckHTSSQLLogicTestExecutor(sqllogic_runner.SQLLogicTestExecutor):
 
     def execute_test(self, test):
         artifacts = _declared_artifacts(Path(test.path), self._repo_root, self._tracked)
+        # A source archive may have no .git directory. Preserve every declared
+        # path that existed before this test, then clean only paths the test
+        # created; Git tracking remains an additional fixture safeguard.
+        preexisting = {path for path in artifacts if path.exists() or path.is_symlink()}
         try:
             return super().execute_test(test)
         finally:
-            _cleanup(artifacts)
+            _cleanup(artifacts - preexisting)
 
 
 def main() -> None:

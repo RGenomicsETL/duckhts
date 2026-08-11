@@ -57,24 +57,17 @@ Sys.setenv(BCFTOOLS_PLUGINS = bcftools_plugin_dir)
 
 bench_rows <- as.integer(Sys.getenv("LIFTOVER_BENCH_ROWS", unset = "1000000"))
 bench_runs <- as.integer(Sys.getenv("LIFTOVER_BENCH_RUNS", unset = "3"))
-duckhts_cache_dir <- Sys.getenv(
-  "DUCKHTS_CACHE_DIR",
-  unset = file.path(
-    path.expand(Sys.getenv("XDG_CACHE_HOME", unset = file.path("~", ".cache"))),
-    "duckhts"
-  )
-)
-liftover_reference_dir <- file.path(duckhts_cache_dir, "references", "liftover", "grch37-to-grch38")
-giab_cache_dir <- file.path(duckhts_cache_dir, "datasets", "giab", "nist-v4.2.1", "grch37")
-real_input_path <- Sys.getenv(
-  "LIFTOVER_REAL_VCF",
-  unset = file.path(giab_cache_dir, "HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")
-)
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+artifact_path <- duckhts_bench_artifact_path
+real_input_path <- Sys.getenv("LIFTOVER_REAL_VCF", unset = artifact_path("giab_hg001_grch37_v421"))
 real_provenance <- Sys.getenv("LIFTOVER_REAL_PROVENANCE", unset = paste0(real_input_path, ".provenance.tsv"))
 real_region <- Sys.getenv("LIFTOVER_REAL_REGION", unset = "")
-real_chain_path <- Sys.getenv("LIFTOVER_REAL_CHAIN", unset = file.path(liftover_reference_dir, "GRCh37_to_GRCh38.chain.gz"))
-real_src_fasta <- Sys.getenv("LIFTOVER_REAL_SRC_FASTA", unset = file.path(liftover_reference_dir, "human_g1k_v37.fasta"))
-real_dst_fasta <- Sys.getenv("LIFTOVER_REAL_DST_FASTA", unset = file.path(liftover_reference_dir, "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"))
+real_chain_path <- Sys.getenv("LIFTOVER_REAL_CHAIN", unset = artifact_path("liftover_grch37_grch38_chain"))
+real_src_fasta <- Sys.getenv("LIFTOVER_REAL_SRC_FASTA", unset = artifact_path("liftover_grch37_fasta"))
+real_dst_fasta <- Sys.getenv("LIFTOVER_REAL_DST_FASTA", unset = artifact_path("liftover_grch38_fasta"))
 
 if (is.na(bench_rows) || bench_rows < 1L) stop("LIFTOVER_BENCH_ROWS must be positive")
 if (is.na(bench_runs) || bench_runs < 1L) stop("LIFTOVER_BENCH_RUNS must be positive")

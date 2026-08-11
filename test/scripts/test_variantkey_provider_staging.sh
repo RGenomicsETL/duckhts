@@ -80,7 +80,7 @@ DBI::dbExecute(con, paste(
 ))
 DBI::dbExecute(con, paste(
   "INSERT INTO model_receipt VALUES ('Ensembl', '116', 'GRCh38',",
-  "'34eaee64f47916a2d9d3d864377f911424741c7ead12883e47dcf998f9677703',",
+  "'34eaee64f47916f2a9d3d864377f911424741c7ead12883e47dcf998f9677703',",
   "'d8c3af0094a7bba6125763bad779ec18a81483c739c6ed122094bdf86c187b92',",
   "'296bc90633562da49e900a723675c7a0b4aba53b8cbdec027f107d46972aec68')"
 ))
