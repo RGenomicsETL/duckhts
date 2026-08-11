@@ -13,7 +13,7 @@ duckhts_bench_cache_dir <- function() {
 #' @export
 duckhts_bench_cache_path <- function(relative_path = "") {
   if (length(relative_path) != 1L || is.na(relative_path) ||
-      grepl("^(/|[A-Za-z]:[/\\\\])", relative_path) ||
+      grepl("^/|^[A-Za-z]:", relative_path) || startsWith(relative_path, "\\\\") ||
       grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", relative_path)) {
     stop("relative_path must be one cache-contained relative path", call. = FALSE)
   }
