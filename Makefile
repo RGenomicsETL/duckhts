@@ -78,7 +78,7 @@ help:
 		'SIMD: make [test-simd-kernels|bench-simd-kernels]' \
 		'DuckVEP: make [test-duckvep-kernel|test-duckvep-differential]' \
 		'Reports: make [bench-duckvep-throughput|duckvep-render-reports]' \
-		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|duckvep-conformance-corpora|variantkey-providers]' \
+		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|variantkey-providers]' \
 		'Wasm: make wasm-playwright-test' \
 		'Cleanup: make [clean|clean_all|clean_local]'
 
@@ -142,6 +142,7 @@ test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
 	bash test/scripts/test_staging_cache.sh
 	bash test/scripts/test_liftover_registry_batch.sh
+	bash test/scripts/test_conformance_plugin_cache.sh
 
 test-benchmark-registry: test-variantkey-provider-staging
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \

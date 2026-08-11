@@ -27,15 +27,44 @@ conformance_require_file() {
   fi
 }
 
+conformance_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "A SHA-256 utility (sha256sum or shasum) is required" >&2
+    return 1
+  fi
+}
+
+conformance_plugin_identity() { # archive plugin_dir
+  local archive="$1" plugin_dir="$2" plugin
+  printf 'archive\t%s\n' "$(conformance_sha256 "$archive")"
+  for plugin in score.so munge.so liftover.so; do
+    printf '%s\t%s\n' "$plugin" "$(conformance_sha256 "${plugin_dir}/${plugin}")"
+  done
+}
+
 conformance_resolve_plugin_dir() {
   local root="$1"
   local zip_path="${root}/score_1.22-20250819.zip"
   local out_dir="${DUCKHTS_SCORE_PLUGIN_DIR:-$(duckhts_cache_subdir conformance/score-plugin)}"
+  local stamp="${out_dir}/.duckhts-score-plugin.identity.tsv"
+  local actual
 
+  conformance_require_file "$zip_path"
   mkdir -p "$out_dir"
-  if [[ ! -f "${out_dir}/score.so" || ! -f "${out_dir}/munge.so" || ! -f "${out_dir}/liftover.so" ]]; then
-    conformance_require_file "$zip_path"
+  actual="$(conformance_plugin_identity "$zip_path" "$out_dir" 2>/dev/null || true)"
+  if [[ ! -f "${out_dir}/score.so" || ! -f "${out_dir}/munge.so" || ! -f "${out_dir}/liftover.so" ]] \
+    || [[ ! -f "$stamp" ]] || ! cmp -s "$stamp" <(printf '%s\n' "$actual"); then
+    rm -f "${out_dir}/score.so" "${out_dir}/munge.so" "${out_dir}/liftover.so" "$stamp"
     unzip -oq "$zip_path" -d "$out_dir"
+    for plugin in score.so munge.so liftover.so; do
+      conformance_require_file "${out_dir}/${plugin}"
+    done
+    conformance_plugin_identity "$zip_path" "$out_dir" >"${stamp}.tmp"
+    mv -f "${stamp}.tmp" "$stamp"
   fi
   printf '%s\n' "$out_dir"
 }
