@@ -46,11 +46,10 @@ Stage the provider workload explicitly before rendering:
 make stage-variantkey-providers
 ```
 
-The command stages declared public raw sources and exports provider relations
-from the registered model cache entry. It fails closed if that model is absent:
-the public Ensembl 116 model producer is tracked in
-<https://github.com/RGenomicsETL/duckhts/issues/179>, rather than being
-replaced by an unreceipted URL.
+The command stages declared public raw sources, builds the registered DuckVEP
+model when absent from checksum-pinned Ensembl 116 core and funcgen MySQL dumps
+plus the matching GRCh38 FASTA, validates its deterministic receipt, and exports
+the provider relations.
 
 ```{r setup, include = FALSE}
 library(DBI)
@@ -99,7 +98,7 @@ if (length(missing_real_sources)) {
   stop(
     "missing staged benchmark sources: ",
     paste(names(missing_real_sources), collapse = ", "),
-    ". Run `make stage-variantkey-providers`; it reports any unavailable registered model.",
+    ". Run `make stage-variantkey-providers` to build and export the registered providers.",
     call. = FALSE
   )
 }

@@ -1,6 +1,22 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- move HPRC v2, Sniffles2 1KGP, and dbVar GRCh38 chr22 DuckVEP corpus staging
+  into the `duckhtsbench` artifact registry. The R-native CLI now owns pinned
+  raw-source identities, remote indexes/manifests, deterministic derived VCFs
+  and tabix indexes, cache paths, atomic publication, and adjacent receipts;
+  retain the former positional shell command as a compatibility forwarder and
+  cover version, ETag, manifest, path, checksum, and stale-cache behavior with
+  a network-free fake-source integration test
+
+- make the registered Ensembl 116 GRCh38 DuckVEP model reproducible from a clean
+  cache: pin the public core and funcgen MySQL manifests, schemas, required table
+  dumps, and primary-assembly FASTA in the benchmark registry; validate release,
+  species, assembly, source manifests, reference sequence, and the deterministic
+  DuckVEP receipt; preserve the imported source relation names; and build the
+  model automatically before VariantKey provider exports. Add a network-free
+  fixture-dump producer test and reject a mutated cached model
+
 - make cgranges benchmark orchestration R-native with an `optparse` entry point,
   retain the former Python command as a compatibility launcher, and invalidate
   shared cgranges/GFFBase results whenever their source revision, extension,

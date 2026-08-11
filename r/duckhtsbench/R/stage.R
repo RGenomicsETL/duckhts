@@ -1,3 +1,15 @@
+duckhts_bench_identity_fields <- function(identity) {
+  identity <- as.character(identity)
+  if (!length(identity) || is.na(identity) || !nzchar(identity)) return(character())
+  fields <- strsplit(identity, ";", fixed = TRUE)[[1L]]
+  if (any(!grepl("^[^=]+=", fields))) {
+    stop("invalid semicolon-delimited artifact identity", call. = FALSE)
+  }
+  keys <- sub("=.*$", "", fields)
+  if (anyDuplicated(keys)) stop("artifact identity fields must be unique", call. = FALSE)
+  stats::setNames(sub("^[^=]+=", "", fields), keys)
+}
+
 #' Download one registry artifact into the DuckHTS cache.
 #'
 #' This handles only registry rows whose transform is `direct_download`; derived
@@ -28,16 +40,14 @@ duckhts_bench_fetch <- function(id, overwrite = FALSE, output = duckhts_bench_ar
     }
   }
   if (overwrite || !ready) {
-    identity <- as.character(row$supplier_identity)
-    fields <- if (!length(identity) || is.na(identity) || !nzchar(identity)) character() else strsplit(identity, ";", fixed = TRUE)[[1L]]
-    values <- stats::setNames(sub("^[^=]+=", "", fields), sub("=.*$", "", fields))
+    values <- duckhts_bench_identity_fields(row$supplier_identity)
     if ("etag" %in% names(values)) {
       curl <- Sys.which("curl")
       if (!nzchar(curl)) stop("curl is required to validate supplier ETag: ", id, call. = FALSE)
       headers <- system2(curl, c("-fsSIL", row$locator), stdout = TRUE)
       etags <- sub("^[[:space:]]*[Ee][Tt][Aa][Gg]:[[:space:]]*\\\"?([^\\\"[:space:]\\r]+).*", "\\1", headers)
       etags <- etags[grepl("^[[:space:]]*[Ee][Tt][Aa][Gg]:", headers)]
-      if (!length(etags) || tail(etags, 1L) != values[["etag"]]) {
+      if (!length(etags) || utils::tail(etags, 1L) != values[["etag"]]) {
         stop("supplier ETag does not match registered artifact: ", id, call. = FALSE)
       }
     }
@@ -72,10 +82,8 @@ duckhts_bench_validate_identity <- function(id, output = duckhts_bench_artifact_
   row <- duckhts_bench_registry()
   row <- row[row$id == id, , drop = FALSE]
   if (nrow(row) != 1L) stop("unknown or non-unique benchmark artifact: ", id, call. = FALSE)
-  identity <- as.character(row$supplier_identity)
-  if (!length(identity) || is.na(identity) || !nzchar(identity)) return(invisible(TRUE))
-  fields <- strsplit(identity, ";", fixed = TRUE)[[1L]]
-  values <- stats::setNames(sub("^[^=]+=", "", fields), sub("=.*$", "", fields))
+  values <- duckhts_bench_identity_fields(row$supplier_identity)
+  if (!length(values)) return(invisible(TRUE))
   if ("bytes" %in% names(values) && file.info(output)$size != as.numeric(values[["bytes"]])) {
     stop("supplier byte identity does not match cached artifact: ", id, call. = FALSE)
   }
@@ -96,7 +104,7 @@ duckhts_bench_validate_identity <- function(id, output = duckhts_bench_artifact_
   if ("sum" %in% names(values) && "blocks" %in% names(values)) {
     sum_bin <- Sys.which("sum")
     if (!nzchar(sum_bin)) stop("sum is required to validate supplier checksum: ", id, call. = FALSE)
-    fields <- strsplit(trimws(system2(sum_bin, c("-r", output), stdout = TRUE)), "[[:space:]]+")[[1L]]
+    fields <- strsplit(trimws(system2(sum_bin, c("-r", shQuote(output)), stdout = TRUE)), "[[:space:]]+")[[1L]]
     if (length(fields) < 2L || as.integer(fields[[1L]]) != as.integer(values[["sum"]]) ||
         as.integer(fields[[2L]]) != as.integer(values[["blocks"]])) {
       stop("supplier sum identity does not match cached artifact: ", id, call. = FALSE)

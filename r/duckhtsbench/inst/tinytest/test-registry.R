@@ -20,6 +20,73 @@ expect_true(all(!grepl("\\.\\.", registry$cache_relpath)))
 expect_true(any(registry$id == "revel_v13_grch37"))
 expect_match(duckhts_bench_artifact_path("revel_v13_grch37"), "revel_grch37\\.parquet$")
 expect_equal(nrow(duckhts_bench_stage_plan("variantkey-providers")), sum(registry$workload == "variantkey-providers"))
+corpus_rows <- duckhts_bench_stage_plan("duckvep-conformance-corpora")
+expect_equal(nrow(corpus_rows), 13L)
+expect_equal(sum(corpus_rows$role == "raw_vcf_source_receipt"), 3L)
+expect_equal(sum(corpus_rows$role == "raw_vcf_index"), 3L)
+expect_equal(sum(corpus_rows$role == "derived_chr22_vcf"), 3L)
+expect_equal(sum(corpus_rows$role == "derived_chr22_vcf_index"), 3L)
+expect_true(all(corpus_rows$cache_relpath[corpus_rows$role == "derived_chr22_vcf_index"] ==
+  paste0(corpus_rows$cache_relpath[corpus_rows$role == "derived_chr22_vcf"], ".tbi")))
+expect_match(
+  corpus_rows$locator[corpus_rows$id == "duckvep_hprc_v2_grch38_source"],
+  "versionId=LnGRAq5AlCslA2a31J72oUZMxvR_5yuI", fixed = TRUE
+)
+expect_match(
+  corpus_rows$supplier_identity[corpus_rows$id == "duckvep_hprc_v2_grch38_source_tbi"],
+  "version_id=FuarSRln2LCGzuG.waMWXsSLQ9UoI5nQ", fixed = TRUE
+)
+expect_match(
+  corpus_rows$supplier_identity[corpus_rows$id == "duckvep_sniffles2_1kgp_source"],
+  "etag=131c622662ade1c745a7fad0b3b40be7-183", fixed = TRUE
+)
+expect_match(
+  corpus_rows$supplier_identity[corpus_rows$id == "duckvep_dbvar_grch38_20260127_source"],
+  "md5=56b1ce7d343c8982bd84076b63e0cd81", fixed = TRUE
+)
+expect_equal(
+  corpus_rows$locator[corpus_rows$id == "duckvep_dbvar_grch38_20260127_chr22"],
+  paste(
+    "artifact:duckvep_dbvar_grch38_20260127_source",
+    "artifact:duckvep_dbvar_grch38_20260127_source_tbi",
+    "artifact:duckvep_dbvar_grch38_20260127_manifest", sep = ";"
+  )
+)
+expect_match(
+  corpus_rows$supplier_identity[corpus_rows$id == "duckvep_hprc_v2_grch38_chr22_african4"],
+  "sha256=c7210035d99961e6243e432ffe513ec18520cd097af2b09cd945e5a2674aa309;bytes=9321604",
+  fixed = TRUE
+)
+expect_match(
+  duckhts_bench_artifact_path("duckvep_sniffles2_1kgp_chr22"),
+  "corpora/duckvep/sniffles2_1kgp/sniffles2_joint_chr22_sites\\.vcf\\.gz$"
+)
+duckvep_sources <- registry[
+  grepl("^source_(manifest|schema|table):(core|funcgen)(:|$)", registry$role),
+  , drop = FALSE
+]
+expect_equal(nrow(duckvep_sources), 20L)
+expect_true(all(duckvep_sources$transform == "direct_download"))
+expect_true(all(duckvep_sources$consumer == "duckvep_ensembl116_model"))
+model_row <- registry[registry$id == "duckvep_ensembl116_model", , drop = FALSE]
+expect_match(model_row$locator, "artifact:ensembl116_core_schema", fixed = TRUE)
+expect_match(model_row$locator, "artifact:ensembl116_funcgen_motif_feature", fixed = TRUE)
+expect_false(grepl("gff3", model_row$locator, fixed = TRUE))
+expect_match(
+  model_row$supplier_identity,
+  "source_manifest_sha256=aa34a1bd99509cc487427e808f94d2169b2f379894cbdf64f28f3537ffdcdc0c",
+  fixed = TRUE
+)
+wrong_release_registry <- tempfile("duckhtsbench-wrong-ensembl-release-", fileext = ".tsv")
+wrong_release <- registry
+wrong_release$release[wrong_release$id == "ensembl116_core_schema"] <- "Ensembl_115_homo_sapiens_core_115_38"
+utils::write.table(wrong_release, wrong_release_registry, sep = "\t", row.names = FALSE, quote = FALSE)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = wrong_release_registry)
+expect_error(
+  duckhtsbench:::duckhts_bench_duckvep_sources(),
+  "exact Ensembl 116 core model inputs"
+)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = registry_path)
 
 old_registry <- Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = NA_character_)
 old_cache <- Sys.getenv("DUCKHTS_CACHE_DIR", unset = NA_character_)

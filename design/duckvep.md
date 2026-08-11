@@ -487,11 +487,23 @@ SELECT * FROM duckvep_model_receipt(
 );
 ```
 
+The registered `duckvep_ensembl116_model` artifact has one clean-cache producer in
+`r/duckhtsbench`. Its registry rows pin the public Ensembl 116 `homo_sapiens_core_116_38`
+and `homo_sapiens_funcgen_116_38` `CHECKSUMS`, schema, and required table dumps plus the
+matching primary-assembly FASTA. The producer verifies each dump against its Ensembl
+manifest, verifies release 116, species `homo_sapiens`, species ID 1, and assembly GRCh38
+from the imported `meta` and `coord_system` relations, and preserves the required source
+table names under `ensembl_core` and `ensembl_funcgen`. It then invokes the same public
+DuckVEP preparation and receipt macros described above. The artifact records the source
+manifest, reference-sequence, and model hashes without a timestamp; a reused model must
+reproduce its stored receipt before provider exports are allowed.
+
 ### What the builder does not implement
 
-The implemented builder does not yet:
+The extension's SQL builder does not itself:
 
-- stage Ensembl `table.sql` and dump files into DuckDB;
+- download or parse Ensembl MySQL dump artifacts; the explicit `r/duckhtsbench` producer
+  owns that transport for the registered Ensembl 116 GRCh38 artifact;
 - reproduce the remaining non-core VEP 116 transcript sources and selection rules,
   including `estgene` and `otherfeatures`/RefSeq;
 - apply transcript-to-genome sequence corrections or arbitrary length-changing/range

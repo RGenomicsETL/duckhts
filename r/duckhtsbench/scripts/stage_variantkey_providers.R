@@ -11,6 +11,7 @@ if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
 }
 source(file.path(package_dir, "R", "registry.R"))
 source(file.path(package_dir, "R", "stage.R"))
+source(file.path(package_dir, "R", "duckvep.R"))
 
 if (length(args) && args[[1L]] == "--plan") {
   print(duckhts_bench_stage_plan("variantkey-providers"), row.names = FALSE)
@@ -98,31 +99,11 @@ unlink(work, recursive = TRUE, force = TRUE)
 publish(temporary, clinvarbitration_tsv)
 duckhts_bench_write_provenance("clinvarbitration_202508", clinvarbitration_tsv)
 
-model <- artifact("duckvep_ensembl116_model")
-if (!file.exists(model) || !file.info(model)$size) {
-  stop(
-    "the registered DuckVEP Ensembl 116 model is absent: ", model,
-    ". Its public producer is tracked at https://github.com/RGenomicsETL/duckhts/issues/179",
-    call. = FALSE
-  )
-}
-duckhts_bench_validate_identity("duckvep_ensembl116_model", model)
-model_row <- plan[plan$id == "duckvep_ensembl116_model", , drop = FALSE]
-identity_fields <- strsplit(model_row$supplier_identity[[1L]], ";", fixed = TRUE)[[1L]]
-model_identity <- stats::setNames(sub("^[^=]+=", "", identity_fields), sub("=.*$", "", identity_fields))
-model_identity <- model_identity[intersect(names(model_identity), c("model_sha256", "source_manifest_sha256", "reference_sha256"))]
-model_con <- DBI::dbConnect(duckdb::duckdb(), model, read_only = TRUE)
-receipt <- DBI::dbGetQuery(
-  model_con,
-  "SELECT source_name, source_version, assembly, source_manifest_sha256, reference_sha256, model_sha256 FROM model_receipt"
+extension <- Sys.getenv(
+  "DUCKHTS_EXTENSION",
+  unset = file.path(package_dir, "..", "..", "build", "release", "duckhts.duckdb_extension")
 )
-DBI::dbDisconnect(model_con, shutdown = TRUE)
-if (nrow(receipt) != 1L || receipt$source_name[[1L]] != "Ensembl" ||
-    receipt$source_version[[1L]] != "116" || receipt$assembly[[1L]] != "GRCh38" ||
-    any(vapply(names(model_identity), function(name) receipt[[name]][[1L]] != model_identity[[name]], logical(1L)))) {
-  stop("registered DuckVEP model receipt does not match Ensembl 116 GRCh38 identity", call. = FALSE)
-}
-duckhts_bench_write_provenance("duckvep_ensembl116_model", model)
+model <- duckhts_bench_stage_duckvep_ensembl116_model(extension)
 
 export_relation <- function(id, query) {
   output <- artifact(id)
