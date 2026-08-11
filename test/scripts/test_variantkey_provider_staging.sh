@@ -55,6 +55,7 @@ source_map[["revel_v13_source_zip"]] <- file.path(source_dir, "revel.zip")
 source_map[["clinvarbitration_202508_source_archive"]] <- file.path(source_dir, "clinvarbitration.tar.gz")
 for (id in registry$id[registry$transform == "direct_download"]) {
   registry$locator[registry$id == id] <- paste0("file://", source_map[[id]])
+  registry$supplier_identity[registry$id == id] <- ""
 }
 utils::write.table(registry, registry_path, sep = "\t", row.names = FALSE, quote = FALSE)
 

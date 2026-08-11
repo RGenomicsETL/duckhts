@@ -2,4 +2,5 @@
 
 - introduce the internal benchmark artifact registry and R-native portability check;
   registered VariantKey provider raw sources, derivations, model exports, and
-  their network-free staging closure now use that authority
+  their network-free staging closure now use that authority; cache reuse validates
+  declared publisher byte, MD5, or Ensembl `sum` identities before provenance is written

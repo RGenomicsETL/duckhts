@@ -708,8 +708,8 @@ regionkey_bounded_overlap <- measure_thread_grid(
         "FROM ov_probe p",
         "JOIN ov_subject s",
         "  ON s.rk_chrom_start >=",
-        "     (regionkey(p.chrom, greatest(0, p.start - 30 + 1), greatest(0, p.start - 30 + 1)) >> 31)",
-        " AND s.rk_chrom_start < (regionkey(p.chrom, p.\"end\", p.\"end\") >> 31)",
+        "     (regionkey(p.chrom, greatest(0, p.start - 30 + 1)::BIGINT, greatest(0, p.start - 30 + 1)::BIGINT) >> 31)",
+        " AND s.rk_chrom_start < (regionkey(p.chrom, p.\"end\"::BIGINT, p.\"end\"::BIGINT) >> 31)",
         " AND are_overlapping_regionkeys(p.rk, s.rk)"
       )
     )
@@ -935,12 +935,12 @@ regulatory_stage_query <- sprintf(
     "         feature_type, so_term, so_accession",
     "  FROM read_parquet(%s)",
     "), keyed AS (",
-    "  SELECT source.*, regionkey(chrom, start0, end0) AS rk",
+    "  SELECT source.*, regionkey(chrom, start0::BIGINT, end0::BIGINT) AS rk",
     "  FROM source",
     "  WHERE chrom IN (%s)",
     ")",
     "SELECT keyed.*, rk >> 31 AS rk_chrom_start,",
-    "       regionkey(chrom, end0, end0) >> 31 AS rk_chrom_end",
+    "       regionkey(chrom, end0::BIGINT, end0::BIGINT) >> 31 AS rk_chrom_end",
     "FROM keyed",
     "WHERE rk IS NOT NULL",
     "ORDER BY rk"
@@ -1909,8 +1909,8 @@ real_regionkey_interval <- measure_thread_grid(
           "FROM read_parquet(%s) q",
           "JOIN read_parquet(%s) s",
           "  ON s.rk_chrom_start >=",
-          "     (regionkey(q.chrom, greatest(0, q.start0 - %d + 1), greatest(0, q.start0 - %d + 1)) >> 31)",
-          " AND s.rk_chrom_start < (regionkey(q.chrom, q.end0, q.end0) >> 31)",
+          "     (regionkey(q.chrom, greatest(0, q.start0 - %d + 1)::BIGINT, greatest(0, q.start0 - %d + 1)::BIGINT) >> 31)",
+          " AND s.rk_chrom_start < (regionkey(q.chrom, q.end0::BIGINT, q.end0::BIGINT) >> 31)",
           " AND are_overlapping_regionkeys(q.rk, s.rk)"
         ),
         sql_path(real_case_path),

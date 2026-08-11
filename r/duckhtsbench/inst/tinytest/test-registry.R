@@ -118,7 +118,7 @@ writeLines(c(
   paste(c("norm_hg00096_chr22_20m_30m", "norm", "gvcf_slice", "test", paste0("file://", norm_source), "public", "norm/HG00096.g.vcf.gz", "bcftools_view_region_sample;tabix_index", "tinytest", "1", ""), collapse = "\t")
 ), norm_registry)
 norm_bcftools <- file.path(tmp, "norm-bcftools")
-writeLines(c("#!/usr/bin/env sh", "while [ \"$1\" != \"-o\" ]; do shift; done", "printf VCF >\"$2\""), norm_bcftools)
+writeLines(c("#!/usr/bin/env sh", "while [ \"$1\" != \"-o\" ]; do shift; done", "printf \"VCF\\n\" >\"$2\""), norm_bcftools)
 norm_tabix <- file.path(tmp, "norm-tabix")
 writeLines(c("#!/usr/bin/env sh", "for arg in \"$@\"; do target=$arg; done", "printf TBI >\"$target.tbi\""), norm_tabix)
 Sys.chmod(c(norm_bcftools, norm_tabix), "0755")
@@ -127,6 +127,9 @@ norm_output <- duckhts_bench_stage_norm(file.path(tmp, "norm-stage", "HG00096.g.
 expect_true(file.exists(norm_output))
 expect_true(file.exists(paste0(norm_output, ".tbi")))
 expect_true(file.exists(paste0(norm_output, ".provenance.tsv")))
+writeLines("stale", norm_output)
+norm_output <- duckhts_bench_stage_norm(norm_output, norm_bcftools, norm_tabix, 1L)
+expect_equal(readLines(norm_output), "VCF")
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
 

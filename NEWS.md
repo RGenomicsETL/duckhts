@@ -8,8 +8,8 @@
   VariantKey benchmark inputs are now explicit environment variables rather than one developer's paths.
   Explicit GIAB, liftover-reference, normalization, Riker, DuckVEP-corpus, local browser, and
   VariantKey-provider raw-source staging defaults now share `~/.cache/duckhts` (or
-  `DUCKHTS_CACHE_DIR`) and record source/transformation
-  provenance beside staged data. Retire only unreferenced generic and mosdepth benchmark reports;
+  `DUCKHTS_CACHE_DIR`), validate declared publisher identities before cache reuse, and record
+  source/transformation provenance beside staged data. Retire only unreferenced generic and mosdepth benchmark reports;
   preserve the VariantKey and FastVEP reports as evidence while their declared public-provider
   staging work is made executable. Normalize embedded
   native source paths so equal clean builds can

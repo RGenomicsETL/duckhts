@@ -14,14 +14,17 @@ duckhts_bench_stage_norm <- function(
   row <- row[row$id == "norm_hg00096_chr22_20m_30m", , drop = FALSE]
   if (nrow(row) != 1L) stop("normalization registry entry is missing", call. = FALSE)
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
-  if (!file.exists(output) || !file.info(output)$size) {
-    status <- system2(bcftools, c("view", "--threads", threads, "-r", "chr22:20000000-30000000", "-s", "HG00096", "-Oz", "-o", output, row$locator))
-    if (status != 0L) stop("could not extract registered 1000G DRAGEN gVCF slice", call. = FALSE)
-  }
-  if (!file.exists(paste0(output, ".tbi")) || !file.info(paste0(output, ".tbi"))$size) {
-    status <- system2(tabix, c("-f", "-p", "vcf", output))
-    if (status != 0L) stop("could not index registered normalization gVCF slice", call. = FALSE)
-  }
+  temporary <- paste0(output, ".partial-", Sys.getpid())
+  unlink(temporary, force = TRUE)
+  on.exit(unlink(temporary, force = TRUE), add = TRUE)
+  status <- system2(bcftools, c("view", "--threads", threads, "-r", "chr22:20000000-30000000", "-s", "HG00096", "-Oz", "-o", temporary, row$locator))
+  if (status != 0L || !file.exists(temporary) || !file.info(temporary)$size) stop("could not extract registered 1000G DRAGEN gVCF slice", call. = FALSE)
+  if (file.exists(output) && unlink(output, force = TRUE) != 0L) stop("could not replace normalization gVCF slice", call. = FALSE)
+  if (!file.rename(temporary, output)) stop("could not publish registered normalization gVCF slice", call. = FALSE)
+  index <- paste0(output, ".tbi")
+  if (file.exists(index) && unlink(index, force = TRUE) != 0L) stop("could not replace normalization gVCF index", call. = FALSE)
+  status <- system2(tabix, c("-f", "-p", "vcf", output))
+  if (status != 0L || !file.exists(index) || !file.info(index)$size) stop("could not index registered normalization gVCF slice", call. = FALSE)
   duckhts_bench_write_provenance("norm_hg00096_chr22_20m_30m", output)
   invisible(output)
 }

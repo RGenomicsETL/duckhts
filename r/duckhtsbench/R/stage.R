@@ -66,6 +66,15 @@ duckhts_bench_validate_identity <- function(id, output = duckhts_bench_artifact_
   if ("md5" %in% names(values) && unname(tools::md5sum(output)) != values[["md5"]]) {
     stop("supplier MD5 identity does not match cached artifact: ", id, call. = FALSE)
   }
+  if ("sum" %in% names(values) && "blocks" %in% names(values)) {
+    sum_bin <- Sys.which("sum")
+    if (!nzchar(sum_bin)) stop("sum is required to validate supplier checksum: ", id, call. = FALSE)
+    fields <- strsplit(trimws(system2(sum_bin, c("-r", output), stdout = TRUE)), "[[:space:]]+")[[1L]]
+    if (length(fields) < 2L || as.integer(fields[[1L]]) != as.integer(values[["sum"]]) ||
+        as.integer(fields[[2L]]) != as.integer(values[["blocks"]])) {
+      stop("supplier sum identity does not match cached artifact: ", id, call. = FALSE)
+    }
+  }
   invisible(TRUE)
 }
 
