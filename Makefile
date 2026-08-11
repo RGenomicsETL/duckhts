@@ -552,10 +552,10 @@ duckvep-render-reports:
 # test that loads it in a real browser and asserts the SIMD kernels resolve on
 # wasm (scalar fallback).  Same build path as CI's wasm-playwright workflow.
 wasm-playwright-test:
-	@set -e; \
-	. scripts/duckhts_cache.sh; \
-	export NPM_CONFIG_CACHE="$$DUCKHTS_CACHE_DIR/npm"; \
-	export PLAYWRIGHT_BROWSERS_PATH="$$DUCKHTS_CACHE_DIR/playwright"; \
-	export DUCKHTS_WASM_SITE_ROOT="$$DUCKHTS_CACHE_DIR/wasm/local-artifacts/site"; \
-	SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh; \
-	cd test/wasm && npm ci && npx playwright install --with-deps chromium && npx playwright test
+	@bash -c 'set -euo pipefail; \
+		source scripts/duckhts_cache.sh; \
+		export NPM_CONFIG_CACHE="$$DUCKHTS_CACHE_DIR/npm"; \
+		export PLAYWRIGHT_BROWSERS_PATH="$$DUCKHTS_CACHE_DIR/playwright"; \
+		export DUCKHTS_WASM_SITE_ROOT="$$DUCKHTS_CACHE_DIR/wasm/local-artifacts/site"; \
+		SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh; \
+		cd test/wasm && npm ci && npx playwright install --with-deps chromium && npx playwright test'
