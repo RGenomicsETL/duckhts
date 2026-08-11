@@ -79,6 +79,13 @@ real_dst_fasta <- Sys.getenv("LIFTOVER_REAL_DST_FASTA", unset = file.path(liftov
 if (is.na(bench_rows) || bench_rows < 1L) stop("LIFTOVER_BENCH_ROWS must be positive")
 if (is.na(bench_runs) || bench_runs < 1L) stop("LIFTOVER_BENCH_RUNS must be positive")
 
+source_revision <- trimws(system2("git", c("rev-parse", "HEAD"), stdout = TRUE))
+execution_metadata <- data.frame(
+  source_revision = source_revision,
+  duckdb_threads = 4L,
+  stringsAsFactors = FALSE
+)
+
 drv <- duckdb::duckdb(config = list(allow_unsigned_extensions = "true"))
 con <- dbConnect(drv, dbdir = ":memory:")
 
@@ -413,6 +420,12 @@ data.frame(
 )
 ```
 
+## Execution Metadata
+
+```{r execution-metadata, echo = FALSE}
+execution_metadata
+```
+
 ## Synthetic Stress Case
 
 ```{r synthetic, echo = FALSE}
@@ -467,12 +480,12 @@ if (real_enabled) {
 ```{r real-case-config, echo = FALSE}
 if (real_enabled) {
   data.frame(
-    input_vcf = real_input_path,
-    provenance = real_provenance,
+    input_vcf = basename(real_input_path),
+    provenance = basename(real_provenance),
     region = if (nzchar(real_region)) real_region else "full_input",
-    chain = real_chain_path,
-    src_fasta = real_src_fasta,
-    dst_fasta = real_dst_fasta,
+    chain = basename(real_chain_path),
+    src_fasta = basename(real_src_fasta),
+    dst_fasta = basename(real_dst_fasta),
     stringsAsFactors = FALSE
   )
 } else {

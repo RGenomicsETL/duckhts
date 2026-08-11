@@ -52,7 +52,7 @@ For curated GIAB benchmark slices, see
 
     #>               engine runs median_sec min_sec max_sec output_rows
     #> 1            duckhts    1      0.003   0.003   0.003         100
-    #> 2 bcftools_RBCFTools    1      0.009   0.009   0.009         100
+    #> 2 bcftools_RBCFTools    1      0.005   0.005   0.005         100
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
     #> 1       100           100                0                    0
@@ -61,5 +61,20 @@ For curated GIAB benchmark slices, see
 
 ## Real-Callset Case
 
-    #>                                   status
-    #> 1 skipped; set all LIFTOVER_REAL_* paths
+    #>                                   input_vcf
+    #> 1 HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
+    #>                                                 provenance     region
+    #> 1 HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz.provenance.tsv full_input
+    #>                       chain           src_fasta
+    #> 1 GRCh37_to_GRCh38.chain.gz human_g1k_v37.fasta
+    #>                                         dst_fasta
+    #> 1 GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
+
+    #>               engine runs median_sec min_sec max_sec output_rows
+    #> 1            duckhts    1      6.552   6.552   6.552     3886470
+    #> 2 bcftools_RBCFTools    1     12.392  12.392  12.392     3886470
+
+    #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
+    #> 1   3886470       3886470                0                    0
+    #>   mismatched_count_groups outputs_match
+    #> 1                       0          TRUE
