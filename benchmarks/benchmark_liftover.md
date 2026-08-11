@@ -51,13 +51,13 @@ For curated GIAB benchmark slices, see
 ## Execution Metadata
 
     #>                            source_revision duckdb_threads
-    #> 1 caf4303c336d2661c3dc072bd5044fa3d92531dd              4
+    #> 1 19c6d6acf8505e4eb03039966cb0c3aa937e3458              4
 
 ## Synthetic Stress Case
 
     #>               engine runs median_sec min_sec max_sec output_rows
     #> 1            duckhts    1      0.004   0.004   0.004         100
-    #> 2 bcftools_RBCFTools    1      0.008   0.008   0.008         100
+    #> 2 bcftools_RBCFTools    1      0.013   0.013   0.013         100
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
     #> 1       100           100                0                    0
@@ -76,8 +76,8 @@ For curated GIAB benchmark slices, see
     #> 1 GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
 
     #>               engine runs median_sec min_sec max_sec output_rows
-    #> 1            duckhts    1      5.981   5.981   5.981     3886470
-    #> 2 bcftools_RBCFTools    1     12.512  12.512  12.512     3886470
+    #> 1            duckhts    1      6.378   6.378   6.378     3886470
+    #> 2 bcftools_RBCFTools    1     12.328  12.328  12.328     3886470
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
     #> 1   3886470       3886470                0                    0
