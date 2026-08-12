@@ -34,7 +34,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.1.9000-0.1.5" id="rduckhts-1519000-015">Rduckhts 1.5.1.9000-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1519000-015"></a></h2>
-<ul><li><p>retire the unsupported <code><a href="../reference/duckhts_build.html">duckhts_build()</a></code> manual compiler path, which could duplicate package configuration and mutate installed sources. The package configure scripts now share one htslib receipt renderer; the R implementation is split into focused files without changing the supported reader and connection wrappers</p></li>
+<ul><li><p>make dependency installation an explicit <code>make deps</code> action rather than an implicit side effect of <code>make build</code>, so package builds remain usable in already provisioned or offline development environments</p></li>
+<li><p>retire the unsupported <code><a href="../reference/duckhts_build.html">duckhts_build()</a></code> manual compiler path, which could duplicate package configuration and mutate installed sources. The package configure scripts now share one htslib receipt renderer; the R implementation is split into focused files without changing the supported reader and connection wrappers</p></li>
 <li><p>compile and load a minimal registered R native library so binary repositories record the actual target architecture in the package <code>Built</code> field. This prevents configure-built DuckHTS and htslib artifacts from being treated as architecture-independent and reused across Linux, macOS, or Windows targets</p></li>
 <li><p>validate R-universe binary packages against both their <code>Built</code> field and bundled DuckDB extension footer, preventing a package built for one target from being published under another architecture</p></li>
 </ul></div>

@@ -2,6 +2,10 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- make dependency installation an explicit `make deps` action rather
+  than an implicit side effect of `make build`, so package builds remain
+  usable in already provisioned or offline development environments
+
 - retire the unsupported
   [`duckhts_build()`](https://rgenomicsetl.github.io/duckhts/reference/duckhts_build.md)
   manual compiler path, which could duplicate package configuration and
