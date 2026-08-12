@@ -63,7 +63,7 @@ rduckhts_simd_backend_compiled <- function(con, backend) {
     con,
     sprintf(
       "SELECT duckhts_simd_backend_compiled(%s) AS compiled",
-      sql_quote_string(backend)
+      sql_quote_string(con, backend)
     )
   )
   isTRUE(out$compiled[[1]])
@@ -77,7 +77,7 @@ rduckhts_simd_backend_cpu_supported <- function(con, backend) {
     con,
     sprintf(
       "SELECT duckhts_simd_backend_cpu_supported(%s) AS supported",
-      sql_quote_string(backend)
+      sql_quote_string(con, backend)
     )
   )
   isTRUE(out$supported[[1]])
@@ -91,7 +91,7 @@ rduckhts_simd_backend_available <- function(con, backend) {
     con,
     sprintf(
       "SELECT duckhts_simd_backend_available(%s) AS available",
-      sql_quote_string(backend)
+      sql_quote_string(con, backend)
     )
   )
   isTRUE(out$available[[1]])
@@ -117,7 +117,7 @@ rduckhts_simd_set_backend <- function(con, backend = "auto") {
     con,
     sprintf(
       "SELECT backend FROM duckhts_simd_set_backend(%s)",
-      sql_quote_string(backend)
+      sql_quote_string(con, backend)
     )
   )
   out$backend[[1]]

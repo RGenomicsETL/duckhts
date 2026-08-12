@@ -1,16 +1,76 @@
-build_param_str <- function(params) {
-  if (length(params) == 0) {
-    return("")
+sql_quote_string <- function(con, x) {
+  if (!is.character(x) || length(x) != 1L || is.na(x)) {
+    stop("SQL literal must be one non-missing character string", call. = FALSE)
   }
-  param_str <- paste(paste0(names(params), " := ", params), collapse = ", ")
-  if (nchar(param_str) > 0) {
-    return(paste0(", ", param_str))
-  }
-  ""
+  as.character(DBI::dbQuoteString(con, x))
 }
 
-sql_quote_string <- function(x) {
-  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+sql_quote_identifier <- function(con, x) {
+  if (!is.character(x) || length(x) != 1L || is.na(x)) {
+    stop("SQL identifier must be one non-missing character string", call. = FALSE)
+  }
+  as.character(DBI::dbQuoteIdentifier(con, x))
+}
+
+sql_raw_expression <- function(x) {
+  if (!is.character(x) || length(x) != 1L || is.na(x)) {
+    stop("SQL expression must be one non-missing character string", call. = FALSE)
+  }
+  x
+}
+
+build_param_str <- function(params) {
+  if (!length(params)) return("")
+  paste0(", ", paste(names(params), ":=", params, collapse = ", "))
+}
+
+sql_varchar_list_literal <- function(con, x, name = "value") {
+  if (is.null(x) || !length(x)) return("[]::VARCHAR[]")
+  if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
+    stop(name, " must be a character vector without NA or empty values", call. = FALSE)
+  }
+  sprintf(
+    "[%s]",
+    paste(
+      vapply(x, function(value) sql_quote_string(con, value), character(1)),
+      collapse = ", "
+    )
+  )
+}
+
+sql_map_literal <- function(con, x, name = "column_map", allow_empty = FALSE) {
+  if (is.null(x) || !length(x)) {
+    if (allow_empty) return("map([]::VARCHAR[], []::VARCHAR[])")
+    stop(name, " must be non-empty", call. = FALSE)
+  }
+  nm <- names(x)
+  if (is.null(nm) || any(!nzchar(nm))) {
+    stop(name, " must be a named character vector", call. = FALSE)
+  }
+  keys <- paste(
+    vapply(nm, function(value) sql_quote_string(con, value), character(1)),
+    collapse = ", "
+  )
+  vals <- paste(
+    vapply(as.character(x), function(value) sql_quote_string(con, value), character(1)),
+    collapse = ", "
+  )
+  sprintf("map([%s], [%s])", keys, vals)
+}
+
+duckdb_path_exists <- function(con, path) {
+  child_pattern <- paste0(sub("/+$", "", path), "/**")
+  tryCatch(
+    isTRUE(DBI::dbGetQuery(
+      con,
+      sprintf(
+        "SELECT EXISTS(SELECT 1 FROM glob([%s, %s]) LIMIT 1) AS exists",
+        sql_quote_string(con, path),
+        sql_quote_string(con, child_pattern)
+      )
+    )$exists[[1]]),
+    error = function(e) NA
+  )
 }
 
 .validate_nonnegative_integer_param <- function(value, name) {
@@ -48,57 +108,6 @@ sql_quote_string <- function(x) {
     stop(sprintf("%s must be 'auto' or 'sequential'", name), call. = FALSE)
   }
   value
-}
-
-sql_varchar_list_literal <- function(x, name = "value") {
-  if (is.null(x) || length(x) == 0L) {
-    return("[]::VARCHAR[]")
-  }
-  if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
-    stop(
-      name,
-      " must be a character vector without NA or empty values",
-      call. = FALSE
-    )
-  }
-  sprintf(
-    "[%s]",
-    paste(vapply(x, sql_quote_string, character(1)), collapse = ", ")
-  )
-}
-
-sql_map_literal <- function(x, name = "column_map", allow_empty = FALSE) {
-  if (is.null(x) || length(x) == 0) {
-    if (allow_empty) {
-      return("map([]::VARCHAR[], []::VARCHAR[])")
-    }
-    stop(name, " must be non-empty", call. = FALSE)
-  }
-  nm <- names(x)
-  if (is.null(nm) || any(!nzchar(nm))) {
-    stop(name, " must be a named character vector", call. = FALSE)
-  }
-  keys <- paste(vapply(nm, sql_quote_string, character(1)), collapse = ", ")
-  vals <- paste(
-    vapply(as.character(x), sql_quote_string, character(1)),
-    collapse = ", "
-  )
-  sprintf("map([%s], [%s])", keys, vals)
-}
-
-duckdb_path_exists <- function(con, path) {
-  child_pattern <- paste0(sub("/+$", "", path), "/**")
-  tryCatch(
-    isTRUE(DBI::dbGetQuery(
-      con,
-      sprintf(
-        "SELECT EXISTS(SELECT 1 FROM glob([%s, %s]) LIMIT 1) AS exists",
-        sql_quote_string(path),
-        sql_quote_string(child_pattern)
-      )
-    )$exists[[1]]),
-    error = function(e) NA
-  )
 }
 
 read_munge_column_map_file <- function(path) {
@@ -149,10 +158,9 @@ resolve_munge_column_map <- function(raw_map, available_columns) {
 }
 
 read_munge_preset_map <- function(con, preset) {
-  preset_sql <- sql_quote_string(preset)
   out <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT duckdb_munge_preset_map(%s) AS m", preset_sql)
+    sprintf("SELECT duckdb_munge_preset_map(%s) AS m", sql_quote_string(con, preset))
   )
   if (nrow(out) != 1 || is.null(out$m[[1]])) {
     stop("duckdb_munge: unknown preset", call. = FALSE)

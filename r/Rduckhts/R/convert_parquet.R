@@ -1,4 +1,4 @@
-# Parquet converter wrappers. Generic SQL literal/path helpers live in duckhts.R.
+# Parquet converter wrappers. SQL-boundary authorities live in sql_helpers.R.
 
 run_convert_parquet_sql <- function(
   con,
@@ -47,8 +47,8 @@ run_convert_parquet_sql <- function(
   query <- sprintf(
     "SELECT %s(%s, %s%s) AS copy_sql",
     sql_function,
-    sql_quote_string(path),
-    sql_quote_string(output),
+    sql_quote_string(con, path),
+    sql_quote_string(con, output),
     build_param_str(params)
   )
   copy_sql <- DBI::dbGetQuery(con, query)$copy_sql
@@ -60,6 +60,7 @@ run_convert_parquet_sql <- function(
 }
 
 convert_parquet_common_params <- function(
+  con,
   columns,
   where,
   compression,
@@ -176,24 +177,28 @@ convert_parquet_common_params <- function(
   }
 
   list(
-    columns = sql_varchar_list_literal(columns, "columns"),
-    where_sql = if (is.null(where)) "NULL" else sql_quote_string(where),
-    compression = sql_quote_string(compression),
+    columns = sql_varchar_list_literal(con, columns, "columns"),
+    where_sql = if (is.null(where)) {
+      "NULL"
+    } else {
+      sql_quote_string(con, where)
+    },
+    compression = sql_quote_string(con, compression),
     row_group_size = as.character(row_group_size),
-    partition_by = sql_varchar_list_literal(partition_by, "partition_by"),
+    partition_by = sql_varchar_list_literal(con, partition_by, "partition_by"),
     include_metadata = if (include_metadata) "true" else "false",
     header_text = if (is.null(header_text)) {
       "NULL"
     } else {
-      sql_quote_string(header_text)
+      sql_quote_string(con, header_text)
     },
-    metadata = sql_map_literal(metadata, name = "metadata", allow_empty = TRUE),
+    metadata = sql_map_literal(con, metadata, name = "metadata", allow_empty = TRUE),
     metadata_json_file = if (is.null(metadata_json_file)) {
       "NULL"
     } else {
-      sql_quote_string(metadata_json_file)
+      sql_quote_string(con, metadata_json_file)
     },
-    write_format_version = sql_quote_string(write_format_version)
+    write_format_version = sql_quote_string(con, write_format_version)
   )
 }
 
@@ -262,6 +267,7 @@ rduckhts_bcf_convert_parquet <- function(
     stop("tidy_format must be TRUE or FALSE", call. = FALSE)
   }
   params <- convert_parquet_common_params(
+    con,
     columns,
     where,
     compression,
@@ -274,14 +280,15 @@ rduckhts_bcf_convert_parquet <- function(
     write_format_version
   )
   if (!is.null(region)) {
-    params$region <- sql_quote_string(region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   params$tidy_format <- if (tidy_format) "true" else "false"
   if (!is.null(additional_csq_column_types)) {
     params$additional_csq_column_types <- sql_quote_string(
+      con,
       additional_csq_column_types
     )
   }
@@ -358,6 +365,7 @@ rduckhts_bam_convert_parquet <- function(
     stop("auxiliary_tags must be TRUE or FALSE", call. = FALSE)
   }
   params <- convert_parquet_common_params(
+    con,
     columns,
     where,
     compression,
@@ -370,24 +378,27 @@ rduckhts_bam_convert_parquet <- function(
     write_format_version
   )
   if (!is.null(region)) {
-    params$region <- sql_quote_string(region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(reference)) {
-    params$reference <- sql_quote_string(reference)
+    params$reference <- sql_quote_string(con, reference)
   }
   params$standard_tags <- if (standard_tags) "true" else "false"
   params$auxiliary_tags <- if (auxiliary_tags) "true" else "false"
   if (!is.null(sequence_encoding)) {
-    params$sequence_encoding <- sql_quote_string(sequence_encoding)
+    params$sequence_encoding <- sql_quote_string(con, sequence_encoding)
   }
   if (!is.null(quality_representation)) {
-    params$quality_representation <- sql_quote_string(quality_representation)
+    params$quality_representation <- sql_quote_string(
+      con,
+      quality_representation
+    )
   }
   if (!is.null(cigar_representation)) {
-    params$cigar_representation <- sql_quote_string(cigar_representation)
+    params$cigar_representation <- sql_quote_string(con, cigar_representation)
   }
   params$decompression_threads <- sprintf(
     "%d",
@@ -473,7 +484,14 @@ rduckhts_gff_convert_parquet <- function(
   if (!is.logical(strict) || length(strict) != 1L || is.na(strict)) {
     stop("strict must be TRUE or FALSE", call. = FALSE)
   }
+  if (!is.null(header) && (!is.logical(header) || length(header) != 1L || is.na(header))) {
+    stop("header must be TRUE or FALSE", call. = FALSE)
+  }
+  if (!is.null(auto_detect) && (!is.logical(auto_detect) || length(auto_detect) != 1L || is.na(auto_detect))) {
+    stop("auto_detect must be TRUE or FALSE", call. = FALSE)
+  }
   params <- convert_parquet_common_params(
+    con,
     columns,
     where,
     compression,
@@ -486,32 +504,16 @@ rduckhts_gff_convert_parquet <- function(
     write_format_version
   )
   if (!is.null(region)) {
-    params$region <- sql_quote_string(region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
-  if (!is.null(header)) {
-    if (!is.logical(header) || length(header) != 1L || is.na(header)) {
-      stop("header must be TRUE or FALSE", call. = FALSE)
-    }
-    params$header <- if (header) "true" else "false"
-  }
-  params$header_names <- sql_varchar_list_literal(header_names, "header_names")
-  if (!is.null(auto_detect)) {
-    if (
-      !is.logical(auto_detect) ||
-        length(auto_detect) != 1L ||
-        is.na(auto_detect)
-    ) {
-      stop("auto_detect must be TRUE or FALSE", call. = FALSE)
-    }
-    params$auto_detect <- if (auto_detect) "true" else "false"
-  }
-  if (!is.null(column_types)) {
-    column_types <- normalize_tabix_types(column_types)
-  }
-  params$column_types <- sql_varchar_list_literal(column_types, "column_types")
+  if (!is.null(header)) params$header <- if (header) "true" else "false"
+  params$header_names <- sql_varchar_list_literal(con, header_names, "header_names")
+  if (!is.null(auto_detect)) params$auto_detect <- if (auto_detect) "true" else "false"
+  if (!is.null(column_types)) column_types <- normalize_tabix_types(column_types)
+  params$column_types <- sql_varchar_list_literal(con, column_types, "column_types")
   params$attributes_map <- if (attributes_map) "true" else "false"
   params$attributes_list <- if (attributes_list) "true" else "false"
   params$attributes_pairs <- if (attributes_pairs) "true" else "false"
@@ -558,7 +560,14 @@ rduckhts_tabix_convert_parquet <- function(
   write_format_version = "1",
   overwrite = FALSE
 ) {
+  if (!is.null(header) && (!is.logical(header) || length(header) != 1L || is.na(header))) {
+    stop("header must be TRUE or FALSE", call. = FALSE)
+  }
+  if (!is.null(auto_detect) && (!is.logical(auto_detect) || length(auto_detect) != 1L || is.na(auto_detect))) {
+    stop("auto_detect must be TRUE or FALSE", call. = FALSE)
+  }
   params <- convert_parquet_common_params(
+    con,
     columns,
     where,
     compression,
@@ -571,32 +580,16 @@ rduckhts_tabix_convert_parquet <- function(
     write_format_version
   )
   if (!is.null(region)) {
-    params$region <- sql_quote_string(region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
-  if (!is.null(header)) {
-    if (!is.logical(header) || length(header) != 1L || is.na(header)) {
-      stop("header must be TRUE or FALSE", call. = FALSE)
-    }
-    params$header <- if (header) "true" else "false"
-  }
-  params$header_names <- sql_varchar_list_literal(header_names, "header_names")
-  if (!is.null(auto_detect)) {
-    if (
-      !is.logical(auto_detect) ||
-        length(auto_detect) != 1L ||
-        is.na(auto_detect)
-    ) {
-      stop("auto_detect must be TRUE or FALSE", call. = FALSE)
-    }
-    params$auto_detect <- if (auto_detect) "true" else "false"
-  }
-  if (!is.null(column_types)) {
-    column_types <- normalize_tabix_types(column_types)
-  }
-  params$column_types <- sql_varchar_list_literal(column_types, "column_types")
+  if (!is.null(header)) params$header <- if (header) "true" else "false"
+  params$header_names <- sql_varchar_list_literal(con, header_names, "header_names")
+  if (!is.null(auto_detect)) params$auto_detect <- if (auto_detect) "true" else "false"
+  if (!is.null(column_types)) column_types <- normalize_tabix_types(column_types)
+  params$column_types <- sql_varchar_list_literal(con, column_types, "column_types")
   run_convert_parquet_sql(
     con,
     "duckhts_tabix_convert_parquet_sql",
