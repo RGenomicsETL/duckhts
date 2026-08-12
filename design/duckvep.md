@@ -357,6 +357,40 @@ builder so extension builds remain offline and the same validation runs for eith
 The builder does not require a MySQL server once those relations and the matching reference
 chunks have been persisted.
 
+#### Versioned model input contract
+
+A DuckVEP model is identified by the tuple `(source, source release, VEP behavioral
+release, species, assembly, transcript-selection policy, reference identity)`. The source
+release and behavioral release are separate fields because an adapter can deliberately
+support a bounded VEP behavioral subset over a particular Ensembl source release; they must
+never be inferred from a cache filename or silently changed in place.
+
+The release adapter is the only version-specific layer. It obtains the declared Ensembl
+relations, maps release-specific schema or attribute-policy differences into the canonical
+input relations below, and records the exact source manifests. It must not reinterpret
+canonical model fields, alter ordinal ordering, or make a version-specific selection without
+putting that selection in the receipt and validation evidence.
+
+| Builder | Required canonical source relations |
+| --- | --- |
+| `duckvep_ensembl_regions` | `core_schema.coord_system`, `core_schema.seq_region`, and a reference-chunk relation with `chrom`, zero-based `start`, half-open `end`, and `seq` |
+| `duckvep_ensembl_transcripts` | region inputs plus `core_schema.seq_region_attrib`, `transcript`, `gene`, `translation`, `exon_transcript`, `exon`, `transcript_attrib`, `translation_attrib`, and `attrib_type` |
+| `duckvep_ensembl_regulation_features` | `funcgen_schema.regulatory_feature`, `feature_type`, and `motif_feature`, plus the canonical region relation |
+
+The extension validates the columns it reads and rejects inconsistent values; the exact
+source-column projections are executable in the builder macros and acceptance fixtures.
+A future release adapter may add source handling, but it must still produce the same
+canonical region, transcript, and regulation relations. Loader projections are backward
+compatible in their documented 11-, 12-, and 13-column forms; a new model capability is an
+additive contract change with an explicit receipt field and tests, not a reinterpretation of
+an older model.
+
+Promoting a new VEP target therefore requires three independent proofs: a pinned public
+source/release manifest and reference identity, canonical-model receipt validation, and
+release-specific differential cases against the pinned upstream VEP target. The evidence
+must state the supported consequence/HGVS/CSQ subset and every intentional difference;
+passing VEP 116 evidence does not validate another release.
+
 `duckvep_model_receipt(...)` checks dense ordinals, region/transcript agreement, and every
 regulatory/motif interval against its declared region. It
 records the declared source, release, assembly, transcript filter, source-manifest hash,
@@ -453,11 +487,23 @@ SELECT * FROM duckvep_model_receipt(
 );
 ```
 
+The registered `duckvep_ensembl116_model` artifact has one clean-cache producer in
+`r/duckhtsbench`. Its registry rows pin the public Ensembl 116 `homo_sapiens_core_116_38`
+and `homo_sapiens_funcgen_116_38` `CHECKSUMS`, schema, and required table dumps plus the
+matching primary-assembly FASTA. The producer verifies each dump against its Ensembl
+manifest, verifies release 116, species `homo_sapiens`, species ID 1, and assembly GRCh38
+from the imported `meta` and `coord_system` relations, and preserves the required source
+table names under `ensembl_core` and `ensembl_funcgen`. It then invokes the same public
+DuckVEP preparation and receipt macros described above. The artifact records the source
+manifest, reference-sequence, and model hashes without a timestamp; a reused model must
+reproduce its stored receipt before provider exports are allowed.
+
 ### What the builder does not implement
 
-The implemented builder does not yet:
+The extension's SQL builder does not itself:
 
-- stage Ensembl `table.sql` and dump files into DuckDB;
+- download or parse Ensembl MySQL dump artifacts; the explicit `r/duckhtsbench` producer
+  owns that transport for the registered Ensembl 116 GRCh38 artifact;
 - reproduce the remaining non-core VEP 116 transcript sources and selection rules,
   including `estgene` and `otherfeatures`/RefSeq;
 - apply transcript-to-genome sequence corrections or arbitrary length-changing/range
@@ -472,8 +518,8 @@ The implemented builder does not yet:
 Those richer facts should remain typed DuckDB relations joined by numeric source IDs. They
 do not belong in every resident C transcript record. Exact VEP-compatible selection and
 the richer Ensembl relation set can therefore be separate named products built from the
-same staged release. Production-corpus conformance and throughput remain tracked at
-https://github.com/RGenomicsETL/duckhts/issues/93 and
+same staged release. The [conformance report](../benchmarks/duckvep_conformance.md)
+records the declared corpus evidence; throughput accounting remains tracked at
 https://github.com/RGenomicsETL/duckhts/issues/95. Further species and genetic-code
 coverage is tracked at https://github.com/RGenomicsETL/duckhts/issues/119.
 
@@ -554,8 +600,7 @@ Production MNVs and indels use the generalized edit/CDS/peptide context exactly 
 projection, sequence, capacity, or unsupported-state failure remains explicit and is never
 retried through a smaller shape-specific classifier. Narrow direct classifiers remain only
 as independent pure-C test references; the annotation path cannot select them after a
-context failure. https://github.com/RGenomicsETL/duckhts/issues/93 owns continued
-real-VEP differential closure, not a second consequence implementation.
+context failure.
 
 ## NMD prediction
 
@@ -933,9 +978,8 @@ RSS, interval-index density, real multi-provider plan, join-count stress, and
 twelve-provider logical-time envelope live in
 `benchmarks/benchmark_variantkey_join_overlap.md`.
 
-The stateful stable-API integration is tracked at
-https://github.com/RGenomicsETL/duckhts/issues/94. Supplementary source plumbing does not
-belong as ignored arguments in the consequence-kernel API.
+Supplementary source plumbing does not belong as ignored arguments in the
+consequence-kernel API.
 
 ## Validation and performance
 
@@ -1221,7 +1265,7 @@ Source ownership makes the resident model immutable and shared; GNU `time -v` ob
 That process measurement is not allocation attribution. At 50,000 bases the same inputs
 expand to 88,784,213 rows and the observed four-branch RSS premium remains 8.16 MiB.
 
-The closed consequence-conformance and dense-throughput campaigns are tracked at
-https://github.com/RGenomicsETL/duckhts/issues/93 and
-https://github.com/RGenomicsETL/duckhts/issues/95. Phased execution remains a distinct
-semantic vertical at https://github.com/RGenomicsETL/duckhts/issues/92.
+The conformance report records the closed consequence campaign, while
+https://github.com/RGenomicsETL/duckhts/issues/95 tracks remaining throughput work. Phased
+execution remains a distinct semantic vertical at
+https://github.com/RGenomicsETL/duckhts/issues/92.

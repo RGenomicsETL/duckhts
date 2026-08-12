@@ -22,6 +22,12 @@ This benchmark:
 
 `make bench-mosdepth`
 
+First stage the registered whole-genome CRAM/reference input and derived BAM:
+
+```sh
+make stage-riker-wgs
+```
+
 Override defaults with:
 
 - `MOSDEPTH_BENCH_BAM`
@@ -33,10 +39,14 @@ Override defaults with:
 ```{r setup, include = FALSE}
 shell_quote <- function(x) shQuote(x, type = "sh")
 
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
 bench_bam <- normalizePath(
   Sys.getenv(
     "MOSDEPTH_BENCH_BAM",
-    unset = "NA12878.mapped.ILLUMINA.bwa.CEU.low_coverage.20121211.bam"
+    unset = duckhts_bench_artifact_path("riker_hg00188_bam")
   ),
   mustWork = TRUE
 )

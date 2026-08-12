@@ -11,23 +11,40 @@ not generate giant UNION ALL bulk-query SQL.
 from __future__ import annotations
 
 import argparse
+import csv
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+from duckhts_cache import duckhts_cache_subdir
+
+
+def registry_artifact_path(repo: Path, artifact_id: str) -> Path:
+    configured = os.environ.get("DUCKHTSBENCH_REGISTRY")
+    registry = Path(configured) if configured else repo / "r" / "duckhtsbench" / "inst" / "benchmark_registry.tsv"
+    if not registry.is_file():
+        raise FileNotFoundError(f"benchmark registry not found: {registry}")
+    with registry.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            if row["id"] == artifact_id:
+                return duckhts_cache_subdir(*Path(row["cache_relpath"]).parts)
+    raise ValueError(f"artifact {artifact_id!r} is not registered in {registry}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[1]
+    duckbedqc_dir = Path(os.environ["DUCKBEDQC_DIR"]) if "DUCKBEDQC_DIR" in os.environ else registry_artifact_path(repo, "duckbedqc_118fc21")
     p = argparse.ArgumentParser(description="Run the real DuckBedQC cgranges benchmark")
     p.add_argument("--extension", default=str(repo / "build" / "release" / "duckhts.duckdb_extension"))
     p.add_argument("--bedtk", default=str(repo / ".sync" / "bedtk" / "bedtk"))
     p.add_argument("--bedtools", default="bedtools")
-    p.add_argument("--subject-bed", default=str(repo / "DuckBedQC" / "data" / "GRCh38_exons.bed"))
-    p.add_argument("--query-bed", default=str(repo / "DuckBedQC" / "data" / "GRCh38_illumina_clinical_regions_v100.39.0.bed"))
+    p.add_argument("--subject-bed", default=str(duckbedqc_dir / "data" / "GRCh38_exons.bed"))
+    p.add_argument("--query-bed", default=str(duckbedqc_dir / "data" / "GRCh38_illumina_clinical_regions_v100.39.0.bed"))
     p.add_argument("--limit-subjects", type=int, help="Use only the first N subject intervals")
     p.add_argument("--limit-queries", type=int, help="Use only the first N query intervals")
     p.add_argument("--passes", type=int, default=1)
-    p.add_argument("--out-dir", default=str(repo / ".tmp" / "cgranges_benchmark_real"))
+    p.add_argument("--out-dir", default=str(duckhts_cache_subdir("benchmarks", "cgranges-real")))
     p.add_argument("--timeout", type=int, default=7200)
     return p
 

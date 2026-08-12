@@ -73,8 +73,6 @@ def _allowed_output(path: Path, root: Path, tracked: set[str]) -> bool:
     relative_name = relative.as_posix()
     if relative_name in tracked:
         return False
-    if relative_name == "test/data" or relative_name.startswith("test/data/"):
-        return False
     if relative_name == "test/duckvep" or relative_name.startswith("test/duckvep/"):
         return False
     if relative_name == "third_party" or relative_name.startswith("third_party/"):
@@ -135,10 +133,14 @@ class DuckHTSSQLLogicTestExecutor(sqllogic_runner.SQLLogicTestExecutor):
 
     def execute_test(self, test):
         artifacts = _declared_artifacts(Path(test.path), self._repo_root, self._tracked)
+        # A source archive may have no .git directory. Preserve every declared
+        # path that existed before this test, then clean only paths the test
+        # created; Git tracking remains an additional fixture safeguard.
+        preexisting = {path for path in artifacts if path.exists() or path.is_symlink()}
         try:
             return super().execute_test(test)
         finally:
-            _cleanup(artifacts)
+            _cleanup(artifacts - preexisting)
 
 
 def main() -> None:

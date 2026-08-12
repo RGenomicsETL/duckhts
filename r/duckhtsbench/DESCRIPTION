@@ -1,0 +1,18 @@
+Package: duckhtsbench
+Type: Package
+Title: DuckHTS Benchmark Input Registry
+Version: 0.0.0.9000
+Authors@R: person("Sounkou", role = c("aut", "cre"), email = "sounkou@example.org")
+Description: Internal utilities that declare, stage, and validate reproducible
+    benchmark and conformance inputs for DuckHTS.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports:
+    utils
+Suggests:
+    DBI,
+    duckdb,
+    jsonlite,
+    optparse,
+    tinytest
+RoxygenNote: 7.3.3

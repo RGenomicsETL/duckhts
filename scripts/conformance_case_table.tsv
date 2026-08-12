@@ -1,8 +1,8 @@
-case_id	dataset	sample	description	default_region	input_vcf
-giab_hg001_grch37_chr20	giab	HG001	GIAB NA12878 HG001 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/NA12878_HG001/NISTv4.2.1/GRCh37/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-giab_hg002_grch37_chr20	giab	HG002	GIAB Ashkenazim trio HG002 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/HG002_NA24385_son/NISTv4.2.1/GRCh37/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-giab_hg003_grch37_chr20	giab	HG003	GIAB Ashkenazim trio HG003 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/HG003_NA24149_father/NISTv4.2.1/GRCh37/HG003_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-giab_hg004_grch37_chr20	giab	HG004	GIAB Ashkenazim trio HG004 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/HG004_NA24143_mother/NISTv4.2.1/GRCh37/HG004_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-giab_hg005_grch37_chr20	giab	HG005	GIAB Chinese trio HG005 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/ChineseTrio/HG005_NA24631_son/NISTv4.2.1/GRCh37/HG005_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-giab_hg006_grch37_chr20	giab	HG006	GIAB Chinese trio HG006 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/ChineseTrio/HG006_NA24694_father/NISTv4.2.1/GRCh37/HG006_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-giab_hg007_grch37_chr20	giab	HG007	GIAB Chinese trio HG007 NISTv4.2.1 GRCh37 benchmark	20	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/ChineseTrio/HG007_NA24695_mother/NISTv4.2.1/GRCh37/HG007_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
+case_id	dataset	sample	description	default_region	artifact_id
+giab_hg001_grch37_chr20	giab	HG001	GIAB NA12878 HG001 NISTv4.2.1 GRCh37 benchmark	20	giab_hg001_grch37_v421
+giab_hg002_grch37_chr20	giab	HG002	GIAB Ashkenazim trio HG002 NISTv4.2.1 GRCh37 benchmark	20	giab_hg002_grch37_v421
+giab_hg003_grch37_chr20	giab	HG003	GIAB Ashkenazim trio HG003 NISTv4.2.1 GRCh37 benchmark	20	giab_hg003_grch37_v421
+giab_hg004_grch37_chr20	giab	HG004	GIAB Ashkenazim trio HG004 NISTv4.2.1 GRCh37 benchmark	20	giab_hg004_grch37_v421
+giab_hg005_grch37_chr20	giab	HG005	GIAB Chinese trio HG005 NISTv4.2.1 GRCh37 benchmark	20	giab_hg005_grch37_v421
+giab_hg006_grch37_chr20	giab	HG006	GIAB Chinese trio HG006 NISTv4.2.1 GRCh37 benchmark	20	giab_hg006_grch37_v421
+giab_hg007_grch37_chr20	giab	HG007	GIAB Chinese trio HG007 NISTv4.2.1 GRCh37 benchmark	20	giab_hg007_grch37_v421

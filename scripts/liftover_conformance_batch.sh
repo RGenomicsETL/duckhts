@@ -15,22 +15,29 @@ set -euo pipefail
 #
 # Environment variables:
 #   LIFTOVER_CASES_TSV     case table (default: scripts/conformance_case_table.tsv)
-#   LIFTOVER_OUT_DIR       output directory (default: /tmp/duckhts_liftover_cases)
-#   LIFTOVER_CHAIN_PATH    chain file (default: /root/GRCh37/GRCh37_to_GRCh38.chain.gz)
-#   LIFTOVER_SRC_FASTA     source FASTA (default: /root/GRCh37/human_g1k_v37.fasta)
-#   LIFTOVER_DST_FASTA     destination FASTA (default: /root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna)
+#   LIFTOVER_OUT_DIR       output directory (default: $DUCKHTS_CACHE_DIR/conformance/liftover)
+#   LIFTOVER_CHAIN_PATH    chain file (default: staged liftover cache path)
+#   LIFTOVER_SRC_FASTA     source FASTA (default: staged liftover cache path)
+#   LIFTOVER_DST_FASTA     destination FASTA (default: staged liftover cache path)
+#                           Run scripts/stage_liftover_references.sh first.
 #   LIFTOVER_REGION_OVERRIDE optional region string applied to every selected case
+#   LIFTOVER_STAGE_ONLY=1 stage selected registered inputs without running comparison
 #   DUCKHTS_EXT, BCFTOOLS_BIN, BCFTOOLS_PLUGIN_DIR, KEEP_SLICE are forwarded to
 #   scripts/liftover_conformance.sh unchanged.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=duckhts_cache.sh
+source "$SCRIPT_DIR/duckhts_cache.sh"
+LIFTOVER_REFERENCE_DIR=${LIFTOVER_REFERENCE_DIR:-$(duckhts_cache_subdir "references/liftover/grch37-to-grch38")}
 CASES_TSV="${LIFTOVER_CASES_TSV:-$SCRIPT_DIR/conformance_case_table.tsv}"
-OUT_DIR="${LIFTOVER_OUT_DIR:-/tmp/duckhts_liftover_cases}"
-CHAIN_PATH="${LIFTOVER_CHAIN_PATH:-/root/GRCh37/GRCh37_to_GRCh38.chain.gz}"
-SRC_FASTA="${LIFTOVER_SRC_FASTA:-/root/GRCh37/human_g1k_v37.fasta}"
-DST_FASTA="${LIFTOVER_DST_FASTA:-/root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
+REGISTRY_TSV="${DUCKHTSBENCH_REGISTRY:-$REPO_ROOT/r/duckhtsbench/inst/benchmark_registry.tsv}"
+OUT_DIR="${LIFTOVER_OUT_DIR:-$(duckhts_cache_subdir conformance/liftover)}"
+CHAIN_PATH="${LIFTOVER_CHAIN_PATH:-$LIFTOVER_REFERENCE_DIR/GRCh37_to_GRCh38.chain.gz}"
+SRC_FASTA="${LIFTOVER_SRC_FASTA:-$LIFTOVER_REFERENCE_DIR/human_g1k_v37.fasta}"
+DST_FASTA="${LIFTOVER_DST_FASTA:-$LIFTOVER_REFERENCE_DIR/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
 REGION_OVERRIDE="${LIFTOVER_REGION_OVERRIDE:-}"
+BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 SUMMARY_TSV="$OUT_DIR/summary.tsv"
 run_count=0
 
@@ -52,7 +59,9 @@ if [[ ! -f "$DST_FASTA" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
-printf 'case_id\tdataset\tsample\tregion\tmapped_statuses\treject_statuses\tmapped_mismatches\treject_mismatches\tcompare_tsv\treject_compare_tsv\n' > "$SUMMARY_TSV"
+if [[ "${LIFTOVER_STAGE_ONLY:-0}" != "1" ]]; then
+  printf 'case_id\tdataset\tsample\tregion\tmapped_statuses\treject_statuses\tmapped_mismatches\treject_mismatches\tcompare_tsv\treject_compare_tsv\n' > "$SUMMARY_TSV"
+fi
 
 have_selection=0
 if [[ $# -gt 0 ]]; then
@@ -73,7 +82,44 @@ case_requested() {
   return 1
 }
 
-while IFS=$'\t' read -r case_id dataset sample description default_region input_vcf; do
+stage_case_input() { # case_id dataset sample artifact_id
+  local case_id="$1"
+  local dataset="$2"
+  local sample="$3"
+  local artifact_id="$4"
+  local source cache_relpath transform cached index provenance row
+
+  [[ -f "$REGISTRY_TSV" ]] || { echo "Benchmark registry not found: $REGISTRY_TSV" >&2; return 1; }
+  row="$(awk -F '\t' -v id="$artifact_id" '$1 == id {print $5 "\t" $7 "\t" $8; exit}' "$REGISTRY_TSV")"
+  [[ -n "$row" ]] || { echo "unknown liftover artifact: $artifact_id" >&2; return 1; }
+  IFS=$'\t' read -r source cache_relpath transform <<<"$row"
+  [[ "$transform" == "direct_download" ]] || { echo "liftover artifact is not a direct VCF download: $artifact_id" >&2; return 1; }
+  cached="$(duckhts_cache_subdir "$cache_relpath")"
+  index="${cached}.tbi"
+  provenance="${cached}.provenance.tsv"
+  mkdir -p "$(dirname "$cached")"
+
+  if [[ ! -s "$cached" ]]; then
+    command -v curl >/dev/null 2>&1 || { echo "curl is required to stage $case_id" >&2; return 1; }
+    echo "Downloading $case_id from registered artifact $artifact_id" >&2
+    curl --fail --location --retry 5 --retry-delay 5 --continue-at - --output "$cached" "$source"
+  else
+    echo "Using cached $case_id input: $cached" >&2
+  fi
+
+  if [[ ! -s "$index" ]]; then "$BCFTOOLS_BIN" index -f -t "$cached"; fi
+  if [[ ! -f "$provenance" ]]; then
+    duckhts_write_provenance "$provenance" \
+      "workload=liftover_conformance" "case_id=$case_id" "dataset=$dataset" \
+      "sample=$sample" "artifact_id=$artifact_id" "source=$source" \
+      "cached_vcf=$cached" "cached_index=$index" \
+      "staging_command=curl; bcftools index -t" \
+      "bcftools=$($BCFTOOLS_BIN --version | head -n 1)"
+  fi
+  printf '%s\n' "$cached"
+}
+
+while IFS=$'\t' read -r case_id dataset sample description default_region artifact_id; do
   [[ -n "$case_id" ]] || continue
   [[ "$case_id" == "case_id" ]] && continue
   if ! case_requested "$case_id" "$@"; then
@@ -85,15 +131,20 @@ while IFS=$'\t' read -r case_id dataset sample description default_region input_
     region="$REGION_OVERRIDE"
   fi
 
-  out_prefix="$OUT_DIR/$case_id"
+  cached_vcf="$(stage_case_input "$case_id" "$dataset" "$sample" "$artifact_id")"
   run_count=$((run_count + 1))
+  if [[ "${LIFTOVER_STAGE_ONLY:-0}" == "1" ]]; then
+    echo "==> [$case_id] staged $cached_vcf"
+    continue
+  fi
+  out_prefix="$OUT_DIR/$case_id"
   echo "==> [$case_id] $description"
   if [[ -n "$region" ]]; then
     LIFTOVER_REGION="$region" bash "$SCRIPT_DIR/liftover_conformance.sh" \
-      "$input_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
+      "$cached_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
   else
     bash "$SCRIPT_DIR/liftover_conformance.sh" \
-      "$input_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
+      "$cached_vcf" "$CHAIN_PATH" "$SRC_FASTA" "$DST_FASTA" "$out_prefix"
   fi
 
   compare_tsv="$out_prefix.compare.tsv"
@@ -113,6 +164,9 @@ done < "$CASES_TSV"
 if [[ "$run_count" -eq 0 ]]; then
   echo "No cases selected from: $CASES_TSV" >&2
   exit 1
+fi
+if [[ "${LIFTOVER_STAGE_ONLY:-0}" == "1" ]]; then
+  exit 0
 fi
 
 echo

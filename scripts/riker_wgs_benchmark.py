@@ -30,11 +30,11 @@ Deliberate differences from upstream's harness:
 Example:
 
     sudo python3 scripts/riker_wgs_benchmark.py \\
-        --bam riker-bench-data/stage/HG00188_30x/input.bam \\
-        --ref riker-bench-data/ref/GRCh38_full_analysis_set_plus_decoy_hla.fa \\
+        --bam "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/stage/HG00188_30x/input.bam" \\
+        --ref "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/reference/GRCh38_full_analysis_set_plus_decoy_hla.fa" \\
         --ext build/release/duckhts.duckdb_extension \\
         --riker-bin riker \\
-        --outdir riker-bench-data/results --tsv riker-bench-data/results/bench.tsv \\
+        --outdir "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/results" --tsv "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/results/bench.tsv" \\
         --tools mosdepth,duckhts,riker,riker-bq0 --threads 1,2,4 --reps 3
 """
 

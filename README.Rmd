@@ -1095,10 +1095,11 @@ not replace the biological comparison logic. Perl/BioPerl plus micromamba provid
 the pinned oracle environment, and [`blit`](https://github.com/WangLabCSU/blit) is the
 non-interactive process runner. Cache-backed campaigns create one acquisition
 receipt and cheaply revalidate the complete installed-file inventory before reuse,
-instead of hashing tens of gigabytes on every invocation. See
-[the corpus workflow](design/duckvep_corpus_workflow.md) for exact commands,
-artifact layers, large-corpus derivation, second-machine reproduction, and the
-procedure for moving from VEP 116 to the next release.
+instead of hashing tens of gigabytes on every invocation. The
+[corpus workflow](design/duckvep_corpus_workflow.md) defines evidence identity,
+denominators, and release transitions; the
+[conformance README](test/duckvep/conformance/README.md) owns commands and
+external-campaign details.
 
 #### Measured performance and FastVEP comparison
 
@@ -1330,27 +1331,22 @@ the row and byte denominators, credits FastVEP for native presentation fields
 left as placeholders in this DuckVEP speed projection, and separately checks
 each result against VEP.
 
-The supplementary result is a direct comparison: the same ClinVar 2026-07-06
-release, the same 4,095,611 HG002 literal ALT queries, the same eight requested
-clinical/frequency fields, and the same 44,561 allele hits. DuckDB reads and
-hashes typed payload columns from collision-safe Parquet joins; FastVEP returns
-the complete fastSA JSON payload.
+The historical supplementary result compares the same ClinVar 2026-07-06
+release, 4,095,611 HG002 literal ALT queries, eight requested clinical/frequency
+fields, and 44,561 allele hits. DuckDB reads typed payload columns from
+collision-safe Parquet joins; FastVEP returns the complete fastSA JSON payload.
 
 ```{r duckvep-readme-fastsa-table, echo=FALSE}
 knitr::kable(sa_comparison, row.names = FALSE, align = c("r", "r", "r", "r"))
 ```
 
-The same report measures a one-plan ClinVar + ClinvArbitration + AlphaMissense
-join, an assembly-correct REVEL workload, and a real phyloP 100-way BigWig. It also
-explains the transcript/core-feature sweeps, shared pair facts and generated SO
-rules, layered fuzz/differential/sanitizer infrastructure, and the composability
-claim: new supplementary sources are normally SQL over readable relations, not
-new provider-specific C or Rust code.
 The illustrated
 [*DuckVEP: the fastest Ensembl VEP-compatible consequence predictor in the
-West?*](benchmarks/benchmark_duckvep_fastvep.md) report gives the build flags,
-source revisions, cache construction, commands, speed, memory, and output
-evidence.
+West?*](benchmarks/benchmark_duckvep_fastvep.md) report retains the historical
+source-comparison evidence and its denominators. It is not an executable
+cross-machine benchmark: a renewed campaign must first declare cache staging
+for every model and provider input. Supplementary sources remain ordinary SQL
+relations rather than provider-specific C or Rust code.
 
 #### Current scope and explicit gaps
 
@@ -1897,15 +1893,21 @@ https://www.htslib.org/doc/htslib-s3-plugin.html
 
 This README is rendered with [`duckknit`](https://github.com/rundel/duckknit) to execute SQL snippets in a persistent DuckDB session.
 
-### Environment setup
+### Clone and environment setup
 
-Run the one-time configure step to create the Python venv and detect platform settings:
+Clone the pinned extension build tools, then create the local Python test environment and
+platform receipt:
 
 ```bash
+git clone --recurse-submodules https://github.com/RGenomicsETL/duckhts.git
+cd duckhts
 make configure
 ```
 
-Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTools for Windows.
+`make configure` is an explicit network bootstrap for the Python SQLLogicTest runner. Normal
+native builds use the committed DuckDB headers and vendored C sources; they do not download
+inputs. Note: MSVC builds (windows_amd64/windows_arm64) are not supported. Use MinGW/RTools
+for Windows.
 
 ### Prerequisites
 
@@ -1938,13 +1940,8 @@ On macOS:
 brew install cmake htslib xz libdeflate
 ```
 
-### Vendor [htslib](https://github.com/samtools/htslib)
-
-```bash
-./scripts/vendor_htslib.sh
-```
-
-This downloads and verifies [htslib](https://github.com/samtools/htslib) 1.24 into `third_party/htslib/`.
+The clone already contains the pinned [htslib](https://github.com/samtools/htslib) source.
+Vendoring scripts are dependency-maintainer operations, not development setup.
 
 ### Build
 
@@ -1974,22 +1971,30 @@ LOAD '/path/to/duckhts.duckdb_extension';
 
 ## Testing
 
-SQL tests live in `test/sql/` using [DuckDB](https://duckdb.org/)'s SQLLogicTest format.
-
-Before running tests for the first time, prepare the indexed test data:
-
-```bash
-./test/scripts/prepare_test_data.sh   # requires samtools, bcftools, bgzip, tabix
-```
-
-This copies files from the vendored [htslib](https://github.com/samtools/htslib) test suite into `test/data/` and
-builds the required indexes (BAI, CSI, TBI, FAI) so region queries work.
-
-Then run:
+SQL tests live in `test/sql/` using [DuckDB](https://duckdb.org/)'s SQLLogicTest format. The
+small fixtures and required indexes are committed under `test/data/`; a fresh clone does not
+prepare or download test data. The test target removes declared generated outputs after each
+file.
 
 ```bash
 make test_release
 ```
+
+### External benchmark and conformance data
+
+Persistent external inputs and derived benchmark relations live outside the clone under
+`$DUCKHTS_CACHE_DIR` (default `~/.cache/duckhts`). Explicit staging commands download
+only missing inputs from their recorded public source and write a nearby provenance TSV with
+the source, release, transformation, and consumer path. Benchmark rendering never downloads
+inputs while measuring.
+
+```bash
+make stage-liftover-references
+make stage-giab-v4.2.1
+make stage-norm-1000g-dragen-gvcf
+```
+
+Use `DUCKHTS_CACHE_DIR=/path/to/cache` to relocate the complete external-data cache.
 
 ## References
 

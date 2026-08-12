@@ -259,17 +259,19 @@ scripts live under `scripts/`; build the extension and a `riker` binary first.
 
 ```sh
 # 1. download the NYGC 1000G CRAM + GRCh38 decoy/HLA reference, transcode to
-#    BAM, index (network is used only in this staging step, never the build):
-scripts/stage_riker_wgs_bam.sh riker-bench-data
+#    BAM, and retain provenance below the DuckHTS cache. Network is used only
+#    in this staging step, never the build:
+source scripts/duckhts_cache.sh
+bash scripts/stage_riker_wgs_bam.sh
 
 # 2. run the 3-way sweep (root needed to drop the page cache each run):
 sudo python3 scripts/riker_wgs_benchmark.py \
-  --bam       riker-bench-data/stage/HG00188_30x/input.bam \
-  --ref       riker-bench-data/ref/GRCh38_full_analysis_set_plus_decoy_hla.fa \
+  --bam       "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/stage/HG00188_30x/input.bam" \
+  --ref       "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/reference/GRCh38_full_analysis_set_plus_decoy_hla.fa" \
   --ext       build/release/duckhts.duckdb_extension \
   --riker-bin riker \
-  --outdir    riker-bench-data/results \
-  --tsv       riker-bench-data/results/bench.tsv \
+  --outdir    "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/results" \
+  --tsv       "$DUCKHTS_CACHE_DIR/benchmarks/riker-wgs/results/bench.tsv" \
   --tools mosdepth,duckhts,riker,riker-bq0 --threads 1,2,4 --reps 3 \
   --cpus 0,2,4,6,8,10   # one distinct physical core per thread of the max budget
 ```

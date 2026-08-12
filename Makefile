@@ -1,4 +1,8 @@
-.PHONY: clean clean_all clean_local function_catalog \
+# =============================================================================
+# Project configuration
+# =============================================================================
+
+.PHONY: help docs clean clean_all clean_local function_catalog \
 	test-duckvep-kernel test-duckvep-kernel-asan \
 	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
 	duckvep-generated-check duckvep-upstream-git-check \
@@ -12,13 +16,20 @@
 	test-duckvep-release-vcf \
 	duckvep-corpus-differential duckvep-statistical-report \
 	duckvep-record-conformance duckvep-record-properties \
-	bench-duckvep-throughput bench-duckvep-release-parquet \
+	bench-duckvep-throughput bench-duckvep-release-parquet bench-mosdepth \
 	duckvep-render-reports \
-	test-simd-kernels bench-simd-kernels
+	test-simd-kernels bench-simd-kernels \
+	test-sqllogictest-debug test-sqllogictest-release \
+	check-benchmark-portability \
+	stage-norm-1000g-dragen-gvcf stage-liftover-references \
+	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
+	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
+	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
+	test-duckvep-corpus-staging test-cgranges-benchmark-r
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-# Main extension configuration
+# Extension configuration
 EXTENSION_NAME=duckhts
 
 # Set to 1 to enable Unstable API (binaries will only work on TARGET_DUCKDB_VERSION, forwards compatibility will be broken)
@@ -36,6 +47,10 @@ TARGET_DUCKDB_VERSION=v1.2.0
 # The DuckDB release to fetch headers from
 DUCKDB_HEADER_VERSION=v1.5.3
 
+# -----------------------------------------------------------------------------
+# Platform overrides
+# -----------------------------------------------------------------------------
+
 # For MinGW/Rtools we build vendored htslib ourselves.
 # Do not inherit the generic DuckDB CI vcpkg + Ninja path here.
 ifeq ($(DUCKDB_PLATFORM),windows_amd64_mingw)
@@ -51,11 +66,31 @@ override VCPKG_TARGET_TRIPLET=
 override VCPKG_HOST_TRIPLET=
 endif
 
+# -----------------------------------------------------------------------------
+# Core extension build
+# -----------------------------------------------------------------------------
+
 all: configure release
 
-# Include makefiles from DuckDB
+help:
+	@printf '%s\n' \
+		'Build: make [debug|release|test|test_release]' \
+		'Docs: make [docs|function_catalog]' \
+		'SIMD: make [test-simd-kernels|bench-simd-kernels]' \
+		'DuckVEP: make [test-duckvep-kernel|test-duckvep-differential]' \
+		'Reports: make [bench-duckvep-throughput|duckvep-render-reports]' \
+		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|variantkey-providers]' \
+		'Wasm: make wasm-playwright-test' \
+		'Cleanup: make [clean|clean_all|clean_local]'
+
+# DuckDB supplies the generic C API extension targets.
 include extension-ci-tools/makefiles/c_api_extensions/base.Makefile
 include extension-ci-tools/makefiles/c_api_extensions/c_cpp.Makefile
+
+# Route both the project and inherited extension-ci-tools test targets through
+# the cleanup-aware executor. `make test_extension_{debug,release}` therefore
+# cannot leave SQL-produced indexes, compressed files, or reports behind.
+TEST_RUNNER=$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py
 
 configure: venv platform extension_version
 
@@ -68,6 +103,10 @@ build_extension_with_metadata_debug build_extension_with_metadata_release: exten
 
 debug: build_extension_library_debug build_extension_with_metadata_debug
 release: build_extension_library_release build_extension_with_metadata_release
+
+# -----------------------------------------------------------------------------
+# WebAssembly link ABI
+# -----------------------------------------------------------------------------
 
 # duckdb-wasm is compiled with native WASM EH and WASM_BIGINT.
 # Without -fwasm-exceptions at link time, emcc generates dynCall_* wrappers locally
@@ -92,9 +131,52 @@ link_wasm_release:
 	emcc $(EXTENSION_BUILD_PATH)/release/$(EXTENSION_LIB_FILENAME) $$WASM_LINK_RSP -o $(EXTENSION_BUILD_PATH)/release/$(EXTENSION_FILENAME_NO_METADATA) -O3 -fwasm-exceptions -sWASM_BIGINT -sSIDE_MODULE=2 -sEXPORTED_FUNCTIONS="_$(EXTENSION_NAME)_init_c_api"
 endif
 
+# -----------------------------------------------------------------------------
+# General tests and maintenance
+# -----------------------------------------------------------------------------
+
 test: test_debug
-test_debug: test-duckvep-kernel test-simd-kernels test_extension_debug
-test_release: test-duckvep-kernel test-simd-kernels test_extension_release
+test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-debug
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-release
+
+test-cache-paths:
+	bash test/scripts/test_duckhts_cache.sh
+	bash test/scripts/test_staging_cache.sh
+	bash test/scripts/test_liftover_registry_batch.sh
+	bash test/scripts/test_conformance_plugin_cache.sh
+
+test-benchmark-registry: test-variantkey-provider-staging test-duckvep-corpus-staging
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	(cd "$$tmp" && R CMD build --no-build-vignettes --no-manual "$(PROJ_DIR)r/duckhtsbench"); \
+	R CMD INSTALL -l "$$tmp" "$$tmp"/duckhtsbench_*.tar.gz; \
+	Rscript -e '.libPaths(c("'"$$tmp"'", .libPaths())); tinytest::test_package("duckhtsbench", testdir = "tinytest")'
+
+test-variantkey-provider-staging:
+	bash test/scripts/test_variantkey_provider_staging.sh
+
+test-duckvep-corpus-staging:
+	bash test/scripts/test_duckvep_corpus_staging.sh
+
+test-cgranges-benchmark-r:
+	bash test/scripts/test_cgranges_benchmark_r.sh
+
+test-sqllogictest-debug: check_configure
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
+			--test-dir test/sql \
+			--external-extension build/debug/$(EXTENSION_NAME).duckdb_extension; \
+	fi
+
+test-sqllogictest-release: check_configure
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) scripts/run_sqllogictest.py \
+			--test-dir test/sql \
+			--external-extension build/release/$(EXTENSION_NAME).duckdb_extension; \
+	fi
 
 # Override header fetch to use the actual DuckDB release version, not the C API version
 update_duckdb_headers_custom:
@@ -111,17 +193,25 @@ clean_local:
 	rm -f *.idxstats.txt
 	rm -f mosdepth_*_sqltest*
 	rm -f test_bgzip_input.bed test_bgzip_input.bed.gz test_bgzip_input.bed.gz.tbi
-	rm -f test_bgzip_roundtrip.bed test_formatcols.vcf.gz.tbi test_range.bam.bai
-	rm -f test_targets.bed.gz test_targets.bed.gz.tbi
-	rm -f test/data/nuc_with_n.fa.fai
+	rm -f test_bgzip_roundtrip.bed test_formatcols.parquet test_formatcols.vcf.gz.tbi
+	rm -f test_range.bam.bai test_targets.bed.gz test_targets.bed.gz.tbi
+	rm -f test_auto.fa test_auto.fa.fai test/data/nuc_with_n.fa.fai
+	rm -f test/tmp_ce.fa.gz test/tmp_ce.fa.gz.fai test/tmp_ce.fa.gz.gzi
 
-# Render README.md from README.Rmd (GitHub-flavored markdown)
+# -----------------------------------------------------------------------------
+# Documentation and benchmark renders
+# -----------------------------------------------------------------------------
+
+# Render README.md from README.Rmd (GitHub-flavored markdown).
+docs: check-benchmark-portability rdm
+
+check-benchmark-portability:
+	Rscript r/duckhtsbench/scripts/check_benchmark_portability.R
+
 function_catalog:
 	python3 scripts/render_function_catalog.py
 rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
-bench:
-	Rscript -e "rmarkdown::render('benchmarks/Benchmark.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 bench-lift:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_liftover.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
@@ -132,7 +222,31 @@ bench-norm:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_norm.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 stage-norm-1000g-dragen-gvcf:
-	scripts/stage_norm_1000g_dragen_gvcf.sh
+	bash scripts/stage_norm_1000g_dragen_gvcf.sh
+
+stage-liftover-references:
+	bash scripts/stage_liftover_references.sh
+
+stage-giab-v4.2.1:
+	bash scripts/stage_giab_benchmark_vcfs.sh
+
+stage-riker-wgs:
+	bash scripts/stage_riker_wgs_bam.sh
+
+stage-duckvep-conformance-corpora:
+	bash scripts/stage_duckvep_conformance_corpora.sh
+
+stage-gffbase:
+	bash scripts/stage_gffbase.sh
+
+stage-duckbedqc-data:
+	bash scripts/stage_duckbedqc_data.sh
+
+stage-variantkey-providers:
+	Rscript r/duckhtsbench/scripts/stage_variantkey_providers.R
+
+bench-mosdepth:
+	Rscript -e "rmarkdown::render('benchmarks/Benchmarks_mosdepth.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
@@ -142,9 +256,6 @@ bench-variantkey-join:
 
 bench-munge:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_munge.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
-
-bench-mosdepth:
-	Rscript -e "rmarkdown::render('benchmarks/Benchmarks_mosdepth.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-gffbase:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_gffbase_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
@@ -157,6 +268,10 @@ bench-simd-bam-gc:
 
 bench-fastq-reader:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_fastq_reader.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+# =============================================================================
+# SIMD kernel contracts
+# =============================================================================
 
 # Standalone SIMD contracts link the backend translation units normally and
 # obtain private functions only through their registrar callbacks.  The normal
@@ -187,6 +302,10 @@ bench-simd-kernels:
 		$(SIMD_KERNEL_TEST_SOURCES) -o "$$tmp/simd_kernels"; \
 	"$$tmp/simd_kernels" --check; \
 	"$$tmp/simd_kernels" --bench $(BENCH_ARGS)
+
+# =============================================================================
+# DuckVEP kernel and conformance
+# =============================================================================
 
 # Pure-C consequence-engine tests ported with the kernel from
 # /root/duckvep-c@9f922c8.  The engine is tested through its borrowed-array ABI,
@@ -314,6 +433,10 @@ test-duckvep-witnesses: release
 	Rscript test/duckvep/conformance/generate_witnesses.R \
 		--ext build/release/duckhts.duckdb_extension --check
 
+# -----------------------------------------------------------------------------
+# Executable VEP differentials
+# -----------------------------------------------------------------------------
+
 # VEP 116 is the sole behavioral oracle.  The short target runs all formal
 # witnesses against the checked-in transcript fixture.  The corpus target uses
 # the same runner for a real VCF and a prepared model database; pass paths and
@@ -374,6 +497,10 @@ duckvep-corpus-differential: release
 		--extension build/release/duckhts.duckdb_extension \
 		$(DUCKVEP_DIFFERENTIAL_ARGS)
 
+# -----------------------------------------------------------------------------
+# Optional corpus campaigns and evidence receipts
+# -----------------------------------------------------------------------------
+
 # Optional coarse-grained campaign orchestration. {targets} owns invalidation and
 # resume behavior; corpus_differential.R and blit retain semantic and process ownership.
 duckvep-targets:
@@ -407,6 +534,10 @@ duckvep-record-properties:
 	Rscript test/duckvep/conformance/property_history.R \
 		$(DUCKVEP_PROPERTY_HISTORY_ARGS)
 
+# -----------------------------------------------------------------------------
+# DuckVEP benchmark and report rendering
+# -----------------------------------------------------------------------------
+
 # `configure` refreshes extension metadata from description.yml before timing.
 bench-duckvep-throughput: configure release
 	Rscript benchmarks/duckvep_throughput.R $(DUCKVEP_THROUGHPUT_ARGS)
@@ -424,9 +555,18 @@ duckvep-render-reports:
 	DUCKHTS_REPO_ROOT=$(PROJ_DIR) Rscript -e \
 		"rmarkdown::render('benchmarks/duckvep_throughput.Rmd', quiet = TRUE)"
 
+# =============================================================================
+# Browser WebAssembly smoke test
+# =============================================================================
+
 # Build the duckdb-wasm extension (Docker) and run the headless Playwright smoke
 # test that loads it in a real browser and asserts the SIMD kernels resolve on
 # wasm (scalar fallback).  Same build path as CI's wasm-playwright workflow.
 wasm-playwright-test:
-	SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh
-	cd test/wasm && npm ci && npx playwright install --with-deps chromium && npx playwright test
+	@bash -c 'set -euo pipefail; \
+		source scripts/duckhts_cache.sh; \
+		export NPM_CONFIG_CACHE="$$DUCKHTS_CACHE_DIR/npm"; \
+		export PLAYWRIGHT_BROWSERS_PATH="$$DUCKHTS_CACHE_DIR/playwright"; \
+		export DUCKHTS_WASM_SITE_ROOT="$$DUCKHTS_CACHE_DIR/wasm/local-artifacts/site"; \
+		SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh; \
+		cd test/wasm && npm ci && npx playwright install --with-deps chromium && npx playwright test'

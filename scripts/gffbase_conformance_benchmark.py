@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import csv
+import hashlib
 import json
 import os
 import platform
@@ -27,6 +28,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
+
+from duckhts_cache import duckhts_cache_subdir
 
 
 GFFBASE_UPSTREAM_URL = "https://github.com/Kuanhao-Chao/gffbase.git"
@@ -222,6 +225,14 @@ def sql_string(value: str | Path) -> str:
     return str(value).replace("'", "''")
 
 
+def file_md5(path: Path) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def git_rev(path: Path) -> str:
     try:
         return subprocess.check_output(
@@ -332,9 +343,8 @@ def import_gffbase(repo_root: Path):
             except ImportError:
                 pass
         raise RuntimeError(
-            "Could not import gffbase. Install it, e.g.\n"
-            "  python3 -m pip install --target .tmp/gffbase_site gffbase==0.1.0\n"
-            "  PYTHONPATH=.tmp/gffbase_site python3 scripts/gffbase_conformance_benchmark.py\n"
+            "Could not import gffbase. Stage the pinned benchmark package first:\n"
+            "  make stage-gffbase\n"
             "or install from the pinned upstream mirror under .sync/gffbase."
         ) from first_error
 
@@ -821,7 +831,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=root / ".tmp" / "gffbase_conformance",
+        default=duckhts_cache_subdir("benchmarks", "gffbase", "results"),
         help="Directory for CSV/JSON outputs and generated fixtures",
     )
     parser.add_argument("--rows", type=int, default=200_000, help="Synthetic GFF3 feature rows for timing")
@@ -914,6 +924,8 @@ def main(argv: list[str] | None = None) -> int:
         "duckhts_git_dirty": git_dirty(repo_root),
         "duckhts_extension": str(args.extension.resolve()),
         "duckhts_extension_size": args.extension.stat().st_size,
+        "duckhts_extension_md5": file_md5(args.extension),
+        "gffbase_site": str(Path(gffbase.__file__).resolve().parent),
         "gffbase_version": getattr(gffbase, "__version__", ""),
         "gffbase_native_available": bool(gffbase.native_available()),
         "gffbase_engine_requested": args.gffbase_engine,
@@ -928,6 +940,7 @@ def main(argv: list[str] | None = None) -> int:
         "rows": args.rows,
         "passes": args.passes,
         "warmup": args.warmup,
+        "include_create_db": args.include_create_db,
         "duckdb_threads": args.duckdb_threads,
         "synthetic_path": str(synthetic_path.resolve()) if synthetic_path.exists() else "",
         "synthetic_bytes": synthetic_path.stat().st_size if synthetic_path.exists() else 0,

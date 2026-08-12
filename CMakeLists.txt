@@ -131,7 +131,8 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         -Wextra
         -Wpedantic
         -Wformat=2
-        -Wstrict-prototypes)
+        -Wstrict-prototypes
+        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
     if(DUCKHTS_STRICT_WARNINGS AND NOT EMSCRIPTEN)
         target_compile_options(${EXTENSION_NAME} PRIVATE -Werror)
     endif()

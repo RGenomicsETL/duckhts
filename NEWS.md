@@ -1,6 +1,44 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- move HPRC v2, Sniffles2 1KGP, and dbVar GRCh38 chr22 DuckVEP corpus staging
+  into the `duckhtsbench` artifact registry. The R-native CLI now owns pinned
+  raw-source identities, remote indexes/manifests, deterministic derived VCFs
+  and tabix indexes, cache paths, atomic publication, and adjacent receipts;
+  retain the former positional shell command as a compatibility forwarder and
+  cover version, ETag, manifest, path, checksum, and stale-cache behavior with
+  a network-free fake-source integration test
+
+- make the registered Ensembl 116 GRCh38 DuckVEP model reproducible from a clean
+  cache: pin the public core and funcgen MySQL manifests, schemas, required table
+  dumps, and primary-assembly FASTA in the benchmark registry; validate release,
+  species, assembly, source manifests, reference sequence, and the deterministic
+  DuckVEP receipt; preserve the imported source relation names; and build the
+  model automatically before VariantKey provider exports. Add a network-free
+  fixture-dump producer test and reject a mutated cached model
+
+- make cgranges benchmark orchestration R-native with an `optparse` entry point,
+  retain the former Python command as a compatibility launcher, and invalidate
+  shared cgranges/GFFBase results whenever their source revision, extension,
+  workload, or declared input identity changes. Resolve retained FastVEP input
+  commands through the selected artifact registry; quote provider-stage paths;
+  and reject an in-checkout wasm Docker work directory before recursive rsync.
+
+- make the ordinary clone/build/test loop use the committed fixture closure: remove the
+  obsolete instruction to regenerate test data from private mirrors, run SQLLogicTests
+  through the cleanup-aware runner, and leave package builds network-free unless the
+  developer explicitly chooses dependency bootstrap. Optional liftover, normalization, and
+  VariantKey benchmark inputs are now explicit environment variables rather than one developer's paths.
+  Explicit GIAB, liftover-reference, normalization, Riker, DuckVEP-corpus, local browser, and
+  VariantKey-provider raw-source staging defaults now share `~/.cache/duckhts` (or
+  `DUCKHTS_CACHE_DIR`), validate declared publisher identities before cache reuse, and record
+  source/transformation provenance beside staged data. Retire only the unreferenced generic report;
+  restore the whole-genome mosdepth report and a registry-backed `bench-mosdepth` entry point, and
+  preserve the VariantKey and FastVEP reports as evidence while their declared public-provider
+  staging work is made executable. Normalize embedded
+  native source paths so equal clean builds can
+  produce equal extension bytes.
+
 - retire the duplicate R-side extension compiler, metadata serializer, and
   platform mapper; the package configure scripts and shared metadata writer are
   now the only build authority. Split the R package code into focused helper,

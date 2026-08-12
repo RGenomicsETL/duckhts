@@ -66,7 +66,9 @@ R package changelog scope is strict:
 ## Design Notes
 
 Read `design/README.md`. Keep a note only while it defines a live contract or a concrete
-unresolved choice. Code and tests replace completed implementation plans; git history and
+unresolved choice. A note should make its model, invariant, ownership, or decision easier
+to control; it must not become a code walkthrough, command catalogue, benchmark copy, or
+issue backlog. Code and tests replace completed implementation plans; git history and
 GitHub issues retain the path and backlog.
 
 ## Build and CI Rules
@@ -136,6 +138,21 @@ Additional R package rules:
 - Do not hand-edit `configure/extension_version.txt`, rendered README/catalog files, or the local `community-extensions/` descriptor for a version-only bump. Normal configure, bootstrap, and catalog rendering carry the authoritative versions forward.
 - A version-only development-cycle bump does not add empty `NEWS.md` sections; changelog entries belong to actual user-visible changes and release finalization.
 
+## Benchmark and Corpus Staging
+
+`r/duckhtsbench` owns the benchmark/corpus artifact registry: identity, source
+release and locator, access conditions, cache-relative destination, derivation,
+and consumers. Benchmark Rmd files and staging wrappers resolve inputs through
+that registry; they do not add private paths, independent URLs, or a second
+cache convention. Each artifact needed by an active benchmark or conformance
+run must have an executable cache-stage path and a network-free staging test. When a
+registry change affects an active benchmark or conformance workload, run its smallest
+representative real benchmark/conformance workload after staging; retain the rendered
+report or state precisely why a declared public input cannot yet be staged.
+A derived artifact names its raw registry inputs and transformation. Do not
+retire a benchmark merely because its data is difficult to reacquire; make the
+reacquisition and derivation contract executable.
+
 ## Testing and Fixtures
 Every public feature needs two levels of testing unless the change is docs-only:
 1. SQL conformance in `test/sql/` — schema, semantics, region/index behavior.
@@ -145,7 +162,7 @@ Guidelines:
 - One `.test` file per feature family; one tinytest file per wrapper family.
 - README examples must be deterministic, short, and use bundled `inst/extdata/`.
 - Prefer fixtures generated with `test/scripts/vcfpp.R` via `vcfppR`; record them in `vcfpp_manifest.tsv` where applicable.
-- New fixtures needed by SQL tests should be documented in `test/scripts/prepare_test_data.sh` and copied into the R package bundle when R tests need them.
+- Core SQL fixtures must be committed; generated test output must be declared and cleaned by the test runner. A fixture-reconstruction script is a maintainer operation, records source inputs and acquisition provenance, and copies R-facing fixtures into the package bundle when needed. It is not clone setup.
 - Avoid committing large local diagnostic data files.
 
 ## Reader and Schema Policies
@@ -173,7 +190,7 @@ When DuckHTS ports or rewrites an existing tool, follow compatibility-rewrite di
 5. document unsupported features and validation commands;
 6. credit original authors and avoid vague compatibility claims.
 
-This applies especially to mosdepth-, bcftools-, samtools-, WisecondorX-, and VEP-inspired behavior.
+This applies especially to mosdepth-, bcftools-, samtools-, and VEP-inspired behavior.
 
 ## Coverage and Interval Work
 Current implemented surfaces include `read_pileup`, `bam_bin_counts`, `duckhts_bam_bed_coverage`, `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `fasta_nuc`, and cgranges-backed overlap functions.
@@ -208,9 +225,6 @@ Wasm support must not be treated like native Linux:
 - Browser constraints apply: same-origin works, remote URLs require permissive CORS, and proxy environment variables do not affect the XHR backend.
 - Treat webR and duckdb-wasm as distinct runtimes and artifacts.
 - Keep the Emscripten socket/i64 compatibility shim canonical in `src/include/wasm_socket_compat.h`.
-
-## WisecondorX / BAM Dedup Context
-`FILE_OFFSET UBIGINT` in `read_bam()` exposes the BGZF virtual offset after each record. Use `ORDER BY FILE_OFFSET` in window functions to reproduce exact BAM file order for streaming dedup. The SQL replication of WisecondorX larp/larp2 is in `scripts/wisecondorx_convert_conformance.py`; consult the relevant upstream/reference notes before changing these semantics.
 
 ## Style
 

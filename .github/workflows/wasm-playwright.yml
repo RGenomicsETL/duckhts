@@ -32,19 +32,25 @@ jobs:
           node-version: "20"
 
       - name: Build duckdb-wasm extension + assemble site (Docker)
-        run: SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh
+        run: |
+          export DUCKHTS_CACHE_DIR="$HOME/.cache/duckhts"
+          SERVE=0 bash scripts/start_duckdb_wasm_local_test.sh
 
       - name: Install Playwright + browser
         working-directory: test/wasm
         run: |
+          export DUCKHTS_CACHE_DIR="$HOME/.cache/duckhts"
+          export NPM_CONFIG_CACHE="$DUCKHTS_CACHE_DIR/npm"
+          export PLAYWRIGHT_BROWSERS_PATH="$DUCKHTS_CACHE_DIR/playwright"
           npm ci
           npx playwright install --with-deps chromium
 
       - name: Run wasm smoke test
         working-directory: test/wasm
-        env:
-          DUCKHTS_WASM_SITE_ROOT: ${{ github.workspace }}/.duckdb-wasm-local-artifacts/site
-        run: npx playwright test
+        run: |
+          export DUCKHTS_CACHE_DIR="$HOME/.cache/duckhts"
+          export PLAYWRIGHT_BROWSERS_PATH="$DUCKHTS_CACHE_DIR/playwright"
+          npx playwright test
 
       - name: Upload Playwright report
         if: failure()

@@ -2,6 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=duckhts_cache.sh
+source "${ROOT_DIR}/scripts/duckhts_cache.sh"
 PORT=${PORT:-8001}
 HOST=${HOST:-127.0.0.1}
 LOCAL_WASM_IMAGE=${LOCAL_WASM_IMAGE:-duckhts/duckdb-wasm-local:latest}
@@ -13,10 +15,10 @@ DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.31.0}
 # SERVE=0 builds the site and exits, printing SITE_ROOT/PORT so an external
 # driver (e.g. Playwright's webServer) can own the HTTP server lifecycle.
 SERVE=${SERVE:-1}
-ARTIFACT_ROOT=${ARTIFACT_ROOT:-${ROOT_DIR}/.duckdb-wasm-local-artifacts}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-$(duckhts_cache_subdir wasm/local-artifacts)}
 SITE_ROOT=${SITE_ROOT:-${ARTIFACT_ROOT}/site}
 WASM_BUILD_DIR=${WASM_BUILD_DIR:-${ARTIFACT_ROOT}/build/wasm_eh/extension/duckhts}
-DOCKER_WORK_ROOT=${DOCKER_WORK_ROOT:-${ROOT_DIR}/.duckdb_wasm_docker_work}
+DOCKER_WORK_ROOT=${DOCKER_WORK_ROOT:-$(duckhts_cache_subdir wasm/docker-work)}
 DOCKER_REBUILD_IMAGE=${DOCKER_REBUILD_IMAGE:-0}
 
 echo "Building DuckHTS wasm extension (DuckDB community extension path)..."
@@ -26,6 +28,14 @@ if [ "${DOCKER_REBUILD_IMAGE}" = "1" ] || ! docker image inspect "${LOCAL_WASM_I
 fi
 
 mkdir -p "${DOCKER_WORK_ROOT}"
+ROOT_DIR_PHYSICAL="$(cd "${ROOT_DIR}" && pwd -P)"
+DOCKER_WORK_ROOT_PHYSICAL="$(cd "${DOCKER_WORK_ROOT}" && pwd -P)"
+case "${DOCKER_WORK_ROOT_PHYSICAL}/" in
+  "${ROOT_DIR_PHYSICAL}/"*)
+    echo "DOCKER_WORK_ROOT must be outside the DuckHTS checkout: ${DOCKER_WORK_ROOT}" >&2
+    exit 2
+    ;;
+esac
 rsync -a --delete \
   --exclude '.git/' \
   --exclude 'build/' \
@@ -85,10 +95,57 @@ rm -rf "${SITE_ROOT}"
 mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/duckdb-wasm" "${SITE_ROOT}/extdata"
 
 RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist"
-curl -fsSL "${RUNTIME_BASE}/duckdb-browser.mjs" -o "${SITE_ROOT}/duckdb-browser.mjs"
-curl -fsSL "${RUNTIME_BASE}/duckdb-browser-eh.worker.js" -o "${SITE_ROOT}/duckdb-browser-eh.worker.js"
-curl -fsSL "${RUNTIME_BASE}/duckdb-eh.wasm" -o "${SITE_ROOT}/duckdb-eh.wasm"
-curl -fsSL "${RUNTIME_BASE}/duckdb-browser-eh.worker.js.map" -o "${SITE_ROOT}/duckdb-browser-eh.worker.js.map" || true
+RUNTIME_CACHE="$(duckhts_cache_subdir "runtime/duckdb-wasm/${DUCKDB_WASM_NPM_VERSION}")"
+if [[ "$DUCKDB_WASM_NPM_VERSION" != "1.31.0" ]]; then
+  echo "DuckDB wasm runtime version $DUCKDB_WASM_NPM_VERSION has no pinned asset manifest" >&2
+  exit 2
+fi
+mkdir -p "$RUNTIME_CACHE"
+runtime_sha256() { # filename
+  case "$1" in
+    duckdb-browser.mjs) printf '%s\n' '660ee2979e878cfd1d70122ab6d511d4454c5e687f59977e77ff70097730a8a0' ;;
+    duckdb-browser-eh.worker.js) printf '%s\n' 'fb692cd56e87c71849ff545e14fef54c91ed4cdef295f16172ab27be8de76b5d' ;;
+    duckdb-eh.wasm) printf '%s\n' '07993a5cda534ebb303d476cbdf3d1f7271841c1298709a4b4a5713d8c78b156' ;;
+    duckdb-browser-eh.worker.js.map) printf '%s\n' 'e3750fb2ea26e4e1e1baf49f3a2b2f3d722d3a0bd840830f2abd431f8546dc90' ;;
+    *) return 2 ;;
+  esac
+}
+sha256_of() { # path
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "sha256sum or shasum is required to verify duckdb-wasm runtime assets" >&2
+    return 2
+  fi
+}
+verify_runtime() { # filename path
+  [[ "$(sha256_of "$2")" == "$(runtime_sha256 "$1")" ]]
+}
+fetch_runtime() { # filename [optional]
+  local name="$1"
+  local optional="${2:-0}"
+  local cached="$RUNTIME_CACHE/$name"
+  local temporary="${cached}.partial.$$"
+  if [[ ! -s "$cached" ]] || ! verify_runtime "$name" "$cached"; then
+    rm -f "$cached" "$temporary"
+    if ! curl -fsSL "${RUNTIME_BASE}/$name" -o "$temporary" || ! verify_runtime "$name" "$temporary"; then
+      rm -f "$temporary"
+      if [[ "$optional" = "1" ]]; then
+        return 0
+      fi
+      echo "could not stage verified duckdb-wasm runtime asset: $name" >&2
+      return 1
+    fi
+    mv -f "$temporary" "$cached"
+  fi
+  cp -f "$cached" "$SITE_ROOT/$name"
+}
+fetch_runtime duckdb-browser.mjs
+fetch_runtime duckdb-browser-eh.worker.js
+fetch_runtime duckdb-eh.wasm
+fetch_runtime duckdb-browser-eh.worker.js.map 1
 printf '%s\n' '<!doctype html><title>duckhts</title>' > "${SITE_ROOT}/favicon.ico"
 
 ln -sf "${ROOT_DIR}/scripts/duckdb-wasm-local-test.html" "${SITE_ROOT}/scripts/duckdb-wasm-local-test.html"

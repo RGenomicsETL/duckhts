@@ -34,15 +34,10 @@ plain tabix-style GFF/GTF-like rows through `read_tabix(...)`. The new
 
 # Run
 
-Install GFFBase into a local target directory, then render this report:
+Stage GFFBase into the DuckHTS cache, then render this report:
 
 ```sh
-python3 -m pip install --target .tmp/gffbase_site gffbase==0.1.0
-PYTHONPATH=.tmp/gffbase_site python3 scripts/gffbase_conformance_benchmark.py \
-  --extension build/release/duckhts.duckdb_extension \
-  --rows 200000 \
-  --passes 3 \
-  --out-dir .tmp/gffbase_conformance
+make stage-gffbase
 make bench-gffbase
 ```
 
@@ -56,7 +51,18 @@ library(knitr)
 library(jsonlite)
 
 repo_root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", unset = getwd()), mustWork = TRUE)
-out_dir <- file.path(repo_root, ".tmp", "gffbase_conformance")
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+duckhts_cache_dir <- duckhts_bench_cache_dir()
+gffbase_site <- Sys.getenv("GFFBASE_SITE", unset = duckhts_bench_artifact_path("gffbase_010"))
+if (!dir.exists(gffbase_site)) {
+  stop("GFFBase is absent from the DuckHTS cache. Run `make stage-gffbase`.", call. = FALSE)
+}
+old_pythonpath <- Sys.getenv("PYTHONPATH", unset = "")
+Sys.setenv(PYTHONPATH = paste(c(gffbase_site, old_pythonpath[nzchar(old_pythonpath)]), collapse = .Platform$path.sep))
+out_dir <- Sys.getenv("GFFBASE_BENCH_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "gffbase", "results"))
 audit_csv <- file.path(out_dir, "gffbase_audit.csv")
 conformance_csv <- file.path(out_dir, "conformance.csv")
 performance_csv <- file.path(out_dir, "performance.csv")
@@ -69,18 +75,37 @@ force <- identical(Sys.getenv("GFFBASE_BENCH_FORCE", unset = "0"), "1")
 include_create_db <- identical(Sys.getenv("GFFBASE_BENCH_INCLUDE_CREATE_DB", unset = "0"), "1")
 human_gff <- strsplit(Sys.getenv("GFFBASE_HUMAN_GFF", unset = ""), ",", fixed = TRUE)[[1]]
 human_gff <- human_gff[nzchar(human_gff)]
+human_gff <- normalizePath(human_gff, mustWork = FALSE)
+extension_path <- normalizePath(file.path(repo_root, "build", "release", "duckhts.duckdb_extension"), mustWork = TRUE)
+current_identity <- list(
+  duckhts_git_rev = trimws(system2("git", c("-C", repo_root, "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)),
+  duckhts_extension = extension_path,
+  duckhts_extension_md5 = unname(tools::md5sum(extension_path)),
+  gffbase_site = normalizePath(gffbase_site, mustWork = TRUE),
+  rows = rows, passes = passes, warmup = warmup,
+  include_create_db = include_create_db, human_gff = human_gff
+)
 
 needs_run <- force || !file.exists(audit_csv) || !file.exists(conformance_csv) || !file.exists(performance_csv) || !file.exists(metadata_json)
 if (!needs_run && file.exists(metadata_json)) {
-  old_meta <- tryCatch(jsonlite::fromJSON(metadata_json), error = function(e) list())
-  needs_run <- !identical(as.integer(old_meta$rows), rows) || !identical(as.integer(old_meta$passes), passes)
+  old_meta <- tryCatch(jsonlite::fromJSON(metadata_json), error = function(error) list())
+  identity_matches <- identical(as.character(old_meta$duckhts_git_rev), current_identity$duckhts_git_rev) &&
+    identical(as.character(old_meta$duckhts_extension), current_identity$duckhts_extension) &&
+    identical(as.character(old_meta$duckhts_extension_md5), current_identity$duckhts_extension_md5) &&
+    startsWith(as.character(old_meta$gffbase_site), current_identity$gffbase_site) &&
+    identical(as.integer(old_meta$rows), current_identity$rows) &&
+    identical(as.integer(old_meta$passes), current_identity$passes) &&
+    identical(as.integer(old_meta$warmup), current_identity$warmup) &&
+    identical(as.logical(old_meta$include_create_db), current_identity$include_create_db) &&
+    identical(as.character(old_meta$human_gff), current_identity$human_gff)
+  needs_run <- !identity_matches
 }
 
 if (needs_run) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   cmd <- c(
     file.path(repo_root, "scripts", "gffbase_conformance_benchmark.py"),
-    "--extension", file.path(repo_root, "build", "release", "duckhts.duckdb_extension"),
+    "--extension", extension_path,
     "--rows", as.character(rows),
     "--passes", as.character(passes),
     "--warmup", as.character(warmup),
@@ -89,11 +114,7 @@ if (needs_run) {
   for (p in human_gff) cmd <- c(cmd, "--human-gff", p)
   if (include_create_db) cmd <- c(cmd, "--include-create-db")
 
-  gffbase_site <- file.path(repo_root, ".tmp", "gffbase_site")
   pythonpath <- Sys.getenv("PYTHONPATH", unset = "")
-  if (dir.exists(gffbase_site)) {
-    pythonpath <- paste(c(gffbase_site, pythonpath[nzchar(pythonpath)]), collapse = .Platform$path.sep)
-  }
   out <- system2("python3", cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
   status <- attr(out, "status")
   if (!is.null(status) && status != 0) {

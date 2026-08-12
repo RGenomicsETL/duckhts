@@ -37,12 +37,19 @@ Useful overrides:
 - `VARIANTKEY_JOIN_RUNS`: timed repeats, default `3`
 - `VARIANTKEY_JOIN_THREADS_LIST`: DuckDB thread grid, default `1,2,4`
 - `DUCKHTS_EXTENSION`: optional extension path override
-- `VARIANTKEY_CLINVAR_VCF`: dated ClinVar GRCh38 VCF
-- `VARIANTKEY_GIAB_VCF`: GIAB HG002 GRCh38 benchmark VCF
-- `VARIANTKEY_REGULATORY_PARQUET`: Ensembl regulatory relation
-- `VARIANTKEY_TRANSCRIPTS_PARQUET`: Ensembl transcript relation
-- `VARIANTKEY_GNOMAD_CONSTRAINT`: gnomAD gene-constraint table
+- `VARIANTKEY_CLINVAR_VCF`, `VARIANTKEY_GIAB_VCF`, and provider variables: cache-path overrides
 - `VARIANTKEY_REAL_CACHE_DIR`: generated benchmark Parquet directory
+
+Stage the provider workload explicitly before rendering:
+
+```sh
+make stage-variantkey-providers
+```
+
+The command stages declared public raw sources, builds the registered DuckVEP
+model when absent from checksum-pinned Ensembl 116 core and funcgen MySQL dumps
+plus the matching GRCh38 FASTA, validates its deterministic receipt, and exports
+the provider relations.
 
 ```{r setup, include = FALSE}
 library(DBI)
@@ -57,50 +64,23 @@ join_rows <- as.integer(Sys.getenv("VARIANTKEY_JOIN_ROWS", unset = "1000000"))
 interval_rows <- as.integer(Sys.getenv("VARIANTKEY_INTERVAL_ROWS", unset = "250000"))
 bench_runs <- as.integer(Sys.getenv("VARIANTKEY_JOIN_RUNS", unset = "3"))
 thread_grid_env <- Sys.getenv("VARIANTKEY_JOIN_THREADS_LIST", unset = "1,2,4")
+registry_source <- normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE)
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(registry_source)
+artifact_path <- duckhts_bench_artifact_path
 
-clinvar_vcf <- Sys.getenv(
-  "VARIANTKEY_CLINVAR_VCF",
-  unset = "/root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz"
-)
-giab_vcf <- Sys.getenv(
-  "VARIANTKEY_GIAB_VCF",
-  unset = "/root/duckvep/data/benchmark/HG002.hiseqx.pcr-free.40x.deepvariant-v1.0.grch38.vcf.gz"
-)
-reference_fasta <- Sys.getenv(
-  "VARIANTKEY_REFERENCE_FASTA",
-  unset = "/root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
-)
-regulatory_parquet <- Sys.getenv(
-  "VARIANTKEY_REGULATORY_PARQUET",
-  unset = "/root/duckvep/data/cache/homo_sapiens.116.38/regulatory.parquet"
-)
-transcripts_parquet <- Sys.getenv(
-  "VARIANTKEY_TRANSCRIPTS_PARQUET",
-  unset = "/root/duckvep/data/cache/homo_sapiens.116.38/transcripts.parquet"
-)
-gnomad_constraint <- Sys.getenv(
-  "VARIANTKEY_GNOMAD_CONSTRAINT",
-  unset = "/root/bioconnect-sprint-py/.cache/gnomad_constraint.txt.gz"
-)
-real_cache_dir <- Sys.getenv(
-  "VARIANTKEY_REAL_CACHE_DIR",
-  unset = "/root/duckhts/.tmp/variantkey_join_overlap"
-)
-revel_parquet <- Sys.getenv(
-  "VARIANTKEY_REVEL_PARQUET",
-  unset = "/root/bioconnect-sprint-py/.cache/revel_grch37.parquet"
-)
-alphamissense_gz <- Sys.getenv(
-  "VARIANTKEY_ALPHAMISSENSE_GZ",
-  unset = file.path(real_cache_dir, "AlphaMissense_hg38.tsv.gz")
-)
-clinvarbitration_tsv <- Sys.getenv(
-  "VARIANTKEY_CLINVARBITRATION_TSV",
-  unset = paste0(
-    "/root/.cache/RClinVarbitration/zenodo/16792026/",
-    "clinvarbitration_data/clinvar_decisions.tsv"
-  )
-)
+clinvar_vcf <- Sys.getenv("VARIANTKEY_CLINVAR_VCF", unset = artifact_path("variantkey_clinvar_20260706"))
+giab_vcf <- Sys.getenv("VARIANTKEY_GIAB_VCF", unset = artifact_path("variantkey_giab_hg002_v421"))
+reference_fasta <- Sys.getenv("VARIANTKEY_REFERENCE_FASTA", unset = artifact_path("ensembl116_grch38_fasta_fa"))
+regulatory_parquet <- Sys.getenv("VARIANTKEY_REGULATORY_PARQUET", unset = artifact_path("duckvep_ensembl116_regulatory_parquet"))
+transcripts_parquet <- Sys.getenv("VARIANTKEY_TRANSCRIPTS_PARQUET", unset = artifact_path("duckvep_ensembl116_transcripts_parquet"))
+gnomad_constraint <- Sys.getenv("VARIANTKEY_GNOMAD_CONSTRAINT", unset = artifact_path("gnomad_v211_constraint"))
+real_cache_dir <- Sys.getenv("VARIANTKEY_REAL_CACHE_DIR", unset = dirname(regulatory_parquet))
+revel_parquet <- Sys.getenv("VARIANTKEY_REVEL_PARQUET", unset = artifact_path("revel_v13_grch37"))
+alphamissense_gz <- Sys.getenv("VARIANTKEY_ALPHAMISSENSE_GZ", unset = artifact_path("alphamissense_v2_hg38"))
+clinvarbitration_tsv <- Sys.getenv("VARIANTKEY_CLINVARBITRATION_TSV", unset = artifact_path("clinvarbitration_202508"))
 
 real_source_paths <- c(
   clinvar_vcf = clinvar_vcf,
@@ -116,8 +96,9 @@ real_source_paths <- c(
 missing_real_sources <- real_source_paths[!file.exists(real_source_paths)]
 if (length(missing_real_sources)) {
   stop(
-    "missing real benchmark sources: ",
+    "missing staged benchmark sources: ",
     paste(names(missing_real_sources), collapse = ", "),
+    ". Run `make stage-variantkey-providers` to build and export the registered providers.",
     call. = FALSE
   )
 }
@@ -726,8 +707,8 @@ regionkey_bounded_overlap <- measure_thread_grid(
         "FROM ov_probe p",
         "JOIN ov_subject s",
         "  ON s.rk_chrom_start >=",
-        "     (regionkey(p.chrom, greatest(0, p.start - 30 + 1), greatest(0, p.start - 30 + 1)) >> 31)",
-        " AND s.rk_chrom_start < (regionkey(p.chrom, p.\"end\", p.\"end\") >> 31)",
+        "     (regionkey(p.chrom, greatest(0, p.start - 30 + 1)::BIGINT, greatest(0, p.start - 30 + 1)::BIGINT) >> 31)",
+        " AND s.rk_chrom_start < (regionkey(p.chrom, p.\"end\"::BIGINT, p.\"end\"::BIGINT) >> 31)",
         " AND are_overlapping_regionkeys(p.rk, s.rk)"
       )
     )
@@ -762,7 +743,7 @@ cgranges_count_overlap <- measure_thread_grid(
       con,
       sprintf(
         paste(
-          "SELECT sum(duckhts_cgranges_count_overlaps('%s', p.chrom, p.start, p.\"end\"))::BIGINT AS n",
+          "SELECT sum(duckhts_cgranges_count_overlaps('%s', p.chrom, p.start::BIGINT, p.\"end\"::BIGINT))::BIGINT AS n",
           "FROM ov_probe p"
         ),
         idx_name
@@ -886,18 +867,18 @@ giab_stage_query <- sprintf(
     "    AND regexp_full_match(alt_normed, '[ACGTNacgtn]+')",
     "    AND upper(ref_normed) <> upper(alt_normed)",
     "), interpreted AS (",
-    "  SELECT normalized.*, duckvep_allele_geometry(pos, ref, alt) AS geometry",
+    "  SELECT normalized.*, duckvep_allele_geometry(pos::UBIGINT, ref, alt) AS geometry",
     "  FROM normalized",
     "), keyed AS (",
     "  SELECT interpreted.*,",
     "         variantkey(chrom, pos, ref, alt) AS vk,",
-    "         regionkey(chrom, geometry.feature_start0, geometry.feature_end0) AS rk",
+    "         regionkey(chrom, geometry.feature_start0::BIGINT, geometry.feature_end0::BIGINT) AS rk",
     "  FROM interpreted",
     ")",
     "SELECT record_index, alt_index, chrom, pos, ref, alt, vk,",
     "       mod(extract_variantkey_refalt(vk), 2) = 1 AS is_hash,",
     "       (rk >> 31) AS rk_chrom_start,",
-    "       (regionkey(chrom, geometry.feature_end0, geometry.feature_end0) >> 31) AS rk_chrom_end,",
+    "       (regionkey(chrom, geometry.feature_end0::BIGINT, geometry.feature_end0::BIGINT) >> 31) AS rk_chrom_end,",
     "       geometry.raw_start0, geometry.raw_end0,",
     "       geometry.feature_start0 AS start0, geometry.feature_end0 AS end0,",
     "       geometry.edit_start0, geometry.edit_end0, geometry.interbase, rk",
@@ -953,12 +934,12 @@ regulatory_stage_query <- sprintf(
     "         feature_type, so_term, so_accession",
     "  FROM read_parquet(%s)",
     "), keyed AS (",
-    "  SELECT source.*, regionkey(chrom, start0, end0) AS rk",
+    "  SELECT source.*, regionkey(chrom, start0::BIGINT, end0::BIGINT) AS rk",
     "  FROM source",
     "  WHERE chrom IN (%s)",
     ")",
     "SELECT keyed.*, rk >> 31 AS rk_chrom_start,",
-    "       regionkey(chrom, end0, end0) >> 31 AS rk_chrom_end",
+    "       regionkey(chrom, end0::BIGINT, end0::BIGINT) >> 31 AS rk_chrom_end",
     "FROM keyed",
     "WHERE rk IS NOT NULL",
     "ORDER BY rk"
@@ -1845,6 +1826,12 @@ real_contigs <- DBI::dbGetQuery(
   sprintf("SELECT DISTINCT chrom FROM read_parquet(%s) ORDER BY chrom", sql_path(real_regulatory_path))
 )$chrom
 
+real_interval_case_rows <- DBI::dbGetQuery(
+  con,
+  sprintf("SELECT count(*)::BIGINT AS n FROM read_parquet(%s) WHERE start0 < end0", sql_path(real_case_path))
+)$n[[1L]]
+if (!real_interval_case_rows) stop("real regulatory overlap requires nonempty query intervals", call. = FALSE)
+
 real_typed_contig_queries <- vapply(
   real_contigs,
   function(chrom) {
@@ -1854,7 +1841,7 @@ real_typed_contig_queries <- vapply(
         "FROM read_parquet(%s) q",
         "JOIN read_parquet(%s) s",
         "  ON q.start0 < s.end0 AND q.end0 > s.start0",
-        "WHERE q.chrom = %s AND s.chrom = %s"
+        "WHERE q.chrom = %s AND s.chrom = %s AND q.start0 < q.end0"
       ),
       sql_path(real_case_path),
       sql_path(real_regulatory_path),
@@ -1889,13 +1876,13 @@ data.frame(
 
 real_typed_interval <- measure_thread_grid(
   "real_regulatory_typed_per_contig_iejoin_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() DBI::dbGetQuery(con, real_typed_interval_sql)
 )
 
 real_packed_interval <- measure_thread_grid(
   "real_regulatory_packed_coordinate_iejoin_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() {
     DBI::dbGetQuery(
       con,
@@ -1905,7 +1892,8 @@ real_packed_interval <- measure_thread_grid(
           "FROM read_parquet(%s) q",
           "JOIN read_parquet(%s) s",
           "  ON q.rk_chrom_start < s.rk_chrom_end",
-          " AND q.rk_chrom_end > s.rk_chrom_start"
+          " AND q.rk_chrom_end > s.rk_chrom_start",
+          "WHERE q.start0 < q.end0"
         ),
         sql_path(real_case_path),
         sql_path(real_regulatory_path)
@@ -1917,7 +1905,7 @@ real_packed_interval <- measure_thread_grid(
 real_max_span <- as.numeric(real_regulatory_stats$max_span[1L])
 real_regionkey_interval <- measure_thread_grid(
   "real_regulatory_regionkey_bounded_start_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() {
     DBI::dbGetQuery(
       con,
@@ -1927,9 +1915,10 @@ real_regionkey_interval <- measure_thread_grid(
           "FROM read_parquet(%s) q",
           "JOIN read_parquet(%s) s",
           "  ON s.rk_chrom_start >=",
-          "     (regionkey(q.chrom, greatest(0, q.start0 - %d + 1), greatest(0, q.start0 - %d + 1)) >> 31)",
-          " AND s.rk_chrom_start < (regionkey(q.chrom, q.end0, q.end0) >> 31)",
-          " AND are_overlapping_regionkeys(q.rk, s.rk)"
+          "     (regionkey(q.chrom, greatest(0, q.start0 - %d + 1)::BIGINT, greatest(0, q.start0 - %d + 1)::BIGINT) >> 31)",
+          " AND s.rk_chrom_start < (regionkey(q.chrom, q.end0::BIGINT, q.end0::BIGINT) >> 31)",
+          " AND are_overlapping_regionkeys(q.rk, s.rk)",
+          "WHERE q.start0 < q.end0"
         ),
         sql_path(real_case_path),
         sql_path(real_regulatory_path),
@@ -1942,14 +1931,14 @@ real_regionkey_interval <- measure_thread_grid(
 
 real_cgranges_interval <- measure_thread_grid(
   "real_regulatory_cgranges_count_pairs",
-  real_case_rows,
+  real_interval_case_rows,
   function() {
     DBI::dbGetQuery(
       con,
       sprintf(
         paste(
-          "SELECT sum(duckhts_cgranges_count_overlaps('%s', chrom, start0, end0))::BIGINT AS n",
-          "FROM read_parquet(%s)"
+          "SELECT sum(duckhts_cgranges_count_overlaps('%s', chrom, start0::BIGINT, end0::BIGINT))::BIGINT AS n",
+          "FROM read_parquet(%s) WHERE start0 < end0"
         ),
         real_idx_name,
         sql_path(real_case_path)
@@ -2077,7 +2066,8 @@ real_regulatory_output_query <- sprintf(
     "FROM read_parquet(%s) q",
     "JOIN read_parquet(%s) s",
     "  ON q.rk_chrom_start < s.rk_chrom_end",
-    " AND q.rk_chrom_end > s.rk_chrom_start"
+    " AND q.rk_chrom_end > s.rk_chrom_start",
+    "WHERE q.start0 < q.end0"
   ),
   sql_path(real_case_path),
   sql_path(real_regulatory_path)
@@ -2181,7 +2171,7 @@ real_cgranges_sql <- paste0(
   "SELECT duckhts_cgranges_index('rss_reg'); ",
   sprintf(
     paste(
-      "SELECT sum(duckhts_cgranges_count_overlaps('rss_reg', chrom, start0, end0))",
+      "SELECT sum(duckhts_cgranges_count_overlaps('rss_reg', chrom, start0::BIGINT, end0::BIGINT))",
       "FROM read_parquet(%s)"
     ),
     sql_path(real_case_path)

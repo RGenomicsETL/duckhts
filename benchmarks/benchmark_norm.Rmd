@@ -34,10 +34,10 @@ Useful overrides:
 - `NORM_REAL_VCF`, `NORM_REAL_REGION`, `NORM_REAL_FASTA`: optional real-callset conformance case
 - `NORM_REAL_SPLIT`: `1` to run the optional real-callset case in split mode too
 - `NORM_REAL_LABEL`: optional label for the real-callset section
-- `NORM_GVCF_VCF`, `NORM_GVCF_FASTA`, `NORM_GVCF_LABEL`: optional locally staged gVCF slice benchmark; the current local default is a 10 Mb 1000 Genomes DRAGEN HG00096 chr22 slice when present
+- `NORM_GVCF_VCF`, `NORM_GVCF_FASTA`, `NORM_GVCF_PROVENANCE`, `NORM_GVCF_LABEL`: optional cached gVCF slice benchmark
 - `NORM_GVCF_RUNS`: timed repeats for the optional gVCF slice, default `1`
 - `NORM_GVCF_SPLIT`: `1` to also run split-multiallelic mode for the optional gVCF slice
-- `NORM_GIAB_DIR`, `NORM_GIAB_FASTA`, `NORM_GIAB_SAMPLES`: full GIAB benchmark inputs; defaults target locally staged HG001/HG002/HG006 GRCh37 files
+- `NORM_GIAB_DIR`, `NORM_GIAB_FASTA`, `NORM_GIAB_SAMPLES`: cached full-GIAB inputs (stage with `make stage-giab-v4.2.1`)
 - `NORM_GIAB_RUNS`: timed repeats for each full GIAB sample, default `1`
 - `NORM_GIAB_SPLIT`: `1` to also run split-multiallelic mode for full GIAB inputs
 - `NORM_REQUIRE_GIAB`: `1` to fail if any configured full GIAB input is missing
@@ -68,13 +68,20 @@ real_region <- Sys.getenv("NORM_REAL_REGION", unset = "")
 real_fasta <- Sys.getenv("NORM_REAL_FASTA", unset = "")
 real_split <- identical(Sys.getenv("NORM_REAL_SPLIT", unset = "0"), "1")
 real_label <- Sys.getenv("NORM_REAL_LABEL", unset = "real_callset")
-gvcf_input_path <- Sys.getenv("NORM_GVCF_VCF", unset = ".tmp/1000g_dragen_hg00096/HG00096.hard-filtered.chr22_20000000_30000000.g.vcf.gz")
-gvcf_fasta <- Sys.getenv("NORM_GVCF_FASTA", unset = "/root/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna")
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+artifact_path <- duckhts_bench_artifact_path
+gvcf_input_path <- Sys.getenv("NORM_GVCF_VCF", unset = artifact_path("norm_hg00096_chr22_20m_30m"))
+gvcf_fasta <- Sys.getenv("NORM_GVCF_FASTA", unset = artifact_path("liftover_grch38_fasta"))
+gvcf_provenance <- Sys.getenv("NORM_GVCF_PROVENANCE", unset = paste0(gvcf_input_path, ".provenance.tsv"))
 gvcf_label <- Sys.getenv("NORM_GVCF_LABEL", unset = "1000G_DRAGEN_HG00096_chr22_20_30Mb_gVCF")
 gvcf_runs <- as.integer(Sys.getenv("NORM_GVCF_RUNS", unset = "1"))
 gvcf_split <- identical(Sys.getenv("NORM_GVCF_SPLIT", unset = "0"), "1")
-giab_dir <- Sys.getenv("NORM_GIAB_DIR", unset = "/root/giab_norm")
-giab_fasta <- Sys.getenv("NORM_GIAB_FASTA", unset = "/root/GRCh37/human_g1k_v37.fasta")
+giab_dir_override <- Sys.getenv("NORM_GIAB_DIR", unset = "")
+giab_dir <- if (nzchar(giab_dir_override)) giab_dir_override else dirname(artifact_path("giab_hg001_grch37_v421"))
+giab_fasta <- Sys.getenv("NORM_GIAB_FASTA", unset = artifact_path("liftover_grch37_fasta"))
 giab_samples <- trimws(strsplit(Sys.getenv("NORM_GIAB_SAMPLES", unset = "HG001,HG002,HG006"), ",", fixed = TRUE)[[1]])
 giab_samples <- giab_samples[nzchar(giab_samples)]
 giab_runs <- as.integer(Sys.getenv("NORM_GIAB_RUNS", unset = "1"))
@@ -116,6 +123,7 @@ benchmark_settings <- data.frame(
     "bcftools_output_mode",
     "gvcf_input_path",
     "gvcf_fasta",
+    "gvcf_provenance",
     "gvcf_runs",
     "giab_dir",
     "giab_fasta",
@@ -130,6 +138,7 @@ benchmark_settings <- data.frame(
     "-Ou",
     gvcf_input_path,
     gvcf_fasta,
+    gvcf_provenance,
     as.character(gvcf_runs),
     giab_dir,
     giab_fasta,
@@ -630,8 +639,8 @@ make stage-norm-1000g-dragen-gvcf
 ```
 
 ```{r gvcf-slice-case, results='asis'}
-if (!file.exists(gvcf_input_path) || !file.exists(gvcf_fasta)) {
-  cat("gVCF slice benchmark skipped. Set `NORM_GVCF_VCF` and `NORM_GVCF_FASTA`, or stage the default 1000G DRAGEN slice locally.\n")
+if (!file.exists(gvcf_input_path) || !file.exists(gvcf_fasta) || !file.exists(gvcf_provenance)) {
+  cat("gVCF slice benchmark skipped. Run `make stage-liftover-references` and `make stage-norm-1000g-dragen-gvcf`, or set `NORM_GVCF_VCF`, `NORM_GVCF_FASTA`, and `NORM_GVCF_PROVENANCE`.\n")
 } else {
   gvcf_case <- run_case(gvcf_input_path, gvcf_fasta, split = FALSE, n = gvcf_runs)
   cat("## ", gvcf_label, " (site-preserving)\n\n", sep = "")
@@ -669,7 +678,12 @@ DuckHTS counts normalized rows and status classes through `duckhts_bcftools_norm
 giab_inputs <- if (length(giab_samples)) {
   data.frame(
     sample = giab_samples,
-    path = file.path(giab_dir, paste0(giab_samples, "_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")),
+    path = vapply(giab_samples, function(sample) {
+      if (nzchar(giab_dir_override)) {
+        return(file.path(giab_dir, paste0(sample, "_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")))
+      }
+      tryCatch(artifact_path(paste0("giab_", tolower(sample), "_grch37_v421")), error = function(error) "")
+    }, character(1L)),
     stringsAsFactors = FALSE
   )
 } else {

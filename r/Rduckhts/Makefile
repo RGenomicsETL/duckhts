@@ -14,9 +14,10 @@ all: build
 deps:
 	R -e "if (!require('tinytest', quietly = TRUE)) install.packages('tinytest', repos = 'https://cran.r-project.org')"
 
-# Build the package
+# Build never installs dependencies or contacts a package repository. Use the
+# explicit `deps` target only when deliberately bootstrapping a development R library.
 .PHONY: build
-build: deps
+build:
 	R CMD build .
 
 .PHONY: install check build rd test test-integration clean cran-ready help
@@ -72,7 +73,7 @@ cran-ready: check-cran
 help:
 	@echo "Available targets:"
 	@echo "  all        - Build the package (default)"
-	@echo "  deps       - Install package dependencies"
+	@echo "  deps       - Explicitly install tinytest from CRAN (network)"
 	@echo "  build      - Build source package"
 	@echo "  install    - Build and install package locally"
 	@echo "  check      - Run basic R CMD check"

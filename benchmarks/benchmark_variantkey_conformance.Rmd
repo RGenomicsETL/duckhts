@@ -35,7 +35,7 @@ make bench-variantkey
 Useful overrides:
 
 - `BCFTOOLS_BIN`: optional bcftools executable override
-- `VARIANTKEY_REAL_CASES`: optional comma-separated local VCF/BCF paths
+- `VARIANTKEY_REAL_CASES`: comma-separated cached VCF/BCF paths; defaults to staged GIAB v4.2.1 GRCh37 cases
 - `VARIANTKEY_OUT_DIR`: optional directory for emitted TSVs and summaries
 - `DUCKHTS_EXTENSION`: optional extension path override
 - `VARIANTKEY_BENCH_ROWS`: synthetic benchmark rows, default `4000000`
@@ -45,9 +45,8 @@ Useful overrides:
 - `VARIANTKEY_CONFORMANCE_DUCK_THREADS`: DuckDB threads for the full conformance harness, default `max(VARIANTKEY_DUCK_THREADS_LIST)`
 - `VARIANTKEY_DUCK_DECOMPRESSION_THREADS`: `read_bcf(...)` worker threads, default `0`
 
-If `VARIANTKEY_REAL_CASES` is unset, this report looks for the locally
-downloaded whole-WGS GIAB files already used in earlier DuckHTS conformance
-work under `/root/giab_norm/`.
+`VARIANTKEY_REAL_CASES` defaults to the DuckHTS GIAB cache populated by
+`make stage-giab-v4.2.1`; set it to run a different staged workload.
 
 ```{r setup, include = FALSE}
 library(utils)
@@ -67,7 +66,13 @@ ext_path <- Sys.getenv(
   "DUCKHTS_EXTENSION",
   unset = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 )
-out_root <- Sys.getenv("VARIANTKEY_OUT_DIR", unset = file.path(tempdir(), "duckhts_variantkey_real"))
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source(normalizePath("r/duckhtsbench/R/registry.R", mustWork = TRUE))
+artifact_path <- duckhts_bench_artifact_path
+duckhts_cache_dir <- duckhts_bench_cache_dir()
+out_root <- Sys.getenv("VARIANTKEY_OUT_DIR", unset = file.path(duckhts_cache_dir, "benchmarks", "variantkey-conformance"))
 dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
 
 bench_rows <- as.integer(Sys.getenv("VARIANTKEY_BENCH_ROWS", unset = "4000000"))
@@ -98,34 +103,20 @@ if (is.na(duck_decompression_threads) || duck_decompression_threads < 0L) {
   stop("VARIANTKEY_DUCK_DECOMPRESSION_THREADS must be a non-negative integer", call. = FALSE)
 }
 
-case_env <- Sys.getenv("VARIANTKEY_REAL_CASES", unset = "")
-default_cases <- data.frame(
-  label = c("giab_hg001_grch37_full", "giab_hg002_grch37_full", "giab_hg006_grch37_full"),
-  path = c(
-    "/root/giab_norm/HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz",
-    "/root/giab_norm/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz",
-    "/root/giab_norm/HG006_GRCh37_1_22_v4.2.1_benchmark.vcf.gz"
-  ),
+default_paths <- vapply(c("hg001", "hg002", "hg006"), function(sample) {
+  artifact_path(paste0("giab_", sample, "_grch37_v421"))
+}, character(1L))
+case_env <- Sys.getenv("VARIANTKEY_REAL_CASES", unset = paste(default_paths, collapse = ","))
+raw_paths <- trimws(strsplit(case_env, ",", fixed = TRUE)[[1]])
+raw_paths <- raw_paths[nzchar(raw_paths)]
+cases <- data.frame(
+  label = sub("\\.(vcf|bcf)(\\.gz)?$", "", basename(raw_paths), ignore.case = TRUE),
+  path = raw_paths,
+  provenance = paste0(raw_paths, ".provenance.tsv"),
   stringsAsFactors = FALSE
 )
-
-if (nzchar(case_env)) {
-  raw_paths <- trimws(strsplit(case_env, ",", fixed = TRUE)[[1]])
-  raw_paths <- raw_paths[nzchar(raw_paths)]
-  cases <- data.frame(
-    label = sub("\\.(vcf|bcf)(\\.gz)?$", "", basename(raw_paths), ignore.case = TRUE),
-    path = raw_paths,
-    stringsAsFactors = FALSE
-  )
-} else {
-  cases <- default_cases[file.exists(default_cases$path), , drop = FALSE]
-}
-
-if (!nrow(cases)) {
-  stop(
-    "No real GIAB inputs found. Set VARIANTKEY_REAL_CASES or place local files under /root/giab_norm/.",
-    call. = FALSE
-  )
+if (!nrow(cases) || any(!file.exists(cases$path)) || any(!file.exists(cases$provenance))) {
+  stop("VariantKey inputs are absent from the DuckHTS cache. Run `make stage-giab-v4.2.1` or set VARIANTKEY_REAL_CASES to staged inputs with provenance.", call. = FALSE)
 }
 
 bench_case_path <- if (nzchar(bench_case_env)) bench_case_env else cases$path[1]

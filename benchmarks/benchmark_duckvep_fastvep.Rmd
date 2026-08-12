@@ -1428,12 +1428,34 @@ env RUSTFLAGS='-C target-cpu=native' cargo build \
   --manifest-path .sync/fastVEP/Cargo.toml --release --locked
 ```
 
+The following shell setup resolves declared provider inputs through the selected
+benchmark registry (and respects `DUCKHTSBENCH_REGISTRY` relocations):
+
+```{bash, eval=FALSE, echo=TRUE}
+eval "$(Rscript - <<'RS'
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source("r/duckhtsbench/R/registry.R")
+inputs <- c(
+  CLINVAR_VCF = "variantkey_clinvar_20260706",
+  GIAB_VCF = "variantkey_giab_hg002_v421",
+  ENSEMBL_GFF3 = "ensembl116_grch38_gff3",
+  ENSEMBL_FASTA = "ensembl116_grch38_fasta_fa"
+)
+for (name in names(inputs)) {
+  cat(name, "=", shQuote(duckhts_bench_artifact_path(inputs[[name]])), "\n", sep = "")
+}
+RS
+)"
+```
+
 The supplementary comparison first builds fastSA from the same ClinVar release:
 
 ```{bash, eval=FALSE, echo=TRUE}
 .sync/fastVEP/target/release/fastvep sa-build \
   --source clinvar \
-  --input /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
+  --input "$CLINVAR_VCF" \
   --output /tmp/duckvep-fastsa/clinvar_20260706_grch38 \
   --assembly GRCh38 --no-progress
 ```
@@ -1498,8 +1520,8 @@ test ! -e "$cache"
 .sync/fastVEP/target/release/fastvep annotate \
   --input benchmarks/data/duckvep_fastvep/clinvar_chr21_seed113.vcf \
   --output /dev/null --output-format tab --no-progress \
-  --gff3 /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.116.gff3.gz \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
+  --gff3 "$ENSEMBL_GFF3" \
+  --fasta "$ENSEMBL_FASTA" \
   --transcript-cache "$cache"
 test "$(sha256sum "$cache" | cut -d' ' -f1)" = \
   00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962
@@ -1512,8 +1534,8 @@ The single-core invocations were:
   -o /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.time \
   taskset -c 2 Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
   --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --model ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/models/duckvep/ensembl-116-grch38.duckdb \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.tab \
   --threads 1 --distance 5000 --memory-limit 4GB
 
@@ -1521,10 +1543,10 @@ The single-core invocations were:
   -o /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.time \
   taskset -c 2 env RAYON_NUM_THREADS=1 \
   .sync/fastVEP/target/release/fastvep annotate \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.tab \
   --output-format tab --distance 5000 --no-progress \
-  --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache
+  --transcript-cache ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/benchmarks/fastvep/homo_sapiens_grch38_116_7038e7c.cache
 
 Rscript benchmarks/benchmark_duckvep_fastvep_receipt.R \
   --input /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.tab \
@@ -1551,16 +1573,16 @@ destinations distinguish the three repetitions:
   taskset -c 2,4,6,8 \
   Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
   --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --model ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/models/duckvep/ensembl-116-grch38.duckdb \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4.tab \
   --threads 4 --distance 5000 --memory-limit 4GB
 
 taskset -c 2,4,6,8 \
   Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
   --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --model ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/models/duckvep/ensembl-116-grch38.duckdb \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.tab \
   --threads 4 --distance 5000 --memory-limit 4GB \
   --profile-json /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json
@@ -1582,15 +1604,15 @@ oracle, FastVEP HGVS output, and collector were produced with:
 out=/tmp/duckvep-fastvep-benchmark/conformance200.CCg7sP
 Rscript test/duckvep/conformance/corpus_differential.R \
   --corpus clinvar_chr21_seed113 \
-  --vcf /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
+  --vcf "$CLINVAR_VCF" \
   --source-version 20260706 \
   --source-checksum sha256:59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 \
-  --cache-dir /root/duckvep/data/vep_cache \
-  --cache-info /root/duckvep/data/vep_cache/homo_sapiens/116_GRCh38/info.txt \
-  --cache-receipt /root/duckvep/data/receipts/homo_sapiens-116-GRCh38.tsv \
+  --cache-dir ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/vep/cache \
+  --cache-info ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/vep/cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/vep/receipts/homo_sapiens-116-GRCh38.tsv \
   --assembly GRCh38 --species homo_sapiens \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --database /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
+  --fasta "$ENSEMBL_FASTA" \
+  --database ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/models/duckvep/ensembl-116-grch38.duckdb \
   --model-sql= --model-name fastvep_conformance \
   --sample-per-shape 200 --max-allele-length 50 --seed 113 --chrom 21 \
   --distance 5000 --hgvs --fork 8 --vep-buffer-size 5000 \
@@ -1607,8 +1629,8 @@ taskset -c 2 env RAYON_NUM_THREADS=1 \
   .sync/fastVEP/target/release/fastvep annotate \
   --input "$out/clinvar_chr21_seed113.vcf" --output "$out/fastvep.vcf" \
   --output-format vcf --hgvs --distance 5000 --no-progress \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache
+  --fasta "$ENSEMBL_FASTA" \
+  --transcript-cache ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/benchmarks/fastvep/homo_sapiens_grch38_116_7038e7c.cache
 
 Rscript benchmarks/benchmark_duckvep_fastvep_conformance.R \
   --extension build/release/duckhts.duckdb_extension \

@@ -1,12 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
+import os from "node:os";
 import path from "node:path";
 
 // The wasm site is assembled by `SERVE=0 scripts/start_duckdb_wasm_local_test.sh`,
 // which prints DUCKHTS_WASM_SITE_ROOT / DUCKHTS_WASM_PORT.  The Makefile target
 // and CI job export those; fall back to the script's defaults otherwise.
+const DUCKHTS_CACHE_DIR =
+  process.env.DUCKHTS_CACHE_DIR ||
+  (process.env.XDG_CACHE_HOME
+    ? path.join(process.env.XDG_CACHE_HOME, "duckhts")
+    : path.join(os.homedir(), ".cache", "duckhts"));
 const SITE_ROOT =
   process.env.DUCKHTS_WASM_SITE_ROOT ||
-  path.resolve(__dirname, "../../.duckdb-wasm-local-artifacts/site");
+  path.join(DUCKHTS_CACHE_DIR, "wasm", "local-artifacts", "site");
 const PORT = process.env.DUCKHTS_WASM_PORT || "8001";
 const HOST = process.env.DUCKHTS_WASM_HOST || "127.0.0.1";
 const BASE_URL = `http://${HOST}:${PORT}`;

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IN_GZ="${1:-hg38_ma_egfr_7_files_maf0.01_rsid.txt.gz}"
-HG38_FA="${2:-$HOME/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna}"
-OUT_PREFIX="${3:-munge_egfr}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=duckhts_cache.sh
+source "$SCRIPT_DIR/duckhts_cache.sh"
+
+IN_GZ="${1:-$(duckhts_cache_subdir datasets/munge/hg38_ma_egfr_7_files_maf0.01_rsid.txt.gz)}"
+HG38_FA="${2:-$(duckhts_cache_subdir references/liftover/grch37-to-grch38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna)}"
+OUT_PREFIX="${3:-$(duckhts_cache_subdir conformance/munge/munge_egfr)}"
 DUCKHTS_EXT="${4:-build/release/duckhts.duckdb_extension}"
 BCFTOOLS_BIN="${BCFTOOLS_BIN:-bcftools}"
 SCORE_PLUGIN_DIR="${SCORE_PLUGIN_DIR:-}"
@@ -12,6 +16,7 @@ COLUMNS_FILE="${COLUMNS_FILE:-scripts/munge_egfr.columns.tsv}"
 NUM_TOL="${NUM_TOL:-1e-6}"
 REL_TOL="${REL_TOL:-1e-7}"
 
+mkdir -p "$(dirname "$OUT_PREFIX")"
 HG38_FA="$(realpath "$HG38_FA")"
 
 DUCK_TSV="${OUT_PREFIX}.duckhts.tsv"
@@ -43,11 +48,12 @@ fi
 
 if [[ -z "$SCORE_PLUGIN_DIR" ]]; then
   if [[ -f "score_1.22-20250819.zip" ]]; then
-    mkdir -p .tmp/score-plugin
-    if [[ ! -f .tmp/score-plugin/munge.so ]]; then
-      unzip -oq score_1.22-20250819.zip -d .tmp/score-plugin
+    SCORE_PLUGIN_DIR="${DUCKHTS_SCORE_PLUGIN_DIR:-$(duckhts_cache_subdir conformance/score-plugin)}"
+    mkdir -p "$SCORE_PLUGIN_DIR"
+    if [[ ! -f "$SCORE_PLUGIN_DIR/munge.so" ]]; then
+      unzip -oq score_1.22-20250819.zip -d "$SCORE_PLUGIN_DIR"
     fi
-    SCORE_PLUGIN_DIR="$(realpath .tmp/score-plugin)"
+    SCORE_PLUGIN_DIR="$(realpath "$SCORE_PLUGIN_DIR")"
   else
     echo "Set SCORE_PLUGIN_DIR or provide score_1.22-20250819.zip" >&2
     exit 1
