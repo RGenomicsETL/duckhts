@@ -65,25 +65,27 @@ rduckhts_bcf <- function(
     }
   }
 
-  # Build the CREATE TABLE query
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (tidy_format) {
     params$tidy_format <- "true"
   }
   if (!is.null(additional_csq_column_types)) {
-    params$additional_csq_column_types <- sprintf(
-      "'%s'",
+    params$additional_csq_column_types <- sql_quote_string(
+      con,
       additional_csq_column_types
     )
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- sprintf(
@@ -113,22 +115,22 @@ rduckhts_bcf <- function(
         call. = FALSE
       )
     }
-    params$decode_error_policy <- sql_quote_string(decode_error_policy)
+    params$decode_error_policy <- sql_quote_string(con, decode_error_policy)
   }
 
   param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bcf('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_bcf(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW bcf_data AS SELECT * FROM read_bcf('%s'%s)",
-      path,
+      "CREATE VIEW bcf_data AS SELECT * FROM read_bcf(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -212,13 +214,13 @@ rduckhts_bam <- function(
 
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(reference)) {
-    params$reference <- sprintf("'%s'", reference)
+    params$reference <- sql_quote_string(con, reference)
   }
   if (!is.null(standard_tags)) {
     params$standard_tags <- if (isTRUE(standard_tags)) "true" else "false"
@@ -227,16 +229,22 @@ rduckhts_bam <- function(
     params$auxiliary_tags <- if (isTRUE(auxiliary_tags)) "true" else "false"
   }
   if (!is.null(sequence_encoding)) {
-    params$sequence_encoding <- sprintf("'%s'", sequence_encoding)
+    params$sequence_encoding <- sql_quote_string(con, sequence_encoding)
   }
   if (!is.null(quality_representation)) {
-    params$quality_representation <- sprintf("'%s'", quality_representation)
+    params$quality_representation <- sql_quote_string(
+      con,
+      quality_representation
+    )
   }
   if (!is.null(cigar_representation)) {
-    params$cigar_representation <- sprintf("'%s'", cigar_representation)
+    params$cigar_representation <- sql_quote_string(con, cigar_representation)
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   if (!is.null(decompression_threads)) {
     params$decompression_threads <- sprintf(
@@ -252,15 +260,15 @@ rduckhts_bam <- function(
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bam('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_bam(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW bam_data AS SELECT * FROM read_bam('%s'%s)",
-      path,
+      "CREATE VIEW bam_data AS SELECT * FROM read_bam(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -318,9 +326,9 @@ rduckhts_pileup <- function(
     stop("region must be a single non-empty string", call. = FALSE)
   }
 
-  params <- list(region = sprintf("'%s'", region))
+  params <- list(region = sql_quote_string(con, region))
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(min_mapq)) {
     params$min_mapq <- sprintf(
@@ -339,15 +347,15 @@ rduckhts_pileup <- function(
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_pileup('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_pileup(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW pileup_data AS SELECT * FROM read_pileup('%s'%s)",
-      path,
+      "CREATE VIEW pileup_data AS SELECT * FROM read_pileup(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -465,33 +473,36 @@ rduckhts_fasta <- function(
 
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(gzi_path)) {
-    params$gzi_path <- sprintf("'%s'", gzi_path)
+    params$gzi_path <- sql_quote_string(con, gzi_path)
   }
   if (!is.null(sequence_encoding)) {
-    params$sequence_encoding <- sprintf("'%s'", sequence_encoding)
+    params$sequence_encoding <- sql_quote_string(con, sequence_encoding)
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_fasta('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_fasta(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW fasta_data AS SELECT * FROM read_fasta('%s'%s)",
-      path,
+      "CREATE VIEW fasta_data AS SELECT * FROM read_fasta(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -575,19 +586,23 @@ rduckhts_bigwig <- function(
     blocks_per_iteration = as.character(as.integer(blocks_per_iteration))
   )
   if (!is.null(region)) {
-    params$region <- sql_quote_string(region)
+    params$region <- sql_quote_string(con, region)
   }
   query <- sprintf(
     "SELECT * FROM read_bigwig(%s%s)",
-    sql_quote_string(path),
-    build_param_str(params)
+    sql_quote_string(con, path),
+    if (length(params)) {
+      paste0(", ", paste(names(params), ":=", params, collapse = ", "))
+    } else {
+      ""
+    }
   )
   if (is.null(table_name)) {
     statement <- paste("CREATE VIEW bigwig_data AS", query)
   } else {
     statement <- sprintf(
       "CREATE TABLE %s AS %s",
-      as.character(DBI::dbQuoteIdentifier(con, table_name)),
+      sql_quote_identifier(con, table_name),
       query
     )
   }
@@ -637,27 +652,30 @@ rduckhts_bed <- function(
 
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bed('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_bed(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW bed_data AS SELECT * FROM read_bed('%s'%s)",
-      path,
+      "CREATE VIEW bed_data AS SELECT * FROM read_bed(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -698,28 +716,32 @@ rduckhts_fasta_nuc <- function(
 ) {
   params <- list()
   if (!is.null(bed_path)) {
-    params$bed_path <- sprintf("'%s'", bed_path)
+    params$bed_path <- sql_quote_string(con, bed_path)
   }
   if (!is.null(bin_width)) {
     params$bin_width <- bin_width
   }
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(gzi_path)) {
-    params$gzi_path <- sprintf("'%s'", gzi_path)
+    params$gzi_path <- sql_quote_string(con, gzi_path)
   }
   if (!is.null(bed_index_path)) {
-    params$bed_index_path <- sprintf("'%s'", bed_index_path)
+    params$bed_index_path <- sql_quote_string(con, bed_index_path)
   }
   if (include_seq) {
     params$include_seq <- "true"
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM fasta_nuc('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM fasta_nuc(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -737,12 +759,12 @@ rduckhts_fasta_nuc <- function(
 rduckhts_fasta_index <- function(con, path, index_path = NULL) {
   params <- list()
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   param_str <- build_param_str(params)
   query <- sprintf(
-    "SELECT * FROM fasta_index('%s'%s)",
-    path,
+    "SELECT * FROM fasta_index(%s%s)",
+    sql_quote_string(con, path),
     param_str
   )
   DBI::dbGetQuery(con, query)
@@ -774,14 +796,18 @@ rduckhts_bgzip <- function(
 ) {
   params <- list(threads = threads, level = level)
   if (!is.null(output_path)) {
-    params$output_path <- sprintf("'%s'", output_path)
+    params$output_path <- sql_quote_string(con, output_path)
   }
   params$keep <- if (keep) "true" else "false"
   if (overwrite) {
     params$overwrite <- "true"
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM bgzip('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM bgzip(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -809,14 +835,18 @@ rduckhts_bgunzip <- function(
 ) {
   params <- list(threads = threads)
   if (!is.null(output_path)) {
-    params$output_path <- sprintf("'%s'", output_path)
+    params$output_path <- sql_quote_string(con, output_path)
   }
   params$keep <- if (keep) "true" else "false"
   if (overwrite) {
     params$overwrite <- "true"
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM bgunzip('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM bgunzip(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -864,27 +894,27 @@ rduckhts_bam_bin_counts <- function(
     mapq = mapq,
     require_flags = require_flags,
     exclude_flags = exclude_flags,
-    rmdup = sql_quote_string(rmdup)
+    rmdup = sql_quote_string(con, rmdup)
   )
   if (!is.null(chrom)) {
-    params$chrom <- sql_quote_string(chrom)
+    params$chrom <- sql_quote_string(con, chrom)
   }
   if (isTRUE(include_unmapped)) {
     params$include_unmapped <- "true"
   }
   if (!is.null(reference)) {
-    params$reference <- sql_quote_string(reference)
+    params$reference <- sql_quote_string(con, reference)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(stats)) {
-    params$stats <- sql_quote_string(stats)
+    params$stats <- sql_quote_string(con, stats)
   }
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM bam_bin_counts(%s, %s%s)",
-    sql_quote_string(path),
+    sql_quote_string(con, path),
     as.character(bin_width),
     param_str
   )
@@ -956,19 +986,19 @@ rduckhts_bam_bed_coverage <- function(
     processing_threads = processing_threads
   )
   if (!is.null(reference)) {
-    params$reference <- sql_quote_string(reference)
+    params$reference <- sql_quote_string(con, reference)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(bed_index_path)) {
-    params$bed_index_path <- sql_quote_string(bed_index_path)
+    params$bed_index_path <- sql_quote_string(con, bed_index_path)
   }
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM duckhts_bam_bed_coverage(%s, %s%s)",
-    sql_quote_string(path),
-    sql_quote_string(bed_path),
+    sql_quote_string(con, path),
+    sql_quote_string(con, bed_path),
     param_str
   )
   DBI::dbGetQuery(con, query)
@@ -1051,25 +1081,25 @@ rduckhts_mosdepth <- function(
     precision_digits = precision_digits
   )
   if (!is.null(chrom)) {
-    params$chrom <- sql_quote_string(chrom)
+    params$chrom <- sql_quote_string(con, chrom)
   }
   if (!is.null(by)) {
-    params$by <- sql_quote_string(by)
+    params$by <- sql_quote_string(con, by)
   }
   if (!is.null(fasta)) {
-    params$fasta <- sql_quote_string(fasta)
+    params$fasta <- sql_quote_string(con, fasta)
   }
   if (!is.null(read_groups)) {
-    params$read_groups <- sql_quote_string(read_groups)
+    params$read_groups <- sql_quote_string(con, read_groups)
   }
   if (!is.null(quantize)) {
-    params$quantize <- sql_quote_string(quantize)
+    params$quantize <- sql_quote_string(con, quantize)
   }
   if (!is.null(thresholds)) {
-    params$thresholds <- sql_quote_string(thresholds)
+    params$thresholds <- sql_quote_string(con, thresholds)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (isTRUE(overwrite)) {
     params$overwrite <- "true"
@@ -1077,8 +1107,8 @@ rduckhts_mosdepth <- function(
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM duckhts_mosdepth(%s, %s%s)",
-    sql_quote_string(prefix),
-    sql_quote_string(path),
+    sql_quote_string(con, prefix),
+    sql_quote_string(con, path),
     param_str
   )
   DBI::dbGetQuery(con, query)
@@ -1106,10 +1136,14 @@ rduckhts_bam_index <- function(
 ) {
   params <- list(min_shift = min_shift, threads = threads)
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM bam_index('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM bam_index(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1139,10 +1173,10 @@ rduckhts_samtools_idxstats <- function(
 ) {
   params <- list(threads = threads)
   if (!is.null(output)) {
-    params$output <- sql_quote_string(output)
+    params$output <- sql_quote_string(con, output)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sql_quote_string(index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (isTRUE(overwrite)) {
     params$overwrite <- "true"
@@ -1150,7 +1184,7 @@ rduckhts_samtools_idxstats <- function(
   param_str <- build_param_str(params)
   query <- sprintf(
     "SELECT * FROM duckhts_samtools_idxstats(%s%s)",
-    sql_quote_string(path),
+    sql_quote_string(con, path),
     param_str
   )
   DBI::dbGetQuery(con, query)
@@ -1178,13 +1212,17 @@ rduckhts_bcf_index <- function(
 ) {
   params <- list(threads = threads)
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(min_shift)) {
     params$min_shift <- min_shift
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM bcf_index('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM bcf_index(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1219,12 +1257,12 @@ rduckhts_tabix_index <- function(
   skip_lines = NULL
 ) {
   params <- list(
-    preset = sprintf("'%s'", preset),
+    preset = sql_quote_string(con, preset),
     min_shift = min_shift,
     threads = threads
   )
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(seq_col)) {
     params$seq_col <- seq_col
@@ -1236,13 +1274,17 @@ rduckhts_tabix_index <- function(
     params$end_col <- end_col
   }
   if (!is.null(comment_char)) {
-    params$comment_char <- sprintf("'%s'", comment_char)
+    params$comment_char <- sql_quote_string(con, comment_char)
   }
   if (!is.null(skip_lines)) {
     params$skip_lines <- skip_lines
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM tabix_index('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM tabix_index(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1299,37 +1341,46 @@ rduckhts_fastq <- function(
 
   params <- list()
   if (!is.null(mate_path)) {
-    params$mate_path <- sprintf("'%s'", mate_path)
+    params$mate_path <- sql_quote_string(con, mate_path)
   }
   if (interleaved) {
     params$interleaved <- "true"
   }
   if (!is.null(sequence_encoding)) {
-    params$sequence_encoding <- sprintf("'%s'", sequence_encoding)
+    params$sequence_encoding <- sql_quote_string(con, sequence_encoding)
   }
   if (!is.null(quality_representation)) {
-    params$quality_representation <- sprintf("'%s'", quality_representation)
+    params$quality_representation <- sql_quote_string(
+      con,
+      quality_representation
+    )
   }
   if (!is.null(input_quality_encoding)) {
-    params$input_quality_encoding <- sprintf("'%s'", input_quality_encoding)
+    params$input_quality_encoding <- sql_quote_string(
+      con,
+      input_quality_encoding
+    )
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
 
   param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_fastq('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_fastq(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW fastq_data AS SELECT * FROM read_fastq('%s'%s)",
-      path,
+      "CREATE VIEW fastq_data AS SELECT * FROM read_fastq(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -1354,8 +1405,8 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
   params <- list(max_records = max_records)
   param_str <- build_param_str(params)
   query <- sprintf(
-    "SELECT * FROM detect_quality_encoding('%s'%s)",
-    path,
+    "SELECT * FROM detect_quality_encoding(%s%s)",
+    sql_quote_string(con, path),
     param_str
   )
   DBI::dbGetQuery(con, query)
@@ -1419,10 +1470,10 @@ rduckhts_gff <- function(
 
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(header)) {
     params$header <- if (isTRUE(header)) "true" else "false"
@@ -1434,23 +1485,35 @@ rduckhts_gff <- function(
     if (!is.character(header_names)) {
       stop("header_names must be a character vector")
     }
+    quoted_names <- vapply(
+      header_names,
+      function(name) sql_quote_string(con, name),
+      character(1)
+    )
     params$header_names <- sprintf(
       "[%s]",
-      paste(sprintf("'%s'", header_names), collapse = ", ")
+      paste(quoted_names, collapse = ", ")
     )
   }
   if (!is.null(column_types)) {
     if (!is.character(column_types)) {
       stop("column_types must be a character vector")
     }
-    normalized_types <- normalize_tabix_types(column_types)
+    quoted_types <- vapply(
+      normalize_tabix_types(column_types),
+      function(type) sql_quote_string(con, type),
+      character(1)
+    )
     params$column_types <- sprintf(
       "[%s]",
-      paste(sprintf("'%s'", normalized_types), collapse = ", ")
+      paste(quoted_types, collapse = ", ")
     )
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   if (attributes_map) {
     params$attributes_map <- "true"
@@ -1469,15 +1532,15 @@ rduckhts_gff <- function(
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_gff('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_gff(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW gff_data AS SELECT * FROM read_gff('%s'%s)",
-      path,
+      "CREATE VIEW gff_data AS SELECT * FROM read_gff(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -1542,10 +1605,10 @@ rduckhts_gtf <- function(
 
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(header)) {
     params$header <- if (isTRUE(header)) "true" else "false"
@@ -1557,23 +1620,35 @@ rduckhts_gtf <- function(
     if (!is.character(header_names)) {
       stop("header_names must be a character vector")
     }
+    quoted_names <- vapply(
+      header_names,
+      function(name) sql_quote_string(con, name),
+      character(1)
+    )
     params$header_names <- sprintf(
       "[%s]",
-      paste(sprintf("'%s'", header_names), collapse = ", ")
+      paste(quoted_names, collapse = ", ")
     )
   }
   if (!is.null(column_types)) {
     if (!is.character(column_types)) {
       stop("column_types must be a character vector")
     }
-    normalized_types <- normalize_tabix_types(column_types)
+    quoted_types <- vapply(
+      normalize_tabix_types(column_types),
+      function(type) sql_quote_string(con, type),
+      character(1)
+    )
     params$column_types <- sprintf(
       "[%s]",
-      paste(sprintf("'%s'", normalized_types), collapse = ", ")
+      paste(quoted_types, collapse = ", ")
     )
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   if (attributes_map) {
     params$attributes_map <- "true"
@@ -1589,15 +1664,15 @@ rduckhts_gtf <- function(
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_gtf('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_gtf(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW gtf_data AS SELECT * FROM read_gtf('%s'%s)",
-      path,
+      "CREATE VIEW gtf_data AS SELECT * FROM read_gtf(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -1656,10 +1731,10 @@ rduckhts_tabix <- function(
 
   params <- list()
   if (!is.null(region)) {
-    params$region <- sprintf("'%s'", region)
+    params$region <- sql_quote_string(con, region)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   if (!is.null(header)) {
     params$header <- if (isTRUE(header)) "true" else "false"
@@ -1671,37 +1746,49 @@ rduckhts_tabix <- function(
     if (!is.character(header_names)) {
       stop("header_names must be a character vector")
     }
+    quoted_names <- vapply(
+      header_names,
+      function(name) sql_quote_string(con, name),
+      character(1)
+    )
     params$header_names <- sprintf(
       "[%s]",
-      paste(sprintf("'%s'", header_names), collapse = ", ")
+      paste(quoted_names, collapse = ", ")
     )
   }
   if (!is.null(column_types)) {
     if (!is.character(column_types)) {
       stop("column_types must be a character vector")
     }
-    normalized_types <- normalize_tabix_types(column_types)
+    quoted_types <- vapply(
+      normalize_tabix_types(column_types),
+      function(type) sql_quote_string(con, type),
+      character(1)
+    )
     params$column_types <- sprintf(
       "[%s]",
-      paste(sprintf("'%s'", normalized_types), collapse = ", ")
+      paste(quoted_types, collapse = ", ")
     )
   }
   if (!is.null(scan_mode)) {
-    params$scan_mode <- sql_quote_string(.validate_scan_mode_param(scan_mode))
+    params$scan_mode <- sql_quote_string(
+      con,
+      .validate_scan_mode_param(scan_mode)
+    )
   }
   param_str <- build_param_str(params)
 
   if (!is.null(table_name)) {
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_tabix('%s'%s)",
-      table_name,
-      path,
+      "CREATE TABLE %s AS SELECT * FROM read_tabix(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
       param_str
     )
   } else {
     create_query <- sprintf(
-      "CREATE VIEW tabix_data AS SELECT * FROM read_tabix('%s'%s)",
-      path,
+      "CREATE VIEW tabix_data AS SELECT * FROM read_tabix(%s%s)",
+      sql_quote_string(con, path),
       param_str
     )
   }
@@ -1725,13 +1812,17 @@ rduckhts_tabix <- function(
 rduckhts_hts_header <- function(con, path, format = NULL, mode = NULL) {
   params <- list()
   if (!is.null(format)) {
-    params$format <- sprintf("'%s'", format)
+    params$format <- sql_quote_string(con, format)
   }
   if (!is.null(mode)) {
-    params$mode <- sprintf("'%s'", mode)
+    params$mode <- sql_quote_string(con, mode)
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM read_hts_header('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM read_hts_header(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1750,13 +1841,17 @@ rduckhts_hts_header <- function(con, path, format = NULL, mode = NULL) {
 rduckhts_hts_index <- function(con, path, format = NULL, index_path = NULL) {
   params <- list()
   if (!is.null(format)) {
-    params$format <- sprintf("'%s'", format)
+    params$format <- sql_quote_string(con, format)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM read_hts_index('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM read_hts_index(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1780,15 +1875,15 @@ rduckhts_hts_index_spans <- function(
 ) {
   params <- list()
   if (!is.null(format)) {
-    params$format <- sprintf("'%s'", format)
+    params$format <- sql_quote_string(con, format)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   param_str <- build_param_str(params)
   query <- sprintf(
-    "SELECT * FROM read_hts_index_spans('%s'%s)",
-    path,
+    "SELECT * FROM read_hts_index_spans(%s%s)",
+    sql_quote_string(con, path),
     param_str
   )
   DBI::dbGetQuery(con, query)
@@ -1814,13 +1909,17 @@ rduckhts_hts_index_raw <- function(
 ) {
   params <- list()
   if (!is.null(format)) {
-    params$format <- sprintf("'%s'", format)
+    params$format <- sql_quote_string(con, format)
   }
   if (!is.null(index_path)) {
-    params$index_path <- sprintf("'%s'", index_path)
+    params$index_path <- sql_quote_string(con, index_path)
   }
   param_str <- build_param_str(params)
-  query <- sprintf("SELECT * FROM read_hts_index_raw('%s'%s)", path, param_str)
+  query <- sprintf(
+    "SELECT * FROM read_hts_index_raw(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   DBI::dbGetQuery(con, query)
 }
 
@@ -1888,29 +1987,37 @@ rduckhts_liftover <- function(
     stop("max_indel_inc must be >= 0", call. = FALSE)
   }
 
-  table_expr <- query
+  table_expr <- sql_raw_expression(query)
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
     table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
   }
-  table_sql <- gsub("'", "''", table_expr, fixed = TRUE)
   params <- list(
-    sprintf("'%s'", table_sql),
-    sprintf("'%s'", chrom_col),
-    sprintf("'%s'", pos_col)
+    sql_quote_string(con, table_expr),
+    sql_quote_string(con, chrom_col),
+    sql_quote_string(con, pos_col)
   )
   if (!is.null(ref_col)) {
-    params <- c(params, sprintf("ref_col := '%s'", ref_col))
+    params <- c(
+      params,
+      sprintf("ref_col := %s", sql_quote_string(con, ref_col))
+    )
   }
   if (!is.null(alt_col)) {
-    params <- c(params, sprintf("alt_col := '%s'", alt_col))
+    params <- c(
+      params,
+      sprintf("alt_col := %s", sql_quote_string(con, alt_col))
+    )
   }
   params <- c(
     params,
-    sprintf("chain_path := '%s'", chain_path),
-    sprintf("dst_fasta_ref := '%s'", dst_fasta_ref)
+    sprintf("chain_path := %s", sql_quote_string(con, chain_path)),
+    sprintf("dst_fasta_ref := %s", sql_quote_string(con, dst_fasta_ref))
   )
   if (!is.null(src_fasta_ref)) {
-    params <- c(params, sprintf("src_fasta_ref := '%s'", src_fasta_ref))
+    params <- c(
+      params,
+      sprintf("src_fasta_ref := %s", sql_quote_string(con, src_fasta_ref))
+    )
   }
   params <- c(
     params,
@@ -1919,7 +2026,10 @@ rduckhts_liftover <- function(
     sprintf("lift_mt := %s", tolower(as.character(lift_mt)))
   )
   if (!is.null(end_pos_col)) {
-    params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
+    params <- c(
+      params,
+      sprintf("end_pos_col := %s", sql_quote_string(con, end_pos_col))
+    )
   }
   params <- c(
     params,
@@ -1978,26 +2088,38 @@ rduckhts_bcftools_norm <- function(
   fasta_index_path = NULL,
   gzi_path = NULL
 ) {
-  table_expr <- query
+  table_expr <- sql_raw_expression(query)
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
     table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
   }
 
   params <- list(
-    sql_quote_string(table_expr),
-    sql_quote_string(fasta_ref)
+    sql_quote_string(con, table_expr),
+    sql_quote_string(con, fasta_ref)
   )
   if (!identical(chrom_col, "chrom")) {
-    params <- c(params, sprintf("chrom_col := '%s'", chrom_col))
+    params <- c(
+      params,
+      sprintf("chrom_col := %s", sql_quote_string(con, chrom_col))
+    )
   }
   if (!identical(pos_col, "pos")) {
-    params <- c(params, sprintf("pos_col := '%s'", pos_col))
+    params <- c(
+      params,
+      sprintf("pos_col := %s", sql_quote_string(con, pos_col))
+    )
   }
   if (!identical(ref_col, "ref")) {
-    params <- c(params, sprintf("ref_col := '%s'", ref_col))
+    params <- c(
+      params,
+      sprintf("ref_col := %s", sql_quote_string(con, ref_col))
+    )
   }
   if (!identical(alt_col, "alt")) {
-    params <- c(params, sprintf("alt_col := '%s'", alt_col))
+    params <- c(
+      params,
+      sprintf("alt_col := %s", sql_quote_string(con, alt_col))
+    )
   }
   params <- c(
     params,
@@ -2007,16 +2129,31 @@ rduckhts_bcftools_norm <- function(
     )
   )
   if (!is.null(end_pos_col)) {
-    params <- c(params, sprintf("end_pos_col := '%s'", end_pos_col))
+    params <- c(
+      params,
+      sprintf("end_pos_col := %s", sql_quote_string(con, end_pos_col))
+    )
   }
   if (!is.null(svlen_col)) {
-    params <- c(params, sprintf("svlen_col := '%s'", svlen_col))
+    params <- c(
+      params,
+      sprintf("svlen_col := %s", sql_quote_string(con, svlen_col))
+    )
   }
   if (!is.null(fasta_index_path)) {
-    params <- c(params, sprintf("fasta_index_path := '%s'", fasta_index_path))
+    params <- c(
+      params,
+      sprintf(
+        "fasta_index_path := %s",
+        sql_quote_string(con, fasta_index_path)
+      )
+    )
   }
   if (!is.null(gzi_path)) {
-    params <- c(params, sprintf("gzi_path := '%s'", gzi_path))
+    params <- c(
+      params,
+      sprintf("gzi_path := %s", sql_quote_string(con, gzi_path))
+    )
   }
 
   sql <- sprintf(
@@ -2064,7 +2201,7 @@ rduckhts_munge <- function(
   nc = NULL,
   ne = NULL
 ) {
-  table_expr <- query
+  table_expr <- sql_raw_expression(query)
   if (grepl("^\\s*select\\b", table_expr, ignore.case = TRUE)) {
     table_expr <- sprintf("(%s) AS duckhts_src", table_expr)
   }
@@ -2123,26 +2260,41 @@ rduckhts_munge <- function(
     }
     column_map_file <- NULL
   }
-  params <- list(sql_quote_string(table_expr))
+  params <- list(sql_quote_string(con, table_expr))
   if (!is.null(preset)) {
-    params <- c(params, sprintf("preset := '%s'", preset))
-  }
-  if (!is.null(column_map)) {
     params <- c(
       params,
-      sprintf("column_map := %s", sql_map_literal(column_map))
+      sprintf("preset := %s", sql_quote_string(con, preset))
+    )
+  }
+  if (!is.null(column_map)) {
+    if (!length(column_map)) {
+      stop("column_map must be non-empty", call. = FALSE)
+    }
+    params <- c(
+      params,
+      sprintf("column_map := %s", sql_map_literal(con, column_map))
     )
   }
   if (!is.null(column_map_file)) {
-    params <- c(params, sprintf("column_map_file := '%s'", column_map_file))
+    params <- c(
+      params,
+      sprintf(
+        "column_map_file := %s",
+        sql_quote_string(con, column_map_file)
+      )
+    )
   }
   if (!is.null(fasta_ref)) {
-    params <- c(params, sprintf("fasta_ref := '%s'", fasta_ref))
+    params <- c(
+      params,
+      sprintf("fasta_ref := %s", sql_quote_string(con, fasta_ref))
+    )
   }
   params <- c(
     params,
-    sprintf("iffy_tag := '%s'", iffy_tag),
-    sprintf("mismatch_tag := '%s'", mismatch_tag)
+    sprintf("iffy_tag := %s", sql_quote_string(con, iffy_tag)),
+    sprintf("mismatch_tag := %s", sql_quote_string(con, mismatch_tag))
   )
   if (!is.null(ns)) {
     params <- c(
@@ -2276,49 +2428,72 @@ rduckhts_score <- function(
   summary_sql <- if (is.null(summary_path)) {
     "NULL"
   } else if (length(summary_path) == 1L) {
-    sql_quote_string(summary_path)
+    sql_quote_string(con, summary_path)
   } else {
-    sprintf("[%s]", paste(sql_quote_string(summary_path), collapse = ", "))
+    quoted_paths <- vapply(
+      summary_path,
+      function(path) sql_quote_string(con, path),
+      character(1)
+    )
+    sprintf("[%s]", paste(quoted_paths, collapse = ", "))
   }
   params <- list(
-    sql_quote_string(bcf_path),
+    sql_quote_string(con, bcf_path),
     summary_sql
   )
   if (!is.null(use)) {
-    params <- c(params, sprintf("use := '%s'", use))
+    params <- c(params, sprintf("use := %s", sql_quote_string(con, use)))
   }
   if (!is.null(columns)) {
-    params <- c(params, sprintf("columns := '%s'", columns))
+    params <- c(
+      params,
+      sprintf("columns := %s", sql_quote_string(con, columns))
+    )
   }
   if (!is.null(columns_file)) {
     params <- c(
       params,
-      sprintf("columns_file := %s", sql_quote_string(columns_file))
+      sprintf("columns_file := %s", sql_quote_string(con, columns_file))
     )
   }
   if (!is.null(q_score_thr)) {
-    params <- c(params, sprintf("q_score_thr := '%s'", q_score_thr))
+    params <- c(
+      params,
+      sprintf("q_score_thr := %s", sql_quote_string(con, q_score_thr))
+    )
   }
   if (!is.null(summaries_list_file)) {
     params <- c(
       params,
       sprintf(
         "summaries_list_file := %s",
-        sql_quote_string(summaries_list_file)
+        sql_quote_string(con, summaries_list_file)
       )
     )
   }
   if (!is.null(log_path)) {
-    params <- c(params, sprintf("log_path := %s", sql_quote_string(log_path)))
+    params <- c(
+      params,
+      sprintf("log_path := %s", sql_quote_string(con, log_path))
+    )
   }
   if (!is.null(samples)) {
-    params <- c(params, sprintf("samples := '%s'", samples))
+    params <- c(
+      params,
+      sprintf("samples := %s", sql_quote_string(con, samples))
+    )
   }
   if (!is.null(regions)) {
-    params <- c(params, sprintf("regions := '%s'", regions))
+    params <- c(
+      params,
+      sprintf("regions := %s", sql_quote_string(con, regions))
+    )
   }
   if (!is.null(regions_file)) {
-    params <- c(params, sprintf("regions_file := '%s'", regions_file))
+    params <- c(
+      params,
+      sprintf("regions_file := %s", sql_quote_string(con, regions_file))
+    )
   }
   if (!is.null(regions_overlap)) {
     params <- c(
@@ -2327,10 +2502,16 @@ rduckhts_score <- function(
     )
   }
   if (!is.null(targets)) {
-    params <- c(params, sprintf("targets := '%s'", targets))
+    params <- c(
+      params,
+      sprintf("targets := %s", sql_quote_string(con, targets))
+    )
   }
   if (!is.null(targets_file)) {
-    params <- c(params, sprintf("targets_file := '%s'", targets_file))
+    params <- c(
+      params,
+      sprintf("targets_file := %s", sql_quote_string(con, targets_file))
+    )
   }
   if (!is.null(targets_overlap)) {
     params <- c(
@@ -2339,13 +2520,28 @@ rduckhts_score <- function(
     )
   }
   if (!is.null(apply_filters)) {
-    params <- c(params, sprintf("apply_filters := '%s'", apply_filters))
+    params <- c(
+      params,
+      sprintf("apply_filters := %s", sql_quote_string(con, apply_filters))
+    )
   }
   if (!is.null(include)) {
-    params <- c(params, sprintf("include := '%s'", include))
+    params <- c(
+      params,
+      sprintf(
+        "include := %s",
+        sql_quote_string(con, sql_raw_expression(include))
+      )
+    )
   }
   if (!is.null(exclude)) {
-    params <- c(params, sprintf("exclude := '%s'", exclude))
+    params <- c(
+      params,
+      sprintf(
+        "exclude := %s",
+        sql_quote_string(con, sql_raw_expression(exclude))
+      )
+    )
   }
   params <- c(
     params,
@@ -2370,29 +2566,42 @@ rduckhts_score <- function(
 # Multi-file reading helpers (internal)
 # --------------------------------------------------------------------------
 
-.format_hts_param <- function(name, value) {
+.format_hts_param <- function(con, name, value) {
+  param_name <- sql_quote_identifier(con, name)
   if (identical(name, "decompression_threads")) {
     value <- .validate_nonnegative_integer_param(value, name)
-    return(sprintf("%s := %d", name, value))
+    return(sprintf("%s := %d", param_name, value))
   }
   if (identical(name, "scan_mode")) {
     value <- .validate_scan_mode_param(value, name)
-    return(sprintf("%s := %s", name, sql_quote_string(value)))
+    return(sprintf("%s := %s", param_name, sql_quote_string(con, value)))
   }
 
   if (is.logical(value)) {
-    return(sprintf("%s := %s", name, if (isTRUE(value)) "true" else "false"))
+    return(sprintf(
+      "%s := %s",
+      param_name,
+      if (isTRUE(value)) "true" else "false"
+    ))
   }
   if (is.numeric(value)) {
-    return(sprintf("%s := %s", name, value))
+    return(sprintf("%s := %s", param_name, value))
   }
   if (is.character(value) && length(value) > 1) {
     # LIST literal
-    items <- paste(sql_quote_string(value), collapse = ", ")
-    return(sprintf("%s := [%s]", name, items))
+    items <- vapply(
+      value,
+      function(item) sql_quote_string(con, item),
+      character(1)
+    )
+    return(sprintf(
+      "%s := [%s]",
+      param_name,
+      paste(items, collapse = ", ")
+    ))
   }
   if (is.character(value) && length(value) == 1) {
-    return(sprintf("%s := %s", name, sql_quote_string(value)))
+    return(sprintf("%s := %s", param_name, sql_quote_string(con, value)))
   }
   stop(
     sprintf("Unsupported parameter type for '%s': %s", name, class(value)[1]),
@@ -2400,14 +2609,14 @@ rduckhts_score <- function(
   )
 }
 
-.build_hts_arm <- function(reader, file, params) {
+.build_hts_arm <- function(con, reader, file, params) {
   # params is a named list of already-validated non-NULL values
   param_parts <- character(0)
   if (length(params) > 0) {
     param_parts <- vapply(
       names(params),
       function(nm) {
-        .format_hts_param(nm, params[[nm]])
+        .format_hts_param(con, nm, params[[nm]])
       },
       character(1)
     )
@@ -2417,7 +2626,7 @@ rduckhts_score <- function(
   } else {
     ""
   }
-  quoted_file <- sql_quote_string(file)
+  quoted_file <- sql_quote_string(con, file)
   sprintf(
     "SELECT %s AS filename, t.* FROM %s(%s%s) t",
     quoted_file,
@@ -2433,7 +2642,7 @@ rduckhts_score <- function(
   for (pattern in files) {
     sql <- sprintf(
       "SELECT file FROM glob(%s) g(file)",
-      sql_quote_string(pattern)
+      sql_quote_string(con, pattern)
     )
     res <- DBI::dbGetQuery(con, sql)
     if (nrow(res) == 0) {
@@ -2508,7 +2717,7 @@ rduckhts_score <- function(
             merged[[col]] <- val
           }
         }
-        .build_hts_arm(reader, f, merged)
+        .build_hts_arm(con, reader, f, merged)
       },
       character(1),
       USE.NAMES = FALSE
@@ -2519,7 +2728,7 @@ rduckhts_score <- function(
     arms <- vapply(
       expanded,
       function(f) {
-        .build_hts_arm(reader, f, uniform_params)
+        .build_hts_arm(con, reader, f, uniform_params)
       },
       character(1),
       USE.NAMES = FALSE
@@ -2527,7 +2736,11 @@ rduckhts_score <- function(
   }
 
   union_sql <- paste(arms, collapse = " UNION ALL BY NAME ")
-  create_sql <- sprintf("CREATE TABLE %s AS %s", table_name, union_sql)
+  create_sql <- sprintf(
+    "CREATE TABLE %s AS %s",
+    sql_quote_identifier(con, table_name),
+    union_sql
+  )
   DBI::dbExecute(con, create_sql)
   invisible(TRUE)
 }

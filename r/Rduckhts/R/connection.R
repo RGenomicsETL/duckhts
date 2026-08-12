@@ -183,9 +183,7 @@ rduckhts_load <- function(con, extension_path = NULL) {
   }
   DBI::dbExecute(con, "SET enable_progress_bar = false")
 
-  # Load the extension. dbQuoteString handles package library paths containing
-  # quotes or other SQL-sensitive characters.
-  quoted_extension <- as.character(DBI::dbQuoteString(con, extension_path))
+  quoted_extension <- sql_quote_string(con, extension_path)
   result <- DBI::dbExecute(con, paste("LOAD", quoted_extension))
   return(result == 0)
 }
