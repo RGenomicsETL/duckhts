@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- quote wrapper paths and option values through one DBI literal authority and
+  SQL object names through one identifier authority, while retaining documented
+  raw expression arguments. Paths and table names containing quotes, spaces,
+  reserved words, or punctuation no longer alter generated statements
+
 - make dependency installation an explicit `make deps` action rather than an
   implicit side effect of `make build`, so package builds remain usable in
   already provisioned or offline development environments

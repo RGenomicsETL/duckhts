@@ -114,7 +114,10 @@ duckdb_type_mappings <- function() {
 #' @export
 detect_complex_types <- function(con, table_name) {
   # Get table schema
-  schema <- DBI::dbGetQuery(con, sprintf("DESCRIBE %s", table_name))
+  schema <- DBI::dbGetQuery(
+    con,
+    sprintf("DESCRIBE %s", sql_quote_identifier(con, table_name))
+  )
 
   # Find complex types (containing [ or MAP)
   complex_mask <- grepl("\\[|MAP", schema$column_type)

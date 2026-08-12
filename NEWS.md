@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- make Rduckhts SQL construction quote paths and option values through one
+  DBI literal authority and table names through one identifier authority, while
+  preserving explicitly documented SQL expression arguments. Quoted paths and
+  identifiers can no longer terminate a wrapper-generated statement
+
 - move HPRC v2, Sniffles2 1KGP, and dbVar GRCh38 chr22 DuckVEP corpus staging
   into the `duckhtsbench` artifact registry. The R-native CLI now owns pinned
   raw-source identities, remote indexes/manifests, deterministic derived VCFs
