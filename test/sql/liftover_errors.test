@@ -147,3 +147,23 @@ SELECT (bcftools_liftover(
 )).src_pos;
 ----
 Invalid Input Error: bcftools_liftover: max_indel_inc must be >= 0
+
+# A long padded allele reaches clip-pad realignment but must be rejected before
+# allocating more than the explicit six-matrix cell budget.
+statement error
+SELECT bcftools_liftover(
+  'chrS', 2,
+  substr(repeat('ACGT', 551), 2, 2200), 'C',
+  '__WORKING_DIRECTORY__/test/data/liftover_nw_limit.chain',
+  '__WORKING_DIRECTORY__/test/data/liftover_nw_limit_dst.fa',
+  '__WORKING_DIRECTORY__/test/data/liftover_nw_limit_src.fa',
+  1, 250, false, NULL::BIGINT, true
+);
+----
+Invalid Input Error: bcftools_liftover: clip-pad alignment exceeds the 4194304-cell limit
+
+# The same connection remains usable after the rejected alignment.
+query I
+SELECT 42;
+----
+42

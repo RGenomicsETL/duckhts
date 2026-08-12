@@ -290,6 +290,29 @@ EOF
 done
 echo "  liftover clip-pad negative-score fixtures + .fai"
 
+# ---- Liftover clip-pad allocation-limit regression fixtures ----
+for out_dir in "$DST" "$PKG_DST"; do
+  python3 - "$out_dir" <<'PY'
+from pathlib import Path
+import sys
+
+out_dir = Path(sys.argv[1])
+first_block = 2201
+source = ("ACGT" * 1100)[:4005]
+destination = source[:first_block] + source[first_block + 1:]
+(out_dir / "liftover_nw_limit_src.fa").write_text(">chrS\n" + source + "\n")
+(out_dir / "liftover_nw_limit_dst.fa").write_text(">chrD\n" + destination + "\n")
+(out_dir / "liftover_nw_limit.chain").write_text(
+    "chain 100 chrS 4005 + 0 4005 chrD 4004 + 0 4004 1\n"
+    "2201 1 0\n"
+    "1803\n"
+)
+PY
+  samtools faidx "$out_dir/liftover_nw_limit_src.fa"
+  samtools faidx "$out_dir/liftover_nw_limit_dst.fa"
+done
+echo "  liftover clip-pad allocation-limit fixtures + .fai"
+
 # ---- Liftover chr23/X source-FASTA alias regression fixtures ----
 for out_dir in "$DST" "$PKG_DST"; do
   cat > "$out_dir/liftover_chr23_alias_src.fa" <<'EOF'

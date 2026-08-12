@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- bound liftover clip-pad realignment to 4,194,304 Needleman–Wunsch cells,
+  with checked matrix sizing and a recoverable DuckDB error instead of wrapped
+  or unbounded input-driven allocation
+
 - make Rduckhts SQL construction quote paths and option values through one
   DBI literal authority and table names through one identifier authority, while
   preserving explicitly documented SQL expression arguments. Quoted paths and

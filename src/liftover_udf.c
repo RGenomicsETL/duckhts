@@ -1280,36 +1280,64 @@ static void scalar_realign_cleanup(scalar_realign_t *ra) {
 #define _M 0
 #define _D 1
 #define _I 2
+/* Three int and three byte matrices: at most 60 MiB per row. */
+#define LIFTOVER_NW_MAX_CELLS ((size_t)4 * 1024 * 1024)
+#define LIFTOVER_NW_LIMIT_ERROR "bcftools_liftover: clip-pad alignment exceeds the 4194304-cell limit"
 /* This version left-aligns deletions and insertions (exact upstream macro) */
 #define MAX_IND(v) ((v[_D]) < (v[_I]) ? (v[_I]) < (v[_M]) ? (_M) : (_I) : (v[_D]) < (v[_M]) ? (_M) : (_D))
 
-/* Exact port of upstream nw() — Needleman-Wunsch with affine gap penalty.
- * Scoring values drawn from bwa mem: match=1, mismatch=-4, gap_open=-6, gap_ext=-1.
- * Returns the alignment score. Path is stored in path->s. */
-static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstring_t *path) {
-    if (!path) return -1;
-    path->l = 0;
-    if (path->s) path->s[0] = '\0';
-    if (s_l > (size_t)(INT_MAX - 1) || t_l > (size_t)(INT_MAX - 1)) return -1;
+typedef enum {
+    LIFTOVER_NW_OK = 0,
+    LIFTOVER_NW_LIMIT,
+    LIFTOVER_NW_NOMEM
+} liftover_nw_status_t;
+
+static liftover_nw_status_t scalar_nw_cell_count(size_t s_l, size_t t_l, size_t *result) {
+    size_t rows, columns;
+    if (s_l >= LIFTOVER_NW_MAX_CELLS || t_l >= LIFTOVER_NW_MAX_CELLS)
+        return LIFTOVER_NW_LIMIT;
+    rows = s_l + 1;
+    columns = t_l + 1;
+    if (rows > LIFTOVER_NW_MAX_CELLS / columns)
+        return LIFTOVER_NW_LIMIT;
+    *result = rows * columns;
+    return LIFTOVER_NW_OK;
+}
+
+/* Port of upstream nw() with a bounded six-matrix allocation.
+ * Scoring values drawn from bwa mem: match=1, mismatch=-4, gap_open=-6, gap_ext=-1. */
+static liftover_nw_status_t scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l,
+                                      kstring_t *path, int *result) {
+    size_t rows, columns, cells, path_size;
     int a = 1;   /* score for a sequence match */
     int b = -4;  /* penalty for a mismatch */
     int o = -6;  /* gap open penalty */
     int e = -1;  /* gap extension penalty */
-    int n = (int)s_l + 1;
-    int m = (int)t_l + 1;
-    int i, j, cell, ind, score[3];
-    int *A[3];
-    char *B[3];
-    if (ks_resize(path, (size_t)(n + m - 1)) < 0) return -1;
+    int n, m, i, j, cell, ind, score[3];
+    int *A[3] = {NULL, NULL, NULL};
+    char *B[3] = {NULL, NULL, NULL};
+
+    if (!path || !result) return LIFTOVER_NW_NOMEM;
+    path->l = 0;
+    if (path->s) path->s[0] = '\0';
+    if (scalar_nw_cell_count(s_l, t_l, &cells) != LIFTOVER_NW_OK)
+        return LIFTOVER_NW_LIMIT;
+    rows = s_l + 1;
+    columns = t_l + 1;
+    path_size = rows + columns - 1;
+    if (ks_resize(path, path_size) < 0) return LIFTOVER_NW_NOMEM;
+
+    n = (int)rows;
+    m = (int)columns;
     for (i = 0; i < 3; i++) {
-        A[i] = (int *)malloc(sizeof(int) * (size_t)(n * m));
-        B[i] = (char *)malloc(sizeof(char) * (size_t)(n * m));
+        A[i] = (int *)malloc(cells * sizeof(*A[i]));
+        B[i] = (char *)malloc(cells * sizeof(*B[i]));
         if (!A[i] || !B[i]) {
             for (int k = 0; k <= i; k++) {
                 free(A[k]);
                 free(B[k]);
             }
-            return -1;
+            return LIFTOVER_NW_NOMEM;
         }
     }
 
@@ -1359,7 +1387,7 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
     score[_D] = A[_D][cell];
     score[_I] = A[_I][cell];
     ind = MAX_IND(score);
-    int ret = score[ind];
+    *result = score[ind];
 
     /* Reconstruct the path by backtracking */
     i = n + m - 2;
@@ -1379,8 +1407,7 @@ static int scalar_nw(const char *s, size_t s_l, const char *t, size_t t_l, kstri
         free(A[i]);
         free(B[i]);
     }
-
-    return ret;
+    return LIFTOVER_NW_OK;
 }
 
 /* Exact port of upstream get_shift() */
@@ -1414,43 +1441,69 @@ static int scalar_get_shift(char *path, int npad) {
  * ref_str is the destination reference sequence spanning [pos5..pos3].
  * pad is the source pad sequence, npad is its signed length.
  * Adjusts pos5/pos3 in-place. Uses allele strings from extend_alleles output. */
-static void scalar_clip_pad(char **alleles, int n_allele,
-                            const char *dst_ref, char *pad, int npad,
-                            hts_pos_t *pos5, hts_pos_t *pos3) {
+static liftover_nw_status_t scalar_clip_pad(char **alleles, int n_allele,
+                                            const char *dst_ref, char *pad, int npad,
+                                            hts_pos_t *pos5, hts_pos_t *pos3) {
     int best_score = INT32_MIN;
     int best_shift = 0;
+    size_t dst_ref_len = strlen(dst_ref);
+    size_t pad_len = npad < 0 ? (size_t)(-(int64_t)npad) : (size_t)npad;
     kstring_t path = {0, 0, NULL};
     kstring_t src_seq = {0, 0, NULL};
+    liftover_nw_status_t status = LIFTOVER_NW_OK;
+
     for (int i = 0; i < n_allele; i++) {
         int new_score;
+        size_t allele_len, src_seq_len, cells;
         if (!alleles[i] || alleles[i][0] == '*') continue;
+
+        allele_len = strlen(alleles[i]);
+        if (allele_len > SIZE_MAX - pad_len) {
+            status = LIFTOVER_NW_LIMIT;
+            break;
+        }
+        src_seq_len = allele_len + pad_len;
+        if (dst_ref_len >= 2 && src_seq_len >= 2 &&
+            scalar_nw_cell_count(dst_ref_len - 2, src_seq_len - 2, &cells) != LIFTOVER_NW_OK) {
+            status = LIFTOVER_NW_LIMIT;
+            break;
+        }
 
         /* Generate source reference sequence: pad + allele or allele + pad */
         src_seq.l = 0;
         if (npad < 0) {
-            kputsn_(pad, (size_t)(-npad), &src_seq);
-            kputs(alleles[i], &src_seq);
-        } else {
-            kputsn_(alleles[i], strlen(alleles[i]), &src_seq);
-            kputsn(pad, (size_t)npad, &src_seq);
+            if (kputsn_(pad, (size_t)(-npad), &src_seq) < 0 ||
+                kputs(alleles[i], &src_seq) < 0) {
+                status = LIFTOVER_NW_NOMEM;
+                break;
+            }
+        } else if (kputsn_(alleles[i], strlen(alleles[i]), &src_seq) < 0 ||
+                   kputsn(pad, (size_t)npad, &src_seq) < 0) {
+            status = LIFTOVER_NW_NOMEM;
+            break;
         }
+        if (dst_ref_len < 2 || src_seq.l < 2) continue;
 
         /* Pairwise align source and destination sequences excluding the anchors */
-        new_score = scalar_nw(dst_ref + 1, (size_t)(*pos3 - *pos5 - 1),
-                              src_seq.s + 1, src_seq.l - 2, &path);
+        status = scalar_nw(dst_ref + 1, dst_ref_len - 2,
+                           src_seq.s + 1, src_seq.l - 2, &path, &new_score);
+        if (status != LIFTOVER_NW_OK) break;
         if (new_score > best_score) {
             best_score = new_score;
             best_shift = scalar_get_shift(path.s, npad);
         }
     }
 
-    if (npad < 0)
-        *pos5 += best_shift;
-    else
-        *pos3 += best_shift;
+    if (status == LIFTOVER_NW_OK) {
+        if (npad < 0)
+            *pos5 += best_shift;
+        else
+            *pos3 += best_shift;
+    }
 
     free(path.s);
     free(src_seq.s);
+    return status;
 }
 
 /* ========================================================================
@@ -2139,8 +2192,23 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
             if (mapped && npad != 0 && pad_seq && dst_pos3 > dst_pos5 && bind->dst_fai) {
                 char *dst_ref_nw = fetch_sequence_flexible(bind->dst_fai, dst_chr, dst_pos5, dst_pos3);
                 if (dst_ref_nw) {
-                    scalar_clip_pad(work_alleles, work_n_allele, dst_ref_nw, pad_seq, npad, &dst_pos5, &dst_pos3);
+                    liftover_nw_status_t nw_status = scalar_clip_pad(
+                        work_alleles, work_n_allele, dst_ref_nw, pad_seq, npad, &dst_pos5, &dst_pos3);
                     free(dst_ref_nw);
+                    if (nw_status != LIFTOVER_NW_OK) {
+                        free_allele_array(work_alleles, work_n_allele);
+                        free(pad_seq);
+                        free(src_ref_copy);
+                        free(src_alt_copy);
+                        free(dst_ref);
+                        free(dst_chr_alloc);
+                        set_liftover_error(
+                            info,
+                            nw_status == LIFTOVER_NW_LIMIT
+                                ? LIFTOVER_NW_LIMIT_ERROR
+                                : "bcftools_liftover: could not allocate clip-pad alignment storage");
+                        return;
+                    }
                 }
             }
 
