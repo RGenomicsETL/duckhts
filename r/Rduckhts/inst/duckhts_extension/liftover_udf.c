@@ -16,6 +16,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/regidx.h>
 
+#include "liftover_nw_limit.h"
+
 #define LIFTOVER_WARNING_BUF 256
 #define LIFTOVER_CACHE_MAX_ENTRIES 8
 typedef struct {
@@ -1281,7 +1283,6 @@ static void scalar_realign_cleanup(scalar_realign_t *ra) {
 #define _D 1
 #define _I 2
 /* Three int and three byte matrices: at most 60 MiB per row. */
-#define LIFTOVER_NW_MAX_CELLS ((size_t)4 * 1024 * 1024)
 #define LIFTOVER_NW_LIMIT_ERROR "bcftools_liftover: clip-pad alignment exceeds the 4194304-cell limit"
 /* This version left-aligns deletions and insertions (exact upstream macro) */
 #define MAX_IND(v) ((v[_D]) < (v[_I]) ? (v[_I]) < (v[_M]) ? (_M) : (_I) : (v[_D]) < (v[_M]) ? (_M) : (_D))
@@ -1291,18 +1292,6 @@ typedef enum {
     LIFTOVER_NW_LIMIT,
     LIFTOVER_NW_NOMEM
 } liftover_nw_status_t;
-
-static liftover_nw_status_t scalar_nw_cell_count(size_t s_l, size_t t_l, size_t *result) {
-    size_t rows, columns;
-    if (s_l >= LIFTOVER_NW_MAX_CELLS || t_l >= LIFTOVER_NW_MAX_CELLS)
-        return LIFTOVER_NW_LIMIT;
-    rows = s_l + 1;
-    columns = t_l + 1;
-    if (rows > LIFTOVER_NW_MAX_CELLS / columns)
-        return LIFTOVER_NW_LIMIT;
-    *result = rows * columns;
-    return LIFTOVER_NW_OK;
-}
 
 /* Port of upstream nw() with a bounded six-matrix allocation.
  * Scoring values drawn from bwa mem: match=1, mismatch=-4, gap_open=-6, gap_ext=-1. */
@@ -1320,8 +1309,7 @@ static liftover_nw_status_t scalar_nw(const char *s, size_t s_l, const char *t, 
     if (!path || !result) return LIFTOVER_NW_NOMEM;
     path->l = 0;
     if (path->s) path->s[0] = '\0';
-    if (scalar_nw_cell_count(s_l, t_l, &cells) != LIFTOVER_NW_OK)
-        return LIFTOVER_NW_LIMIT;
+    if (!liftover_nw_cell_count(s_l, t_l, &cells)) return LIFTOVER_NW_LIMIT;
     rows = s_l + 1;
     columns = t_l + 1;
     path_size = rows + columns - 1;
@@ -1464,7 +1452,7 @@ static liftover_nw_status_t scalar_clip_pad(char **alleles, int n_allele,
         }
         src_seq_len = allele_len + pad_len;
         if (dst_ref_len >= 2 && src_seq_len >= 2 &&
-            scalar_nw_cell_count(dst_ref_len - 2, src_seq_len - 2, &cells) != LIFTOVER_NW_OK) {
+            !liftover_nw_cell_count(dst_ref_len - 2, src_seq_len - 2, &cells)) {
             status = LIFTOVER_NW_LIMIT;
             break;
         }

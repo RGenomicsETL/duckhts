@@ -3,7 +3,8 @@
 # duckhts 1.5.1.9000
 - bound liftover clip-pad realignment to 4,194,304 Needleman–Wunsch cells,
   with checked matrix sizing and a recoverable DuckDB error instead of wrapped
-  or unbounded input-driven allocation
+  or unbounded input-driven allocation. Add replayable randomized cell-admission
+  properties and malformed SQL/chain fuzzing that checks connection recovery
 
 - make Rduckhts SQL construction quote paths and option values through one
   DBI literal authority and table names through one identifier authority, while
