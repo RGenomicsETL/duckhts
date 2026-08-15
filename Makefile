@@ -158,12 +158,12 @@ test-liftover-property-asan:
 test-liftover-property-ubsan:
 	$(call run_liftover_property,-fsanitize=undefined -fno-sanitize-recover=undefined,UBSAN_OPTIONS=halt_on_error=1)
 
-test-liftover-fuzz: release
+test-liftover-fuzz:
 	$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
 		--extension build/release/$(EXTENSION_NAME).duckdb_extension \
 		--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}
 
-test-liftover-fuzz-debug: debug
+test-liftover-fuzz-debug:
 	$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
 		--extension build/debug/$(EXTENSION_NAME).duckdb_extension \
 		--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}
@@ -175,7 +175,7 @@ test-sanitizers:
 	$(MAKE) test-sanitized-extension SANITIZER=asan
 	$(MAKE) test-sanitized-extension SANITIZER=ubsan
 
-test-bcftools-filter-recovery: release
+test-bcftools-filter-recovery:
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping filter recovery probe on MinGW"; \
 	else \

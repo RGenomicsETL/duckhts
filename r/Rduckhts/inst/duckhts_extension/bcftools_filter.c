@@ -104,6 +104,25 @@ typedef struct _token_t
 }
 token_t;
 
+static void filter_token_destroy(token_t *token)
+{
+    if ( !token ) return;
+    free(token->key);
+    free(token->str_value.s);
+    free(token->tag);
+    free(token->idxs);
+    free(token->usmpl);
+    free(token->values);
+    free(token->pass_samples);
+    if ( token->hash ) khash_str2int_destroy_free(token->hash);
+    if ( token->regex )
+    {
+        regfree(token->regex);
+        free(token->regex);
+    }
+    memset(token, 0, sizeof(*token));
+}
+
 struct _filter_t
 {
     bcf_hdr_t *hdr;
@@ -3855,28 +3874,45 @@ err:
     return NULL;
 }
 
+#define FILTER_APPEND_TOKEN(n, m, p) do { \
+    if ( (n)==INT_MAX || hts_resize(token_t, (size_t)(n) + 1, &(m), &(p), HTS_RESIZE_CLEAR) < 0 ) \
+        error("Out of memory while parsing the filter expression\n"); \
+    (n)++; \
+} while (0)
+
 // Parse filter expression and convert to reverse polish notation. Dijkstra's shunting-yard algorithm
 static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error)
 {
     filter_t *filter = (filter_t *) calloc(1,sizeof(filter_t));
+    volatile int nops = 0, mops = 0;    // operators stack
+    volatile int nout = 0, mout = 0;    // filter tokens, RPN
+    token_t *volatile out = NULL;
+    token_t *volatile ops = NULL;
     if ( !filter ) return NULL;
     filter->str = strdup(str);
     filter->hdr = hdr;
     filter->max_unpack |= BCF_UN_STR;
     filter->exit_on_error = exit_on_error;
+    if ( !filter->str )
+    {
+        filter->status |= FILTER_ERR_OTHER;
+        snprintf(filter->last_error, sizeof(filter->last_error), "Out of memory while parsing the filter expression");
+        return filter;
+    }
     if ( duckhts_filter_recovery_begin(filter) != 0 )
     {
+        int i;
         duckhts_filter_recovery_end();
+        for (i=0; i<nout; i++) filter_token_destroy(&out[i]);
+        for (i=0; i<nops; i++) filter_token_destroy(&ops[i]);
+        free(out);
+        free(ops);
         filter->status |= FILTER_ERR_OTHER;
         if ( !filter->last_error[0] )
             snprintf(filter->last_error, sizeof(filter->last_error), "Could not parse the expression: %s", str);
         return filter;
     }
 
-    int nops = 0, mops = 0;    // operators stack
-    int nout = 0, mout = 0;    // filter tokens, RPN
-    token_t *out = NULL;
-    token_t *ops = NULL;
     char *tmp = filter->str;
     perl_init(filter, &tmp);
 
@@ -3892,16 +3928,14 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
 
         if ( ret==TOK_LFT )         // left bracket
         {
-            nops++;
-            hts_expand0(token_t, nops, mops, ops);
+            FILTER_APPEND_TOKEN(nops, mops, ops);
             ops[nops-1].tok_type = ret;
         }
         else if ( ret==TOK_RGT )    // right bracket
         {
             while ( nops>0 && ops[nops-1].tok_type!=TOK_LFT )
             {
-                nout++;
-                hts_expand0(token_t, nout, mout, out);
+                FILTER_APPEND_TOKEN(nout, mout, out);
                 out[nout-1] = ops[nops-1];
                 memset(&ops[nops-1],0,sizeof(token_t));
                 nops--;
@@ -3912,8 +3946,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         }
         else if ( ret==TOK_EXT )    // external value
         {
-            nout++;
-            hts_expand0(token_t, nout, mout, out);
+            FILTER_APPEND_TOKEN(nout, mout, out);
             filters_init1_ext(filter, tmp, len, &out[nout-1]);
             tmp += len;
         }
@@ -3922,8 +3955,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             // detect unary minus: replace -value with -1*(value)
             if ( ret==TOK_SUB && last_op!=TOK_VAL && last_op!=TOK_RGT )
             {
-                nout++;
-                hts_expand0(token_t, nout, mout, out);
+                FILTER_APPEND_TOKEN(nout, mout, out);
                 token_t *tok = &out[nout-1];
                 tok->tok_type  = TOK_VAL;
                 tok->hdr_id    = -1;
@@ -3936,8 +3968,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             {
                 // this is different from TOK_PERLSUB,TOK_BINOM,TOK_FISHER in that the expression inside the
                 // brackets gets evaluated as normal expression
-                nops++;
-                hts_expand0(token_t, nops, mops, ops);
+                FILTER_APPEND_TOKEN(nops, mops, ops);
                 token_t *tok = &ops[nops-1];
                 tok->tok_type  = -ret;
                 tok->hdr_id    = -1;
@@ -3976,8 +4007,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                     kputc('"', &rmme);
                     kputsn(tmp, beg-tmp, &rmme);
                     kputc('"', &rmme);
-                    nout++;
-                    hts_expand0(token_t, nout, mout, out);
+                    FILTER_APPEND_TOKEN(nout, mout, out);
                     filters_init1(filter, rmme.s, rmme.l, &out[nout-1]);
                     nargs++;
                 }
@@ -3992,16 +4022,14 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                 for (i=0; i<margs; i++)
                 {
                     nargs++;
-                    nout++;
-                    hts_expand0(token_t, nout, mout, out);
+                    FILTER_APPEND_TOKEN(nout, mout, out);
                     filters_init1(filter, rmme_list[i], strlen(rmme_list[i]), &out[nout-1]);
                     free(rmme_list[i]);
                 }
                 free(rmme_list);
                 free(rmme.s);
 
-                nout++;
-                hts_expand0(token_t, nout, mout, out);
+                FILTER_APPEND_TOKEN(nout, mout, out);
                 token_t *tok = &out[nout-1];
                 tok->tok_type  = ret;
                 tok->nargs     = nargs;
@@ -4016,15 +4044,13 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             {
                 while ( nops>0 && op_prec[ret] < op_prec[ops[nops-1].tok_type] )
                 {
-                    nout++;
-                    hts_expand0(token_t, nout, mout, out);
+                    FILTER_APPEND_TOKEN(nout, mout, out);
                     out[nout-1] = ops[nops-1];
                     memset(&ops[nops-1],0,sizeof(token_t));
                     nops--;
                 }
             }
-            nops++;
-            hts_expand0(token_t, nops, mops, ops);
+            FILTER_APPEND_TOKEN(nops, mops, ops);
             ops[nops-1].tok_type = ret;
         }
         else if ( !len )    // all tokes read or an error
@@ -4034,8 +4060,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         }
         else           // TOK_VAL: annotation name or value
         {
-            nout++;
-            hts_expand0(token_t, nout, mout, out);
+            FILTER_APPEND_TOKEN(nout, mout, out);
             if ( tmp[len-1]==',' )
                 filters_init1(filter, tmp, len-1, &out[nout-1]);
             else
@@ -4047,8 +4072,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     while ( nops>0 )
     {
         if ( ops[nops-1].tok_type==TOK_LFT || ops[nops-1].tok_type==TOK_RGT ) error("Could not parse the expression: [%s]\n", filter->str);
-        nout++;
-        hts_expand0(token_t, nout, mout, out);
+        FILTER_APPEND_TOKEN(nout, mout, out);
         out[nout-1] = ops[nops-1];
         memset(&ops[nops-1],0,sizeof(token_t));
         nops--;
@@ -4124,6 +4148,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             if ( !out[j].key )
                 error("Could not parse the expression, wrong value for regex operator: %s\n", filter->str);
             out[j].regex = (regex_t *) malloc(sizeof(regex_t));
+            if ( !out[j].regex ) error("Out of memory while compiling the regex expression\n");
             int cflags = REG_NOSUB;
             int len = strlen(out[j].key);
             if ( len>2 && out[j].key[len-1]=='i' && out[j].key[len-2]=='/' && out[j].key[len-3]!='\\'  )
@@ -4132,7 +4157,11 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                 cflags |= REG_ICASE;
             }
             if ( regcomp(out[j].regex, out[j].key, cflags) )
+            {
+                free(out[j].regex);
+                out[j].regex = NULL;
                 error("Could not compile the regex expression \"%s\": %s\n", out[j].key,filter->str);
+            }
         }
         if ( out[i].is_str && out[i].tok_type==TOK_VAL && out[i].key && strchr(out[i].key,',') )
         {
@@ -4268,10 +4297,12 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         else if ( out[i].tok_type==TOK_sMEDIAN ) { out[i].func = func_smpl_median; out[i].tok_type = TOK_FUNC; }
         else if ( out[i].tok_type==TOK_sSTDEV ) { out[i].func = func_smpl_stddev; out[i].tok_type = TOK_FUNC; }
         else if ( out[i].tok_type==TOK_sSUM ) { out[i].func = func_smpl_sum; out[i].tok_type = TOK_FUNC; }
-        hts_expand0(double,1,out[i].mvalues,out[i].values);
+        if ( hts_resize(double, 1, &out[i].mvalues, &out[i].values, HTS_RESIZE_CLEAR) < 0 )
+            error("Out of memory while preparing the filter expression\n");
         if ( filter->nsamples )
         {
             out[i].pass_samples = (uint8_t*)malloc(filter->nsamples);
+            if ( !out[i].pass_samples ) error("Out of memory while preparing the filter expression\n");
             int j;
             for (j=0; j<filter->nsamples; j++) out[i].pass_samples[j] = 0;
         }
@@ -4280,12 +4311,24 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     if (0) filter_debug_print(out, NULL, nout);
 
     if ( mops ) free(ops);
+    ops = NULL;
+    nops = mops = 0;
+    if ( (size_t)nout > SIZE_MAX / sizeof(token_t*) )
+        error("Filter expression is too large\n");
     filter->filters   = out;
     filter->nfilters  = nout;
-    filter->flt_stack = (token_t **)malloc(sizeof(token_t*)*nout);
+    filter->flt_stack = nout ? (token_t **)malloc(sizeof(token_t*)*(size_t)nout) : NULL;
+    if ( nout && !filter->flt_stack )
+    {
+        filter->filters = NULL;
+        filter->nfilters = 0;
+        error("Out of memory while preparing the filter expression\n");
+    }
     duckhts_filter_recovery_end();
     return filter;
 }
+#undef FILTER_APPEND_TOKEN
+
 filter_t *filter_parse(bcf_hdr_t *hdr, const char *str)
 {
     return filter_init_(hdr, str, 0);
@@ -4299,22 +4342,7 @@ void filter_destroy(filter_t *filter)
 {
     perl_destroy(filter);
     int i;
-    for (i=0; i<filter->nfilters; i++)
-    {
-        if ( filter->filters[i].key ) free(filter->filters[i].key);
-        free(filter->filters[i].str_value.s);
-        free(filter->filters[i].tag);
-        free(filter->filters[i].idxs);
-        free(filter->filters[i].usmpl);
-        free(filter->filters[i].values);
-        free(filter->filters[i].pass_samples);
-        if (filter->filters[i].hash) khash_str2int_destroy_free(filter->filters[i].hash);
-        if (filter->filters[i].regex)
-        {
-            regfree(filter->filters[i].regex);
-            free(filter->filters[i].regex);
-        }
-    }
+    for (i=0; i<filter->nfilters; i++) filter_token_destroy(&filter->filters[i]);
     for (i=0; i<filter->nundef_tag; i++) free(filter->undef_tag[i]);
     for (i=0; i<filter->nused_tag; i++) free(filter->used_tag[i]);
     free(filter->ext);

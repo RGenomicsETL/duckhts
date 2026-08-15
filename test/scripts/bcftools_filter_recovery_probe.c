@@ -17,7 +17,7 @@ int main(void) {
     bcf_hdr_t *hdr = bcf_hdr_init("w");
     bcf1_t *rec = bcf_init();
     filter_t *filter;
-    int gt = bcf_gt_unphased(0), dp[] = {10, 11}, fmt_type, info_type;
+    int gt = bcf_gt_unphased(0), dp[] = {10, 11}, fmt_type, info_type, i;
     const char *alleles[] = {"A", "C"};
     if (!hdr || !rec) return 2;
     bcf_hdr_append(hdr, "##fileformat=VCFv4.2");
@@ -45,6 +45,15 @@ int main(void) {
     if (!expect_recovery(filter, rec, "Unsupported INFO type")) return 7;
     filter_destroy(filter);
     rec->d.info[0].type = info_type;
+
+    for (i = 0; i < 1000; i++) {
+        const char *expr = i & 1 ? "INFO/DP>0 & (" : "ID~\"[\"";
+        const char *message = i & 1 ? "Could not parse" : "Could not compile";
+        filter = filter_parse(hdr, expr);
+        if (!filter || filter_status(filter) != FILTER_ERR_OTHER ||
+            !filter_last_error(filter) || !strstr(filter_last_error(filter), message)) return 8;
+        filter_destroy(filter);
+    }
 
     puts("bcftools filter recovery: OK");
     bcf_destroy(rec);

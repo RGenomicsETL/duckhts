@@ -81,5 +81,10 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror "${compile_flags[@]}" \
   -Isrc/include -Ithird_party/htslib test/scripts/bcftools_filter_recovery_probe.c \
   -L"$out_dir" -Wl,-rpath,"$root/$out_dir" -lduckhts "${link_flags[@]}" \
   -o "$tmp/filter_recovery"
-"${runtime[@]}" "$tmp/filter_recovery"
+if [ "$sanitizer" = asan ]; then
+  ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+    LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$tmp/filter_recovery"
+else
+  "${runtime[@]}" "$tmp/filter_recovery"
+fi
 echo "$sanitizer complete-extension gates: OK"

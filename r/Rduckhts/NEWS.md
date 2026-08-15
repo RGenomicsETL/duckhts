@@ -4,7 +4,8 @@
   4,194,304-cell Needleman–Wunsch limit without terminating the DuckDB session
 
 - make malformed bundled bcftools score-filter INFO/FORMAT storage return a
-  recoverable error instead of terminating the DuckDB process
+  detailed recoverable error instead of terminating the DuckDB process, and
+  reclaim partial filter parser tokens after recovered failures
 
 - quote wrapper paths and option values through one DBI literal authority and
   SQL object names through one identifier authority, while retaining documented

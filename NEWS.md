@@ -5,11 +5,16 @@
   with checked matrix sizing and a recoverable DuckDB error instead of wrapped
   or unbounded input-driven allocation. Add replayable randomized cell-admission
   properties, malformed SQL/chain fuzzing that checks connection recovery, and
-  complete-extension ASan/UBSan CI over the same focused host-safety corpus
+  complete-extension ASan/UBSan CI over the same focused host-safety corpus.
+  Sanitizer CI installs a checksum-pinned DuckDB CLI, and distribution tests
+  consume the already built extension instead of rebuilding a relocated CMake
+  cache
 
 - route malformed bcftools score-filter INFO/FORMAT storage and failed internal
   invariants through one recoverable filter authority instead of `exit()` or
-  runtime assertions, and remove the unused second recovery stack
+  runtime assertions, clean partial parser tokens after recovered failures,
+  preserve the detailed filter cause in SQL errors, and remove the unused
+  second recovery stack
 
 - make Rduckhts SQL construction quote paths and option values through one
   DBI literal authority and table names through one identifier authority, while

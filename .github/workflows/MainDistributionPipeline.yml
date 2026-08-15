@@ -41,6 +41,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libbz2-dev libcurl4-openssl-dev libdeflate-dev liblzma-dev libssl-dev zlib1g-dev
+      - name: Install DuckDB 1.5.0 CLI
+        run: |
+          curl -fsSL --retry 3 -o /tmp/duckdb.zip \
+            https://github.com/duckdb/duckdb/releases/download/v1.5.0/duckdb_cli-linux-amd64.zip
+          echo "179a481edf048dd1fef0f097d66933b4b5f5a5737d4034c645e415ec722c0292  /tmp/duckdb.zip" | sha256sum -c -
+          unzip -q /tmp/duckdb.zip -d /tmp/duckdb-cli
+          chmod +x /tmp/duckdb-cli/duckdb
+          echo "/tmp/duckdb-cli" >> "$GITHUB_PATH"
       - name: Configure
         run: make configure
       - name: Run sanitizer corpus
