@@ -3,6 +3,9 @@
 - make bundled liftover reject clip-pad realignments above its explicit
   4,194,304-cell Needleman–Wunsch limit without terminating the DuckDB session
 
+- make malformed bundled bcftools score-filter INFO/FORMAT storage return a
+  recoverable error instead of terminating the DuckDB process
+
 - quote wrapper paths and option values through one DBI literal authority and
   SQL object names through one identifier authority, while retaining documented
   raw expression arguments. Paths and table names containing quotes, spaces,

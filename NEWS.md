@@ -6,6 +6,10 @@
   or unbounded input-driven allocation. Add replayable randomized cell-admission
   properties and malformed SQL/chain fuzzing that checks connection recovery
 
+- route malformed bcftools score-filter INFO/FORMAT storage and failed internal
+  invariants through one recoverable filter authority instead of `exit()` or
+  runtime assertions, and remove the unused second recovery stack
+
 - make Rduckhts SQL construction quote paths and option values through one
   DBI literal authority and table names through one identifier authority, while
   preserving explicitly documented SQL expression arguments. Quoted paths and

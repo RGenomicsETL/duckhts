@@ -25,9 +25,9 @@ THE SOFTWARE.  */
 #include <ctype.h>
 #include <stdlib.h>
 #include <strings.h>
-#include <assert.h>
 #include <errno.h>
 #include <math.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <sys/types.h>
 #include <stdint.h>
@@ -214,18 +214,20 @@ static void duckhts_filter_raise(const char *format, ...)
     va_end(ap);
 }
 
-static int duckhts_filter_recovery_begin(filter_t *filter)
+static int duckhts_filter_recovery_push(filter_t *filter)
 {
     if ( filter ) filter->last_error[0] = '\0';
     if ( g_filter_recovery.depth >= (int)(sizeof(g_filter_recovery.env_stack) / sizeof(g_filter_recovery.env_stack[0])) )
     {
         if ( filter )
             snprintf(filter->last_error, sizeof(filter->last_error), "bcftools filter recovery depth exceeded");
-        return 1;
+        if ( g_filter_recovery.depth > 0 )
+            longjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1], 1);
+        return 0;
     }
     g_filter_recovery.filter_stack[g_filter_recovery.depth] = filter;
     g_filter_recovery.depth++;
-    return setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]);
+    return 1;
 }
 
 static void duckhts_filter_recovery_end(void)
@@ -236,7 +238,12 @@ static void duckhts_filter_recovery_end(void)
 }
 
 #define error duckhts_filter_raise
-
+#define duckhts_filter_recovery_begin(filter) \
+    (duckhts_filter_recovery_push(filter) \
+         ? setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]) \
+         : 1)
+#define FILTER_REQUIRE(condition) \
+    do { if ( !(condition) ) error("bcftools filter invariant failed: %s", #condition); } while (0)
 
 #define TOK_VAL     0
 #define TOK_LFT     1       // (
@@ -595,7 +602,7 @@ static void filters_set_type(filter_t *flt, bcf1_t *line, token_t *tok)
 }
 static void filters_set_info(filter_t *flt, bcf1_t *line, token_t *tok)
 {
-    assert( tok->hdr_id >=0  );
+    FILTER_REQUIRE( tok->hdr_id >=0  );
     int i;
     for (i=0; i<line->n_info; i++)
         if ( line->d.info[i].key == tok->hdr_id ) break;
@@ -917,7 +924,7 @@ static int bcf_get_info_value(bcf1_t *line, int info_id, int ivec, void *value)
         case BCF_BT_INT16: BRANCH(int16_t, le_to_i16, val==bcf_int16_missing, val==bcf_int16_vector_end, int64_t); break;
         case BCF_BT_INT32: BRANCH(int32_t, le_to_i32, val==bcf_int32_missing, val==bcf_int32_vector_end, int64_t); break;
         case BCF_BT_FLOAT: BRANCH(float,   le_to_float, bcf_float_is_missing(val), bcf_float_is_vector_end(val), double); break;
-        default: fprintf(stderr,"todo: type %d\n", info->type); exit(1); break;
+        default: error("Unsupported INFO type %d", info->type);
     }
     #undef BRANCH
     return -1;  // this shouldn't happen
@@ -1378,7 +1385,7 @@ static void _filters_set_genotype(filter_t *flt, bcf1_t *line, token_t *tok, int
         default: error("The GT type is not lineognised: %d at %s:%"PRId64"\n",fmt->type, bcf_seqname(flt->hdr,line),(int64_t) line->pos+1); break;
     }
 #undef BRANCH_INT
-    assert( tok->nsamples == nsmpl );
+    FILTER_REQUIRE( tok->nsamples == nsmpl );
     tok->nvalues = tok->str_value.l = nvals1*nsmpl;
     tok->str_value.s[tok->str_value.l] = 0;
     tok->nval1 = nvals1;
@@ -1417,7 +1424,7 @@ gt_length_too_big:
             plen++;
         }
     }
-    assert( tok->nsamples == nsmpl );
+    FILTER_REQUIRE( tok->nsamples == nsmpl );
     tok->nvalues = tok->str_value.l;
     tok->nval1 = blen;
 }
@@ -1481,7 +1488,7 @@ static void filters_set_alt_string(filter_t *flt, bcf1_t *line, token_t *tok)
 }
 static void filters_set_nmissing(filter_t *flt, bcf1_t *line, token_t *tok)
 {
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
 
     bcf_unpack(line, BCF_UN_FMT);
     if ( !line->n_sample )
@@ -1520,7 +1527,7 @@ static void filters_set_nmissing(filter_t *flt, bcf1_t *line, token_t *tok)
         case BCF_BT_INT8:  BRANCH(int8_t,  le_to_i8,  bcf_int8_vector_end); break;
         case BCF_BT_INT16: BRANCH(int16_t, le_to_i16, bcf_int16_vector_end); break;
         case BCF_BT_INT32: BRANCH(int32_t, le_to_i32, bcf_int32_vector_end); break;
-        default: fprintf(stderr,"todo: type %d\n", fmt->type); exit(1); break;
+        default: error("Unsupported FORMAT type %d", fmt->type);
     }
     #undef BRANCH
     tok->nsamples = 0;
@@ -1532,7 +1539,7 @@ static int func_npass(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **stac
     if ( nstack==0 ) error("Error parsing the expression\n");
     token_t *tok = stack[nstack - 1];
     if ( !tok->nsamples ) error("The function %s works with FORMAT fields\n", rtok->tag);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
 
     int i, nsmpl = 0, npass = 0;
     for (i=0; i<tok->nsamples; i++)
@@ -1666,7 +1673,7 @@ static int func_smpl_max(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, has_value;
@@ -1733,7 +1740,7 @@ static int func_smpl_min(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, has_value;
@@ -1796,7 +1803,7 @@ static int func_smpl_avg(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, n;
@@ -1871,7 +1878,7 @@ static int func_smpl_median(filter_t *flt, bcf1_t *line, token_t *rtok, token_t 
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, n;
@@ -1949,7 +1956,7 @@ static int func_smpl_stddev(filter_t *flt, bcf1_t *line, token_t *rtok, token_t 
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, n;
@@ -2021,7 +2028,7 @@ static int func_smpl_sum(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, has_value;
@@ -2124,7 +2131,7 @@ static int func_smpl_count(filter_t *flt, bcf1_t *line, token_t *rtok, token_t *
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i,j;
@@ -2232,7 +2239,7 @@ static int func_fisher(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **sta
         rtok->nvalues  = tok->nsamples;
         rtok->nsamples = tok->nsamples;
         hts_expand(double, rtok->nvalues, rtok->mvalues, rtok->values);
-        assert(tok->usmpl);
+        FILTER_REQUIRE(tok->usmpl);
         if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
         memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
 
@@ -2334,7 +2341,7 @@ static int func_binom(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **stac
     int i, istack = nstack - rtok->nargs;
 
     if ( rtok->nargs!=2 && rtok->nargs!=1 ) error("Error: binom() takes one or two arguments\n");
-    assert( istack>=0 );
+    FILTER_REQUIRE( istack>=0 );
 
     // The expected mean is 0.5. Should we support also prob!=0.5?
     //
@@ -2362,7 +2369,7 @@ static int func_binom(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **stac
         rtok->nvalues  = tok->nsamples;
         rtok->nsamples = tok->nsamples;
         hts_expand(double, rtok->nvalues, rtok->mvalues, rtok->values);
-        assert(tok->usmpl);
+        FILTER_REQUIRE(tok->usmpl);
         if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
         memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
 
@@ -2559,7 +2566,7 @@ inline static void tok_init_samples(token_t *atok, token_t *btok, token_t *rtok)
         } \
         else if ( atok->nsamples && btok->nsamples ) \
         { \
-            assert( atok->nsamples==btok->nsamples ); \
+            FILTER_REQUIRE( atok->nsamples==btok->nsamples ); \
             if ( atok->nval1!=btok->nval1 && atok->nval1!=1 && btok->nval1!=1 ) \
                 error("Cannot run numeric operator in -i/-e filtering on vectors of different lengths: %d vs %d\n",atok->nval1,btok->nval1); \
             for (i=0; i<rtok->nsamples; i++) \
@@ -2584,7 +2591,7 @@ inline static void tok_init_samples(token_t *atok, token_t *btok, token_t *rtok)
         } \
         else if ( atok->nsamples ) \
         { \
-            assert( btok->nvalues==1 ); \
+            FILTER_REQUIRE( btok->nvalues==1 ); \
             if ( !bcf_double_is_missing_or_vector_end(btok->values[0]) ) \
             { \
                 for (i=0; i<atok->nvalues; i++) \
@@ -2601,7 +2608,7 @@ inline static void tok_init_samples(token_t *atok, token_t *btok, token_t *rtok)
         } \
         else \
         { \
-            assert( atok->nvalues==1 ); \
+            FILTER_REQUIRE( atok->nvalues==1 ); \
             if ( !bcf_double_is_missing_or_vector_end(atok->values[0]) ) \
             { \
                 for (i=0; i<btok->nvalues; i++) \
@@ -2673,7 +2680,7 @@ static int vector_logic_or(filter_t *filter, bcf1_t *line, token_t *rtok, token_
         return 2;
     }
 
-    assert( atok->nsamples==btok->nsamples );
+    FILTER_REQUIRE( atok->nsamples==btok->nsamples );
 
     for (i=0; i<rtok->nsamples; i++)
     {
@@ -2706,7 +2713,7 @@ static int vector_logic_and(filter_t *filter, bcf1_t *line, token_t *rtok, token
         return 2;
     }
 
-    assert( atok->nsamples==btok->nsamples );
+    FILTER_REQUIRE( atok->nsamples==btok->nsamples );
     if ( rtok->tok_type==TOK_AND_VEC )  // &&, can be true in different samples
     {
         for (i=0; i<rtok->nsamples; i++)
@@ -2978,9 +2985,9 @@ static void cmp_vector_strings(token_t *atok, token_t *btok, token_t *rtok)
     int i, logic = rtok->tok_type;     // TOK_EQ, TOK_NE, TOK_LIKE, TOK_NLIKE
     regex_t *regex = atok->regex ? atok->regex : (btok->regex ? btok->regex : NULL);
 
-    assert( atok->nvalues==atok->str_value.l && btok->nvalues==btok->str_value.l );
-    assert( !atok->nsamples || !btok->nsamples );
-    assert( (!regex && (logic==TOK_EQ || logic==TOK_NE)) || (regex && (logic==TOK_LIKE || logic==TOK_NLIKE)) );
+    FILTER_REQUIRE( atok->nvalues==atok->str_value.l && btok->nvalues==btok->str_value.l );
+    FILTER_REQUIRE( !atok->nsamples || !btok->nsamples );
+    FILTER_REQUIRE( (!regex && (logic==TOK_EQ || logic==TOK_NE)) || (regex && (logic==TOK_LIKE || logic==TOK_NLIKE)) );
 
     int missing_logic[] = {0,0,0};
     if ( logic==TOK_EQ || logic==TOK_LIKE ) missing_logic[0] = missing_logic[2] = 1;
@@ -3040,7 +3047,7 @@ static void cmp_vector_strings(token_t *atok, token_t *btok, token_t *rtok)
     // The case of (!atok->nsamples || !btok->nsamples) && (atok->nvalues && btok->nvalues)
     token_t *xtok = atok->nsamples ? atok : btok;
     token_t *ytok = atok->nsamples ? btok : atok;
-    assert( regex==ytok->regex );
+    FILTER_REQUIRE( regex==ytok->regex );
     for (i=0; i<xtok->nsamples; i++)
     {
         if ( !rtok->usmpl[i] ) continue;
@@ -3120,7 +3127,7 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
     if ( tag_idx[len-1] == ']' ) tag_idx[len-1] = 0;
     char *ori = strdup(tag_idx);
 
-    assert( !tok->idxs && !tok->usmpl );
+    FILTER_REQUIRE( !tok->idxs && !tok->usmpl );
     int *idxs1 = NULL, nidxs1 = 0, idx1 = 0;
     int *idxs2 = NULL, nidxs2 = 0, idx2 = 0;
 
@@ -3837,7 +3844,7 @@ char **parse_tag_list(const char *string, int *_n)
         goto err;
 
     s = s_new;
-    assert(n < INT_MAX); // hts_resize() should ensure this
+    FILTER_REQUIRE(n < INT_MAX); // hts_resize() should ensure this
     *_n = n;
     return s;
 
@@ -4367,6 +4374,7 @@ int filter_test(filter_t *filter, bcf1_t *line, const uint8_t **samples)
     if ( duckhts_filter_recovery_begin(filter) != 0 )
     {
         duckhts_filter_recovery_end();
+        filter->status |= FILTER_ERR_OTHER;
         if ( !filter->last_error[0] )
             snprintf(filter->last_error, sizeof(filter->last_error), "Error occurred while processing the filter \"%s\"", filter->str);
         return -1;
