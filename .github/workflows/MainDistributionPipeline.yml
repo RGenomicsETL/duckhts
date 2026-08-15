@@ -23,6 +23,37 @@ jobs:
       - name: Check NEON kernels against scalar oracles
         run: make test-simd-kernels
 
+  sanitizers:
+    name: Complete extension ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, ubsan]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbz2-dev libcurl4-openssl-dev libdeflate-dev liblzma-dev libssl-dev zlib1g-dev
+      - name: Install DuckDB 1.5.0 CLI
+        run: |
+          curl -fsSL --retry 3 -o /tmp/duckdb.zip \
+            https://github.com/duckdb/duckdb/releases/download/v1.5.0/duckdb_cli-linux-amd64.zip
+          echo "179a481edf048dd1fef0f097d66933b4b5f5a5737d4034c645e415ec722c0292  /tmp/duckdb.zip" | sha256sum -c -
+          unzip -q /tmp/duckdb.zip -d /tmp/duckdb-cli
+          chmod +x /tmp/duckdb-cli/duckdb
+          echo "/tmp/duckdb-cli" >> "$GITHUB_PATH"
+      - name: Configure
+        run: make configure
+      - name: Run sanitizer corpus
+        run: make test-sanitized-extension SANITIZER=${{ matrix.sanitizer }}
+
   duckdb-build:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5.0

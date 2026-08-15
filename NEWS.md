@@ -1,6 +1,26 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- bound liftover clip-pad realignment to 4,194,304 Needleman–Wunsch cells,
+  with checked matrix sizing and a recoverable DuckDB error instead of wrapped
+  or unbounded input-driven allocation. Add replayable randomized cell-admission
+  properties, malformed SQL/chain fuzzing that checks connection recovery, and
+  complete-extension ASan/UBSan CI over the same focused host-safety corpus.
+  Sanitizer CI installs a checksum-pinned DuckDB CLI, distribution tests
+  consume the already built extension instead of rebuilding a relocated CMake
+  cache, and MinGW jobs skip only the incompatible MSVC Python-wheel loader
+  while retaining their native Windows contracts. The rendered liftover report
+  keeps current synthetic evidence and the nearest comparable full-input
+  real-callset baseline when current public inputs are not staged
+
+- route malformed bcftools score-filter INFO/FORMAT storage and failed internal
+  invariants through one recoverable filter authority instead of `exit()` or
+  runtime assertions, unwind token stacks plus parser-owned index, file, and
+  variable-argument temporaries after recovered failures, invoke `setjmp()`
+  directly in a standards-conforming controlling expression, preserve the
+  detailed filter cause in SQL errors, and remove the unused second recovery
+  stack
+
 - make Rduckhts SQL construction quote paths and option values through one
   DBI literal authority and table names through one identifier authority, while
   preserving explicitly documented SQL expression arguments. Quoted paths and

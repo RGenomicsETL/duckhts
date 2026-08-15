@@ -25,9 +25,9 @@ THE SOFTWARE.  */
 #include <ctype.h>
 #include <stdlib.h>
 #include <strings.h>
-#include <assert.h>
 #include <errno.h>
 #include <math.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <sys/types.h>
 #include <stdint.h>
@@ -103,6 +103,25 @@ typedef struct _token_t
     int nval1;              // number of per-sample fields or string length
 }
 token_t;
+
+static void filter_token_destroy(token_t *token)
+{
+    if ( !token ) return;
+    free(token->key);
+    free(token->str_value.s);
+    free(token->tag);
+    free(token->idxs);
+    free(token->usmpl);
+    free(token->values);
+    free(token->pass_samples);
+    if ( token->hash ) khash_str2int_destroy_free(token->hash);
+    if ( token->regex )
+    {
+        regfree(token->regex);
+        free(token->regex);
+    }
+    memset(token, 0, sizeof(*token));
+}
 
 struct _filter_t
 {
@@ -214,18 +233,20 @@ static void duckhts_filter_raise(const char *format, ...)
     va_end(ap);
 }
 
-static int duckhts_filter_recovery_begin(filter_t *filter)
+static int duckhts_filter_recovery_push(filter_t *filter)
 {
     if ( filter ) filter->last_error[0] = '\0';
     if ( g_filter_recovery.depth >= (int)(sizeof(g_filter_recovery.env_stack) / sizeof(g_filter_recovery.env_stack[0])) )
     {
         if ( filter )
             snprintf(filter->last_error, sizeof(filter->last_error), "bcftools filter recovery depth exceeded");
-        return 1;
+        if ( g_filter_recovery.depth > 0 )
+            longjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1], 1);
+        return 0;
     }
     g_filter_recovery.filter_stack[g_filter_recovery.depth] = filter;
     g_filter_recovery.depth++;
-    return setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]);
+    return 1;
 }
 
 static void duckhts_filter_recovery_end(void)
@@ -236,7 +257,8 @@ static void duckhts_filter_recovery_end(void)
 }
 
 #define error duckhts_filter_raise
-
+#define FILTER_REQUIRE(condition) \
+    do { if ( !(condition) ) error("bcftools filter invariant failed: %s", #condition); } while (0)
 
 #define TOK_VAL     0
 #define TOK_LFT     1       // (
@@ -595,7 +617,7 @@ static void filters_set_type(filter_t *flt, bcf1_t *line, token_t *tok)
 }
 static void filters_set_info(filter_t *flt, bcf1_t *line, token_t *tok)
 {
-    assert( tok->hdr_id >=0  );
+    FILTER_REQUIRE( tok->hdr_id >=0  );
     int i;
     for (i=0; i<line->n_info; i++)
         if ( line->d.info[i].key == tok->hdr_id ) break;
@@ -917,7 +939,7 @@ static int bcf_get_info_value(bcf1_t *line, int info_id, int ivec, void *value)
         case BCF_BT_INT16: BRANCH(int16_t, le_to_i16, val==bcf_int16_missing, val==bcf_int16_vector_end, int64_t); break;
         case BCF_BT_INT32: BRANCH(int32_t, le_to_i32, val==bcf_int32_missing, val==bcf_int32_vector_end, int64_t); break;
         case BCF_BT_FLOAT: BRANCH(float,   le_to_float, bcf_float_is_missing(val), bcf_float_is_vector_end(val), double); break;
-        default: fprintf(stderr,"todo: type %d\n", info->type); exit(1); break;
+        default: error("Unsupported INFO type %d", info->type);
     }
     #undef BRANCH
     return -1;  // this shouldn't happen
@@ -1378,7 +1400,7 @@ static void _filters_set_genotype(filter_t *flt, bcf1_t *line, token_t *tok, int
         default: error("The GT type is not lineognised: %d at %s:%"PRId64"\n",fmt->type, bcf_seqname(flt->hdr,line),(int64_t) line->pos+1); break;
     }
 #undef BRANCH_INT
-    assert( tok->nsamples == nsmpl );
+    FILTER_REQUIRE( tok->nsamples == nsmpl );
     tok->nvalues = tok->str_value.l = nvals1*nsmpl;
     tok->str_value.s[tok->str_value.l] = 0;
     tok->nval1 = nvals1;
@@ -1417,7 +1439,7 @@ gt_length_too_big:
             plen++;
         }
     }
-    assert( tok->nsamples == nsmpl );
+    FILTER_REQUIRE( tok->nsamples == nsmpl );
     tok->nvalues = tok->str_value.l;
     tok->nval1 = blen;
 }
@@ -1481,7 +1503,7 @@ static void filters_set_alt_string(filter_t *flt, bcf1_t *line, token_t *tok)
 }
 static void filters_set_nmissing(filter_t *flt, bcf1_t *line, token_t *tok)
 {
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
 
     bcf_unpack(line, BCF_UN_FMT);
     if ( !line->n_sample )
@@ -1520,7 +1542,7 @@ static void filters_set_nmissing(filter_t *flt, bcf1_t *line, token_t *tok)
         case BCF_BT_INT8:  BRANCH(int8_t,  le_to_i8,  bcf_int8_vector_end); break;
         case BCF_BT_INT16: BRANCH(int16_t, le_to_i16, bcf_int16_vector_end); break;
         case BCF_BT_INT32: BRANCH(int32_t, le_to_i32, bcf_int32_vector_end); break;
-        default: fprintf(stderr,"todo: type %d\n", fmt->type); exit(1); break;
+        default: error("Unsupported FORMAT type %d", fmt->type);
     }
     #undef BRANCH
     tok->nsamples = 0;
@@ -1532,7 +1554,7 @@ static int func_npass(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **stac
     if ( nstack==0 ) error("Error parsing the expression\n");
     token_t *tok = stack[nstack - 1];
     if ( !tok->nsamples ) error("The function %s works with FORMAT fields\n", rtok->tag);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
 
     int i, nsmpl = 0, npass = 0;
     for (i=0; i<tok->nsamples; i++)
@@ -1666,7 +1688,7 @@ static int func_smpl_max(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, has_value;
@@ -1733,7 +1755,7 @@ static int func_smpl_min(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, has_value;
@@ -1796,7 +1818,7 @@ static int func_smpl_avg(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, n;
@@ -1871,7 +1893,7 @@ static int func_smpl_median(filter_t *flt, bcf1_t *line, token_t *rtok, token_t 
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, n;
@@ -1949,7 +1971,7 @@ static int func_smpl_stddev(filter_t *flt, bcf1_t *line, token_t *rtok, token_t 
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, n;
@@ -2021,7 +2043,7 @@ static int func_smpl_sum(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **s
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i, j, has_value;
@@ -2124,7 +2146,7 @@ static int func_smpl_count(filter_t *flt, bcf1_t *line, token_t *rtok, token_t *
     rtok->nvalues  = tok->nsamples;
     rtok->nval1 = 1;
     hts_expand(double,rtok->nvalues,rtok->mvalues,rtok->values);
-    assert(tok->usmpl);
+    FILTER_REQUIRE(tok->usmpl);
     if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
     memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
     int i,j;
@@ -2232,7 +2254,7 @@ static int func_fisher(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **sta
         rtok->nvalues  = tok->nsamples;
         rtok->nsamples = tok->nsamples;
         hts_expand(double, rtok->nvalues, rtok->mvalues, rtok->values);
-        assert(tok->usmpl);
+        FILTER_REQUIRE(tok->usmpl);
         if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
         memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
 
@@ -2334,7 +2356,7 @@ static int func_binom(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **stac
     int i, istack = nstack - rtok->nargs;
 
     if ( rtok->nargs!=2 && rtok->nargs!=1 ) error("Error: binom() takes one or two arguments\n");
-    assert( istack>=0 );
+    FILTER_REQUIRE( istack>=0 );
 
     // The expected mean is 0.5. Should we support also prob!=0.5?
     //
@@ -2362,7 +2384,7 @@ static int func_binom(filter_t *flt, bcf1_t *line, token_t *rtok, token_t **stac
         rtok->nvalues  = tok->nsamples;
         rtok->nsamples = tok->nsamples;
         hts_expand(double, rtok->nvalues, rtok->mvalues, rtok->values);
-        assert(tok->usmpl);
+        FILTER_REQUIRE(tok->usmpl);
         if ( !rtok->usmpl ) rtok->usmpl = (uint8_t*) malloc(tok->nsamples);
         memcpy(rtok->usmpl, tok->usmpl, tok->nsamples);
 
@@ -2559,7 +2581,7 @@ inline static void tok_init_samples(token_t *atok, token_t *btok, token_t *rtok)
         } \
         else if ( atok->nsamples && btok->nsamples ) \
         { \
-            assert( atok->nsamples==btok->nsamples ); \
+            FILTER_REQUIRE( atok->nsamples==btok->nsamples ); \
             if ( atok->nval1!=btok->nval1 && atok->nval1!=1 && btok->nval1!=1 ) \
                 error("Cannot run numeric operator in -i/-e filtering on vectors of different lengths: %d vs %d\n",atok->nval1,btok->nval1); \
             for (i=0; i<rtok->nsamples; i++) \
@@ -2584,7 +2606,7 @@ inline static void tok_init_samples(token_t *atok, token_t *btok, token_t *rtok)
         } \
         else if ( atok->nsamples ) \
         { \
-            assert( btok->nvalues==1 ); \
+            FILTER_REQUIRE( btok->nvalues==1 ); \
             if ( !bcf_double_is_missing_or_vector_end(btok->values[0]) ) \
             { \
                 for (i=0; i<atok->nvalues; i++) \
@@ -2601,7 +2623,7 @@ inline static void tok_init_samples(token_t *atok, token_t *btok, token_t *rtok)
         } \
         else \
         { \
-            assert( atok->nvalues==1 ); \
+            FILTER_REQUIRE( atok->nvalues==1 ); \
             if ( !bcf_double_is_missing_or_vector_end(atok->values[0]) ) \
             { \
                 for (i=0; i<btok->nvalues; i++) \
@@ -2673,7 +2695,7 @@ static int vector_logic_or(filter_t *filter, bcf1_t *line, token_t *rtok, token_
         return 2;
     }
 
-    assert( atok->nsamples==btok->nsamples );
+    FILTER_REQUIRE( atok->nsamples==btok->nsamples );
 
     for (i=0; i<rtok->nsamples; i++)
     {
@@ -2706,7 +2728,7 @@ static int vector_logic_and(filter_t *filter, bcf1_t *line, token_t *rtok, token
         return 2;
     }
 
-    assert( atok->nsamples==btok->nsamples );
+    FILTER_REQUIRE( atok->nsamples==btok->nsamples );
     if ( rtok->tok_type==TOK_AND_VEC )  // &&, can be true in different samples
     {
         for (i=0; i<rtok->nsamples; i++)
@@ -2978,9 +3000,9 @@ static void cmp_vector_strings(token_t *atok, token_t *btok, token_t *rtok)
     int i, logic = rtok->tok_type;     // TOK_EQ, TOK_NE, TOK_LIKE, TOK_NLIKE
     regex_t *regex = atok->regex ? atok->regex : (btok->regex ? btok->regex : NULL);
 
-    assert( atok->nvalues==atok->str_value.l && btok->nvalues==btok->str_value.l );
-    assert( !atok->nsamples || !btok->nsamples );
-    assert( (!regex && (logic==TOK_EQ || logic==TOK_NE)) || (regex && (logic==TOK_LIKE || logic==TOK_NLIKE)) );
+    FILTER_REQUIRE( atok->nvalues==atok->str_value.l && btok->nvalues==btok->str_value.l );
+    FILTER_REQUIRE( !atok->nsamples || !btok->nsamples );
+    FILTER_REQUIRE( (!regex && (logic==TOK_EQ || logic==TOK_NE)) || (regex && (logic==TOK_LIKE || logic==TOK_NLIKE)) );
 
     int missing_logic[] = {0,0,0};
     if ( logic==TOK_EQ || logic==TOK_LIKE ) missing_logic[0] = missing_logic[2] = 1;
@@ -3040,7 +3062,7 @@ static void cmp_vector_strings(token_t *atok, token_t *btok, token_t *rtok)
     // The case of (!atok->nsamples || !btok->nsamples) && (atok->nvalues && btok->nvalues)
     token_t *xtok = atok->nsamples ? atok : btok;
     token_t *ytok = atok->nsamples ? btok : atok;
-    assert( regex==ytok->regex );
+    FILTER_REQUIRE( regex==ytok->regex );
     for (i=0; i<xtok->nsamples; i++)
     {
         if ( !rtok->usmpl[i] ) continue;
@@ -3059,6 +3081,7 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     if ( *tag_idx==0 || !strcmp("*", tag_idx) )
     {
         *idxs = (int*) malloc(sizeof(int));
+        if ( !*idxs ) return -1;
         (*idxs)[0] = -1;
         *nidxs     = 1;
         *idx       = -2;
@@ -3067,6 +3090,7 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     if ( !strcmp("GT", tag_idx) )
     {
         *idxs = (int*) malloc(sizeof(int));
+        if ( !*idxs ) return -1;
         (*idxs)[0] = -1;
         *nidxs     = 1;
         *idx = -3;
@@ -3075,22 +3099,35 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
 
     // TAG[integer] .. one field; idx positive
     char *end, *beg = tag_idx;
-    *idx = strtol(tag_idx, &end, 10);
-    if ( *idx >= 0 && *end==0 ) return 0;
+    long parsed = strtol(tag_idx, &end, 10);
+    if ( parsed>=0 && parsed<INT_MAX && *end==0 )
+    {
+        *idx = (int)parsed;
+        return 0;
+    }
 
     // TAG[0,1] or TAG[0-2] or [1-] etc; idx=-2, idxs[...]=0,0,1,1,..
     int i, ibeg = -1;
     while ( *beg )
     {
-        int num = strtol(beg, &end, 10);
+        int num;
+        int *new_idxs;
+        size_t count;
+        parsed = strtol(beg, &end, 10);
+        if ( end==beg || parsed<0 || parsed>=INT_MAX ) return -1;
+        num = (int)parsed;
         if ( end[0]==',' ) beg = end + 1;
         else if ( end[0]==0 ) beg = end;
         else if ( end[0]=='-' ) { beg = end + 1; ibeg = num; continue; }
         else return -1;
         if ( num >= *nidxs )
         {
-            *idxs = (int*) realloc(*idxs, sizeof(int)*(num+1));
-            memset(*idxs + *nidxs, 0, sizeof(int)*(num - *nidxs + 1));
+            count = (size_t)num + 1;
+            if ( count > SIZE_MAX / sizeof(int) ) return -1;
+            new_idxs = (int*) realloc(*idxs, sizeof(int)*count);
+            if ( !new_idxs ) return -1;
+            *idxs = new_idxs;
+            memset(*idxs + *nidxs, 0, sizeof(int)*(count - (size_t)*nidxs));
             *nidxs = num + 1;
         }
         if ( ibeg>=0 )
@@ -3104,8 +3141,13 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     {
         if ( ibeg >= *nidxs )
         {
-            *idxs = (int*) realloc(*idxs, sizeof(int)*(ibeg+1));
-            memset(*idxs + *nidxs, 0, sizeof(int)*(ibeg - *nidxs + 1));
+            int *new_idxs;
+            size_t count = (size_t)ibeg + 1;
+            if ( count > SIZE_MAX / sizeof(int) ) return -1;
+            new_idxs = (int*) realloc(*idxs, sizeof(int)*count);
+            if ( !new_idxs ) return -1;
+            *idxs = new_idxs;
+            memset(*idxs + *nidxs, 0, sizeof(int)*(count - (size_t)*nidxs));
             *nidxs = ibeg + 1;
         }
         (*idxs)[ibeg] = -1;
@@ -3114,53 +3156,78 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     return 0;
 }
 
-static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, token_t *tok)   // tag_idx points just after "TAG["
+#define PARSE_TAG_FAIL(...) do { \
+    snprintf(fail_msg, sizeof(fail_msg), __VA_ARGS__); \
+    goto fail; \
+} while (0)
+
+static int parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, token_t *tok,
+                         char *err, size_t err_sz)   // tag_idx points just after "TAG["
 {
     int i, len = strlen(tag_idx);
-    if ( tag_idx[len-1] == ']' ) tag_idx[len-1] = 0;
-    char *ori = strdup(tag_idx);
-
-    assert( !tok->idxs && !tok->usmpl );
+    char *ori = NULL, *fname = NULL;
+    char **list = NULL;
+    int nsmpl = 0;
     int *idxs1 = NULL, nidxs1 = 0, idx1 = 0;
     int *idxs2 = NULL, nidxs2 = 0, idx2 = 0;
-
     int set_samples = 0;
-    char *colon = strrchr(tag_idx, ':');
+    char *colon;
+    char fail_msg[512] = {0};
+
+    if ( tok->idxs || tok->usmpl ) PARSE_TAG_FAIL("Filter token index state is already initialized\n");
+    if ( len && tag_idx[len-1] == ']' ) tag_idx[len-1] = 0;
+    ori = strdup(tag_idx);
+    if ( !ori ) PARSE_TAG_FAIL("Could not allocate memory\n");
+
+    colon = strrchr(tag_idx, ':');
     if ( tag_idx[0]=='@' )     // file list with sample names
     {
-        if ( !is_fmt ) error("Could not parse \"%s\". (Not a FORMAT tag yet a sample list provided.)\n", ori);
-        char *fname = expand_path(tag_idx+1);
+        int has_subfield;
+        if ( !is_fmt ) PARSE_TAG_FAIL("Could not parse \"%s\". (Not a FORMAT tag yet a sample list provided.)\n", ori);
+        fname = expand_path(tag_idx+1);
+        if ( !fname ) PARSE_TAG_FAIL("Could not allocate memory\n");
 #ifdef _WIN32
-        if (fname && strlen(fname) > 2 && fname[1] == ':') // Deal with Windows paths, such as 'C:\..'
+        if ( strlen(fname) > 2 && fname[1] == ':' ) // Deal with Windows paths, such as 'C:\..'
             colon = strrchr(fname+2, ':');
 #endif
-        int nsmpl;
-        char **list = hts_readlist(fname, 1, &nsmpl);
+        list = hts_readlist(fname, 1, &nsmpl);
         if ( !list && colon )
         {
-            if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 ) error("Could not parse the index: %s\n", ori);
+            char *fname_colon;
+            if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 )
+                PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
             tok->idxs  = idxs2;
             tok->nidxs = nidxs2;
             tok->idx   = idx2;
-            colon = strrchr(fname, ':');
-            *colon = 0;
+            idxs2 = NULL;
+            nidxs2 = 0;
+            fname_colon = strrchr(fname, ':');
+            if ( !fname_colon ) PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
+            *fname_colon = 0;
             list = hts_readlist(fname, 1, &nsmpl);
         }
-        if ( !list ) error("Could not read: %s\n", fname);
+        if ( !list ) PARSE_TAG_FAIL("Could not read: %s\n", fname);
+        has_subfield = colon != NULL;
         free(fname);
+        fname = NULL;
         tok->nsamples = bcf_hdr_nsamples(hdr);
         tok->usmpl = (uint8_t*) calloc(tok->nsamples,1);
+        if ( tok->nsamples && !tok->usmpl ) PARSE_TAG_FAIL("Could not allocate memory\n");
         for (i=0; i<nsmpl; i++)
         {
             int ismpl = bcf_hdr_id2int(hdr,BCF_DT_SAMPLE,list[i]);
-            if ( ismpl<0 ) error("No such sample in the VCF: \"%s\"\n", list[i]);
-            free(list[i]);
+            if ( ismpl<0 ) PARSE_TAG_FAIL("No such sample in the VCF: \"%s\"\n", list[i]);
             tok->usmpl[ismpl] = 1;
+            free(list[i]);
+            list[i] = NULL;
         }
         free(list);
-        if ( !colon )
+        list = NULL;
+        nsmpl = 0;
+        if ( !has_subfield )
         {
             tok->idxs = (int*) malloc(sizeof(int));
+            if ( !tok->idxs ) PARSE_TAG_FAIL("Could not allocate memory\n");
             tok->idxs[0] = -1;
             tok->nidxs   = 1;
             tok->idx     = -2;
@@ -3168,29 +3235,35 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
     }
     else if ( colon )
     {
-        if ( !is_fmt ) error("Could not parse the index \"%s\". (Not a FORMAT tag yet sample index implied.)\n", ori);
+        if ( !is_fmt ) PARSE_TAG_FAIL("Could not parse the index \"%s\". (Not a FORMAT tag yet sample index implied.)\n", ori);
         *colon = 0;
-        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 ) error("Could not parse the index: %s\n", ori);
-        if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 ) error("Could not parse the index: %s\n", ori);
+        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 )
+            PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
+        if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 )
+            PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
         tok->idxs  = idxs2;
         tok->nidxs = nidxs2;
         tok->idx   = idx2;
+        idxs2 = NULL;
+        nidxs2 = 0;
         set_samples = 1;
     }
     else
     {
-        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 ) error("Could not parse the index: %s\n", ori);
+        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 )
+            PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
         if ( is_fmt )
         {
             if ( nidxs1==1 && idxs1[0]==-1 )
             {
                 tok->idxs = (int*) malloc(sizeof(int));
+                if ( !tok->idxs ) PARSE_TAG_FAIL("Could not allocate memory\n");
                 tok->idxs[0] = -1;
                 tok->nidxs   = 1;
                 tok->idx     = idx1;
             }
             else if ( bcf_hdr_id2number(hdr,BCF_HL_FMT,tok->hdr_id)!=1 )
-                error("The FORMAT tag %s can have multiple subfields, run as %s[sample:subfield]\n", tag,tag);
+                PARSE_TAG_FAIL("The FORMAT tag %s can have multiple subfields, run as %s[sample:subfield]\n", tag,tag);
             else
                 tok->idx = 0;
             set_samples = 1;
@@ -3200,6 +3273,8 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
             tok->idxs  = idxs1;
             tok->nidxs = nidxs1;
             tok->idx   = idx1;
+            idxs1 = NULL;
+            nidxs1 = 0;
         }
     }
 
@@ -3207,9 +3282,10 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
     {
         tok->nsamples = bcf_hdr_nsamples(hdr);
         tok->usmpl = (uint8_t*) calloc(tok->nsamples,1);
+        if ( tok->nsamples && !tok->usmpl ) PARSE_TAG_FAIL("Could not allocate memory\n");
         if ( idx1>=0 )
         {
-            if ( idx1 >= bcf_hdr_nsamples(hdr) ) error("The sample index is too large: %s\n", ori);
+            if ( idx1 >= bcf_hdr_nsamples(hdr) ) PARSE_TAG_FAIL("The sample index is too large: %s\n", ori);
             tok->usmpl[idx1] = 1;
         }
         else if ( idx1==-2 || idx1==-3 )
@@ -3218,7 +3294,7 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
             {
                 if ( idxs1[i]==0 ) continue;
                 if ( idxs1[i]==-1 ) break;
-                if ( i >= bcf_hdr_nsamples(hdr) ) error("The sample index is too large: %s\n", ori);
+                if ( i >= bcf_hdr_nsamples(hdr) ) PARSE_TAG_FAIL("The sample index is too large: %s\n", ori);
                 tok->usmpl[i] = 1;
             }
             if ( nidxs1 && idxs1[nidxs1-1]==-1 )    // open range, such as "7-"
@@ -3226,16 +3302,34 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
                 for (; i<tok->nsamples; i++) tok->usmpl[i] = 1;
             }
         }
-        else error("todo: %s:%d .. %d\n", __FILE__,__LINE__, idx2);
+        else PARSE_TAG_FAIL("todo: %s:%d .. %d\n", __FILE__,__LINE__, idx2);
         free(idxs1);
+        idxs1 = NULL;
+        nidxs1 = 0;
     }
     free(ori);
+    ori = NULL;
 
     if ( tok->nidxs && tok->idxs[tok->nidxs-1]!=-1 )
     {
         for (i=0; i<tok->nidxs; i++) if ( tok->idxs[i] ) tok->nuidxs++;
     }
+    return 0;
+
+fail:
+    if ( list )
+    {
+        for (i=0; i<nsmpl; i++) free(list[i]);
+        free(list);
+    }
+    free(fname);
+    free(idxs1);
+    free(idxs2);
+    free(ori);
+    snprintf(err, err_sz, "%s", fail_msg[0] ? fail_msg : "Could not parse the filter index\n");
+    return -1;
 }
+#undef PARSE_TAG_FAIL
 static int max_ac_an_unpack(bcf_hdr_t *hdr)
 {
     int hdr_id = bcf_hdr_id2int(hdr,BCF_DT_ID,"AC");
@@ -3304,12 +3398,21 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     if ( str[0]=='@' )
     {
         tok->tag = (char*) calloc(len+1,sizeof(char));
+        if ( !tok->tag ) error("Could not allocate memory\n");
         memcpy(tok->tag,str,len);
         tok->tag[len] = 0;
         char *fname = expand_path(tok->tag+1);
         int i, n;
-        char **list = hts_readlist(fname, 1, &n);
-        if ( !list ) error("Could not read: %s\n", fname);
+        char **list;
+        if ( !fname ) error("Could not allocate memory\n");
+        list = hts_readlist(fname, 1, &n);
+        if ( !list )
+        {
+            char read_error[512];
+            snprintf(read_error, sizeof(read_error), "Could not read: %s\n", fname);
+            free(fname);
+            error("%s", read_error);
+        }
         free(fname);
         tok->hash = khash_str2int_init();
         for (i=0; i<n; i++)
@@ -3441,7 +3544,17 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     // does it have array subscript?
     int is_array = 0;
     kstring_t tmp = {0,0,0};
-    kputsn(str, len, &tmp);
+    char init_fail_msg[512];
+    if ( kputsn(str, len, &tmp) < 0 || !tmp.l )
+    {
+        free(tmp.s);
+        error("Could not allocate or parse the filter token\n");
+    }
+#define FILTER_INIT_FAIL(...) do { \
+    snprintf(init_fail_msg, sizeof(init_fail_msg), __VA_ARGS__); \
+    free(tmp.s); \
+    error("%s", init_fail_msg); \
+} while (0)
     if ( tmp.s[tmp.l-1] == ']' )
     {
         int i;
@@ -3456,15 +3569,18 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
             int is_info = bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_INFO,tok->hdr_id) ? 1 : 0;
             is_fmt = bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_FMT,tok->hdr_id) ? 1 : 0;
             if ( is_info && is_fmt )
-                error("Error: ambiguous filtering expression, both INFO/%s and FORMAT/%s are defined in the VCF header.\n" , tmp.s,tmp.s);
+                FILTER_INIT_FAIL("Error: ambiguous filtering expression, both INFO/%s and FORMAT/%s are defined in the VCF header.\n", tmp.s,tmp.s);
         }
         if ( is_fmt==-1 ) is_fmt = 0;
     }
     if ( is_array )
     {
-        parse_tag_idx(filter->hdr, is_fmt, tmp.s, tmp.s+is_array, tok);
+        char parse_err[512];
+        if ( parse_tag_idx(filter->hdr, is_fmt, tmp.s, tmp.s+is_array, tok,
+                           parse_err, sizeof(parse_err)) != 0 )
+            FILTER_INIT_FAIL("%s", parse_err);
         if ( tok->idx==-3 && bcf_hdr_id2length(filter->hdr,BCF_HL_FMT,tok->hdr_id)!=BCF_VL_R )
-            error("Error: GT subscripts can be used only with Number=R tags\n");
+            FILTER_INIT_FAIL("Error: GT subscripts can be used only with Number=R tags\n");
     }
     else if ( is_fmt ) init_usmpl(filter,tok);
 
@@ -3481,7 +3597,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
         else if ( is_fmt )
         {
             if ( !bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_FMT,tok->hdr_id) )
-                error("No such FORMAT field: %s\n", tmp.s);
+                FILTER_INIT_FAIL("No such FORMAT field: %s\n", tmp.s);
             if ( bcf_hdr_id2number(filter->hdr,BCF_HL_FMT,tok->hdr_id)!=1 && !is_array )
             {
                 tok->idxs = (int*) malloc(sizeof(int));
@@ -3494,11 +3610,11 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
                 case BCF_HT_INT:  tok->setter = &filters_set_format_int; tok->ht_type = BCF_HT_INT; break;
                 case BCF_HT_REAL: tok->setter = &filters_set_format_float; tok->ht_type = BCF_HT_REAL; break;
                 case BCF_HT_STR:  tok->setter = &filters_set_format_string; tok->ht_type = BCF_HT_STR; tok->is_str = 1; break;
-                default: error("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
+                default: FILTER_INIT_FAIL("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
             }
         }
         else if ( !bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_INFO,tok->hdr_id) )
-            error("No such INFO field: %s\n", tmp.s);
+            FILTER_INIT_FAIL("No such INFO field: %s\n", tmp.s);
         else
         {
             if ( bcf_hdr_id2type(filter->hdr,BCF_HL_INFO,tok->hdr_id) == BCF_HT_FLAG )
@@ -3519,7 +3635,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
                         case BCF_HT_INT:  tok->setter = &filters_set_info_int; break;
                         case BCF_HT_REAL: tok->setter = &filters_set_info_float; break;
                         case BCF_HT_STR:  tok->setter = &filters_set_info_string; tok->is_str = 1; break;
-                        default: error("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
+                        default: FILTER_INIT_FAIL("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
                     }
                     if (!is_array)
                     {
@@ -3616,7 +3732,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
         if ( errno!=0 || end!=tmp.s+len )
         {
             if ( filter->exit_on_error )
-                error("[%s:%d %s] Error: the tag \"%s\" is not defined in the VCF header\n", __FILE__,__LINE__,__FUNCTION__,tmp.s);
+                FILTER_INIT_FAIL("[%s:%d %s] Error: the tag \"%s\" is not defined in the VCF header\n", __FILE__,__LINE__,__FUNCTION__,tmp.s);
             filter->status |= FILTER_ERR_UNKN_TAGS;
             filter_add_undef_tag(filter,tmp.s);
         }
@@ -3629,6 +3745,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     if ( tmp.s ) free(tmp.s);
     return 0;
 }
+#undef FILTER_INIT_FAIL
 
 static void filter_debug_print(token_t *toks, token_t **tok_ptrs, int ntoks)
 {
@@ -3837,7 +3954,7 @@ char **parse_tag_list(const char *string, int *_n)
         goto err;
 
     s = s_new;
-    assert(n < INT_MAX); // hts_resize() should ensure this
+    if ( n >= INT_MAX ) goto err; // hts_resize() should ensure this
     *_n = n;
     return s;
 
@@ -3848,28 +3965,58 @@ err:
     return NULL;
 }
 
+#define FILTER_APPEND_TOKEN(n, m, p) do { \
+    if ( (n)==INT_MAX || hts_resize(token_t, (size_t)(n) + 1, &(m), &(p), HTS_RESIZE_CLEAR) < 0 ) \
+        error("Out of memory while parsing the filter expression\n"); \
+    (n)++; \
+} while (0)
+
 // Parse filter expression and convert to reverse polish notation. Dijkstra's shunting-yard algorithm
 static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error)
 {
     filter_t *filter = (filter_t *) calloc(1,sizeof(filter_t));
+    volatile int nops = 0, mops = 0;    // operators stack
+    volatile int nout = 0, mout = 0;    // filter tokens, RPN
+    token_t *volatile out = NULL;
+    token_t *volatile ops = NULL;
+    char *volatile arg_tmp = NULL;
+    char **volatile arg_list = NULL;
+    volatile int arg_count = 0;
     if ( !filter ) return NULL;
     filter->str = strdup(str);
     filter->hdr = hdr;
     filter->max_unpack |= BCF_UN_STR;
     filter->exit_on_error = exit_on_error;
-    if ( duckhts_filter_recovery_begin(filter) != 0 )
+    if ( !filter->str )
     {
+        filter->status |= FILTER_ERR_OTHER;
+        snprintf(filter->last_error, sizeof(filter->last_error), "Out of memory while parsing the filter expression");
+        return filter;
+    }
+    if ( !duckhts_filter_recovery_push(filter) )
+    {
+        filter->status |= FILTER_ERR_OTHER;
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Could not initialize filter recovery");
+        return filter;
+    }
+    if ( setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]) != 0 )
+    {
+        int i;
         duckhts_filter_recovery_end();
+        for (i=0; i<arg_count; i++) free(arg_list[i]);
+        free(arg_list);
+        free(arg_tmp);
+        for (i=0; i<nout; i++) filter_token_destroy(&out[i]);
+        for (i=0; i<nops; i++) filter_token_destroy(&ops[i]);
+        free(out);
+        free(ops);
         filter->status |= FILTER_ERR_OTHER;
         if ( !filter->last_error[0] )
             snprintf(filter->last_error, sizeof(filter->last_error), "Could not parse the expression: %s", str);
         return filter;
     }
 
-    int nops = 0, mops = 0;    // operators stack
-    int nout = 0, mout = 0;    // filter tokens, RPN
-    token_t *out = NULL;
-    token_t *ops = NULL;
     char *tmp = filter->str;
     perl_init(filter, &tmp);
 
@@ -3885,16 +4032,14 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
 
         if ( ret==TOK_LFT )         // left bracket
         {
-            nops++;
-            hts_expand0(token_t, nops, mops, ops);
+            FILTER_APPEND_TOKEN(nops, mops, ops);
             ops[nops-1].tok_type = ret;
         }
         else if ( ret==TOK_RGT )    // right bracket
         {
             while ( nops>0 && ops[nops-1].tok_type!=TOK_LFT )
             {
-                nout++;
-                hts_expand0(token_t, nout, mout, out);
+                FILTER_APPEND_TOKEN(nout, mout, out);
                 out[nout-1] = ops[nops-1];
                 memset(&ops[nops-1],0,sizeof(token_t));
                 nops--;
@@ -3905,8 +4050,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         }
         else if ( ret==TOK_EXT )    // external value
         {
-            nout++;
-            hts_expand0(token_t, nout, mout, out);
+            FILTER_APPEND_TOKEN(nout, mout, out);
             filters_init1_ext(filter, tmp, len, &out[nout-1]);
             tmp += len;
         }
@@ -3915,8 +4059,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             // detect unary minus: replace -value with -1*(value)
             if ( ret==TOK_SUB && last_op!=TOK_VAL && last_op!=TOK_RGT )
             {
-                nout++;
-                hts_expand0(token_t, nout, mout, out);
+                FILTER_APPEND_TOKEN(nout, mout, out);
                 token_t *tok = &out[nout-1];
                 tok->tok_type  = TOK_VAL;
                 tok->hdr_id    = -1;
@@ -3929,8 +4072,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             {
                 // this is different from TOK_PERLSUB,TOK_BINOM,TOK_FISHER in that the expression inside the
                 // brackets gets evaluated as normal expression
-                nops++;
-                hts_expand0(token_t, nops, mops, ops);
+                FILTER_APPEND_TOKEN(nops, mops, ops);
                 token_t *tok = &ops[nops-1];
                 tok->tok_type  = -ret;
                 tok->hdr_id    = -1;
@@ -3958,7 +4100,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                 tmp += len;
                 char *beg = tmp;
                 kstring_t rmme = {0,0,0};
-                int i, margs, nargs = 0;
+                int i, margs = 0, nargs = 0;
 
                 if ( ret == TOK_PERLSUB )
                 {
@@ -3966,11 +4108,14 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                     if ( *beg!='(' ) error("[%s:%d] Could not parse the expression: %s\n", __FILE__,__LINE__,str);
 
                     // the subroutine name
-                    kputc('"', &rmme);
-                    kputsn(tmp, beg-tmp, &rmme);
-                    kputc('"', &rmme);
-                    nout++;
-                    hts_expand0(token_t, nout, mout, out);
+                    if ( kputc('"', &rmme) < 0 || kputsn(tmp, beg-tmp, &rmme) < 0 ||
+                         kputc('"', &rmme) < 0 )
+                    {
+                        arg_tmp = rmme.s;
+                        error("Out of memory while parsing function arguments\n");
+                    }
+                    arg_tmp = rmme.s;
+                    FILTER_APPEND_TOKEN(nout, mout, out);
                     filters_init1(filter, rmme.s, rmme.l, &out[nout-1]);
                     nargs++;
                 }
@@ -3980,21 +4125,32 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
 
                 // subroutine arguments
                 rmme.l = 0;
-                kputsn(beg+1, end-beg-1, &rmme);
+                if ( kputsn(beg+1, end-beg-1, &rmme) < 0 )
+                {
+                    arg_tmp = rmme.s;
+                    error("Out of memory while parsing function arguments\n");
+                }
+                arg_tmp = rmme.s;
                 char **rmme_list = parse_tag_list(rmme.s, &margs);
+                arg_list = rmme_list;
+                arg_count = margs;
+                if ( !rmme_list ) error("Out of memory while parsing function arguments\n");
                 for (i=0; i<margs; i++)
                 {
                     nargs++;
-                    nout++;
-                    hts_expand0(token_t, nout, mout, out);
+                    FILTER_APPEND_TOKEN(nout, mout, out);
                     filters_init1(filter, rmme_list[i], strlen(rmme_list[i]), &out[nout-1]);
                     free(rmme_list[i]);
+                    rmme_list[i] = NULL;
                 }
                 free(rmme_list);
+                arg_list = NULL;
+                arg_count = 0;
                 free(rmme.s);
+                rmme.s = NULL;
+                arg_tmp = NULL;
 
-                nout++;
-                hts_expand0(token_t, nout, mout, out);
+                FILTER_APPEND_TOKEN(nout, mout, out);
                 token_t *tok = &out[nout-1];
                 tok->tok_type  = ret;
                 tok->nargs     = nargs;
@@ -4009,15 +4165,13 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             {
                 while ( nops>0 && op_prec[ret] < op_prec[ops[nops-1].tok_type] )
                 {
-                    nout++;
-                    hts_expand0(token_t, nout, mout, out);
+                    FILTER_APPEND_TOKEN(nout, mout, out);
                     out[nout-1] = ops[nops-1];
                     memset(&ops[nops-1],0,sizeof(token_t));
                     nops--;
                 }
             }
-            nops++;
-            hts_expand0(token_t, nops, mops, ops);
+            FILTER_APPEND_TOKEN(nops, mops, ops);
             ops[nops-1].tok_type = ret;
         }
         else if ( !len )    // all tokes read or an error
@@ -4027,8 +4181,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         }
         else           // TOK_VAL: annotation name or value
         {
-            nout++;
-            hts_expand0(token_t, nout, mout, out);
+            FILTER_APPEND_TOKEN(nout, mout, out);
             if ( tmp[len-1]==',' )
                 filters_init1(filter, tmp, len-1, &out[nout-1]);
             else
@@ -4040,8 +4193,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     while ( nops>0 )
     {
         if ( ops[nops-1].tok_type==TOK_LFT || ops[nops-1].tok_type==TOK_RGT ) error("Could not parse the expression: [%s]\n", filter->str);
-        nout++;
-        hts_expand0(token_t, nout, mout, out);
+        FILTER_APPEND_TOKEN(nout, mout, out);
         out[nout-1] = ops[nops-1];
         memset(&ops[nops-1],0,sizeof(token_t));
         nops--;
@@ -4117,6 +4269,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             if ( !out[j].key )
                 error("Could not parse the expression, wrong value for regex operator: %s\n", filter->str);
             out[j].regex = (regex_t *) malloc(sizeof(regex_t));
+            if ( !out[j].regex ) error("Out of memory while compiling the regex expression\n");
             int cflags = REG_NOSUB;
             int len = strlen(out[j].key);
             if ( len>2 && out[j].key[len-1]=='i' && out[j].key[len-2]=='/' && out[j].key[len-3]!='\\'  )
@@ -4125,7 +4278,11 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                 cflags |= REG_ICASE;
             }
             if ( regcomp(out[j].regex, out[j].key, cflags) )
+            {
+                free(out[j].regex);
+                out[j].regex = NULL;
                 error("Could not compile the regex expression \"%s\": %s\n", out[j].key,filter->str);
+            }
         }
         if ( out[i].is_str && out[i].tok_type==TOK_VAL && out[i].key && strchr(out[i].key,',') )
         {
@@ -4261,10 +4418,12 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         else if ( out[i].tok_type==TOK_sMEDIAN ) { out[i].func = func_smpl_median; out[i].tok_type = TOK_FUNC; }
         else if ( out[i].tok_type==TOK_sSTDEV ) { out[i].func = func_smpl_stddev; out[i].tok_type = TOK_FUNC; }
         else if ( out[i].tok_type==TOK_sSUM ) { out[i].func = func_smpl_sum; out[i].tok_type = TOK_FUNC; }
-        hts_expand0(double,1,out[i].mvalues,out[i].values);
+        if ( hts_resize(double, 1, &out[i].mvalues, &out[i].values, HTS_RESIZE_CLEAR) < 0 )
+            error("Out of memory while preparing the filter expression\n");
         if ( filter->nsamples )
         {
             out[i].pass_samples = (uint8_t*)malloc(filter->nsamples);
+            if ( !out[i].pass_samples ) error("Out of memory while preparing the filter expression\n");
             int j;
             for (j=0; j<filter->nsamples; j++) out[i].pass_samples[j] = 0;
         }
@@ -4273,12 +4432,24 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     if (0) filter_debug_print(out, NULL, nout);
 
     if ( mops ) free(ops);
+    ops = NULL;
+    nops = mops = 0;
+    if ( (size_t)nout > SIZE_MAX / sizeof(token_t*) )
+        error("Filter expression is too large\n");
     filter->filters   = out;
     filter->nfilters  = nout;
-    filter->flt_stack = (token_t **)malloc(sizeof(token_t*)*nout);
+    filter->flt_stack = nout ? (token_t **)malloc(sizeof(token_t*)*(size_t)nout) : NULL;
+    if ( nout && !filter->flt_stack )
+    {
+        filter->filters = NULL;
+        filter->nfilters = 0;
+        error("Out of memory while preparing the filter expression\n");
+    }
     duckhts_filter_recovery_end();
     return filter;
 }
+#undef FILTER_APPEND_TOKEN
+
 filter_t *filter_parse(bcf_hdr_t *hdr, const char *str)
 {
     return filter_init_(hdr, str, 0);
@@ -4292,22 +4463,7 @@ void filter_destroy(filter_t *filter)
 {
     perl_destroy(filter);
     int i;
-    for (i=0; i<filter->nfilters; i++)
-    {
-        if ( filter->filters[i].key ) free(filter->filters[i].key);
-        free(filter->filters[i].str_value.s);
-        free(filter->filters[i].tag);
-        free(filter->filters[i].idxs);
-        free(filter->filters[i].usmpl);
-        free(filter->filters[i].values);
-        free(filter->filters[i].pass_samples);
-        if (filter->filters[i].hash) khash_str2int_destroy_free(filter->filters[i].hash);
-        if (filter->filters[i].regex)
-        {
-            regfree(filter->filters[i].regex);
-            free(filter->filters[i].regex);
-        }
-    }
+    for (i=0; i<filter->nfilters; i++) filter_token_destroy(&filter->filters[i]);
     for (i=0; i<filter->nundef_tag; i++) free(filter->undef_tag[i]);
     for (i=0; i<filter->nused_tag; i++) free(filter->used_tag[i]);
     free(filter->ext);
@@ -4364,9 +4520,17 @@ int filter_test(filter_t *filter, bcf1_t *line, const uint8_t **samples)
             snprintf(filter->last_error, sizeof(filter->last_error), "Error: the caller did not check the filter status");
         return -1;
     }
-    if ( duckhts_filter_recovery_begin(filter) != 0 )
+    if ( !duckhts_filter_recovery_push(filter) )
+    {
+        filter->status |= FILTER_ERR_OTHER;
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Could not initialize filter recovery");
+        return -1;
+    }
+    if ( setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]) != 0 )
     {
         duckhts_filter_recovery_end();
+        filter->status |= FILTER_ERR_OTHER;
         if ( !filter->last_error[0] )
             snprintf(filter->last_error, sizeof(filter->last_error), "Error occurred while processing the filter \"%s\"", filter->str);
         return -1;

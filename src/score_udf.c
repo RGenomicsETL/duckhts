@@ -1503,17 +1503,27 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     return out;
 }
 
-static int score_record_matches_exprs(bcf1_t *rec, const score_scan_source_t *src) {
+static int score_record_matches_exprs(bcf1_t *rec, const score_scan_source_t *src, char *err, size_t err_sz) {
     if (src->include_filt) {
         int keep;
         keep = filter_test(src->include_filt, rec, NULL);
-        if (keep < 0) return -1;
+        if (keep < 0) {
+            const char *detail = filter_last_error(src->include_filt);
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression%s%s",
+                     detail && detail[0] ? ": " : "", detail && detail[0] ? detail : "");
+            return -1;
+        }
         if (!keep) return 0;
     }
     if (src->exclude_filt) {
         int drop;
         drop = filter_test(src->exclude_filt, rec, NULL);
-        if (drop < 0) return -1;
+        if (drop < 0) {
+            const char *detail = filter_last_error(src->exclude_filt);
+            snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression%s%s",
+                     detail && detail[0] ? ": " : "", detail && detail[0] ? detail : "");
+            return -1;
+        }
         if (drop) return 0;
     }
     return 1;
@@ -2399,7 +2409,7 @@ static void score_init(duckdb_init_info info) {
             if (!score_record_in_region_list(hdr, rec, bind->regions, bind->regions_overlap >= 0 ? bind->regions_overlap : 1)) continue;
             if (!score_record_in_region_list(hdr, rec, bind->targets, bind->targets_overlap >= 0 ? bind->targets_overlap : 0)) continue;
             {
-                int expr_keep = score_record_matches_exprs(rec, &src);
+                int expr_keep = score_record_matches_exprs(rec, &src, err, sizeof(err));
                 if (expr_keep < 0) {
                     if (idxs) duckdb_free(idxs);
                     if (int32_arr) free(int32_arr);
@@ -2416,7 +2426,7 @@ static void score_init(duckdb_init_info info) {
                         duckdb_free(summaries);
                     }
                     score_destroy_init(init);
-                    duckdb_init_set_error(info, "bcftools_score: failed to evaluate include/exclude expression");
+                    duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to evaluate include/exclude expression");
                     return;
                 }
                 if (expr_keep == 0) continue;

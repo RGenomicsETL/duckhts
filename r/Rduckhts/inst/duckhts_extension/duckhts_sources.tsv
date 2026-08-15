@@ -53,5 +53,4 @@ third_party/cgranges/cgranges.c|cgranges.c
 third_party/libBigWig/bwRead.c|libBigWig/bwRead.c
 third_party/libBigWig/bwValues.c|libBigWig/bwValues.c
 src/bcftools_filter.c|bcftools_filter.c
-src/bcftools_shim.c|bcftools_shim.c
 src/wasm_http_hfile.c|wasm_http_hfile.c

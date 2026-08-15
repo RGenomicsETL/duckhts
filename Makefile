@@ -25,7 +25,10 @@
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
 	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
 	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
-	test-duckvep-corpus-staging test-cgranges-benchmark-r
+	test-duckvep-corpus-staging test-cgranges-benchmark-r \
+	test-liftover-property test-liftover-property-asan \
+	test-liftover-property-ubsan test-liftover-fuzz test-liftover-fuzz-debug \
+	test-bcftools-filter-recovery test-sanitized-extension test-sanitizers
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -136,8 +139,60 @@ endif
 # -----------------------------------------------------------------------------
 
 test: test_debug
-test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-sqllogictest-release
+test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
+
+define run_liftover_property
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$${CC:-cc} -std=c11 -Wall -Wextra -Werror $(1) -Isrc/include \
+			test/scripts/liftover_nw_property.c -o "$$tmp/liftover_nw_property"; \
+		$(2) "$$tmp/liftover_nw_property" $${LIFTOVER_PROP_SEED:-169} $${LIFTOVER_PROP_TRIALS:-100000}
+endef
+
+test-liftover-property:
+	$(call run_liftover_property,,)
+
+test-liftover-property-asan:
+	$(call run_liftover_property,-fsanitize=address -fno-omit-frame-pointer,ASAN_OPTIONS=detect_leaks=1)
+
+test-liftover-property-ubsan:
+	$(call run_liftover_property,-fsanitize=undefined -fno-sanitize-recover=undefined,UBSAN_OPTIONS=halt_on_error=1)
+
+test-liftover-fuzz:
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping Python DuckDB fuzz gate for the MinGW extension platform"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
+			--extension build/release/$(EXTENSION_NAME).duckdb_extension \
+			--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}; \
+	fi
+
+test-liftover-fuzz-debug:
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping Python DuckDB fuzz gate for the MinGW extension platform"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
+			--extension build/debug/$(EXTENSION_NAME).duckdb_extension \
+			--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}; \
+	fi
+
+test-sanitized-extension:
+	bash scripts/test_sanitized_extension.sh $${SANITIZER:-asan}
+
+test-sanitizers:
+	$(MAKE) test-sanitized-extension SANITIZER=asan
+	$(MAKE) test-sanitized-extension SANITIZER=ubsan
+
+test-bcftools-filter-recovery:
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping filter recovery probe on MinGW"; \
+	else \
+		set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$${CC:-cc} -std=c11 -Wall -Wextra -Werror -Isrc/include -Ithird_party/htslib \
+			test/scripts/bcftools_filter_recovery_probe.c -Lbuild/release \
+			-Wl,-rpath,$(PROJ_DIR)build/release -lduckhts -o "$$tmp/filter_recovery"; \
+		"$$tmp/filter_recovery"; \
+	fi
 
 test-cache-paths:
 	bash test/scripts/test_duckhts_cache.sh
