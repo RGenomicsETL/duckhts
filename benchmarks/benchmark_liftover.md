@@ -51,13 +51,13 @@ For curated GIAB benchmark slices, see
 ## Execution Metadata
 
     #>                            source_revision duckdb_threads
-    #> 1 19c6d6acf8505e4eb03039966cb0c3aa937e3458              4
+    #> 1 3d42ef48863eb4a9ef67c1e64a1def766d57a1e6              4
 
 ## Synthetic Stress Case
 
     #>               engine runs median_sec min_sec max_sec output_rows
     #> 1            duckhts    1      0.004   0.004   0.004         100
-    #> 2 bcftools_RBCFTools    1      0.013   0.013   0.013         100
+    #> 2 bcftools_RBCFTools    1      0.011   0.011   0.011         100
 
     #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
     #> 1       100           100                0                    0
@@ -66,20 +66,5 @@ For curated GIAB benchmark slices, see
 
 ## Real-Callset Case
 
-    #>                                   input_vcf
-    #> 1 HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz
-    #>                                                 provenance     region
-    #> 1 HG001_GRCh37_1_22_v4.2.1_benchmark.vcf.gz.provenance.tsv full_input
-    #>                       chain           src_fasta
-    #> 1 GRCh37_to_GRCh38.chain.gz human_g1k_v37.fasta
-    #>                                         dst_fasta
-    #> 1 GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
-
-    #>               engine runs median_sec min_sec max_sec output_rows
-    #> 1            duckhts    1      6.378   6.378   6.378     3886470
-    #> 2 bcftools_RBCFTools    1     12.328  12.328  12.328     3886470
-
-    #>   duck_rows bcftools_rows only_duck_groups only_bcftools_groups
-    #> 1   3886470       3886470                0                    0
-    #>   mismatched_count_groups outputs_match
-    #> 1                       0          TRUE
+    #>                                   status
+    #> 1 skipped; set all LIFTOVER_REAL_* paths
