@@ -49,11 +49,12 @@ int main(void) {
     filter_destroy(filter);
     rec->d.info[0].type = info_type;
 
-    for (i = 0; i < 1200; i++) {
-        const char *expr = i % 3 == 0 ? "INFO/DP>0 & (" :
-                           i % 3 == 1 ? "ID~\"[\"" : "FORMAT/DP[0-2]";
-        const char *message = i % 3 == 0 ? "Could not parse" :
-                              i % 3 == 1 ? "Could not compile" : "sample index is too large";
+    for (i = 0; i < 1600; i++) {
+        const char *expr = i % 4 == 0 ? "INFO/DP>0 & (" :
+                           i % 4 == 1 ? "ID~\"[\"" :
+                           i % 4 == 2 ? "FORMAT/DP[0-2]" : "FISHER(FORMAT/DP[0-2])";
+        const char *message = i % 4 == 0 ? "Could not parse" :
+                              i % 4 == 1 ? "Could not compile" : "sample index is too large";
         filter = filter_parse(hdr, expr);
         if (!filter || filter_status(filter) != FILTER_ERR_OTHER ||
             !filter_last_error(filter) || !strstr(filter_last_error(filter), message)) return 8;

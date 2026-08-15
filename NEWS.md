@@ -9,13 +9,15 @@
   Sanitizer CI installs a checksum-pinned DuckDB CLI, distribution tests
   consume the already built extension instead of rebuilding a relocated CMake
   cache, and MinGW jobs skip only the incompatible MSVC Python-wheel loader
-  while retaining their native Windows contracts
+  while retaining their native Windows contracts. The rendered liftover report
+  keeps current synthetic evidence and the nearest comparable full-input
+  real-callset baseline when current public inputs are not staged
 
 - route malformed bcftools score-filter INFO/FORMAT storage and failed internal
   invariants through one recoverable filter authority instead of `exit()` or
-  runtime assertions, unwind token stacks and parser-owned index/file
-  temporaries after recovered failures, preserve the detailed filter cause in
-  SQL errors, and remove the unused second recovery stack
+  runtime assertions, unwind token stacks plus parser-owned index, file, and
+  variable-argument temporaries after recovered failures, preserve the detailed
+  filter cause in SQL errors, and remove the unused second recovery stack
 
 - make Rduckhts SQL construction quote paths and option values through one
   DBI literal authority and table names through one identifier authority, while

@@ -3958,7 +3958,7 @@ char **parse_tag_list(const char *string, int *_n)
         goto err;
 
     s = s_new;
-    FILTER_REQUIRE(n < INT_MAX); // hts_resize() should ensure this
+    if ( n >= INT_MAX ) goto err; // hts_resize() should ensure this
     *_n = n;
     return s;
 
@@ -3983,6 +3983,9 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     volatile int nout = 0, mout = 0;    // filter tokens, RPN
     token_t *volatile out = NULL;
     token_t *volatile ops = NULL;
+    char *volatile arg_tmp = NULL;
+    char **volatile arg_list = NULL;
+    volatile int arg_count = 0;
     if ( !filter ) return NULL;
     filter->str = strdup(str);
     filter->hdr = hdr;
@@ -3998,6 +4001,9 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     {
         int i;
         duckhts_filter_recovery_end();
+        for (i=0; i<arg_count; i++) free(arg_list[i]);
+        free(arg_list);
+        free(arg_tmp);
         for (i=0; i<nout; i++) filter_token_destroy(&out[i]);
         for (i=0; i<nops; i++) filter_token_destroy(&ops[i]);
         free(out);
@@ -4091,7 +4097,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                 tmp += len;
                 char *beg = tmp;
                 kstring_t rmme = {0,0,0};
-                int i, margs, nargs = 0;
+                int i, margs = 0, nargs = 0;
 
                 if ( ret == TOK_PERLSUB )
                 {
@@ -4099,9 +4105,13 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
                     if ( *beg!='(' ) error("[%s:%d] Could not parse the expression: %s\n", __FILE__,__LINE__,str);
 
                     // the subroutine name
-                    kputc('"', &rmme);
-                    kputsn(tmp, beg-tmp, &rmme);
-                    kputc('"', &rmme);
+                    if ( kputc('"', &rmme) < 0 || kputsn(tmp, beg-tmp, &rmme) < 0 ||
+                         kputc('"', &rmme) < 0 )
+                    {
+                        arg_tmp = rmme.s;
+                        error("Out of memory while parsing function arguments\n");
+                    }
+                    arg_tmp = rmme.s;
                     FILTER_APPEND_TOKEN(nout, mout, out);
                     filters_init1(filter, rmme.s, rmme.l, &out[nout-1]);
                     nargs++;
@@ -4112,17 +4122,30 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
 
                 // subroutine arguments
                 rmme.l = 0;
-                kputsn(beg+1, end-beg-1, &rmme);
+                if ( kputsn(beg+1, end-beg-1, &rmme) < 0 )
+                {
+                    arg_tmp = rmme.s;
+                    error("Out of memory while parsing function arguments\n");
+                }
+                arg_tmp = rmme.s;
                 char **rmme_list = parse_tag_list(rmme.s, &margs);
+                arg_list = rmme_list;
+                arg_count = margs;
+                if ( !rmme_list ) error("Out of memory while parsing function arguments\n");
                 for (i=0; i<margs; i++)
                 {
                     nargs++;
                     FILTER_APPEND_TOKEN(nout, mout, out);
                     filters_init1(filter, rmme_list[i], strlen(rmme_list[i]), &out[nout-1]);
                     free(rmme_list[i]);
+                    rmme_list[i] = NULL;
                 }
                 free(rmme_list);
+                arg_list = NULL;
+                arg_count = 0;
                 free(rmme.s);
+                rmme.s = NULL;
+                arg_tmp = NULL;
 
                 FILTER_APPEND_TOKEN(nout, mout, out);
                 token_t *tok = &out[nout-1];
