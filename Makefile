@@ -159,14 +159,22 @@ test-liftover-property-ubsan:
 	$(call run_liftover_property,-fsanitize=undefined -fno-sanitize-recover=undefined,UBSAN_OPTIONS=halt_on_error=1)
 
 test-liftover-fuzz:
-	$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
-		--extension build/release/$(EXTENSION_NAME).duckdb_extension \
-		--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping Python DuckDB fuzz gate for the MinGW extension platform"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
+			--extension build/release/$(EXTENSION_NAME).duckdb_extension \
+			--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}; \
+	fi
 
 test-liftover-fuzz-debug:
-	$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
-		--extension build/debug/$(EXTENSION_NAME).duckdb_extension \
-		--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping Python DuckDB fuzz gate for the MinGW extension platform"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
+			--extension build/debug/$(EXTENSION_NAME).duckdb_extension \
+			--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}; \
+	fi
 
 test-sanitized-extension:
 	bash scripts/test_sanitized_extension.sh $${SANITIZER:-asan}

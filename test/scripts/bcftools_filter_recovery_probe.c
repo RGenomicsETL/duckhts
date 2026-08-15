@@ -17,16 +17,19 @@ int main(void) {
     bcf_hdr_t *hdr = bcf_hdr_init("w");
     bcf1_t *rec = bcf_init();
     filter_t *filter;
-    int gt = bcf_gt_unphased(0), dp[] = {10, 11}, fmt_type, info_type, i;
+    int gt[] = {bcf_gt_unphased(0), bcf_gt_unphased(0)};
+    int dp[] = {10, 11}, fmt_type, info_type, i;
     const char *alleles[] = {"A", "C"};
     if (!hdr || !rec) return 2;
     bcf_hdr_append(hdr, "##fileformat=VCFv4.2");
     bcf_hdr_append(hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
+    bcf_hdr_append(hdr, "##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Depth\">");
     bcf_hdr_append(hdr, "##INFO=<ID=DP,Number=2,Type=Integer,Description=\"Depth\">");
-    bcf_hdr_add_sample(hdr, "S");
+    bcf_hdr_add_sample(hdr, "S1");
+    bcf_hdr_add_sample(hdr, "S2");
     bcf_hdr_add_sample(hdr, NULL);
     if (bcf_hdr_sync(hdr) != 0 || bcf_update_alleles(hdr, rec, alleles, 2) != 0 ||
-        bcf_update_genotypes(hdr, rec, &gt, 1) != 0 ||
+        bcf_update_genotypes(hdr, rec, gt, 2) != 0 ||
         bcf_update_info_int32(hdr, rec, "DP", dp, 2) != 0) return 3;
     bcf_unpack(rec, BCF_UN_ALL);
 
@@ -46,9 +49,11 @@ int main(void) {
     filter_destroy(filter);
     rec->d.info[0].type = info_type;
 
-    for (i = 0; i < 1000; i++) {
-        const char *expr = i & 1 ? "INFO/DP>0 & (" : "ID~\"[\"";
-        const char *message = i & 1 ? "Could not parse" : "Could not compile";
+    for (i = 0; i < 1200; i++) {
+        const char *expr = i % 3 == 0 ? "INFO/DP>0 & (" :
+                           i % 3 == 1 ? "ID~\"[\"" : "FORMAT/DP[0-2]";
+        const char *message = i % 3 == 0 ? "Could not parse" :
+                              i % 3 == 1 ? "Could not compile" : "sample index is too large";
         filter = filter_parse(hdr, expr);
         if (!filter || filter_status(filter) != FILTER_ERR_OTHER ||
             !filter_last_error(filter) || !strstr(filter_last_error(filter), message)) return 8;

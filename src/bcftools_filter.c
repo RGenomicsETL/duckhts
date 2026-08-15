@@ -3085,6 +3085,7 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     if ( *tag_idx==0 || !strcmp("*", tag_idx) )
     {
         *idxs = (int*) malloc(sizeof(int));
+        if ( !*idxs ) return -1;
         (*idxs)[0] = -1;
         *nidxs     = 1;
         *idx       = -2;
@@ -3093,6 +3094,7 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     if ( !strcmp("GT", tag_idx) )
     {
         *idxs = (int*) malloc(sizeof(int));
+        if ( !*idxs ) return -1;
         (*idxs)[0] = -1;
         *nidxs     = 1;
         *idx = -3;
@@ -3101,22 +3103,35 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
 
     // TAG[integer] .. one field; idx positive
     char *end, *beg = tag_idx;
-    *idx = strtol(tag_idx, &end, 10);
-    if ( *idx >= 0 && *end==0 ) return 0;
+    long parsed = strtol(tag_idx, &end, 10);
+    if ( parsed>=0 && parsed<INT_MAX && *end==0 )
+    {
+        *idx = (int)parsed;
+        return 0;
+    }
 
     // TAG[0,1] or TAG[0-2] or [1-] etc; idx=-2, idxs[...]=0,0,1,1,..
     int i, ibeg = -1;
     while ( *beg )
     {
-        int num = strtol(beg, &end, 10);
+        int num;
+        int *new_idxs;
+        size_t count;
+        parsed = strtol(beg, &end, 10);
+        if ( end==beg || parsed<0 || parsed>=INT_MAX ) return -1;
+        num = (int)parsed;
         if ( end[0]==',' ) beg = end + 1;
         else if ( end[0]==0 ) beg = end;
         else if ( end[0]=='-' ) { beg = end + 1; ibeg = num; continue; }
         else return -1;
         if ( num >= *nidxs )
         {
-            *idxs = (int*) realloc(*idxs, sizeof(int)*(num+1));
-            memset(*idxs + *nidxs, 0, sizeof(int)*(num - *nidxs + 1));
+            count = (size_t)num + 1;
+            if ( count > SIZE_MAX / sizeof(int) ) return -1;
+            new_idxs = (int*) realloc(*idxs, sizeof(int)*count);
+            if ( !new_idxs ) return -1;
+            *idxs = new_idxs;
+            memset(*idxs + *nidxs, 0, sizeof(int)*(count - (size_t)*nidxs));
             *nidxs = num + 1;
         }
         if ( ibeg>=0 )
@@ -3130,8 +3145,13 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     {
         if ( ibeg >= *nidxs )
         {
-            *idxs = (int*) realloc(*idxs, sizeof(int)*(ibeg+1));
-            memset(*idxs + *nidxs, 0, sizeof(int)*(ibeg - *nidxs + 1));
+            int *new_idxs;
+            size_t count = (size_t)ibeg + 1;
+            if ( count > SIZE_MAX / sizeof(int) ) return -1;
+            new_idxs = (int*) realloc(*idxs, sizeof(int)*count);
+            if ( !new_idxs ) return -1;
+            *idxs = new_idxs;
+            memset(*idxs + *nidxs, 0, sizeof(int)*(count - (size_t)*nidxs));
             *nidxs = ibeg + 1;
         }
         (*idxs)[ibeg] = -1;
@@ -3140,53 +3160,78 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     return 0;
 }
 
-static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, token_t *tok)   // tag_idx points just after "TAG["
+#define PARSE_TAG_FAIL(...) do { \
+    snprintf(fail_msg, sizeof(fail_msg), __VA_ARGS__); \
+    goto fail; \
+} while (0)
+
+static int parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, token_t *tok,
+                         char *err, size_t err_sz)   // tag_idx points just after "TAG["
 {
     int i, len = strlen(tag_idx);
-    if ( tag_idx[len-1] == ']' ) tag_idx[len-1] = 0;
-    char *ori = strdup(tag_idx);
-
-    FILTER_REQUIRE( !tok->idxs && !tok->usmpl );
+    char *ori = NULL, *fname = NULL;
+    char **list = NULL;
+    int nsmpl = 0;
     int *idxs1 = NULL, nidxs1 = 0, idx1 = 0;
     int *idxs2 = NULL, nidxs2 = 0, idx2 = 0;
-
     int set_samples = 0;
-    char *colon = strrchr(tag_idx, ':');
+    char *colon;
+    char fail_msg[512] = {0};
+
+    if ( tok->idxs || tok->usmpl ) PARSE_TAG_FAIL("Filter token index state is already initialized\n");
+    if ( len && tag_idx[len-1] == ']' ) tag_idx[len-1] = 0;
+    ori = strdup(tag_idx);
+    if ( !ori ) PARSE_TAG_FAIL("Could not allocate memory\n");
+
+    colon = strrchr(tag_idx, ':');
     if ( tag_idx[0]=='@' )     // file list with sample names
     {
-        if ( !is_fmt ) error("Could not parse \"%s\". (Not a FORMAT tag yet a sample list provided.)\n", ori);
-        char *fname = expand_path(tag_idx+1);
+        int has_subfield;
+        if ( !is_fmt ) PARSE_TAG_FAIL("Could not parse \"%s\". (Not a FORMAT tag yet a sample list provided.)\n", ori);
+        fname = expand_path(tag_idx+1);
+        if ( !fname ) PARSE_TAG_FAIL("Could not allocate memory\n");
 #ifdef _WIN32
-        if (fname && strlen(fname) > 2 && fname[1] == ':') // Deal with Windows paths, such as 'C:\..'
+        if ( strlen(fname) > 2 && fname[1] == ':' ) // Deal with Windows paths, such as 'C:\..'
             colon = strrchr(fname+2, ':');
 #endif
-        int nsmpl;
-        char **list = hts_readlist(fname, 1, &nsmpl);
+        list = hts_readlist(fname, 1, &nsmpl);
         if ( !list && colon )
         {
-            if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 ) error("Could not parse the index: %s\n", ori);
+            char *fname_colon;
+            if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 )
+                PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
             tok->idxs  = idxs2;
             tok->nidxs = nidxs2;
             tok->idx   = idx2;
-            colon = strrchr(fname, ':');
-            *colon = 0;
+            idxs2 = NULL;
+            nidxs2 = 0;
+            fname_colon = strrchr(fname, ':');
+            if ( !fname_colon ) PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
+            *fname_colon = 0;
             list = hts_readlist(fname, 1, &nsmpl);
         }
-        if ( !list ) error("Could not read: %s\n", fname);
+        if ( !list ) PARSE_TAG_FAIL("Could not read: %s\n", fname);
+        has_subfield = colon != NULL;
         free(fname);
+        fname = NULL;
         tok->nsamples = bcf_hdr_nsamples(hdr);
         tok->usmpl = (uint8_t*) calloc(tok->nsamples,1);
+        if ( tok->nsamples && !tok->usmpl ) PARSE_TAG_FAIL("Could not allocate memory\n");
         for (i=0; i<nsmpl; i++)
         {
             int ismpl = bcf_hdr_id2int(hdr,BCF_DT_SAMPLE,list[i]);
-            if ( ismpl<0 ) error("No such sample in the VCF: \"%s\"\n", list[i]);
-            free(list[i]);
+            if ( ismpl<0 ) PARSE_TAG_FAIL("No such sample in the VCF: \"%s\"\n", list[i]);
             tok->usmpl[ismpl] = 1;
+            free(list[i]);
+            list[i] = NULL;
         }
         free(list);
-        if ( !colon )
+        list = NULL;
+        nsmpl = 0;
+        if ( !has_subfield )
         {
             tok->idxs = (int*) malloc(sizeof(int));
+            if ( !tok->idxs ) PARSE_TAG_FAIL("Could not allocate memory\n");
             tok->idxs[0] = -1;
             tok->nidxs   = 1;
             tok->idx     = -2;
@@ -3194,29 +3239,35 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
     }
     else if ( colon )
     {
-        if ( !is_fmt ) error("Could not parse the index \"%s\". (Not a FORMAT tag yet sample index implied.)\n", ori);
+        if ( !is_fmt ) PARSE_TAG_FAIL("Could not parse the index \"%s\". (Not a FORMAT tag yet sample index implied.)\n", ori);
         *colon = 0;
-        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 ) error("Could not parse the index: %s\n", ori);
-        if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 ) error("Could not parse the index: %s\n", ori);
+        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 )
+            PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
+        if ( parse_idxs(colon+1, &idxs2, &nidxs2, &idx2) != 0 )
+            PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
         tok->idxs  = idxs2;
         tok->nidxs = nidxs2;
         tok->idx   = idx2;
+        idxs2 = NULL;
+        nidxs2 = 0;
         set_samples = 1;
     }
     else
     {
-        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 ) error("Could not parse the index: %s\n", ori);
+        if ( parse_idxs(tag_idx, &idxs1, &nidxs1, &idx1) != 0 )
+            PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
         if ( is_fmt )
         {
             if ( nidxs1==1 && idxs1[0]==-1 )
             {
                 tok->idxs = (int*) malloc(sizeof(int));
+                if ( !tok->idxs ) PARSE_TAG_FAIL("Could not allocate memory\n");
                 tok->idxs[0] = -1;
                 tok->nidxs   = 1;
                 tok->idx     = idx1;
             }
             else if ( bcf_hdr_id2number(hdr,BCF_HL_FMT,tok->hdr_id)!=1 )
-                error("The FORMAT tag %s can have multiple subfields, run as %s[sample:subfield]\n", tag,tag);
+                PARSE_TAG_FAIL("The FORMAT tag %s can have multiple subfields, run as %s[sample:subfield]\n", tag,tag);
             else
                 tok->idx = 0;
             set_samples = 1;
@@ -3226,6 +3277,8 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
             tok->idxs  = idxs1;
             tok->nidxs = nidxs1;
             tok->idx   = idx1;
+            idxs1 = NULL;
+            nidxs1 = 0;
         }
     }
 
@@ -3233,9 +3286,10 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
     {
         tok->nsamples = bcf_hdr_nsamples(hdr);
         tok->usmpl = (uint8_t*) calloc(tok->nsamples,1);
+        if ( tok->nsamples && !tok->usmpl ) PARSE_TAG_FAIL("Could not allocate memory\n");
         if ( idx1>=0 )
         {
-            if ( idx1 >= bcf_hdr_nsamples(hdr) ) error("The sample index is too large: %s\n", ori);
+            if ( idx1 >= bcf_hdr_nsamples(hdr) ) PARSE_TAG_FAIL("The sample index is too large: %s\n", ori);
             tok->usmpl[idx1] = 1;
         }
         else if ( idx1==-2 || idx1==-3 )
@@ -3244,7 +3298,7 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
             {
                 if ( idxs1[i]==0 ) continue;
                 if ( idxs1[i]==-1 ) break;
-                if ( i >= bcf_hdr_nsamples(hdr) ) error("The sample index is too large: %s\n", ori);
+                if ( i >= bcf_hdr_nsamples(hdr) ) PARSE_TAG_FAIL("The sample index is too large: %s\n", ori);
                 tok->usmpl[i] = 1;
             }
             if ( nidxs1 && idxs1[nidxs1-1]==-1 )    // open range, such as "7-"
@@ -3252,16 +3306,34 @@ static void parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, 
                 for (; i<tok->nsamples; i++) tok->usmpl[i] = 1;
             }
         }
-        else error("todo: %s:%d .. %d\n", __FILE__,__LINE__, idx2);
+        else PARSE_TAG_FAIL("todo: %s:%d .. %d\n", __FILE__,__LINE__, idx2);
         free(idxs1);
+        idxs1 = NULL;
+        nidxs1 = 0;
     }
     free(ori);
+    ori = NULL;
 
     if ( tok->nidxs && tok->idxs[tok->nidxs-1]!=-1 )
     {
         for (i=0; i<tok->nidxs; i++) if ( tok->idxs[i] ) tok->nuidxs++;
     }
+    return 0;
+
+fail:
+    if ( list )
+    {
+        for (i=0; i<nsmpl; i++) free(list[i]);
+        free(list);
+    }
+    free(fname);
+    free(idxs1);
+    free(idxs2);
+    free(ori);
+    snprintf(err, err_sz, "%s", fail_msg[0] ? fail_msg : "Could not parse the filter index\n");
+    return -1;
 }
+#undef PARSE_TAG_FAIL
 static int max_ac_an_unpack(bcf_hdr_t *hdr)
 {
     int hdr_id = bcf_hdr_id2int(hdr,BCF_DT_ID,"AC");
@@ -3330,12 +3402,21 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     if ( str[0]=='@' )
     {
         tok->tag = (char*) calloc(len+1,sizeof(char));
+        if ( !tok->tag ) error("Could not allocate memory\n");
         memcpy(tok->tag,str,len);
         tok->tag[len] = 0;
         char *fname = expand_path(tok->tag+1);
         int i, n;
-        char **list = hts_readlist(fname, 1, &n);
-        if ( !list ) error("Could not read: %s\n", fname);
+        char **list;
+        if ( !fname ) error("Could not allocate memory\n");
+        list = hts_readlist(fname, 1, &n);
+        if ( !list )
+        {
+            char read_error[512];
+            snprintf(read_error, sizeof(read_error), "Could not read: %s\n", fname);
+            free(fname);
+            error("%s", read_error);
+        }
         free(fname);
         tok->hash = khash_str2int_init();
         for (i=0; i<n; i++)
@@ -3467,7 +3548,17 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     // does it have array subscript?
     int is_array = 0;
     kstring_t tmp = {0,0,0};
-    kputsn(str, len, &tmp);
+    char init_fail_msg[512];
+    if ( kputsn(str, len, &tmp) < 0 || !tmp.l )
+    {
+        free(tmp.s);
+        error("Could not allocate or parse the filter token\n");
+    }
+#define FILTER_INIT_FAIL(...) do { \
+    snprintf(init_fail_msg, sizeof(init_fail_msg), __VA_ARGS__); \
+    free(tmp.s); \
+    error("%s", init_fail_msg); \
+} while (0)
     if ( tmp.s[tmp.l-1] == ']' )
     {
         int i;
@@ -3482,15 +3573,18 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
             int is_info = bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_INFO,tok->hdr_id) ? 1 : 0;
             is_fmt = bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_FMT,tok->hdr_id) ? 1 : 0;
             if ( is_info && is_fmt )
-                error("Error: ambiguous filtering expression, both INFO/%s and FORMAT/%s are defined in the VCF header.\n" , tmp.s,tmp.s);
+                FILTER_INIT_FAIL("Error: ambiguous filtering expression, both INFO/%s and FORMAT/%s are defined in the VCF header.\n", tmp.s,tmp.s);
         }
         if ( is_fmt==-1 ) is_fmt = 0;
     }
     if ( is_array )
     {
-        parse_tag_idx(filter->hdr, is_fmt, tmp.s, tmp.s+is_array, tok);
+        char parse_err[512];
+        if ( parse_tag_idx(filter->hdr, is_fmt, tmp.s, tmp.s+is_array, tok,
+                           parse_err, sizeof(parse_err)) != 0 )
+            FILTER_INIT_FAIL("%s", parse_err);
         if ( tok->idx==-3 && bcf_hdr_id2length(filter->hdr,BCF_HL_FMT,tok->hdr_id)!=BCF_VL_R )
-            error("Error: GT subscripts can be used only with Number=R tags\n");
+            FILTER_INIT_FAIL("Error: GT subscripts can be used only with Number=R tags\n");
     }
     else if ( is_fmt ) init_usmpl(filter,tok);
 
@@ -3507,7 +3601,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
         else if ( is_fmt )
         {
             if ( !bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_FMT,tok->hdr_id) )
-                error("No such FORMAT field: %s\n", tmp.s);
+                FILTER_INIT_FAIL("No such FORMAT field: %s\n", tmp.s);
             if ( bcf_hdr_id2number(filter->hdr,BCF_HL_FMT,tok->hdr_id)!=1 && !is_array )
             {
                 tok->idxs = (int*) malloc(sizeof(int));
@@ -3520,11 +3614,11 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
                 case BCF_HT_INT:  tok->setter = &filters_set_format_int; tok->ht_type = BCF_HT_INT; break;
                 case BCF_HT_REAL: tok->setter = &filters_set_format_float; tok->ht_type = BCF_HT_REAL; break;
                 case BCF_HT_STR:  tok->setter = &filters_set_format_string; tok->ht_type = BCF_HT_STR; tok->is_str = 1; break;
-                default: error("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
+                default: FILTER_INIT_FAIL("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
             }
         }
         else if ( !bcf_hdr_idinfo_exists(filter->hdr,BCF_HL_INFO,tok->hdr_id) )
-            error("No such INFO field: %s\n", tmp.s);
+            FILTER_INIT_FAIL("No such INFO field: %s\n", tmp.s);
         else
         {
             if ( bcf_hdr_id2type(filter->hdr,BCF_HL_INFO,tok->hdr_id) == BCF_HT_FLAG )
@@ -3545,7 +3639,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
                         case BCF_HT_INT:  tok->setter = &filters_set_info_int; break;
                         case BCF_HT_REAL: tok->setter = &filters_set_info_float; break;
                         case BCF_HT_STR:  tok->setter = &filters_set_info_string; tok->is_str = 1; break;
-                        default: error("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
+                        default: FILTER_INIT_FAIL("[%s:%d %s] FIXME\n", __FILE__,__LINE__,__FUNCTION__);
                     }
                     if (!is_array)
                     {
@@ -3642,7 +3736,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
         if ( errno!=0 || end!=tmp.s+len )
         {
             if ( filter->exit_on_error )
-                error("[%s:%d %s] Error: the tag \"%s\" is not defined in the VCF header\n", __FILE__,__LINE__,__FUNCTION__,tmp.s);
+                FILTER_INIT_FAIL("[%s:%d %s] Error: the tag \"%s\" is not defined in the VCF header\n", __FILE__,__LINE__,__FUNCTION__,tmp.s);
             filter->status |= FILTER_ERR_UNKN_TAGS;
             filter_add_undef_tag(filter,tmp.s);
         }
@@ -3655,6 +3749,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     if ( tmp.s ) free(tmp.s);
     return 0;
 }
+#undef FILTER_INIT_FAIL
 
 static void filter_debug_print(token_t *toks, token_t **tok_ptrs, int ntoks)
 {
