@@ -28,7 +28,7 @@
 	test-duckvep-corpus-staging test-cgranges-benchmark-r \
 	test-liftover-property test-liftover-property-asan \
 	test-liftover-property-ubsan test-liftover-fuzz test-liftover-fuzz-debug \
-	test-bcftools-filter-recovery
+	test-bcftools-filter-recovery test-sanitized-extension test-sanitizers
 
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -167,6 +167,13 @@ test-liftover-fuzz-debug: debug
 	$(PYTHON_VENV_BIN) test/scripts/fuzz_liftover_sql.py \
 		--extension build/debug/$(EXTENSION_NAME).duckdb_extension \
 		--seed $${LIFTOVER_FUZZ_SEED:-169} --trials $${LIFTOVER_FUZZ_TRIALS:-250}
+
+test-sanitized-extension:
+	bash scripts/test_sanitized_extension.sh $${SANITIZER:-asan}
+
+test-sanitizers:
+	$(MAKE) test-sanitized-extension SANITIZER=asan
+	$(MAKE) test-sanitized-extension SANITIZER=ubsan
 
 test-bcftools-filter-recovery: release
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \

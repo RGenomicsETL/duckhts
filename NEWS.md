@@ -4,7 +4,8 @@
 - bound liftover clip-pad realignment to 4,194,304 Needleman–Wunsch cells,
   with checked matrix sizing and a recoverable DuckDB error instead of wrapped
   or unbounded input-driven allocation. Add replayable randomized cell-admission
-  properties and malformed SQL/chain fuzzing that checks connection recovery
+  properties, malformed SQL/chain fuzzing that checks connection recovery, and
+  complete-extension ASan/UBSan CI over the same focused host-safety corpus
 
 - route malformed bcftools score-filter INFO/FORMAT storage and failed internal
   invariants through one recoverable filter authority instead of `exit()` or

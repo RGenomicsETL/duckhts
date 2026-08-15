@@ -23,6 +23,29 @@ jobs:
       - name: Check NEON kernels against scalar oracles
         run: make test-simd-kernels
 
+  sanitizers:
+    name: Complete extension ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, ubsan]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbz2-dev libcurl4-openssl-dev libdeflate-dev liblzma-dev libssl-dev zlib1g-dev
+      - name: Configure
+        run: make configure
+      - name: Run sanitizer corpus
+        run: make test-sanitized-extension SANITIZER=${{ matrix.sanitizer }}
+
   duckdb-build:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5.0
