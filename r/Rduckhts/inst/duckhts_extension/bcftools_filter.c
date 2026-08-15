@@ -257,10 +257,6 @@ static void duckhts_filter_recovery_end(void)
 }
 
 #define error duckhts_filter_raise
-#define duckhts_filter_recovery_begin(filter) \
-    (duckhts_filter_recovery_push(filter) \
-         ? setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]) \
-         : 1)
 #define FILTER_REQUIRE(condition) \
     do { if ( !(condition) ) error("bcftools filter invariant failed: %s", #condition); } while (0)
 
@@ -3997,7 +3993,14 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         snprintf(filter->last_error, sizeof(filter->last_error), "Out of memory while parsing the filter expression");
         return filter;
     }
-    if ( duckhts_filter_recovery_begin(filter) != 0 )
+    if ( !duckhts_filter_recovery_push(filter) )
+    {
+        filter->status |= FILTER_ERR_OTHER;
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Could not initialize filter recovery");
+        return filter;
+    }
+    if ( setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]) != 0 )
     {
         int i;
         duckhts_filter_recovery_end();
@@ -4517,7 +4520,14 @@ int filter_test(filter_t *filter, bcf1_t *line, const uint8_t **samples)
             snprintf(filter->last_error, sizeof(filter->last_error), "Error: the caller did not check the filter status");
         return -1;
     }
-    if ( duckhts_filter_recovery_begin(filter) != 0 )
+    if ( !duckhts_filter_recovery_push(filter) )
+    {
+        filter->status |= FILTER_ERR_OTHER;
+        if ( !filter->last_error[0] )
+            snprintf(filter->last_error, sizeof(filter->last_error), "Could not initialize filter recovery");
+        return -1;
+    }
+    if ( setjmp(g_filter_recovery.env_stack[g_filter_recovery.depth - 1]) != 0 )
     {
         duckhts_filter_recovery_end();
         filter->status |= FILTER_ERR_OTHER;

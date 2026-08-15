@@ -6,7 +6,8 @@
 - make malformed bundled bcftools score-filter INFO/FORMAT storage return a
   detailed recoverable error instead of terminating the DuckDB process, and
   reclaim token stacks plus parser-owned index, file, and variable-argument
-  temporaries after recovered failures
+  temporaries after recovered failures, with `setjmp()` invoked only in a
+  standards-conforming controlling expression
 
 - quote wrapper paths and option values through one DBI literal authority and
   SQL object names through one identifier authority, while retaining documented
