@@ -2,6 +2,17 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- make bundled liftover reject clip-pad realignments above its explicit
+  4,194,304-cell Needleman–Wunsch limit without terminating the DuckDB
+  session
+
+- make malformed bundled bcftools score-filter INFO/FORMAT storage
+  return a detailed recoverable error instead of terminating the DuckDB
+  process, and reclaim token stacks plus parser-owned index, file, and
+  variable-argument temporaries after recovered failures, with
+  `setjmp()` invoked only in a standards-conforming controlling
+  expression
+
 - quote wrapper paths and option values through one DBI literal
   authority and SQL object names through one identifier authority, while
   retaining documented raw expression arguments. Paths and table names
