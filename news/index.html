@@ -34,7 +34,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.1.9000-0.1.5" id="rduckhts-1519000-015">Rduckhts 1.5.1.9000-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1519000-015"></a></h2>
-<ul><li><p>make bundled liftover reject clip-pad realignments above its explicit 4,194,304-cell Needleman–Wunsch limit without terminating the DuckDB session</p></li>
+<ul><li><p>stop bundling and compiling the unused DuckVEP variant-tile implementation; bundled annotation behavior and R wrappers are unchanged</p></li>
+<li><p>make bundled liftover reject clip-pad realignments above its explicit 4,194,304-cell Needleman–Wunsch limit without terminating the DuckDB session</p></li>
 <li><p>make malformed bundled bcftools score-filter INFO/FORMAT storage return a detailed recoverable error instead of terminating the DuckDB process, and reclaim token stacks plus parser-owned index, file, and variable-argument temporaries after recovered failures, with <code>setjmp()</code> invoked only in a standards-conforming controlling expression</p></li>
 <li><p>quote wrapper paths and option values through one DBI literal authority and SQL object names through one identifier authority, while retaining documented raw expression arguments. Paths and table names containing quotes, spaces, reserved words, or punctuation no longer alter generated statements</p></li>
 <li><p>make dependency installation an explicit <code>make deps</code> action rather than an implicit side effect of <code>make build</code>, so package builds remain usable in already provisioned or offline development environments</p></li>
