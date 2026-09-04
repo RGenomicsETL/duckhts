@@ -142,12 +142,14 @@ No result here establishes a general "no regression" or "fastest" claim.
 The shared cache retains at most eight handles and eight 65,536-base sequence
 windows **per thread**, plus terminators and metadata. HTSlib index/transport
 memory and caller-owned fetch results are separate; remote BGZF tuning can
-retain additional per-handle blocks. This is not a sealed-allocation claim.
+retain additional per-handle blocks. Tuning remains caller-specific and is part
+of cache identity; this patch does not add public I/O options. This is not a
+sealed-allocation claim.
 
 Independent cache tests use seed 171, twelve mixed-case/IUPAC references
 (alternating plain and BGZF), eight concurrent workers, and 16,000 random
 requests checked against retained source bytes. They also test missing-index
-creation, exact versus clipped contig ends, explicit FAI/GZI keys, cache
+creation, exact versus clipped contig ends, explicit FAI/GZI and tuning keys, cache
 eviction, caller-copy isolation, requests at and above 65,536 bases, and TLS
 destruction. ASan/UBSan and `make test-reference-cache-tsan CC=clang` pass.
 The GCC TSAN runtime cannot initialize on this host (unexpected memory mapping);

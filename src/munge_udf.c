@@ -124,7 +124,7 @@ static char *normalize_allele(const char *s, size_t n) {
 static duckhts_reference_entry_t *get_munge_reference(const char *fasta_path, char **err) {
     const char *cause = NULL;
     duckhts_reference_entry_t *entry =
-        duckhts_reference_cache_get(fasta_path, NULL, NULL, &cause);
+        duckhts_reference_cache_get(fasta_path, NULL, NULL, 0, &cause);
     if (!entry) {
         char message[1024];
         snprintf(message, sizeof(message), "bcftools_munge_row: %s: %s", cause, fasta_path);

@@ -140,7 +140,7 @@ static duckhts_reference_entry_t *get_norm_cache_entry(const char *fasta_path,
     const char *fai_path, const char *gzi_path, char **err) {
     const char *cause = NULL;
     duckhts_reference_entry_t *entry =
-        duckhts_reference_cache_get(fasta_path, fai_path, gzi_path, &cause);
+        duckhts_reference_cache_get(fasta_path, fai_path, gzi_path, 1, &cause);
     if (!entry) {
         char message[256];
         snprintf(message, sizeof(message), "bcftools_norm_row: %s", cause);

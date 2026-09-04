@@ -15,6 +15,7 @@ struct duckhts_reference_entry {
     char *fai_path;
     char *gzi_path;
     faidx_t *fai;
+    int indexed_remote_tuned;
     char *window_contig;
     char *window_seq;
     hts_pos_t window_beg;
@@ -78,7 +79,7 @@ static void reference_key_init(void) {
 
 duckhts_reference_entry_t *duckhts_reference_cache_get(
     const char *fasta_path, const char *fai_path, const char *gzi_path,
-    const char **error) {
+    int tune_indexed_remote_io, const char **error) {
     reference_cache_t *cache;
     duckhts_reference_entry_t *entry, **link;
     if (!error) return NULL;
@@ -106,7 +107,8 @@ duckhts_reference_entry_t *duckhts_reference_cache_get(
     for (link = &cache->head; (entry = *link) != NULL; link = &entry->next) {
         if (reference_path_equal(entry->fasta_path, fasta_path) &&
             reference_path_equal(entry->fai_path, fai_path) &&
-            reference_path_equal(entry->gzi_path, gzi_path)) {
+            reference_path_equal(entry->gzi_path, gzi_path) &&
+            entry->indexed_remote_tuned == (tune_indexed_remote_io != 0)) {
             *link = entry->next;
             entry->next = cache->head;
             cache->head = entry;
@@ -139,8 +141,11 @@ duckhts_reference_entry_t *duckhts_reference_cache_get(
         *error = "failed to load FASTA index";
         return NULL;
     }
-    duckhts_apply_remote_faidx_tuning(entry->fai, fasta_path,
-                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
+    entry->indexed_remote_tuned = (tune_indexed_remote_io != 0);
+    if (entry->indexed_remote_tuned) {
+        duckhts_apply_remote_faidx_tuning(entry->fai, fasta_path,
+                                        DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
+    }
     entry->next = cache->head;
     cache->head = entry;
     cache->count++;

@@ -5,7 +5,8 @@
   thread-owned cache, retaining at most eight handles and eight 64-KiB sequence
   windows per thread. Oversized fetch results are not retained. Independent
   handles no longer serialize reference fetches; index creation remains locked.
-  Keep caller-specific alias/end-of-contig and IUPAC semantics, and test exact
+  Keep caller-specific alias/end-of-contig, IUPAC, and remote-I/O tuning semantics;
+  transport-tuning choices are part of cache identity. Test exact
   bytes, eviction, cleanup, and concurrent plain/BGZF access independently of SQL
 
 - remove the unused DuckVEP variant-tile implementation, its isolated tests, and

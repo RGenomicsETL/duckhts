@@ -7,9 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include "hts_io_tuning.h"
 
 static atomic_uint live_handles;
 static atomic_ulong fetch_calls;
+static unsigned tuning_requests;
+static void observed_tuning(faidx_t *fai, const char *path, duckhts_hts_io_profile_t profile) {
+    tuning_requests++;
+    duckhts_apply_remote_faidx_tuning(fai, path, profile);
+}
 static faidx_t *observed_load(const char *p, const char *f, const char *g,
                              int flags, enum fai_format_options format) {
     faidx_t *fai = fai_load3_format(p, f, g, flags, format);
@@ -28,10 +34,12 @@ static char *observed_fetch(const faidx_t *fai, const char *chrom,
 #define fai_load3_format observed_load
 #define fai_destroy observed_destroy
 #define faidx_fetch_seq64 observed_fetch
+#define duckhts_apply_remote_faidx_tuning observed_tuning
 #include "../../src/reference_cache.c"
 #undef fai_load3_format
 #undef fai_destroy
 #undef faidx_fetch_seq64
+#undef duckhts_apply_remote_faidx_tuning
 
 enum { REFERENCES = 12, BASES = 262144, WORKERS = 8 };
 static char paths[REFERENCES][1024];
@@ -86,7 +94,7 @@ static int bounds_and_aliases(void) {
     const char *error = NULL;
     for (unsigned r = 0; r < REFERENCES; r++) {
         duckhts_reference_entry_t *entry =
-            duckhts_reference_cache_get(paths[r], NULL, NULL, &error);
+            duckhts_reference_cache_get(paths[r], NULL, NULL, 0, &error);
         CHECK(entry && !error);
         char *bases = duckhts_reference_fetch(entry, "chr1", 10, 20,
                                             DUCKHTS_REFERENCE_EXACT);
@@ -149,22 +157,31 @@ static int bounds_and_aliases(void) {
     }
     /* Reacquire an evicted file and verify file identity, not pointer identity. */
     duckhts_reference_entry_t *entry =
-        duckhts_reference_cache_get(paths[0], NULL, NULL, &error);
+        duckhts_reference_cache_get(paths[0], NULL, NULL, 0, &error);
     CHECK(entry != NULL);
     char *bases = duckhts_reference_fetch(entry, "chr1", 0, 4095, DUCKHTS_REFERENCE_EXACT);
     CHECK(bases && !memcmp(bases, expected[0], 4096));
     free(bases);
-    CHECK(duckhts_reference_cache_get(paths[0], "", "", &error) == entry);
+    CHECK(duckhts_reference_cache_get(paths[0], "", "", 0, &error) == entry);
+    CHECK(tuning_requests == 0);
+    duckhts_reference_entry_t *tuned =
+        duckhts_reference_cache_get(paths[0], NULL, NULL, 1, &error);
+    CHECK(tuned && tuned != entry && tuned->indexed_remote_tuned);
+    CHECK(tuning_requests == 1);
+    CHECK(duckhts_reference_cache_get(paths[0], NULL, NULL, 0, &error) == entry);
+    CHECK(duckhts_reference_cache_get(paths[0], NULL, NULL, 1, &error) == tuned);
+    CHECK(!entry->indexed_remote_tuned);
+    CHECK(tuning_requests == 1);
     char index[1100];
     snprintf(index, sizeof(index), "%s.fai", paths[0]);
     duckhts_reference_entry_t *explicit_index =
-        duckhts_reference_cache_get(paths[0], index, NULL, &error);
+        duckhts_reference_cache_get(paths[0], index, NULL, 0, &error);
     CHECK(explicit_index && explicit_index != entry);
-    CHECK(duckhts_reference_cache_get(paths[0], index, NULL, &error) == explicit_index);
+    CHECK(duckhts_reference_cache_get(paths[0], index, NULL, 0, &error) == explicit_index);
     char gzi[1100];
     snprintf(index, sizeof(index), "%s.fai", paths[1]);
     snprintf(gzi, sizeof(gzi), "%s.gzi", paths[1]);
-    explicit_index = duckhts_reference_cache_get(paths[1], index, gzi, &error);
+    explicit_index = duckhts_reference_cache_get(paths[1], index, gzi, 0, &error);
     CHECK(explicit_index && !error);
     bases = duckhts_reference_fetch(explicit_index, "chr1", 0, 4095,
                                    DUCKHTS_REFERENCE_EXACT);
@@ -187,7 +204,7 @@ static void *random_worker(void *pointer) {
     pthread_mutex_unlock(&start_mutex);
     /* All workers acquire the same initially unindexed plain FASTA. */
     const char *initial_error = NULL;
-    if (!duckhts_reference_cache_get(paths[0], NULL, NULL, &initial_error)) {
+    if (!duckhts_reference_cache_get(paths[0], NULL, NULL, 0, &initial_error)) {
         fprintf(stderr, "index creation: %s\n", initial_error);
         w->failed = 1;
         return NULL;
@@ -198,7 +215,7 @@ static void *random_worker(void *pointer) {
         size_t position = random_u32(&state) % (BASES - length);
         const char *error = NULL;
         duckhts_reference_entry_t *entry =
-            duckhts_reference_cache_get(paths[r], NULL, NULL, &error);
+            duckhts_reference_cache_get(paths[r], NULL, NULL, 0, &error);
         char *bases = entry ? duckhts_reference_fetch(entry, "chr1", position,
             position + length - 1, DUCKHTS_REFERENCE_EXACT) : NULL;
         if (!bases || strlen(bases) != length ||
