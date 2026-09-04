@@ -142,7 +142,3 @@ r/Rduckhts/inst/duckhts_extension/samtools/*.so
 r/Rduckhts/inst/duckhts_extension/samtools/*.dll
 r/Rduckhts/inst/duckhts_extension/samtools/*.dylib
 r/Rduckhts/inst/duckhts_extension/samtools/*.a
-
-# [epiq]: local hydrated state is never committed
-.epiq/events/
-.epiq/log/
