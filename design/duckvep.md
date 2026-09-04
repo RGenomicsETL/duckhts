@@ -171,8 +171,8 @@ facts as consequence prediction; it must not reconstruct biology from rendered S
 - `src/duckvep/duckvep_sql.c` registers the public event-relation dispatcher and generated
   SO metadata relation.
 - `src/duckvep/duckvep_model.c` validates, owns, publishes, pins, and drops named models.
-- `src/duckvep/duckvep_annotate.c` and `src/duckvep/duckvep_variant_tile.c` adapt DuckDB
-  vectors to the pure C batch interface and materialize results.
+- `src/duckvep/duckvep_annotate.c` adapts DuckDB vectors to the pure C batch interface
+  and materializes results.
 - `src/duckvep/kernel/include/duckvep_kernel.h` is the host-neutral kernel ABI; the sibling
   kernel sources own traversal, topology, projection, coding edits, phased edits,
   structural geometry, and fact-to-SO evaluation.
