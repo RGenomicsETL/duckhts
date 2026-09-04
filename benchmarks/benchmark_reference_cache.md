@@ -32,10 +32,10 @@ required for peak RSS and the optional htslib interposition probe.
 
     ##   revision                                   commit
     ##   baseline 47424232570311f09785b096f75e0fb083244734
-    ##  candidate 62f9b8786852817b8db9747bd185666dac080d33
+    ##  candidate 5e83511f3db0e81ac4440db54e917822b558a3d2
     ##                     extension_md5
     ##  bcf15693b036abeccc30941db47821b1
-    ##  1895545a05cf4548e66d772efe2d15fd
+    ##  e83dbba4a843ebd84125a71cee449b94
 
     ## R: R version 4.6.0 (2026-04-24)
     ## DuckDB: 1.5.3
@@ -59,40 +59,40 @@ including setup, not cache-only memory. The operating-system page cache
 is warm; this is not a cold-storage benchmark.
 
     ##   revision operator threads median_elapsed_s median_cpu_s median_peak_rss_kib
-    ##   baseline    munge       1            0.287        0.287              231264
-    ##  candidate    munge       1            0.252        0.251              231732
-    ##   baseline     norm       1            0.326        0.326              231392
-    ##  candidate     norm       1            0.323        0.322              231504
-    ##   baseline    munge       4            0.154        0.570              231496
-    ##  candidate    munge       4            0.067        0.260              231340
-    ##   baseline     norm       4            0.087        0.335              231956
-    ##  candidate     norm       4            0.087        0.334              231880
+    ##   baseline    munge       1            0.280        0.280              231664
+    ##  candidate    munge       1            0.383        0.323              231580
+    ##   baseline     norm       1            0.323        0.324              231932
+    ##  candidate     norm       1            0.317        0.316              231712
+    ##   baseline    munge       4            0.159        0.593              231596
+    ##  candidate    munge       4            0.067        0.257              231636
+    ##   baseline     norm       4            0.087        0.330              231760
+    ##  candidate     norm       4            0.089        0.339              234364
 
     ##   revision operator threads run elapsed   cpu
-    ##   baseline     norm       1   1   0.329 0.329
-    ##   baseline     norm       1   2   0.323 0.323
-    ##   baseline     norm       1   3   0.326 0.326
-    ##  candidate     norm       1   1   0.323 0.322
-    ##  candidate     norm       1   2   0.322 0.321
-    ##  candidate     norm       1   3   0.326 0.325
-    ##   baseline     norm       4   1   0.089 0.341
-    ##   baseline     norm       4   2   0.087 0.326
-    ##   baseline     norm       4   3   0.086 0.335
-    ##  candidate     norm       4   1   0.090 0.341
-    ##  candidate     norm       4   2   0.086 0.326
-    ##  candidate     norm       4   3   0.087 0.334
-    ##   baseline    munge       1   1   0.287 0.287
-    ##   baseline    munge       1   2   0.284 0.283
-    ##   baseline    munge       1   3   0.288 0.289
-    ##  candidate    munge       1   1   0.255 0.254
-    ##  candidate    munge       1   2   0.252 0.251
-    ##  candidate    munge       1   3   0.251 0.251
-    ##   baseline    munge       4   1   0.182 0.656
-    ##   baseline    munge       4   2   0.154 0.570
-    ##   baseline    munge       4   3   0.150 0.554
-    ##  candidate    munge       4   1   0.077 0.282
-    ##  candidate    munge       4   2   0.067 0.260
-    ##  candidate    munge       4   3   0.067 0.259
+    ##   baseline     norm       1   1   0.325 0.324
+    ##   baseline     norm       1   2   0.319 0.320
+    ##   baseline     norm       1   3   0.323 0.324
+    ##  candidate     norm       1   1   0.318 0.317
+    ##  candidate     norm       1   2   0.317 0.316
+    ##  candidate     norm       1   3   0.312 0.313
+    ##   baseline     norm       4   1   0.097 0.366
+    ##   baseline     norm       4   2   0.087 0.330
+    ##   baseline     norm       4   3   0.087 0.330
+    ##  candidate     norm       4   1   0.090 0.346
+    ##  candidate     norm       4   2   0.089 0.339
+    ##  candidate     norm       4   3   0.087 0.326
+    ##   baseline    munge       1   1   0.284 0.284
+    ##   baseline    munge       1   2   0.280 0.280
+    ##   baseline    munge       1   3   0.280 0.280
+    ##  candidate    munge       1   1   0.447 0.391
+    ##  candidate    munge       1   2   0.383 0.323
+    ##  candidate    munge       1   3   0.347 0.322
+    ##   baseline    munge       4   1   0.161 0.601
+    ##   baseline    munge       4   2   0.155 0.579
+    ##   baseline    munge       4   3   0.159 0.593
+    ##  candidate    munge       4   1   0.079 0.287
+    ##  candidate    munge       4   2   0.066 0.255
+    ##  candidate    munge       4   3   0.067 0.257
 
 ## Reference work, counted separately
 
@@ -144,15 +144,16 @@ regression” or “fastest” claim.
 The shared cache retains at most eight handles and eight 65,536-base
 sequence windows **per thread**, plus terminators and metadata. HTSlib
 index/transport memory and caller-owned fetch results are separate;
-remote BGZF tuning can retain additional per-handle blocks. This is not
-a sealed-allocation claim.
+remote BGZF tuning can retain additional per-handle blocks. Tuning
+remains caller-specific and is part of cache identity; this patch does
+not add public I/O options. This is not a sealed-allocation claim.
 
 Independent cache tests use seed 171, twelve mixed-case/IUPAC references
 (alternating plain and BGZF), eight concurrent workers, and 16,000
 random requests checked against retained source bytes. They also test
 missing-index creation, exact versus clipped contig ends, explicit
-FAI/GZI keys, cache eviction, caller-copy isolation, requests at and
-above 65,536 bases, and TLS destruction. ASan/UBSan and
+FAI/GZI and tuning keys, cache eviction, caller-copy isolation, requests
+at and above 65,536 bases, and TLS destruction. ASan/UBSan and
 `make test-reference-cache-tsan CC=clang` pass. The GCC TSAN runtime
 cannot initialize on this host (unexpected memory mapping); Clang TSAN
 passes both the standard probe and a directly HTSlib-linked build.
