@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- share normalization and munging reference access through one host-neutral,
+  thread-owned cache, retaining at most eight handles and eight 64-KiB sequence
+  windows per thread. Oversized fetch results are not retained. Independent
+  handles no longer serialize reference fetches; index creation remains locked.
+  Keep caller-specific alias/end-of-contig and IUPAC semantics, and test exact
+  bytes, eviction, cleanup, and concurrent plain/BGZF access independently of SQL
+
 - remove the unused DuckVEP variant-tile implementation, its isolated tests, and
   its extension/package build entries. The SQL annotation adapter already owns
   variant storage; public SQL behavior and the host-neutral kernel ABI are unchanged

@@ -87,4 +87,17 @@ if [ "$sanitizer" = asan ]; then
 else
   "${runtime[@]}" "$tmp/filter_recovery"
 fi
+
+# Exercise the shared first-party cache without DuckDB execution, retaining
+# leak checks and exact byte oracles across eviction and concurrent fetches.
+${CC:-cc} -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror "${compile_flags[@]}" \
+  -Isrc/include -Ithird_party/htslib test/scripts/reference_cache_test.c \
+  -L"$out_dir" -Wl,-rpath,"$root/$out_dir" -lduckhts -pthread "${link_flags[@]}" \
+  -o "$tmp/reference_cache_test"
+if [ "$sanitizer" = asan ]; then
+  ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+    LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$tmp/reference_cache_test" "$tmp"
+else
+  "${runtime[@]}" "$tmp/reference_cache_test" "$tmp"
+fi
 echo "$sanitizer complete-extension gates: OK"

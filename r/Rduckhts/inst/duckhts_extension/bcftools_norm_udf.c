@@ -3,45 +3,17 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <ctype.h>
 #include <limits.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <htslib/faidx.h>
 #include <htslib/hts.h>
 #include <htslib/kstring.h>
 
-#include "hts_io_tuning.h"
+#include "reference_cache.h"
 
 #define NORM_ALN_WIN 100
-#define NORM_CACHE_MAX_ENTRIES 8
-#define NORM_REF_FETCH_QUANTUM 65536
-#define NORM_REF_FETCH_PAD 4096
-
-typedef struct norm_cache_entry {
-    char *fasta_path;
-    char *fai_path;
-    char *gzi_path;
-    faidx_t *fai;
-    char *window_contig;
-    hts_pos_t window_beg;
-    hts_pos_t window_end;
-    char *window_seq;
-    struct norm_cache_entry *next;
-} norm_cache_entry_t;
-
-/*
- * faidx_t and the cached reference window own mutable htslib/file state.  Never
- * share a norm cache entry across DuckDB worker threads; issue #17/PR #18 fixed
- * the same class of FASTA-cache race in munge/liftover.  The cache below is
- * deliberately pthread-local, and reference fetches are serialized defensively.
- */
-static pthread_key_t g_norm_cache_key;
-static pthread_once_t g_norm_cache_key_once = PTHREAD_ONCE_INIT;
-static pthread_mutex_t g_norm_fai_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 enum {
     NORM_OUT_POS = 0,
     NORM_OUT_END_POS,
@@ -121,51 +93,6 @@ static void free_norm_result(norm_result_t *result) {
     memset(result, 0, sizeof(*result));
 }
 
-static void destroy_norm_cache(void *ptr) {
-    norm_cache_entry_t *entry = (norm_cache_entry_t *)ptr;
-    while (entry) {
-        norm_cache_entry_t *next = entry->next;
-        free(entry->fasta_path);
-        free(entry->fai_path);
-        free(entry->gzi_path);
-        if (entry->fai) fai_destroy(entry->fai);
-        free(entry->window_contig);
-        free(entry->window_seq);
-        free(entry);
-        entry = next;
-    }
-}
-
-static void init_norm_cache_key(void) {
-    pthread_key_create(&g_norm_cache_key, destroy_norm_cache);
-}
-
-static norm_cache_entry_t *get_norm_cache_head(void) {
-    pthread_once(&g_norm_cache_key_once, init_norm_cache_key);
-    return (norm_cache_entry_t *)pthread_getspecific(g_norm_cache_key);
-}
-
-static void set_norm_cache_head(norm_cache_entry_t *head) {
-    pthread_once(&g_norm_cache_key_once, init_norm_cache_key);
-    pthread_setspecific(g_norm_cache_key, head);
-}
-
-static void trim_norm_cache_head(norm_cache_entry_t *head) {
-    size_t count = 0;
-    norm_cache_entry_t *entry = head;
-    norm_cache_entry_t *prev = NULL;
-    while (entry) {
-        count++;
-        if (count > NORM_CACHE_MAX_ENTRIES) {
-            if (prev) prev->next = NULL;
-            destroy_norm_cache(entry);
-            return;
-        }
-        prev = entry;
-        entry = entry->next;
-    }
-}
-
 static int same_nullable_string(const char *a, const char *b) {
     if (!a && !b) return 1;
     if (!a || !b) return 0;
@@ -176,28 +103,6 @@ static int same_nullable_span(const char *a, const char *b, size_t b_len) {
     if (!a && !b) return 1;
     if (!a || !b) return 0;
     return strlen(a) == b_len && memcmp(a, b, b_len) == 0;
-}
-
-static void seq_to_upper_ascii(char *seq) {
-    if (!seq) return;
-    while (*seq) {
-        *seq = (char)toupper((unsigned char)*seq);
-        seq++;
-    }
-}
-
-static inline int replace_iupac_codes(char *seq, int nseq) {
-    int i, n = 0;
-    for (i = 0; i < nseq; i++) {
-        char c = (char)toupper((unsigned char)seq[i]);
-        if (c != 'A' && c != 'C' && c != 'G' && c != 'T' && c != 'N') {
-            seq[i] = 'N';
-            n++;
-        } else {
-            seq[i] = c;
-        }
-    }
-    return n;
 }
 
 static inline int has_non_acgtn(const char *seq, int nseq) {
@@ -231,155 +136,31 @@ static int is_gvcf_ignored_alt(const char *alt) {
     return is_gvcf_symbolic_alt(alt) || is_spanning_deletion_alt(alt);
 }
 
-static char *resolve_fasta_contig_name(faidx_t *fai, const char *chrom) {
-    static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
-    char with_chr[512];
-    const char *aliases[8];
-    int idx = 0;
-
-    if (!fai || !chrom || !*chrom) return NULL;
-
-    aliases[idx++] = chrom;
-    if (strncasecmp(chrom, "chr", 3) != 0) {
-        snprintf(with_chr, sizeof(with_chr), "chr%s", chrom);
-        aliases[idx++] = with_chr;
-    } else if (chrom[3] != '\0') {
-        aliases[idx++] = chrom + 3;
-    }
-    if (strcasecmp(chrom, "M") == 0 || strcasecmp(chrom, "MT") == 0 || strcasecmp(chrom, "chrM") == 0) {
-        for (int i = 0; mt_aliases[i]; i++) aliases[idx++] = mt_aliases[i];
-    }
-    aliases[idx] = NULL;
-
-    for (int i = 0; aliases[i]; i++) {
-        if (faidx_has_seq(fai, aliases[i]) > 0) return dup_cstr(aliases[i]);
-    }
-    return NULL;
-}
-
-static norm_cache_entry_t *get_norm_cache_entry(const char *fasta_path,
-                                                const char *fai_path,
-                                                const char *gzi_path,
-                                                char **err) {
-    norm_cache_entry_t *head = get_norm_cache_head();
-    norm_cache_entry_t *entry = NULL;
-    norm_cache_entry_t *prev = NULL;
-    faidx_t *loaded = NULL;
-
-    for (entry = head; entry; prev = entry, entry = entry->next) {
-        if (same_nullable_string(entry->fasta_path, fasta_path)
-            && same_nullable_string(entry->fai_path, fai_path)
-            && same_nullable_string(entry->gzi_path, gzi_path)) {
-            if (prev) {
-                prev->next = entry->next;
-                entry->next = head;
-                head = entry;
-                set_norm_cache_head(head);
-            }
-            return entry;
-        }
-    }
-
-    loaded = fai_load3_format(fasta_path,
-                              (fai_path && *fai_path) ? fai_path : NULL,
-                              (gzi_path && *gzi_path) ? gzi_path : NULL,
-                              FAI_CREATE,
-                              FAI_FASTA);
-    if (!loaded) {
-        *err = dup_cstr("bcftools_norm_row: failed to load FASTA index");
-        return NULL;
-    }
-    duckhts_apply_remote_faidx_tuning(loaded, fasta_path, DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
-
-    entry = (norm_cache_entry_t *)calloc(1, sizeof(*entry));
+static duckhts_reference_entry_t *get_norm_cache_entry(const char *fasta_path,
+    const char *fai_path, const char *gzi_path, char **err) {
+    const char *cause = NULL;
+    duckhts_reference_entry_t *entry =
+        duckhts_reference_cache_get(fasta_path, fai_path, gzi_path, &cause);
     if (!entry) {
-        fai_destroy(loaded);
-        *err = dup_cstr("bcftools_norm_row: out of memory");
-        return NULL;
+        char message[256];
+        snprintf(message, sizeof(message), "bcftools_norm_row: %s", cause);
+        *err = dup_cstr(message);
     }
-    entry->fasta_path = dup_cstr(fasta_path);
-    entry->fai_path = dup_cstr(fai_path);
-    entry->gzi_path = dup_cstr(gzi_path);
-    if (!entry->fasta_path || ((fai_path && *fai_path) && !entry->fai_path)
-        || ((gzi_path && *gzi_path) && !entry->gzi_path)) {
-        fai_destroy(loaded);
-        free(entry->fasta_path);
-        free(entry->fai_path);
-        free(entry->gzi_path);
-        free(entry);
-        *err = dup_cstr("bcftools_norm_row: out of memory");
-        return NULL;
-    }
-    entry->fai = loaded;
-    entry->next = head;
-    trim_norm_cache_head(entry);
-    set_norm_cache_head(entry);
     return entry;
 }
 
-static char *fetch_windowed_sequence(norm_cache_entry_t *entry,
-                                     const char *chrom,
-                                     hts_pos_t start0,
-                                     hts_pos_t end0) {
-    hts_pos_t seq_len;
-    hts_pos_t fetch_beg;
-    hts_pos_t fetch_end;
-    hts_pos_t contig_len;
-    char *resolved = NULL;
-    char *fetched = NULL;
-    char *out = NULL;
-
-    if (!entry || !entry->fai || !chrom || start0 < 0 || end0 < start0) return NULL;
-
-    if (entry->window_seq && entry->window_contig && strcmp(entry->window_contig, chrom) == 0
-        && start0 >= entry->window_beg && end0 <= entry->window_end) {
-        return dup_span(entry->window_seq + (size_t)(start0 - entry->window_beg), (size_t)(end0 - start0 + 1));
+static char *fetch_windowed_sequence(duckhts_reference_entry_t *entry,
+    const char *chrom, hts_pos_t start0, hts_pos_t end0) {
+    char *bases = duckhts_reference_fetch(entry, chrom, start0, end0,
+                                        DUCKHTS_REFERENCE_CLIP_END);
+    /* bcftools normalization interprets non-ACGTN reference bases as N.
+     * Do not alter shared cached bytes: munge preserves IUPAC characters. */
+    if (bases) {
+        for (char *p = bases; *p; p++)
+            if (*p != 'A' && *p != 'C' && *p != 'G' && *p != 'T' && *p != 'N')
+                *p = 'N';
     }
-
-    resolved = resolve_fasta_contig_name(entry->fai, chrom);
-    if (!resolved) return NULL;
-
-    if (entry->window_seq && entry->window_contig && strcmp(entry->window_contig, resolved) == 0
-        && start0 >= entry->window_beg && end0 <= entry->window_end) {
-        out = dup_span(entry->window_seq + (size_t)(start0 - entry->window_beg), (size_t)(end0 - start0 + 1));
-        free(resolved);
-        return out;
-    }
-
-    contig_len = faidx_seq_len64(entry->fai, resolved);
-    if (contig_len <= 0) {
-        free(resolved);
-        return NULL;
-    }
-    if (start0 >= contig_len) {
-        free(resolved);
-        return NULL;
-    }
-    if (end0 >= contig_len) end0 = contig_len - 1;
-
-    fetch_beg = start0 > NORM_REF_FETCH_PAD ? start0 - NORM_REF_FETCH_PAD : 0;
-    fetch_end = fetch_beg + NORM_REF_FETCH_QUANTUM - 1;
-    if (fetch_end < end0) fetch_end = end0;
-    if (fetch_end >= contig_len) fetch_end = contig_len - 1;
-
-    pthread_mutex_lock(&g_norm_fai_fetch_mutex);
-    fetched = faidx_fetch_seq64(entry->fai, resolved, fetch_beg, fetch_end, &seq_len);
-    pthread_mutex_unlock(&g_norm_fai_fetch_mutex);
-    if (!fetched || seq_len != fetch_end - fetch_beg + 1) {
-        free(fetched);
-        free(resolved);
-        return NULL;
-    }
-    replace_iupac_codes(fetched, (int)seq_len);
-
-    free(entry->window_contig);
-    free(entry->window_seq);
-    entry->window_contig = resolved;
-    entry->window_seq = fetched;
-    entry->window_beg = fetch_beg;
-    entry->window_end = fetch_end;
-
-    return dup_span(entry->window_seq + (size_t)(start0 - entry->window_beg), (size_t)(end0 - start0 + 1));
+    return bases;
 }
 
 static int split_alt_text(const char *alt_text, size_t alt_len, char ***out_alts, int *out_n_alt) {
@@ -577,7 +358,7 @@ static int prepare_sequence_allele(const char *src, kstring_t *dst) {
     dst->l = 0;
     if (!src) return 1;
     if (kputs(src, dst) < 0) return 0;
-    seq_to_upper_ascii(dst->s);
+    duckhts_reference_uppercase(dst->s);
     return 1;
 }
 
@@ -587,7 +368,7 @@ static void free_kstring_array(kstring_t *arr, int n) {
     free(arr);
 }
 
-static hts_pos_t realign_left_cached(norm_cache_entry_t *cache,
+static hts_pos_t realign_left_cached(duckhts_reference_entry_t *cache,
                                      const char *chrom,
                                      kstring_t *als,
                                      int n_allele,
@@ -688,7 +469,7 @@ static void set_result_applicable(norm_result_t *result,
     result->n_alt = n_alt;
 }
 
-static int normalize_variant_row(norm_cache_entry_t *cache,
+static int normalize_variant_row(duckhts_reference_entry_t *cache,
                                  const char *chrom,
                                  int64_t pos1,
                                  const char *ref_in,
@@ -728,10 +509,10 @@ static int normalize_variant_row(norm_cache_entry_t *cache,
 
     orig_ref = dup_cstr(ref_in);
     if (!orig_ref) goto oom;
-    seq_to_upper_ascii(orig_ref);
+    duckhts_reference_uppercase(orig_ref);
     if (!copy_alt_array(alt_in, n_alt_in, &orig_alt, &n_orig_alt)) goto oom;
     for (int i = 0; i < n_orig_alt; i++) {
-        if (orig_alt[i]) seq_to_upper_ascii(orig_alt[i]);
+        if (orig_alt[i]) duckhts_reference_uppercase(orig_alt[i]);
     }
 
     original_end = has_end_pos ? end_pos_in : pos1 + (int64_t)strlen(orig_ref) - 1;
@@ -1092,7 +873,7 @@ static void bcftools_norm_row_scalar(duckdb_function_info info,
     char *cached_fasta_path = NULL;
     char *cached_fai_path = NULL;
     char *cached_gzi_path = NULL;
-    norm_cache_entry_t *cached_entry = NULL;
+    duckhts_reference_entry_t *cached_entry = NULL;
 
     for (int i = 0; i < NORM_OUT_COUNT; i++) child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
     duckdb_list_vector_set_size(child_vecs[NORM_OUT_ALT], 0);
