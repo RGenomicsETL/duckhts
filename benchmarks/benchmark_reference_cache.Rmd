@@ -93,6 +93,7 @@ cat(system2("uname", "-srmo", stdout = TRUE), "\n")
 cat(system2("sh", c("-c", shQuote("lscpu | sed -n '/Model name:/p'")), stdout = TRUE), "\n")
 cat("Rows per query:", rows, "; measured repetitions:", runs, "\n")
 cat(system2("clang", "--version", stdout = TRUE)[1], "\n")
+cat(system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE), "\n")
 ```
 
 ## Timings
@@ -138,6 +139,14 @@ rebuilds the pre-change code with the candidate toolchain and dependencies.
 This measures clustered SNVs on a real plain FASTA, not arbitrary indels,
 random genome-wide access, remote transport, BGZF throughput, or BAM generation.
 No result here establishes a general "no regression" or "fastest" claim.
+
+The first post-transport-policy run is retained in
+[benchmark_reference_cache.md](benchmark_reference_cache.md). It recorded slower
+one-worker munging and faster four-worker munging. A fixed-CPU-placement repeat,
+when present as `benchmark_reference_cache_affinity.md`, is a separate experiment,
+not a replacement for that result. Its process affinity is recorded above;
+all subprocesses inherit it. Neither experiment establishes the cause of a
+difference by itself.
 
 The shared cache retains at most eight handles and eight 65,536-base sequence
 windows **per thread**, plus terminators and metadata. HTSlib index/transport
