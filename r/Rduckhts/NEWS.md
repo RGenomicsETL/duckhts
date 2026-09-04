@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- stop bundling and compiling the unused DuckVEP variant-tile implementation;
+  bundled annotation behavior and R wrappers are unchanged
+
 - make bundled liftover reject clip-pad realignments above its explicit
   4,194,304-cell Needleman–Wunsch limit without terminating the DuckDB session
 

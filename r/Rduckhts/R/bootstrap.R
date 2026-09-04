@@ -67,8 +67,7 @@ duckhts_bootstrap <- function(repo_root = NULL) {
 
   duckvep_dest <- file.path(dest, "duckvep")
   dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
-  duckvep_headers <- c("duckvep_model.h", "duckvep_variant_tile.h")
-  file.copy(file.path(src_dir, "duckvep", duckvep_headers), duckvep_dest)
+  file.copy(file.path(src_dir, "duckvep", "duckvep_model.h"), duckvep_dest)
   duckvep_kernel_headers <- c("duckvep_kernel.h", "duckvep_so.h")
   duckvep_kernel_private_headers <- list.files(
     file.path(src_dir, "duckvep", "kernel", "src"),

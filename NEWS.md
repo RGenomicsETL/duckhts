@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- remove the unused DuckVEP variant-tile implementation, its isolated tests, and
+  its extension/package build entries. The SQL annotation adapter already owns
+  variant storage; public SQL behavior and the host-neutral kernel ABI are unchanged
+
 - bound liftover clip-pad realignment to 4,194,304 Needleman–Wunsch cells,
   with checked matrix sizing and a recoverable DuckDB error instead of wrapped
   or unbounded input-driven allocation. Add replayable randomized cell-admission
