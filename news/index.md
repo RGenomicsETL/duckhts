@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- make bundled BAM formatting and list-growth failures DBI query errors,
+  preserving same-connection recovery and genuine missing/empty values
+  instead of returning fabricated CIGAR or partial auxiliary tags. Size
+  integer-array formatter scratch by its encoded subtype rather than a
+  generic numeric bound
+
 - return NA for bundled `read_bam` FILE_OFFSET on SAM, CRAM, and
   non-BGZF BAM. BGZF-compressed BAM retains its post-record virtual
   offset (not the record start); use explicit SQL ORDER BY within one
