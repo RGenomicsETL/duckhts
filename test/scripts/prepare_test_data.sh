@@ -71,6 +71,7 @@ if [[ "$MODE" == "--duckvep-only" ]]; then
 fi
 
 # ---- BAM (copy + index) ----
+(cd "$REPO_ROOT" && Rscript test/scripts/prepare_bam_scan_fixtures.R)
 cp "$SRC/range.bam" "$DST/range.bam"
 samtools index "$DST/range.bam"
 echo "  range.bam + .bai"

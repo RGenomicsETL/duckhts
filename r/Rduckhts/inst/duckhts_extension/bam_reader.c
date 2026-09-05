@@ -8,7 +8,7 @@
  * Parallelism strategy (indexed BAM/CRAM, no user region):
  *   - Global init advertises max_threads = min(n_contigs, 16)
  *   - Each DuckDB thread opens its own samFile + hts_idx_t
- *   - Threads claim contigs via __sync_fetch_and_add on a shared counter
+ *   - Threads claim contigs and one no-coordinate tail via an atomic counter
  *   - Per-thread hts_set_threads for htslib I/O decompression
  *
  * For user-supplied region queries the multi-region iterator
@@ -27,6 +27,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdbool.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <errno.h>
 #include <strings.h>
 
 #include <htslib/sam.h>
@@ -250,7 +251,7 @@ typedef struct {
  * ================================================================ */
 
 typedef struct {
-    int current_contig; /* atomic counter — threads fetch-and-add */
+    idx_t current_partition; /* named contigs, then one no-coordinate tail */
     int n_contigs;
     int has_region;
 } bam_global_init_data_t;
@@ -268,7 +269,6 @@ typedef struct {
 
     int done;
     int is_parallel;
-    int assigned_contig;
     int needs_next_contig;
     int count_only;
     int need_seq_buffers;
@@ -441,11 +441,16 @@ static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
 
     int nseq = hts_idx_nseq(idx);
     uint64_t total = hts_idx_get_n_no_coor(idx);
+    /* Zero also means the optional trailing count was absent in an older
+     * BAI/CSI. Only a nonzero count proves this statistic was supplied. */
+    if (total == 0) return 0;
     for (int tid = 0; tid < nseq; tid++) {
         uint64_t mapped = 0, unmapped = 0;
         if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0) {
             return 0;
         }
+        if (mapped > UINT64_MAX - total || unmapped > UINT64_MAX - total - mapped)
+            return 0;
         total += mapped + unmapped;
     }
 
@@ -731,7 +736,7 @@ static void bam_read_global_init(duckdb_init_info info) {
         sizeof(bam_global_init_data_t));
     memset(global, 0, sizeof(bam_global_init_data_t));
 
-    global->current_contig = 0;
+    global->current_partition = 0;
     global->has_region = (bind->n_regions > 0);
 
     /*
@@ -788,7 +793,6 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     int is_parallel = (!bind->scan_sequential && bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
     local->is_parallel = is_parallel;
-    local->assigned_contig = -1;
     local->needs_next_contig = is_parallel;
     local->qual_repr = bind->qual_repr;
 
@@ -850,9 +854,10 @@ static void bam_read_local_init(duckdb_init_info info) {
                 destroy_bam_local(local);
                 return;
             }
-            /* No index but parallel was requested — fall back to sequential */
-            local->is_parallel = 0;
-            local->needs_next_contig = 0;
+            /* A per-worker fallback would scan the whole file once per worker. */
+            duckdb_init_set_error(info, "read_bam: failed to reload index for full-file scan");
+            destroy_bam_local(local);
+            return;
         }
     }
 
@@ -878,7 +883,7 @@ static void bam_read_local_init(duckdb_init_info info) {
 
 /* ================================================================
  * Claim next contig for parallel scanning
- * Returns 1 if a contig was claimed, 0 if done
+ * Returns 1 for a partition, 0 at EOF, -1 on iterator construction failure.
  * ================================================================ */
 
 static int claim_next_contig(bam_local_init_data_t *local,
@@ -892,23 +897,28 @@ static int claim_next_contig(bam_local_init_data_t *local,
         local->itr = NULL;
     }
 
-    for (;;) {
-        int next = __sync_fetch_and_add(&global->current_contig, 1);
-        if (next >= global->n_contigs)
-            return 0;  /* all contigs claimed */
+    idx_t next = __sync_fetch_and_add(&global->current_partition, 1);
+    if (next > (idx_t)global->n_contigs) return 0;
 
-        local->assigned_contig = next;
-
-        /* sam_itr_queryi: iterate reads overlapping the entire contig.
-         * tid=next, beg=0, end=HTS_POS_MAX covers the full reference. */
-        local->itr = sam_itr_queryi(local->idx, next, 0, HTS_POS_MAX);
-        if (local->itr) {
-            local->needs_next_contig = 0;
-            return 1;
+    int tid = next == (idx_t)global->n_contigs ? HTS_IDX_NOCOOR : (int)next;
+    /* Do not skip the tail based on n_no_coor: older BAI/CSI files may omit
+     * that optional count, and CRAI does not supply it. */
+    errno = 0;
+    local->itr = sam_itr_queryi(local->idx, tid, 0, HTS_POS_MAX);
+    if (!local->itr) {
+        /* Without a mapped chunk or optional count, HTSlib cannot distinguish
+         * an empty BAM from an all-unplaced BAM. No named-contig iterator can
+         * have read/searched this handle in that case: it is still immediately
+         * after the header. The unique tail owner streams the remaining file.
+         * Allocation failures set errno and must not trigger this fallback. */
+        if (tid == HTS_IDX_NOCOOR && hts_get_format(local->fp)->format == bam &&
+            errno == 0 && hts_idx_get_n_no_coor(local->idx) == 0) {
+            local->itr = sam_itr_queryi(NULL, HTS_IDX_REST, 0, 0);
         }
-
-        /* Contig may have zero indexed reads — try the next claim. */
+        if (!local->itr) return -1;
     }
+    local->needs_next_contig = 0;
+    return 1;
 }
 
 /* ================================================================
@@ -942,7 +952,10 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
     /* For parallel scans, claim first/next contig if needed */
     if (local->needs_next_contig) {
-        if (!claim_next_contig(local, global)) {
+        int claimed = claim_next_contig(local, global);
+        if (claimed <= 0) {
+            if (claimed < 0)
+                duckdb_function_set_error(info, "read_bam: failed to create full-file iterator");
             local->done = 1;
             duckdb_data_chunk_set_size(output, 0);
             return;
@@ -961,10 +974,23 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
         if (ret < 0) {
             /* ret == -1: EOF/end-of-region.  ret < -1: error. */
+            if (ret < -1) {
+                duckdb_function_set_error(info, "read_bam: failed to read SAM/BAM/CRAM record");
+                local->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
             if (local->is_parallel && ret == -1) {
                 /* Try next contig and keep filling this chunk if we can. */
                 local->needs_next_contig = 1;
-                if (!claim_next_contig(local, global)) {
+                int claimed = claim_next_contig(local, global);
+                if (claimed < 0) {
+                    duckdb_function_set_error(info, "read_bam: failed to create full-file iterator");
+                    local->done = 1;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
+                if (claimed == 0) {
                     local->done = 1;
                     break;
                 }

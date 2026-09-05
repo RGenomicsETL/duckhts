@@ -1,0 +1,571 @@
+# name: test/sql/bam_scan.test
+# description: Automatic full-file scans retain no-coordinate records and surface read errors
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET threads=1;
+
+# mixed: bam/bai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/csi, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: cram/crai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0))));
+----
+5	5	0
+
+# single: bam/bai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0))));
+----
+3	3	0
+
+# single: bam/csi, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0))));
+----
+3	3	0
+
+# single: cram/crai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0))));
+----
+3	3	0
+
+# all_unplaced: bam/bai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/csi, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: cram/crai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0))));
+----
+2053	2053	0
+
+# empty: bam/bai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0))));
+----
+0	0	0
+
+# empty: bam/csi, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0))));
+----
+0	0	0
+
+# empty: cram/crai, 1 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0))));
+----
+0	0	0
+
+statement ok
+SET threads=4;
+
+# mixed: bam/bai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/csi, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: cram/crai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai', decompression_threads := 0))));
+----
+5	5	0
+
+# single: bam/bai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.bai', decompression_threads := 0))));
+----
+3	3	0
+
+# single: bam/csi, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.bam.csi', decompression_threads := 0))));
+----
+3	3	0
+
+# single: cram/crai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_single.cram.crai', decompression_threads := 0))));
+----
+3	3	0
+
+# all_unplaced: bam/bai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/csi, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: cram/crai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.cram.crai', decompression_threads := 0))));
+----
+2053	2053	0
+
+# empty: bam/bai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.bai', decompression_threads := 0))));
+----
+0	0	0
+
+# empty: bam/csi, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.csi', decompression_threads := 0))));
+----
+0	0	0
+
+# empty: cram/crai, 4 workers; physical duplicates count separately.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', scan_mode := 'sequential', decompression_threads := 0))
+   UNION ALL
+   (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', scan_mode := 'sequential', decompression_threads := 0)
+    EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.cram.crai', decompression_threads := 0))));
+----
+0	0	0
+
+# Coordinate-bearing unmapped reads belong to their contig, not the tail.
+query TIII rowsort
+SELECT QNAME, FLAG, POS, count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', decompression_threads := 0)
+GROUP BY QNAME, FLAG, POS;
+----
+mapped1	0	10	1
+mapped2	0	30	1
+placed_unmapped	4	20	1
+unplaced	4	0	2
+
+query T rowsort
+SELECT QNAME FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', region := 'chr1', decompression_threads := 0);
+----
+mapped1
+placed_unmapped
+
+query I
+SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', region := '*', decompression_threads := 0);
+----
+2
+
+statement error
+SELECT QNAME FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_malformed.sam', scan_mode := 'sequential', decompression_threads := 0);
+----
+read_bam: failed to read SAM/BAM/CRAM record
+
+query I
+SELECT 4242;
+----
+4242
+
+# Legacy indexes without the optional no-coordinate count must not look empty.
+statement ok
+SET threads=1;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0))));
+----
+2053	2053	0
+
+statement ok
+SET threads=1;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0))));
+----
+2053	2053	0
+
+statement ok
+SET threads=1;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0))));
+----
+5	5	0
+
+statement ok
+SET threads=1;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0))));
+----
+5	5	0
+
+statement ok
+SET threads=1;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0))));
+----
+0	0	0
+
+statement ok
+SET threads=1;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0))));
+----
+0	0	0
+
+statement ok
+SET threads=4;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', decompression_threads := 0))));
+----
+2053	2053	0
+
+statement ok
+SET threads=4;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', decompression_threads := 0))));
+----
+2053	2053	0
+
+statement ok
+SET threads=4;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', decompression_threads := 0))));
+----
+5	5	0
+
+statement ok
+SET threads=4;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', decompression_threads := 0))));
+----
+5	5	0
+
+statement ok
+SET threads=4;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.bai', decompression_threads := 0))));
+----
+0	0	0
+
+statement ok
+SET threads=4;
+
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0))
+  UNION ALL
+  (SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', scan_mode := 'sequential', decompression_threads := 0)
+   EXCEPT ALL SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_empty.bam.legacy.csi', decompression_threads := 0))));
+----
+0	0	0

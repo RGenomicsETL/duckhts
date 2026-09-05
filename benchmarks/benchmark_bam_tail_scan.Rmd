@@ -1,0 +1,91 @@
+---
+title: "Automatic BAM tail ownership: small-fixture scan cost"
+output:
+  github_document:
+    html_preview: false
+---
+
+This compares the automatic BAM scan before and after the no-coordinate tail fix,
+using the existing `benchmark_simd_bam_gc.py` workload on its committed nanopore
+fixture. It exercises many empty contig claims and full `SEQ` decoding, but this
+186-record fixture is dominated by setup cost: it is not a WGS throughput benchmark.
+There are no unplaced reads in this performance input, so both builds do equal work.
+The separate SQL/R regression corpus tests retained no-coordinate records,
+physical duplicates, BAI/CSI, CRAM, and output chunks.
+
+The nearest checked-in report is
+[`benchmark_simd_bam_gc.md`](benchmark_simd_bam_gc.md), whose historical run used
+3,245,905 HG00106 exome reads / 327,836,405 bases and one DuckDB worker. That input
+is not staged here; its timings are not a comparable regression baseline. The
+same-run comparison below uses the current driver's committed default input.
+Remote I/O, large-input throughput, and CRAM performance remain unmeasured.
+
+## Reproduction and identity
+
+Build each named source revision separately. Set `BAM_SCAN_BASELINE_EXTENSION` to
+the pre-fix binary, `BAM_SCAN_BASELINE_REVISION` to its revision, then render this
+report from the repository root. `DUCKHTS_EXTENSION` selects the candidate binary;
+`PYTHON` selects the Python environment with DuckDB installed.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r measurement, echo=FALSE}
+library(jsonlite)
+baseline <- Sys.getenv("BAM_SCAN_BASELINE_EXTENSION")
+baseline_revision <- Sys.getenv("BAM_SCAN_BASELINE_REVISION")
+candidate <- Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension")
+python <- Sys.getenv("PYTHON", "configure/venv/bin/python3")
+stopifnot(nzchar(baseline_revision), file.exists(baseline), file.exists(candidate))
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+source_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+input <- "test/data/nanopore.bam"
+identity <- data.frame(
+  property = c("baseline revision", "candidate revision", "candidate src tree",
+               "baseline binary MD5", "candidate binary MD5", "input", "input MD5",
+               "input bytes", "HTSlib", "host", "CPU affinity", "repetitions"),
+  value = c(baseline_revision, revision, source_tree, unname(tools::md5sum(baseline)),
+            unname(tools::md5sum(candidate)), input, unname(tools::md5sum(input)),
+            file.info(input)$size, readLines("third_party/htslib/VERSION", n = 1),
+            Sys.info()[["sysname"]],
+            system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE),
+            "9 per build/thread setting after warm-up; fresh Python process per setting")
+)
+knitr::kable(identity)
+results <- list()
+for (threads in c(1L, 4L)) {
+  for (build in c("baseline", "candidate")) {
+    output <- tempfile(fileext = ".json")
+    ext <- if (build == "baseline") baseline else candidate
+    args <- c("scripts/benchmark_simd_bam_gc.py", "--extension", ext,
+              "--bam", input, "--max-reads", "0", "--iterations", "9",
+              "--threads", threads, "--backends", "auto", "--modes", "bam_scan",
+              "--json-out", output)
+    log <- system2(python, shQuote(args), stdout = TRUE, stderr = TRUE)
+    stopifnot(is.null(attr(log, "status")) || attr(log, "status") == 0L)
+    measured <- fromJSON(output, simplifyVector = FALSE)[[1]]
+    stopifnot(!measured$skipped, measured$reads == 186L)
+    results[[length(results) + 1L]] <- data.frame(
+      build = build, duckdb_workers = threads, htslib_workers_per_handle = 2L,
+      input_records = 186L, decoded_sequence_rows = measured$reads,
+      input_bases = measured$total_bases, sql_output_rows = 1L,
+      gc_sum = measured$gc_fraction_sum, backend = measured$kernel_backend,
+      median_seconds = measured$median_sec, min_seconds = measured$min_sec,
+      max_seconds = max(unlist(measured$timings_sec))
+    )
+    unlink(output)
+  }
+}
+results <- do.call(rbind, results)
+stopifnot(length(unique(results$input_bases)) == 1L,
+          max(results$gc_sum) - min(results$gc_sum) < 1e-9)
+knitr::kable(results, digits = 6)
+```
+
+Each query scans 186 BAM records, materializes their sequences into DuckDB vectors,
+and returns one aggregate row containing the read count, total bases, and sum of
+GC fractions. All nine repetitions validate those values; equality here is not
+a substitute for the independent SAM-field and row-multiset regression tests.
+No claim of general performance parity or speedup follows from these small timings.
