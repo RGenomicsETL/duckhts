@@ -20,7 +20,6 @@ DUCKDB_EXTENSION_EXTERN
 
 /* bcf_reader.c */
 extern void register_read_bcf_function(duckdb_connection connection);
-extern void register_read_bcf_v2_function(duckdb_connection connection);
 extern void register_read_bcf_appender_function(duckdb_connection connection, duckdb_database database);
 /* bam_reader.c */
 extern void register_read_bam_function(duckdb_connection connection);
@@ -227,7 +226,6 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_duckhts_htslib_functions(connection);
     register_duckhts_simd_functions(connection);
     register_read_bcf_function(connection);
-    register_read_bcf_v2_function(connection);
     register_read_bcf_appender_function(connection, *access->get_database(info));
     register_read_bam_function(connection);
     register_read_pileup_function(connection);

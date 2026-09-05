@@ -370,10 +370,8 @@ echo "  liftover spanning-deletion swap / ref-add fixtures + .fai"
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"
 
-# ---- read_bcf_v2 regression fixtures ----
+# ---- read_bcf regression fixtures ----
 for out_dir in "$DST" "$PKG_DST"; do
-  printf 'S1\n' > "$out_dir/samples_s1.txt"
-
   cat > "$out_dir/genotype_ploidy_edge_cases.vcf" <<'EOF'
 ##fileformat=VCFv4.3
 ##contig=<ID=chr1,length=1000>
@@ -405,7 +403,7 @@ lines <- c(
 for (path in args) writeLines(lines, path)
 RS
 
-echo "  read_bcf_v2 sample/filter/projection regression fixtures"
+echo "  read_bcf projection/ploidy regression fixtures"
 
 # ---- DuckVEP / bcftools csq fixture plumbing ----
 mkdir -p "$DST/duckvep"

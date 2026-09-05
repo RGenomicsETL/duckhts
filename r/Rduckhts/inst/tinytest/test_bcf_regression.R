@@ -18,61 +18,42 @@ test_bcf_filter_list_fetch_regression <- function() {
   expect_true(file.exists(bcf_path))
 
   quoted_bcf <- DBI::dbQuoteString(con, bcf_path)
-  for (reader in c("read_bcf", "read_bcf_v2")) {
-    rs <- dbSendQuery(
-      con,
-      sprintf(
-        "SELECT POS, FILTER::VARCHAR AS filter_str FROM %s(%s) ORDER BY POS",
-        reader,
-        quoted_bcf
-      )
-    )
-
-    n_rows <- 0L
-    saw_multi_filter <- FALSE
-    repeat {
-      chunk <- dbFetch(rs, n = 512)
-      if (nrow(chunk) == 0L) {
-        break
-      }
-      n_rows <- n_rows + nrow(chunk)
-      if (any(chunk$filter_str == "[q10, q20]")) {
-        saw_multi_filter <- TRUE
-      }
-    }
-
-    DBI::dbClearResult(rs)
-
-    expect_equal(n_rows, 5000L)
-    expect_true(saw_multi_filter)
-
-    summary <- dbGetQuery(
-      con,
-      sprintf(
-        "SELECT COUNT(*) AS n_rows, SUM(length(FILTER)) AS filter_items FROM %s(%s)",
-        reader,
-        quoted_bcf
-      )
-    )
-    expect_equal(summary$n_rows[1], 5000L)
-    expect_equal(summary$filter_items[1], 5384L)
-  }
-
-  mismatch <- DBI::dbGetQuery(
+  rs <- dbSendQuery(
     con,
     sprintf(
-      paste0(
-        "WITH ",
-        "v1 AS (SELECT POS, FILTER FROM read_bcf(%s)), ",
-        "v2 AS (SELECT POS, FILTER FROM read_bcf_v2(%s)) ",
-        "SELECT count(*) AS n FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2) ",
-        "UNION ALL (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1))"
-      ),
-      quoted_bcf,
+      "SELECT POS, FILTER::VARCHAR AS filter_str FROM read_bcf(%s) ORDER BY POS",
       quoted_bcf
     )
   )
-  expect_equal(mismatch$n[1], 0)
+
+  n_rows <- 0L
+  saw_multi_filter <- FALSE
+  repeat {
+    chunk <- dbFetch(rs, n = 512)
+    if (nrow(chunk) == 0L) {
+      break
+    }
+    n_rows <- n_rows + nrow(chunk)
+    if (any(chunk$filter_str == "[q10, q20]")) {
+      saw_multi_filter <- TRUE
+    }
+  }
+
+  DBI::dbClearResult(rs)
+
+  expect_equal(n_rows, 5000L)
+  expect_true(saw_multi_filter)
+
+  summary <- dbGetQuery(
+    con,
+    sprintf(
+      "SELECT COUNT(*) AS n_rows, SUM(length(FILTER)) AS filter_items FROM read_bcf(%s)",
+      quoted_bcf
+    )
+  )
+  expect_equal(summary$n_rows[1], 5000L)
+  expect_equal(summary$filter_items[1], 5384L)
+
 }
 
 test_bcf_malformed_record_errors <- function() {
@@ -107,11 +88,11 @@ test_bcf_malformed_record_errors <- function() {
     dbGetQuery(
       con,
       sprintf(
-        "SELECT sum(POS) FROM read_bcf_v2(%s, tidy_format := true)",
+        "SELECT sum(POS) FROM read_bcf(%s, tidy_format := true)",
         quoted_bcf
       )
     ),
-    pattern = "read_bcf_v2: failed to read or parse BCF/VCF record"
+    pattern = "read_bcf: failed to read or parse BCF/VCF record"
   )
 
   DBI::dbExecute(con, "DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos")
@@ -179,22 +160,13 @@ test_bcf_type_clash_errors <- function() {
   expect_true(null_policy_info$is_null[1])
 
   # Reverse clash: String header over numeric payload. htslib's string decode
-  # does not type-check, so both readers must NULL this under the default policy
+  # does not type-check, so the reader must NULL this under the default policy
   # rather than leak raw bytes.
   null_str_info <- dbGetQuery(
     con,
     sprintf("SELECT INFO_NN IS NULL AS is_null FROM read_bcf(%s)", quoted_str)
   )
   expect_true(null_str_info$is_null[1])
-  null_str_info_v2 <- dbGetQuery(
-    con,
-    sprintf(
-      "SELECT INFO_NN IS NULL AS is_null FROM read_bcf_v2(%s, info_fields := 'NN')",
-      quoted_str
-    )
-  )
-  expect_true(null_str_info_v2$is_null[1])
-
   null_policy_format <- dbGetQuery(
     con,
     sprintf(
@@ -228,16 +200,7 @@ test_bcf_type_clash_errors <- function() {
     ),
     pattern = "read_bcf: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10"
   )
-  expect_error(
-    dbGetQuery(
-      con,
-      sprintf(
-        "SELECT INFO_DP FROM read_bcf_v2(%s, info_fields := 'DP', decode_error_policy := 'error')",
-        quoted_info
-      )
-    ),
-    pattern = "read_bcf_v2: INFO/DP encoded BCF type CHAR does not match header Type=Integer at chr1:10"
-  )
+
   expect_error(
     dbGetQuery(
       con,
@@ -258,16 +221,7 @@ test_bcf_type_clash_errors <- function() {
     ),
     pattern = "read_bcf: FORMAT/XX encoded BCF type CHAR does not match header Type=Integer at chr1:10"
   )
-  expect_error(
-    dbGetQuery(
-      con,
-      sprintf(
-        "SELECT FORMAT_XX_S1 FROM read_bcf_v2(%s, format_fields := 'XX', decode_error_policy := 'error')",
-        quoted_format
-      )
-    ),
-    pattern = "read_bcf_v2: FORMAT/XX encoded BCF type CHAR does not match header Type=Integer at chr1:10"
-  )
+
 }
 
 test_bcf_filter_list_fetch_regression()

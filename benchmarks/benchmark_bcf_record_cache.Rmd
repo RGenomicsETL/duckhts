@@ -6,8 +6,8 @@ output: github_document
 <!-- benchmark_bcf_record_cache.md is generated from this Rmd. -->
 
 This paired workload materializes **every declared column** of the registered
-GIAB HG002 GRCh38 NIST v4.2.1 benchmark VCF, with both `read_bcf` and
-`read_bcf_v2`, in wide and tidy form. The file has one sample, so input records
+GIAB HG002 GRCh38 NIST v4.2.1 benchmark VCF with `read_bcf`, in wide and tidy
+form. The file has one sample, so input records
 and output rows have the same denominator. This exercises typed INFO, GT, and
 FORMAT decoding across many output chunks, not multi-sample expansion or CSQ.
 
@@ -20,6 +20,12 @@ BCF_CACHE_BASELINE_EXTENSION=/path/to/baseline/duckhts.duckdb_extension \
 BCF_CACHE_BASELINE_REV=<commit> \
 Rscript -e 'rmarkdown::render("benchmarks/benchmark_bcf_record_cache.Rmd", knit_root_dir=getwd())'
 ```
+
+The earlier `benchmark_bcf_record_cache.md` records the experiment at its named
+source revisions. Preserve that report when measuring retirement: render this
+Rmd with `output_file = "benchmark_bcf_reader_retirement.md"`. Set
+`BCF_CACHE_READERS=read_bcf,read_bcf_v2` only to reproduce the historical comparison
+with two old binaries that both expose the experimental reader.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
@@ -42,6 +48,9 @@ if (system2("git", c("diff", "--quiet", "HEAD", "--", "src")) != 0L)
 source_trees <- vapply(revisions, function(revision)
   system2("git", c("rev-parse", paste0(revision, ":src")), stdout = TRUE), character(1))
 runs <- as.integer(Sys.getenv("BCF_CACHE_RUNS", "3"))
+readers <- strsplit(Sys.getenv("BCF_CACHE_READERS", "read_bcf"), ",", fixed = TRUE)[[1L]]
+stopifnot(length(readers) > 0L, !anyDuplicated(readers),
+  all(readers %in% c("read_bcf", "read_bcf_v2")))
 stopifnot(runs > 0L, nzchar(Sys.which("bcftools")))
 # This independent HTSlib executable supplies the input denominator, not either
 # reader's optimized COUNT path. No VCF-derived fixture or private cache is made.
@@ -58,7 +67,7 @@ dbExecute(con, "SET threads=1")
 dbExecute(con, "SET memory_limit='16GB'")
 for (mode in c("wide", "tidy")) {
   snapshots <- character()
-  for (reader in c("read_bcf", "read_bcf_v2")) for (run in seq_len(runs)) {
+  for (reader in readers) for (run in seq_len(runs)) {
     # Reverse revision order on alternate repetitions to expose order effects.
     order <- if (run %% 2L) names(extensions) else rev(names(extensions))
     for (revision in order) {
@@ -76,7 +85,7 @@ for (mode in c("wide", "tidy")) {
     }
   }
   # Compare typed row multisets, including multiplicity, without imposing file
-  # arrival order. First-run snapshots from all four cases must match exactly.
+  # arrival order. First-run snapshots from every case must match exactly.
   base <- sprintf("read_parquet(%s)", dbQuoteString(con, snapshots[1]))
   for (i in seq_along(snapshots)[-1]) {
     other <- sprintf("read_parquet(%s)", dbQuoteString(con, snapshots[i]))

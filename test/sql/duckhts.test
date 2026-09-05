@@ -25,6 +25,11 @@ SELECT
 # read_bcf – VCF/BCF reader
 # ==============================================================
 
+query I
+SELECT count(*) FROM duckdb_functions() WHERE function_name = 'read_bcf_v2';
+----
+0
+
 # --- record count (bgzipped VCF) ---
 query I
 SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz');
@@ -37,269 +42,58 @@ SELECT CHROM, POS, ID, REF FROM read_bcf('__WORKING_DIRECTORY__/test/data/format
 ----
 1	100	a	A
 
-# --- read_bcf_v2 starts as a schema-compatible benchmark clone ---
+# --- read_bcf materializes all tidy sample rows ---
 query IIIT
 SELECT count(*), min(POS), max(POS), min(FORMAT_S)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', tidy_format := true);
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', tidy_format := true);
 ----
 3	100	100	a
 
-# --- read_bcf_v2 count-only scans preserve record/sample counts ---
+# --- read_bcf count-only scans preserve record/sample counts ---
 query IIII
 SELECT
-  (SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')),
-  (SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', tidy_format := true)),
-  (SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', region := '1:1-200')),
-  (SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', region := '1:1-200', tidy_format := true));
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')),
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', tidy_format := true)),
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', region := '1:1-200')),
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', region := '1:1-200', tidy_format := true));
 ----
 1	3	1	3
 
-# --- read_bcf_v2 strict v1 conformance: schema, default VCF ---
-query I
-WITH
-v1 AS (
-  SELECT row_number() OVER () AS ord, column_name, column_type
-  FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz'))
-),
-v2 AS (
-  SELECT row_number() OVER () AS ord, column_name, column_type
-  FROM (DESCRIBE SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz'))
-)
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 strict v1 conformance: default VCF rows ---
-query I
-WITH
-v1 AS (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')),
-v2 AS (SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz'))
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 strict v1 conformance: projected core/filter VCF columns ---
-query I
-WITH
-v1 AS (SELECT CHROM, POS, ID, REF, ALT, QUAL, FILTER FROM read_bcf('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz')),
-v2 AS (SELECT CHROM, POS, ID, REF, ALT, QUAL, FILTER FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz'))
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 strict v1 conformance: INFO and FORMAT VCF projections ---
-query I
-WITH
-v1 AS (
-  SELECT POS, INFO_SB, FORMAT_GT_S1, FORMAT_HQ_S1, FORMAT_GT_S2, FORMAT_HQ_S2
-  FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf')
-),
-v2 AS (
-  SELECT POS, INFO_SB, FORMAT_GT_S1, FORMAT_HQ_S1, FORMAT_GT_S2, FORMAT_HQ_S2
-  FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf')
-)
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 strict v1 conformance: tidy VCF rows ---
-query I
-WITH
-v1 AS (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', tidy_format := true)),
-v2 AS (SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', tidy_format := true))
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 strict v1 conformance: indexed BCF region, tidy rows ---
-query I
-WITH
-v1 AS (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151', tidy_format := true)),
-v2 AS (SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151', tidy_format := true))
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 strict v1 conformance: VEP schema override and rows ---
-query I
-WITH
-v1 AS (
-  SELECT *
-  FROM read_bcf('__WORKING_DIRECTORY__/test/data/test_vep.vcf', additional_csq_column_types := 'DISTANCE String')
-),
-v2 AS (
-  SELECT *
-  FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/test_vep.vcf', additional_csq_column_types := 'DISTANCE String')
-)
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-# --- read_bcf_v2 sample pushdown: wide schema only exposes selected samples ---
-query I
-SELECT count(*)
-FROM (DESCRIBE SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', samples := 'S1'))
-WHERE column_name = 'FORMAT_GT_S2';
-----
-0
-
-# --- read_bcf_v2 sample pushdown: tidy include list ---
-query IIT
-SELECT count(*), count(DISTINCT SAMPLE_ID), string_agg(FORMAT_GT, ',' ORDER BY POS)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', samples := 'S1', tidy_format := true);
-----
-2	1	0/1,0/0
-
-# --- read_bcf_v2 sample pushdown: tidy exclude list ---
-query IIT
-SELECT count(*), count(DISTINCT SAMPLE_ID), string_agg(FORMAT_GT, ',' ORDER BY POS)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', exclude_samples := 'S2', tidy_format := true);
-----
-2	1	0/1,0/0
-
-# --- read_bcf_v2 sample pushdown: samples_file ---
-query IIT
-SELECT count(*), count(DISTINCT SAMPLE_ID), string_agg(FORMAT_GT, ',' ORDER BY POS)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', samples_file := '__WORKING_DIRECTORY__/test/data/samples_s1.txt', tidy_format := true);
-----
-2	1	0/1,0/0
-
-# --- read_bcf_v2 sample pushdown: indexed BCF region applies bcf_subset_format ---
-query IIT
-SELECT count(*), count(DISTINCT SAMPLE_ID), string_agg(FORMAT_GT, ',' ORDER BY POS)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:3000150-3000151', samples := 'A', tidy_format := true);
-----
-2	1	0/1,0/1
-
-# --- read_bcf_v2 sample pushdown: zero selected samples stays one row per variant ---
-query III
-SELECT
-  (SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true, exclude_samples := 'A,B')),
-  (SELECT count(CHROM) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true, exclude_samples := 'A,B')),
-  (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true, exclude_samples := 'A,B')) WHERE column_name = 'SAMPLE_ID');
-----
-15	15	0
-
-statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', samples := 'NOPE');
-----
-unknown sample
-
-# --- read_bcf_v2 bind-time field filters: include_* removes optional schemas ---
+# --- SQL projection selects the required header-declared fields ---
 query IT
 SELECT count(*), string_agg(column_name, ',' ORDER BY column_name)
-FROM (DESCRIBE SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', include_info := false, include_format := false, include_vep := false));
-----
-7	ALT,CHROM,FILTER,ID,POS,QUAL,REF
-
-# --- read_bcf_v2 bind-time field filters: INFO/FORMAT lists keep header order ---
-query IT
-SELECT count(*), string_agg(column_name, ',' ORDER BY column_name)
-FROM (DESCRIBE SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', info_fields := 'SB', format_fields := 'GT'));
+FROM (DESCRIBE SELECT CHROM, POS, ID, REF, ALT, QUAL, FILTER,
+  INFO_SB, FORMAT_GT_S1, FORMAT_GT_S2
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf'));
 ----
 10	ALT,CHROM,FILTER,FORMAT_GT_S1,FORMAT_GT_S2,ID,INFO_SB,POS,QUAL,REF
 
-# --- read_bcf_v2 bind-time field filters: filtered INFO/FORMAT rows materialize correctly ---
+# --- Projected INFO/FORMAT rows materialize correctly ---
 query III
 SELECT count(*), sum(list_count(INFO_SB)), sum(length(coalesce(FORMAT_GT_S1, '')) + length(coalesce(FORMAT_GT_S2, '')))
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', info_fields := 'SB', format_fields := 'GT');
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf');
 ----
 2	4	12
 
-# --- read_bcf_v2 projected GT matches v1, including haploid and large-allele fallback cases ---
-query II
-SELECT
-  (SELECT count(*) FROM (
-     SELECT POS, SAMPLE_ID, FORMAT_GT
-     FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true)
-     EXCEPT ALL
-     SELECT POS, SAMPLE_ID, FORMAT_GT
-     FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true, format_fields := 'GT')
-   )),
-  (SELECT count(*) FROM (
-     SELECT POS, SAMPLE_ID, FORMAT_GT
-     FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true, format_fields := 'GT')
-     EXCEPT ALL
-     SELECT POS, SAMPLE_ID, FORMAT_GT
-     FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true)
-   ));
-----
-0	0
-
 query T
 SELECT string_agg(FORMAT_GT, ',' ORDER BY POS, SAMPLE_ID)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true, format_fields := 'GT')
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', tidy_format := true)
 WHERE FORMAT_GT IN ('2', '0/300', '240/260');
 ----
 2,0/300,240/260
 
-# --- read_bcf_v2 projected GT covers haploid, phased, polyploid, and large allele fallback cases ---
+# --- read_bcf projected GT covers haploid, phased, polyploid, and large allele fallback cases ---
 query T
 SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT, ',' ORDER BY SAMPLE_ID)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/genotype_ploidy_edge_cases.vcf', tidy_format := true, format_fields := 'GT');
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/genotype_ploidy_edge_cases.vcf', tidy_format := true);
 ----
 BIG=0/10,DIP=0|1,HAP=1,TET=0/1/2/3,TRI=0/1/2
 
-# --- read_bcf_v2 preserves phased GT plus PL/GP/DS/PS FORMAT fields exactly vs v1 ---
-query I
-WITH
-v1 AS (
-  SELECT POS, SAMPLE_ID, FORMAT_GT, FORMAT_PL, FORMAT_GP, FORMAT_DS, FORMAT_PS
-  FROM read_bcf('__WORKING_DIRECTORY__/test/data/phased_genotype_fields.vcf', tidy_format := true)
-),
-v2 AS (
-  SELECT POS, SAMPLE_ID, FORMAT_GT, FORMAT_PL, FORMAT_GP, FORMAT_DS, FORMAT_PS
-  FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/phased_genotype_fields.vcf', tidy_format := true,
-                   format_fields := 'GT,PL,GP,DS,PS')
-)
-SELECT count(*)
-FROM ((SELECT * FROM v1 EXCEPT ALL SELECT * FROM v2)
-      UNION ALL
-      (SELECT * FROM v2 EXCEPT ALL SELECT * FROM v1));
-----
-0
-
-query T
-SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PS=' || coalesce(CAST(FORMAT_PS AS VARCHAR), 'NA'), ',' ORDER BY POS, SAMPLE_ID)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/phased_genotype_fields.vcf', tidy_format := true,
-                 format_fields := 'GT,PL,GP,DS,PS');
-----
-S1=0|1:PS=10,S2=1|2:PS=10,S1=1|0:PS=20,S2=0/1:PS=NA,S1=1:PS=30,S2=0|1|1:PS=30,S1=0|1|1|2:PS=40,S2=2|2:PS=40
-
-query T
-SELECT string_agg(SAMPLE_ID || '=' || FORMAT_GT || ':PL=' || length(FORMAT_PL) || ':GP=' || length(FORMAT_GP) || ':DS=' || length(FORMAT_DS), ',' ORDER BY POS, SAMPLE_ID)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/phased_genotype_fields.vcf', tidy_format := true,
-                 format_fields := 'GT,PL,GP,DS,PS')
-WHERE POS >= 30;
-----
-S1=1:PL=2:GP=2:DS=1,S2=0|1|1:PL=4:GP=4:DS=1,S1=0|1|1|2:PL=15:GP=15:DS=2,S2=2|2:PL=6:GP=6:DS=2
-
-# --- read_bcf_v2 tidy sample-run fill survives DuckDB chunk boundaries ---
+# --- Tidy records survive DuckDB output chunk limits ---
 query IIT
 WITH t AS (
   SELECT SAMPLE_ID, FORMAT_GT
-  FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', tidy_format := true, format_fields := 'GT')
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', tidy_format := true)
 )
 SELECT
   (SELECT count(*) FROM t),
@@ -310,56 +104,15 @@ SELECT
 ----
 2053	2053	S0001=0/1,S2048=0/1,S2049=0/1,S2053=0/1
 
-# --- read_bcf_v2 bind-time field filters: VEP list filters parsed annotation columns ---
-query IT
-SELECT count(*), string_agg(column_name, ',' ORDER BY column_name)
-FROM (DESCRIBE SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/test_vep.vcf', include_info := false, include_format := false, vep_fields := 'Consequence,DISTANCE'));
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/no_such_file.vcf');
 ----
-9	ALT,CHROM,FILTER,ID,POS,QUAL,REF,VEP_Consequence,VEP_DISTANCE
-
-# --- read_bcf_v2 bind-time field filters: filtered VEP rows materialize correctly ---
-query III
-SELECT count(*), sum(list_count(VEP_Consequence)), sum(list_count(VEP_DISTANCE))
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/test_vep.vcf', include_info := false, include_format := false, vep_fields := 'Consequence,DISTANCE');
-----
-802	2219	546
-
-# --- read_bcf_v2 include_format := false prevents tidy row explosion ---
-query I
-SELECT count(*)
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', tidy_format := true, include_format := false);
-----
-2
+read_bcf: failed to open BCF/VCF file
 
 statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', info_fields := 'NOPE');
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', region := 'chr1:1-10');
 ----
-unknown field
-
-statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/score_gwas_summary.vcf', format_fields := 'GT');
-----
-unknown field
-
-statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/test_vep.vcf', format_fields := 'GT');
-----
-no samples
-
-statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', exclude_samples := 'S1,S2', format_fields := 'GT');
-----
-no samples
-
-statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/no_such_file.vcf');
-----
-read_bcf_v2: failed to open BCF/VCF file
-
-statement error
-SELECT count(*) FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/fixed_count_arrays.vcf', region := 'chr1:1-10');
-----
-read_bcf_v2: region query requires an index file
+read_bcf: region query requires an index file
 
 # --- decompression_threads := 0 keeps BCF/VCF reads single-threaded ---
 query I
@@ -492,7 +245,7 @@ SELECT
 2	1
 
 query I
-SELECT count(*) FROM read_bcf_v2(
+SELECT count(*) FROM read_bcf(
   '__WORKING_DIRECTORY__/test/data/vcf_file.bcf',
   region := '1:3000150-3000151,1:3000150-3000151');
 ----
@@ -705,18 +458,10 @@ LIMIT 1;
 ----
 VARCHAR[]
 
-# --- Both readers retain VEP records across tidy sample rows ---
+# --- Retain VEP records across tidy sample rows ---
 query TTTT
 SELECT SAMPLE_ID, VEP_SYMBOL::VARCHAR, VEP_DISTANCE::VARCHAR, FORMAT_GT
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/test_vep_tidy.vcf', tidy_format := true)
-ORDER BY SAMPLE_ID;
-----
-S1	[GENE1]	[12]	0/1
-S2	[GENE1]	[12]	1/1
-
-query TTTT
-SELECT SAMPLE_ID, VEP_SYMBOL::VARCHAR, VEP_DISTANCE::VARCHAR, FORMAT_GT
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/test_vep_tidy.vcf', tidy_format := true)
 ORDER BY SAMPLE_ID;
 ----
 S1	[GENE1]	[12]	0/1
@@ -727,13 +472,6 @@ query III
 SELECT count(*), count(*) FILTER (WHERE VEP_SYMBOL = ['GENE1']),
        count(*) FILTER (WHERE VEP_DISTANCE = [12])
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', tidy_format := true);
-----
-2053	2053	2053
-
-query III
-SELECT count(*), count(*) FILTER (WHERE VEP_SYMBOL = ['GENE1']),
-       count(*) FILTER (WHERE VEP_DISTANCE = [12])
-FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', tidy_format := true);
 ----
 2053	2053	2053
 
@@ -750,14 +488,6 @@ ORDER BY POS, SAMPLE_ID;
 20	S2	NULL	NULL	0	NULL	NULL
 30	S1	[GENE2, GENE3]	1234	0|1|2	[4, 5, 6]	[longer, value, three]
 30	S2	[GENE2, GENE3]	1234	2/2	[0, 0, 9]	[last]
-
-query I
-WITH a AS (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_cache_lifecycle.vcf', tidy_format := true)),
-     b AS (SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_cache_lifecycle.vcf', tidy_format := true))
-SELECT count(*) FROM ((SELECT * FROM a EXCEPT ALL SELECT * FROM b)
-                     UNION ALL (SELECT * FROM b EXCEPT ALL SELECT * FROM a));
-----
-0
 
 # ==============================================================
 # read_bam - SAM/BAM/CRAM reader

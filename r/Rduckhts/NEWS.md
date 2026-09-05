@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- remove experimental `read_bcf_v2` from the bundled extension. Use `read_bcf`
+  with ordinary SQL projection and `scan_mode := 'sequential'` when needed;
+  experimental sample/schema selectors are removed, not transferred to the
+  canonical reader. Existing R wrapper arguments and `read_bcf` behavior stay unchanged
+
 - reuse profile-specific Fedora Clang build dependencies and select an explicit
   CRAN mirror for Windows ARM64 dependency caching in package CI; current-source
   tarball installation, strict diagnostics, and package checks still run
