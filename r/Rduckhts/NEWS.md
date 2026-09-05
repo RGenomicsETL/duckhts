@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- fix missing consequence fields after the first tidy sample in bundled
+  `read_bcf` results. Keep record-owned annotation and decode buffers across
+  output chunks, with unchanged wrapper arguments and scan defaults
+
 - bound bundled normalization/munging reference caches to eight handles and
   eight 64-KiB sequence windows per worker thread, without serializing fetches
   on independent handles. Preserve reference aliases and each wrapper's

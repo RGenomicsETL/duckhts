@@ -254,9 +254,8 @@ typedef struct {
     struct timespec last_progress_time;  // Last time progress was logged
     int timing_initialized;           // Flag to indicate timing is set up
 
-    // Persistent decode cache for read_bcf_v2. The legacy read_bcf path keeps
-    // per-output-chunk caches so v1 remains behaviorally isolated for benchmarks.
-    int cache_persistent;
+    // Worker-owned decode buffers. Loaded values and CSQ descriptors belong to
+    // the current record, including when tidy samples span output chunks.
     int cache_n_format_fields;
     int cache_n_info_fields;
     int *fmt_loaded;
@@ -440,12 +439,10 @@ static void bcf_decode_cache_free(bcf_init_data_t *init) {
     init->vep_loaded = 0;
     init->cache_n_format_fields = 0;
     init->cache_n_info_fields = 0;
-    init->cache_persistent = 0;
 }
 
 static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *bind) {
     if (!init || !bind) return 0;
-    init->cache_persistent = 1;
     init->cache_n_format_fields = bind->n_format_fields;
     init->cache_n_info_fields = bind->n_info_fields;
 
@@ -457,6 +454,11 @@ static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *b
         init->fmt_i32 = (int32_t **)duckdb_malloc(nfmt * sizeof(int32_t *));
         init->fmt_f32 = (float **)duckdb_malloc(nfmt * sizeof(float *));
         init->fmt_str = (char ***)duckdb_malloc(nfmt * sizeof(char **));
+        /* Cleanup must see only initialized element pointers after any
+         * allocation failure, including a partially constructed cache. */
+        if (init->fmt_i32) memset(init->fmt_i32, 0, nfmt * sizeof(int32_t *));
+        if (init->fmt_f32) memset(init->fmt_f32, 0, nfmt * sizeof(float *));
+        if (init->fmt_str) memset(init->fmt_str, 0, nfmt * sizeof(char **));
         if (!init->fmt_loaded || !init->fmt_ret || !init->fmt_n_values ||
             !init->fmt_i32 || !init->fmt_f32 || !init->fmt_str) {
             bcf_decode_cache_free(init);
@@ -465,9 +467,6 @@ static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *b
         memset(init->fmt_loaded, 0, nfmt * sizeof(int));
         memset(init->fmt_ret, 0, nfmt * sizeof(int));
         memset(init->fmt_n_values, 0, nfmt * sizeof(int));
-        memset(init->fmt_i32, 0, nfmt * sizeof(int32_t *));
-        memset(init->fmt_f32, 0, nfmt * sizeof(float *));
-        memset(init->fmt_str, 0, nfmt * sizeof(char **));
     }
 
     if (bind->n_info_fields > 0) {
@@ -479,6 +478,9 @@ static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *b
         init->info_i32 = (int32_t **)duckdb_malloc(ninfo * sizeof(int32_t *));
         init->info_f32 = (float **)duckdb_malloc(ninfo * sizeof(float *));
         init->info_str = (char **)duckdb_malloc(ninfo * sizeof(char *));
+        if (init->info_i32) memset(init->info_i32, 0, ninfo * sizeof(int32_t *));
+        if (init->info_f32) memset(init->info_f32, 0, ninfo * sizeof(float *));
+        if (init->info_str) memset(init->info_str, 0, ninfo * sizeof(char *));
         if (!init->info_loaded || !init->info_ret || !init->info_n_values ||
             !init->info_flag || !init->info_i32 || !init->info_f32 || !init->info_str) {
             bcf_decode_cache_free(init);
@@ -488,9 +490,6 @@ static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *b
         memset(init->info_ret, 0, ninfo * sizeof(int));
         memset(init->info_n_values, 0, ninfo * sizeof(int));
         memset(init->info_flag, 0, ninfo * sizeof(int));
-        memset(init->info_i32, 0, ninfo * sizeof(int32_t *));
-        memset(init->info_f32, 0, ninfo * sizeof(float *));
-        memset(init->info_str, 0, ninfo * sizeof(char *));
     }
 
     return 1;
@@ -2579,8 +2578,10 @@ static void bcf_read_local_init(duckdb_init_info info) {
         return;
     }
 
-    if (bind->reader_version >= 2 && !bcf_decode_cache_init(local, bind)) {
-        duckdb_init_set_error(info, "read_bcf_v2: out of memory allocating decode cache");
+    if (!bcf_decode_cache_init(local, bind)) {
+        char err[128];
+        snprintf(err, sizeof(err), "%s: out of memory allocating decode cache", reader_name);
+        duckdb_init_set_error(info, err);
         destroy_init_data(local);
         return;
     }
@@ -3173,6 +3174,11 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     duckdb_vector* vectors = NULL;
     if (init->column_count > 0) {
         vectors = (duckdb_vector*)duckdb_malloc(init->column_count * sizeof(duckdb_vector));
+        if (!vectors) {
+            duckdb_function_set_error(info, "read_bcf: out of memory allocating output vector pointers");
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
         for (idx_t i = 0; i < init->column_count; i++) {
             vectors[i] = duckdb_data_chunk_get_vector(output, i);
         }
@@ -3182,112 +3188,24 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     int tidy_mode = bind->tidy_format && bind->include_format && bind->n_samples > 0;
     int current_sample = 0;  // Which sample we're emitting (only used in tidy mode)
 
-    // Per-record FORMAT cache to avoid repeated bcf_get_format_* calls across
-    // projected columns/samples for the same record. read_bcf_v2 keeps these
-    // buffers in local init data so tidy records split across DuckDB chunks do
-    // not re-decode the same BCF/VCF record on the next function call.
-    int use_persistent_cache = bind->reader_version >= 2 && init->cache_persistent;
-    int *fmt_loaded = NULL;
-    int *fmt_ret = NULL;
-    int *fmt_n_values = NULL;
-    int32_t **fmt_i32 = NULL;
-    float **fmt_f32 = NULL;
-    char ***fmt_str = NULL;
-    int gt_loaded = 0;
-    int gt_ret = 0;
-    int gt_n_values = 0;
-    int32_t *gt_arr = NULL;
-    if (use_persistent_cache) {
-        fmt_loaded = init->fmt_loaded;
-        fmt_ret = init->fmt_ret;
-        fmt_n_values = init->fmt_n_values;
-        fmt_i32 = init->fmt_i32;
-        fmt_f32 = init->fmt_f32;
-        fmt_str = init->fmt_str;
-        gt_loaded = init->gt_loaded;
-        gt_ret = init->gt_ret;
-        gt_n_values = init->gt_n_values;
-        gt_arr = init->gt_arr;
-    } else if (bind->n_format_fields > 0) {
-        size_t nfmt = (size_t)bind->n_format_fields;
-        fmt_loaded = (int *)duckdb_malloc(nfmt * sizeof(int));
-        fmt_ret = (int *)duckdb_malloc(nfmt * sizeof(int));
-        fmt_n_values = (int *)duckdb_malloc(nfmt * sizeof(int));
-        fmt_i32 = (int32_t **)duckdb_malloc(nfmt * sizeof(int32_t *));
-        fmt_f32 = (float **)duckdb_malloc(nfmt * sizeof(float *));
-        fmt_str = (char ***)duckdb_malloc(nfmt * sizeof(char **));
-        if (!fmt_loaded || !fmt_ret || !fmt_n_values || !fmt_i32 || !fmt_f32 || !fmt_str) {
-            duckdb_function_set_error(info, "read_bcf: out of memory allocating format cache");
-            if (fmt_loaded) duckdb_free(fmt_loaded);
-            if (fmt_ret) duckdb_free(fmt_ret);
-            if (fmt_n_values) duckdb_free(fmt_n_values);
-            if (fmt_i32) duckdb_free(fmt_i32);
-            if (fmt_f32) duckdb_free(fmt_f32);
-            if (fmt_str) duckdb_free(fmt_str);
-            duckdb_free(vectors);
-            duckdb_data_chunk_set_size(output, 0);
-            return;
-        }
-        memset(fmt_loaded, 0, nfmt * sizeof(int));
-        memset(fmt_ret, 0, nfmt * sizeof(int));
-        memset(fmt_n_values, 0, nfmt * sizeof(int));
-        memset(fmt_i32, 0, nfmt * sizeof(int32_t *));
-        memset(fmt_f32, 0, nfmt * sizeof(float *));
-        memset(fmt_str, 0, nfmt * sizeof(char **));
-    }
-
-    // Per-record INFO cache (same rationale as FORMAT cache above).
-    int *info_loaded = NULL;
-    int *info_ret = NULL;
-    int *info_n_values = NULL;
-    int *info_flag = NULL;
-    int32_t **info_i32 = NULL;
-    float **info_f32 = NULL;
-    char **info_str = NULL;
-    if (use_persistent_cache) {
-        info_loaded = init->info_loaded;
-        info_ret = init->info_ret;
-        info_n_values = init->info_n_values;
-        info_flag = init->info_flag;
-        info_i32 = init->info_i32;
-        info_f32 = init->info_f32;
-        info_str = init->info_str;
-    } else if (bind->n_info_fields > 0) {
-        size_t ninfo = (size_t)bind->n_info_fields;
-        info_loaded = (int *)duckdb_malloc(ninfo * sizeof(int));
-        info_ret = (int *)duckdb_malloc(ninfo * sizeof(int));
-        info_n_values = (int *)duckdb_malloc(ninfo * sizeof(int));
-        info_flag = (int *)duckdb_malloc(ninfo * sizeof(int));
-        info_i32 = (int32_t **)duckdb_malloc(ninfo * sizeof(int32_t *));
-        info_f32 = (float **)duckdb_malloc(ninfo * sizeof(float *));
-        info_str = (char **)duckdb_malloc(ninfo * sizeof(char *));
-        if (!info_loaded || !info_ret || !info_n_values || !info_flag || !info_i32 || !info_f32 || !info_str) {
-            duckdb_function_set_error(info, "read_bcf: out of memory allocating info cache");
-            if (info_loaded) duckdb_free(info_loaded);
-            if (info_ret) duckdb_free(info_ret);
-            if (info_n_values) duckdb_free(info_n_values);
-            if (info_flag) duckdb_free(info_flag);
-            if (info_i32) duckdb_free(info_i32);
-            if (info_f32) duckdb_free(info_f32);
-            if (info_str) duckdb_free(info_str);
-            if (fmt_loaded) duckdb_free(fmt_loaded);
-            if (fmt_ret) duckdb_free(fmt_ret);
-            if (fmt_n_values) duckdb_free(fmt_n_values);
-            if (fmt_i32) duckdb_free(fmt_i32);
-            if (fmt_f32) duckdb_free(fmt_f32);
-            if (fmt_str) duckdb_free(fmt_str);
-            duckdb_free(vectors);
-            duckdb_data_chunk_set_size(output, 0);
-            return;
-        }
-        memset(info_loaded, 0, ninfo * sizeof(int));
-        memset(info_ret, 0, ninfo * sizeof(int));
-        memset(info_n_values, 0, ninfo * sizeof(int));
-        memset(info_flag, 0, ninfo * sizeof(int));
-        memset(info_i32, 0, ninfo * sizeof(int32_t *));
-        memset(info_f32, 0, ninfo * sizeof(float *));
-        memset(info_str, 0, ninfo * sizeof(char *));
-    }
+    // Borrow the worker cache; only the record transition resets loaded state.
+    int *fmt_loaded = init->fmt_loaded;
+    int *fmt_ret = init->fmt_ret;
+    int *fmt_n_values = init->fmt_n_values;
+    int32_t **fmt_i32 = init->fmt_i32;
+    float **fmt_f32 = init->fmt_f32;
+    char ***fmt_str = init->fmt_str;
+    int gt_loaded = init->gt_loaded;
+    int gt_ret = init->gt_ret;
+    int gt_n_values = init->gt_n_values;
+    int32_t *gt_arr = init->gt_arr;
+    int *info_loaded = init->info_loaded;
+    int *info_ret = init->info_ret;
+    int *info_n_values = init->info_n_values;
+    int *info_flag = init->info_flag;
+    int32_t **info_i32 = init->info_i32;
+    float **info_f32 = init->info_f32;
+    char **info_str = init->info_str;
 
     int scan_error = 0;
     char scan_err[512] = {0};
@@ -3394,44 +3312,29 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 memset(info_loaded, 0, (size_t)bind->n_info_fields * sizeof(int));
             }
             gt_loaded = 0;
-            if (use_persistent_cache) {
-                if (init->vep_rec) {
-                    vep_record_destroy(init->vep_rec);
-                    init->vep_rec = NULL;
-                }
-                init->vep_loaded = 0;
+            if (init->vep_rec) {
+                vep_record_destroy(init->vep_rec);
+                init->vep_rec = NULL;
             }
+            init->vep_loaded = 0;
         }
 
-        // Parse VEP annotation once per record if needed. read_bcf_v2 caches the
-        // parsed record across tidy sample rows and DuckDB chunk boundaries.
+        // Retain parsed annotation until every sample of this record is emitted.
         vep_record_t* vep_rec = NULL;
         if (init->need_vep) {
-            if (use_persistent_cache) {
-                if (!init->vep_loaded) {
-                    if (bind->reader_version >= 2) {
-                        init->vep_rec = vep_record_parse_selected_bcf(
-                            bind->vep_schema, init->hdr, init->rec,
-                            init->projected_vep_field_indices,
-                            init->n_projected_vep_fields
-                        );
-                    } else {
-                        init->vep_rec = vep_record_parse_bcf(bind->vep_schema, init->hdr, init->rec);
-                    }
-                    init->vep_loaded = 1;
-                }
-                vep_rec = init->vep_rec;
-            } else if (!tidy_mode || current_sample == 0) {
+            if (!init->vep_loaded) {
                 if (bind->reader_version >= 2) {
-                    vep_rec = vep_record_parse_selected_bcf(
+                    init->vep_rec = vep_record_parse_selected_bcf(
                         bind->vep_schema, init->hdr, init->rec,
                         init->projected_vep_field_indices,
                         init->n_projected_vep_fields
                     );
                 } else {
-                    vep_rec = vep_record_parse_bcf(bind->vep_schema, init->hdr, init->rec);
+                    init->vep_rec = vep_record_parse_bcf(bind->vep_schema, init->hdr, init->rec);
                 }
+                init->vep_loaded = 1;
             }
+            vep_rec = init->vep_rec;
         }
 
         idx_t emit_run_len = 1;
@@ -3837,14 +3740,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         }
 
         if (scan_error) {
-            if (vep_rec && !use_persistent_cache) {
-                vep_record_destroy(vep_rec);
-            }
             break;
-        }
-
-        if (vep_rec && !use_persistent_cache) {
-            vep_record_destroy(vep_rec);
         }
 
         row_count += emit_run_len;
@@ -3876,43 +3772,11 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 #endif
     }
 
-    // Cleanup cached vectors
     duckdb_free(vectors);
-    if (use_persistent_cache) {
-        init->gt_loaded = gt_loaded;
-        init->gt_ret = gt_ret;
-        init->gt_n_values = gt_n_values;
-        init->gt_arr = gt_arr;
-    } else {
-        if (bind->n_format_fields > 0) {
-            for (int i = 0; i < bind->n_format_fields; i++) {
-                if (fmt_i32 && fmt_i32[i]) free(fmt_i32[i]);
-                if (fmt_f32 && fmt_f32[i]) free(fmt_f32[i]);
-                if (fmt_str && fmt_str[i]) free_bcf_format_string_array(fmt_str[i]);
-            }
-            if (gt_arr) free(gt_arr);
-            if (fmt_loaded) duckdb_free(fmt_loaded);
-            if (fmt_ret) duckdb_free(fmt_ret);
-            if (fmt_n_values) duckdb_free(fmt_n_values);
-            if (fmt_i32) duckdb_free(fmt_i32);
-            if (fmt_f32) duckdb_free(fmt_f32);
-            if (fmt_str) duckdb_free(fmt_str);
-        }
-        if (bind->n_info_fields > 0) {
-            for (int i = 0; i < bind->n_info_fields; i++) {
-                if (info_i32 && info_i32[i]) free(info_i32[i]);
-                if (info_f32 && info_f32[i]) free(info_f32[i]);
-                if (info_str && info_str[i]) free(info_str[i]);
-            }
-            if (info_loaded) duckdb_free(info_loaded);
-            if (info_ret) duckdb_free(info_ret);
-            if (info_n_values) duckdb_free(info_n_values);
-            if (info_flag) duckdb_free(info_flag);
-            if (info_i32) duckdb_free(info_i32);
-            if (info_f32) duckdb_free(info_f32);
-            if (info_str) duckdb_free(info_str);
-        }
-    }
+    init->gt_loaded = gt_loaded;
+    init->gt_ret = gt_ret;
+    init->gt_n_values = gt_n_values;
+    init->gt_arr = gt_arr;
 
     duckdb_data_chunk_set_size(output, row_count);
 }

@@ -76,6 +76,8 @@ run_sql "precision_digits must be between 0 and 18" \
   "SELECT * FROM duckhts_mosdepth('$tmp/mosdepth','test/data/range.bam',precision_digits:=-1,overwrite:=true);"
 run_sql "" \
   "SELECT count(*) FROM bcftools_score('test/data/score_input.vcf','test/data/score_summary.tsv',use:='GT',columns:='PLINK');"
+run_sql "" \
+  "SELECT CASE WHEN count(*)=2053 AND count(*) FILTER (WHERE VEP_SYMBOL=['GENE1'] AND VEP_DISTANCE=[12])=2053 THEN true ELSE error('tidy CSQ record lifetime') END FROM read_bcf('test/data/tidy_chunk_boundary.vcf',tidy_format:=true); SELECT POS,SAMPLE_ID,VEP_SYMBOL,INFO_DP,FORMAT_GT,FORMAT_AD,FORMAT_ST FROM read_bcf('test/data/bcf_cache_lifecycle.vcf',tidy_format:=true); SELECT POS,SAMPLE_ID,VEP_SYMBOL,INFO_DP,FORMAT_GT,FORMAT_AD,FORMAT_ST FROM read_bcf_v2('test/data/bcf_cache_lifecycle.vcf',tidy_format:=true);"
 
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror "${compile_flags[@]}" \
   -Isrc/include -Ithird_party/htslib test/scripts/bcftools_filter_recovery_probe.c \

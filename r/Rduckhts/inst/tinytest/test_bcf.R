@@ -761,6 +761,37 @@ test_bcf_appender <- function() {
   expect_equal(delta$n[1], 0)
 }
 
+test_bcf_record_cache <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  for (reader in c("read_bcf", "read_bcf_v2")) {
+    path <- system.file("extdata", "bcf_cache_lifecycle.vcf", package = "Rduckhts")
+    expect_true(file.exists(path))
+    out <- dbGetQuery(con, sprintf(paste(
+      "SELECT POS, SAMPLE_ID, VEP_SYMBOL::VARCHAR AS symbol, INFO_DP,",
+      "FORMAT_GT, FORMAT_AD::VARCHAR AS ad, FORMAT_ST::VARCHAR AS st",
+      "FROM %s(%s, tidy_format := true) ORDER BY POS, SAMPLE_ID"
+    ), reader, dbQuoteString(con, path)))
+    expect_equal(as.integer(out$POS), rep(c(10L, 20L, 30L), each = 2L))
+    expect_equal(out$SAMPLE_ID, rep(c("S1", "S2"), 3L))
+    expect_equal(out$symbol, rep(c("[GENE1]", NA, "[GENE2, GENE3]"), each = 2L))
+    expect_equal(out$INFO_DP, rep(c(7L, NA_integer_, 1234L), each = 2L))
+    expect_equal(out$FORMAT_GT, c("0/1", "1/1", "./.", "0", "0|1|2", "2/2"))
+    expect_equal(out$ad, c("[6, 1]", "[0, 7]", NA, NA, "[4, 5, 6]", "[0, 0, 9]"))
+    expect_equal(out$st, c("[x, y]", "[z]", NA, NA, "[longer, value, three]", "[last]"))
+
+    path <- system.file("extdata", "tidy_chunk_boundary.vcf", package = "Rduckhts")
+    out <- dbGetQuery(con, sprintf(paste(
+      "SELECT count(*) AS n, count(*) FILTER (WHERE VEP_SYMBOL = ['GENE1']",
+      "AND VEP_DISTANCE = [12] AND FORMAT_GT = '0/1') AS correct",
+      "FROM %s(%s, tidy_format := true)"
+    ), reader, dbQuoteString(con, path)))
+    expect_equal(out$n[[1]], 2053)
+    expect_equal(out$correct[[1]], 2053)
+  }
+}
+
+test_bcf_record_cache()
 test_bcf_string_format_lists()
 test_bcf_v2_sql()
 test_bcf_appender()

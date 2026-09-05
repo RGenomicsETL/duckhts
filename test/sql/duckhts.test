@@ -705,7 +705,15 @@ LIMIT 1;
 ----
 VARCHAR[]
 
-# --- read_bcf_v2 caches VEP records across tidy sample rows ---
+# --- Both readers retain VEP records across tidy sample rows ---
+query TTTT
+SELECT SAMPLE_ID, VEP_SYMBOL::VARCHAR, VEP_DISTANCE::VARCHAR, FORMAT_GT
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/test_vep_tidy.vcf', tidy_format := true)
+ORDER BY SAMPLE_ID;
+----
+S1	[GENE1]	[12]	0/1
+S2	[GENE1]	[12]	1/1
+
 query TTTT
 SELECT SAMPLE_ID, VEP_SYMBOL::VARCHAR, VEP_DISTANCE::VARCHAR, FORMAT_GT
 FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/test_vep_tidy.vcf', tidy_format := true)
@@ -713,6 +721,43 @@ ORDER BY SAMPLE_ID;
 ----
 S1	[GENE1]	[12]	0/1
 S2	[GENE1]	[12]	1/1
+
+# --- A 2053-sample record retains its CSQ across multiple output chunks ---
+query III
+SELECT count(*), count(*) FILTER (WHERE VEP_SYMBOL = ['GENE1']),
+       count(*) FILTER (WHERE VEP_DISTANCE = [12])
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', tidy_format := true);
+----
+2053	2053	2053
+
+query III
+SELECT count(*), count(*) FILTER (WHERE VEP_SYMBOL = ['GENE1']),
+       count(*) FILTER (WHERE VEP_DISTANCE = [12])
+FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', tidy_format := true);
+----
+2053	2053	2053
+
+# --- Missing fields reset loaded state; later records may grow their buffers ---
+query ITTITTT
+SELECT POS, SAMPLE_ID, VEP_SYMBOL::VARCHAR, INFO_DP,
+       FORMAT_GT, FORMAT_AD::VARCHAR, FORMAT_ST::VARCHAR
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_cache_lifecycle.vcf', tidy_format := true)
+ORDER BY POS, SAMPLE_ID;
+----
+10	S1	[GENE1]	7	0/1	[6, 1]	[x, y]
+10	S2	[GENE1]	7	1/1	[0, 7]	[z]
+20	S1	NULL	NULL	./.	NULL	NULL
+20	S2	NULL	NULL	0	NULL	NULL
+30	S1	[GENE2, GENE3]	1234	0|1|2	[4, 5, 6]	[longer, value, three]
+30	S2	[GENE2, GENE3]	1234	2/2	[0, 0, 9]	[last]
+
+query I
+WITH a AS (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_cache_lifecycle.vcf', tidy_format := true)),
+     b AS (SELECT * FROM read_bcf_v2('__WORKING_DIRECTORY__/test/data/bcf_cache_lifecycle.vcf', tidy_format := true))
+SELECT count(*) FROM ((SELECT * FROM a EXCEPT ALL SELECT * FROM b)
+                     UNION ALL (SELECT * FROM b EXCEPT ALL SELECT * FROM a));
+----
+0
 
 # ==============================================================
 # read_bam - SAM/BAM/CRAM reader

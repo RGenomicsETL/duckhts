@@ -342,7 +342,7 @@
       "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null')",
       "returns": "table",
       "r_wrapper": "rduckhts_bcf",
-      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap.",
+      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. Both reader names retain worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap.",
       "examples": [
         "SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;"
       ]

@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- preserve CSQ/ANN/BCSQ values on every `read_bcf` tidy sample row, including
+  records split across output chunks. Both BCF readers now retain one worker-owned
+  decode cache; remove the duplicate per-chunk allocation/cleanup path and make
+  partial cache initialization safe to destroy. Scan defaults remain unchanged
+
 - share normalization and munging reference access through one host-neutral,
   thread-owned cache, retaining at most eight handles and eight 64-KiB sequence
   windows per thread. Oversized fetch results are not retained. Independent

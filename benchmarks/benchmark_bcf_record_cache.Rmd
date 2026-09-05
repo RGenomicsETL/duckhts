@@ -1,0 +1,164 @@
+---
+title: "DuckHTS BCF record-cache ownership"
+output: github_document
+---
+
+<!-- benchmark_bcf_record_cache.md is generated from this Rmd. -->
+
+This paired workload materializes **every declared column** of the registered
+GIAB HG002 GRCh38 NIST v4.2.1 benchmark VCF, with both `read_bcf` and
+`read_bcf_v2`, in wide and tidy form. The file has one sample, so input records
+and output rows have the same denominator. This exercises typed INFO, GT, and
+FORMAT decoding across many output chunks, not multi-sample expansion or CSQ.
+
+Stage `variantkey_giab_hg002_v421` explicitly with the `duckhtsbench`
+`duckhts_bench_fetch()` helper before running; rendering never downloads data.
+Then build both revisions with the same toolchain and run from the repo root:
+
+```sh
+BCF_CACHE_BASELINE_EXTENSION=/path/to/baseline/duckhts.duckdb_extension \
+BCF_CACHE_BASELINE_REV=<commit> \
+Rscript -e 'rmarkdown::render("benchmarks/benchmark_bcf_record_cache.Rmd", knit_root_dir=getwd())'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(DBI)
+library(duckdb)
+root <- normalizePath(".", mustWork = TRUE)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(root, "r/duckhtsbench/inst/benchmark_registry.tsv"))
+source("r/duckhtsbench/R/registry.R")
+source("r/duckhtsbench/R/stage.R")
+input <- duckhts_bench_artifact_path("variantkey_giab_hg002_v421")
+duckhts_bench_validate_identity("variantkey_giab_hg002_v421", input)
+extensions <- c(baseline = Sys.getenv("BCF_CACHE_BASELINE_EXTENSION"),
+  candidate = Sys.getenv("BCF_CACHE_CANDIDATE_EXTENSION", "build/release/duckhts.duckdb_extension"))
+extensions <- vapply(extensions, normalizePath, character(1), mustWork = TRUE)
+revisions <- c(baseline = Sys.getenv("BCF_CACHE_BASELINE_REV"),
+  candidate = system2("git", c("rev-parse", "HEAD"), stdout = TRUE))
+stopifnot(nzchar(revisions["baseline"]))
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src")) != 0L)
+  stop("Commit candidate extension sources before revision-labelled measurements")
+source_trees <- vapply(revisions, function(revision)
+  system2("git", c("rev-parse", paste0(revision, ":src")), stdout = TRUE), character(1))
+runs <- as.integer(Sys.getenv("BCF_CACHE_RUNS", "3"))
+stopifnot(runs > 0L, nzchar(Sys.which("bcftools")))
+# This independent HTSlib executable supplies the input denominator, not either
+# reader's optimized COUNT path. No VCF-derived fixture or private cache is made.
+count_command <- paste("bcftools query -f", shQuote("%CHROM\n"), shQuote(input), "| wc -l")
+input_rows <- as.numeric(system2("bash", c("-o", "pipefail", "-c", shQuote(count_command)), stdout = TRUE))
+stopifnot(length(input_rows) == 1L, !is.na(input_rows), input_rows > 0)
+samples <- system2("bcftools", c("query", "-l", shQuote(input)), stdout = TRUE)
+stopifnot(identical(samples, "HG002"))
+directory <- tempfile("duckhts_bcf_cache_bench_")
+dir.create(directory)
+timings <- comparisons <- list()
+con <- dbConnect(duckdb())
+dbExecute(con, "SET threads=1")
+dbExecute(con, "SET memory_limit='16GB'")
+for (mode in c("wide", "tidy")) {
+  snapshots <- character()
+  for (reader in c("read_bcf", "read_bcf_v2")) for (run in seq_len(runs)) {
+    # Reverse revision order on alternate repetitions to expose order effects.
+    order <- if (run %% 2L) names(extensions) else rev(names(extensions))
+    for (revision in order) {
+      key <- paste(mode, reader, revision, sep = "_")
+      snapshot <- if (run == 1L) file.path(directory, paste0(key, ".parquet")) else ""
+      if (nzchar(snapshot)) snapshots[key] <- snapshot
+      output <- file.path(directory, "timing.tsv")
+      args <- c("benchmarks/bcf_record_cache_run.R", shQuote(extensions[revision]),
+        shQuote(input), reader, mode, input_rows, shQuote(snapshot), shQuote(output))
+      log <- system2(file.path(R.home("bin"), "Rscript"), args, stdout = TRUE, stderr = TRUE)
+      status <- attr(log, "status")
+      if (!is.null(status) && status != 0L) stop(paste(log, collapse = "\n"))
+      timings[[length(timings) + 1L]] <- data.frame(mode, reader, revision, run,
+        read.delim(output, colClasses = c(checksum = "character")))
+    }
+  }
+  # Compare typed row multisets, including multiplicity, without imposing file
+  # arrival order. First-run snapshots from all four cases must match exactly.
+  base <- sprintf("read_parquet(%s)", dbQuoteString(con, snapshots[1]))
+  for (i in seq_along(snapshots)[-1]) {
+    other <- sprintf("read_parquet(%s)", dbQuoteString(con, snapshots[i]))
+    sql <- sprintf(paste("SELECT count(*) AS n FROM ((SELECT * FROM %s EXCEPT ALL SELECT * FROM %s)",
+      "UNION ALL (SELECT * FROM %s EXCEPT ALL SELECT * FROM %s))"), base, other, other, base)
+    difference <- as.numeric(dbGetQuery(con, sql)$n)
+    stopifnot(difference == 0)
+    comparisons[[length(comparisons) + 1L]] <- data.frame(mode,
+      reference = names(snapshots)[1], compared = names(snapshots)[i], different_rows = difference)
+  }
+  unlink(unname(snapshots))
+}
+dbDisconnect(con, shutdown = TRUE)
+timings <- do.call(rbind, timings)
+comparisons <- do.call(rbind, comparisons)
+for (mode in unique(timings$mode)) {
+  stopifnot(length(unique(timings$checksum[timings$mode == mode])) == 1L)
+}
+```
+
+## Revisions, input, and environment
+
+```{r identity}
+print(data.frame(revision = names(revisions), commit = unname(revisions),
+  src_tree = unname(source_trees), extension_md5 = unname(tools::md5sum(extensions))), row.names = FALSE)
+cat("Artifact: variantkey_giab_hg002_v421; registered bytes:", file.info(input)$size, "\n")
+cat("Observed input MD5:", unname(tools::md5sum(input)), "\n")
+cat("Input records:", input_rows, "; sample: HG002; output rows per scan:", input_rows, "\n")
+cat("DuckDB threads: 1; sequential scan handles: 1; HTSlib decompression workers: 0\n")
+cat("Measured repetitions per reader/mode/revision:", runs, "\n")
+cat("R:", R.version.string, "; DuckDB:", as.character(packageVersion("duckdb")), "\n")
+cat(system2("uname", "-srmo", stdout = TRUE), "\n")
+cat(system2("clang", "--version", stdout = TRUE)[1], "\n")
+cat(system2("bcftools", "--version", stdout = TRUE)[1:2], sep = "\n")
+cat("\n", system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE), "\n")
+cat(system2("sh", c("-c", shQuote("lscpu | sed -n '/Model name:/p'")), stdout = TRUE), "\n")
+```
+
+## Full typed materialization
+
+Elapsed and user + system CPU times include binding, initialization, VCF/BGZF
+decoding, typed vectors, and `CREATE TABLE AS` materialization. Every repetition
+uses a fresh R/DuckDB process. Startup, staging, independent counting, checksum
+validation, Parquet snapshot writing, and exact comparison are outside timing.
+The OS page cache is warm. RSS is the whole-process high-water mark immediately
+after materialization, not an allocation count or cache-only measurement.
+
+```{r timing}
+summary <- aggregate(cbind(elapsed, cpu, peak_rss_kib) ~ mode + reader + revision,
+  timings, median)
+summary$input_records <- input_rows
+summary$output_rows <- input_rows
+summary$rows_per_second <- input_rows / summary$elapsed
+print(summary, row.names = FALSE, digits = 6)
+print(timings[c("mode", "reader", "revision", "run", "rows", "columns", "elapsed", "cpu")],
+  row.names = FALSE, digits = 6)
+```
+
+## Output agreement and scope
+
+```{r agreement}
+print(comparisons, row.names = FALSE)
+print(unique(timings[c("mode", "rows", "columns", "checksum")]), row.names = FALSE)
+```
+
+Each first-run snapshot is compared against the pre-change `read_bcf` output
+with `EXCEPT ALL` in both directions. Every repetition also checks the independent
+record count and a sum of hashes covering every materialized field. Hash agreement
+alone is not an exact oracle; the separate first-run comparisons check complete
+typed row multisets. The registry pins the supplier byte count; the input MD5
+above is observed at measurement time, not a supplier-authenticated checksum.
+
+The earlier [appender contig report](benchmark_bcf_appender_contigs.md) exercises
+a narrow scalar appender with different data and scheduling. It is not an
+identical-workload baseline; the paired pre-change build here supplies that baseline.
+This report does not measure indexed or remote scans, appender pipelining, many-sample
+throughput, CSQ parsing throughput, or bounded/static allocation. It establishes
+neither universal performance parity nor a fastest-reader claim.
+
+The independent SQL/R regression fixtures separately exercise two-sample CSQ
+replication, all 2,053 sample rows of a record crossing an output chunk, missing
+annotations and FORMAT values, growing list/string buffers, and changing ploidy.
+The pre-change legacy reader returns incorrect CSQ rows; that incorrect output
+is not used as a valid throughput baseline here. Reader names, scan defaults,
+sample-selection policies, and output ordering guarantees remain unchanged.
