@@ -138,6 +138,11 @@ else
   "${runtime[@]}" "$build_dir/duckhts_region_list_test"
 fi
 cmake --build "$build_dir" --target duckhts_reader_alloc_probe -j2
+${CC:-cc} -std=c11 -UNDEBUG -Wall -Wextra -Werror "${compile_flags[@]}" \
+  -Isrc/include -Ithird_party/htslib test/scripts/bam_format_test.c \
+  -L"$out_dir" -Wl,-rpath,"$root/$out_dir" -lduckhts "${link_flags[@]}" \
+  -o "$tmp/bam_format_test"
+"${runtime[@]}" "$tmp/bam_format_test"
 python_runtime=("${runtime[@]}")
 if [ "$sanitizer" = asan ]; then
   # Python does not link C++; load it at startup so ASan can resolve

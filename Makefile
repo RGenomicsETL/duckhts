@@ -157,11 +157,19 @@ define run_reader_alloc_test
 endef
 
 .PHONY: test-reader-alloc test-reader-alloc-r
-test-reader-alloc:
+test-reader-alloc: test-bam-format
 	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
 
 test-reader-alloc-r:
 	$(call run_reader_alloc_test,Rscript test/scripts/reader_alloc_test.R)
+
+.PHONY: test-bam-format
+test-bam-format:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
+			-Isrc/include -Ithird_party/htslib test/scripts/bam_format_test.c \
+			-Lbuild/release -Wl,-rpath,$(PROJ_DIR)build/release -lduckhts \
+			-o "$$tmp/bam_format_test"; "$$tmp/bam_format_test"
 
 .PHONY: test-region-list
 test-region-list:

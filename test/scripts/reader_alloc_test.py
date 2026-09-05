@@ -33,6 +33,7 @@ def main():
         "vcf-tabix": source("read_bcf", "region_union.vcf.gz"),
         "bam-indexed": source("read_bam", "bam_scan_mixed.bam", ", decompression_threads:=0"),
         "bam-read-groups": source("read_bam", "bam_read_groups.sam", ", scan_mode:='sequential', decompression_threads:=0"),
+        "bam-materialize": source("read_bam", "bam_materialize.sam", ", standard_tags:=true, auxiliary_tags:=true, decompression_threads:=0"),
         "cram-indexed": source("read_bam", "bam_scan_mixed.cram", ", decompression_threads:=0"),
         "fasta-sequential": source("read_fasta", "region_names.fa", ", scan_mode:='sequential'"),
         "fasta-indexed": source("read_fasta", "region_names.fa.gz", ", region:='{chr,part}:1-5,{chr:part}:1-5'"),
@@ -48,6 +49,10 @@ def main():
     for name in ("attempts", "failures", "live"):
         getattr(probe, "reader_alloc_" + name).restype = ctypes.c_long
     assert probe.reader_alloc_open(extension.encode()) == 0
+    assert probe.reader_list_helper_checks() == 0
+    probe.reader_list_arm.argtypes = [ctypes.c_long, ctypes.c_long]
+    for name in ("attempts", "failures", "data_after_failure"):
+        getattr(probe, "reader_list_" + name).restype = ctypes.c_long
     assert probe.reader_alloc_arm(0) == 0
     assert probe.reader_alloc_helper_checks() == 0
     probe.reader_alloc_disarm()
@@ -87,10 +92,42 @@ def main():
                     assert read(sql) == expected, (name, nth, "recovery changed schema/rows")
                     con.execute("SELECT 4242").fetchall()
                     failures += 1
+        list_failures = 0
+        for projection, options in (
+            ("CIGAR", ", cigar_representation:='binary'"),
+            ("SEQ", ", sequence_encoding:='nt16'"),
+            ("QUAL", ", quality_representation:='phred'"),
+            ("ML, FZ, CG", ", standard_tags:=true"),
+            ("AUXILIARY_TAGS", ", auxiliary_tags:=true"),
+            ("*", ", standard_tags:=true, auxiliary_tags:=true, cigar_representation:='binary', sequence_encoding:='nt16', quality_representation:='phred'"),
+        ):
+            sql = "SELECT " + projection + " FROM " + source("read_bam", "bam_materialize.sam", options + ", decompression_threads:=0")
+            for kind in (1, 2):
+                assert probe.reader_list_arm(kind, 0) == 0
+                expected = read(sql)
+                count = probe.reader_list_attempts()
+                assert count > 0
+                probe.reader_list_disarm()
+                for nth in range(1, count + 1):
+                    assert probe.reader_list_arm(kind, nth) == 0
+                    try:
+                        read(sql)
+                    except duckdb.Error as error:
+                        assert "failed to grow output list" in str(error), (projection, kind, nth, error)
+                    else:
+                        raise AssertionError((projection, kind, nth, "list failure silently succeeded"))
+                    assert probe.reader_list_failures() == 1
+                    assert probe.reader_list_data_after_failure() == 0
+                    probe.reader_list_disarm()
+                    assert con.execute("SELECT 4242").fetchone() == (4242,)
+                    assert read(sql) == expected, (projection, kind, nth, "list recovery changed rows")
+                    list_failures += 1
     finally:
+        probe.reader_list_disarm()
         probe.reader_alloc_close()
         con.close()
     print(f"reader allocation failures: {failures} errors, zero tracked leaks, exact schema/row recovery: OK")
+    print(f"BAM list failures: {list_failures} errors, no data access after failure, exact recovery: OK")
 
 
 if __name__ == "__main__":

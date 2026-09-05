@@ -8,8 +8,13 @@
 
 static duckdb_ext_api_v1 duckdb_ext_api;
 #include "duckdb_alloc.h"
+#include "duckdb_list.h"
 #undef duckdb_malloc
 #undef duckdb_free
+#undef duckdb_list_vector_get_size
+#undef duckdb_list_vector_reserve
+#undef duckdb_list_vector_set_size
+#undef duckdb_vector_get_data
 
 static duckdb_ext_api_v1 *extension_api;
 static void *extension_handle;
@@ -17,6 +22,31 @@ static void *(*saved_malloc)(size_t);
 static void (*saved_free)(void *);
 static void *live[16384];
 static long live_count, attempts, fail_at, failures;
+static duckdb_state (*saved_reserve)(duckdb_vector, idx_t);
+static duckdb_state (*saved_set_size)(duckdb_vector, idx_t);
+static void *(*saved_get_data)(duckdb_vector);
+static long list_kind, list_attempts, list_fail_at, list_failures, data_after_failure;
+
+static duckdb_state probe_reserve(duckdb_vector vec, idx_t size) {
+    if (list_kind == 1 && ++list_attempts == list_fail_at) {
+        list_failures++;
+        return DuckDBError;
+    }
+    return saved_reserve(vec, size);
+}
+
+static duckdb_state probe_set_size(duckdb_vector vec, idx_t size) {
+    if (list_kind == 2 && ++list_attempts == list_fail_at) {
+        list_failures++;
+        return DuckDBError;
+    }
+    return saved_set_size(vec, size);
+}
+
+static void *probe_get_data(duckdb_vector vec) {
+    if (list_failures) data_after_failure++;
+    return saved_get_data(vec);
+}
 
 static void *probe_malloc(size_t bytes) {
     attempts++;
@@ -58,6 +88,9 @@ int reader_alloc_open(const char *path) {
     if (!extension_api) return 2;
     saved_malloc = extension_api->duckdb_malloc;
     saved_free = extension_api->duckdb_free;
+    saved_reserve = extension_api->duckdb_list_vector_reserve;
+    saved_set_size = extension_api->duckdb_list_vector_set_size;
+    saved_get_data = extension_api->duckdb_vector_get_data;
     return !saved_malloc || !saved_free;
 }
 
@@ -84,6 +117,57 @@ void reader_alloc_close(void) {
     dlclose(extension_handle);
     extension_handle = NULL;
     extension_api = NULL;
+}
+
+int reader_list_arm(long kind, long nth) {
+    if (!extension_api || (kind != 1 && kind != 2)) return 1;
+    list_kind = kind;
+    list_fail_at = nth;
+    list_attempts = list_failures = data_after_failure = 0;
+    extension_api->duckdb_list_vector_reserve = probe_reserve;
+    extension_api->duckdb_list_vector_set_size = probe_set_size;
+    extension_api->duckdb_vector_get_data = probe_get_data;
+    return 0;
+}
+
+void reader_list_disarm(void) {
+    extension_api->duckdb_list_vector_reserve = saved_reserve;
+    extension_api->duckdb_list_vector_set_size = saved_set_size;
+    extension_api->duckdb_vector_get_data = saved_get_data;
+}
+
+long reader_list_attempts(void) { return list_attempts; }
+long reader_list_failures(void) { return list_failures; }
+long reader_list_data_after_failure(void) { return data_after_failure; }
+
+static idx_t helper_size;
+static int helper_reserves;
+static idx_t helper_get_size(duckdb_vector vec) { (void)vec; return helper_size; }
+static duckdb_state helper_reserve(duckdb_vector vec, idx_t size) {
+    (void)vec; (void)size;
+    helper_reserves++;
+    return DuckDBSuccess;
+}
+static duckdb_state helper_set_size(duckdb_vector vec, idx_t size) {
+    (void)vec;
+    helper_size = size;
+    return DuckDBSuccess;
+}
+
+int reader_list_helper_checks(void) {
+    duckdb_ext_api.duckdb_list_vector_get_size = helper_get_size;
+    duckdb_ext_api.duckdb_list_vector_reserve = helper_reserve;
+    duckdb_ext_api.duckdb_list_vector_set_size = helper_set_size;
+    helper_size = UINT64_MAX - 1;
+    helper_reserves = 0;
+    duckdb_list_entry entry = {42, 17};
+    if (duckhts_list_extend(NULL, 2, &entry) || helper_reserves ||
+        entry.offset != 42 || entry.length != 17) return 1;
+    if (!duckhts_list_extend(NULL, 0, &entry) || helper_reserves ||
+        entry.offset != UINT64_MAX - 1 || entry.length != 0) return 2;
+    if (!duckhts_list_extend(NULL, 1, &entry) || helper_reserves != 1 ||
+        helper_size != UINT64_MAX || entry.offset != UINT64_MAX - 1 || entry.length != 1) return 3;
+    return 0;
 }
 
 int reader_alloc_helper_checks(void) {
@@ -121,4 +205,14 @@ void reader_alloc_r_stats(int *count, int *remaining, int *failed) {
     *count = (int)attempts;
     *remaining = (int)live_count;
     *failed = (int)failures;
+}
+
+void reader_list_r_arm(int *kind, int *nth, int *status) {
+    *status = reader_list_arm(*kind, *nth);
+}
+
+void reader_list_r_stats(int *count, int *failed, int *unsafe_access) {
+    *count = (int)list_attempts;
+    *failed = (int)list_failures;
+    *unsafe_access = (int)data_after_failure;
 }

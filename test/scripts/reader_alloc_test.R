@@ -21,14 +21,18 @@ test_installed_reader_allocations <- function(probe_path) {
                          failed = 0L, PACKAGE = shim[["name"]])
   disarm <- function() invisible(.C("reader_alloc_disarm", PACKAGE = shim[["name"]]))
   fixtures <- c(read_bcf = "bcf_cache_lifecycle.vcf", read_bam = "bam_read_groups.sam",
+                read_bam_materialize = "bam_materialize.sam",
                 read_fasta = "region_names.fa", read_fastq = "r1.fq")
   failures <- 0L
   for (reader in names(fixtures)) {
     path <- system.file("extdata", fixtures[[reader]], package = "Rduckhts")
     stopifnot(nzchar(path))
-    options <- if (reader == "read_bam") ", decompression_threads := 0" else ""
+    function_name <- if (reader == "read_bam_materialize") "read_bam" else reader
+    options <- if (function_name == "read_bam") ", decompression_threads := 0" else ""
+    if (reader == "read_bam_materialize")
+      options <- paste0(options, ", standard_tags := true, auxiliary_tags := true")
     sql <- sprintf("SELECT * FROM %s(%s, scan_mode := 'sequential'%s)",
-                   reader, dbQuoteString(con, path), options)
+                   function_name, dbQuoteString(con, path), options)
     arm(0L)
     expected <- dbGetQuery(con, sql)
     dbGetQuery(con, "SELECT 4242")
@@ -53,6 +57,42 @@ test_installed_reader_allocations <- function(probe_path) {
   }
   cat("Installed R reader allocation failures:", failures,
       "errors, zero tracked leaks, exact DBI recovery: OK\n")
+  path <- dbQuoteString(con, system.file("extdata", "bam_materialize.sam", package = "Rduckhts"))
+  projections <- c("CIGAR", "SEQ", "QUAL", "ML, FZ, CG", "AUXILIARY_TAGS", "*")
+  options <- c("cigar_representation := 'binary'", "sequence_encoding := 'nt16'",
+               "quality_representation := 'phred'", "standard_tags := true", "auxiliary_tags := true",
+               paste("standard_tags := true, auxiliary_tags := true, cigar_representation := 'binary',",
+                     "sequence_encoding := 'nt16', quality_representation := 'phred'"))
+  list_arm <- function(kind, nth) stopifnot(.C("reader_list_r_arm", as.integer(kind),
+    as.integer(nth), status = 0L, PACKAGE = shim[["name"]])$status == 0L)
+  list_stats <- function() .C("reader_list_r_stats", count = 0L, failed = 0L,
+                             unsafe_access = 0L, PACKAGE = shim[["name"]])
+  list_disarm <- function() invisible(.C("reader_list_disarm", PACKAGE = shim[["name"]]))
+  on.exit(list_disarm(), add = TRUE, after = FALSE)
+  failures <- 0L
+  for (i in seq_along(projections)) {
+    sql <- sprintf("SELECT %s FROM read_bam(%s, %s, decompression_threads := 0)",
+                   projections[[i]], path, options[[i]])
+    for (kind in 1:2) {
+      list_arm(kind, 0L)
+      expected <- dbGetQuery(con, sql)
+      count <- list_stats()$count
+      stopifnot(count > 0L)
+      list_disarm()
+      for (nth in seq_len(count)) {
+        list_arm(kind, nth)
+        error <- tryCatch({dbGetQuery(con, sql); NULL}, error = identity)
+        stopifnot(inherits(error, "error"), grepl("failed to grow output list", conditionMessage(error), fixed = TRUE))
+        state <- list_stats()
+        stopifnot(state$failed == 1L, state$unsafe_access == 0L)
+        list_disarm()
+        stopifnot(dbGetQuery(con, "SELECT 4242 AS n")$n == 4242L)
+        stopifnot(identical(dbGetQuery(con, sql), expected))
+        failures <- failures + 1L
+      }
+    }
+  }
+  cat("Installed R BAM list failures:", failures, "errors, no post-failure data access, exact DBI recovery: OK\n")
 }
 
 args <- commandArgs(trailingOnly = TRUE)
