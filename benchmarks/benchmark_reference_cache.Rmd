@@ -1,0 +1,168 @@
+---
+title: "DuckHTS worker-local reference cache"
+output: github_document
+---
+
+<!-- benchmark_reference_cache.md is generated from benchmark_reference_cache.Rmd. -->
+
+This paired benchmark exercises `bcftools_norm_row` and `bcftools_munge_row`
+against the full, uncompressed Broad hg38 v0 reference from the `duckhtsbench`
+registry (`liftover_grch38_fasta`). The registered 3,249,912,778-byte size and
+MD5 are validated before use. Input rows are synthetic SNVs at the first
+1,000,000 A/C/G/T positions starting at chr22:20,000,000; each ALT is C for
+reference A, otherwise A. Each row requests one reference base and must return
+one unchanged, correctly oriented row. Every timed run checks positions,
+alleles, status/filter, row count, and the input-ID sum, not just throughput.
+
+Run from the repo root after building both revisions with the same toolchain:
+
+```sh
+REFERENCE_CACHE_BASELINE_EXTENSION=/path/to/baseline/duckhts.duckdb_extension \
+REFERENCE_CACHE_BASELINE_REV=<commit> \
+Rscript -e 'rmarkdown::render("benchmarks/benchmark_reference_cache.Rmd", knit_root_dir=getwd())'
+```
+
+The candidate defaults to `build/release/duckhts.duckdb_extension`. Stage the
+registered reference explicitly with `duckhts_bench_fetch("liftover_grch38_fasta")`
+before rendering. No benchmark download or alternate cache layout is embedded
+here. Linux is required for peak RSS and the optional htslib interposition probe.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(".", mustWork = TRUE)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(root, "r/duckhtsbench/inst/benchmark_registry.tsv"))
+source("r/duckhtsbench/R/registry.R")
+source("r/duckhtsbench/R/stage.R")
+reference <- duckhts_bench_artifact_path("liftover_grch38_fasta")
+stopifnot(file.exists(reference))
+duckhts_bench_validate_identity("liftover_grch38_fasta", reference)
+extensions <- c(
+  baseline = Sys.getenv("REFERENCE_CACHE_BASELINE_EXTENSION"),
+  candidate = Sys.getenv("REFERENCE_CACHE_CANDIDATE_EXTENSION", "build/release/duckhts.duckdb_extension"))
+extensions <- vapply(extensions, normalizePath, character(1), mustWork = TRUE)
+revisions <- c(baseline = Sys.getenv("REFERENCE_CACHE_BASELINE_REV"),
+  candidate = system2("git", c("rev-parse", "HEAD"), stdout = TRUE))
+stopifnot(nzchar(revisions["baseline"]))
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src")) != 0L)
+  stop("Commit candidate extension sources before recording revision-labelled measurements")
+rows <- as.integer(Sys.getenv("REFERENCE_CACHE_ROWS", "1000000"))
+runs <- as.integer(Sys.getenv("REFERENCE_CACHE_RUNS", "3"))
+stopifnot(rows > 0L, rows <= 1000000L, runs > 0L)
+directory <- tempfile("duckhts_reference_bench_")
+dir.create(directory)
+probe <- file.path(directory, "metrics.so")
+compile <- c("-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
+  "-Ithird_party/htslib", "benchmarks/reference_cache_metrics.c", "-ldl", "-pthread", "-o", shQuote(probe))
+stopifnot(system2(Sys.getenv("CC", "cc"), compile) == 0L)
+run_case <- function(revision, operator, threads, measured) {
+  output <- file.path(directory, "result.tsv")
+  env <- c(paste0("REFERENCE_CACHE_EXTENSION=", shQuote(extensions[revision])))
+  if (measured) env <- c(env, paste0("REFERENCE_CACHE_METRICS=", shQuote(probe)),
+    paste0("LD_PRELOAD=", shQuote(probe)))
+  args <- c("benchmarks/reference_cache_run.R", operator, threads, shQuote(reference),
+    rows, if (measured) 1L else runs, shQuote(output))
+  log <- system2(file.path(R.home("bin"), "Rscript"), args, env = env, stdout = TRUE, stderr = TRUE)
+  status <- attr(log, "status")
+  if (!is.null(status) && status != 0L) stop(paste(log, collapse = "\n"))
+  data.frame(revision = revision, operator = operator, threads = threads,
+    read.delim(output, check.names = FALSE))
+}
+# Alternate baseline/candidate within each workload; never time with interposition.
+timings <- counters <- list()
+for (operator in c("norm", "munge")) for (threads in c(1L, 4L)) {
+  for (revision in names(extensions)) {
+    key <- paste(operator, threads, revision)
+    timings[[key]] <- run_case(revision, operator, threads, FALSE)
+    counters[[key]] <- run_case(revision, operator, threads, TRUE)
+  }
+}
+timings <- do.call(rbind, timings)
+counters <- do.call(rbind, counters)
+for (operator in c("norm", "munge"))
+  counters <- rbind(counters, run_case("candidate", operator, 8L, TRUE))
+row.names(timings) <- row.names(counters) <- NULL
+```
+
+## Revisions and environment
+
+```{r identity}
+print(data.frame(revision = names(revisions), commit = unname(revisions),
+  extension_md5 = unname(tools::md5sum(extensions))), row.names = FALSE)
+cat(sprintf("R: %s\nDuckDB: %s\n", R.version.string, as.character(packageVersion("duckdb"))))
+cat(system2("uname", "-srmo", stdout = TRUE), "\n")
+cat(system2("sh", c("-c", shQuote("lscpu | sed -n '/Model name:/p'")), stdout = TRUE), "\n")
+cat("Rows per query:", rows, "; measured repetitions:", runs, "\n")
+cat(system2("clang", "--version", stdout = TRUE)[1], "\n")
+cat(system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE), "\n")
+```
+
+## Timings
+
+Each function/thread/revision combination uses a fresh R process; repetitions
+within that process reuse worker caches when DuckDB retains workers. Table
+construction, FASTA staging, indexing, and R startup are excluded from elapsed
+and CPU time. CPU is user + system process CPU during the query. Peak RSS is
+the **whole-process high-water mark**, including setup, not cache-only memory.
+The operating-system page cache is warm; this is not a cold-storage benchmark.
+
+```{r timing}
+summary <- aggregate(cbind(elapsed, cpu, peak_rss_kib) ~ revision + operator + threads,
+  timings, median)
+names(summary)[4:6] <- c("median_elapsed_s", "median_cpu_s", "median_peak_rss_kib")
+print(summary, row.names = FALSE, digits = 6)
+print(timings[c("revision", "operator", "threads", "run", "elapsed", "cpu")], row.names = FALSE)
+```
+
+## Reference work, counted separately
+
+These are separate untimed runs with a benchmark-only interposition library;
+counter overhead is absent from the timing table. All rows take one reference
+lookup. Thus a cache hit is `input rows - htslib fetches`. Fetched bases include
+read-ahead. One FASTA key is used per worker, so there are no capacity evictions;
+handle destruction can occur when DuckDB tears down workers. The independent
+native test, rather than this locality workload, exercises more than eight
+references and verifies destruction, retained-window limits, and exact bytes.
+The candidate also runs at eight requested workers on the same full plain
+FASTA as a regression stress case; handle-load counts expose actual workers.
+
+```{r counters}
+print(counters[c("revision", "operator", "threads", "rows", "output_rows", "correct_rows",
+  "fetches", "fetched_bases", "cache_hits", "handle_loads", "handle_destroys")], row.names = FALSE)
+```
+
+## Scope
+
+The nearest earlier reports are [normalization](benchmark_norm.md) and
+[munging](benchmark_munge.md). They use different workloads, so their timings
+are not an identical-input baseline for this change. The paired baseline above
+rebuilds the pre-change code with the candidate toolchain and dependencies.
+This measures clustered SNVs on a real plain FASTA, not arbitrary indels,
+random genome-wide access, remote transport, BGZF throughput, or BAM generation.
+No result here establishes a general "no regression" or "fastest" claim.
+
+The first post-transport-policy run is retained in
+[benchmark_reference_cache.md](benchmark_reference_cache.md). It recorded slower
+one-worker munging and faster four-worker munging. A fixed-CPU-placement repeat,
+when present as `benchmark_reference_cache_affinity.md`, is a separate experiment,
+not a replacement for that result. Its process affinity is recorded above;
+all subprocesses inherit it. Neither experiment establishes the cause of a
+difference by itself.
+
+The shared cache retains at most eight handles and eight 65,536-base sequence
+windows **per thread**, plus terminators and metadata. HTSlib index/transport
+memory and caller-owned fetch results are separate; remote BGZF tuning can
+retain additional per-handle blocks. Tuning remains caller-specific and is part
+of cache identity; this patch does not add public I/O options. This is not a
+sealed-allocation claim.
+
+Independent cache tests use seed 171, twelve mixed-case/IUPAC references
+(alternating plain and BGZF), eight concurrent workers, and 16,000 random
+requests checked against retained source bytes. They also test missing-index
+creation, exact versus clipped contig ends, explicit FAI/GZI and tuning keys, cache
+eviction, caller-copy isolation, requests at and above 65,536 bases, and TLS
+destruction. ASan/UBSan and `make test-reference-cache-tsan CC=clang` pass.
+The GCC TSAN runtime cannot initialize on this host (unexpected memory mapping);
+Clang TSAN passes both the standard probe and a directly HTSlib-linked build.
+HTSlib itself is not sanitizer-instrumented in these probes; they do not prove
+the absence of every dependency race. SQL/R checks additionally exercise mixed
+normalization/munging calls, one million rows, input reversal, and 1/4/8 workers.

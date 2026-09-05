@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bound bundled normalization/munging reference caches to eight handles and
+  eight 64-KiB sequence windows per worker thread, without serializing fetches
+  on independent handles. Preserve reference aliases and each wrapper's
+  end-of-contig, ambiguous-base, and remote-I/O tuning behavior
+
 - stop bundling and compiling the unused DuckVEP variant-tile implementation;
   bundled annotation behavior and R wrappers are unchanged
 

@@ -1,0 +1,77 @@
+# name: test/sql/reference_cache.test
+# description: Shared norm/munge cache retains caller semantics across vectors and eviction
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test/data/reference_cache.fa',
+  output_path := '__WORKING_DIRECTORY__/test_reference_cache.fa.gz', keep := true, overwrite := true)
+
+statement ok
+SELECT * FROM fasta_index('__WORKING_DIRECTORY__/test_reference_cache.fa.gz',
+  index_path := '__WORKING_DIRECTORY__/test_reference_cache.fa.gz.fai')
+
+statement ok
+CREATE TABLE cache_inputs AS
+SELECT i, 1 + (i * 13) % 60 AS pos,
+  substr('ACGTRYSWKMNACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAA', 1 + (i * 13) % 60, 1) AS ref,
+  '__WORKING_DIRECTORY__/' || repeat('./', (i // 2048) % 12) || 'test_reference_cache.fa.gz' AS path
+FROM range(1000000) t(i)
+
+statement ok
+CREATE MACRO cache_outputs(input_table) AS TABLE
+SELECT i, pos, ref,
+  bcftools_norm_row('chrCache', pos, CASE WHEN ref IN ('A','C','G','T','N') THEN ref ELSE 'N' END,
+    [CASE WHEN ref = 'A' THEN 'C' ELSE 'A' END], path, NULL, NULL, NULL, NULL) AS norm,
+  bcftools_munge_row('chrCache', pos, CASE WHEN ref = 'A' THEN 'C' ELSE 'A' END, ref, NULL,
+    NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
+    path,'IFFY','REF_MISMATCH',NULL,NULL,NULL) AS munge
+FROM query_table(input_table)
+
+statement ok
+PRAGMA threads=1
+
+statement ok
+CREATE TABLE cache_serial AS SELECT * FROM cache_outputs('cache_inputs')
+
+query III
+SELECT count(*), count(*) FILTER (WHERE norm.pos_normed = pos AND norm.norm_status = 'Unchanged'
+  AND norm.ref_normed = CASE WHEN ref IN ('A','C','G','T','N') THEN ref ELSE 'N' END),
+  count(*) FILTER (WHERE munge.pos = pos AND munge.ref = ref AND munge.filter IS NULL AND NOT munge.alleles_swapped)
+FROM cache_serial
+----
+1000000	1000000	1000000
+
+statement ok
+PRAGMA threads=8
+
+statement ok
+CREATE TABLE cache_shuffled AS SELECT * FROM cache_inputs ORDER BY i DESC
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM cache_outputs('cache_shuffled') EXCEPT ALL SELECT * FROM cache_serial)
+  UNION ALL
+  (SELECT * FROM cache_serial EXCEPT ALL SELECT * FROM cache_outputs('cache_shuffled'))
+) differences
+----
+0
+
+statement ok
+PRAGMA threads=1
+
+# Execute normalization first on the same literal path. Its N interpretation
+# must not overwrite the cached IUPAC bytes subsequently consumed by munge.
+query T
+SELECT bcftools_norm_row('chrCache',5,'N',['A'],
+  '__WORKING_DIRECTORY__/test/data/reference_cache.fa',NULL,NULL,NULL,NULL).norm_status
+----
+Unchanged
+
+query TT
+SELECT m.ref, m.filter FROM (SELECT bcftools_munge_row('chrCache',5,'A','R',NULL,
+  NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
+  '__WORKING_DIRECTORY__/test/data/reference_cache.fa','IFFY','REF_MISMATCH',NULL,NULL,NULL) AS m)
+----
+R	NULL

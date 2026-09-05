@@ -3,54 +3,14 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <ctype.h>
 #include <math.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <htslib/faidx.h>
+#include "reference_cache.h"
 
 #define MUNGE_TAG_BUF 128
-
-typedef struct munge_cache_entry {
-    char *fasta_path;
-    faidx_t *fai;
-    struct munge_cache_entry *next;
-} munge_cache_entry_t;
-
-/*
- * faidx_t owns a mutable BGZF cursor, so a single handle cannot be shared
- * across concurrent DuckDB worker threads. Keep one cache per thread instead.
- */
-static pthread_key_t g_munge_cache_key;
-static pthread_once_t g_munge_cache_key_once = PTHREAD_ONCE_INIT;
-static pthread_mutex_t g_munge_fai_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static void destroy_munge_cache(void *ptr) {
-    munge_cache_entry_t *entry = (munge_cache_entry_t *)ptr;
-    while (entry) {
-        munge_cache_entry_t *next = entry->next;
-        free(entry->fasta_path);
-        if (entry->fai) fai_destroy(entry->fai);
-        free(entry);
-        entry = next;
-    }
-}
-
-static void init_munge_cache_key(void) {
-    pthread_key_create(&g_munge_cache_key, destroy_munge_cache);
-}
-
-static munge_cache_entry_t *get_munge_cache_head(void) {
-    pthread_once(&g_munge_cache_key_once, init_munge_cache_key);
-    return (munge_cache_entry_t *)pthread_getspecific(g_munge_cache_key);
-}
-
-static void set_munge_cache_head(munge_cache_entry_t *head) {
-    pthread_once(&g_munge_cache_key_once, init_munge_cache_key);
-    pthread_setspecific(g_munge_cache_key, head);
-}
 
 enum {
     MUNGE_OUT_CHROM = 0,
@@ -131,50 +91,6 @@ static void set_munge_error(duckdb_function_info info, const char *msg) {
     duckdb_scalar_function_set_error(info, msg ? msg : "bcftools_munge_row: unknown error");
 }
 
-static void seq_to_upper_ascii(char *seq) {
-    if (!seq) return;
-    while (*seq) {
-        *seq = (char)toupper((unsigned char)*seq);
-        seq++;
-    }
-}
-
-static char *fetch_sequence_flexible(faidx_t *fai, const char *chrom, hts_pos_t start, hts_pos_t end) {
-    static const char *mt_aliases[] = {"MT", "chrM", "M", NULL};
-    char with_chr[512];
-    const char *aliases[8];
-    hts_pos_t len = 0;
-    char *ref = NULL;
-    int idx = 0;
-    if (!fai || !chrom || start < 1 || end < start) return NULL;
-
-    aliases[idx++] = chrom;
-    if (strncasecmp(chrom, "chr", 3) != 0) {
-        snprintf(with_chr, sizeof(with_chr), "chr%s", chrom);
-        aliases[idx++] = with_chr;
-    } else if (chrom[3] != '\0') {
-        aliases[idx++] = chrom + 3;
-    }
-    if (strcasecmp(chrom, "M") == 0 || strcasecmp(chrom, "MT") == 0 || strcasecmp(chrom, "chrM") == 0) {
-        for (int i = 0; mt_aliases[i]; i++) aliases[idx++] = mt_aliases[i];
-    }
-    aliases[idx] = NULL;
-
-    for (int i = 0; aliases[i]; i++) {
-        if (faidx_has_seq(fai, aliases[i]) <= 0) {
-            continue;
-        }
-        ref = faidx_fetch_seq64(fai, aliases[i], start - 1, end - 1, &len);
-        if (ref && len == end - start + 1) {
-            seq_to_upper_ascii(ref);
-            return ref;
-        }
-        free(ref);
-        ref = NULL;
-    }
-    return NULL;
-}
-
 static char *normalize_allele(const char *s, size_t n) {
     int symbolic = 0;
     char *out;
@@ -201,46 +117,20 @@ static char *normalize_allele(const char *s, size_t n) {
         return out;
     }
     out = dup_span(s, n);
-    seq_to_upper_ascii(out);
+    duckhts_reference_uppercase(out);
     return out;
 }
 
-static faidx_t *get_munge_fai(const char *fasta_path, char **err) {
-    munge_cache_entry_t *head = get_munge_cache_head();
-    munge_cache_entry_t *entry;
-    faidx_t *loaded;
-    char msg[1024];
-    for (entry = head; entry; entry = entry->next) {
-        if (strcmp(entry->fasta_path, fasta_path) == 0) {
-            return entry->fai;
-        }
-    }
-
-    loaded = fai_load3(fasta_path, NULL, NULL, FAI_CREATE);
-    if (!loaded) {
-        snprintf(msg, sizeof(msg), "bcftools_munge_row: failed to load FASTA index: %s", fasta_path);
-        *err = dup_cstr(msg);
-        return NULL;
-    }
-
-    entry = (munge_cache_entry_t *)calloc(1, sizeof(*entry));
+static duckhts_reference_entry_t *get_munge_reference(const char *fasta_path, char **err) {
+    const char *cause = NULL;
+    duckhts_reference_entry_t *entry =
+        duckhts_reference_cache_get(fasta_path, NULL, NULL, 0, &cause);
     if (!entry) {
-        fai_destroy(loaded);
-        *err = dup_cstr("bcftools_munge_row: out of memory");
-        return NULL;
+        char message[1024];
+        snprintf(message, sizeof(message), "bcftools_munge_row: %s: %s", cause, fasta_path);
+        *err = dup_cstr(message);
     }
-    entry->fasta_path = dup_cstr(fasta_path);
-    if (!entry->fasta_path) {
-        fai_destroy(loaded);
-        free(entry);
-        *err = dup_cstr("bcftools_munge_row: out of memory");
-        return NULL;
-    }
-    entry->fai = loaded;
-
-    entry->next = head;
-    set_munge_cache_head(entry);
-    return loaded;
+    return entry;
 }
 
 static double safe_minus_log10(double x) {
@@ -292,7 +182,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
     idx_t row_count = duckdb_data_chunk_get_size(input);
     char *cached_fasta_path = NULL;
     idx_t cached_fasta_len = 0;
-    faidx_t *cached_fai = NULL;
+    duckhts_reference_entry_t *cached_fai = NULL;
 
     for (int i = 0; i < MUNGE_OUT_COUNT; i++) child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
 
@@ -311,7 +201,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         char *norm_ref = NULL;
         char *ref_fetch = NULL;
         char *chrom_cstr = NULL;
-        faidx_t *fai = NULL;
+        duckhts_reference_entry_t *fai = NULL;
         double ns = NAN, ez = NAN, nc = NAN, es = NAN, se = NAN, lp = NAN, af = NAN, ac = NAN, ne = NAN;
         double si = NAN, i2 = NAN, cq = NAN;
         const char *ed = NULL;
@@ -439,7 +329,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
                 free(cached_fasta_path);
                 return;
             }
-            fai = get_munge_fai(fasta_path, &err);
+            fai = get_munge_reference(fasta_path, &err);
             if (fai) {
                 free(cached_fasta_path);
                 cached_fasta_path = fasta_path;
@@ -466,14 +356,13 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             free(cached_fasta_path);
             return;
         }
-        pthread_mutex_lock(&g_munge_fai_fetch_mutex);
-        ref_fetch = fetch_sequence_flexible(
+        ref_fetch = duckhts_reference_fetch(
             fai,
             chrom_cstr,
-            pos,
-            pos + (hts_pos_t)((strlen(norm_ref) > strlen(norm_alt) ? strlen(norm_ref) : strlen(norm_alt))) - 1
+            pos - 1,
+            pos + (hts_pos_t)((strlen(norm_ref) > strlen(norm_alt) ? strlen(norm_ref) : strlen(norm_alt))) - 2,
+            DUCKHTS_REFERENCE_EXACT
         );
-        pthread_mutex_unlock(&g_munge_fai_fetch_mutex);
         free(chrom_cstr);
         if (!ref_fetch) {
             /* Upstream hard-errors here, but in SQL context we emit the row

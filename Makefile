@@ -141,6 +141,34 @@ endif
 test: test_debug
 test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
+test_release: test-reference-cache
+
+.PHONY: test-reference-cache test-reference-cache-asan test-reference-cache-ubsan test-reference-cache-tsan
+define run_reference_cache_test
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping POSIX reference probe on MinGW; R package coverage remains enabled"; \
+	else \
+		set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -D_DEFAULT_SOURCE -O1 -g -Wall -Wextra -Werror $(1) \
+			-Isrc/include -Ithird_party/htslib test/scripts/reference_cache_test.c \
+			-Lbuild/release -Wl,-rpath,$(PROJ_DIR)build/release -lduckhts -pthread \
+			-o "$$tmp/reference_cache_test"; \
+		$(2) "$$tmp/reference_cache_test" "$$tmp" \
+			$${REFERENCE_CACHE_SEED:-171} $${REFERENCE_CACHE_TRIALS:-2000}; \
+	fi
+endef
+
+test-reference-cache:
+	$(call run_reference_cache_test,,)
+
+test-reference-cache-asan:
+	$(call run_reference_cache_test,-fsanitize=address -fno-omit-frame-pointer,ASAN_OPTIONS=detect_leaks=1:halt_on_error=1)
+
+test-reference-cache-ubsan:
+	$(call run_reference_cache_test,-fsanitize=undefined -fno-sanitize-recover=undefined,UBSAN_OPTIONS=halt_on_error=1)
+
+test-reference-cache-tsan:
+	$(call run_reference_cache_test,-fsanitize=thread,TSAN_OPTIONS=halt_on_error=1)
 
 define run_liftover_property
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
