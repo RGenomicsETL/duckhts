@@ -370,10 +370,8 @@ echo "  liftover spanning-deletion swap / ref-add fixtures + .fai"
 Rscript "$SCRIPT_DIR/vcfpp.R"
 echo "  vcfppR-generated VCF spec/mapping/regression fixtures + manifest"
 
-# ---- read_bcf_v2 regression fixtures ----
+# ---- read_bcf regression fixtures ----
 for out_dir in "$DST" "$PKG_DST"; do
-  printf 'S1\n' > "$out_dir/samples_s1.txt"
-
   cat > "$out_dir/genotype_ploidy_edge_cases.vcf" <<'EOF'
 ##fileformat=VCFv4.3
 ##contig=<ID=chr1,length=1000>
@@ -398,14 +396,15 @@ samples <- sprintf("S%04d", seq_len(2053))
 lines <- c(
   "##fileformat=VCFv4.3",
   "##contig=<ID=chr1,length=1000>",
+  "##INFO=<ID=CSQ,Number=.,Type=String,Description=\"Consequence annotations from Ensembl VEP. Format: Allele|Consequence|SYMBOL|DISTANCE\">",
   "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
   paste(c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", samples), collapse = "\t"),
-  paste(c("chr1", "10", "tidy_chunk", "A", "C", ".", "PASS", ".", "GT", rep("0/1", length(samples))), collapse = "\t")
+  paste(c("chr1", "10", "tidy_chunk", "A", "C", ".", "PASS", "CSQ=C|missense_variant|GENE1|12", "GT", rep("0/1", length(samples))), collapse = "\t")
 )
 for (path in args) writeLines(lines, path)
 RS
 
-echo "  read_bcf_v2 sample/filter/projection regression fixtures"
+echo "  read_bcf projection/ploidy regression fixtures"
 
 # ---- DuckVEP / bcftools csq fixture plumbing ----
 mkdir -p "$DST/duckvep"

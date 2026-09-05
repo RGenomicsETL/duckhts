@@ -342,21 +342,9 @@
       "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null')",
       "returns": "table",
       "r_wrapper": "rduckhts_bcf",
-      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap.",
+      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap.",
       "examples": [
         "SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;"
-      ]
-    },
-    {
-      "name": "read_bcf_v2",
-      "kind": "table",
-      "category": "Readers",
-      "signature": "read_bcf_v2(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, samples_file := NULL, exclude_samples := NULL, exclude_samples_file := NULL, force_samples := FALSE, include_info := TRUE, include_format := TRUE, include_vep := TRUE, info_fields := NULL, format_fields := NULL, vep_fields := NULL)",
-      "returns": "table",
-      "r_wrapper": "",
-      "description": "Experimental clone of read_bcf(...) for non-destructive benchmarking of current-schema scan optimizations. It preserves the read_bcf wide/tidy output schema by default, streams full-file scans by default instead of auto-iterating indexed contigs, accepts the same scan_mode and decode_error_policy ('null', 'warn', or 'error') contract as read_bcf, and shares read_bcf's native deduplicating multi-region iterator. It sets htslib VCF text max_unpack from DuckDB projection pushdown so unprojected INFO/FORMAT text can be skipped earlier, keeps INFO/FORMAT/GT decode buffers and parsed VEP/CSQ records in local scan state across output chunks, repeats VEP-derived values correctly across tidy sample rows, supports v2-only htslib sample pushdown via comma-separated samples/exclude_samples strings or samples_file/exclude_samples_file lists, can bind only requested INFO/FORMAT/VEP fields through include_info/include_format/include_vep and comma-separated info_fields/format_fields/vep_fields controls, rejects format_fields when no samples are selected, treats tidy_format := true with include_format := false as one row per variant because no SAMPLE_ID/FORMAT columns are bound, and counts VCF text rows without parsing when no columns are projected.",
-      "examples": [
-        "SELECT CHROM, POS, REF, ALT FROM read_bcf_v2('vcf_file.bcf') LIMIT 5;"
       ]
     },
     {

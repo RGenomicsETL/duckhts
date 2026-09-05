@@ -257,7 +257,7 @@ source_counts_time <- system.time({
     glue(
       "WITH records AS (
          SELECT ALT
-           FROM read_bcf_v2({sql_q(input)}, include_format := FALSE)
+           FROM read_bcf({sql_q(input)}, scan_mode := 'sequential')
        )
        SELECT count(*)::UBIGINT AS source_records,
               coalesce(sum(len(ALT)), 0)::UBIGINT AS source_alt_alleles
@@ -281,7 +281,7 @@ stage_time <- system.time({
                 REF AS reference,
                 ALT,
                 INFO_VE
-           FROM read_bcf_v2({sql_q(input)}, include_format := FALSE)
+           FROM read_bcf({sql_q(input)}, scan_mode := 'sequential')
           WHERE CHROM = {sql_q(opt$chromosome)}
        ),
        alleles AS (

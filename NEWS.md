@@ -1,6 +1,23 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- remove the experimental `read_bcf_v2` SQL function and its generation-specific
+  sample/schema selectors, text-only counting, and sample-run paths. Use
+  `read_bcf`, SQL projection, and explicit `scan_mode := 'sequential'` for streaming;
+  experimental sample-selection parameters are not accepted by `read_bcf`.
+  Keep canonical header types, decode errors, worker-owned record caches, and
+  HTSlib multi-region iteration unchanged
+
+- cache Fedora Clang R dependencies under the exact build-profile inputs and
+  use an explicit CRAN mirror for the Windows ARM64 dependency cache. Populate
+  default-branch caches on main pushes; continue building and checking each
+  current Rduckhts source tarball regardless of cache hits
+
+- preserve CSQ/ANN/BCSQ values on every `read_bcf` tidy sample row, including
+  records split across output chunks. Both BCF readers now retain one worker-owned
+  decode cache; remove the duplicate per-chunk allocation/cleanup path and make
+  partial cache initialization safe to destroy. Scan defaults remain unchanged
+
 - share normalization and munging reference access through one host-neutral,
   thread-owned cache, retaining at most eight handles and eight 64-KiB sequence
   windows per thread. Oversized fetch results are not retained. Independent

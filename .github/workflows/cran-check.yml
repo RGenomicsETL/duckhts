@@ -1,8 +1,10 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
 # Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
 on:
-  #push:
-  #  branches: [r_package, develop, main]
+  # Populate default-branch dependency caches that later PRs can restore.
+  # PR merge-ref caches are otherwise private to that individual PR.
+  push:
+    branches: [main]
   pull_request:
     branches: [r_package, develop, main]
   workflow_dispatch:
@@ -44,6 +46,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Fedora Clang R dependencies
+        uses: actions/cache@v4
+        with:
+          path: /root/R-libs
+          # Never reuse a library built under another image/R/compiler profile.
+          key: rduckhts-fedora-clang-${{ runner.arch }}-${{ hashFiles('.github/workflows/cran-check.yml', 'scripts/check_cran_fedora*.sh', 'r/Rduckhts/DESCRIPTION') }}
 
       - name: Build and check with warnings promoted to errors
         env:
@@ -211,6 +220,9 @@ jobs:
         with:
           r-version: release
           rtools-version: '45'
+          # pak's CRAN source-cache validation requires Repository: CRAN;
+          # R-universe rebuilds carry different repository metadata.
+          cran: https://cloud.r-project.org
           use-public-rspm: true
 
       - uses: r-lib/actions/setup-r-dependencies@v2

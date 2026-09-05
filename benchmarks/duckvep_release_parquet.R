@@ -148,16 +148,17 @@ if (!identical(loaded_version, declared_version)) {
 input_sql <- sql_q(input)
 projections <- list(
   full_typed = glue(
-    "SELECT * FROM read_bcf_v2(
-       {input_sql}, include_format := false, scan_mode := 'sequential'
+    "SELECT COLUMNS('^(CHROM|POS|ID|REF|ALT|QUAL|FILTER|INFO_.*|VEP_.*)$')
+     FROM read_bcf(
+       {input_sql}, scan_mode := 'sequential'
      )"
   ),
   consequence = glue(
-    "SELECT * FROM read_bcf_v2(
+    "SELECT CHROM, POS, ID, REF, ALT, QUAL, FILTER,
+       VEP_Allele, VEP_Consequence, VEP_Feature_type, VEP_Feature,
+       VEP_Amino_acids, VEP_SIFT, INFO_VE
+     FROM read_bcf(
        {input_sql},
-       info_fields := 'VE',
-       include_format := false,
-       vep_fields := 'Allele,Consequence,Feature_type,Feature,Amino_acids,SIFT',
        scan_mode := 'sequential'
      )"
   )
