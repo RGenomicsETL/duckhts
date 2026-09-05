@@ -84,6 +84,12 @@ sed '/^##contig=/d' "$DST/region_union.vcf" | bgzip -c > "$DST/region_union_no_c
 tabix -f -p vcf "$DST/region_union_no_contig.vcf.gz"
 mv "$DST/region_union_no_contig.vcf.gz.tbi" "$DST/region_union_no_contig.index.tbi"
 cp "$DST/region_union_no_contig.vcf.gz" "$DST/region_union_no_contig.index.tbi" "$PKG_DST/"
+# Literal FASTA header names and repeated quoted requests, plain and BGZF.
+samtools faidx "$DST/region_names.fa"
+bgzip -c "$DST/region_names.fa" > "$DST/region_names.fa.gz"
+samtools faidx "$DST/region_names.fa.gz"
+cp "$DST/region_names.fa" "$DST/region_names.fa.fai" "$DST/region_names.fa.gz" \
+   "$DST/region_names.fa.gz.fai" "$DST/region_names.fa.gz.gzi" "$PKG_DST/"
 
 (cd "$REPO_ROOT" && Rscript test/scripts/prepare_bam_scan_fixtures.R)
 cp "$SRC/range.bam" "$DST/range.bam"

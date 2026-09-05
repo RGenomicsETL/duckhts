@@ -80,6 +80,8 @@ run_sql "region list: invalid item" \
   "SELECT count(*) FROM read_bcf('test/data/region_union_no_contig.vcf.gz',index_path:='test/data/region_union_no_contig.index.tbi',region:='chr1:1-20,chr1:20-10');"
 run_sql "region list: empty item" \
   "SELECT count(*) FROM read_fasta('test/data/ce.fa',region:='CHROMOSOME_I:1-10,');"
+run_sql "" \
+  "SELECT CASE WHEN count(*)=2 AND min(NAME)='chr,part' AND min(SEQUENCE)='ACGTA' THEN true ELSE error('quoted FASTA header name') END FROM read_fasta('test/data/region_names.fa.gz',region:='{chr,part}:1-5,{chr,part}:1-5');"
 run_sql "region list: invalid item" \
   "SELECT count(*) FROM read_tabix('test/data/gff_file.gff.gz',region:='X:20-10');"
 run_sql "" \

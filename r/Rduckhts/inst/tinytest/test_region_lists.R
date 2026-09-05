@@ -5,6 +5,16 @@ test_region_lists <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
   file <- function(name) dbQuoteString(con, system.file("extdata", name, package = "Rduckhts"))
+  for (suffix in c("fa", "fa.gz")) {
+    path <- file(paste0("region_names.", suffix))
+    answer <- dbGetQuery(con, sprintf(paste(
+      "SELECT NAME,SEQUENCE FROM read_fasta(%s,",
+      "region := '{chr,part}:1-5,{chr:part}:2-4,{chr1:1-5},{chr,part}:1-5') ORDER BY NAME"), path))
+    expect_equal(answer$NAME, c("chr,part", "chr,part", "chr1:1-5", "chr:part"))
+    expect_equal(answer$SEQUENCE, c("ACGTA", "ACGTA", "GGGGCCCC", "TGG"))
+    expect_equal(dbGetQuery(con, sprintf(
+      "SELECT NAME FROM read_fasta(%s, region := '{chr1:1-5}')", path))$NAME, "chr1:1-5")
+  }
   explicit_index <- sprintf("read_bcf(%s, index_path := %s, region := %%s)",
                            file("region_union_no_contig.vcf.gz"), file("region_union_no_contig.index.tbi"))
   expect_error(dbGetQuery(con, paste("SELECT count(*) FROM",

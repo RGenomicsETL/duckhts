@@ -6,7 +6,9 @@
   host-neutral list parser across BAM, BCF, FASTA, and tabix readers; retain
   HTSlib coordinate semantics, unknown-contig handling, native record-union
   iteration, and FASTA's repeated-request rows. NULL/empty-string selection
-  remains the no-filter API; list-allocation failure is a query error
+  remains the no-filter API; list-allocation failure is a query error. FASTA
+  region names come from the reader-owned index, preserving literal comma/colon
+  header names instead of returning request-quoting braces or truncated names
 
 - register the synthetic multi-region benchmark inputs and their network-free
   staging/test path; compare both reader revisions on the same staged artifacts

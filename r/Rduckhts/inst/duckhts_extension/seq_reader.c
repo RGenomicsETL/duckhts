@@ -1147,26 +1147,26 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 return;
             }
 
-            const char *name = region;
-            size_t name_len = strlen(region);
-            const char *colon = strchr(region, ':');
-            if (colon) name_len = (size_t)(colon - region);
-            if (ensure_buf(&init->pair_buf, &init->pair_buf_cap,
-                           name_len) != 0) {
-                free(seq);
-                duckdb_function_set_error(info, "read_fasta: out of memory allocating name buffer");
-                init->done = 1;
-                duckdb_data_chunk_set_size(output, 0);
-                return;
-            }
-            memcpy(init->pair_buf, name, name_len);
-            init->pair_buf[name_len] = '\0';
-
             for (idx_t i = 0; i < init->column_count; i++) {
                 idx_t col_id = init->column_ids[i];
                 duckdb_vector vec = duckdb_data_chunk_get_vector(output, i);
                 if (col_id == SEQ_COL_NAME) {
-                    duckdb_vector_assign_string_element(vec, row_count, init->pair_buf);
+                    /* Use the same parser/index as fai_fetch64, not a second
+                     * interpretation of quoted or colon-containing names. */
+                    int tid;
+                    hts_pos_t beg, end;
+                    const char *name = NULL;
+                    if (fai_parse_region(init->fai, region, &tid, &beg, &end, 0)) {
+                        name = faidx_iseq(init->fai, tid); /* borrowed from this reader */
+                    }
+                    if (!name) {
+                        free(seq);
+                        duckdb_function_set_error(info, "read_fasta: failed to resolve region header name");
+                        init->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
+                    duckdb_vector_assign_string_element(vec, row_count, name);
                 } else if (col_id == SEQ_COL_DESCRIPTION) {
                     set_null(vec, row_count);
                 } else if (col_id == SEQ_COL_SEQUENCE) {

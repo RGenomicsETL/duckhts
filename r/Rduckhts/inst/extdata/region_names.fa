@@ -1,0 +1,8 @@
+>chr,part comma contig
+ACGTACGT
+>chr:part colon contig
+TTGGCCAA
+>chr1 ordinary contig
+AACCGGTT
+>chr1:1-5 ambiguous contig
+GGGGCCCC

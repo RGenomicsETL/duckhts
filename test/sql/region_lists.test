@@ -4,6 +4,32 @@
 
 require duckhts
 
+query TT rowsort
+SELECT NAME,SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa', region := '{chr,part}:1-5,{chr:part}:2-4,{chr1:1-5},{chr,part}:1-5');
+----
+chr,part	ACGTA
+chr,part	ACGTA
+chr1:1-5	GGGGCCCC
+chr:part	TGG
+
+query TT rowsort
+SELECT NAME,SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa.gz', region := '{chr,part}:1-5,{chr:part}:2-4,{chr1:1-5},{chr,part}:1-5');
+----
+chr,part	ACGTA
+chr,part	ACGTA
+chr1:1-5	GGGGCCCC
+chr:part	TGG
+
+query T
+SELECT NAME FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa', region := '{chr1:1-5}');
+----
+chr1:1-5
+
+query T
+SELECT SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa', region := '{chr,part}:1-5', sequence_encoding := 'nt16');
+----
+[1, 2, 4, 8, 1]
+
 statement error
 SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union_no_contig.vcf.gz', index_path := '__WORKING_DIRECTORY__/test/data/region_union_no_contig.index.tbi', region := 'chr1:10-20,chr1:20-10');
 ----

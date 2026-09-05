@@ -3,7 +3,8 @@
 - reject empty region-list items in bundled BAM/BCF/FASTA/tabix readers and
   malformed known-contig BAM/BCF/tabix intervals. Region-list parse failures no
   longer become full-file or partial scans; NULL/empty-string selection still
-  means no filter, and repeated FASTA requests still produce repeated rows
+  means no filter, and repeated FASTA requests still produce repeated rows.
+  Quoted FASTA region requests retain the literal comma/colon header name
 
 - remove experimental `read_bcf_appender` from the bundled extension.
   Use `read_bcf` with DuckDB SQL materialization or the existing R wrappers;
