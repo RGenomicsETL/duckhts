@@ -1,6 +1,15 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- replace the BAM SIMD benchmark's Python driver with a shared R driver and
+  fresh R/DuckDB processes per backend; retain workload controls and result
+  checks, and invalidate cached measurements when binaries or inputs change
+
+- report BAM CIGAR/AUX formatting and output-list growth failures as query
+  errors instead of publishing missing, partial, or unwritable values. Share
+  checked list growth and use reusable caller-owned text scratch with bounded
+  native formatters; preserve genuine missing CIGAR/QUAL/tags and empty AUX strings
+
 - restrict `read_bam` FILE_OFFSET to BGZF-compressed BAM: it is the virtual
   position immediately after the record, not its start. SAM (including compressed
   SAM), CRAM, and non-BGZF BAM return NULL instead of invalid transport-dependent

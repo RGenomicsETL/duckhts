@@ -28,6 +28,10 @@ Two workloads are reported for each SIMD backend request:
 
 The default input is the committed `test/data/nanopore.bam` fixture. Set
 `SIMD_BAM_GC_BAM` to benchmark a separately staged BAM under the DuckHTS cache.
+The shared R driver runs each backend in a fresh R/DuckDB process, checks every
+repeat and cross-backend aggregate, and measures elapsed `Sys.time()` including
+DBI result retrieval. Warm-up and connection creation are outside the timer.
+Historical Python-host measurements are not directly comparable to this R host.
 
 # Run
 
@@ -37,7 +41,7 @@ make bench-simd-bam-gc
 
 Useful overrides:
 
-- `SIMD_BAM_GC_BAM`: BAM path; default is the local HG00106 exome BAM if present
+- `SIMD_BAM_GC_BAM`: BAM path; default is the committed nanopore fixture
 - `SIMD_BAM_GC_MAX_READS`: read limit before aggregation, default `0` for all reads
 - `SIMD_BAM_GC_RUNS`: timed repeats per backend/workload, default `5`
 - `SIMD_BAM_GC_THREADS`: DuckDB threads, default `1` to isolate SIMD effects
@@ -74,21 +78,27 @@ threads <- as.integer(Sys.getenv("SIMD_BAM_GC_THREADS", unset = "1"))
 backends <- Sys.getenv("SIMD_BAM_GC_BACKENDS", unset = "scalar,auto,avx2,avx512")
 modes <- Sys.getenv("SIMD_BAM_GC_MODES", unset = "bam_scan,materialized_seq")
 force <- identical(Sys.getenv("SIMD_BAM_GC_FORCE", unset = "0"), "1")
-python <- Sys.getenv("PYTHON", unset = "python3")
+driver <- file.path(repo_root, "scripts", "benchmark_simd_bam_gc.R")
+source(driver)
 
 if (is.na(max_reads) || max_reads < 0L) stop("SIMD_BAM_GC_MAX_READS must be >= 0", call. = FALSE)
 if (is.na(runs) || runs < 1L) stop("SIMD_BAM_GC_RUNS must be positive", call. = FALSE)
 if (is.na(threads) || threads < 1L) stop("SIMD_BAM_GC_THREADS must be positive", call. = FALSE)
 
 requested_meta <- list(
-  schema = 1L,
+  schema = 2L,
   bam = bam,
   max_reads = max_reads,
   runs = runs,
   threads = threads,
   backends = backends,
   modes = modes,
-  extension = extension
+  extension = extension,
+  input_md5 = unname(tools::md5sum(bam)),
+  extension_md5 = unname(tools::md5sum(extension)),
+  driver_md5 = unname(tools::md5sum(driver)),
+  r_version = R.version.string,
+  duckdb_version = as.character(packageVersion("duckdb"))
 )
 needs_run <- force || !file.exists(json_out) || !file.exists(meta_out)
 if (!needs_run) {
@@ -97,23 +107,13 @@ if (!needs_run) {
 }
 
 if (needs_run) {
-  cmd <- c(
-    file.path(repo_root, "scripts", "benchmark_simd_bam_gc.py"),
-    "--extension", extension,
-    "--bam", bam,
-    "--max-reads", as.character(max_reads),
-    "--iterations", as.character(runs),
-    "--threads", as.character(threads),
-    "--backends", backends,
-    "--modes", modes,
-    "--json-out", json_out
+  measured <- benchmark_simd_bam_gc(
+    extension, bam, max_reads = max_reads, iterations = runs, threads = threads,
+    backends = trimws(strsplit(backends, ",", fixed = TRUE)[[1L]]),
+    modes = trimws(strsplit(modes, ",", fixed = TRUE)[[1L]])
   )
-  out <- system2(python, cmd, stdout = TRUE, stderr = TRUE)
-  status <- attr(out, "status")
-  if (!is.null(status) && status != 0) {
-    stop(paste(out, collapse = "\n"), call. = FALSE)
-  }
-  writeLines(jsonlite::toJSON(requested_meta, auto_unbox = TRUE, pretty = TRUE), meta_out)
+  jsonlite::write_json(measured, json_out, auto_unbox = TRUE, pretty = TRUE, null = "null", digits = NA)
+  jsonlite::write_json(requested_meta, meta_out, auto_unbox = TRUE, pretty = TRUE)
 }
 
 raw_results <- jsonlite::fromJSON(json_out, simplifyVector = FALSE)
@@ -169,7 +169,8 @@ path_display <- function(path) {
 }
 
 configuration <- data.frame(
-  setting = c("bam", "max_reads", "iterations", "threads", "backend_requests", "workloads", "extension"),
+  setting = c("bam", "max_reads", "iterations", "threads", "backend_requests", "workloads", "extension",
+              "source revision", "source tree", "input MD5", "extension MD5", "R", "DuckDB R package"),
   value = c(
     path_display(bam),
     if (max_reads == 0L) "all" else format(max_reads, big.mark = ","),
@@ -177,7 +178,11 @@ configuration <- data.frame(
     as.character(threads),
     backends,
     modes,
-    path_display(extension)
+    path_display(extension),
+    system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
+    system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE),
+    requested_meta$input_md5, requested_meta$extension_md5,
+    requested_meta$r_version, requested_meta$duckdb_version
   ),
   stringsAsFactors = FALSE
 )

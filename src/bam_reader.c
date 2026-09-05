@@ -37,6 +37,8 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
+#include "include/duckdb_list.h"
+#include "include/bam_format.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
@@ -115,13 +117,10 @@ static duckdb_logical_type bam_std_tag_type(const bam_std_tag_t *t) {
     }
 }
 
-static void bam_assign_list_int(duckdb_vector vec, idx_t row, const uint8_t *aux) {
+static int bam_assign_list_int(duckdb_vector vec, idx_t row, const uint8_t *aux) {
     uint32_t len = bam_auxB_len(aux);
     duckdb_list_entry entry;
-    entry.offset = duckdb_list_vector_get_size(vec);
-    entry.length = len;
-    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+    if (!duckhts_list_extend(vec, len, &entry)) return 0;
 
     duckdb_vector child = duckdb_list_vector_get_child(vec);
     int64_t *data = (int64_t *)duckdb_vector_get_data(child);
@@ -130,15 +129,13 @@ static void bam_assign_list_int(duckdb_vector vec, idx_t row, const uint8_t *aux
     }
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
     list_data[row] = entry;
+    return 1;
 }
 
-static void bam_assign_list_double(duckdb_vector vec, idx_t row, const uint8_t *aux) {
+static int bam_assign_list_double(duckdb_vector vec, idx_t row, const uint8_t *aux) {
     uint32_t len = bam_auxB_len(aux);
     duckdb_list_entry entry;
-    entry.offset = duckdb_list_vector_get_size(vec);
-    entry.length = len;
-    duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-    duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+    if (!duckhts_list_extend(vec, len, &entry)) return 0;
 
     duckdb_vector child = duckdb_list_vector_get_child(vec);
     double *data = (double *)duckdb_vector_get_data(child);
@@ -147,51 +144,7 @@ static void bam_assign_list_double(duckdb_vector vec, idx_t row, const uint8_t *
     }
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
     list_data[row] = entry;
-}
-
-static void bam_aux_to_string(const uint8_t *aux, kstring_t *ks) {
-    ks->l = 0;
-    char type = bam_aux_type(aux);
-    switch (type) {
-        case 'A': {
-            kputc(bam_aux2A(aux), ks);
-            break;
-        }
-        case 'i':
-        case 'I':
-        case 's':
-        case 'S':
-        case 'c':
-        case 'C':
-            ksprintf(ks, "%" PRId64, bam_aux2i(aux));
-            break;
-        case 'f':
-        case 'd':
-            ksprintf(ks, "%g", bam_aux2f(aux));
-            break;
-        case 'Z':
-        case 'H': {
-            const char *z = bam_aux2Z(aux);
-            if (z) kputs(z, ks);
-            break;
-        }
-        case 'B': {
-            char subtype = aux[1];
-            uint32_t len = bam_auxB_len(aux);
-            kputc(subtype, ks);
-            for (uint32_t i = 0; i < len; i++) {
-                kputc(',', ks);
-                if (subtype == 'f' || subtype == 'd') {
-                    ksprintf(ks, "%g", bam_auxB2f(aux, i));
-                } else {
-                    ksprintf(ks, "%" PRId64, bam_auxB2i(aux, i));
-                }
-            }
-            break;
-        }
-        default:
-            break;
-    }
+    return 1;
 }
 
 /* ================================================================
@@ -285,8 +238,10 @@ typedef struct {
     char *qual_buf;
     size_t qual_buf_cap;
     duckhts_quality_representation qual_repr;
-    kstring_t cigar_tmp;
-    kstring_t aux_tmp;
+    char *cigar_buf; /* Worker-owned scratch; allocated with duckdb_malloc */
+    size_t cigar_buf_cap;
+    char *aux_buf;
+    size_t aux_buf_cap;
 
     /* Read group caching */
     char *last_rg_id;
@@ -326,8 +281,8 @@ static void destroy_bam_local(void *data) {
     if (l->qual_buf) free(l->qual_buf);
     if (l->last_rg_id) duckdb_free(l->last_rg_id);
     ks_free(&l->rg_tmp);
-    ks_free(&l->cigar_tmp);
-    ks_free(&l->aux_tmp);
+    if (l->cigar_buf) duckdb_free(l->cigar_buf);
+    if (l->aux_buf) duckdb_free(l->aux_buf);
     duckdb_free(l);
 }
 
@@ -362,19 +317,17 @@ static int ensure_seq_buf(bam_local_init_data_t *l, int seq_len) {
     return 1;
 }
 
-/* ================================================================
- * CIGAR → string
- * Uses bam_cigar_op / bam_cigar_oplen / bam_cigar_opchr from sam.h
- * ================================================================ */
-
-static int cigar_to_kstring(const uint32_t *cigar, int n_cigar, kstring_t *ks) {
-    ks->l = 0;
-    if (ks->s) ks->s[0] = '\0';
-    for (int i = 0; i < n_cigar; i++) {
-        if (kputw((int)bam_cigar_oplen(cigar[i]), ks) < 0) return -1;
-        if (kputc(bam_cigar_opchr(bam_cigar_op(cigar[i])), ks) < 0) return -1;
-    }
-    return 0;
+/* Scratch contents are replaced by the next formatter call, never retained
+ * across growth. The previous allocation remains owned on failure. */
+static int bam_reserve_text(char **buffer, size_t *capacity, size_t required) {
+    if (required <= *capacity) return 1;
+    size_t next = required <= SIZE_MAX / 2 ? required * 2 : required;
+    char *data = duckdb_malloc(next);
+    if (!data) return 0;
+    if (*buffer) duckdb_free(*buffer);
+    *buffer = data;
+    *capacity = next;
+    return 1;
 }
 
 /* ================================================================
@@ -1061,30 +1014,25 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
             case BAM_COL_CIGAR: {
                 if (bind->cigar_binary) {
-                    duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                    duckdb_list_entry *list_data =
-                        (duckdb_list_entry *)duckdb_vector_get_data(vec);
                     idx_t n = (idx_t)b->core.n_cigar;
-                    idx_t child_offset = duckdb_list_vector_get_size(vec);
+                    duckdb_list_entry entry;
+                    if (!duckhts_list_extend(vec, n, &entry)) goto list_error;
                     if (n > 0) {
-                        duckdb_list_vector_reserve(vec, child_offset + n);
-                        duckdb_list_vector_set_size(vec, child_offset + n);
+                        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
                         uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
-                        memcpy(child_data + child_offset, bam_get_cigar(b),
+                        memcpy(child_data + entry.offset, bam_get_cigar(b),
                                sizeof(uint32_t) * (size_t)n);
                     }
-                    list_data[row_count].offset = child_offset;
-                    list_data[row_count].length = n;
+                    ((duckdb_list_entry *)duckdb_vector_get_data(vec))[row_count] = entry;
                 } else if (b->core.n_cigar > 0) {
-                    if (cigar_to_kstring(bam_get_cigar(b), (int)b->core.n_cigar,
-                                         &local->cigar_tmp) == 0 &&
-                        local->cigar_tmp.s) {
-                        duckdb_vector_assign_string_element_len(vec, row_count,
-                                                                local->cigar_tmp.s,
-                                                                local->cigar_tmp.l);
-                    } else {
-                        duckdb_vector_assign_string_element(vec, row_count, "*");
-                    }
+                    size_t capacity, length;
+                    if (!duckhts_bam_cigar_capacity(b->core.n_cigar, &capacity)) goto format_error;
+                    if (!bam_reserve_text(&local->cigar_buf, &local->cigar_buf_cap, capacity))
+                        goto text_oom;
+                    if (!duckhts_bam_cigar_format(bam_get_cigar(b), b->core.n_cigar,
+                                                 local->cigar_buf, local->cigar_buf_cap, &length))
+                        goto format_error;
+                    duckdb_vector_assign_string_element_len(vec, row_count, local->cigar_buf, length);
                 } else {
                     duckdb_vector_assign_string_element(vec, row_count, "*");
                 }
@@ -1115,25 +1063,18 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             case BAM_COL_SEQ: {
                 if (bind->seq_nt16) {
                     /* Emit packed nt16 codes as LIST(UTINYINT) */
-                    duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                    duckdb_list_entry *list_data =
-                        (duckdb_list_entry *)duckdb_vector_get_data(vec);
-                    idx_t child_offset = duckdb_list_vector_get_size(vec);
+                    duckdb_list_entry entry;
+                    if (!duckhts_list_extend(vec, (idx_t)seq_len, &entry)) goto list_error;
                     if (seq_len > 0) {
-                        duckdb_list_vector_reserve(vec, child_offset + seq_len);
-                        duckdb_list_vector_set_size(vec, child_offset + seq_len);
+                        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
                         uint8_t *child_data =
                             (uint8_t *)duckdb_vector_get_data(child_vec);
                         const uint8_t *raw_seq = bam_get_seq(b);
                         for (int k = 0; k < seq_len; k++)
-                            child_data[child_offset + k] =
+                            child_data[entry.offset + k] =
                                 (uint8_t)bam_seqi(raw_seq, k);
-                        list_data[row_count].offset = child_offset;
-                        list_data[row_count].length = (idx_t)seq_len;
-                    } else {
-                        list_data[row_count].offset = child_offset;
-                        list_data[row_count].length = 0;
                     }
+                    ((duckdb_list_entry *)duckdb_vector_get_data(vec))[row_count] = entry;
                 } else {
                     if (seq_len > 0) {
                         seq_decode_to_string(bam_get_seq(b), seq_len,
@@ -1150,16 +1091,12 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             case BAM_COL_QUAL: {
                 if (seq_len > 0 && bam_get_qual(b)[0] != 255) {
                     if (local->qual_repr == DUCKHTS_QUALITY_REPR_PHRED) {
+                        duckdb_list_entry entry;
+                        if (!duckhts_list_extend(vec, (idx_t)seq_len, &entry)) goto list_error;
                         duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-                        duckdb_list_entry *list_data =
-                            (duckdb_list_entry *)duckdb_vector_get_data(vec);
-                        idx_t child_offset = duckdb_list_vector_get_size(vec);
-                        duckdb_list_vector_reserve(vec, child_offset + seq_len);
-                        duckdb_list_vector_set_size(vec, child_offset + seq_len);
                         uint8_t *child_data = (uint8_t *)duckdb_vector_get_data(child_vec);
-                        memcpy(child_data + child_offset, bam_get_qual(b), (size_t)seq_len);
-                        list_data[row_count].offset = child_offset;
-                        list_data[row_count].length = (idx_t)seq_len;
+                        memcpy(child_data + entry.offset, bam_get_qual(b), (size_t)seq_len);
+                        ((duckdb_list_entry *)duckdb_vector_get_data(vec))[row_count] = entry;
                     } else {
                         qual_to_string(bam_get_qual(b), seq_len, local->qual_buf);
                         duckdb_vector_assign_string_element(vec, row_count,
@@ -1278,9 +1215,9 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             case 'B': {
                                 char subtype = aux[1];
                                 if (subtype == 'f' || subtype == 'd') {
-                                    bam_assign_list_double(vec, row_count, aux);
+                                    if (!bam_assign_list_double(vec, row_count, aux)) goto list_error;
                                 } else {
-                                    bam_assign_list_int(vec, row_count, aux);
+                                    if (!bam_assign_list_int(vec, row_count, aux)) goto list_error;
                                 }
                                 break;
                             }
@@ -1291,7 +1228,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     } else if (bind->auxiliary_tags &&
                                (int)col_id == bind->aux_col_idx) {
                         uint8_t *aux = bam_aux_first(b);
-                        int count = 0;
+                        idx_t count = 0;
                         while (aux) {
                             char tagbuf[3] = {0, 0, 0};
                             const char *tag = bam_aux_tag(aux);
@@ -1302,6 +1239,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             aux = bam_aux_next(b, aux);
                         }
+                        if (errno != ENOENT) goto format_error;
 
                         if (count == 0) {
                             duckdb_vector_ensure_validity_writable(vec);
@@ -1315,17 +1253,14 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         }
 
                         duckdb_list_entry entry;
-                        entry.offset = duckdb_list_vector_get_size(vec);
-                        entry.length = count;
-                        duckdb_list_vector_reserve(vec, entry.offset + entry.length);
-                        duckdb_list_vector_set_size(vec, entry.offset + entry.length);
+                        if (!duckhts_list_extend(vec, count, &entry)) goto list_error;
 
                         duckdb_vector child = duckdb_list_vector_get_child(vec);
                         duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
                         duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
 
                         aux = bam_aux_first(b);
-                        int write_idx = 0;
+                        idx_t write_idx = 0;
                         while (aux && write_idx < count) {
                             char tagbuf[3] = {0, 0, 0};
                             const char *tag = bam_aux_tag(aux);
@@ -1337,10 +1272,15 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             duckdb_vector_assign_string_element(
                                 key_vec, entry.offset + write_idx, tagbuf);
-                            bam_aux_to_string(aux, &local->aux_tmp);
-                            duckdb_vector_assign_string_element(
-                                val_vec, entry.offset + write_idx,
-                                local->aux_tmp.s ? local->aux_tmp.s : "");
+                            size_t capacity, length;
+                            if (!duckhts_bam_aux_capacity(aux, b->data + b->l_data, &capacity))
+                                goto format_error;
+                            if (!bam_reserve_text(&local->aux_buf, &local->aux_buf_cap, capacity))
+                                goto text_oom;
+                            if (!duckhts_bam_aux_format(aux, local->aux_buf,
+                                                       local->aux_buf_cap, &length)) goto format_error;
+                            duckdb_vector_assign_string_element_len(
+                                val_vec, entry.offset + write_idx, local->aux_buf, length);
                             write_idx++;
                             aux = bam_aux_next(b, aux);
                         }
@@ -1359,6 +1299,19 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     } /* while rows */
 
     duckdb_data_chunk_set_size(output, row_count);
+    return;
+
+list_error:
+    duckdb_function_set_error(info, "read_bam: failed to grow output list");
+    goto materialization_error;
+text_oom:
+    duckdb_function_set_error(info, "read_bam: out of memory allocating formatter scratch");
+    goto materialization_error;
+format_error:
+    duckdb_function_set_error(info, "read_bam: failed to format CIGAR or AUX value");
+materialization_error:
+    local->done = 1;
+    duckdb_data_chunk_set_size(output, 0);
 }
 
 /* ================================================================
