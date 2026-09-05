@@ -3,10 +3,11 @@
 Status: open design for indexed full-scan scheduling and a possible VCF/BCF record-location
 surface. Explicit `scan_mode := 'sequential'` is implemented for supported readers.
 
-## Current boundary
+## Current scan ownership
 
 Indexed full-file scans in `read_bam(...)` and `read_bcf(...)` claim each
-contig once in header order. Region scans, native multi-region scans, sequential scans, and
+contig once in header order; automatic BAM/CRAM scans also claim the no-coordinate tail
+once. Region scans, native multi-region scans, sequential scans, and
 index-backed zero-column counts are separate paths and must keep their existing semantics.
 
 Parallel scans do not promise physical output order. A downstream workflow that needs a
@@ -41,15 +42,51 @@ The experiment does not justify changing these independent policies together:
 - Explicit region lists use HTSlib 1.24 `bcf_itr_regarray`/`tbx_itr_regarray` for one
   visit per matching stored record. This preserves duplicate records in the file.
   Do not add SQL `DISTINCT` or independent overlapping shard scans as substitutes.
-  Input-list validation and efficient scheduling of sparse/dense targets remain
-  separate work; native deduplication does not establish those contracts.
+  Shared list parsing rejects empty items, and HTSlib validates known-contig
+  coordinates before iteration. Efficient scheduling of sparse/dense targets
+  remains separate work; native deduplication does not establish that contract.
 
 The measured full-column, one-sample workload in
 [`benchmark_bcf_record_cache.md`](../benchmarks/benchmark_bcf_record_cache.md)
 is retained as evidence, not a general endorsement of either scheduling policy.
 It does not measure selected samples, dense region lists, remote seeks, or the
-appender's narrower schema. A pipeline may preserve batch arrival order without
-producing coordinate-sorted output; its consumer must name the required order.
+retired appender's narrower schema.
+
+## Sequential pipelines and materialization
+
+The `read_bcf_appender` experiment is retired, not aliased. It compared narrow
+materialization and contig scheduling; it did not establish a second BCF semantic
+authority or a general input-order guarantee. `CREATE TABLE AS`, `INSERT SELECT`,
+and `COPY` over `read_bcf` remain the materialization interfaces. Historical
+appender measurements are retained in `benchmark_bcf_appender_contigs.md` under
+`benchmarks/`, and require an extension revision that still contains the experiment.
+
+The useful model for further pipeline work is Heng Li's minibwa
+[`kt_pipeline`](https://github.com/lh3/minibwa/blob/d6d9f87d300908622306382cbe17d5ffd2879d2f/kthread.c#L78)
+(0.7-r421, pinned by Rminibwa): batches traverse each stage in batch-index order
+while different stages overlap. Its mapping stage also uses `kt_for` internally.
+Adopting that model here would require these explicit contracts, not another SQL
+reader name:
+
+- One sequential producer owns its mutable HTSlib handle. A batch owns or retains
+  every record backing its borrowed fields until all consumers finish; a tidy
+  record remains live across every output chunk containing its samples.
+- Exact record multiplicity, input order, and coordinate sort order are different
+  properties. Parallel transforms may finish out of order; an ordered consumer
+  must emit by input ordinal if input-order preservation is required. Neither
+  input ordinals nor ordered batches sort an unsorted file, and SQL consumers
+  requiring order still need an explicit `ORDER BY` contract.
+- Bound both the number of in-flight batches and their owned bytes. Cancellation
+  and errors reclaim each outstanding batch exactly once; EOF is not a decode,
+  capacity, or I/O failure. Worker-local handles/caches remain worker-local.
+- Semantic record preservation is not byte-for-byte HTS rewriting. A narrow
+  projection cannot preserve unprojected INFO/FORMAT fields; a transport offset
+  is not a portable record identifier. A lossless writer needs its own contract.
+
+`scan_mode := 'sequential'` selects full-file streaming; it does not currently
+promise a staged parallel decoder. The open question is whether overlapping
+decode/transform/materialization beats the ordinary projected DuckDB pipeline
+at equal schema, records, output bytes, memory, and thread count.
 
 ## Weighted contig claiming
 
@@ -78,7 +115,7 @@ it records the contig distribution, thread count, and tail-time change.
 ## VCF/BCF record location
 
 Adding a record-location column to `read_bcf(...)` remains a public-interface decision. The
-experimental `read_bcf_appender(...)` can expose a BGZF position, but that does not establish
+retired appender experiment exposed a BGZF position, but that did not establish
 portable semantics for the general reader.
 
 The public contract must answer all of the following before a column is added:

@@ -1,5 +1,15 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- reject empty region-list items in bundled BAM/BCF/FASTA/tabix readers and
+  malformed known-contig BAM/BCF/tabix intervals. Region-list parse failures no
+  longer become full-file or partial scans; NULL/empty-string selection still
+  means no filter, and repeated FASTA requests still produce repeated rows.
+  Quoted FASTA region requests retain the literal comma/colon header name
+
+- remove experimental `read_bcf_appender` from the bundled extension.
+  Use `read_bcf` with DuckDB SQL materialization or the existing R wrappers;
+  no appender-only parameters or record-offset column are transferred
+
 - retain no-coordinate reads in bundled `read_bam` automatic BAM/CRAM full-file
   scans, with unchanged region filtering. Failed reads, iterators, or worker
   index reloads now raise query errors instead of losing or duplicating rows.

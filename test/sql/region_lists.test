@@ -1,0 +1,510 @@
+# name: test/sql/region_lists.test
+# description: Region-list validation is distinct from absent selection and preserves record multiplicity
+# group: [duckhts]
+
+require duckhts
+
+query TT rowsort
+SELECT NAME,SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa', region := '{chr,part}:1-5,{chr:part}:2-4,{chr1:1-5},{chr,part}:1-5');
+----
+chr,part	ACGTA
+chr,part	ACGTA
+chr1:1-5	GGGGCCCC
+chr:part	TGG
+
+query TT rowsort
+SELECT NAME,SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa.gz', region := '{chr,part}:1-5,{chr:part}:2-4,{chr1:1-5},{chr,part}:1-5');
+----
+chr,part	ACGTA
+chr,part	ACGTA
+chr1:1-5	GGGGCCCC
+chr:part	TGG
+
+query T
+SELECT NAME FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa', region := '{chr1:1-5}');
+----
+chr1:1-5
+
+query T
+SELECT SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/region_names.fa', region := '{chr,part}:1-5', sequence_encoding := 'nt16');
+----
+[1, 2, 4, 8, 1]
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union_no_contig.vcf.gz', index_path := '__WORKING_DIRECTORY__/test/data/region_union_no_contig.index.tbi', region := 'chr1:10-20,chr1:20-10');
+----
+region list: invalid item
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union_no_contig.vcf.gz', index_path := '__WORKING_DIRECTORY__/test/data/region_union_no_contig.index.tbi', region := 'chr1:11-11,chr1:19-19');
+----
+2
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := ',');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := ' , , ');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1,');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := ',1');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1, ,1');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:20-10');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:10-20,1:20-10');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '1:abc');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := ',');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := ' , , ');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I,');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := ',CHROMOSOME_I');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I, ,CHROMOSOME_I');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:20-10');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:10-20,CHROMOSOME_I:20-10');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := 'CHROMOSOME_I:abc');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := ',');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := ' , , ');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X,');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := ',X');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X, ,X');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:20-10');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:10-20,X:20-10');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:abc');
+----
+region list: invalid item
+
+statement error
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := ',');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := ' , , ');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I,');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := ',CHROMOSOME_I');
+----
+region list: empty item
+
+statement error
+SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I, ,CHROMOSOME_I');
+----
+region list: empty item
+
+query IIII
+SELECT
+ (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := '')),
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', region := '')),
+ (SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := '')),
+ (SELECT count(*) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := ''));
+----
+15	112	62	7
+
+# FASTA intentionally preserves repeated requests as repeated sequence rows.
+query II
+SELECT count(*), min(length(SEQUENCE)) FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I:1-10,CHROMOSOME_I:1-10');
+----
+2	10
+
+statement ok
+CREATE TABLE region_oracle AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', scan_mode := 'sequential', tidy_format := false);
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+6	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:19-19,chr1:11-11', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+2	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:17-17,chr1:18-18', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+4	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'absent:1-10, chr1:11-11 ', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+2	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:80-90', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE false)
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE false EXCEPT ALL SELECT * FROM region_actual)));
+----
+0	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+DROP TABLE region_oracle;
+
+statement ok
+CREATE TABLE region_oracle AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', scan_mode := 'sequential', tidy_format := true);
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+12	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:19-19,chr1:11-11', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+4	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:17-17,chr1:18-18', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+8	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'absent:1-10, chr1:11-11 ', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+4	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', region := 'chr1:80-90', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE false)
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE false EXCEPT ALL SELECT * FROM region_actual)));
+----
+0	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+DROP TABLE region_oracle;
+
+statement ok
+CREATE TABLE region_oracle AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', scan_mode := 'sequential', tidy_format := false);
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+6	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:19-19,chr1:11-11', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+2	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:17-17,chr1:18-18', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+4	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'absent:1-10, chr1:11-11 ', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+2	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:80-90', tidy_format := false);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE false)
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE false EXCEPT ALL SELECT * FROM region_actual)));
+----
+0	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+DROP TABLE region_oracle;
+
+statement ok
+CREATE TABLE region_oracle AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', scan_mode := 'sequential', tidy_format := true);
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','same_c','same_g','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+12	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:19-19,chr1:11-11', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+4	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:17-17,chr1:18-18', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end','duplicate') EXCEPT ALL SELECT * FROM region_actual)));
+----
+8	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'absent:1-10, chr1:11-11 ', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end'))
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE ID IN ('long_ref','long_end') EXCEPT ALL SELECT * FROM region_actual)));
+----
+4	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+CREATE TABLE region_actual AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', region := 'chr1:80-90', tidy_format := true);
+
+query II
+SELECT (SELECT count(*) FROM region_actual), (SELECT count(*) FROM (
+ (SELECT * FROM region_actual EXCEPT ALL SELECT * FROM region_oracle WHERE false)
+ UNION ALL
+ (SELECT * FROM region_oracle WHERE false EXCEPT ALL SELECT * FROM region_actual)));
+----
+0	0
+
+statement ok
+DROP TABLE region_actual;
+
+statement ok
+DROP TABLE region_oracle;
+
+query I
+SELECT 4242;
+----
+4242

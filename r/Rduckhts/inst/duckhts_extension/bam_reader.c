@@ -36,6 +36,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
 
@@ -304,11 +305,7 @@ static void destroy_bam_bind(void *data) {
     if (b->index_path) duckdb_free(b->index_path);
     if (b->reference) duckdb_free(b->reference);
     if (b->region) duckdb_free(b->region);
-    if (b->regions) {
-        for (unsigned int i = 0; i < b->n_regions; i++)
-            duckdb_free(b->regions[i]);
-        duckdb_free(b->regions);
-    }
+    free(b->regions); /* one region-list allocation, including strings */
     duckdb_free(b);
 }
 
@@ -339,33 +336,8 @@ static void destroy_bam_local(void *data) {
  * Region parsing helper — split comma-separated regions
  * ================================================================ */
 
-static void parse_regions(const char *region_str, char ***out_regions, unsigned int *out_count) {
-    *out_regions = NULL;
-    *out_count = 0;
-    if (!region_str || strlen(region_str) == 0) return;
-
-    /* Count commas to determine array size */
-    unsigned int count = 1;
-    for (const char *p = region_str; *p; p++)
-        if (*p == ',') count++;
-
-    char **arr = (char **)duckdb_malloc(sizeof(char *) * count);
-    char *dup = (char *)duckdb_malloc(strlen(region_str) + 1);
-    strcpy(dup, region_str);
-
-    unsigned int idx = 0;
-    char *tok = strtok(dup, ",");
-    while (tok && idx < count) {
-        size_t len = strlen(tok) + 1;
-        arr[idx] = (char *)duckdb_malloc(len);
-        memcpy(arr[idx], tok, len);
-        idx++;
-        tok = strtok(NULL, ",");
-    }
-    duckdb_free(dup);
-
-    *out_regions = arr;
-    *out_count = idx;
+static int bam_region_name2id(void *hdr, const char *name) {
+    return sam_hdr_name2tid((sam_hdr_t *)hdr, name);
 }
 
 /* ================================================================
@@ -476,8 +448,15 @@ static void bam_read_bind(duckdb_bind_info info) {
     /* Parse optional region parameter */
     char *region = NULL;
     duckdb_value region_val = duckdb_bind_get_named_parameter(info, "region");
-    if (region_val && !duckdb_is_null_value(region_val))
+    if (region_val && !duckdb_is_null_value(region_val)) {
         region = duckdb_get_varchar(region_val);
+        if (!region) {
+            duckdb_destroy_value(&region_val);
+            duckdb_free(file_path);
+            duckdb_bind_set_error(info, "region list: out of memory reading region");
+            return;
+        }
+    }
     if (region_val) duckdb_destroy_value(&region_val);
 
     /* Parse optional explicit index path */
@@ -563,7 +542,18 @@ static void bam_read_bind(duckdb_bind_info info) {
     bind->scan_sequential = scan_sequential;
 
     /* Parse comma-separated regions (if any) */
-    parse_regions(region, &bind->regions, &bind->n_regions);
+    char region_error[256];
+    if (!duckhts_region_list_parse(region, &bind->regions, &bind->n_regions,
+                                   region_error, sizeof(region_error)) ||
+        !duckhts_region_list_validate(bind->regions, bind->n_regions,
+                                      bam_region_name2id, hdr,
+                                      region_error, sizeof(region_error))) {
+        duckdb_bind_set_error(info, region_error);
+        sam_hdr_destroy(hdr);
+        sam_close(fp);
+        destroy_bam_bind(bind);
+        return;
+    }
 
     /* Optional tag controls */
     duckdb_value std_val = duckdb_bind_get_named_parameter(info, "standard_tags");

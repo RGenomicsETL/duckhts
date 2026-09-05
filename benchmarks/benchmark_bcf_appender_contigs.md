@@ -1,6 +1,10 @@
 BCF appender contig-parallel benchmark
 ================
 
+Historical experiment: `read_bcf_appender` is removed from the public extension.
+The recorded measurements are retained, not relabeled as canonical-reader
+performance. Reproduction requires an explicitly selected pre-retirement binary.
+
 This report measures `read_bcf_appender(...)` after making
 `region_threads` partition work by primary contig. Each contig keeps its
 complete interval set in one htslib 1.24 multi-region iterator, so
@@ -18,11 +22,13 @@ materialization.
 
 ## Reproduction
 
-Build and install the current `Rduckhts` tarball, then render with the
+Build an extension revision containing the experiment, then render with the
 process allowed on all CPUs named below. The script pins the serial run
 to one CPU and the four-job run to four CPUs.
 
 ``` bash
+DUCKHTS_APPENDER_EXTENSION=/path/to/old/duckhts.duckdb_extension \
+DUCKHTS_APPENDER_REVISION=408fbcb5bc7c \
 DUCKHTS_BENCH_SERIAL_CPU=16 \
 DUCKHTS_BENCH_PARALLEL_CPUS=16-19 \
 taskset -c 16-19 Rscript -e "rmarkdown::render('benchmarks/benchmark_bcf_appender_contigs.Rmd', output_format = 'github_document')"

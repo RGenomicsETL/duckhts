@@ -71,6 +71,26 @@ if [[ "$MODE" == "--duckvep-only" ]]; then
 fi
 
 # ---- BAM (copy + index) ----
+# Synthetic region-union authority is the committed VCF, including its two
+# identical physical records and REF/END spans across disjoint requests.
+bgzip -c "$DST/region_union.vcf" > "$DST/region_union.vcf.gz"
+tabix -f -p vcf "$DST/region_union.vcf.gz"
+bcftools view --no-version -Ob -o "$DST/region_union.bcf" "$DST/region_union.vcf"
+bcftools index -f "$DST/region_union.bcf"
+cp "$DST/region_union.vcf" "$DST/region_union.vcf.gz" "$DST/region_union.vcf.gz.tbi" \
+   "$DST/region_union.bcf" "$DST/region_union.bcf.csi" "$PKG_DST/"
+# VCF may omit contig declarations; only this explicit index knows its targets.
+sed '/^##contig=/d' "$DST/region_union.vcf" | bgzip -c > "$DST/region_union_no_contig.vcf.gz"
+tabix -f -p vcf "$DST/region_union_no_contig.vcf.gz"
+mv "$DST/region_union_no_contig.vcf.gz.tbi" "$DST/region_union_no_contig.index.tbi"
+cp "$DST/region_union_no_contig.vcf.gz" "$DST/region_union_no_contig.index.tbi" "$PKG_DST/"
+# Literal FASTA header names and repeated quoted requests, plain and BGZF.
+samtools faidx "$DST/region_names.fa"
+bgzip -c "$DST/region_names.fa" > "$DST/region_names.fa.gz"
+samtools faidx "$DST/region_names.fa.gz"
+cp "$DST/region_names.fa" "$DST/region_names.fa.fai" "$DST/region_names.fa.gz" \
+   "$DST/region_names.fa.gz.fai" "$DST/region_names.fa.gz.gzi" "$PKG_DST/"
+
 (cd "$REPO_ROOT" && Rscript test/scripts/prepare_bam_scan_fixtures.R)
 cp "$SRC/range.bam" "$DST/range.bam"
 samtools index "$DST/range.bam"

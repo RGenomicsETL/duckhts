@@ -320,118 +320,29 @@ test_bcf_projection_sql <- function() {
 
 }
 
-test_bcf_appender <- function() {
+test_bcf_materialization <- function() {
   con <- rduckhts_connect()
-  on.exit(
-    {
-      dbDisconnect(con, shutdown = TRUE)
-    },
-    add = TRUE
-  )
-  bcf_path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
-  expect_true(file.exists(bcf_path))
-
-  quoted_path <- DBI::dbQuoteString(con, bcf_path)
-
-  out <- DBI::dbGetQuery(
-    con,
-    sprintf(
-      paste0(
-        "SELECT rows_written FROM read_bcf_appender(",
-        "%s, 'bcf_appender_test', ",
-        "region := '1:3000150-3000151', tidy_format := true, overwrite := true)"
-      ),
-      quoted_path
-    )
-  )
-  expect_equal(out$rows_written[1], 4)
-
-  schema <- DBI::dbGetQuery(con, "PRAGMA table_info('bcf_appender_test')")
-  expect_false("FILE_OFFSET" %in% schema$name)
-
-  counts <- DBI::dbGetQuery(
-    con,
-    "SELECT count(*) AS n, count(DISTINCT SAMPLE_ID) AS samples FROM bcf_appender_test"
-  )
-  expect_equal(counts$n[1], 4)
-  expect_equal(counts$samples[1], 2)
-
-  out_offset <- DBI::dbGetQuery(
-    con,
-    sprintf(
-      paste0(
-        "SELECT rows_written FROM read_bcf_appender(",
-        "%s, 'bcf_appender_offset_test', ",
-        "region := '1:3000150-3000151', tidy_format := true, ",
-        "overwrite := true, include_file_offset := true)"
-      ),
-      quoted_path
-    )
-  )
-  expect_equal(out_offset$rows_written[1], 4)
-
-  offset_counts <- DBI::dbGetQuery(
-    con,
-    paste0(
-      "SELECT count(*) AS n, count(DISTINCT SAMPLE_ID) AS samples, ",
-      "count(DISTINCT FILE_OFFSET) AS offsets FROM bcf_appender_offset_test"
-    )
-  )
-  expect_equal(offset_counts$n[1], 4)
-  expect_equal(offset_counts$samples[1], 2)
-  expect_equal(offset_counts$offsets[1], 2)
-
-  region_spec <- paste0(
-    "1:3062915-3062915,1:3062918-3062918,",
-    "1:3062915-3062915,2:3199812-3199812"
-  )
-  out_serial_regions <- DBI::dbGetQuery(
-    con,
-    sprintf(
-      paste0(
-        "SELECT rows_written FROM read_bcf_appender(",
-        "%s, 'bcf_appender_serial_regions_test', ",
-        "region := %s, tidy_format := true, overwrite := true, ",
-        "include_file_offset := true, region_threads := 1)"
-      ),
-      quoted_path,
-      DBI::dbQuoteString(con, region_spec)
-    )
-  )
-  expect_equal(out_serial_regions$rows_written[1], 6)
-
-  out_parallel <- DBI::dbGetQuery(
-    con,
-    sprintf(
-      paste0(
-        "SELECT rows_written FROM read_bcf_appender(",
-        "%s, 'bcf_appender_parallel_regions_test', ",
-        "region := %s, tidy_format := true, overwrite := true, ",
-        "include_file_offset := true, region_threads := 2)"
-      ),
-      quoted_path,
-      DBI::dbQuoteString(con, region_spec)
-    )
-  )
-  expect_equal(out_parallel$rows_written[1], 6)
-
-  parallel_schema <- DBI::dbGetQuery(
-    con,
-    "PRAGMA table_info('bcf_appender_parallel_regions_test')"
-  )
-  expect_false("duckhts_region_idx" %in% parallel_schema$name)
-
-  delta <- DBI::dbGetQuery(
-    con,
-    paste0(
-      "SELECT count(*) AS n FROM (",
-      "(SELECT * FROM bcf_appender_serial_regions_test EXCEPT ALL ",
-      " SELECT * FROM bcf_appender_parallel_regions_test) UNION ALL ",
-      "(SELECT * FROM bcf_appender_parallel_regions_test EXCEPT ALL ",
-      " SELECT * FROM bcf_appender_serial_regions_test))"
-    )
-  )
-  expect_equal(delta$n[1], 0)
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  path <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+  quoted <- dbQuoteString(con, path)
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM duckdb_functions()",
+    "WHERE function_name IN ('read_bcf_v2','read_bcf_appender')"))$n[[1]], 0)
+  dbExecute(con, sprintf(paste(
+    "CREATE TABLE bcf_materialized AS SELECT * FROM read_bcf(%s,",
+    "region := '1:3062915-3062915,1:3062918-3062918,1:3062915-3062915,2:3199812-3199812',",
+    "tidy_format := true)"), quoted))
+  actual <- dbGetQuery(con, "SELECT * FROM bcf_materialized ORDER BY CHROM,POS,SAMPLE_ID")
+  expected <- dbGetQuery(con, sprintf(paste(
+    "SELECT * FROM read_bcf(%s, scan_mode := 'sequential', tidy_format := true)",
+    "WHERE (CHROM='1' AND POS IN (3062915,3062918)) OR (CHROM='2' AND POS=3199812)",
+    "ORDER BY CHROM,POS,SAMPLE_ID"), quoted))
+  expect_equal(nrow(actual), 6L)
+  expect_equal(actual, expected)
+  dbExecute(con, sprintf(paste(
+    "CREATE OR REPLACE TABLE bcf_materialized AS SELECT * FROM read_bcf(%s,",
+    "region := 'absent_contig:1-1000', tidy_format := true)"), quoted))
+  expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM bcf_materialized")$n[[1]], 0)
 }
 
 test_bcf_record_cache <- function() {
@@ -465,4 +376,4 @@ test_bcf_record_cache <- function() {
 test_bcf_record_cache()
 test_bcf_string_format_lists()
 test_bcf_projection_sql()
-test_bcf_appender()
+test_bcf_materialization()
