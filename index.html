@@ -566,100 +566,93 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bcf</code></td>
-<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap.</td>
+<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap.</td>
 </tr>
 <tr class="even">
-<td><code>read_bcf_v2</code></td>
-<td>table</td>
-<td>table</td>
-<td></td>
-<td>Experimental clone of read_bcf(…) for non-destructive benchmarking of current-schema scan optimizations. It preserves the read_bcf wide/tidy output schema by default, streams full-file scans by default instead of auto-iterating indexed contigs, accepts the same scan_mode and decode_error_policy (‘null’, ‘warn’, or ‘error’) contract as read_bcf, and shares read_bcf’s native deduplicating multi-region iterator. It sets htslib VCF text max_unpack from DuckDB projection pushdown so unprojected INFO/FORMAT text can be skipped earlier, keeps INFO/FORMAT/GT decode buffers and parsed VEP/CSQ records in local scan state across output chunks, repeats VEP-derived values correctly across tidy sample rows, supports v2-only htslib sample pushdown via comma-separated samples/exclude_samples strings or samples_file/exclude_samples_file lists, can bind only requested INFO/FORMAT/VEP fields through include_info/include_format/include_vep and comma-separated info_fields/format_fields/vep_fields controls, rejects format_fields when no samples are selected, treats tidy_format := true with include_format := false as one row per variant because no SAMPLE_ID/FORMAT columns are bound, and counts VCF text rows without parsing when no columns are projected.</td>
-</tr>
-<tr class="odd">
 <td><code>read_bcf_appender</code></td>
 <td>table</td>
 <td>table</td>
 <td></td>
 <td>Experimental side-effecting benchmark helper that reads BCF/VCF with htslib and appends a narrow scalar tidy table through DuckDB’s chunk appender API. The target table is created in the default schema with columns CHROM, POS, REF, ALT, SAMPLE_ID, and FORMAT_GT; set include_file_offset := TRUE to add FILE_OFFSET as a file-order token. Comma-separated regions use htslib’s native deduplicating multi-region iterators. region_threads controls at most 16 worker handles claiming primary-contig jobs iteratively: every contig keeps its complete requested interval set in one native iterator, so repeated, overlapping, or record-spanning intervals produce the same target schema and row multiset for every thread count. Header contig count does not create worker threads or open handles, and a request limited to one contig uses one iterator. Parallel row arrival is unordered; use ORDER BY FILE_OFFSET when file order matters. decompression_threads configures htslib workers per open region-worker handle, so total helper threads can scale as region workers times decompression workers. The operation runs inside an internal transaction and surfaces malformed-record errors as DuckDB errors; decode_error_policy controls corrupt BCF FORMAT/GT header-vs-payload mismatches with ‘null’, ‘warn’, or ‘error’. target_table must be an unqualified SQL identifier. This is intended to compare appender-based materialization against read_bcf(…) query pipelines, not as a full replacement for the typed read_bcf surface.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>read_bam</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bam</code></td>
 <td>Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT[], quality_representation := ‘phred’ to return QUAL as UTINYINT[], and cigar_representation := ‘binary’ to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. scan_mode := ‘sequential’ forces a full-file streaming scan instead of index-backed count/parallel paths and is incompatible with region. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>read_fasta</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_fasta</code></td>
 <td>Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT[] (htslib nt16 4-bit codes) instead of VARCHAR. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>read_bed</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bed</code></td>
 <td>Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>fasta_nuc</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_fasta_nuc</code></td>
 <td>Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>read_fastq</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_fastq</code></td>
 <td>Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT[] and quality_representation := ‘phred’ to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’. scan_mode := ‘sequential’ forces raw streaming/counting instead of index-backed count paths.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>read_bigwig</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bigwig</code></td>
 <td>Read stored BigWig signal intervals as CHROM, START0, END0, and VALUE. Coordinates are zero-based half-open. region uses htslib’s one-based inclusive syntax; comma-separated requests are merged per contig and emit each stored interval once. Full scans claim nonempty contigs across DuckDB workers, and multi-region scans claim merged ranges. Each worker owns its mutable file handle and iterator. blocks_per_iteration controls libBigWig iterator batching, not the number of DuckDB workers. Local, native remote, and browser wasm reads all use DuckHTS’s htslib hFILE transport rather than a second libcurl stack.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>read_gff</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_gff</code></td>
 <td>Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>read_gtf</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_gtf</code></td>
 <td>Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>read_tabix</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_tabix</code></td>
 <td>Read generic tabix-indexed text data with optional header handling and type inference. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a row once when requested regions overlap. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>fasta_index</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_fasta_index</code></td>
 <td>Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>hts_union_query</code></td>
 <td>scalar_macro</td>
 <td>VARCHAR</td>
 <td><code>rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi</code></td>
 <td>Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts_*_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>hts_region_union_query</code></td>
 <td>scalar_macro</td>
 <td>VARCHAR</td>
@@ -2230,7 +2223,7 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
+<span><span class="co">#&gt;   success                                         output_path bytes_out</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
@@ -2270,7 +2263,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
