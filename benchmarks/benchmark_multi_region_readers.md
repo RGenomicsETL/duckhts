@@ -37,15 +37,15 @@ connection, with baseline first.
 | property                  | value                                                                                                                                                                                                                                                  |
 |:--------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | baseline revision         | 9b4b232127d5043716a1ec34cb66b96f2c7b2c03                                                                                                                                                                                                               |
-| candidate revision        | d6278e154aef6a877039b2d5fb9ba80acc512bb2                                                                                                                                                                                                               |
-| candidate src tree        | b78accf31f330d42712944a3244fdb3422d21b31                                                                                                                                                                                                               |
+| candidate revision        | 74f4a1eac2dd4c231da24816a3c844d198574402                                                                                                                                                                                                               |
+| candidate src tree        | 37670e4dcad48c2828879054fabf4a3dbc1e8f40                                                                                                                                                                                                               |
 | baseline binary MD5       | 725b64e3c894a1ef045245d53c4a98a6                                                                                                                                                                                                                       |
-| candidate binary MD5      | 5704c4f173be9553e6e0d94fe1bc720d                                                                                                                                                                                                                       |
+| candidate binary MD5      | 5bfcfbbd4d206288713427cb9d402806                                                                                                                                                                                                                       |
 | run date                  | 2026-09-05                                                                                                                                                                                                                                             |
 | DuckDB R package          | 1.5.3                                                                                                                                                                                                                                                  |
 | HTSlib                    | 1.24                                                                                                                                                                                                                                                   |
 | CPU                       | 13th Gen Intel(R) Core(TM) i5-13500                                                                                                                                                                                                                    |
-| CPU affinity              | pid 468465’s current affinity list: 2                                                                                                                                                                                                                  |
+| CPU affinity              | pid 511911’s current affinity list: 2                                                                                                                                                                                                                  |
 | DuckDB threads            | 1                                                                                                                                                                                                                                                      |
 | HTSlib workers per handle | 0                                                                                                                                                                                                                                                      |
 | input records per format  | 2000000                                                                                                                                                                                                                                                |
@@ -80,14 +80,14 @@ records.
 | build     | format       | runs | reader_rows | sql_output_rows | min_seconds | median_seconds | max_seconds |
 |:----------|:-------------|-----:|------------:|----------------:|------------:|---------------:|------------:|
 | baseline  | BCF + CSI    |    9 |     1625000 |               1 |       0.078 |          0.080 |       0.082 |
-| baseline  | VCF.gz + TBI |    9 |     1625000 |               1 |       0.303 |          0.307 |       0.310 |
-| candidate | BCF + CSI    |    9 |     1625000 |               1 |       0.078 |          0.078 |       0.082 |
-| candidate | VCF.gz + TBI |    9 |     1625000 |               1 |       0.301 |          0.304 |       0.311 |
+| baseline  | VCF.gz + TBI |    9 |     1625000 |               1 |       0.309 |          0.314 |       0.317 |
+| candidate | BCF + CSI    |    9 |     1625000 |               1 |       0.079 |          0.080 |       0.081 |
+| candidate | VCF.gz + TBI |    9 |     1625000 |               1 |       0.307 |          0.312 |       0.316 |
 
 | format       | median_seconds_baseline | median_seconds_candidate | percent_change |
 |:-------------|------------------------:|-------------------------:|---------------:|
-| BCF + CSI    |                   0.080 |                    0.078 |         -2.500 |
-| VCF.gz + TBI |                   0.307 |                    0.304 |         -0.977 |
+| BCF + CSI    |                   0.080 |                    0.080 |          0.000 |
+| VCF.gz + TBI |                   0.314 |                    0.312 |         -0.637 |
 
 This is a warm-page-cache, one-core iterator/decode measurement,
 including region parsing and initialization. It does not measure remote
